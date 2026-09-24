@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_MODES,
-  EFFORTS,
-  effortBudget,
   estimateTokens,
   formatElapsed,
   formatTokens,
@@ -10,13 +8,7 @@ import {
   MUTATING_TOOLS,
 } from "../extension/src/shared/modes";
 
-describe("modes & effort", () => {
-  it("maps effort presets to budgets", () => {
-    expect(effortBudget("quick")).toEqual({ stepCap: 15, maxTokens: 1_024 });
-    expect(effortBudget("balanced")).toEqual({ stepCap: 40, maxTokens: 4_096 });
-    expect(effortBudget("deep")).toEqual({ stepCap: 80, maxTokens: 8_192 });
-  });
-
+describe("modes", () => {
   it("classifies mutating tools for plan mode", () => {
     for (const t of ["click", "type", "key", "download", "evaluate_js", "network_mock"]) {
       expect(isMutating(t)).toBe(true);
@@ -27,10 +19,9 @@ describe("modes & effort", () => {
     expect(MUTATING_TOOLS.has("select")).toBe(true);
   });
 
-  it("exposes mode and effort labels", () => {
+  it("exposes mode labels", () => {
     expect(AGENT_MODES.plan.label).toBe("Plan");
     expect(AGENT_MODES.plan.hint.toLowerCase()).toContain("read-only");
-    expect(EFFORTS.balanced.label).toBe("Balanced");
   });
 
   it("estimates and formats tokens", () => {

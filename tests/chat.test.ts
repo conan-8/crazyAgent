@@ -118,4 +118,45 @@ describe("conversation folding", () => {
     expect(stored.llm[0]?.images).toBeUndefined();
     expect(conv.llm[0]?.images).toHaveLength(1); // original untouched
   });
+
+  it("folds reasoning deltas into one coalesced block", () => {
+    const conv = newConversation("c7", "task");
+    foldUser(conv, "task");
+    foldEvent(conv, { kind: "reasoning_delta", text: "Let me " });
+    foldEvent(conv, { kind: "reasoning_delta", text: "think." });
+    foldEvent(conv, { kind: "token_delta", text: "Answer." });
+    const blocks = conv.turns[1]!.blocks;
+    const reasoning = blocks.filter((b) => b.kind === "reasoning") as Extract<
+      ChatBlock,
+      { kind: "reasoning" }
+    >[];
+    expect(reasoning).toHaveLength(1);
+    expect(reasoning[0]!.text).toBe("Let me think.");
+    // Reasoning stays separate from the answer text.
+    const text = blocks.filter((b) => b.kind === "text") as Extract<
+      ChatBlock,
+      { kind: "text" }
+    >[];
+    expect(text.map((b) => b.text).join("")).toBe("Answer.");
+  });
+
+  it("accepts a done event carrying final run stats", () => {
+    const conv = newConversation("c8", "task");
+    foldUser(conv, "task");
+    foldEvent(conv, {
+      kind: "done",
+      summary: "done",
+      stats: {
+        steps: 3,
+        inputTokens: 900,
+        outputTokens: 100,
+        totalTokens: 1000,
+        tokensPerSec: 12.5,
+        contextTokens: 400,
+        contextWindow: 128_000,
+        elapsedMs: 8000,
+      },
+    });
+    expect(conv.turns[1]!.blocks.some((b) => b.kind === "text")).toBe(true);
+  });
 });

@@ -25,6 +25,7 @@ export interface ConfirmMarker {
 
 export type ChatBlock =
   | { kind: "text"; text: string }
+  | { kind: "reasoning"; text: string }
   | { kind: "tool"; card: ToolCard }
   | { kind: "confirm"; confirm: ConfirmMarker };
 
@@ -107,6 +108,14 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
     case "token_delta":
       appendText(assistantTurn(), e.text);
       break;
+    case "reasoning_delta": {
+      // Coalesce consecutive thinking chunks into one collapsible block.
+      const turn = assistantTurn();
+      const lastBlock = turn.blocks[turn.blocks.length - 1];
+      if (lastBlock?.kind === "reasoning") lastBlock.text += e.text;
+      else turn.blocks.push({ kind: "reasoning", text: e.text });
+      break;
+    }
     case "tool_call":
       assistantTurn().blocks.push({
         kind: "tool",

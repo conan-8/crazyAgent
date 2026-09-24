@@ -84,6 +84,40 @@ describe("provider request shaping", () => {
     expect(msgs[3]).toEqual({ role: "tool", tool_call_id: "c1", content: "clicked" });
     expect(body.tools[0]).toMatchObject({ type: "function", function: { name: "click" } });
   });
+
+  it("omits thinking by default", () => {
+    const a = buildAnthropicBody(req, "m1") as Record<string, unknown>;
+    const o = buildOpenAiBody(req, "m1") as Record<string, unknown>;
+    expect(a.thinking).toBeUndefined();
+    expect(o.enable_thinking).toBeUndefined();
+  });
+
+  it("enables Anthropic extended thinking with a budget", () => {
+    const body = buildAnthropicBody(
+      { ...req, thinking: true, thinkingBudget: 4096 },
+      "m1",
+    ) as Record<string, unknown>;
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 4096 });
+    // max_tokens must exceed the thinking budget or the API rejects it.
+    expect(body.max_tokens as number).toBeGreaterThan(4096);
+  });
+
+  it("leaves max_tokens alone when it already exceeds the budget", () => {
+    const body = buildAnthropicBody(
+      { ...req, thinking: true, thinkingBudget: 1024, maxTokens: 8192 },
+      "m1",
+    ) as Record<string, unknown>;
+    expect(body.max_tokens).toBe(8192);
+  });
+
+  it("enables thinking on the OpenAI-compatible path", () => {
+    const body = buildOpenAiBody({ ...req, thinking: true }, "m1") as Record<
+      string,
+      unknown
+    >;
+    expect(body.enable_thinking).toBe(true);
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: true });
+  });
 });
 
 describe("SSE aggregators", () => {
@@ -122,5 +156,48 @@ describe("SSE aggregators", () => {
     expect(result.toolCalls).toEqual([
       { id: "c9", name: "type", args: {}, invalidJson: '{"text"oops' },
     ]);
+  });
+
+  it("captures Anthropic thinking_delta without leaking it into text", () => {
+    const thinking: string[] = [];
+    const texts: string[] = [];
+    const agg = anthropicAggregator(
+      (t) => texts.push(t),
+      (t) => thinking.push(t),
+    );
+    const lines = [
+      `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "thinking" } })}`,
+      `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Let me " } })}`,
+      `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "reason." } })}`,
+      `data: ${JSON.stringify({ type: "content_block_start", index: 1, content_block: { type: "text" } })}`,
+      `data: ${JSON.stringify({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Answer." } })}`,
+    ];
+    for (const line of lines) agg.feed(line);
+    const result = agg.result();
+    expect(result.reasoning).toBe("Let me reason.");
+    expect(thinking).toEqual(["Let me ", "reason."]);
+    // Reasoning must never be appended to assistant prose.
+    expect(result.text).toBe("Answer.");
+    expect(texts).toEqual(["Answer."]);
+  });
+
+  it("captures OpenAI reasoning_content (DeepSeek/vLLM)", () => {
+    const agg = openAiAggregator();
+    const lines = [
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "step 1 " } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning: "step 2" } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "Final" } }] })}`,
+      `data: [DONE]`,
+    ];
+    for (const line of lines) agg.feed(line);
+    const result = agg.result();
+    expect(result.reasoning).toBe("step 1 step 2");
+    expect(result.text).toBe("Final");
+  });
+
+  it("omits reasoning when the model emitted none", () => {
+    const agg = openAiAggregator();
+    agg.feed(`data: ${JSON.stringify({ choices: [{ delta: { content: "Hi" } }] })}`);
+    expect(agg.result().reasoning).toBeUndefined();
   });
 });

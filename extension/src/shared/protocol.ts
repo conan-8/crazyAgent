@@ -64,9 +64,26 @@ export type StepEvent =
       elapsedMs: number;
     }
   | { kind: "token_delta"; text: string }
+  /** Streamed model reasoning ("thinking"); rendered in a collapsed block. */
+  | { kind: "reasoning_delta"; text: string }
   | { kind: "need_confirm"; id: string; tool: string; summary: string }
-  | { kind: "done"; summary: string }
+  /** `stats` are the final numbers, so the bar survives the run ending. */
+  | { kind: "done"; summary: string; stats?: RunStats }
   | { kind: "error"; message: string };
+
+/** Cumulative numbers for one agent run. */
+export interface RunStats {
+  steps: number;
+  totalTokens: number;
+  outputTokens: number;
+  inputTokens: number;
+  tokensPerSec: number;
+  contextTokens: number;
+  contextWindow: number;
+  elapsedMs: number;
+  /** Reasoning tokens/text reported by the provider, when thinking was on. */
+  reasoningChars?: number;
+}
 
 /** Panel → service worker, over the long-lived port. */
 export type PortRequest =

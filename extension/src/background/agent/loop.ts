@@ -8,7 +8,7 @@ import type {
   LlmToolSpec,
   ToolCall,
 } from "../../shared/llm";
-import type { Checkpoint, StepEvent } from "../../shared/protocol";
+import type { Checkpoint, RunStats, StepEvent } from "../../shared/protocol";
 import { validateToolArgs } from "../tools/types";
 import { estimateTokens, isMutating } from "../../shared/modes";
 import { buildSystemPrompt } from "./prompts";
@@ -31,13 +31,21 @@ export interface LoopDeps {
   save(cp: Checkpoint): Promise<void>;
   shouldStop(): boolean;
   execute(name: string, args: Record<string, unknown>): Promise<ExecuteResult>;
-  stepCap: number;
+  /**
+   * Optional ceiling on agent steps. Omitted/Infinity means uncapped: the loop
+   * runs until the model answers, the user stops it, or an error aborts it.
+   */
+  stepCap?: number;
   sendScreenshots: boolean;
   maxTokens?: number;
   /** "plan" blocks mutating tools; default "auto". */
   agentMode?: string;
   /** Model context window for the usage bar. */
   contextWindow?: number;
+  /** Ask the model to emit reasoning before answering. */
+  thinking?: boolean;
+  /** Token budget for the thinking block, where the provider accepts one. */
+  thinkingBudget?: number;
 }
 
 const MAX_RESULT_CHARS = 24_000;
@@ -55,26 +63,35 @@ export async function runAgentTask(
   const runStartedAt = Date.now();
   let totalIn = 0;
   let totalOut = 0;
+  let reasoningChars = 0;
+  let lastStats: RunStats | undefined;
   let invalidStreak = 0;
+  // Uncapped by default. `Infinity` keeps the loop condition identical to the
+  // capped path, so there is one code path rather than two.
+  const stepCap = deps.stepCap ?? Number.POSITIVE_INFINITY;
 
-  for (let step = cp.stepIndex; step < deps.stepCap; step++) {
-    if (deps.shouldStop()) return finish(cp, deps, "stopped");
+  for (let step = cp.stepIndex; step < stepCap; step++) {
+    if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
     deps.emit({ kind: "step_started", stepIndex: step });
 
     let result;
     try {
       result = await deps.llm.complete(
         {
-          system: buildSystemPrompt(cp.task, deps.stepCap, deps.agentMode ?? "auto"),
+          system: buildSystemPrompt(cp.task, deps.agentMode ?? "auto"),
           messages: truncateHistory(cp.messages, HISTORY_BUDGET_CHARS),
           tools,
           maxTokens: deps.maxTokens,
+          thinking: deps.thinking,
+          thinkingBudget: deps.thinkingBudget,
         },
         (text) => deps.emit({ kind: "token_delta", text }),
+        undefined,
+        (text) => deps.emit({ kind: "reasoning_delta", text }),
       );
     } catch (err) {
       deps.emit({ kind: "error", message: `LLM call failed: ${String((err as Error)?.message ?? err)}` });
-      return finish(cp, deps, "stopped");
+      return finish(cp, deps, "stopped", lastStats);
     }
 
     // Live usage for the stats bar: provider numbers when reported, else
@@ -85,16 +102,21 @@ export async function runAgentTask(
     };
     totalIn += usage.inputTokens;
     totalOut += usage.outputTokens;
+    if (result.reasoning) reasoningChars += result.reasoning.length;
     const elapsedMs = Math.max(1, Date.now() - runStartedAt);
-    deps.emit({
-      kind: "usage",
-      totalTokens: totalIn + totalOut,
+    const stats: RunStats = {
+      steps: step + 1,
+      inputTokens: totalIn,
       outputTokens: totalOut,
+      totalTokens: totalIn + totalOut,
       tokensPerSec: Math.round((totalOut / elapsedMs) * 10_000) / 10,
       contextTokens: usage.inputTokens + usage.outputTokens,
       contextWindow,
       elapsedMs,
-    });
+      reasoningChars: reasoningChars || undefined,
+    };
+    lastStats = stats;
+    deps.emit({ kind: "usage", ...stats });
 
     cp.messages.push({
       role: "assistant",
@@ -110,12 +132,13 @@ export async function runAgentTask(
       deps.emit({
         kind: "done",
         summary: result.text.trim() || "task finished (no summary)",
+        stats,
       });
       return "completed";
     }
 
     for (const call of result.toolCalls) {
-      if (deps.shouldStop()) return finish(cp, deps, "stopped");
+      if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
       deps.emit({
         kind: "tool_call",
         stepIndex: step,
@@ -131,7 +154,7 @@ export async function runAgentTask(
           kind: "error",
           message: "three consecutive invalid tool calls — aborting",
         });
-        return finish(cp, deps, "stopped");
+        return finish(cp, deps, "stopped", lastStats);
       }
     }
 
@@ -139,7 +162,7 @@ export async function runAgentTask(
     cp.updatedAt = Date.now();
     await deps.save(cp);
   }
-  return finish(cp, deps, "capped");
+  return finish(cp, deps, "capped", lastStats, stepCap);
 }
 
 async function runOne(
@@ -223,16 +246,24 @@ async function runOne(
   }
 }
 
-function finish(cp: Checkpoint, deps: LoopDeps, outcome: AgentOutcome): AgentOutcome {
+function finish(
+  cp: Checkpoint,
+  deps: LoopDeps,
+  outcome: AgentOutcome,
+  stats?: RunStats,
+  stepCap: number = Number.POSITIVE_INFINITY,
+): AgentOutcome {
   cp.done = true;
   cp.updatedAt = Date.now();
   const summary =
     outcome === "capped"
-      ? `stopped: reached the ${deps.stepCap}-step budget`
+      ? Number.isFinite(stepCap)
+        ? `stopped: reached the ${stepCap}-step budget`
+        : "stopped: reached the step budget"
       : outcome === "stopped"
         ? `stopped at step ${cp.stepIndex + 1}`
         : "completed";
-  deps.emit({ kind: "done", summary });
+  deps.emit({ kind: "done", summary, stats });
   return outcome;
 }
 

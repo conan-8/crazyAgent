@@ -1,4 +1,4 @@
-// Side panel — chat interface with a full control bar (mode / model / effort,
+// Side panel — chat interface with a full control bar (mode / model,
 // live run stats, attachments). Assistant turns are ordered blocks: tool
 // activity streams in, the rendered-markdown answer lands below it. Threads
 // persist to history with multi-turn context.
@@ -28,11 +28,9 @@ import {
 } from "../shared/chat";
 import {
   AGENT_MODES,
-  EFFORTS,
   formatElapsed,
   formatTokens,
   type AgentMode,
-  type Effort,
 } from "../shared/modes";
 import {
   fetchModelsFor,
@@ -40,7 +38,13 @@ import {
 import {
   loadSettings,
   saveSettings,
+  makeEntry,
+  normalizeSettings,
+  activeApiKey,
+  activeConnection,
+  CONNECTION_DEFAULTS,
   type AgentSettings,
+  type ApiKeyEntry,
 } from "../background/settings";
 
 const app = document.getElementById("app");
@@ -133,6 +137,7 @@ const ICONS = {
   mode: "M4 6h16M4 12h10M4 18h7",
   chip: "M4 4h16v16H4zM9 9h6v6H9z",
   gauge: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 7v5l3 3",
+  brain: "M12 5a3 3 0 0 0-3 3v1a3 3 0 0 0 0 6v1a3 3 0 0 0 6 0v-1a3 3 0 0 0 0-6V8a3 3 0 0 0-3-3z",
 };
 
 // ------------------------------ blocks ------------------------------
@@ -184,6 +189,39 @@ function ToolRow({ card, onZoom }: { card: ToolCard; onZoom: (src: string) => vo
         <img class="thumb" src={card.image} onClick={() => onZoom(card.image!)} />
       ) : null}
     </details>
+  );
+}
+
+/**
+ * Model reasoning ("thinking"). Collapsed by default and auto-opened while it
+ * is still streaming, so long reasoning never pushes the answer off-screen.
+ */
+function ReasoningBlock({ text, live }: { text: string; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [touched, setTouched] = useState(false);
+  const expanded = touched ? open : live;
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  return (
+    <div class="reasoning">
+      <button
+        class="reasoning-head"
+        onClick={() => {
+          setTouched(true);
+          setOpen(!expanded);
+        }}
+        aria-expanded={expanded}
+      >
+        <Icon size={11}>{ICONS.brain}</Icon>
+        <span>{live ? "Thinking…" : "Thought"}</span>
+        <span class="reasoning-meta">
+          {words} words
+          <span class={`chev ${expanded ? "chev-open" : ""}`}>
+            <Icon size={10}>{ICONS.chevron}</Icon>
+          </span>
+        </span>
+      </button>
+      {expanded ? <div class="reasoning-body">{text.trim()}</div> : null}
+    </div>
   );
 }
 
@@ -276,6 +314,9 @@ function TurnView({
             </div>
           );
         }
+        if (block.kind === "reasoning") {
+          return <ReasoningBlock key={i} text={block.text} live={live} />;
+        }
         return <Markdown key={i} text={block.text} />;
       })}
     </div>
@@ -337,6 +378,180 @@ function MenuItem({
 
 // ------------------------------ settings ------------------------------
 
+/** Mask a secret for at-a-glance identification without revealing it. */
+function maskKey(key: string): string {
+  if (!key) return "(empty)";
+  if (key.length <= 8) return "•".repeat(key.length);
+  return `${key.slice(0, 4)}…${key.slice(-4)}`;
+}
+
+/**
+ * Connection manager: saved credentials, each bound to its own provider, base
+ * URL and model. Exactly one is active; the active row is expanded and edited
+ * inline, the rest stay compact so a long list stays readable.
+ */
+function KeyManager({
+  keys,
+  activeId,
+  onSelect,
+  onChange,
+}: {
+  keys: ApiKeyEntry[];
+  activeId: string;
+  onSelect: (id: string) => void;
+  onChange: (keys: ApiKeyEntry[]) => void;
+}) {
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleIn = (
+    setter: (fn: (prev: Set<string>) => Set<string>) => void,
+    id: string,
+  ) => {
+    setter((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const patch = (id: string, field: keyof ApiKeyEntry, value: string) => {
+    onChange(keys.map((k) => (k.id === id ? { ...k, [field]: value } : k)));
+  };
+
+  const add = () => {
+    const entry = makeEntry({
+      label: `Connection ${keys.length + 1}`,
+      ...CONNECTION_DEFAULTS,
+    });
+    onChange([...keys, entry]);
+    onSelect(entry.id);
+    setExpanded((prev) => new Set(prev).add(entry.id));
+  };
+
+  const remove = (id: string) => {
+    const next = keys.filter((k) => k.id !== id);
+    onChange(next);
+    // Deleting the active connection promotes the first remaining one.
+    if (id === activeId) onSelect(next[0]?.id ?? "");
+  };
+
+  return (
+    <div class="keys">
+      {keys.length === 0 ? (
+        <p class="keys-empty">
+          No connections saved yet — add one to pick a provider, endpoint and model.
+        </p>
+      ) : null}
+      {keys.map((k) => {
+        const active = k.id === activeId;
+        // The active row is always open; others open on demand.
+        const open = active || expanded.has(k.id);
+        return (
+          <div class={`key-row ${active ? "key-active" : ""}`} key={k.id}>
+            <div class="key-head">
+              <label class="key-pick" title="Use this connection">
+                <input
+                  type="radio"
+                  name="activeKey"
+                  checked={active}
+                  onChange={() => onSelect(k.id)}
+                />
+              </label>
+              <button
+                class="key-label-btn"
+                onClick={() => toggleIn(setExpanded, k.id)}
+                title={open ? "Collapse" : "Expand"}
+              >
+                <span class={`chev ${open ? "chev-open" : ""}`}>
+                  <Icon size={10}>{ICONS.chevron}</Icon>
+                </span>
+                {k.label || "(unnamed)"}
+                <span class="key-summary">
+                  {k.provider === "anthropic" ? "Anthropic" : "OpenAI-compat"} ·{" "}
+                  {k.model || "no model"}
+                </span>
+              </button>
+              <div class="key-actions">
+                <button
+                  class="btn-icon"
+                  onClick={() => remove(k.id)}
+                  title="Delete connection"
+                >
+                  <Icon size={12}>{ICONS.trash}</Icon>
+                </button>
+              </div>
+            </div>
+            {open ? (
+              <div class="key-body">
+                <label class="key-field">
+                  <span>Label</span>
+                  <input
+                    value={k.label}
+                    placeholder="e.g. work / openrouter"
+                    onInput={(e) => patch(k.id, "label", (e.target as HTMLInputElement).value)}
+                  />
+                </label>
+                <label class="key-field">
+                  <span>API key</span>
+                  <input
+                    type={revealed.has(k.id) ? "text" : "password"}
+                    value={k.key}
+                    placeholder="sk-…"
+                    onInput={(e) => patch(k.id, "key", (e.target as HTMLInputElement).value)}
+                  />
+                </label>
+                <div class="key-field-inline">
+                  <span class="key-mask">{maskKey(k.key)}</span>
+                  <button
+                    class="btn-icon"
+                    onClick={() => toggleIn(setRevealed, k.id)}
+                    title={revealed.has(k.id) ? "Hide" : "Reveal"}
+                  >
+                    {revealed.has(k.id) ? "🙈" : "👁"}
+                  </button>
+                </div>
+                <label class="key-field">
+                  <span>Provider</span>
+                  <select
+                    value={k.provider}
+                    onChange={(e) =>
+                      patch(k.id, "provider", (e.target as HTMLSelectElement).value)
+                    }
+                  >
+                    <option value="openai-compatible">OpenAI-compatible</option>
+                    <option value="anthropic">Anthropic</option>
+                  </select>
+                </label>
+                <label class="key-field">
+                  <span>Base URL</span>
+                  <input
+                    value={k.baseUrl}
+                    placeholder="https://api.openai.com/v1"
+                    onInput={(e) => patch(k.id, "baseUrl", (e.target as HTMLInputElement).value)}
+                  />
+                </label>
+                <label class="key-field">
+                  <span>Model</span>
+                  <input
+                    value={k.model}
+                    placeholder="gpt-4o-mini"
+                    onInput={(e) => patch(k.id, "model", (e.target as HTMLInputElement).value)}
+                  />
+                </label>
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+      <button class="btn-ghost keys-add" onClick={add}>
+        <Icon size={12}>{ICONS.plus}</Icon> Add connection
+      </button>
+    </div>
+  );
+}
+
 function SettingsDrawer({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<AgentSettings | null>(null);
   const [saved, setSaved] = useState(false);
@@ -357,31 +572,27 @@ function SettingsDrawer({ onClose }: { onClose: () => void }) {
           <Icon>{ICONS.close}</Icon>
         </button>
       </div>
-      <label>Provider</label>
-      <select
-        value={s.provider}
-        onChange={(e) =>
-          set("provider", (e.target as HTMLSelectElement).value as AgentSettings["provider"])
-        }
-      >
-        <option value="openai-compatible">OpenAI-compatible</option>
-        <option value="anthropic">Anthropic</option>
-      </select>
-      <label>Base URL</label>
-      <input
-        value={s.baseUrl}
-        onInput={(e) => set("baseUrl", (e.target as HTMLInputElement).value)}
-      />
-      <label>Model</label>
-      <input
-        value={s.model}
-        onInput={(e) => set("model", (e.target as HTMLInputElement).value)}
-      />
-      <label>API key</label>
-      <input
-        type="password"
-        value={s.apiKey}
-        onInput={(e) => set("apiKey", (e.target as HTMLInputElement).value)}
+      <label>Connections</label>
+      <KeyManager
+        keys={s.apiKeys}
+        activeId={s.activeKeyId}
+        onSelect={(id) => {
+          // Re-resolve every mirror: switching connection also switches the
+          // provider, base URL and model the agent will use. Persist it too, so
+          // the composer never runs against a stale connection while the
+          // drawer is still open.
+          setS((prev) => {
+            if (!prev) return prev;
+            const next = normalizeSettings({ ...prev, activeKeyId: id });
+            void saveSettings(next);
+            return next;
+          });
+          setSaved(true);
+        }}
+        onChange={(keys) => {
+          setS((prev) => (prev ? normalizeSettings({ ...prev, apiKeys: keys }) : prev));
+          setSaved(false);
+        }}
       />
       <label>Control transport</label>
       <select
@@ -399,11 +610,11 @@ function SettingsDrawer({ onClose }: { onClose: () => void }) {
         value={String(s.contextWindow)}
         onInput={(e) => set("contextWindow", Number((e.target as HTMLInputElement).value) || 128000)}
       />
-      <label>Step cap (ceiling for effort)</label>
+      <label>Max output tokens per call</label>
       <input
         type="number"
-        value={String(s.stepCap)}
-        onInput={(e) => set("stepCap", Number((e.target as HTMLInputElement).value) || 40)}
+        value={String(s.maxTokens)}
+        onInput={(e) => set("maxTokens", Number((e.target as HTMLInputElement).value) || 8192)}
       />
       <label>CDP port (Unlimited mode)</label>
       <input
@@ -419,11 +630,36 @@ function SettingsDrawer({ onClose }: { onClose: () => void }) {
         />
         Send screenshots to the model
       </label>
+      <label class="inline">
+        <input
+          type="checkbox"
+          checked={s.thinking}
+          onChange={(e) => set("thinking", (e.target as HTMLInputElement).checked)}
+        />
+        Thinking / reasoning (slower, better on hard tasks)
+      </label>
+      {s.thinking ? (
+        <>
+          <label>Thinking budget (tokens)</label>
+          <input
+            type="number"
+            value={String(s.thinkingBudget)}
+            onInput={(e) =>
+              set("thinkingBudget", Number((e.target as HTMLInputElement).value) || 2048)
+            }
+          />
+        </>
+      ) : null}
       <div class="row">
         <button
           class="btn-primary"
           onClick={() => {
-            void saveSettings(s).then(() => setSaved(true));
+            // Re-resolve the mirror here too: selecting a different key does not
+            // touch `apiKey` directly, so it could otherwise be saved stale.
+            void saveSettings({
+              ...s,
+              apiKey: activeApiKey(s),
+            }).then(() => setSaved(true));
           }}
         >
           Save
@@ -442,12 +678,28 @@ const SUGGESTIONS = [
   "Fill this form with my details and review before submitting",
 ];
 
+/** Hover text for the "last:" summary — the details that don't fit inline. */
+function lastRunTitle(u: UsageStats): string {
+  const parts = [
+    `steps: ${u.steps ?? "—"}`,
+    `input: ${formatTokens(Math.max(0, u.totalTokens - u.outputTokens))}`,
+    `output: ${formatTokens(u.outputTokens)}`,
+    `context: ${formatTokens(u.contextTokens)} / ${formatTokens(u.contextWindow)}`,
+  ];
+  if (u.reasoningChars) parts.push(`reasoning: ${u.reasoningChars} chars`);
+  return parts.join("\n");
+}
+
 interface UsageStats {
   totalTokens: number;
   outputTokens: number;
   tokensPerSec: number;
   contextTokens: number;
   contextWindow: number;
+  /** Kept so the bar still reads correctly once the run has ended. */
+  elapsedMs?: number;
+  steps?: number;
+  reasoningChars?: number;
 }
 
 function App() {
@@ -463,7 +715,7 @@ function App() {
   const [historyList, setHistoryList] = useState<ConversationSummary[]>([]);
   const [viewer, setViewer] = useState<string | null>(null);
   const [resolved, setResolved] = useState<Set<string>>(new Set());
-  const [openMenu, setOpenMenu] = useState<"mode" | "model" | "effort" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"mode" | "model" | null>(null);
   const [settings, setSettingsState] = useState<AgentSettings | null>(null);
   const [attachments, setAttachments] = useState<RunAttachment[]>([]);
   const [usage, setUsage] = useState<UsageStats | null>(null);
@@ -479,6 +731,19 @@ function App() {
 
   const bump = () => setTick((t) => t + 1);
   const refreshSettings = () => void loadSettings().then(setSettingsState);
+
+  // The settings drawer writes to the same storage key; pick those writes up so
+  // switching connection there immediately repoints the composer and model menu.
+  useEffect(() => {
+    const onChanged = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area === "local" && changes.baSettings) refreshSettings();
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
 
   useEffect(() => {
     refreshSettings();
@@ -512,7 +777,22 @@ function App() {
               tokensPerSec: msg.event.tokensPerSec,
               contextTokens: msg.event.contextTokens,
               contextWindow: msg.event.contextWindow,
+              elapsedMs: msg.event.elapsedMs,
             });
+          } else if (msg.event.kind === "done" && msg.event.stats) {
+            // Freeze the final numbers so the bar persists after the run.
+            const s = msg.event.stats;
+            setUsage({
+              totalTokens: s.totalTokens,
+              outputTokens: s.outputTokens,
+              tokensPerSec: s.tokensPerSec,
+              contextTokens: s.contextTokens,
+              contextWindow: s.contextWindow,
+              elapsedMs: s.elapsedMs,
+              steps: s.steps,
+              reasoningChars: s.reasoningChars,
+            });
+            if (currentConv) foldEvent(currentConv, msg.event);
           } else if (currentConv) {
             foldEvent(currentConv, msg.event);
           }
@@ -638,24 +918,45 @@ function App() {
 
   const pickSetting = <K extends keyof AgentSettings>(k: K, v: AgentSettings[K]) => {
     if (!settings) return;
-    const next = { ...settings, [k]: v };
+    let next = { ...settings, [k]: v };
+    // Provider/base URL/model belong to the active connection: write through to
+    // the entry, or the normaliser would overwrite the edit on save.
+    if (k === "model" || k === "provider" || k === "baseUrl") {
+      next = {
+        ...next,
+        apiKeys: next.apiKeys.map((entry) =>
+          entry.id === next.activeKeyId ? { ...entry, [k]: v } : entry,
+        ),
+      };
+    }
     setSettingsState(next);
     void saveSettings(next);
     setOpenMenu(null);
   };
 
-  // The model menu lists what the configured key can actually call — fetched
+  // The model menu lists what the active connection can actually call — fetched
   // live from the provider's catalog, cached per provider/key/baseURL.
   const loadModels = async () => {
     if (!settings) return;
-    const signature = `${settings.provider}|${settings.baseUrl}|${settings.apiKey}`;
+    // Read the active connection directly rather than trusting the derived
+    // mirrors: those can lag a connection switch by one save, which sent the
+    // previous connection's key and surfaced as a bogus "key not valid".
+    const conn = activeConnection(settings);
+    const creds = conn
+      ? { provider: conn.provider, baseUrl: conn.baseUrl, apiKey: conn.key }
+      : {
+          provider: settings.provider,
+          baseUrl: settings.baseUrl,
+          apiKey: settings.apiKey,
+        };
+    const signature = `${creds.provider}|${creds.baseUrl}|${creds.apiKey}`;
     if (modelCacheRef.current?.signature === signature) {
       setModelList(modelCacheRef.current.models);
       setModelListState("idle");
       return;
     }
     setModelListState("loading");
-    const result = await fetchModelsFor(settings);
+    const result = await fetchModelsFor(creds);
     if (result.models.length) {
       modelCacheRef.current = { signature, models: result.models };
       setModelList(result.models);
@@ -744,7 +1045,6 @@ function App() {
   };
 
   const modeLabel = AGENT_MODES[settings?.agentMode ?? "auto"]?.label ?? "Auto";
-  const effortLabel = EFFORTS[settings?.effort ?? "balanced"]?.label ?? "Balanced";
   const modelLabel = settings?.model ?? "model";
   const streaming =
     running &&
@@ -952,24 +1252,6 @@ function App() {
           </div>
 
           <div class="toolbar toolbar-2">
-            <Popover
-              label={effortLabel}
-              icon={ICONS.gauge}
-              right
-              open={openMenu === "effort"}
-              onToggle={() => setOpenMenu(openMenu === "effort" ? null : "effort")}
-            >
-              {(Object.keys(EFFORTS) as Effort[]).map((e) => (
-                <MenuItem
-                  key={e}
-                  active={(settings?.effort ?? "balanced") === e}
-                  title={EFFORTS[e].label}
-                  hint={EFFORTS[e].hint}
-                  onClick={() => pickSetting("effort", e)}
-                />
-              ))}
-            </Popover>
-
             <button
               class="btn-icon"
               title="Settings"
@@ -1019,10 +1301,17 @@ function App() {
             </>
           ) : (
             <>
-              <span class="live-dot idle" /> idle · {modeLabel} · {effortLabel}
-              {swStartedAt
-                ? ` · worker since ${new Date(swStartedAt).toLocaleTimeString()}`
-                : ""}
+              <span class="live-dot idle" /> idle · {modeLabel} · unlimited steps
+              {usage ? (
+                <>
+                  <span class="sep">·</span>
+                  <span class="stat stat-last" title={lastRunTitle(usage)}>
+                    last: {formatElapsed(usage.elapsedMs ?? 0)} ·{" "}
+                    {formatTokens(usage.totalTokens)} tok ·{" "}
+                    {(usage.tokensPerSec ?? 0).toFixed(1)} tok/s
+                  </span>
+                </>
+              ) : null}
               {checkpoint && !checkpoint.done
                 ? ` · checkpoint @ step ${checkpoint.stepIndex + 1}`
                 : ""}

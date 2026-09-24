@@ -17,8 +17,17 @@ import { validateToolArgs } from "../extension/src/background/tools/types";
 
 class FakeLlm implements LlmClient {
   calls = 0;
+  /** Requests as received, so tests can assert thinking flags reach the LLM. */
+  seen: LlmRequest[] = [];
   constructor(private script: LlmResult[]) {}
-  async complete(req: LlmRequest, onText?: (t: string) => void): Promise<LlmResult> {
+  async complete(
+    req: LlmRequest,
+    onText?: (t: string) => void,
+    _signal?: AbortSignal,
+    onReasoning?: (t: string) => void,
+  ): Promise<LlmResult> {
+    this.seen.push(req);
+    onReasoning?.("…");
     onText?.("…");
     return this.script[this.calls++] ?? { text: "done", toolCalls: [], stopReason: "end" };
   }
@@ -109,6 +118,55 @@ describe("runAgentTask", () => {
     expect(done).toMatchObject({ kind: "done", summary: "All done!" });
   });
 
+  it("reports final run stats on the done event", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([
+      { text: "Done.", toolCalls: [], stopReason: "end_turn", usage: { inputTokens: 700, outputTokens: 50 } },
+    ]);
+    await runAgentTask(cp, deps);
+    const done = events.at(-1);
+    expect(done?.kind).toBe("done");
+    const stats = (done as Extract<StepEvent, { kind: "done" }>).stats;
+    expect(stats).toBeDefined();
+    expect(stats!.inputTokens).toBe(700);
+    expect(stats!.outputTokens).toBe(50);
+    expect(stats!.totalTokens).toBe(750);
+    expect(stats!.steps).toBe(1);
+    expect(stats!.contextWindow).toBe(128_000);
+  });
+
+  it("streams reasoning deltas as their own event kind", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([
+      { text: "Done.", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    await runAgentTask(cp, deps);
+    expect(events.some((e) => e.kind === "reasoning_delta")).toBe(true);
+  });
+
+  it("counts reasoning characters into the stats", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([
+      { text: "Done.", toolCalls: [], stopReason: "end_turn", reasoning: "abcdef" },
+    ]);
+    await runAgentTask(cp, deps);
+    const stats = (events.at(-1) as Extract<StepEvent, { kind: "done" }>).stats;
+    expect(stats!.reasoningChars).toBe(6);
+  });
+
+  it("forwards the thinking flag to the LLM request", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness([{ text: "Done.", toolCalls: [], stopReason: "end_turn" }], {
+      thinking: true,
+      thinkingBudget: 4096,
+    });
+    await runAgentTask(cp, deps);
+    expect((deps.llm as FakeLlm).seen[0]).toMatchObject({
+      thinking: true,
+      thinkingBudget: 4096,
+    });
+  });
+
   it("feeds validation errors back without executing, then recovers", async () => {
     const cp = makeCheckpoint();
     const { events, executed, deps } = harness([
@@ -163,6 +221,40 @@ describe("runAgentTask", () => {
     const outcome = await runAgentTask(cp, deps);
 
     expect(outcome).toBe("capped");
+  });
+
+  it("runs uncapped when no stepCap is given (the default)", async () => {
+    const cp = makeCheckpoint();
+    // 30 tool-calling steps, far past the old presets (15/40/80 era caps were
+    // enforced here) — the loop should keep going until the model answers.
+    const script: LlmResult[] = Array.from({ length: 30 }, (_, i) =>
+      toolCall("snapshot", {}, `c${i}`),
+    );
+    const { deps } = harness([
+      ...script,
+      { text: "Finished after many steps.", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    // harness() sets stepCap: 5 by default; drop it to exercise the uncapped path.
+    delete (deps as { stepCap?: number }).stepCap;
+
+    const outcome = await runAgentTask(cp, deps);
+
+    expect(outcome).toBe("completed");
+    expect((deps.llm as FakeLlm).calls).toBe(31);
+  });
+
+  it("still stops uncapped runs on request", async () => {
+    const cp = makeCheckpoint();
+    let checks = 0;
+    const { deps } = harness(
+      // Keep requesting tools so the loop would otherwise run forever.
+      Array.from({ length: 50 }, (_, i) => toolCall("snapshot", {}, `s${i}`)),
+      { shouldStop: () => ++checks > 5 },
+    );
+    delete (deps as { stepCap?: number }).stepCap;
+    const outcome = await runAgentTask(cp, deps);
+    // Unbounded step count, but cooperative stop still ends it.
+    expect(outcome).toBe("stopped");
   });
 
   it("stops cooperatively between tool calls", async () => {

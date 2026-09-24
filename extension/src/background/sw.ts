@@ -40,7 +40,6 @@ import {
   summarize,
   type Conversation,
 } from "../shared/chat";
-import { effortBudget } from "../shared/modes";
 import { assess, ConfirmGate, type ElementProbe } from "./policy";
 import { probeElement } from "./tools/actions";
 import "./tools/perception"; // registers snapshot / screenshot / wait_for_settle
@@ -175,18 +174,20 @@ async function runFrom(cp: Checkpoint): Promise<void> {
       });
     } else {
       const settings = await loadSettings();
-      const budget = effortBudget(settings.effort);
       cp.toolSpecs ??= [...toolRegistry.values()].map(toLlmTool);
       await runAgentTask(cp, {
         llm: createLlmClient(settings),
         emit,
         save: saveCheckpoint,
         shouldStop: () => stopRequested,
-        stepCap: Math.min(settings.stepCap, budget.stepCap),
-        maxTokens: budget.maxTokens,
+        // No stepCap: the agent runs until it answers, the user stops it, or
+        // an error aborts it.
+        maxTokens: settings.maxTokens,
         agentMode: settings.agentMode,
         contextWindow: settings.contextWindow,
         sendScreenshots: settings.sendScreenshots,
+        thinking: settings.thinking,
+        thinkingBudget: settings.thinkingBudget,
         execute: (name, args) => executeToolGated(name, args),
       });
     }

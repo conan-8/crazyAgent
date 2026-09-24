@@ -10,6 +10,8 @@ export interface ElementInfo {
   type?: string;
   name: string;
   value?: string;
+  /** True when this element accepts typed text (form control or contenteditable). */
+  editable?: boolean;
   disabled?: boolean;
   checked?: boolean;
   href?: string;
@@ -33,6 +35,9 @@ const INTERACTIVE = [
   "textarea",
   "summary",
   '[contenteditable="true"]',
+  '[contenteditable=""]',
+  '[contenteditable="plaintext-only"]',
+  "[contenteditable]:not([contenteditable=\"false\"])",
   '[role="button"]',
   '[role="link"]',
   '[role="textbox"]',
@@ -44,6 +49,21 @@ const INTERACTIVE = [
   '[role="switch"]',
   "[onclick]",
 ].join(", ");
+
+/**
+ * Is this node a contenteditable text host? `isContentEditable` is the fast
+ * path but is not implemented everywhere (jsdom returns undefined), so fall
+ * back to the attribute itself — including the bare `contenteditable` form
+ * Instagram's DM composer uses. An explicit "false" always wins.
+ */
+export function isEditableHost(el: Element): boolean {
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    return true;
+  }
+  const attr = el.getAttribute("contenteditable");
+  if (attr !== null) return attr.toLowerCase() !== "false";
+  return (el as HTMLElement).isContentEditable === true;
+}
 
 interface Registration {
   el: WeakRef<Element>;
@@ -157,15 +177,35 @@ export class ElementRegistry {
           ? null
           : { x: rect.x, y: rect.y, w: rect.width, h: rect.height };
       const input = el as HTMLInputElement;
+      const isFormControl =
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        el instanceof HTMLButtonElement ||
+        el instanceof HTMLSelectElement;
+      const contentEditable = isEditableHost(el);
+      // Only inputs/textarea/contenteditable accept typed text — a <button>
+      // or <select> is a form control but has no text to type into.
+      const isTextHost =
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        contentEditable;
       elements.push({
         ref,
         tag: el.tagName.toLowerCase(),
         role: el.getAttribute("role") ?? undefined,
-        type: input.type,
+        type: isFormControl ? input.type : undefined,
         name,
-        value: "value" in el ? String(input.value ?? "") : undefined,
-        disabled: Boolean(input.disabled),
-        checked: input.checked,
+        value: isFormControl
+          ? String(input.value ?? "")
+          : contentEditable
+            ? (el.textContent ?? "")
+            : undefined,
+        // Surface typability so the model knows it can `type` here; rich-text
+        // composers (contenteditable divs) are otherwise indistinguishable
+        // from a plain clickable div.
+        editable: isTextHost,
+        disabled: isFormControl ? Boolean(input.disabled) : undefined,
+        checked: isFormControl ? Boolean(input.checked) : undefined,
         href: el.getAttribute("href") ?? undefined,
         box,
         selector,

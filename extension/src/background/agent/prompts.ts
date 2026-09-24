@@ -34,7 +34,6 @@ const MODE_RULES: Record<string, string[]> = {
 
 export function buildSystemPrompt(
   task: string,
-  stepCap: number,
   agentMode: string = "auto",
 ): string {
   return [
@@ -44,7 +43,9 @@ export function buildSystemPrompt(
     "",
     ...BASE_RULES,
     "",
-    `Budget: at most ${stepCap} steps. Never invent refs and never fabricate tool results.`,
+    "You have no step limit — keep working until the task is genuinely done. Because nothing will cut you off, you are responsible for not looping: if the same action fails twice, change approach or stop and report the blocker instead of repeating it.",
+    "",
+    "Never invent refs and never fabricate tool results.",
     "",
     `Current task: ${task}`,
   ].join("\n");

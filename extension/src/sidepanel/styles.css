@@ -741,6 +741,125 @@ details.card[open] .tool-name {
   margin: 0;
 }
 
+/* Multi-key manager */
+.keys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.keys-empty {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.key-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.key-row.key-active {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
+}
+
+.key-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key-pick {
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+
+.key-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 2px 0 2px 20px;
+}
+
+.key-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+
+.key-field > span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.key-field-inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.key-summary {
+  margin-left: 6px;
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.key-label-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-soft);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.key-label-btn .chev {
+  display: inline-flex;
+  transition: transform 0.12s ease;
+}
+
+.key-label-btn .chev-open {
+  transform: rotate(180deg);
+}
+
+.key-mask {
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.key-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.keys-add {
+  align-self: flex-start;
+}
+
 .drawer label {
   font-size: 10.5px;
   font-weight: 600;
@@ -1044,6 +1163,68 @@ details.card[open] .tool-name {
 
 .stat {
   font-variant-numeric: tabular-nums;
+}
+
+/* Model reasoning: quiet, collapsed, never competes with the answer. */
+.reasoning {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  margin: 6px 0;
+  overflow: hidden;
+}
+
+.reasoning-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--text-faint);
+  text-align: left;
+}
+
+.reasoning-head:hover {
+  color: var(--text-soft);
+  background: var(--bg-hover);
+}
+
+.reasoning-meta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-style: normal;
+  font-size: 10.5px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.reasoning-meta .chev {
+  display: inline-flex;
+  transition: transform 0.12s ease;
+}
+
+.reasoning-meta .chev-open {
+  transform: rotate(180deg);
+}
+
+.reasoning-body {
+  padding: 8px 10px;
+  border-top: 1px dashed var(--border);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 .live-dot {

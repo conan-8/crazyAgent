@@ -50,6 +50,7 @@ registerTool({
         `"${e.name}"`,
       ];
       if (e.disabled) bits.push("disabled");
+      if (e.editable) bits.push("editable");
       if (e.value && e.tag !== "button") bits.push(`value="${e.value.slice(0, 40)}"`);
       return bits.join(" ");
     });

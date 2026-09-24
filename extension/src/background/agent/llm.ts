@@ -4,6 +4,7 @@
 import type {
   LlmClient,
   LlmMessage,
+  LlmReasoningSink,
   LlmRequest,
   LlmResult,
   LlmTextSink,
@@ -68,7 +69,7 @@ export function buildAnthropicBody(
   req: LlmRequest,
   model: string,
 ): Record<string, unknown> {
-  return {
+  const body: Record<string, unknown> = {
     model,
     max_tokens: req.maxTokens ?? 4_096,
     system: req.system,
@@ -80,6 +81,17 @@ export function buildAnthropicBody(
     messages: toAnthropicMessages(req.messages),
     stream: true,
   };
+  if (req.thinking) {
+    // Extended thinking requires max_tokens > thinking.budget_tokens, so lift
+    // the cap when the caller's budget would otherwise exceed it.
+    const budget = req.thinkingBudget ?? 2_048;
+    body.thinking = { type: "enabled", budget_tokens: budget };
+    const cap = (body.max_tokens as number) ?? 4_096;
+    if (cap <= budget) body.max_tokens = budget + 1_024;
+    // Temperature is incompatible with extended thinking — omit it if set.
+    delete body.temperature;
+  }
+  return body;
 }
 
 export function toOpenAiMessages(messages: LlmMessage[]): unknown[] {
@@ -123,7 +135,7 @@ export function buildOpenAiBody(
   req: LlmRequest,
   model: string,
 ): Record<string, unknown> {
-  return {
+  const body: Record<string, unknown> = {
     model,
     max_tokens: req.maxTokens ?? 4_096,
     messages: [
@@ -141,6 +153,13 @@ export function buildOpenAiBody(
     stream: true,
     stream_options: { include_usage: true },
   };
+  if (req.thinking) {
+    // vLLM/SGLang-style switch; most OpenAI-compatible servers ignore unknown
+    // fields, and DeepSeek reasoners emit reasoning_content unprompted.
+    body.enable_thinking = true;
+    body.chat_template_kwargs = { enable_thinking: true };
+  }
+  return body;
 }
 
 // ---------------- SSE aggregation ----------------
@@ -149,14 +168,23 @@ export interface StreamAggregator {
   feed(line: string): void;
   result(): LlmResult;
   text: string;
+  /** Accumulated reasoning text, when the model streamed any. */
+  reasoning?: string;
   usage?: { inputTokens: number; outputTokens: number };
 }
 
-export function anthropicAggregator(onText?: LlmTextSink): StreamAggregator {
+export function anthropicAggregator(
+  onText?: LlmTextSink,
+  onReasoning?: LlmReasoningSink,
+): StreamAggregator {
   const blocks = new Map<number, { kind: string; id?: string; name?: string; text: string }>();
   let stopReason = "";
+  let reasoning = "";
   const agg: StreamAggregator = {
     text: "",
+    get reasoning() {
+      return reasoning;
+    },
     feed(line) {
       if (!line.startsWith("data:")) return;
       let event: Record<string, unknown>;
@@ -175,10 +203,21 @@ export function anthropicAggregator(onText?: LlmTextSink): StreamAggregator {
           text: "",
         });
       } else if (type === "content_block_delta") {
-        const delta = event.delta as { type: string; text?: string; partial_json?: string };
+        const delta = event.delta as {
+          type: string;
+          text?: string;
+          partial_json?: string;
+          thinking?: string;
+        };
         const block = blocks.get(event.index as number);
         if (!block) return;
-        if (delta.type === "text_delta" && delta.text) {
+        if (delta.type === "thinking_delta" && delta.thinking) {
+          // Extended-thinking output: keep it out of `text` so it never
+          // reaches the transcript as assistant prose.
+          reasoning += delta.thinking;
+          block.text += delta.thinking;
+          onReasoning?.(delta.thinking);
+        } else if (delta.type === "text_delta" && delta.text) {
           block.text += delta.text;
           agg.text += delta.text;
           onText?.(delta.text);
@@ -204,17 +243,30 @@ export function anthropicAggregator(onText?: LlmTextSink): StreamAggregator {
         if (block.kind !== "tool_use") continue;
         toolCalls.push(makeToolCall(block.id ?? "", block.name ?? "", block.text));
       }
-      return { text: agg.text, toolCalls, stopReason, usage: agg.usage };
+      return {
+        text: agg.text,
+        toolCalls,
+        stopReason,
+        usage: agg.usage,
+        reasoning: reasoning || undefined,
+      };
     },
   };
   return agg;
 }
 
-export function openAiAggregator(onText?: LlmTextSink): StreamAggregator {
+export function openAiAggregator(
+  onText?: LlmTextSink,
+  onReasoning?: LlmReasoningSink,
+): StreamAggregator {
   const calls = new Map<number, { id: string; name: string; args: string }>();
   let stopReason = "";
+  let reasoning = "";
   const agg: StreamAggregator = {
     text: "",
+    get reasoning() {
+      return reasoning;
+    },
     feed(line) {
       if (!line.startsWith("data:")) return;
       const payload = line.slice(5).trim();
@@ -230,7 +282,15 @@ export function openAiAggregator(onText?: LlmTextSink): StreamAggregator {
       const delta = (choice.delta ?? {}) as {
         content?: string | null;
         tool_calls?: Record<string, unknown>[];
+        // DeepSeek/vLLM use `reasoning_content`; OpenAI-style gateways vary.
+        reasoning_content?: string | null;
+        reasoning?: string | null;
       };
+      const think = delta.reasoning_content ?? delta.reasoning;
+      if (think) {
+        reasoning += think;
+        onReasoning?.(think);
+      }
       if (delta.content) {
         agg.text += delta.content;
         onText?.(delta.content);
@@ -259,7 +319,13 @@ export function openAiAggregator(onText?: LlmTextSink): StreamAggregator {
       const toolCalls = [...calls.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([index, call]) => makeToolCall(call.id || `call_${index}`, call.name, call.args));
-      return { text: agg.text, toolCalls, stopReason, usage: agg.usage };
+      return {
+        text: agg.text,
+        toolCalls,
+        stopReason,
+        usage: agg.usage,
+        reasoning: reasoning || undefined,
+      };
     },
   };
   return agg;
@@ -307,7 +373,12 @@ async function readSse(
 class AnthropicClient implements LlmClient {
   constructor(private settings: AgentSettings) {}
 
-  async complete(req: LlmRequest, onText?: LlmTextSink, signal?: AbortSignal): Promise<LlmResult> {
+  async complete(
+    req: LlmRequest,
+    onText?: LlmTextSink,
+    signal?: AbortSignal,
+    onReasoning?: LlmReasoningSink,
+  ): Promise<LlmResult> {
     const res = await fetch(`${this.settings.baseUrl.replace(/\/$/, "")}/messages`, {
       method: "POST",
       signal,
@@ -318,14 +389,19 @@ class AnthropicClient implements LlmClient {
       },
       body: JSON.stringify(buildAnthropicBody(req, this.settings.model)),
     });
-    return readSse(res, anthropicAggregator(onText), signal);
+    return readSse(res, anthropicAggregator(onText, onReasoning), signal);
   }
 }
 
 class OpenAiCompatClient implements LlmClient {
   constructor(private settings: AgentSettings) {}
 
-  async complete(req: LlmRequest, onText?: LlmTextSink, signal?: AbortSignal): Promise<LlmResult> {
+  async complete(
+    req: LlmRequest,
+    onText?: LlmTextSink,
+    signal?: AbortSignal,
+    onReasoning?: LlmReasoningSink,
+  ): Promise<LlmResult> {
     const res = await fetch(`${this.settings.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       signal,
@@ -335,7 +411,7 @@ class OpenAiCompatClient implements LlmClient {
       },
       body: JSON.stringify(buildOpenAiBody(req, this.settings.model)),
     });
-    return readSse(res, openAiAggregator(onText), signal);
+    return readSse(res, openAiAggregator(onText, onReasoning), signal);
   }
 }
 

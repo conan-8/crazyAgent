@@ -4,6 +4,7 @@
 // via chrome.scripting.executeScript; reached through globalThis.__baActions.
 
 import type { ElementRegistry } from "./registry";
+import { isEditableHost } from "./registry";
 
 export type ActionRequest =
   | { action: "click"; ref: string }
@@ -133,9 +134,21 @@ export class Actions {
 
   #type(el: HTMLElement, text: string, submit: boolean): ActionResult {
     el.focus?.();
-    const isContentEditable = el.isContentEditable;
-    if (isContentEditable) {
-      el.textContent = text;
+    // contenteditable (incl. IG's DM composer) and any non-form-control node:
+    // never touch `.value` — assigning it on a div throws and the native
+    // setter lookup is worse. Insert through the selection/Range API so rich
+    // editors (Draft.js/Lexical/ProseMirror) observe a real DOM mutation.
+    const isFormControl =
+      el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+
+    if (!isFormControl) {
+      if (!isEditableHost(el)) {
+        return {
+          ok: false,
+          error: `element is not typable: <${el.tagName.toLowerCase()}> is neither a form control nor contenteditable`,
+        };
+      }
+      this.#insertIntoEditable(el, text);
     } else {
       // Native prototype setter so React's value tracker sees the change.
       const proto =
@@ -145,13 +158,61 @@ export class Actions {
       const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
       if (setter) setter.call(el, text);
       else el.setAttribute("value", text);
+      const data = { bubbles: true, cancelable: true, inputType: "insertText", data: text };
+      el.dispatchEvent(new InputEvent("beforeinput", data));
+      el.dispatchEvent(new InputEvent("input", data));
     }
-    const data = { bubbles: true, cancelable: true, inputType: "insertText", data: text };
-    el.dispatchEvent(new InputEvent("beforeinput", data));
-    el.dispatchEvent(new InputEvent("input", data));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     if (submit) this.#submitFrom(el);
-    return { ok: true, data: { value: (el as HTMLInputElement).value } };
+    return { ok: true, data: { value: readValue(el) } };
+  }
+
+  /**
+   * Insert text into a contenteditable host the way a real user would: place a
+   * collapsed Range at the end (or replace the current selection), then use
+   * execCommand("insertText") which fires the beforeinput/input events rich
+   * editors listen for. Falls back to direct DOM insertion where execCommand
+   * is unavailable (e.g. jsdom).
+   */
+  #insertIntoEditable(el: HTMLElement, text: string): void {
+    const doc = el.ownerDocument;
+    const sel = doc.getSelection?.();
+    const range = doc.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false); // caret at end of existing content
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    const exec = doc.execCommand?.bind(doc);
+    let inserted = false;
+    if (exec) {
+      try {
+        inserted = exec("insertText", false, text);
+      } catch {
+        inserted = false;
+      }
+    }
+    if (!inserted) {
+      range.deleteContents();
+      const node = doc.createTextNode(text);
+      range.insertNode(node);
+      range.setStartAfter(node);
+      range.collapse(true);
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      el.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          cancelable: false,
+          inputType: "insertText",
+          data: text,
+        }),
+      );
+    }
   }
 
   #select(el: HTMLElement, value: string): ActionResult {
@@ -197,6 +258,14 @@ export class Actions {
     if (typeof form.requestSubmit === "function") form.requestSubmit();
     else form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   }
+}
+
+/** Read back what a node now contains, without assuming it has `.value`. */
+function readValue(el: HTMLElement): string {
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    return el.value;
+  }
+  return (el.innerText ?? el.textContent ?? "").trim();
 }
 
 const DOWN_SEQUENCE = [

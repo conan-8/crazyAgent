@@ -121,4 +121,43 @@ describe("ElementRegistry", () => {
     const el = document.getElementById("two")!;
     expect(document.querySelector(cssPath(el))).toBe(el);
   });
+
+  // Regression: Instagram's DM composer uses a bare `contenteditable`
+  // attribute, which `[contenteditable="true"]` does not match — so the
+  // composer never appeared in the snapshot as a typable element.
+  it("discovers contenteditable composers using a bare attribute", () => {
+    setBody(`<div id="dm" role="textbox" contenteditable aria-label="Message"></div>`);
+    const snap = registry.collect();
+    const dm = snap.elements.find((e) => e.name === "Message");
+    expect(dm).toBeDefined();
+    expect(dm?.tag).toBe("div");
+    expect(dm?.editable).toBe(true);
+  });
+
+  it("discovers contenteditable=true and marks it editable", () => {
+    setBody(`<div role="textbox" contenteditable="true" aria-label="Comment"></div>`);
+    const el = registry.collect().elements.find((e) => e.name === "Comment");
+    expect(el?.editable).toBe(true);
+  });
+
+  it("marks form controls editable and plain buttons not editable", () => {
+    setBody(`
+      <input placeholder="text field" />
+      <textarea placeholder="notes"></textarea>
+      <button>Send</button>
+    `);
+    const snap = registry.collect();
+    const byName = (n: string) => snap.elements.find((e) => e.name === n);
+    expect(byName("text field")?.editable).toBe(true);
+    expect(byName("notes")?.editable).toBe(true);
+    expect(byName("Send")?.editable).toBe(false);
+  });
+
+  it("does not misreport type/disabled/checked on a contenteditable div", () => {
+    setBody(`<div role="textbox" contenteditable aria-label="Message"></div>`);
+    const dm = registry.collect().elements.find((e) => e.name === "Message");
+    expect(dm?.type).toBeUndefined();
+    expect(dm?.disabled).toBeUndefined();
+    expect(dm?.checked).toBeUndefined();
+  });
 });

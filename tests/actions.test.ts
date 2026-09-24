@@ -114,4 +114,50 @@ describe("Actions", () => {
     expect(spy).toHaveBeenCalledWith(-1);
     spy.mockRestore();
   });
+
+  // Regression: Instagram's DM composer (and Draft.js/Lexical/ProseMirror
+  // editors) are contenteditable divs, not form controls. Assigning `.value`
+  // or resolving the HTMLInputElement setter threw "Illegal invocation".
+  describe("contenteditable targets", () => {
+    const COMPOSER = `<div id="dm" role="textbox" contenteditable="true" aria-label="Message"></div>`;
+
+    it("types into a contenteditable div without throwing Illegal invocation", () => {
+      setBody(COMPOSER);
+      const res = actions.run({ action: "type", ref: refOf("Message"), text: "hello group" });
+      expect(res.ok).toBe(true);
+      expect(res.error).toBeUndefined();
+      expect(document.getElementById("dm")!.textContent).toContain("hello group");
+    });
+
+    it("reports the typed text back as the value", () => {
+      setBody(COMPOSER);
+      const res = actions.run({ action: "type", ref: refOf("Message"), text: "hi" });
+      expect((res.data as { value: string }).value).toContain("hi");
+    });
+
+    it("fires an input event so framework editors observe the change", () => {
+      setBody(COMPOSER);
+      const seen: string[] = [];
+      const dm = document.getElementById("dm")!;
+      dm.addEventListener("input", () => seen.push("input"));
+      dm.addEventListener("change", () => seen.push("change"));
+      actions.run({ action: "type", ref: refOf("Message"), text: "x" });
+      expect(seen).toContain("input");
+    });
+
+    it("appends rather than clobbering existing draft text", () => {
+      setBody(`<div id="dm" role="textbox" contenteditable="true" aria-label="Message">draft </div>`);
+      actions.run({ action: "type", ref: refOf("Message"), text: "more" });
+      const text = document.getElementById("dm")!.textContent!;
+      expect(text).toContain("draft");
+      expect(text).toContain("more");
+    });
+
+    it("rejects a non-editable div with a clear error instead of crashing", () => {
+      setBody(`<div id="plain" role="button" aria-label="Plain">Plain</div>`);
+      const res = actions.run({ action: "type", ref: refOf("Plain"), text: "nope" });
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("not typable");
+    });
+  });
 });

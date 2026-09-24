@@ -36,6 +36,14 @@ export interface LlmRequest {
   messages: LlmMessage[];
   tools: LlmToolSpec[];
   maxTokens?: number;
+  /**
+   * Ask the model to emit its reasoning ("thinking") before answering.
+   * Providers translate this per wire format; ones without support ignore it
+   * rather than failing the turn.
+   */
+  thinking?: boolean;
+  /** Token budget for the thinking block, where the provider accepts one. */
+  thinkingBudget?: number;
 }
 
 export interface LlmResult {
@@ -44,14 +52,18 @@ export interface LlmResult {
   stopReason: string;
   /** Provider-reported usage when available (else the loop estimates). */
   usage?: { inputTokens: number; outputTokens: number };
+  /** Streamed reasoning text, when the model emitted any. */
+  reasoning?: string;
 }
 
 export type LlmTextSink = (text: string) => void;
+export type LlmReasoningSink = (text: string) => void;
 
 export interface LlmClient {
   complete(
     req: LlmRequest,
     onText?: LlmTextSink,
     signal?: AbortSignal,
+    onReasoning?: LlmReasoningSink,
   ): Promise<LlmResult>;
 }
