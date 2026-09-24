@@ -13,6 +13,9 @@ import {
   type Conversation,
   type ConversationSummary,
   type DemoConfig,
+  type LogExportFormat,
+  type LogSummary,
+  type LogTurnRecord,
   type PortRequest,
   type RunAttachment,
   type StepEvent,
@@ -32,6 +35,8 @@ import {
   formatTokens,
   type AgentMode,
 } from "../shared/modes";
+import { THINKING_LEVELS } from "../shared/llm";
+import { madmanExclamation } from "../shared/madman";
 import {
   fetchModelsFor,
 } from "../shared/models";
@@ -283,7 +288,7 @@ function ToolRow({
           {preview ? (
             <span class="tool-preview">{preview}</span>
           ) : (
-            <span class="tool-chip">{card.name}</span>
+            <span class="tool-chip">{card.label ?? card.name}</span>
           )}
         </span>
         {card.image ? (
@@ -909,6 +914,39 @@ function Switch({
   );
 }
 
+function SelectRow<T extends string>({
+  title,
+  hint,
+  value,
+  options,
+  onChange,
+}: {
+  title: string;
+  hint: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div class="switch-row select-row">
+      <span class="switch-text">
+        <span>{title}</span>
+        <small>{hint}</small>
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange((e.target as HTMLSelectElement).value as T)}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function NumberField({
   label,
   value,
@@ -1042,22 +1080,33 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 title="Send screenshots"
                 hint="Let the model see the page, not just its text"
               />
-              <Switch
-                checked={s.thinking}
+              <SelectRow
+                title="Reasoning effort"
+                hint={
+                  THINKING_LEVELS.find((l) => l.value === s.thinking)?.hint ??
+                  "Let the model think before acting"
+                }
+                value={s.thinking}
+                options={THINKING_LEVELS.map(({ value, label }) => ({ value, label }))}
                 onChange={(v) => set("thinking", v)}
-                title="Extended thinking"
-                hint="Slower, better on hard multi-step tasks"
               />
-              <Collapse open={s.thinking}>
-                <div class="nested-field">
-                  <NumberField
-                    label="Thinking budget (tokens)"
-                    value={s.thinkingBudget}
-                    fallback={2048}
-                    onChange={(v) => set("thinkingBudget", v)}
-                  />
-                </div>
-              </Collapse>
+            </section>
+
+            <section class="set-group" style="--i:4">
+              <h3 class="set-title">
+                <Icon d={ICONS.bolt} size={12} /> Madman mode
+              </h3>
+              <Switch
+                checked={s.madman}
+                onChange={(v) => set("madman", v)}
+                title="Unleash the profanity"
+                hint="Every tool call carries a cuss word; replies and mid-run exclamations swear"
+              />
+              {s.madman ? (
+                <p class="madman-preview">
+                  {madmanExclamation("scroll the whole list by hand", "preview")}
+                </p>
+              ) : null}
             </section>
           </div>
           <footer class="sheet-foot">
@@ -1202,6 +1251,218 @@ function HistoryBody({
   );
 }
 
+// ------------------------------ run logs ------------------------------
+
+/** "1.2s" / "2m03s" — compact per-turn durations for the log timeline. */
+function shortDuration(ms: number | undefined): string {
+  if (ms === undefined) return "—";
+  if (ms < 1_000) return `${ms}ms`;
+  const s = ms / 1_000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m${String(Math.round(s - m * 60)).padStart(2, "0")}s`;
+}
+
+function clockTime(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/** A local copy of the log JSONL/Markdown, written to the Downloads folder. */
+function downloadLog(filename: string, content: string): void {
+  const type =
+    filename.endsWith(".jsonl") ? "application/x-ndjson" : "text/markdown";
+  const blob = new Blob([content], { type: `${type};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+function LogsBody({
+  logs,
+  detail,
+  onOpen,
+  onBack,
+  onDelete,
+  onClear,
+  onExport,
+  onClose,
+}: {
+  logs: LogSummary[];
+  detail: LogTurnRecord | null;
+  onOpen: (id: string) => void;
+  onBack: () => void;
+  onDelete: (id: string) => void;
+  onClear: () => void;
+  onExport: (format: LogExportFormat, logId?: string) => void;
+  onClose: () => void;
+}) {
+  if (detail) {
+    return (
+      <>
+        <SheetHead
+          title="Run detail"
+          sub={`${detail.turns.length} turn${detail.turns.length === 1 ? "" : "s"} · ${detail.toolCalls} tool call${detail.toolCalls === 1 ? "" : "s"} · ${shortDuration(detail.durationMs)}`}
+          icon={ICONS.history}
+          onClose={onClose}
+        />
+        <div class="log-actions">
+          <button class="btn-ghost" onClick={onBack}>
+            ← All runs
+          </button>
+          <button class="btn-ghost" onClick={() => onExport("jsonl", detail.id)}>
+            Export JSONL
+          </button>
+          <button class="btn-ghost" onClick={() => onExport("md", detail.id)}>
+            Export MD
+          </button>
+        </div>
+        <div class="sheet-body log-body">
+          <p class="log-task">{detail.task || "Untitled run"}</p>
+          <p class="log-meta">
+            {isoLocal(detail.startedAt)} · {detail.status} · {detail.mode ?? "—"}
+            {detail.resumed ? " · resumed" : ""}
+          </p>
+          {detail.turns.map((turn) => (
+            <div class="log-turn" key={turn.index}>
+              <div class="log-turn-head">
+                <b>Turn {turn.index + 1}</b>
+                <span>
+                  {clockTime(turn.startedAt)} · {shortDuration(turn.durationMs)}
+                </span>
+              </div>
+              {turn.reasoning.trim() ? (
+                <details class="log-reasoning">
+                  <summary>reasoning</summary>
+                  <pre>{turn.reasoning.trim()}</pre>
+                </details>
+              ) : null}
+              {turn.exclamations.map((ex, i) => (
+                <p class="log-exclaim" key={i}>
+                  {clockTime(ex.at)} — {ex.message}
+                </p>
+              ))}
+              {turn.tools.map((call) => (
+                <div class="log-tool" key={call.index}>
+                  <div class="log-tool-head">
+                    <span class={call.ok === false ? "log-fail" : "log-ok"}>
+                      {call.ok === false ? "✗" : call.ok === true ? "✓" : "…"}
+                    </span>
+                    <b>{call.label ?? call.name}</b>
+                    <span class="log-tool-time">
+                      {clockTime(call.at)} · {shortDuration(call.durationMs)}
+                    </span>
+                  </div>
+                  <pre class="log-pre">{call.args}</pre>
+                  {call.result !== undefined ? (
+                    <pre class="log-pre log-pre-result">{call.result}</pre>
+                  ) : null}
+                  {call.image ? <p class="log-meta">[screenshot captured]</p> : null}
+                </div>
+              ))}
+              {turn.confirmations.map((c) => (
+                <p class="log-confirm" key={c.id}>
+                  ⚠ {clockTime(c.at)} — {c.tool}: {c.summary}
+                </p>
+              ))}
+              {turn.errors.map((err, i) => (
+                <p class="log-confirm" key={i}>
+                  ⚠ {clockTime(err.at)} — {err.message}
+                </p>
+              ))}
+              {turn.text.trim() ? <div class="log-text">{turn.text.trim()}</div> : null}
+              {turn.summary && turn.summary !== turn.text.trim() ? (
+                <p class="log-summary">
+                  <b>Summary:</b> {turn.summary}
+                </p>
+              ) : null}
+              {turn.stats ? (
+                <p class="log-meta">
+                  {turn.stats.steps} steps · {turn.stats.totalTokens} tokens (
+                  {turn.stats.outputTokens} out) · {turn.stats.tokensPerSec.toFixed(1)} tok/s
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SheetHead
+        title="Run logs"
+        sub={`${logs.length} logged run${logs.length === 1 ? "" : "s"}`}
+        icon={ICONS.history}
+        onClose={onClose}
+      />
+      <div class="log-actions">
+        <button class="btn-ghost" onClick={() => onExport("jsonl")}>
+          Export all JSONL
+        </button>
+        <button class="btn-ghost" onClick={() => onExport("md")}>
+          Export all MD
+        </button>
+        <button class="btn-ghost log-clear" onClick={onClear}>
+          Clear
+        </button>
+      </div>
+      <div class="sheet-body hist-body">
+        {logs.length === 0 ? (
+          <div class="empty">
+            <span class="empty-icon">
+              <Icon d={ICONS.history} size={20} />
+            </span>
+            <b>No runs logged yet</b>
+            <p class="hint">
+              Every task is archived locally with per-turn times, tool calls and
+              results.
+            </p>
+          </div>
+        ) : (
+          logs.map((log, i) => (
+            <div class="hist-row" key={log.id} style={`--i:${Math.min(i, 12)}`}>
+              <button class="hist-item" onClick={() => onOpen(log.id)}>
+                <span class="hist-title">
+                  {log.status === "running" ? "● " : ""}
+                  {log.task || "Untitled run"}
+                </span>
+                <span class="hist-meta">
+                  {relativeTime(log.startedAt)} · {log.turns} turn
+                  {log.turns === 1 ? "" : "s"} · {log.toolCalls} tool
+                  {log.toolCalls === 1 ? "" : "s"} · {shortDuration(log.durationMs)}
+                </span>
+              </button>
+              <button
+                class="btn-icon btn-icon-sm hist-del"
+                onClick={() => onDelete(log.id)}
+                aria-label="Delete log"
+                data-tip="Delete"
+                data-tip-align="end"
+              >
+                <Icon d={ICONS.trash} size={13} />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
+function isoLocal(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 // ------------------------------ welcome ------------------------------
 
 const SUGGESTIONS = [
@@ -1306,6 +1567,9 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<ConversationSummary[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
+  const [logs, setLogs] = useState<LogSummary[]>([]);
+  const [logDetail, setLogDetail] = useState<LogTurnRecord | null>(null);
   const [viewer, setViewer] = useState<string | null>(null);
   const [resolved, setResolved] = useState<Map<string, Decision>>(new Map());
   const [openMenu, setOpenMenu] = useState<"mode" | "model" | null>(null);
@@ -1416,6 +1680,12 @@ function App() {
           currentConv = msg.conversation;
           setConv(msg.conversation);
           setShowHistory(false);
+        } else if (msg.type === "logs.list") {
+          setLogs(msg.logs);
+        } else if (msg.type === "logs.get") {
+          setLogDetail(msg.log);
+        } else if (msg.type === "logs.export") {
+          downloadLog(msg.filename, msg.content);
         }
       });
       port.onDisconnect.addListener(() => {
@@ -1524,6 +1794,7 @@ function App() {
 
   const openHistory = () => {
     setShowSettings(false);
+    setShowLogs(false);
     setShowHistory(true);
     postPort?.({ kind: "history.list" });
   };
@@ -1533,6 +1804,29 @@ function App() {
 
   const deleteConversation = (id: string) =>
     postPort?.({ kind: "history.delete", conversationId: id });
+
+  const openLogs = () => {
+    setShowSettings(false);
+    setShowHistory(false);
+    setLogDetail(null);
+    setShowLogs(true);
+    postPort?.({ kind: "logs.list" });
+  };
+
+  const openLog = (id: string) => postPort?.({ kind: "logs.get", logId: id });
+
+  const deleteLog = (id: string) => {
+    if (logDetail?.id === id) setLogDetail(null);
+    postPort?.({ kind: "logs.delete", logId: id });
+  };
+
+  const clearLogs = () => {
+    setLogDetail(null);
+    postPort?.({ kind: "logs.clear" });
+  };
+
+  const exportLogs = (format: LogExportFormat, logId?: string) =>
+    postPort?.({ kind: "logs.export", format, logId });
 
   const newChat = () => {
     currentConv = null;
@@ -1649,6 +1943,12 @@ function App() {
     openConversation,
     deleteConversation,
     newChat,
+    // run-log surface (timestamped per-turn chat + tool archive)
+    logs: () =>
+      chrome.storage.local
+        .get("baRunLogs")
+        .then((r) => (r.baRunLogs as LogTurnRecord[]) ?? []),
+    logsUI: () => ({ open: showLogs, detail: logDetail?.id ?? null }),
     // control bar surface
     usage: () => usage,
     addAttachment: (a: RunAttachment) => setAttachments((prev) => [...prev, a].slice(0, 4)),
@@ -1748,6 +2048,13 @@ function App() {
             onClick={() => (showHistory ? setShowHistory(false) : openHistory())}
           />
           <IconButton
+            icon={ICONS.logs}
+            tip="Run logs"
+            label="Run logs"
+            class={showLogs ? "is-on" : ""}
+            onClick={() => (showLogs ? setShowLogs(false) : openLogs())}
+          />
+          <IconButton
             icon={ICONS.settings}
             tip="Settings"
             label="⚙"
@@ -1755,6 +2062,7 @@ function App() {
             class={showSettings ? "is-on" : ""}
             onClick={() => {
               setShowHistory(false);
+              setShowLogs(false);
               setShowSettings(!showSettings);
             }}
           />
@@ -1999,6 +2307,31 @@ function App() {
           onOpen={openConversation}
           onDelete={deleteConversation}
           onClose={() => setShowHistory(false)}
+        />
+      </Sheet>
+
+      <Sheet
+        open={showLogs}
+        side="left"
+        class="history-view logs-view"
+        label="Run logs"
+        onClose={() => {
+          setShowLogs(false);
+          setLogDetail(null);
+        }}
+      >
+        <LogsBody
+          logs={logs}
+          detail={logDetail}
+          onOpen={openLog}
+          onBack={() => setLogDetail(null)}
+          onDelete={deleteLog}
+          onClear={clearLogs}
+          onExport={exportLogs}
+          onClose={() => {
+            setShowLogs(false);
+            setLogDetail(null);
+          }}
         />
       </Sheet>
 

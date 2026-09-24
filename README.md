@@ -48,10 +48,24 @@ downloads, `evaluate_js`, network modification) pause with **Allow once /
 Always allow / Deny** cards; denies return a cancellation the model works
 around. **Stop** aborts between steps.
 
+**Madman mode** (Settings → Madman mode) makes the agent swear. Every tool
+call is labelled with a cuss word, and the agent narrates setbacks in the
+middle of a run in character — "Because this shit ass site is so fucking slow
+I have to scroll the whole goddamn list by hand." Off by default; the toggle
+only changes the voice, never the facts or the safety gates.
+
 **Chat history**: every task is a thread. **History** lists past threads
 (title, time, turn count) — click one to reopen its transcript, **✕** to
 delete, **New chat** to start fresh. Typing into an open thread continues it
 with full prior context (the follow-up really sees the earlier turns).
+
+**Run logs**: the **Run logs** button (next to History) archives every task
+locally in `chrome.storage.local` — one timestamped record per run, split into
+turns, each turn carrying its start time, duration and token stats, and each
+tool call its raw args, result and how long it took. Records survive worker
+teardown and browser restarts. Open one for a per-turn timeline, or **Export
+JSONL / Export MD** to write the whole archive (or a single run) into your
+Downloads folder for keeping alongside the project. Demo runs aren't logged.
 
 ## Development
 

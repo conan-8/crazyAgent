@@ -43,6 +43,22 @@ into an open thread continues with real multi-turn context (`run` carries
 `conversationId`; the worker seeds the checkpoint messages from the stored
 transcript). Deletion cancels any pending flush so threads can't resurrect.
 
+**Run logs** (`shared/logging.ts` + `background/runlog.ts`) are the archival
+counterpart: a second pure folder (`foldLogEvent`) turns the same StepEvent
+stream into a timestamped record of the run rather than a display view. Where a
+`Conversation` keeps only the folded blocks, a `LogTurnRecord` keeps, per turn:
+`startedAt`/`endedAt`/`durationMs`, streamed reasoning, every tool call with its
+raw args, result (truncated at 8 KB), per-call duration and ok/fail, madman
+exclamations, confirmation prompts, errors and the final `RunStats`. Records
+live in `chrome.storage.local` under `baRunLogs` (ring of 200, separate from
+`baConversations`), so they survive worker teardown and browser restarts.
+`emit()` folds + flushes on every non-token event; token deltas coalesce behind
+a 1 s timer. A worker resume reattaches to the still-`running` record for the
+same conversation instead of splitting one task across two entries. The panel's
+**Run logs** drawer lists runs, opens a per-turn timeline (`logs.get`) and
+exports a selection or the whole archive as JSONL or Markdown (`logs.export` →
+Blob download into the browser's Downloads folder). Demo/echo runs are excluded.
+
 ## Workflow
 
 - `npm run watch` rebuilds `dist/` on change; reload the extension at
@@ -76,6 +92,18 @@ Implement `LlmClient` in `background/agent/llm.ts` (or reuse the
 OpenAI-compatible client with a custom base URL), add request/response shaping
 as pure functions and extend `tests/llm.test.ts`. Register the provider in
 `settings.ts` + the panel's Settings drawer.
+
+## Madman mode
+
+A voice setting, not a behavior one. The toggle lives in `AgentSettings.madman`
+and reaches the loop as `LoopDeps.madman`; everything else is in
+`shared/madman.ts` (pure, unit-tested in `tests/madman.test.ts`). It works in
+two halves: `madmanPrompt()` is appended to the system prompt so the model
+writes in character, and `madmanLabel()`/`madmanExclamation()` decorate tool
+cards deterministically, so "every tool call carries a cuss word" holds even
+when the model forgets. `madman-smoke.mjs` proves all of it against a real
+browser and a scripted mock LLM. Turning it off must leave the prompt
+byte-identical to the pre-Madman prompt (`tests/prompts.test.ts` asserts this).
 
 ## Helper daemon (Unlimited mode)
 

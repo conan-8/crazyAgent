@@ -12,6 +12,8 @@ const steps = [
   ["phase 5+6 — UI & policy", "node", ["scripts/phase56-smoke.mjs"]],
   ["phase 7 — unlimited mode", "node", ["scripts/phase7-smoke.mjs"]],
   ["chat & history", "node", ["scripts/phase9-smoke.mjs"]],
+  ["run logs (archive + export)", "node", ["scripts/phase10-smoke.mjs"]],
+  ["madman mode", "node", ["scripts/madman-smoke.mjs"]],
   ["phase 1 — lifecycle (quick)", "node", ["scripts/phase1-smoke.mjs", "quick"]],
 ];
 

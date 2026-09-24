@@ -40,10 +40,12 @@ function serve(port) {
   return server;
 }
 
-export function startFixtureServers() {
+export function startFixtureServers({ mainPort = 8790, framePort = 8791 } = {}) {
   return {
-    main: serve(8790),
-    frame: serve(8791),
+    main: serve(mainPort),
+    frame: serve(framePort),
+    mainPort,
+    framePort,
     close() {
       for (const s of [this.main, this.frame]) s.close();
     },

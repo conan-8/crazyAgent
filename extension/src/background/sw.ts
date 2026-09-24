@@ -40,8 +40,28 @@ import {
   summarize,
   type Conversation,
 } from "../shared/chat";
+import {
+  foldLogEvent,
+  newTurnRecord,
+  toJsonl,
+  toMarkdown,
+  type LogTurnRecord,
+} from "../shared/logging";
+import {
+  clearRecords,
+  deleteRecord,
+  getRecord,
+  listRecords,
+  listSummaries,
+  saveRecord,
+} from "./runlog";
 import { assess, ConfirmGate, type ElementProbe } from "./policy";
 import { probeElement } from "./tools/actions";
+import {
+  collectSnapshot,
+  formatSnapshot,
+  settleTab,
+} from "./tools/perception";
 import "./tools/perception"; // registers snapshot / screenshot / wait_for_settle
 import "./tools/actions"; // registers click / type / select / key / hover / scroll / read_page
 import "./tools/tabs"; // registers navigate / reload / back / forward / tabs_*
@@ -121,11 +141,79 @@ function emit(event: StepEvent): void {
     foldEvent(currentConv, event);
     scheduleConvFlush(event.kind === "token_delta");
   }
+  if (currentLog) {
+    foldLogEvent(currentLog, event);
+    scheduleLogFlush(event.kind === "token_delta");
+  }
   if (event.kind === "done") {
     void recordHistory(currentTask, event);
   }
 }
 let currentTask = "";
+
+// ---- structured run log (timestamped per turn, archived locally) ----
+let currentLog: LogTurnRecord | null = null;
+let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Token deltas arrive per chunk — flushing on each would hammer storage.
+ * Everything else (tool calls/results, confirmations, done) flushes at once so
+ * the log survives a service-worker kill mid-turn.
+ */
+function scheduleLogFlush(deferred: boolean): void {
+  if (!currentLog) return;
+  if (!deferred) {
+    if (logFlushTimer) {
+      clearTimeout(logFlushTimer);
+      logFlushTimer = null;
+    }
+    void flushLog();
+    return;
+  }
+  if (!logFlushTimer) {
+    logFlushTimer = setTimeout(() => {
+      logFlushTimer = null;
+      void flushLog();
+    }, 1_000);
+  }
+}
+
+async function flushLog(): Promise<void> {
+  const rec = currentLog;
+  if (!rec) return;
+  await saveRecord(rec);
+}
+
+/** Open a fresh log record for a new run. */
+async function openLogRecord(
+  task: string,
+  mode: ControlMode,
+  conversationId: string | undefined,
+  attachments: RunAttachment[] | undefined,
+): Promise<void> {
+  currentLog = newTurnRecord(task, {
+    conversationId,
+    mode,
+    attachments: attachments?.map((a) => ({ name: a.name, kind: a.kind })),
+  });
+  await flushLog();
+}
+
+/** Close the active record (done/error already set status via foldLogEvent). */
+async function closeLogRecord(): Promise<void> {
+  const rec = currentLog;
+  if (!rec) return;
+  if (rec.status === "running") {
+    // Stopped by the user, or the loop returned without a terminal event.
+    rec.status = "done";
+    rec.durationMs = Math.max(0, Date.now() - rec.startedAt);
+  }
+  if (logFlushTimer) {
+    clearTimeout(logFlushTimer);
+    logFlushTimer = null;
+  }
+  await flushLog();
+}
 
 // ---- chat conversation (history) for the current run ----
 let currentConv: Conversation | null = null;
@@ -187,7 +275,7 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         contextWindow: settings.contextWindow,
         sendScreenshots: settings.sendScreenshots,
         thinking: settings.thinking,
-        thinkingBudget: settings.thinkingBudget,
+        madman: settings.madman,
         execute: (name, args) => executeToolGated(name, args),
       });
     }
@@ -196,7 +284,47 @@ async function runFrom(cp: Checkpoint): Promise<void> {
   } finally {
     loopRunning = false;
     keepalive.stop();
+    await closeLogRecord();
     await clearCheckpoint();
+  }
+}
+
+/**
+ * Page-affecting actions whose result gets an automatic settle + fresh
+ * snapshot appended — "action + observation" in one round-trip, so the model
+ * no longer has to call wait_for_settle + snapshot after every step.
+ */
+const AUTO_OBSERVE_TOOLS = new Set([
+  "click",
+  "type",
+  "select",
+  "key",
+  "hover",
+  "scroll",
+  "navigate",
+  "reload",
+  "back",
+  "forward",
+  "tabs_create",
+  "tabs_switch",
+]);
+
+const OBSERVATION_MAX_CHARS = 12_000;
+
+/** Best-effort settle + compact snapshot after an action; null on failure. */
+async function observeAfterAction(tabId: number): Promise<string | null> {
+  try {
+    // Shorter reachability budget than the manual tool: fail fast on pages
+    // where the content script can never run (chrome://, PDF viewer, …).
+    await settleTab(tabId, 10_000, 8).catch(() => null);
+    const snap = await collectSnapshot(tabId);
+    if (!snap.frames.length) return null;
+    const text = formatSnapshot(snap);
+    return text.length > OBSERVATION_MAX_CHARS
+      ? `${text.slice(0, OBSERVATION_MAX_CHARS)}…[truncated]`
+      : text;
+  } catch {
+    return null; // observation is an optimization — never fail the action
   }
 }
 
@@ -218,7 +346,27 @@ async function executeToolGated(
       return { ok: false, error: outcome.reason };
     }
   }
-  return executeTool(name, args);
+  const res = await executeTool(name, args);
+  if (!res.ok || !AUTO_OBSERVE_TOOLS.has(name) || stopRequested) return res;
+  // Observe whichever tab is active NOW — tabs_create/tabs_switch moved it.
+  const obsTabId =
+    (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id ??
+    tabId;
+  if (obsTabId === undefined) return res;
+  const observation = await observeAfterAction(obsTabId);
+  if (!observation || stopRequested) return res;
+  const base = res.text ?? JSON.stringify(res.payload ?? null);
+  return {
+    ...res,
+    text: `${base}\n\n--- page after action (auto-settled, fresh snapshot) ---\n${observation}`,
+  };
+}
+
+/** Timestamped export filename, e.g. crazyagent-logs-2026-05-04T09-30-00.jsonl. */
+function logFilename(format: "jsonl" | "md", count: number): string {
+  const stamp = new Date().toISOString().replace(/\.\d+Z$/, "").replace(/:/g, "-");
+  const suffix = count === 1 ? "" : `-x${count}`;
+  return `crazyagent-logs-${stamp}${suffix}.${format}`;
 }
 
 /** Shared tool executor (agent loop + dev run_tool channel). */
@@ -325,6 +473,9 @@ async function startRun(
     updatedAt: Date.now(),
     done: false,
   };
+  // Demo/echo runs are UI smoke, not real work — keep them out of the archive.
+  if (demo) currentLog = null;
+  else await openLogRecord(task, mode, currentConv?.id, attachments);
   await saveCheckpoint(cp);
   await runFrom(cp);
 }
@@ -340,6 +491,25 @@ async function maybeResume(trigger: string): Promise<void> {
       currentConv =
         (await getConversation(cp.conversationId)) ??
         newConversation(cp.conversationId, cp.task);
+    }
+    // Continue the still-open log record when this run already had one, so a
+    // worker teardown doesn't split one task into two archive entries.
+    if (cp.demo) {
+      currentLog = null;
+    } else {
+      const open = (await listRecords()).find(
+        (r) => r.status === "running" && r.conversationId === cp.conversationId,
+      );
+      if (open) {
+        open.resumed = true;
+        currentLog = open;
+      } else {
+        currentLog = newTurnRecord(cp.task, {
+          conversationId: cp.conversationId,
+          mode: cp.mode,
+          at: cp.startedAt,
+        });
+      }
     }
     emit({
       kind: "info",
@@ -400,6 +570,36 @@ async function handleRequest(
       stopRequested = true;
       signalStop();
       break;
+    case "logs.list": {
+      port.postMessage({ type: "logs.list", logs: await listSummaries() });
+      break;
+    }
+    case "logs.get": {
+      port.postMessage({ type: "logs.get", log: await getRecord(msg.logId) });
+      break;
+    }
+    case "logs.delete":
+      await deleteRecord(msg.logId);
+      port.postMessage({ type: "logs.list", logs: await listSummaries() });
+      break;
+    case "logs.clear":
+      await clearRecords();
+      port.postMessage({ type: "logs.list", logs: [] });
+      break;
+    case "logs.export": {
+      // Fold the live record in first so an in-flight run exports as-is.
+      if (currentLog) await flushLog();
+      const records = msg.logId
+        ? [(await getRecord(msg.logId))].filter((r): r is LogTurnRecord => r !== null)
+        : await listRecords();
+      port.postMessage({
+        type: "logs.export",
+        format: msg.format,
+        filename: logFilename(msg.format, records.length),
+        content: msg.format === "jsonl" ? toJsonl(records) : toMarkdown(records),
+      });
+      break;
+    }
     case "state": {
       const checkpoint = await loadCheckpoint();
       port.postMessage({

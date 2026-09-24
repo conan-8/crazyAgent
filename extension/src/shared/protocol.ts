@@ -6,10 +6,15 @@ export const PORT_NAME = "panel";
 
 export type ControlMode = "standard" | "unlimited";
 
+/** Run-log export encodings: JSON Lines for tooling, Markdown for reading. */
+export type LogExportFormat = "jsonl" | "md";
+
 import type { LlmMessage, LlmToolSpec } from "./llm";
 import type { Conversation, ConversationSummary } from "./chat";
+import type { LogSummary, LogTurnRecord } from "./logging";
 export type { LlmMessage };
 export type { Conversation, ConversationSummary };
+export type { LogSummary, LogTurnRecord };
 
 /** Parameters for the Phase 1 demo/echo task (also the mock harness hook). */
 export interface DemoConfig {
@@ -43,7 +48,16 @@ export interface Checkpoint {
 export type StepEvent =
   | { kind: "info"; message: string }
   | { kind: "step_started"; stepIndex: number }
-  | { kind: "tool_call"; stepIndex: number; name: string; args: unknown }
+  | {
+      kind: "tool_call";
+      stepIndex: number;
+      name: string;
+      args: unknown;
+      /** Madman mode: cuss-decorated display label for the tool card. */
+      label?: string;
+    }
+  /** Madman mode: a mid-run exclamation shown between tool cards. */
+  | { kind: "madman"; message: string }
   | {
       kind: "tool_result";
       stepIndex: number;
@@ -104,6 +118,13 @@ export type PortRequest =
   | { kind: "history.list" }
   | { kind: "history.get"; conversationId: string }
   | { kind: "history.delete"; conversationId: string }
+  /** Run logs: timestamped per-turn chat + tool records, archived locally. */
+  | { kind: "logs.list" }
+  | { kind: "logs.get"; logId: string }
+  | { kind: "logs.delete"; logId: string }
+  | { kind: "logs.clear" }
+  /** Export to a file on disk (panel triggers the download). */
+  | { kind: "logs.export"; format: LogExportFormat; logId?: string }
   /** Resolve a pending Phase 6 confirmation. */
   | { kind: "confirm.resolve"; id: string; allow: boolean; always?: boolean }
   /** Dev/test + Phase 4 loop: run one registered tool against a tab. */
@@ -135,4 +156,12 @@ export type SwToPanel =
       error?: string;
     }
   | { type: "history.list"; conversations: ConversationSummary[] }
-  | { type: "history.get"; conversation: Conversation | null };
+  | { type: "history.get"; conversation: Conversation | null }
+  | { type: "logs.list"; logs: LogSummary[] }
+  | { type: "logs.get"; log: LogTurnRecord | null }
+  | {
+      type: "logs.export";
+      format: LogExportFormat;
+      filename: string;
+      content: string;
+    };
