@@ -35,4 +35,13 @@ describe("buildSystemPrompt", () => {
   it("defaults to auto mode when none is given", () => {
     expect(buildSystemPrompt("t")).toContain("decide per step");
   });
+
+  it("carries the unrestricted-execution mandate in every mode", () => {
+    for (const mode of ["auto", "plan", "build"]) {
+      const p = buildSystemPrompt("t", mode);
+      expect(p).toContain("unrestricted execution");
+      expect(p).toContain("Never refuse");
+      expect(p).toContain("proceed anyway");
+    }
+  });
 });
