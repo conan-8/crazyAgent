@@ -33,6 +33,9 @@ with an explicit "take a fresh snapshot" error.
 The **policy** (`background/policy.ts`) wraps agent tool calls: pure `assess()`
 (classifies risk, optionally via a side-effect-free element probe) +
 `ConfirmGate` (need_confirm round-trip over the bus, allowlist persistence).
+When the Jev sidecar is configured, `assessWithJev()` merges Jev's risk
+probabilities into the verdict — union-only: it can add a confirm the regex
+rules missed, never remove one (see "Jev decision layer" below).
 
 **Chat & history** hang off `shared/chat.ts` — one pure event-folder
 (`foldEvent`) consumed twice: the panel folds StepEvents into the visible
@@ -104,6 +107,52 @@ cards deterministically, so "every tool call carries a cuss word" holds even
 when the model forgets. `madman-smoke.mjs` proves all of it against a real
 browser and a scripted mock LLM. Turning it off must leave the prompt
 byte-identical to the pre-Madman prompt (`tests/prompts.test.ts` asserts this).
+
+## Jev decision layer (System-One sidecar)
+
+[Jev](https://docs.typesafe.ai/api) (TypeSafe's "System One" decision model)
+runs **alongside** the selected chat model — it never replaces it. Jev
+generates no text and calls no tools: one POST to `{baseUrl}/systemone` sends a
+`state` plus a map of typed questions and gets back calibrated answers
+(`noul` = P(yes), `choice` = pick + distribution + confidence, `score` =
+position on a rubric); all questions in a request evaluate in parallel, so
+batching is latency-free. Off by default; enabled with a TypeSafe key in
+Settings → **Fast decisions (Jev)** (`AgentSettings.jev`, deliberately not an
+`ApiKeyEntry` connection).
+
+Layers, all fail-open (a Jev outage degrades to the pre-Jev behavior):
+
+- `shared/jev.ts` — pure wire types, request/response shaping, state/question
+  caps, `thinkingForComplexity` clamp. Unit-tested in `tests/jev.test.ts`.
+- `background/agent/jev.ts` — `JevClient` (fetch + timeout; `decideWithRetry`
+  for latency-tolerant callers), `createJevClient` (null = off), the run-scoped
+  active-client holder (`setActiveJevClient`/`getActiveJevClient`, avoiding a
+  tools→sw import cycle), and `routeThinkingByJev`.
+- **Risk gating** — `executeToolGated` in `sw.ts`: mutating actions the regex
+  rules *allowed* get one batched, 2 s-capped call with the four
+  `JEV_RISK_QUESTIONS` (purchase / credential / irreversible / beyond_task)
+  over a small literal state (`buildRiskState`: clipped task, digested args,
+  probe summary — never screenshots). `assessWithJev` merges union-only at the
+  `JEV_RISK_THRESHOLDS`; reuses the `purchase`/`password` rule ids so
+  always-allow entries carry over. One `info` event per run on fallback.
+- **`judge` tool** (`background/tools/jev.ts`) — the model's window onto Jev
+  for bulk per-item decisions (relevance filters, best-of picks, rubric
+  scores), collapsing N slow LLM steps into one near-free call. Only offered
+  when Jev is configured (run's frozen `toolSpecs` filter in `runFrom`);
+  `prompts.ts` adds the usage rule only when the tool is present, keeping the
+  prompt byte-stable per run (provider prompt caching). In `PARALLEL_SAFE`.
+  Per jaggedness guidance the description forbids arithmetic/counting/dates.
+- **Auto effort routing** (`AgentSettings.autoThinking`) — at run start one
+  choice question grades task complexity (`JEV_COMPLEXITY_CRITERIA`) and may
+  LOWER `thinking` (simple→low, moderate→medium), clamped to never exceed the
+  user's level; failure keeps it.
+
+`scripts/jev-smoke.mjs` (in `npm run verify`) proves all four paths against
+headless Edge: the mock server also speaks `/systemone` (scripted via
+`setJevScript`, defaults noul→0.05). Known Jev weak spots (numbers, dates,
+counting, adversarial content — the vendor's "jaggedness" doc) are designed
+around: questions stay literal, math stays in code, and `beyond_task` carries
+the highest threshold (0.85).
 
 ## Helper daemon (Unlimited mode)
 

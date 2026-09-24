@@ -19,6 +19,13 @@ that risk.
   Each prompt offers **Allow once / Always allow / Deny**. "Always allow" is
   persisted per rule (`chrome.storage.local`, `baPolicyAlways`) and can be
   cleared by removing that key.
+- **Jev risk gate (optional, off by default).** When the Jev sidecar is
+  configured, every mutating action the regex rules *allowed* is additionally
+  classified by the decision model (purchase / credential / irreversible /
+  beyond-task probabilities). It is union-only — it can add a confirmation,
+  never remove one — and fails open: if Jev is unreachable or slow (2 s cap),
+  the rule-based verdict stands. This narrows the "checkout button labeled
+  'Continue'" gap below, but a probability is not a guarantee.
 - **Cooperative stop** between tool calls (interruptible step waits).
 - **Step cap** (default 40) bounds runaway loops; malformed tool calls abort
   after 3 consecutive failures.
@@ -29,16 +36,33 @@ that risk.
 
 - Purchase/form detection is URL + button-text regex — a checkout button
   labeled "Continue" will not match. The password gate is the most reliable;
-  the purchase gate is best-effort.
+  the purchase gate is best-effort. The optional Jev risk gate (above) covers
+  many of these misses, but is itself probabilistic and adversarial pages are
+  a documented Jev weak spot — treat both layers as reduction, not proof.
 - Deny cancels the specific tool call; the model may attempt an equivalent
   action through another tool. Watch the transcript.
 - "Always allow" persists silently; revisit it deliberately.
+
+## Jev data flow (when enabled)
+
+- With the sidecar on, these leave the browser to `api.typesafe.ai` (or your
+  configured base URL): the task text (clipped), a digest of each
+  regex-allowed mutating action (tool, clipped args, element probe text), the
+  `judge` tool's model-composed states (page excerpts the model chooses to
+  send), and — with Auto effort — the task text for complexity grading.
+- Screenshots are never sent to Jev. Nothing is sent when the sidecar is off;
+  the gate path is skipped entirely.
+- The `judge` tool means page text can reach TypeSafe whenever the model
+  decides to call it — the same trust you already extend to your chat
+  provider, pointed at a second vendor. Point the base URL at a
+  self-hosted Jev-class model if that matters.
 
 ## Secrets
 
 - API key lives in `chrome.storage.local` in cleartext (personal-use
   assumption). Anything running as your user can read it. Use a scoped,
-  low-limit key where the provider supports it.
+  low-limit key where the provider supports it. The same applies to the
+  optional TypeSafe (Jev) key stored next to it.
 - The helper daemon (`helper/`) runs as your user with stdio framed JSON from
   the extension only (`allowed_origins` pins it to the extension id). It can
   drive the browser it attaches to and nothing else.

@@ -209,8 +209,10 @@ async function main() {
     const histItems = await panel.eval(`document.querySelectorAll(".hist-item").length`);
     await panel.eval(`document.querySelector(".hist-item").click()`);
     // The sheet plays a ~300ms exit animation, so poll rather than assume.
+    // 5s budget: inside `npm run verify` the box carries six prior browser
+    // suites' worth of teardown, and a 2s window flaked under that load.
     let dom3 = { users: 0, overlayOpen: true };
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 50; i++) {
       dom3 = await panel.eval(`JSON.stringify({
         users: document.querySelectorAll(".bubble-user").length,
         overlayOpen: Boolean(document.querySelector(".history-view")),

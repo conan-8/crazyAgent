@@ -13,5 +13,9 @@
       <input id="password" name="password" type="password" autocomplete="current-password" />
       <button id="login-btn" type="submit">Log in</button>
     </form>
+    <!-- Regex-safe purchase-ish label: no word from PURCHASE_RE, so only the
+         Jev risk gate flags it (jev-smoke scenario B). After the form so the
+         refs phase56 relies on (username=1, password=2, login=3) stay put. -->
+    <button id="upgrade-btn" type="button">Upgrade plan</button>
   </body>
 </html>

@@ -2,6 +2,8 @@
 // Mock LLM server speaking BOTH wire protocols over real HTTP + SSE:
 //   POST …/chat/completions  (OpenAI-compatible, streamed tool_calls)
 //   POST …/messages          (Anthropic Messages, streamed tool_use blocks)
+// Plus the TypeSafe Jev decision endpoint (plain JSON):
+//   POST …/systemone         (noul/choice/score answers, scripted overrides)
 // The scripted "model" advances one turn per completed tool result already in
 // the conversation, so runs are stateless and replayable.
 import http from "node:http";
@@ -109,10 +111,38 @@ async function streamAnthropic(res, step, turn) {
   sseEvent(res, "message_stop", { type: "message_stop" });
 }
 
-export function startMockLlm({ script, port = 8792 }) {
+/** Canned Jev answer per question type (deliberately boring: noul 0.05). */
+function defaultJevAnswer(q) {
+  if (q.type === "noul") return { type: "noul", noul: 0.05 };
+  if (q.type === "choice") {
+    const options = Object.keys(q.criteria ?? {});
+    const first = options[0] ?? "";
+    const rest = options.length > 1 ? 0.1 / (options.length - 1) : 0;
+    const probabilities = Object.fromEntries(
+      options.map((o, i) => [o, i === 0 ? 0.9 : rest]),
+    );
+    return { type: "choice", choice: first, probabilities, confidence: 0.9 };
+  }
+  const levels = Array.isArray(q.criteria) ? q.criteria : [];
+  return {
+    type: "score",
+    score: 0,
+    legend: Object.fromEntries(levels.map((l, i) => [String(i), l])),
+    probabilities: levels.length ? { 0: 1 } : {},
+    confidence: 1,
+  };
+}
+
+export function startMockLlm({ script, port = 8792, jevScript = null }) {
   let activeScript = script;
-  const hits = { openai: 0, anthropic: 0 };
+  /**
+   * Jev overrides: null (typed defaults), "fail" (503s), or a map of
+   * question id → answer fields merged over the default for that type.
+   */
+  let activeJevScript = jevScript;
+  const hits = { openai: 0, anthropic: 0, jev: 0 };
   let lastBody = null;
+  let lastJevBody = null;
   /** Every request body seen, in order — lets a smoke assert prompt content. */
   const bodies = [];
   const server = http.createServer(async (req, res) => {
@@ -122,7 +152,32 @@ export function startMockLlm({ script, port = 8792 }) {
     try {
       body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
     } catch {}
-    const kind = String(req.url).includes("chat/completions") ? "openai" : "anthropic";
+    const url = String(req.url);
+    // Jev (TypeSafe System-One) decision endpoint — plain JSON, no SSE.
+    if (url.includes("systemone")) {
+      hits.jev++;
+      lastJevBody = body;
+      if (activeJevScript === "fail") {
+        res.writeHead(503, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "mock jev overloaded" }));
+        return;
+      }
+      const answers = {};
+      for (const [id, q] of Object.entries(body.questions ?? {})) {
+        const override = activeJevScript?.[id];
+        answers[id] = override ? { type: q.type, ...override } : defaultJevAnswer(q);
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          model: body.model ?? "mock-jev",
+          answers,
+          usage: { input_tokens: 100, output_tokens: 0 },
+        }),
+      );
+      return;
+    }
+    const kind = url.includes("chat/completions") ? "openai" : "anthropic";
     hits[kind]++;
     lastBody = body;
     bodies.push(body);
@@ -144,8 +199,12 @@ export function startMockLlm({ script, port = 8792 }) {
     lastRequest: () => lastBody,
     /** All request bodies seen so far, in order. */
     requests: () => bodies,
+    lastJevRequest: () => lastJevBody,
     setScript(s) {
       activeScript = s;
+    },
+    setJevScript(s) {
+      activeJevScript = s;
     },
     close: () => server.close(),
   };

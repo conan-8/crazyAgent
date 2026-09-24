@@ -30,6 +30,8 @@ npm install && npm run build        # produces dist/
 4. Click the toolbar icon → the side panel opens. In **⚙ Settings** choose a
    provider (Anthropic or any OpenAI-compatible endpoint: OpenAI, OpenRouter,
    DeepSeek, local Ollama/vLLM…), model and API key, plus the control mode.
+   Optionally add a [TypeSafe key](https://console.typesafe.ai/keys) under
+   **Fast decisions (Jev)** — see below.
 
 > Why a cloned profile for Unlimited mode: since Chrome 136,
 > `--remote-debugging-port` is ignored on the default user-data-dir (Google's
@@ -53,6 +55,19 @@ call is labelled with a cuss word, and the agent narrates setbacks in the
 middle of a run in character — "Because this shit ass site is so fucking slow
 I have to scroll the whole goddamn list by hand." Off by default; the toggle
 only changes the voice, never the facts or the safety gates.
+
+**Fast decisions (Jev)** (Settings → Fast decisions) pairs your selected model
+with [Jev](https://typesafe.ai/), TypeSafe's "System One" decision model — a
+calibrated classifier that answers typed yes/no, choice and score questions in
+milliseconds instead of a full LLM round-trip. It never replaces your chat
+model; it works alongside it in three places: risky actions the keyword rules
+missed get a confirmation card ("Jev flags this as likely completing a purchase
+(95%)"), the agent gains a `judge` tool that settles bulk per-item decisions
+(relevance filters, best-of picks) in one near-free call, and optional **Auto
+effort** lets Jev grade each task and lower reasoning effort on trivial ones.
+Everything fails open: if Jev is slow, down or unconfigured, runs proceed on
+the rule-based policy exactly as before. Off by default; needs a TypeSafe API
+key ($0.042/M input tokens, output free).
 
 **Chat history**: every task is a thread. **History** lists past threads
 (title, time, turn count) — click one to reopen its transcript, **✕** to
@@ -102,5 +117,7 @@ perception handles cross-origin frames and shadow DOM; actions recover from
 SPA re-renders or fail cleanly; the agent loop streams and tools correctly on
 both provider wire formats; the UI and policy gates behave as specified; the
 helper daemon serves full CDP including network interception and crash
-recovery. A live-LLM run ("search Hacker News for X and summarize") needs
-your API key in Settings — the machinery is covered by the mock-LLM suite.
+recovery; the Jev sidecar gates, judges, routes effort and fails open
+(`scripts/jev-smoke.mjs`, mock `/systemone` endpoint). A live-LLM run ("search
+Hacker News for X and summarize") needs your API key in Settings — the
+machinery is covered by the mock-LLM suite.

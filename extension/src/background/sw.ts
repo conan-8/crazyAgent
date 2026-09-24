@@ -55,7 +55,22 @@ import {
   listSummaries,
   saveRecord,
 } from "./runlog";
-import { assess, ConfirmGate, type ElementProbe } from "./policy";
+import {
+  JEV_RISK_QUESTIONS,
+  assess,
+  assessWithJev,
+  buildRiskState,
+  toRiskAnswers,
+  ConfirmGate,
+  type ElementProbe,
+} from "./policy";
+import {
+  createJevClient,
+  routeThinkingByJev,
+  setActiveJevClient,
+  type JevClient,
+} from "./agent/jev";
+import { isMutating } from "../shared/modes";
 import { probeElement } from "./tools/actions";
 import {
   collectSnapshot,
@@ -67,8 +82,19 @@ import "./tools/actions"; // registers click / type / select / key / hover / scr
 import "./tools/tabs"; // registers navigate / reload / back / forward / tabs_*
 import "./tools/misc"; // registers evaluate_js / download (sensitive)
 import "./tools/network"; // registers network_* (Unlimited mode)
+import "./tools/jev"; // registers judge (Jev sidecar; offered only when configured)
 
 const ALWAYS_KEY = "baPolicyAlways";
+
+/**
+ * Jev sidecar state for the current run. `currentJev` risk-checks mutating
+ * actions the regex rules allowed; the judge tool reads the same client via
+ * agent/jev's active-holder. Both are null when Jev is off — every path then
+ * behaves exactly as before Jev existed.
+ */
+let currentJev: JevClient | null = null;
+let jevFallbackNoted = false;
+const JEV_GATE_TIMEOUT_MS = 2_000;
 
 const gate = new ConfirmGate({
   emit,
@@ -262,7 +288,30 @@ async function runFrom(cp: Checkpoint): Promise<void> {
       });
     } else {
       const settings = await loadSettings();
-      cp.toolSpecs ??= [...toolRegistry.values()].map(toLlmTool);
+      // Jev sidecar: built per run from settings; null when off/unconfigured.
+      currentJev = createJevClient(settings.jev);
+      setActiveJevClient(currentJev);
+      jevFallbackNoted = false;
+      const jevEnabled = currentJev !== null;
+      // The judge tool only reaches the model when Jev can actually answer.
+      // Specs freeze here, so the tool list stays byte-stable across the run's
+      // steps (provider prompt caching) and across a checkpoint resume.
+      cp.toolSpecs ??= [...toolRegistry.values()]
+        .filter((t) => t.name !== "judge" || jevEnabled)
+        .map(toLlmTool);
+      // Auto effort routing: Jev grades the task and may LOWER the thinking
+      // level for trivial work (never raises it; falls back on any failure).
+      let thinking = settings.thinking;
+      if (settings.autoThinking && currentJev) {
+        const routed = await routeThinkingByJev(currentJev, cp.task, settings.thinking);
+        thinking = routed.level;
+        if (routed.complexity) {
+          emit({
+            kind: "info",
+            message: `thinking: ${thinking} (task graded '${routed.complexity}' by Jev)`,
+          });
+        }
+      }
       await runAgentTask(cp, {
         llm: createLlmClient(settings),
         emit,
@@ -274,8 +323,10 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         agentMode: settings.agentMode,
         contextWindow: settings.contextWindow,
         sendScreenshots: settings.sendScreenshots,
-        thinking: settings.thinking,
+        thinking,
         madman: settings.madman,
+        judgeAvailable:
+          jevEnabled && (cp.toolSpecs?.some((t) => t.name === "judge") ?? false),
         execute: (name, args) => executeToolGated(name, args),
       });
     }
@@ -339,7 +390,29 @@ async function executeToolGated(
   if (needsProbe && typeof args.ref === "string" && tabId !== undefined) {
     probe = await probeElement(tabId, args.ref).catch(() => null);
   }
-  const risk = assess(name, args, probe);
+  let risk = assess(name, args, probe);
+  // Jev risk gate: mutating actions the regex rules allowed get one batched,
+  // time-boxed decision call. Union-only — Jev can add a confirm, never drop
+  // one — and any failure falls through to the deterministic verdict.
+  if (risk.level === "allow" && isMutating(name) && currentJev && !stopRequested) {
+    try {
+      const result = await currentJev.decide(
+        buildRiskState(currentTask, name, args, probe),
+        JEV_RISK_QUESTIONS,
+        { timeoutMs: JEV_GATE_TIMEOUT_MS },
+      );
+      risk = assessWithJev(risk, toRiskAnswers(result.answers), probe?.text ?? undefined);
+    } catch (err) {
+      if (!jevFallbackNoted) {
+        jevFallbackNoted = true;
+        const msg = err instanceof Error ? err.message : String(err);
+        emit({
+          kind: "info",
+          message: `Jev unavailable (${msg}) — continuing with rule-based policy only`,
+        });
+      }
+    }
+  }
   if (risk.level === "confirm") {
     const outcome = await gate.request(risk);
     if (!outcome.allow) {
@@ -486,6 +559,9 @@ async function maybeResume(trigger: string): Promise<void> {
   const cp = await loadCheckpoint();
   if (cp && !cp.done) {
     currentCp = cp;
+    // Restore the task text too: history recording and Jev's risk state both
+    // read it, and a resumed run never went through startRun.
+    currentTask = cp.task;
     stopRequested = false;
     if (cp.conversationId && !cp.demo) {
       currentConv =

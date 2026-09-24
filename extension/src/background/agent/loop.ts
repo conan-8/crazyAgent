@@ -50,6 +50,8 @@ export interface LoopDeps {
   thinking?: ThinkingLevel;
   /** Madman mode: profane voice in the prompt + a cuss on every tool label. */
   madman?: boolean;
+  /** Jev sidecar configured: the `judge` tool is in the spec list. */
+  judgeAvailable?: boolean;
 }
 
 const MAX_RESULT_CHARS = 24_000;
@@ -72,6 +74,7 @@ const PARALLEL_SAFE = new Set([
   "wait_for_settle",
   "tabs_list",
   "network_observe",
+  "judge", // read-only external decision call — never touches page state
 ]);
 
 /** One LLM call with retry + backoff on transient failures (429/5xx/network). */
@@ -132,6 +135,7 @@ export async function runAgentTask(
             cp.task,
             deps.agentMode ?? "auto",
             deps.madman === true,
+            deps.judgeAvailable === true,
           ),
           messages: truncateHistory(cp.messages, HISTORY_BUDGET_CHARS),
           tools,

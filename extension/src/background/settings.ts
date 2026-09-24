@@ -2,6 +2,7 @@
 import type { ControlMode } from "../shared/protocol";
 import type { AgentMode } from "../shared/modes";
 import type { ThinkingLevel } from "../shared/llm";
+import { JEV_DEFAULTS } from "../shared/jev";
 
 /**
  * One saved connection: a credential plus the endpoint and model it belongs to.
@@ -13,6 +14,19 @@ export interface ApiKeyEntry {
   label: string;
   key: string;
   provider: "anthropic" | "openai-compatible";
+  baseUrl: string;
+  model: string;
+}
+
+/**
+ * Jev (TypeSafe System-One) sidecar config. Deliberately NOT an ApiKeyEntry
+ * connection: Jev is a decision model that works alongside the selected chat
+ * model (risk gating, the `judge` tool, effort routing) — it can never drive
+ * the agent loop itself.
+ */
+export interface JevSettings {
+  enabled: boolean;
+  apiKey: string;
   baseUrl: string;
   model: string;
 }
@@ -57,6 +71,18 @@ export interface AgentSettings {
    * tool-call label with a cuss word. Off by default.
    */
   madman: boolean;
+  /**
+   * Jev (TypeSafe System-One) decision-model sidecar. Works alongside the
+   * selected chat model — never replaces it. Off until a key is set; the
+   * agent run never depends on Jev being reachable.
+   */
+  jev: JevSettings;
+  /**
+   * Let Jev grade each task's complexity at run start and LOWER the reasoning
+   * effort for trivial tasks (never raises it above `thinking`). Requires
+   * `jev.enabled`.
+   */
+  autoThinking: boolean;
 }
 
 /** Defaults for a brand-new connection. */
@@ -81,6 +107,14 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   thinking: "low",
   // Straight-laced by default; Madman mode is opt-in.
   madman: false,
+  // Jev sidecar off until the user pastes a TypeSafe key.
+  jev: {
+    enabled: false,
+    apiKey: "",
+    baseUrl: JEV_DEFAULTS.baseUrl,
+    model: JEV_DEFAULTS.model,
+  },
+  autoThinking: false,
 };
 
 const THINKING_VALUES: ThinkingLevel[] = ["off", "low", "medium", "high"];
@@ -106,6 +140,22 @@ export function migrateThinking(stored: {
 }
 
 const KEY = "baSettings";
+
+/** Backfill/coerce a stored Jev block (missing or partial → safe defaults). */
+export function normalizeJev(stored: unknown): JevSettings {
+  const raw = (stored && typeof stored === "object" ? stored : {}) as Partial<JevSettings>;
+  return {
+    // Only a real `true` enables the sidecar; anything else stays off.
+    enabled: raw.enabled === true,
+    apiKey: typeof raw.apiKey === "string" ? raw.apiKey : "",
+    baseUrl:
+      typeof raw.baseUrl === "string" && raw.baseUrl.trim()
+        ? raw.baseUrl.trim()
+        : JEV_DEFAULTS.baseUrl,
+    model:
+      typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : JEV_DEFAULTS.model,
+  };
+}
 
 /** Stable-enough id for a new entry (crypto.randomUUID needs a secure ctx). */
 export function newKeyId(): string {
@@ -203,6 +253,9 @@ export function normalizeSettings(
     thinking: migrateThinking(merged),
     // Coerce: only a real `true` turns Madman mode on.
     madman: merged.madman === true,
+    // Jev sidecar: backfill partial stored objects; coerce the toggles.
+    jev: normalizeJev(merged.jev),
+    autoThinking: merged.autoThinking === true,
   };
 }
 

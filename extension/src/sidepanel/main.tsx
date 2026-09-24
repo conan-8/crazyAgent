@@ -37,6 +37,7 @@ import {
 } from "../shared/modes";
 import { THINKING_LEVELS } from "../shared/llm";
 import { madmanExclamation } from "../shared/madman";
+import { JEV_DEFAULTS } from "../shared/jev";
 import {
   fetchModelsFor,
 } from "../shared/models";
@@ -1106,6 +1107,70 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 <p class="madman-preview">
                   {madmanExclamation("scroll the whole list by hand", "preview")}
                 </p>
+              ) : null}
+            </section>
+
+            <section class="set-group" style="--i:5">
+              <h3 class="set-title">
+                <Icon d={ICONS.sparkles} size={12} /> Fast decisions (Jev)
+              </h3>
+              <Switch
+                checked={s.jev.enabled}
+                onChange={(v) => set("jev", { ...s.jev, enabled: v })}
+                title="Enable Jev"
+                hint="TypeSafe System-One model working alongside your selected model: risk checks on sensitive actions, a judge tool for bulk decisions, optional effort routing"
+              />
+              {s.jev.enabled ? (
+                <>
+                  <label class="field">
+                    <span>TypeSafe API key</span>
+                    <input
+                      type="password"
+                      value={s.jev.apiKey}
+                      placeholder="console.typesafe.ai/keys"
+                      onInput={(e) =>
+                        set("jev", {
+                          ...s.jev,
+                          apiKey: (e.target as HTMLInputElement).value,
+                        })
+                      }
+                    />
+                  </label>
+                  <Switch
+                    checked={s.autoThinking}
+                    onChange={(v) => set("autoThinking", v)}
+                    title="Auto effort"
+                    hint="Let Jev grade each task and lower reasoning effort on trivial ones (never raises it)"
+                  />
+                  <div class="field-grid">
+                    <label class="field">
+                      <span>Base URL</span>
+                      <input
+                        value={s.jev.baseUrl}
+                        placeholder={JEV_DEFAULTS.baseUrl}
+                        onInput={(e) =>
+                          set("jev", {
+                            ...s.jev,
+                            baseUrl: (e.target as HTMLInputElement).value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label class="field">
+                      <span>Model</span>
+                      <input
+                        value={s.jev.model}
+                        placeholder={JEV_DEFAULTS.model}
+                        onInput={(e) =>
+                          set("jev", {
+                            ...s.jev,
+                            model: (e.target as HTMLInputElement).value,
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                </>
               ) : null}
             </section>
           </div>

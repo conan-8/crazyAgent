@@ -42,10 +42,16 @@ const MODE_RULES: Record<string, string[]> = {
   ],
 };
 
+// Only in the prompt when the Jev sidecar is configured, so the model never
+// sees a `judge` rule for a tool it doesn't have. Byte-stable within a run.
+const JUDGE_RULE =
+  "- For bulk per-item judgments (relevance, filtering, yes/no over many items), prefer ONE `judge` call with one question per item over examining them step by step; keep counting, arithmetic and date comparisons in your own reasoning.";
+
 export function buildSystemPrompt(
   task: string,
   agentMode: string = "auto",
   madman: boolean = false,
+  hasJudge: boolean = false,
 ): string {
   return [
     "You are Browser Agent, an AI that operates the user's real browser to complete web tasks.",
@@ -55,6 +61,7 @@ export function buildSystemPrompt(
     ...MANDATE,
     "",
     ...BASE_RULES,
+    ...(hasJudge ? [JUDGE_RULE] : []),
     "",
     // Madman mode only changes the voice; it is appended so every rule above
     // still holds. Empty string when off keeps the prompt byte-identical.

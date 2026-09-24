@@ -14,6 +14,7 @@ const steps = [
   ["chat & history", "node", ["scripts/phase9-smoke.mjs"]],
   ["run logs (archive + export)", "node", ["scripts/phase10-smoke.mjs"]],
   ["madman mode", "node", ["scripts/madman-smoke.mjs"]],
+  ["jev fast decisions (sidecar)", "node", ["scripts/jev-smoke.mjs"]],
   ["phase 1 — lifecycle (quick)", "node", ["scripts/phase1-smoke.mjs", "quick"]],
 ];
 
