@@ -1,10 +1,10 @@
 // Side panel — chat interface with a full control bar (mode / model,
 // live run stats, attachments). Assistant turns are ordered blocks: tool
-// activity streams in, the rendered-markdown answer lands below it. Threads
-// persist to history with multi-turn context.
+// activity streams in as a timeline, the rendered-markdown answer lands below
+// it. Threads persist to history with multi-turn context.
 // Test hooks stay on window.__ba (phase smokes rely on the stable surface).
-import { render } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { render, type ComponentChildren } from "preact";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import {
@@ -46,6 +46,8 @@ import {
   type AgentSettings,
   type ApiKeyEntry,
 } from "../background/settings";
+import { Icon, ICONS } from "./icons";
+import { Collapse, useAutosize, usePresence, useStickToBottom } from "./motion";
 
 const app = document.getElementById("app");
 if (!app) throw new Error("#app missing");
@@ -101,94 +103,226 @@ function newLocalConversation(task: string): Conversation {
   return conv;
 }
 
-// ------------------------------ icons ------------------------------
+// ------------------------------ primitives ------------------------------
 
-function Icon({ children, size = 14 }: { children: string; size?: number }) {
+/** Brand mark: a glossy sphere whose colour field rotates (faster while working). */
+function Orb({ size = 22, active = false, class: cls = "" }: { size?: number; active?: boolean; class?: string }) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+    <span
+      class={`orb ${active ? "orb-active" : ""} ${cls}`}
+      style={`--orb:${size}px`}
       aria-hidden="true"
-    >
-      <path d={children} />
-    </svg>
+    />
   );
 }
-const ICONS = {
-  send: "M12 19V5M5 12l7-7 7 7",
-  plus: "M12 5v14M5 12h14",
-  history: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2",
-  gear: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
-  trash: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6",
-  close: "M18 6 6 18M6 6l12 12",
-  chevron: "M6 9l6 6 6-6",
-  spark: "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z",
-  tool: "M14.7 6.3a4 4 0 0 0 5 5l-9.4 9.4a2.1 2.1 0 0 1-3-3l9.4-9.4z",
-  check: "M20 6 9 17l-5-5",
-  warn: "M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
-  stop: "M7 7h10v10H7z",
-  clip: "M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.67 3.67 0 0 1 5.18 5.18L9.63 17.6a1.83 1.83 0 0 1-2.59-2.59l8.49-8.48",
-  mode: "M4 6h16M4 12h10M4 18h7",
-  chip: "M4 4h16v16H4zM9 9h6v6H9z",
-  gauge: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 7v5l3 3",
-  brain: "M12 5a3 3 0 0 0-3 3v1a3 3 0 0 0 0 6v1a3 3 0 0 0 6 0v-1a3 3 0 0 0 0-6V8a3 3 0 0 0-3-3z",
-};
+
+/** Icon-only button with a styled tooltip; `label` is its (hidden) text. */
+function IconButton({
+  icon,
+  tip,
+  label,
+  onClick,
+  class: cls = "",
+  tipAlign = "center",
+}: {
+  icon: string;
+  tip: string;
+  label?: string;
+  onClick: () => void;
+  class?: string;
+  tipAlign?: "center" | "end";
+}) {
+  return (
+    <button
+      class={`btn-icon ${cls}`}
+      onClick={onClick}
+      aria-label={tip}
+      data-tip={tip}
+      data-tip-align={tipAlign}
+    >
+      <Icon d={icon} size={15} />
+      {label ? <span class="vh" aria-hidden="true">{label}</span> : null}
+    </button>
+  );
+}
+
+function Aurora() {
+  return (
+    <div class="aurora" aria-hidden="true">
+      <span class="blob blob-1" />
+      <span class="blob blob-2" />
+      <span class="blob blob-3" />
+      <span class="grain" />
+    </div>
+  );
+}
 
 // ------------------------------ blocks ------------------------------
 
-function Markdown({ text }: { text: string }) {
+function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
   return (
-    <div class="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />
+    <div
+      class={`md${streaming ? " is-streaming" : ""}`}
+      dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+    />
   );
 }
 
-// Reference-style human labels for activity rows.
-const TOOL_LABELS: Record<string, string> = {
-  navigate: "Navigated",
-  screenshot: "Captured",
-  read_page: "Read",
-  snapshot: "Inspected",
-  wait_for_settle: "Waited",
-  click: "Clicked",
-  type: "Typed",
-  select: "Selected",
-  key: "Pressed",
-  hover: "Hovered",
-  scroll: "Scrolled",
-  reload: "Reloaded",
-  download: "Downloaded",
-  evaluate_js: "Evaluated",
-  network_mock: "Mocked",
-  network_rewrite: "Rewrote",
-  network_observe: "Observed",
+/** Per-tool glyph plus past/present-tense verbs for the activity timeline. */
+const TOOL_META: Record<string, { icon: string; done: string; active: string }> = {
+  navigate: { icon: ICONS.globe, done: "Navigated", active: "Navigating" },
+  back: { icon: ICONS.arrowLeft, done: "Went back", active: "Going back" },
+  forward: { icon: ICONS.arrowRight, done: "Went forward", active: "Going forward" },
+  reload: { icon: ICONS.reload, done: "Reloaded", active: "Reloading" },
+  screenshot: { icon: ICONS.camera, done: "Captured", active: "Capturing" },
+  read_page: { icon: ICONS.doc, done: "Read", active: "Reading" },
+  snapshot: { icon: ICONS.eye, done: "Inspected", active: "Inspecting" },
+  wait_for_settle: { icon: ICONS.clock, done: "Waited", active: "Waiting" },
+  click: { icon: ICONS.pointer, done: "Clicked", active: "Clicking" },
+  type: { icon: ICONS.keyboard, done: "Typed", active: "Typing" },
+  select: { icon: ICONS.list, done: "Selected", active: "Selecting" },
+  key: { icon: ICONS.command, done: "Pressed", active: "Pressing" },
+  hover: { icon: ICONS.cursor, done: "Hovered", active: "Hovering" },
+  scroll: { icon: ICONS.updown, done: "Scrolled", active: "Scrolling" },
+  download: { icon: ICONS.download, done: "Downloaded", active: "Downloading" },
+  evaluate_js: { icon: ICONS.code, done: "Evaluated", active: "Evaluating" },
+  network_mock: { icon: ICONS.activity, done: "Mocked", active: "Mocking" },
+  network_rewrite: { icon: ICONS.activity, done: "Rewrote", active: "Rewriting" },
+  network_observe: { icon: ICONS.activity, done: "Observed", active: "Observing" },
+  network_clear: { icon: ICONS.activity, done: "Cleared rules", active: "Clearing rules" },
+  tabs_list: { icon: ICONS.window, done: "Listed tabs", active: "Listing tabs" },
+  tabs_create: { icon: ICONS.window, done: "Opened tab", active: "Opening tab" },
+  tabs_switch: { icon: ICONS.window, done: "Switched tab", active: "Switching tab" },
+  tabs_close: { icon: ICONS.window, done: "Closed tab", active: "Closing tab" },
 };
 
-function ToolRow({ card, onZoom }: { card: ToolCard; onZoom: (src: string) => void }) {
-  const status = !card.filled ? "…" : card.ok ? "✓" : "✗";
+function parseArgs(args: string): Record<string, unknown> | null {
+  try {
+    const v = JSON.parse(args);
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The one argument that says what a call did (URL host, typed text, ref…). */
+function argPreview(args: string): string {
+  const a = parseArgs(args);
+  if (!a) return "";
+  if (typeof a.url === "string") {
+    try {
+      const u = new URL(a.url);
+      return u.host + (u.pathname !== "/" ? u.pathname : "");
+    } catch {
+      return a.url;
+    }
+  }
+  for (const k of ["text", "value", "query", "key", "ref", "selector", "direction", "pattern", "urlPattern", "expression", "tabId"]) {
+    const v = a[k];
+    if (typeof v === "string" && v) return k === "text" || k === "value" ? `“${v}”` : v;
+    if (typeof v === "number") return k === "tabId" ? `tab ${v}` : String(v);
+  }
+  return "";
+}
+
+function prettyArgs(args: string): string {
+  const a = parseArgs(args);
+  return a ? JSON.stringify(a, null, 2) : args;
+}
+
+type ToolState = "run" | "ok" | "err" | "idle";
+
+function StatusGlyph({ state }: { state: ToolState }) {
+  if (state === "run") return <span class="status-glyph spinner" aria-label="running" />;
+  if (state === "idle") return <span class="status-glyph glyph-idle" aria-label="not run" />;
   return (
-    <details class={`card ${card.filled && !card.ok ? "card-err" : ""}`}>
-      <summary class="card-title">
-        <span class="tool-name">
-          <Icon size={12}>{ICONS.tool}</Icon>
-          {TOOL_LABELS[card.name] ?? "Ran"}
-          <span class="tool-chip">{card.name}</span>
+    <span class={`status-glyph glyph-${state}`} aria-label={state === "ok" ? "done" : "failed"}>
+      <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">
+        <path pathLength={1} d={state === "ok" ? "M5 12.5l4.5 4.5L19 7.5" : "M7 7l10 10M17 7 7 17"} />
+      </svg>
+    </span>
+  );
+}
+
+function ToolRow({
+  card,
+  active,
+  onZoom,
+}: {
+  card: ToolCard;
+  active: boolean;
+  onZoom: (src: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const meta = TOOL_META[card.name];
+  const state: ToolState = card.filled ? (card.ok ? "ok" : "err") : active ? "run" : "idle";
+  const preview = useMemo(() => argPreview(card.args), [card.args]);
+  const toggle = () => setOpen(!open);
+  return (
+    <div class={`card card-${state}${open ? " is-open" : ""}`}>
+      <div
+        class="card-title"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggle();
+          }
+        }}
+      >
+        <span class="tool-icon">
+          <Icon d={meta?.icon ?? ICONS.tool} size={13} />
         </span>
-        <span class={`tool-badge ${card.filled ? (card.ok ? "ok" : "err") : ""}`}>
-          {status}
+        <span class="tool-text">
+          <span class="tool-label">
+            {state === "run" ? (meta?.active ?? "Running") : (meta?.done ?? "Ran")}
+          </span>
+          {preview ? (
+            <span class="tool-preview">{preview}</span>
+          ) : (
+            <span class="tool-chip">{card.name}</span>
+          )}
         </span>
-      </summary>
-      <div class="card-body">{card.args}</div>
-      {card.result ? <div class="card-body card-result">{card.result}</div> : null}
-      {card.image ? (
-        <img class="thumb" src={card.image} onClick={() => onZoom(card.image!)} />
-      ) : null}
-    </details>
+        {card.image ? (
+          <button
+            class="thumb-mini"
+            onClick={(e) => {
+              e.stopPropagation();
+              onZoom(card.image!);
+            }}
+            aria-label="View screenshot"
+          >
+            <img src={card.image} alt="" />
+          </button>
+        ) : null}
+        <StatusGlyph state={state} />
+        <span class="chev">
+          <Icon d={ICONS.chevron} size={12} />
+        </span>
+      </div>
+      <Collapse open={open}>
+        <div class="card-detail">
+          {card.args && card.args !== "{}" ? (
+            <div class="card-section">
+              <span class="card-k">{card.name}</span>
+              <pre class="card-body">{prettyArgs(card.args)}</pre>
+            </div>
+          ) : null}
+          {card.result ? (
+            <div class="card-section">
+              <span class="card-k">{card.ok ? "result" : "error"}</span>
+              <pre class="card-body card-result">{card.result}</pre>
+            </div>
+          ) : null}
+          {card.image ? (
+            <img class="thumb" src={card.image} alt="Screenshot" onClick={() => onZoom(card.image!)} />
+          ) : null}
+        </div>
+      </Collapse>
+    </div>
   );
 }
 
@@ -202,7 +336,7 @@ function ReasoningBlock({ text, live }: { text: string; live: boolean }) {
   const expanded = touched ? open : live;
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
   return (
-    <div class="reasoning">
+    <div class={`reasoning${live ? " is-live" : ""}${expanded ? " is-open" : ""}`}>
       <button
         class="reasoning-head"
         onClick={() => {
@@ -211,16 +345,20 @@ function ReasoningBlock({ text, live }: { text: string; live: boolean }) {
         }}
         aria-expanded={expanded}
       >
-        <Icon size={11}>{ICONS.brain}</Icon>
-        <span>{live ? "Thinking…" : "Thought"}</span>
+        <span class="reasoning-icon">
+          <Icon d={ICONS.bulb} size={12} />
+        </span>
+        <span class={live ? "shimmer-text" : ""}>{live ? "Thinking" : "Thought process"}</span>
         <span class="reasoning-meta">
           {words} words
-          <span class={`chev ${expanded ? "chev-open" : ""}`}>
-            <Icon size={10}>{ICONS.chevron}</Icon>
+          <span class="chev">
+            <Icon d={ICONS.chevron} size={11} />
           </span>
         </span>
       </button>
-      {expanded ? <div class="reasoning-body">{text.trim()}</div> : null}
+      <Collapse open={expanded}>
+        <div class="reasoning-body">{text.trim()}</div>
+      </Collapse>
     </div>
   );
 }
@@ -237,16 +375,22 @@ function ConfirmCardView({
   onConfirm: (id: string, allow: boolean, always: boolean) => void;
 }) {
   return (
-    <div class="confirm-card">
+    <div class="confirm-card" role="alertdialog" aria-label={`Allow ${tool}?`}>
       <div class="confirm-title">
-        <Icon>{ICONS.warn}</Icon> {tool}
+        <span class="confirm-icon">
+          <Icon d={ICONS.shield} size={14} />
+        </span>
+        <span>
+          <span class="confirm-eyebrow">Needs your approval</span>
+          <span class="confirm-tool">{tool}</span>
+        </span>
       </div>
       <div class="confirm-summary">{summary}</div>
-      <div class="row confirm-actions">
+      <div class="confirm-actions">
         <button class="btn-primary" onClick={() => onConfirm(id, true, false)}>
           Allow once
         </button>
-        <button onClick={() => onConfirm(id, true, true)}>Always allow</button>
+        <button class="btn-soft" onClick={() => onConfirm(id, true, true)}>Always allow</button>
         <button class="btn-danger" onClick={() => onConfirm(id, false, false)}>
           Deny
         </button>
@@ -255,18 +399,77 @@ function ConfirmCardView({
   );
 }
 
+type Decision = "once" | "always" | "deny";
+
+const DECISION_LABEL: Record<Decision, string> = {
+  once: "Allowed",
+  always: "Always allowed",
+  deny: "Denied",
+};
+
+/** A settled approval, drawn as a timeline step. */
+function ConfirmNote({
+  tool,
+  summary,
+  decision,
+}: {
+  tool: string;
+  summary: string;
+  decision?: Decision;
+}) {
+  const denied = decision === "deny";
+  return (
+    <div class={`card confirm-note${denied ? " is-denied" : ""}`} title={summary}>
+      <div class="card-title">
+        <span class="tool-icon note-icon">
+          <Icon d={ICONS.shield} size={13} />
+        </span>
+        <span class="tool-text">
+          <span class="tool-label">{decision ? DECISION_LABEL[decision] : "Approval"}</span>
+          <span class="tool-chip">{tool}</span>
+          <span class="tool-preview">{summary}</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      class={`copy-btn${copied ? " is-copied" : ""}`}
+      aria-label="Copy answer"
+      data-tip={copied ? "Copied" : "Copy"}
+      data-tip-align="end"
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1400);
+        });
+      }}
+    >
+      <Icon d={copied ? ICONS.check : ICONS.copy} size={12} />
+    </button>
+  );
+}
+
 function TurnView({
   turn,
   live,
+  active,
   onZoom,
   onConfirm,
   resolved,
 }: {
   turn: ChatTurn;
+  /** Last turn of the thread (confirm cards stay actionable). */
   live: boolean;
+  /** This turn is being produced right now (spinners, caret, shimmer). */
+  active: boolean;
   onZoom: (src: string) => void;
   onConfirm: (id: string, allow: boolean, always: boolean) => void;
-  resolved: Set<string>;
+  resolved: Map<string, Decision>;
 }) {
   if (turn.role === "user") {
     return (
@@ -276,7 +479,7 @@ function TurnView({
           <div class="attach-strip">
             {turn.attachments.map((a) => (
               <span key={a.name} class="attach-chip">
-                <Icon size={10}>{ICONS.clip}</Icon>
+                <Icon d={a.kind === "image" ? ICONS.image : ICONS.clip} size={11} />
                 {a.name}
               </span>
             ))}
@@ -286,17 +489,26 @@ function TurnView({
     );
   }
 
+  const answer = turn.blocks
+    .filter((b): b is { kind: "text"; text: string } => b.kind === "text")
+    .map((b) => b.text)
+    .join("\n\n")
+    .trim();
+  const lastIndex = turn.blocks.length - 1;
+
   return (
-    <div class="bubble bubble-assistant">
+    <div class={`bubble bubble-assistant${active ? " is-active" : ""}`}>
       <div class="assistant-badge">
-        <span class="spark">
-          <Icon size={11}>{ICONS.spark}</Icon>
+        <Orb size={16} active={active} />
+        <span class="assistant-name">crazyAgent</span>
+        <span class="assistant-time">
+          {new Date(turn.when).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
         </span>
-        Agent
+        {answer && !active ? <CopyButton text={answer} /> : null}
       </div>
       {turn.blocks.map((block: ChatBlock, i: number) => {
         if (block.kind === "tool") {
-          return <ToolRow key={i} card={block.card} onZoom={onZoom} />;
+          return <ToolRow key={i} card={block.card} active={active} onZoom={onZoom} />;
         }
         if (block.kind === "confirm") {
           const pending = live && !resolved.has(block.confirm.id);
@@ -309,16 +521,48 @@ function TurnView({
               onConfirm={onConfirm}
             />
           ) : (
-            <div key={i} class="confirm-note">
-              <Icon size={11}>{ICONS.check}</Icon> {block.confirm.tool} — {block.confirm.summary}
-            </div>
+            <ConfirmNote
+              key={i}
+              tool={block.confirm.tool}
+              summary={block.confirm.summary}
+              decision={resolved.get(block.confirm.id)}
+            />
           );
         }
         if (block.kind === "reasoning") {
-          return <ReasoningBlock key={i} text={block.text} live={live} />;
+          return <ReasoningBlock key={i} text={block.text} live={active && i === lastIndex} />;
         }
-        return <Markdown key={i} text={block.text} />;
+        return <Markdown key={i} text={block.text} streaming={active && i === lastIndex} />;
       })}
+    </div>
+  );
+}
+
+/** What the agent is doing right now, derived from the newest block. */
+function activityLabel(conv: Conversation | null): string {
+  const turn = conv?.turns[conv.turns.length - 1];
+  if (!turn || turn.role !== "assistant") return "Getting started";
+  const last = turn.blocks[turn.blocks.length - 1];
+  if (!last) return "Thinking";
+  if (last.kind === "tool") {
+    return last.card.filled ? "Deciding next step" : (TOOL_META[last.card.name]?.active ?? "Working");
+  }
+  if (last.kind === "confirm") return "Waiting for approval";
+  if (last.kind === "reasoning") return "Thinking";
+  return "Writing";
+}
+
+function WorkingIndicator({ label }: { label: string }) {
+  return (
+    <div class="typing" role="status">
+      <span class="typing-orbit">
+        <span />
+        <span />
+        <span />
+      </span>
+      <span class="shimmer-text" key={label}>
+        {label}…
+      </span>
     </div>
   );
 }
@@ -338,18 +582,28 @@ function Popover({
   open: boolean;
   onToggle: () => void;
   right?: boolean;
-  children: preact.ComponentChildren;
+  children: ComponentChildren;
 }) {
+  const presence = usePresence(open, 180);
   return (
     <span class={`pop ${right ? "pop-right" : ""}`}>
-      <button class={`chip-btn ${open ? "chip-open" : ""}`} onClick={onToggle}>
-        <Icon size={12}>{icon}</Icon>
+      <button
+        class={`chip-btn ${open ? "chip-open" : ""}`}
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-haspopup="menu"
+      >
+        <Icon d={icon} size={12} />
         <span class="chip-label">{label}</span>
         <span class="chev">
-          <Icon size={10}>{ICONS.chevron}</Icon>
+          <Icon d={ICONS.chevron} size={10} />
         </span>
       </button>
-      {open ? <div class="menu">{children}</div> : null}
+      {presence.mounted ? (
+        <div class="menu" role="menu" data-state={presence.state}>
+          {children}
+        </div>
+      ) : null}
     </span>
   );
 }
@@ -358,21 +612,86 @@ function MenuItem({
   active,
   title,
   hint,
+  icon,
   onClick,
 }: {
   active: boolean;
   title: string;
   hint?: string;
+  icon?: string;
   onClick: () => void;
 }) {
   return (
-    <button class={`menu-item ${active ? "menu-active" : ""}`} onClick={onClick}>
-      <span class="menu-title">
-        {active ? <Icon size={11}>{ICONS.check}</Icon> : <span class="menu-dot" />}
-        {title}
+    <button
+      class={`menu-item ${active ? "menu-active" : ""}`}
+      role="menuitemradio"
+      aria-checked={active}
+      onClick={onClick}
+    >
+      {icon ? (
+        <span class="menu-icon">
+          <Icon d={icon} size={13} />
+        </span>
+      ) : null}
+      <span class="menu-text">
+        <span class="menu-title">{title}</span>
+        {hint ? <span class="menu-hint">{hint}</span> : null}
       </span>
-      {hint ? <span class="menu-hint">{hint}</span> : null}
+      <span class="menu-check">
+        <Icon d={ICONS.check} size={12} stroke={2.2} />
+      </span>
     </button>
+  );
+}
+
+const MODE_ICONS: Record<AgentMode, string> = {
+  auto: ICONS.sparkles,
+  plan: ICONS.map,
+  build: ICONS.wrench,
+};
+
+// ------------------------------ sheets ------------------------------
+
+/** Slide-over panel with a dimmed backdrop; plays its exit before unmounting. */
+function Sheet({
+  open,
+  side,
+  onClose,
+  class: cls,
+  label,
+  children,
+}: {
+  open: boolean;
+  side: "left" | "right";
+  onClose: () => void;
+  class: string;
+  label: string;
+  children: ComponentChildren;
+}) {
+  const presence = usePresence(open, 300);
+  if (!presence.mounted) return null;
+  return (
+    <div class={`sheet-layer sheet-${side}`} data-state={presence.state}>
+      <div class="sheet-backdrop" onClick={onClose} />
+      <aside class={`sheet ${cls}`} role="dialog" aria-label={label}>
+        {children}
+      </aside>
+    </div>
+  );
+}
+
+function SheetHead({ title, sub, icon, onClose }: { title: string; sub: string; icon: string; onClose: () => void }) {
+  return (
+    <header class="sheet-head">
+      <span class="sheet-icon">
+        <Icon d={icon} size={15} />
+      </span>
+      <div class="sheet-titles">
+        <h2>{title}</h2>
+        <p>{sub}</p>
+      </div>
+      <IconButton icon={ICONS.close} tip="Close" onClick={onClose} tipAlign="end" />
+    </header>
   );
 }
 
@@ -441,13 +760,14 @@ function KeyManager({
     <div class="keys">
       {keys.length === 0 ? (
         <p class="keys-empty">
-          No connections saved yet — add one to pick a provider, endpoint and model.
+          No connections yet — add one to pick a provider, endpoint and model.
         </p>
       ) : null}
       {keys.map((k) => {
         const active = k.id === activeId;
         // The active row is always open; others open on demand.
         const open = active || expanded.has(k.id);
+        const anthropic = k.provider === "anthropic";
         return (
           <div class={`key-row ${active ? "key-active" : ""}`} key={k.id}>
             <div class="key-head">
@@ -458,34 +778,34 @@ function KeyManager({
                   checked={active}
                   onChange={() => onSelect(k.id)}
                 />
+                <span class="radio-dot" />
               </label>
+              <span class={`provider-badge ${anthropic ? "pb-anthropic" : "pb-openai"}`}>
+                {anthropic ? "A" : "O"}
+              </span>
               <button
                 class="key-label-btn"
                 onClick={() => toggleIn(setExpanded, k.id)}
-                title={open ? "Collapse" : "Expand"}
+                aria-expanded={open}
               >
-                <span class={`chev ${open ? "chev-open" : ""}`}>
-                  <Icon size={10}>{ICONS.chevron}</Icon>
-                </span>
-                {k.label || "(unnamed)"}
+                <span class="key-name">{k.label || "(unnamed)"}</span>
                 <span class="key-summary">
-                  {k.provider === "anthropic" ? "Anthropic" : "OpenAI-compat"} ·{" "}
-                  {k.model || "no model"}
+                  {anthropic ? "Anthropic" : "OpenAI-compatible"} · {k.model || "no model"}
                 </span>
               </button>
-              <div class="key-actions">
-                <button
-                  class="btn-icon"
-                  onClick={() => remove(k.id)}
-                  title="Delete connection"
-                >
-                  <Icon size={12}>{ICONS.trash}</Icon>
-                </button>
-              </div>
+              <button
+                class="btn-icon btn-icon-sm key-del"
+                onClick={() => remove(k.id)}
+                aria-label="Delete connection"
+                data-tip="Delete"
+                data-tip-align="end"
+              >
+                <Icon d={ICONS.trash} size={13} />
+              </button>
             </div>
-            {open ? (
+            <Collapse open={open}>
               <div class="key-body">
-                <label class="key-field">
+                <label class="field">
                   <span>Label</span>
                   <input
                     value={k.label}
@@ -493,38 +813,51 @@ function KeyManager({
                     onInput={(e) => patch(k.id, "label", (e.target as HTMLInputElement).value)}
                   />
                 </label>
-                <label class="key-field">
+                <label class="field">
                   <span>API key</span>
-                  <input
-                    type={revealed.has(k.id) ? "text" : "password"}
-                    value={k.key}
-                    placeholder="sk-…"
-                    onInput={(e) => patch(k.id, "key", (e.target as HTMLInputElement).value)}
-                  />
+                  <span class="input-affix">
+                    <input
+                      type={revealed.has(k.id) ? "text" : "password"}
+                      value={k.key}
+                      placeholder="sk-…"
+                      onInput={(e) => patch(k.id, "key", (e.target as HTMLInputElement).value)}
+                    />
+                    <button
+                      class="affix-btn"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        toggleIn(setRevealed, k.id);
+                      }}
+                      aria-label={revealed.has(k.id) ? "Hide key" : "Reveal key"}
+                    >
+                      <Icon d={revealed.has(k.id) ? ICONS.eyeOff : ICONS.eye} size={13} />
+                    </button>
+                  </span>
+                  <small class="key-mask">{maskKey(k.key)}</small>
                 </label>
-                <div class="key-field-inline">
-                  <span class="key-mask">{maskKey(k.key)}</span>
-                  <button
-                    class="btn-icon"
-                    onClick={() => toggleIn(setRevealed, k.id)}
-                    title={revealed.has(k.id) ? "Hide" : "Reveal"}
-                  >
-                    {revealed.has(k.id) ? "🙈" : "👁"}
-                  </button>
+                <div class="field-grid">
+                  <label class="field">
+                    <span>Provider</span>
+                    <select
+                      value={k.provider}
+                      onChange={(e) =>
+                        patch(k.id, "provider", (e.target as HTMLSelectElement).value)
+                      }
+                    >
+                      <option value="openai-compatible">OpenAI-compatible</option>
+                      <option value="anthropic">Anthropic</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Model</span>
+                    <input
+                      value={k.model}
+                      placeholder="gpt-4o-mini"
+                      onInput={(e) => patch(k.id, "model", (e.target as HTMLInputElement).value)}
+                    />
+                  </label>
                 </div>
-                <label class="key-field">
-                  <span>Provider</span>
-                  <select
-                    value={k.provider}
-                    onChange={(e) =>
-                      patch(k.id, "provider", (e.target as HTMLSelectElement).value)
-                    }
-                  >
-                    <option value="openai-compatible">OpenAI-compatible</option>
-                    <option value="anthropic">Anthropic</option>
-                  </select>
-                </label>
-                <label class="key-field">
+                <label class="field">
                   <span>Base URL</span>
                   <input
                     value={k.baseUrl}
@@ -532,151 +865,411 @@ function KeyManager({
                     onInput={(e) => patch(k.id, "baseUrl", (e.target as HTMLInputElement).value)}
                   />
                 </label>
-                <label class="key-field">
-                  <span>Model</span>
-                  <input
-                    value={k.model}
-                    placeholder="gpt-4o-mini"
-                    onInput={(e) => patch(k.id, "model", (e.target as HTMLInputElement).value)}
-                  />
-                </label>
               </div>
-            ) : null}
+            </Collapse>
           </div>
         );
       })}
-      <button class="btn-ghost keys-add" onClick={add}>
-        <Icon size={12}>{ICONS.plus}</Icon> Add connection
+      <button class="btn-dashed keys-add" onClick={add}>
+        <Icon d={ICONS.plus} size={13} /> Add connection
       </button>
     </div>
   );
 }
 
-function SettingsDrawer({ onClose }: { onClose: () => void }) {
+function Switch({
+  checked,
+  onChange,
+  title,
+  hint,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <label class="switch-row">
+      <span class="switch-text">
+        <span>{title}</span>
+        <small>{hint}</small>
+      </span>
+      <span class="switch">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={checked}
+          onChange={(e) => onChange((e.target as HTMLInputElement).checked)}
+        />
+        <span class="switch-track">
+          <span class="switch-thumb" />
+        </span>
+      </span>
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  fallback,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  fallback: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label class="field">
+      <span>{label}</span>
+      <input
+        type="number"
+        value={String(value)}
+        onInput={(e) => onChange(Number((e.target as HTMLInputElement).value) || fallback)}
+      />
+    </label>
+  );
+}
+
+function SettingsBody({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<AgentSettings | null>(null);
   const [saved, setSaved] = useState(false);
   useEffect(() => {
     void loadSettings().then(setS);
   }, []);
-  if (!s) return <div class="drawer">loading…</div>;
   const set = <K extends keyof AgentSettings>(k: K, v: AgentSettings[K]) => {
     // Functional update: multiple field edits batch correctly.
     setS((prev) => (prev ? { ...prev, [k]: v } : prev));
     setSaved(false);
   };
   return (
-    <div class="drawer">
-      <div class="row spread">
-        <h2>Settings</h2>
-        <button class="btn-icon" onClick={onClose} title="Close">
-          <Icon>{ICONS.close}</Icon>
-        </button>
-      </div>
-      <label>Connections</label>
-      <KeyManager
-        keys={s.apiKeys}
-        activeId={s.activeKeyId}
-        onSelect={(id) => {
-          // Re-resolve every mirror: switching connection also switches the
-          // provider, base URL and model the agent will use. Persist it too, so
-          // the composer never runs against a stale connection while the
-          // drawer is still open.
-          setS((prev) => {
-            if (!prev) return prev;
-            const next = normalizeSettings({ ...prev, activeKeyId: id });
-            void saveSettings(next);
-            return next;
-          });
-          setSaved(true);
-        }}
-        onChange={(keys) => {
-          setS((prev) => (prev ? normalizeSettings({ ...prev, apiKeys: keys }) : prev));
-          setSaved(false);
-        }}
-      />
-      <label>Control transport</label>
-      <select
-        value={s.mode}
-        onChange={(e) =>
-          set("mode", (e.target as HTMLSelectElement).value as AgentSettings["mode"])
-        }
-      >
-        <option value="standard">Standard (chrome.debugger)</option>
-        <option value="unlimited">Unlimited (helper daemon)</option>
-      </select>
-      <label>Context window (tokens)</label>
-      <input
-        type="number"
-        value={String(s.contextWindow)}
-        onInput={(e) => set("contextWindow", Number((e.target as HTMLInputElement).value) || 128000)}
-      />
-      <label>Max output tokens per call</label>
-      <input
-        type="number"
-        value={String(s.maxTokens)}
-        onInput={(e) => set("maxTokens", Number((e.target as HTMLInputElement).value) || 8192)}
-      />
-      <label>CDP port (Unlimited mode)</label>
-      <input
-        type="number"
-        value={String(s.cdpPort)}
-        onInput={(e) => set("cdpPort", Number((e.target as HTMLInputElement).value) || 9222)}
-      />
-      <label class="inline">
-        <input
-          type="checkbox"
-          checked={s.sendScreenshots}
-          onChange={(e) => set("sendScreenshots", (e.target as HTMLInputElement).checked)}
-        />
-        Send screenshots to the model
-      </label>
-      <label class="inline">
-        <input
-          type="checkbox"
-          checked={s.thinking}
-          onChange={(e) => set("thinking", (e.target as HTMLInputElement).checked)}
-        />
-        Thinking / reasoning (slower, better on hard tasks)
-      </label>
-      {s.thinking ? (
+    <>
+      <SheetHead title="Settings" sub="Connections, runtime and behaviour" icon={ICONS.sliders} onClose={onClose} />
+      {!s ? (
+        <div class="sheet-body">
+          <div class="skeleton" />
+          <div class="skeleton" />
+          <div class="skeleton short" />
+        </div>
+      ) : (
         <>
-          <label>Thinking budget (tokens)</label>
-          <input
-            type="number"
-            value={String(s.thinkingBudget)}
-            onInput={(e) =>
-              set("thinkingBudget", Number((e.target as HTMLInputElement).value) || 2048)
-            }
-          />
+          <div class="sheet-body">
+            <section class="set-group" style="--i:0">
+              <h3 class="set-title">
+                <Icon d={ICONS.key} size={12} /> Connections
+              </h3>
+              <KeyManager
+                keys={s.apiKeys}
+                activeId={s.activeKeyId}
+                onSelect={(id) => {
+                  // Re-resolve every mirror: switching connection also switches the
+                  // provider, base URL and model the agent will use. Persist it too, so
+                  // the composer never runs against a stale connection while the
+                  // drawer is still open.
+                  setS((prev) => {
+                    if (!prev) return prev;
+                    const next = normalizeSettings({ ...prev, activeKeyId: id });
+                    void saveSettings(next);
+                    return next;
+                  });
+                  setSaved(true);
+                }}
+                onChange={(keys) => {
+                  setS((prev) => (prev ? normalizeSettings({ ...prev, apiKeys: keys }) : prev));
+                  setSaved(false);
+                }}
+              />
+            </section>
+
+            <section class="set-group" style="--i:1">
+              <h3 class="set-title">
+                <Icon d={ICONS.cpu} size={12} /> Control transport
+              </h3>
+              <div class="segmented" data-index={s.mode === "unlimited" ? 1 : 0} role="radiogroup">
+                <span class="seg-glider" />
+                <button
+                  role="radio"
+                  aria-checked={s.mode === "standard"}
+                  class={s.mode === "standard" ? "on" : ""}
+                  onClick={() => set("mode", "standard")}
+                >
+                  <b>Standard</b>
+                  <small>chrome.debugger</small>
+                </button>
+                <button
+                  role="radio"
+                  aria-checked={s.mode === "unlimited"}
+                  class={s.mode === "unlimited" ? "on" : ""}
+                  onClick={() => set("mode", "unlimited")}
+                >
+                  <b>Unlimited</b>
+                  <small>helper daemon</small>
+                </button>
+              </div>
+              {s.mode === "unlimited" ? (
+                <NumberField label="CDP port" value={s.cdpPort} fallback={9222} onChange={(v) => set("cdpPort", v)} />
+              ) : null}
+            </section>
+
+            <section class="set-group" style="--i:2">
+              <h3 class="set-title">
+                <Icon d={ICONS.gauge} size={12} /> Model limits
+              </h3>
+              <div class="field-grid">
+                <NumberField
+                  label="Context window"
+                  value={s.contextWindow}
+                  fallback={128000}
+                  onChange={(v) => set("contextWindow", v)}
+                />
+                <NumberField
+                  label="Max output / call"
+                  value={s.maxTokens}
+                  fallback={8192}
+                  onChange={(v) => set("maxTokens", v)}
+                />
+              </div>
+            </section>
+
+            <section class="set-group" style="--i:3">
+              <h3 class="set-title">
+                <Icon d={ICONS.bolt} size={12} /> Behaviour
+              </h3>
+              <Switch
+                checked={s.sendScreenshots}
+                onChange={(v) => set("sendScreenshots", v)}
+                title="Send screenshots"
+                hint="Let the model see the page, not just its text"
+              />
+              <Switch
+                checked={s.thinking}
+                onChange={(v) => set("thinking", v)}
+                title="Extended thinking"
+                hint="Slower, better on hard multi-step tasks"
+              />
+              <Collapse open={s.thinking}>
+                <div class="nested-field">
+                  <NumberField
+                    label="Thinking budget (tokens)"
+                    value={s.thinkingBudget}
+                    fallback={2048}
+                    onChange={(v) => set("thinkingBudget", v)}
+                  />
+                </div>
+              </Collapse>
+            </section>
+          </div>
+          <footer class="sheet-foot">
+            <span class={`save-state${saved ? " is-saved" : ""}`}>
+              <span class="save-dot">
+                <Icon d={ICONS.check} size={10} stroke={2.6} />
+              </span>
+              {saved ? "Saved · applies on next run" : "Unsaved changes apply on next run"}
+            </span>
+            <button
+              class="btn-primary"
+              onClick={() => {
+                // Re-resolve the mirror here too: selecting a different key does not
+                // touch `apiKey` directly, so it could otherwise be saved stale.
+                void saveSettings({
+                  ...s,
+                  apiKey: activeApiKey(s),
+                }).then(() => setSaved(true));
+              }}
+            >
+              Save
+            </button>
+          </footer>
         </>
-      ) : null}
-      <div class="row">
-        <button
-          class="btn-primary"
-          onClick={() => {
-            // Re-resolve the mirror here too: selecting a different key does not
-            // touch `apiKey` directly, so it could otherwise be saved stale.
-            void saveSettings({
-              ...s,
-              apiKey: activeApiKey(s),
-            }).then(() => setSaved(true));
-          }}
-        >
-          Save
-        </button>
-        {saved ? <span class="hint">saved — effective on next run</span> : null}
+      )}
+    </>
+  );
+}
+
+// ------------------------------ history ------------------------------
+
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = Math.round(diff / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function dayBucket(ts: number): string {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const day = 86_400_000;
+  if (ts >= start.getTime()) return "Today";
+  if (ts >= start.getTime() - day) return "Yesterday";
+  if (ts >= start.getTime() - 7 * day) return "Previous 7 days";
+  return "Older";
+}
+
+function HistoryBody({
+  items,
+  currentId,
+  onOpen,
+  onDelete,
+  onClose,
+}: {
+  items: ConversationSummary[];
+  currentId: string | undefined;
+  onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [removing, setRemoving] = useState<Set<string>>(new Set());
+  const q = query.trim().toLowerCase();
+  const visible = q ? items.filter((h) => h.title.toLowerCase().includes(q)) : items;
+  const groups: { label: string; rows: ConversationSummary[] }[] = [];
+  for (const h of visible) {
+    const label = dayBucket(h.updatedAt);
+    const g = groups[groups.length - 1];
+    if (g?.label === label) g.rows.push(h);
+    else groups.push({ label, rows: [h] });
+  }
+  let n = 0;
+  return (
+    <>
+      <SheetHead
+        title="History"
+        sub={`${items.length} conversation${items.length === 1 ? "" : "s"}`}
+        icon={ICONS.history}
+        onClose={onClose}
+      />
+      <div class="sheet-search">
+        <Icon d={ICONS.search} size={13} />
+        <input
+          placeholder="Search conversations"
+          value={query}
+          onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
+        />
+      </div>
+      <div class="sheet-body hist-body">
+        {items.length === 0 ? (
+          <div class="empty">
+            <span class="empty-icon">
+              <Icon d={ICONS.chat} size={20} />
+            </span>
+            <b>No conversations yet</b>
+            <p class="hint">Your tasks will show up here.</p>
+          </div>
+        ) : visible.length === 0 ? (
+          <div class="empty">
+            <b>No matches</b>
+            <p class="hint">Nothing matches “{query}”.</p>
+          </div>
+        ) : (
+          groups.map((g) => (
+            <div class="hist-group" key={g.label}>
+              <h3 class="hist-label">{g.label}</h3>
+              {g.rows.map((h) => (
+                <div
+                  class={`hist-row${h.id === currentId ? " is-current" : ""}${removing.has(h.id) ? " is-removing" : ""}`}
+                  key={h.id}
+                  style={`--i:${Math.min(n++, 12)}`}
+                >
+                  <button class="hist-item" onClick={() => onOpen(h.id)}>
+                    <span class="hist-title">{h.title || "Untitled"}</span>
+                    <span class="hist-meta">
+                      {relativeTime(h.updatedAt)} · {h.turns} turn{h.turns === 1 ? "" : "s"}
+                    </span>
+                  </button>
+                  <button
+                    class="btn-icon btn-icon-sm hist-del"
+                    onClick={() => {
+                      setRemoving((prev) => new Set(prev).add(h.id));
+                      setTimeout(() => onDelete(h.id), 240);
+                    }}
+                    aria-label="Delete conversation"
+                    data-tip="Delete"
+                    data-tip-align="end"
+                  >
+                    <Icon d={ICONS.trash} size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
+// ------------------------------ welcome ------------------------------
+
+const SUGGESTIONS = [
+  { icon: ICONS.doc, title: "Summarize this page", task: "Summarize the current page" },
+  {
+    icon: ICONS.tag,
+    title: "Find the best deal",
+    task: "Find the cheapest option on this page and add it to the cart",
+  },
+  {
+    icon: ICONS.form,
+    title: "Fill out a form",
+    task: "Fill this form with my details and review before submitting",
+  },
+  { icon: ICONS.layers, title: "Digest my tabs", task: "Summarize my open tabs" },
+];
+
+function Welcome({ onPick }: { onPick: (task: string) => void }) {
+  return (
+    <div class="welcome">
+      <div class="hero-orb">
+        <span class="hero-halo" />
+        <span class="hero-ring ring-1" />
+        <span class="hero-ring ring-2" />
+        <Orb size={60} />
+      </div>
+      <h2 class="welcome-title">
+        What should I <span class="grad-text">do</span> for you?
+      </h2>
+      <p class="welcome-sub">I navigate, click, type and read pages in your browser — just describe the task.</p>
+      <div class="suggestions">
+        {SUGGESTIONS.map((s, i) => (
+          <button key={s.task} class="chip" style={`--i:${i}`} onClick={() => onPick(s.task)}>
+            <span class="chip-icon">
+              <Icon d={s.icon} size={14} />
+            </span>
+            <span class="chip-text">
+              <b>{s.title}</b>
+              <small>{s.task}</small>
+            </span>
+            <span class="chip-arrow">
+              <Icon d={ICONS.arrowRight} size={13} />
+            </span>
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
-// ------------------------------ app ------------------------------
+// ------------------------------ viewer ------------------------------
 
-const SUGGESTIONS = [
-  "Summarize the current page",
-  "Find the cheapest option on this page and add it to the cart",
-  "Fill this form with my details and review before submitting",
-];
+function ImageViewer({ src, onClose }: { src: string | null; onClose: () => void }) {
+  const presence = usePresence(Boolean(src), 240);
+  const last = useRef(src);
+  if (src) last.current = src;
+  if (!presence.mounted || !last.current) return null;
+  return (
+    <div class="viewer" data-state={presence.state} onClick={onClose}>
+      <img src={last.current} alt="Screenshot" />
+      <button class="viewer-close" aria-label="Close">
+        <Icon d={ICONS.close} size={16} />
+      </button>
+    </div>
+  );
+}
+
+// ------------------------------ app ------------------------------
 
 /** Hover text for the "last:" summary — the details that don't fit inline. */
 function lastRunTitle(u: UsageStats): string {
@@ -714,7 +1307,7 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<ConversationSummary[]>([]);
   const [viewer, setViewer] = useState<string | null>(null);
-  const [resolved, setResolved] = useState<Set<string>>(new Set());
+  const [resolved, setResolved] = useState<Map<string, Decision>>(new Map());
   const [openMenu, setOpenMenu] = useState<"mode" | "model" | null>(null);
   const [settings, setSettingsState] = useState<AgentSettings | null>(null);
   const [attachments, setAttachments] = useState<RunAttachment[]>([]);
@@ -723,11 +1316,18 @@ function App() {
   const [modelList, setModelList] = useState<string[]>([]);
   const [modelListState, setModelListState] = useState<"idle" | "loading" | "error">("idle");
   const [modelListError, setModelListError] = useState("");
+  const [modelFilter, setModelFilter] = useState("");
+  const [dragging, setDragging] = useState(false);
   const modelCacheRef = useRef<{ signature: string; models: string[] } | null>(null);
   const portRef = useRef<chrome.runtime.Port | null>(null);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const runStartRef = useRef(0);
+  const dragDepth = useRef(0);
+  const { scrollRef, contentRef, atBottom, scrollToBottom } = useStickToBottom<
+    HTMLElement,
+    HTMLDivElement
+  >(running);
+  const inputRef = useAutosize(taskText);
 
   const bump = () => setTick((t) => t + 1);
   const refreshSettings = () => void loadSettings().then(setSettingsState);
@@ -846,10 +1446,32 @@ function App() {
     return () => clearInterval(timer);
   }, [running]);
 
-  // Auto-scroll the transcript to the newest content.
+  // A thread opened from history starts at its newest turn.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  });
+    if (conv) scrollToBottom(false);
+  }, [conv?.id]);
+
+  // Popovers close on any outside press; Escape peels back one layer at a time.
+  useEffect(() => {
+    if (!openMenu) return;
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement).closest?.(".pop")) setOpenMenu(null);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [openMenu]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (viewer) setViewer(null);
+      else if (openMenu) setOpenMenu(null);
+      else if (showSettings) setShowSettings(false);
+      else if (showHistory) setShowHistory(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [viewer, openMenu, showSettings, showHistory]);
 
   // Accepts real-agent runs (string) and Phase 1 demo runs (demo object).
   const startRun = (
@@ -860,6 +1482,7 @@ function App() {
     eventBuffer.length = 0;
     setRunning(true);
     setUsage(null);
+    scrollToBottom(false);
     if (isDemo) {
       const demo = taskOrDemo as DemoConfig;
       currentConv = newLocalConversation("demo task");
@@ -895,11 +1518,12 @@ function App() {
   const stop = () => postPort?.({ kind: "stop" });
 
   const resolveConfirm = (id: string, allow: boolean, always: boolean) => {
-    setResolved((prev) => new Set(prev).add(id));
+    setResolved((prev) => new Map(prev).set(id, !allow ? "deny" : always ? "always" : "once"));
     postPort?.({ kind: "confirm.resolve", id, allow, always });
   };
 
   const openHistory = () => {
+    setShowSettings(false);
     setShowHistory(true);
     postPort?.({ kind: "history.list" });
   };
@@ -914,6 +1538,8 @@ function App() {
     currentConv = null;
     setConv(null);
     setTaskText("");
+    setShowHistory(false);
+    inputRef.current?.focus();
   };
 
   const pickSetting = <K extends keyof AgentSettings>(k: K, v: AgentSettings[K]) => {
@@ -1044,134 +1670,170 @@ function App() {
     if (/^https?:\/\//i.test(href)) void chrome.tabs.create({ url: href });
   };
 
-  const modeLabel = AGENT_MODES[settings?.agentMode ?? "auto"]?.label ?? "Auto";
+  // Drag-and-drop anywhere on the panel attaches files.
+  const hasFiles = (e: DragEvent) => Boolean(e.dataTransfer?.types.includes("Files"));
+  const dragHandlers = {
+    onDragEnter: (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth.current++;
+      setDragging(true);
+    },
+    onDragOver: (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (!dragDepth.current) setDragging(false);
+    },
+    onDrop: (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth.current = 0;
+      setDragging(false);
+      onFiles(e.dataTransfer?.files ?? null);
+    },
+  };
+
+  const pickSuggestion = (task: string) => {
+    setTaskText(task);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(task.length, task.length);
+    });
+  };
+
+  const agentMode = settings?.agentMode ?? "auto";
+  const modeLabel = AGENT_MODES[agentMode]?.label ?? "Auto";
   const modelLabel = settings?.model ?? "model";
-  const streaming =
-    running &&
-    conv &&
-    conv.turns.length > 0 &&
-    conv.turns[conv.turns.length - 1]?.role === "assistant";
+  const lastTurnIndex = conv ? conv.turns.length - 1 : -1;
+  const ctxWindow = usage?.contextWindow ?? settings?.contextWindow ?? 128_000;
+  const ctxRatio = Math.min(1, (usage?.contextTokens ?? 0) / Math.max(1, ctxWindow));
+  const filteredModels = modelFilter.trim()
+    ? modelList.filter((m) => m.toLowerCase().includes(modelFilter.trim().toLowerCase()))
+    : modelList;
+  const canSend = Boolean(taskText.trim() || attachments.length);
 
   return (
-    <div class="shell">
+    <div class={`shell${running ? " is-running" : ""}${conv ? " has-conv" : ""}`} {...dragHandlers}>
+      <Aurora />
+
       <header class="topbar">
-        <nav class="row topbar-actions">
-          <button class="btn-ghost" onClick={newChat} title="New chat">
-            <Icon>{ICONS.plus}</Icon> New chat
-          </button>
-          <button class="btn-ghost" onClick={openHistory} title="History">
-            <Icon>{ICONS.history}</Icon> History
-          </button>
-          <button
-            class="btn-icon"
-            onClick={() => setShowSettings(!showSettings)}
-            title="Settings"
-          >
-            ⚙
-          </button>
+        <div class="brand">
+          <Orb size={24} active={running} />
+          <div class="brand-text">
+            <span class="brand-name">crazyAgent</span>
+            <span class="brand-sub" key={running ? "run" : "idle"}>
+              {running ? (
+                <span class="shimmer-text">Working · {formatElapsed(elapsed)}</span>
+              ) : (
+                <>
+                  <span class="live-dot idle" />
+                  Ready · {modeLabel}
+                </>
+              )}
+            </span>
+          </div>
+        </div>
+        <nav class="topbar-actions">
+          <IconButton icon={ICONS.compose} tip="New chat" label="New chat" onClick={newChat} />
+          <IconButton
+            icon={ICONS.history}
+            tip="History"
+            label="History"
+            class={showHistory ? "is-on" : ""}
+            onClick={() => (showHistory ? setShowHistory(false) : openHistory())}
+          />
+          <IconButton
+            icon={ICONS.settings}
+            tip="Settings"
+            label="⚙"
+            tipAlign="end"
+            class={showSettings ? "is-on" : ""}
+            onClick={() => {
+              setShowHistory(false);
+              setShowSettings(!showSettings);
+            }}
+          />
         </nav>
+        <span class="run-progress" aria-hidden="true" />
       </header>
 
-      {showSettings ? <SettingsDrawer onClose={() => setShowSettings(false)} /> : null}
-
-      {showHistory ? (
-        <div class="history-view">
-          <div class="row spread">
-            <h2>Chat history</h2>
-            <button class="btn-icon" onClick={() => setShowHistory(false)}>
-              <Icon>{ICONS.close}</Icon>
-            </button>
+      <div class="stage">
+        <main class="transcript" ref={scrollRef} onClick={onTranscriptClick}>
+          <div class="transcript-inner" ref={contentRef}>
+            {!conv ? (
+              <Welcome onPick={pickSuggestion} />
+            ) : (
+              conv.turns.map((turn, i) => (
+                <TurnView
+                  key={i}
+                  turn={turn}
+                  live={running || i === lastTurnIndex}
+                  active={running && i === lastTurnIndex}
+                  onZoom={(src) => setViewer(src)}
+                  onConfirm={resolveConfirm}
+                  resolved={resolved}
+                />
+              ))
+            )}
+            {running ? <WorkingIndicator label={activityLabel(conv)} /> : null}
           </div>
-          {historyList.length === 0 ? (
-            <p class="hint">no conversations yet</p>
-          ) : (
-            historyList.map((h) => (
-              <div class="hist-row" key={h.id}>
-                <button class="hist-item" onClick={() => openConversation(h.id)}>
-                  <span class="hist-title">{h.title}</span>
-                  <span class="hist-meta">
-                    {new Date(h.updatedAt).toLocaleString()} · {h.turns} turns
-                  </span>
-                </button>
-                <button
-                  class="btn-icon hist-del"
-                  onClick={() => deleteConversation(h.id)}
-                  title="Delete"
-                >
-                  <Icon>{ICONS.trash}</Icon>
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      ) : null}
-
-      <main class="transcript" ref={scrollRef} onClick={onTranscriptClick}>
-        {!conv ? (
-          <div class="welcome">
-            <div class="welcome-glow" />
-            <span class="spark big">
-              <Icon size={24}>{ICONS.spark}</Icon>
-            </span>
-            <h2>What should I do in your browser?</h2>
-            <p class="hint">I can navigate, click, type, and read pages — just ask.</p>
-            <div class="suggestions">
-              {SUGGESTIONS.map((s) => (
-                <button key={s} class="chip" onClick={() => setTaskText(s)}>
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          conv.turns.map((turn, i) => (
-            <TurnView
-              key={i}
-              turn={turn}
-              live={running || i === conv.turns.length - 1}
-              onZoom={(src) => setViewer(src)}
-              onConfirm={resolveConfirm}
-              resolved={resolved}
-            />
-          ))
-        )}
-        {streaming ? (
-          <div class="typing">
-            <span class="dot" />
-            <span class="dot" />
-            <span class="dot" />
-          </div>
-        ) : null}
-      </main>
+        </main>
+        <button
+          class={`jump${!atBottom && conv ? " is-visible" : ""}`}
+          onClick={() => scrollToBottom()}
+          tabIndex={!atBottom && conv ? 0 : -1}
+        >
+          <Icon d={ICONS.arrowDown} size={12} /> Latest
+        </button>
+      </div>
 
       <footer class="composer-wrap">
         {attachments.length ? (
           <div class="draft-strip">
             {attachments.map((a, i) => (
-              <span key={`${a.name}-${i}`} class="attach-chip">
-                <Icon size={10}>{ICONS.clip}</Icon>
-                {a.name}
+              <span key={`${a.name}-${i}`} class="attach-chip draft-chip">
+                {a.kind === "image" ? (
+                  <img class="attach-thumb" src={a.data} alt="" />
+                ) : (
+                  <Icon d={ICONS.clip} size={11} />
+                )}
+                <span class="attach-name">{a.name}</span>
                 <button
                   class="chip-x"
+                  aria-label={`Remove ${a.name}`}
                   onClick={() =>
                     setAttachments((prev) => prev.filter((_, j) => j !== i))
                   }
                 >
-                  <Icon size={9}>{ICONS.close}</Icon>
+                  <Icon d={ICONS.close} size={10} />
                 </button>
               </span>
             ))}
           </div>
         ) : null}
 
-        <div class="composer">
+        <div class={`composer${running ? " is-running" : ""}`}>
+          <span class="composer-glow" aria-hidden="true" />
           <textarea
+            ref={inputRef}
             class="task-input"
-            rows={2}
-            placeholder="Describe what to build"
+            rows={1}
+            placeholder={running ? "Working on it…" : "Ask crazyAgent to do anything on the web…"}
             value={taskText}
             disabled={running}
             onInput={(e) => setTaskText((e.target as HTMLTextAreaElement).value)}
+            onPaste={(e) => {
+              const files = e.clipboardData?.files;
+              if (files?.length) {
+                e.preventDefault();
+                onFiles(files);
+              }
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -1179,13 +1841,13 @@ function App() {
               }
             }}
           />
-          <div class="toolbar toolbar-1">
+          <div class="toolbar">
             <button
-              class="btn-icon"
+              class="btn-icon attach-btn"
               title="Attach files"
               onClick={() => fileRef.current?.click()}
             >
-              <Icon>{ICONS.plus}</Icon>
+              <Icon d={ICONS.plus} size={16} />
             </button>
             <input
               ref={fileRef}
@@ -1201,14 +1863,16 @@ function App() {
 
             <Popover
               label={modeLabel}
-              icon={ICONS.mode}
+              icon={MODE_ICONS[agentMode] ?? ICONS.sparkles}
               open={openMenu === "mode"}
               onToggle={() => setOpenMenu(openMenu === "mode" ? null : "mode")}
             >
+              <div class="menu-head">Agent mode</div>
               {(Object.keys(AGENT_MODES) as AgentMode[]).map((m) => (
                 <MenuItem
                   key={m}
-                  active={(settings?.agentMode ?? "auto") === m}
+                  active={agentMode === m}
+                  icon={MODE_ICONS[m]}
                   title={AGENT_MODES[m].label}
                   hint={AGENT_MODES[m].hint}
                   onClick={() => pickSetting("agentMode", m)}
@@ -1218,113 +1882,145 @@ function App() {
 
             <Popover
               label={modelLabel}
-              icon={ICONS.chip}
+              icon={ICONS.cpu}
               open={openMenu === "model"}
               onToggle={() => {
                 const next = openMenu === "model" ? null : "model";
                 setOpenMenu(next);
+                setModelFilter("");
                 if (next) void loadModels();
               }}
             >
-              {modelListState === "loading" ? (
-                <div class="menu-note">loading models for this key…</div>
-              ) : modelListState === "error" ? (
-                <div class="menu-note menu-error">{modelListError}</div>
-              ) : (
-                modelList.map((m) => (
-                  <MenuItem
-                    key={m}
-                    active={settings?.model === m}
-                    title={m}
-                    onClick={() => pickSetting("model", m)}
+              <div class="menu-head">Model</div>
+              {modelListState === "idle" && modelList.length > 8 ? (
+                <div class="menu-search">
+                  <Icon d={ICONS.search} size={12} />
+                  <input
+                    placeholder="Filter models"
+                    value={modelFilter}
+                    onInput={(e) => setModelFilter((e.target as HTMLInputElement).value)}
                   />
-                ))
-              )}
-              {modelListState === "idle" && settings?.model && !modelList.includes(settings.model) ? (
-                <MenuItem
-                  active
-                  title={settings.model}
-                  hint="current (not in this key's catalog)"
-                  onClick={() => setOpenMenu(null)}
-                />
+                </div>
               ) : null}
+              <div class="menu-scroll">
+                {modelListState === "loading" ? (
+                  <div class="menu-note">
+                    <span class="spinner" /> Loading models for this key…
+                  </div>
+                ) : modelListState === "error" ? (
+                  <div class="menu-note menu-error">{modelListError}</div>
+                ) : (
+                  filteredModels.map((m) => (
+                    <MenuItem
+                      key={m}
+                      active={settings?.model === m}
+                      title={m}
+                      onClick={() => pickSetting("model", m)}
+                    />
+                  ))
+                )}
+                {modelListState === "idle" && settings?.model && !modelList.includes(settings.model) ? (
+                  <MenuItem
+                    active
+                    title={settings.model}
+                    hint="current (not in this key's catalog)"
+                    onClick={() => setOpenMenu(null)}
+                  />
+                ) : null}
+              </div>
             </Popover>
-          </div>
-
-          <div class="toolbar toolbar-2">
-            <button
-              class="btn-icon"
-              title="Settings"
-              onClick={() => setShowSettings(!showSettings)}
-            >
-              <Icon>{ICONS.gear}</Icon>
-            </button>
 
             <span class="toolbar-spacer" />
 
-            {running ? (
-              <button class="btn-icon send stop" onClick={stop} title="Stop">
-                <Icon>{ICONS.stop}</Icon>
-                <span class="vh">Stop</span>
-              </button>
-            ) : (
-              <button
-                class="btn-icon send"
-                onClick={sendTask}
-                disabled={!taskText.trim() && !attachments.length}
-                title="Run"
-              >
-                <Icon>{ICONS.send}</Icon>
-                <span class="vh">Run</span>
-              </button>
-            )}
+            <button
+              class={`btn-icon send${running ? " stop" : ""}`}
+              onClick={running ? stop : sendTask}
+              disabled={!running && !canSend}
+              aria-label={running ? "Stop" : "Run"}
+            >
+              <span class="send-icons">
+                <Icon d={ICONS.send} size={16} stroke={2.2} class="i-send" />
+                <Icon d={ICONS.stop} size={12} fill class="i-stop" />
+              </span>
+              <span class="vh">{running ? "Stop" : "Run"}</span>
+            </button>
           </div>
         </div>
 
         <div class="status">
           {running ? (
             <>
-              <span class="stat stat-timer">⏱ {formatElapsed(elapsed)}</span>
-              <span class="sep">·</span>
+              <span class="stat stat-timer">
+                <Icon d={ICONS.clock} size={11} /> {formatElapsed(elapsed)}
+              </span>
               <span class="stat stat-tokens">
-                △ {formatTokens(usage?.totalTokens ?? 0)} tok
+                <Icon d={ICONS.activity} size={11} /> {formatTokens(usage?.totalTokens ?? 0)} tok
               </span>
-              <span class="sep">·</span>
               <span class="stat stat-tps">
-                {(usage?.tokensPerSec ?? 0).toFixed(1)} tok/s
+                <Icon d={ICONS.bolt} size={11} /> {(usage?.tokensPerSec ?? 0).toFixed(1)} tok/s
               </span>
-              <span class="sep">·</span>
-              <span class="stat stat-ctx">
-                ctx {formatTokens(usage?.contextTokens ?? 0)}/
-                {formatTokens(usage?.contextWindow ?? settings?.contextWindow ?? 128_000)}
+              <span class="stat stat-ctx" title="Context used">
+                ctx {formatTokens(usage?.contextTokens ?? 0)}/{formatTokens(ctxWindow)}
+                <span class="meter">
+                  <span style={`transform:scaleX(${ctxRatio})`} />
+                </span>
               </span>
             </>
           ) : (
             <>
-              <span class="live-dot idle" /> idle · {modeLabel} · unlimited steps
+              <span class="stat">
+                <kbd>↵</kbd> run <kbd>⇧↵</kbd> newline
+              </span>
               {usage ? (
-                <>
-                  <span class="sep">·</span>
-                  <span class="stat stat-last" title={lastRunTitle(usage)}>
-                    last: {formatElapsed(usage.elapsedMs ?? 0)} ·{" "}
-                    {formatTokens(usage.totalTokens)} tok ·{" "}
-                    {(usage.tokensPerSec ?? 0).toFixed(1)} tok/s
-                  </span>
-                </>
+                <span class="stat stat-last" title={lastRunTitle(usage)}>
+                  last run {formatElapsed(usage.elapsedMs ?? 0)} ·{" "}
+                  {formatTokens(usage.totalTokens)} tok ·{" "}
+                  {(usage.tokensPerSec ?? 0).toFixed(1)} tok/s
+                </span>
               ) : null}
-              {checkpoint && !checkpoint.done
-                ? ` · checkpoint @ step ${checkpoint.stepIndex + 1}`
-                : ""}
+              {checkpoint && !checkpoint.done ? (
+                <span class="stat">checkpoint @ step {checkpoint.stepIndex + 1}</span>
+              ) : null}
             </>
           )}
         </div>
       </footer>
 
-      {viewer ? (
-        <div class="viewer" onClick={() => setViewer(null)}>
-          <img src={viewer} />
+      <Sheet
+        open={showHistory}
+        side="left"
+        class="history-view"
+        label="History"
+        onClose={() => setShowHistory(false)}
+      >
+        <HistoryBody
+          items={historyList}
+          currentId={conv?.id}
+          onOpen={openConversation}
+          onDelete={deleteConversation}
+          onClose={() => setShowHistory(false)}
+        />
+      </Sheet>
+
+      <Sheet
+        open={showSettings}
+        side="right"
+        class="drawer"
+        label="Settings"
+        onClose={() => setShowSettings(false)}
+      >
+        <SettingsBody onClose={() => setShowSettings(false)} />
+      </Sheet>
+
+      <ImageViewer src={viewer} onClose={() => setViewer(null)} />
+
+      <div class={`dropzone${dragging ? " is-visible" : ""}`} aria-hidden="true">
+        <div class="dropzone-inner">
+          <Icon d={ICONS.upload} size={22} />
+          <b>Drop to attach</b>
+          <small>Images and text files · up to 4</small>
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }
