@@ -1,4 +1,4 @@
-# Browser Agent — an AI browser agent as a Chromium sidebar
+# crazyAgent — an AI browser agent as a Chromium sidebar
 
 A Chromium (Manifest V3) extension whose **side panel** hosts an AI agent that
 operates your real browser to complete web tasks ("find the cheapest X and add
