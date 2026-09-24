@@ -204,15 +204,20 @@ async function main() {
     );
 
     // ---- H3: reopen the thread from the history overlay ----
-    await panel.eval(`[...document.querySelectorAll("button")].find(b => b.textContent.trim() === "History").click()`);
+    await panel.eval(`[...document.querySelectorAll(".topbar-actions button")].find(b => b.textContent.trim() === "History").click()`);
     await sleep(400);
     const histItems = await panel.eval(`document.querySelectorAll(".hist-item").length`);
     await panel.eval(`document.querySelector(".hist-item").click()`);
-    await sleep(400);
-    const dom3 = await panel.eval(`JSON.stringify({
-      users: document.querySelectorAll(".bubble-user").length,
-      overlayOpen: Boolean(document.querySelector(".history-view")),
-    })`).then(JSON.parse);
+    // The sheet plays a ~300ms exit animation, so poll rather than assume.
+    let dom3 = { users: 0, overlayOpen: true };
+    for (let i = 0; i < 20; i++) {
+      dom3 = await panel.eval(`JSON.stringify({
+        users: document.querySelectorAll(".bubble-user").length,
+        overlayOpen: Boolean(document.querySelector(".history-view")),
+      })`).then(JSON.parse);
+      if (dom3.users >= 1 && !dom3.overlayOpen) break;
+      await sleep(100);
+    }
     check(
       "H3 history overlay reopens a thread",
       histItems >= 1 && dom3.users >= 1 && !dom3.overlayOpen,
@@ -303,17 +308,18 @@ async function main() {
     await waitDone(panel);
     const bar = await panel.eval(`JSON.stringify({
       hasMode: [...document.querySelectorAll(".chip-btn")].some((b) => b.textContent.includes("Auto")),
-      hasEffort: [...document.querySelectorAll(".chip-btn")].some((b) => b.textContent.includes("Balanced")),
       hasModel: [...document.querySelectorAll(".chip-btn")].some((b) => b.textContent.includes("mock-model")),
       hasAttach: Boolean([...document.querySelectorAll("button")].find((b) => b.title === "Attach files")),
     })`).then(JSON.parse);
+    // Reasoning effort is configured in Settings ("Reasoning effort"), not as
+    // a control-bar chip — the bar carries mode / model / attach.
     check(
-      "H8 control bar: live stats + mode/model/effort/attach",
+      "H8 control bar: live stats + mode/model/attach",
       /\d:\d\d/.test(statsMid.timer) &&
         /tok/.test(statsMid.tokens) &&
         /tok\/s/.test(statsMid.tps) &&
         /ctx/.test(statsMid.ctx) &&
-        bar.hasMode && bar.hasEffort && bar.hasModel && bar.hasAttach,
+        bar.hasMode && bar.hasModel && bar.hasAttach,
       JSON.stringify({ statsMid, bar }),
     );
 
