@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAnthropicBody,
   buildOpenAiBody,
+  toAnthropicMessages,
   anthropicAggregator,
   openAiAggregator,
 } from "../extension/src/background/agent/llm";
@@ -31,8 +32,8 @@ const req: LlmRequest = {
 
 type ShapedBody = {
   model: string;
-  system: string;
-  tools: { name: string; input_schema: object; type?: string }[];
+  system: { type: string; text: string; cache_control?: unknown }[];
+  tools: { name: string; input_schema: object; cache_control?: unknown }[];
   messages: { role: string; content: unknown }[];
 };
 
@@ -40,8 +41,13 @@ describe("provider request shaping", () => {
   it("builds an Anthropic body with tool_use/tool_result blocks and images", () => {
     const body = buildAnthropicBody(req, "m1") as unknown as ShapedBody;
     expect(body.model).toBe("m1");
-    expect(body.system).toBe("sys");
+    // System is a cache-controlled block: stable prefix across steps.
+    expect(body.system).toEqual([
+      { type: "text", text: "sys", cache_control: { type: "ephemeral" } },
+    ]);
     expect(body.tools[0]).toMatchObject({ name: "click", input_schema: expect.any(Object) });
+    // The last tool carries the cache breakpoint for the tools+system prefix.
+    expect(body.tools[0]!.cache_control).toEqual({ type: "ephemeral" });
 
     const msgs = body.messages;
     // user with text + image
@@ -90,33 +96,65 @@ describe("provider request shaping", () => {
     const o = buildOpenAiBody(req, "m1") as Record<string, unknown>;
     expect(a.thinking).toBeUndefined();
     expect(o.enable_thinking).toBeUndefined();
+    expect(o.reasoning_effort).toBeUndefined();
   });
 
-  it("enables Anthropic extended thinking with a budget", () => {
-    const body = buildAnthropicBody(
-      { ...req, thinking: true, thinkingBudget: 4096 },
-      "m1",
-    ) as Record<string, unknown>;
-    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 4096 });
+  it("maps a thinking level to an Anthropic budget", () => {
+    const body = buildAnthropicBody({ ...req, thinking: "medium" }, "m1") as Record<
+      string,
+      unknown
+    >;
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 4_096 });
     // max_tokens must exceed the thinking budget or the API rejects it.
-    expect(body.max_tokens as number).toBeGreaterThan(4096);
+    expect(body.max_tokens as number).toBeGreaterThan(4_096);
   });
 
   it("leaves max_tokens alone when it already exceeds the budget", () => {
     const body = buildAnthropicBody(
-      { ...req, thinking: true, thinkingBudget: 1024, maxTokens: 8192 },
+      { ...req, thinking: "low", maxTokens: 8192 },
       "m1",
     ) as Record<string, unknown>;
     expect(body.max_tokens).toBe(8192);
   });
 
-  it("enables thinking on the OpenAI-compatible path", () => {
-    const body = buildOpenAiBody({ ...req, thinking: true }, "m1") as Record<
+  it("skips thinking for Anthropic models that predate it", () => {
+    const body = buildAnthropicBody(
+      { ...req, thinking: "high" },
+      "claude-3-5-sonnet-20241022",
+    ) as Record<string, unknown>;
+    expect(body.thinking).toBeUndefined();
+  });
+
+  it("maps a thinking level to the OpenAI-compatible knobs", () => {
+    const body = buildOpenAiBody({ ...req, thinking: "high" }, "m1") as Record<
       string,
       unknown
     >;
     expect(body.enable_thinking).toBe(true);
     expect(body.chat_template_kwargs).toEqual({ enable_thinking: true });
+    expect(body.reasoning_effort).toBe("high");
+  });
+
+  it("keeps thinking knobs away from strict OpenAI non-reasoners", () => {
+    // api.openai.com 400s on unknown params — gpt-4o-mini must get none.
+    const body = buildOpenAiBody(
+      { ...req, thinking: "high" },
+      "gpt-4o-mini",
+      { baseUrl: "https://api.openai.com/v1" },
+    ) as Record<string, unknown>;
+    expect(body.enable_thinking).toBeUndefined();
+    expect(body.reasoning_effort).toBeUndefined();
+    expect(body.max_tokens).toBe(4_096);
+  });
+
+  it("sends reasoning_effort (and max_completion_tokens) to OpenAI reasoners", () => {
+    const body = buildOpenAiBody({ ...req, thinking: "low" }, "o4-mini", {
+      baseUrl: "https://api.openai.com/v1",
+    }) as Record<string, unknown>;
+    expect(body.reasoning_effort).toBe("low");
+    expect(body.enable_thinking).toBeUndefined();
+    expect(body.max_completion_tokens).toBe(4_096);
+    expect(body.max_tokens).toBeUndefined();
   });
 });
 
@@ -169,16 +207,46 @@ describe("SSE aggregators", () => {
       `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "thinking" } })}`,
       `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Let me " } })}`,
       `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "reason." } })}`,
+      `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig-abc" } })}`,
       `data: ${JSON.stringify({ type: "content_block_start", index: 1, content_block: { type: "text" } })}`,
       `data: ${JSON.stringify({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Answer." } })}`,
     ];
     for (const line of lines) agg.feed(line);
     const result = agg.result();
     expect(result.reasoning).toBe("Let me reason.");
+    // The signature must be captured so the block can be replayed next turn.
+    expect(result.reasoningSignature).toBe("sig-abc");
     expect(thinking).toEqual(["Let me ", "reason."]);
     // Reasoning must never be appended to assistant prose.
     expect(result.text).toBe("Answer.");
     expect(texts).toEqual(["Answer."]);
+  });
+
+  it("replays a signed thinking block ahead of tool_use for Anthropic", () => {
+    const out = toAnthropicMessages([
+      {
+        role: "assistant",
+        content: "working",
+        thinking: "Let me reason.",
+        thinkingSignature: "sig-abc",
+        toolCalls: [{ id: "t1", name: "click", args: { ref: "5" } }],
+      },
+    ]) as { role: string; content: Record<string, unknown>[] }[];
+    const content = out[0]!.content;
+    expect(content[0]).toEqual({
+      type: "thinking",
+      thinking: "Let me reason.",
+      signature: "sig-abc",
+    });
+    expect(content[1]).toEqual({ type: "text", text: "working" });
+    expect(content[2]).toMatchObject({ type: "tool_use", id: "t1", name: "click" });
+  });
+
+  it("omits an unsigned thinking block rather than send an invalid one", () => {
+    const out = toAnthropicMessages([
+      { role: "assistant", content: "hi", thinking: "reason", toolCalls: [] },
+    ]) as { content: Record<string, unknown>[] }[];
+    expect(out[0]!.content.every((b) => b.type !== "thinking")).toBe(true);
   });
 
   it("captures OpenAI reasoning_content (DeepSeek/vLLM)", () => {

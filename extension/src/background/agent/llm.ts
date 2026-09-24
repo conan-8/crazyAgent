@@ -10,6 +10,7 @@ import type {
   LlmTextSink,
   ToolCall,
 } from "../../shared/llm";
+import { thinkingBudgetFor } from "../../shared/llm";
 import type { AgentSettings } from "../settings";
 
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -29,6 +30,17 @@ export function toAnthropicMessages(messages: LlmMessage[]): unknown[] {
       i++;
     } else if (m.role === "assistant") {
       const content: unknown[] = [];
+      // Anthropic extended thinking + tool use: the thinking block (with its
+      // signature) must lead the assistant turn and be replayed verbatim.
+      // Guard on a non-empty signature — an unsigned thinking block is itself
+      // rejected by the API, so omit it rather than send an invalid one.
+      if (m.thinking && m.thinkingSignature) {
+        content.push({
+          type: "thinking",
+          thinking: m.thinking,
+          signature: m.thinkingSignature,
+        });
+      }
       if (m.content) content.push({ type: "text", text: m.content });
       for (const tc of m.toolCalls ?? []) {
         content.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.args });
@@ -65,26 +77,47 @@ function toAnthropicImage(dataUrl: string): unknown {
   return { type: "image", source: { type: "base64", media_type: mediaType, data } };
 }
 
+/** Anthropic models that predate extended thinking (would 400 on `thinking`). */
+function anthropicSupportsThinking(model: string): boolean {
+  return !/claude-(?:2|instant|3-5|3-(?:haiku|sonnet|opus))/i.test(model);
+}
+
 export function buildAnthropicBody(
   req: LlmRequest,
   model: string,
 ): Record<string, unknown> {
+  const tools = req.tools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.parameters,
+  }));
+  // Prompt caching: tools and system are byte-stable across the run's steps,
+  // so marking them ephemeral lets the API bill them as cache reads (~90%
+  // cheaper) instead of re-processing the whole prefix every step.
+  if (tools.length) {
+    (tools[tools.length - 1] as Record<string, unknown>).cache_control = {
+      type: "ephemeral",
+    };
+  }
   const body: Record<string, unknown> = {
     model,
     max_tokens: req.maxTokens ?? 4_096,
-    system: req.system,
-    tools: req.tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.parameters,
-    })),
+    system: [
+      {
+        type: "text",
+        text: req.system,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    tools,
     messages: toAnthropicMessages(req.messages),
     stream: true,
   };
-  if (req.thinking) {
+  const level = req.thinking ?? "off";
+  if (level !== "off" && anthropicSupportsThinking(model)) {
     // Extended thinking requires max_tokens > thinking.budget_tokens, so lift
-    // the cap when the caller's budget would otherwise exceed it.
-    const budget = req.thinkingBudget ?? 2_048;
+    // the cap when the level's budget would otherwise exceed it.
+    const budget = thinkingBudgetFor(level);
     body.thinking = { type: "enabled", budget_tokens: budget };
     const cap = (body.max_tokens as number) ?? 4_096;
     if (cap <= budget) body.max_tokens = budget + 1_024;
@@ -131,13 +164,27 @@ export function toOpenAiMessages(messages: LlmMessage[]): unknown[] {
   return out;
 }
 
+/** OpenAI's own reasoners (o-series, GPT-5) — the ones that take `reasoning_effort`. */
+function isOpenAiReasoner(model: string): boolean {
+  return /^(?:o\d|gpt-5)/i.test(model);
+}
+
 export function buildOpenAiBody(
   req: LlmRequest,
   model: string,
+  opts: { baseUrl?: string } = {},
 ): Record<string, unknown> {
+  // api.openai.com rejects unknown body params outright, so thinking knobs are
+  // only sent there for models that support them; other gateways (OpenRouter,
+  // vLLM, DeepSeek, Ollama, …) tolerate or honor the extra fields.
+  const strictOpenAi = (opts.baseUrl ?? "").includes("api.openai.com");
+  const reasoner = isOpenAiReasoner(model);
+  const level = req.thinking ?? "off";
   const body: Record<string, unknown> = {
     model,
-    max_tokens: req.maxTokens ?? 4_096,
+    // OpenAI reasoners require max_completion_tokens; everyone else max_tokens.
+    [strictOpenAi && reasoner ? "max_completion_tokens" : "max_tokens"]:
+      req.maxTokens ?? 4_096,
     messages: [
       { role: "system", content: req.system },
       ...toOpenAiMessages(req.messages),
@@ -153,11 +200,16 @@ export function buildOpenAiBody(
     stream: true,
     stream_options: { include_usage: true },
   };
-  if (req.thinking) {
-    // vLLM/SGLang-style switch; most OpenAI-compatible servers ignore unknown
-    // fields, and DeepSeek reasoners emit reasoning_content unprompted.
-    body.enable_thinking = true;
-    body.chat_template_kwargs = { enable_thinking: true };
+  if (level !== "off") {
+    if (!strictOpenAi) {
+      // vLLM/SGLang-style switch; most OpenAI-compatible servers ignore unknown
+      // fields, and DeepSeek reasoners emit reasoning_content unprompted.
+      body.enable_thinking = true;
+      body.chat_template_kwargs = { enable_thinking: true };
+      body.reasoning_effort = level;
+    } else if (reasoner) {
+      body.reasoning_effort = level;
+    }
   }
   return body;
 }
@@ -177,9 +229,13 @@ export function anthropicAggregator(
   onText?: LlmTextSink,
   onReasoning?: LlmReasoningSink,
 ): StreamAggregator {
-  const blocks = new Map<number, { kind: string; id?: string; name?: string; text: string }>();
+  const blocks = new Map<
+    number,
+    { kind: string; id?: string; name?: string; text: string; signature?: string }
+  >();
   let stopReason = "";
   let reasoning = "";
+  let signature = "";
   const agg: StreamAggregator = {
     text: "",
     get reasoning() {
@@ -195,12 +251,18 @@ export function anthropicAggregator(
       }
       const type = event.type as string;
       if (type === "content_block_start") {
-        const cb = event.content_block as { type: string; id?: string; name?: string };
+        const cb = event.content_block as {
+          type: string;
+          id?: string;
+          name?: string;
+          signature?: string;
+        };
         blocks.set(event.index as number, {
           kind: cb.type,
           id: cb.id,
           name: cb.name,
           text: "",
+          signature: cb.signature,
         });
       } else if (type === "content_block_delta") {
         const delta = event.delta as {
@@ -208,6 +270,7 @@ export function anthropicAggregator(
           text?: string;
           partial_json?: string;
           thinking?: string;
+          signature?: string;
         };
         const block = blocks.get(event.index as number);
         if (!block) return;
@@ -217,6 +280,11 @@ export function anthropicAggregator(
           reasoning += delta.thinking;
           block.text += delta.thinking;
           onReasoning?.(delta.thinking);
+        } else if (delta.type === "signature_delta" && delta.signature) {
+          // Cryptographic signature for the thinking block — must be replayed
+          // verbatim next turn or Anthropic rejects the tool-use continuation.
+          signature += delta.signature;
+          block.signature = (block.signature ?? "") + delta.signature;
         } else if (delta.type === "text_delta" && delta.text) {
           block.text += delta.text;
           agg.text += delta.text;
@@ -249,6 +317,7 @@ export function anthropicAggregator(
         stopReason,
         usage: agg.usage,
         reasoning: reasoning || undefined,
+        reasoningSignature: signature || undefined,
       };
     },
   };
@@ -409,7 +478,9 @@ class OpenAiCompatClient implements LlmClient {
         "content-type": "application/json",
         authorization: `Bearer ${this.settings.apiKey}`,
       },
-      body: JSON.stringify(buildOpenAiBody(req, this.settings.model)),
+      body: JSON.stringify(
+        buildOpenAiBody(req, this.settings.model, { baseUrl: this.settings.baseUrl }),
+      ),
     });
     return readSse(res, openAiAggregator(onText, onReasoning), signal);
   }

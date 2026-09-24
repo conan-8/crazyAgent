@@ -5,12 +5,16 @@
 import type {
   LlmClient,
   LlmMessage,
+  LlmRequest,
+  LlmResult,
   LlmToolSpec,
+  ThinkingLevel,
   ToolCall,
 } from "../../shared/llm";
 import type { Checkpoint, RunStats, StepEvent } from "../../shared/protocol";
 import { validateToolArgs } from "../tools/types";
 import { estimateTokens, isMutating } from "../../shared/modes";
+import { madmanExclamation, madmanLabel } from "../../shared/madman";
 import { buildSystemPrompt } from "./prompts";
 
 export type AgentOutcome = "completed" | "stopped" | "capped";
@@ -42,15 +46,60 @@ export interface LoopDeps {
   agentMode?: string;
   /** Model context window for the usage bar. */
   contextWindow?: number;
-  /** Ask the model to emit reasoning before answering. */
-  thinking?: boolean;
-  /** Token budget for the thinking block, where the provider accepts one. */
-  thinkingBudget?: number;
+  /** Reasoning effort level forwarded to the provider ("off" disables). */
+  thinking?: ThinkingLevel;
+  /** Madman mode: profane voice in the prompt + a cuss on every tool label. */
+  madman?: boolean;
 }
 
 const MAX_RESULT_CHARS = 24_000;
 const HISTORY_BUDGET_CHARS = 120_000;
 const MAX_LIVE_IMAGES = 4;
+
+/** Total attempts per LLM call (1 try + retries) and the backoff between them. */
+const LLM_ATTEMPTS = 3;
+const RETRY_DELAYS_MS = [1_000, 3_000];
+
+/**
+ * Read-only tools that never touch page state — safe to execute concurrently
+ * when the model batches several of them in one step. Anything else (actions,
+ * navigation, gated tools) stays strictly sequential.
+ */
+const PARALLEL_SAFE = new Set([
+  "snapshot",
+  "read_page",
+  "screenshot",
+  "wait_for_settle",
+  "tabs_list",
+  "network_observe",
+]);
+
+/** One LLM call with retry + backoff on transient failures (429/5xx/network). */
+async function completeWithRetry(
+  deps: LoopDeps,
+  req: LlmRequest,
+  onText: (t: string) => void,
+  onReasoning: (t: string) => void,
+): Promise<LlmResult> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < LLM_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]!;
+      deps.emit({
+        kind: "info",
+        message: `LLM call failed (${String((lastErr as Error)?.message ?? lastErr)}) — retrying in ${delay / 1000}s (attempt ${attempt + 1}/${LLM_ATTEMPTS})`,
+      });
+      await new Promise((r) => setTimeout(r, delay));
+      if (deps.shouldStop()) break;
+    }
+    try {
+      return await deps.llm.complete(req, onText, undefined, onReasoning);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
 
 export async function runAgentTask(
   cp: Checkpoint,
@@ -76,17 +125,20 @@ export async function runAgentTask(
 
     let result;
     try {
-      result = await deps.llm.complete(
+      result = await completeWithRetry(
+        deps,
         {
-          system: buildSystemPrompt(cp.task, deps.agentMode ?? "auto"),
+          system: buildSystemPrompt(
+            cp.task,
+            deps.agentMode ?? "auto",
+            deps.madman === true,
+          ),
           messages: truncateHistory(cp.messages, HISTORY_BUDGET_CHARS),
           tools,
           maxTokens: deps.maxTokens,
           thinking: deps.thinking,
-          thinkingBudget: deps.thinkingBudget,
         },
         (text) => deps.emit({ kind: "token_delta", text }),
-        undefined,
         (text) => deps.emit({ kind: "reasoning_delta", text }),
       );
     } catch (err) {
@@ -122,6 +174,12 @@ export async function runAgentTask(
       role: "assistant",
       content: result.text,
       toolCalls: result.toolCalls.length ? result.toolCalls : undefined,
+      // Persist reasoning only when Anthropic signed it: the signature marks a
+      // thinking block that MUST be replayed on the tool-use continuation.
+      // OpenAI/DeepSeek reasoning has no signature and is streamed live to the
+      // UI only, so we don't bloat the checkpoint replaying it back.
+      thinking: result.reasoningSignature ? result.reasoning || undefined : undefined,
+      thinkingSignature: result.reasoningSignature || undefined,
     });
 
     if (!result.toolCalls.length) {
@@ -137,15 +195,15 @@ export async function runAgentTask(
       return "completed";
     }
 
-    for (const call of result.toolCalls) {
-      if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
-      deps.emit({
-        kind: "tool_call",
-        stepIndex: step,
-        name: call.name,
-        args: call.args,
-      });
-      const outcome = await runOne(call, deps, step, specsByName, planOnly);
+    // Execute the batch: all-read-only batches run concurrently; anything
+    // else stays sequential with a stop check between calls. Outcomes are
+    // recorded in call order either way.
+    let aborted = false;
+    const record = (outcome: {
+      message: LlmMessage;
+      event: StepEvent;
+      invalid: boolean;
+    }): void => {
       cp.messages.push(outcome.message);
       deps.emit(outcome.event);
       invalidStreak = outcome.invalid ? invalidStreak + 1 : 0;
@@ -154,9 +212,53 @@ export async function runAgentTask(
           kind: "error",
           message: "three consecutive invalid tool calls — aborting",
         });
-        return finish(cp, deps, "stopped", lastStats);
+        aborted = true;
+      }
+    };
+
+    const calls = result.toolCalls;
+    const madman = deps.madman === true;
+    // Madman mode: every tool call gets a cuss word we control, so the "every
+    // tool call contains a cuss word" contract holds even when the model
+    // forgets to swear. The exclamation lands once per step, before the calls.
+    if (madman && calls.length) {
+      deps.emit({
+        kind: "madman",
+        message: madmanExclamation(
+          calls.map((c) => c.name).join(", ") || undefined,
+          `step:${step}`,
+        ),
+      });
+    }
+    const announce = (call: ToolCall): void => {
+      deps.emit({
+        kind: "tool_call",
+        stepIndex: step,
+        name: call.name,
+        args: call.args,
+        label: madman ? madmanLabel(call.name, `${step}:${call.name}`) : undefined,
+      });
+    };
+    const canParallel =
+      calls.length > 1 &&
+      calls.every(
+        (c) => c.invalidJson === undefined && PARALLEL_SAFE.has(c.name),
+      );
+    if (canParallel) {
+      for (const call of calls) announce(call);
+      const outcomes = await Promise.all(
+        calls.map((call) => runOne(call, deps, step, specsByName, planOnly)),
+      );
+      for (const outcome of outcomes) record(outcome);
+    } else {
+      for (const call of calls) {
+        if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
+        announce(call);
+        record(await runOne(call, deps, step, specsByName, planOnly));
+        if (aborted) break;
       }
     }
+    if (aborted) return finish(cp, deps, "stopped", lastStats);
 
     cp.stepIndex = step + 1;
     cp.updatedAt = Date.now();

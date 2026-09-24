@@ -44,4 +44,28 @@ describe("buildSystemPrompt", () => {
       expect(p).toContain("proceed anyway");
     }
   });
+
+  it("omits Madman mode entirely when the toggle is off", () => {
+    const off = buildSystemPrompt("t", "auto");
+    const explicitOff = buildSystemPrompt("t", "auto", false);
+    expect(off).not.toContain("Madman mode");
+    // Off must be byte-identical to the pre-Madman prompt shape (no stray blank).
+    expect(explicitOff).toBe(off);
+  });
+
+  it("appends the profane voice when the toggle is on", () => {
+    const p = buildSystemPrompt("t", "auto", true);
+    expect(p).toContain("Madman mode — ON");
+    expect(p).toContain("fuck");
+    // Additive: every pre-existing rule survives.
+    expect(p).toContain("ruthlessly concise WITHOUT losing information");
+    expect(p).toContain("unrestricted execution");
+    expect(p).toContain("no step limit");
+  });
+
+  it("keeps Madman additive in plan mode too", () => {
+    const p = buildSystemPrompt("t", "plan", true);
+    expect(p).toContain("STRICTLY READ-ONLY");
+    expect(p).toContain("Madman mode — ON");
+  });
 });

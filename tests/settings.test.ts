@@ -181,13 +181,32 @@ describe("normalizeSettings migration", () => {
 
   it("preserves unrelated settings", () => {
     const s = normalizeSettings({
-      thinking: true,
+      thinking: "high",
       maxTokens: 4096,
       apiKeys: [k("a", "work", "sk-work")],
       activeKeyId: "a",
     });
-    expect(s.thinking).toBe(true);
+    expect(s.thinking).toBe("high");
     expect(s.maxTokens).toBe(4096);
+  });
+
+  it("defaults thinking to the lowest on-level for a fresh install", () => {
+    expect(normalizeSettings(undefined).thinking).toBe("low");
+  });
+
+  it("migrates a legacy boolean thinking flag to a level", () => {
+    const legacy = (o: Record<string, unknown>) =>
+      normalizeSettings(o as never);
+    expect(legacy({ thinking: false }).thinking).toBe("off");
+    expect(legacy({ thinking: true }).thinking).toBe("medium");
+    // A custom legacy budget maps to its nearest level.
+    expect(legacy({ thinking: true, thinkingBudget: 800 }).thinking).toBe("low");
+    expect(legacy({ thinking: true, thinkingBudget: 20_000 }).thinking).toBe("high");
+  });
+
+  it("drops the removed numeric thinkingBudget field", () => {
+    const s = normalizeSettings({ thinkingBudget: 2048 } as never);
+    expect("thinkingBudget" in s).toBe(false);
   });
 
   it("is idempotent — re-normalising does not grow the list", () => {
@@ -205,6 +224,27 @@ describe("normalizeSettings migration", () => {
     });
     expect(Array.isArray(s.apiKeys)).toBe(true);
     expect(s.apiKeys).toEqual([]);
+  });
+});
+
+describe("madman setting", () => {
+  it("is off by default", () => {
+    expect(DEFAULT_SETTINGS.madman).toBe(false);
+    expect(normalizeSettings(undefined).madman).toBe(false);
+  });
+
+  it("round-trips when enabled", () => {
+    const s = normalizeSettings({ madman: true });
+    expect(s.madman).toBe(true);
+    expect(normalizeSettings(s).madman).toBe(true);
+  });
+
+  it("coerces only a real true — junk never enables it", () => {
+    const legacy = (o: Record<string, unknown>) => normalizeSettings(o as never);
+    expect(legacy({ madman: "yes" }).madman).toBe(false);
+    expect(legacy({ madman: 1 }).madman).toBe(false);
+    expect(legacy({ madman: null }).madman).toBe(false);
+    expect(legacy({ madman: true }).madman).toBe(true);
   });
 });
 

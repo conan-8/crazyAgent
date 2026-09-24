@@ -113,6 +113,8 @@ export function startMockLlm({ script, port = 8792 }) {
   let activeScript = script;
   const hits = { openai: 0, anthropic: 0 };
   let lastBody = null;
+  /** Every request body seen, in order — lets a smoke assert prompt content. */
+  const bodies = [];
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -123,6 +125,7 @@ export function startMockLlm({ script, port = 8792 }) {
     const kind = String(req.url).includes("chat/completions") ? "openai" : "anthropic";
     hits[kind]++;
     lastBody = body;
+    bodies.push(body);
     const turn = countToolResults(body, kind);
     const step = activeScript[Math.min(turn, activeScript.length - 1)];
     if (step.delayMs) await delay(step.delayMs);
@@ -139,6 +142,8 @@ export function startMockLlm({ script, port = 8792 }) {
     server,
     hits: () => ({ ...hits }),
     lastRequest: () => lastBody,
+    /** All request bodies seen so far, in order. */
+    requests: () => bodies,
     setScript(s) {
       activeScript = s;
     },

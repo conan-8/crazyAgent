@@ -160,3 +160,50 @@ describe("conversation folding", () => {
     expect(conv.turns[1]!.blocks.some((b) => b.kind === "text")).toBe(true);
   });
 });
+
+describe("madman mode folding", () => {
+  it("shows the mid-run exclamation as its own text block", () => {
+    const conv = newConversation("c1", "task");
+    foldUser(conv, "task");
+    foldEvent(conv, { kind: "madman", message: "Because this shit ass site is slow." });
+    foldEvent(conv, { kind: "token_delta", text: "Doing it." });
+    const turn = conv.turns[1]!;
+    expect(texts(turn.blocks)[0]).toContain("this shit ass site");
+    // The exclamation must not swallow the answer that follows it.
+    expect(texts(turn.blocks).join("")).toContain("Doing it.");
+  });
+
+  it("keeps the exclamation in the transcript when a turn is stored", () => {
+    const conv = newConversation("c1", "task");
+    foldUser(conv, "task");
+    foldEvent(conv, { kind: "madman", message: "For fuck's sake." });
+    const stored = forStorage(conv);
+    expect(texts(stored.turns[1]!.blocks).join("")).toContain("fuck");
+  });
+});
+
+describe("madman tool card labels", () => {
+  it("stores the cuss-decorated label while keeping the raw tool name", () => {
+    const conv = newConversation("c1", "task");
+    foldUser(conv, "task");
+    foldEvent(conv, {
+      kind: "tool_call",
+      stepIndex: 0,
+      name: "click",
+      args: { ref: "1" },
+      label: "click (fuck)",
+    });
+    const card = (conv.turns[1]!.blocks[0] as { card: { name: string; label?: string } }).card;
+    // The raw name survives so result matching by tool still works.
+    expect(card.name).toBe("click");
+    expect(card.label).toBe("click (fuck)");
+  });
+
+  it("leaves the label undefined when madman mode is off", () => {
+    const conv = newConversation("c1", "task");
+    foldUser(conv, "task");
+    foldEvent(conv, { kind: "tool_call", stepIndex: 0, name: "click", args: {} });
+    const card = (conv.turns[1]!.blocks[0] as { card: { label?: string } }).card;
+    expect(card.label).toBeUndefined();
+  });
+});

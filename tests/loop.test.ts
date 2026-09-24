@@ -154,17 +154,110 @@ describe("runAgentTask", () => {
     expect(stats!.reasoningChars).toBe(6);
   });
 
-  it("forwards the thinking flag to the LLM request", async () => {
+  it("forwards the thinking level to the LLM request", async () => {
     const cp = makeCheckpoint();
     const { deps } = harness([{ text: "Done.", toolCalls: [], stopReason: "end_turn" }], {
-      thinking: true,
-      thinkingBudget: 4096,
+      thinking: "high",
     });
     await runAgentTask(cp, deps);
-    expect((deps.llm as FakeLlm).seen[0]).toMatchObject({
-      thinking: true,
-      thinkingBudget: 4096,
-    });
+    expect((deps.llm as FakeLlm).seen[0]).toMatchObject({ thinking: "high" });
+  });
+
+  it("retries a transient LLM failure and completes", async () => {
+    const cp = makeCheckpoint();
+    let attempts = 0;
+    const flaky: LlmClient = {
+      async complete() {
+        attempts++;
+        if (attempts === 1) throw new Error("HTTP 500: boom");
+        return { text: "recovered", toolCalls: [], stopReason: "end_turn" };
+      },
+    };
+    const { events, deps } = harness([], { llm: flaky });
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    expect(attempts).toBe(2);
+    expect(
+      events.some((e) => e.kind === "info" && e.message.includes("retrying")),
+    ).toBe(true);
+    expect(events.at(-1)).toMatchObject({ kind: "done", summary: "recovered" });
+  }, 15_000);
+
+  it("gives up after repeated LLM failures", async () => {
+    const cp = makeCheckpoint();
+    let attempts = 0;
+    const dead: LlmClient = {
+      async complete() {
+        attempts++;
+        throw new Error("HTTP 503: down");
+      },
+    };
+    const { events, deps } = harness([], { llm: dead });
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("stopped");
+    expect(attempts).toBe(3);
+    expect(events.some((e) => e.kind === "error")).toBe(true);
+  }, 15_000);
+
+  it("runs read-only batches concurrently but records results in call order", async () => {
+    const cp = makeCheckpoint();
+    const finished: string[] = [];
+    const { deps } = harness(
+      [
+        {
+          text: "",
+          toolCalls: [
+            { id: "slow", name: "snapshot", args: { tag: "slow" } },
+            { id: "fast", name: "screenshot", args: { tag: "fast" } },
+          ],
+          stopReason: "tool_use",
+        },
+        { text: "done", toolCalls: [], stopReason: "end_turn" },
+      ],
+      {
+        execute: async (name, args) => {
+          // The first call takes longer — concurrency means the second
+          // finishes first, yet messages must stay in call order.
+          await new Promise((r) =>
+            setTimeout(r, args.tag === "slow" ? 60 : 5),
+          );
+          finished.push(String(args.tag));
+          return { ok: true, payload: { name } };
+        },
+      },
+    );
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    expect(finished).toEqual(["fast", "slow"]); // actually ran in parallel
+    const toolMsgs = cp.messages.filter((m) => m.role === "tool");
+    expect(toolMsgs.map((m) => m.toolCallId)).toEqual(["slow", "fast"]);
+  });
+
+  it("keeps mutating batches sequential", async () => {
+    const cp = makeCheckpoint();
+    const order: string[] = [];
+    const { deps } = harness(
+      [
+        {
+          text: "",
+          toolCalls: [
+            { id: "a", name: "click", args: { ref: "1" } },
+            { id: "b", name: "click", args: { ref: "2" } },
+          ],
+          stopReason: "tool_use",
+        },
+        { text: "done", toolCalls: [], stopReason: "end_turn" },
+      ],
+      {
+        execute: async (name, args) => {
+          await new Promise((r) => setTimeout(r, args.ref === "1" ? 30 : 1));
+          order.push(String(args.ref));
+          return { ok: true, payload: { name } };
+        },
+      },
+    );
+    await runAgentTask(cp, deps);
+    expect(order).toEqual(["1", "2"]); // call order, not completion order
   });
 
   it("feeds validation errors back without executing, then recovers", async () => {
@@ -347,5 +440,100 @@ describe("truncateHistory", () => {
     // only the newest images survive
     const withImages = out.filter((m) => m.images?.length);
     expect(withImages.length).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("madman mode wiring", () => {
+  it("sends the plain prompt and emits no madman event when off", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([
+      toolCall("snapshot", {}),
+      { text: "done", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    await runAgentTask(cp, deps);
+    expect(events.some((e) => e.kind === "madman")).toBe(false);
+    const llm = deps.llm as FakeLlm;
+    expect(llm.seen[0]!.system).not.toContain("Madman mode");
+  });
+
+  it("seeds the profane voice into the system prompt when on", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness(
+      [{ text: "done", toolCalls: [], stopReason: "end_turn" }],
+      { madman: true },
+    );
+    await runAgentTask(cp, deps);
+    const llm = deps.llm as FakeLlm;
+    expect(llm.seen[0]!.system).toContain("Madman mode — ON");
+    // Additive: the mandate and style contract must survive.
+    expect(llm.seen[0]!.system).toContain("unrestricted execution");
+    expect(llm.seen[0]!.system).toContain("ruthlessly concise");
+  });
+
+  it("emits one swearing exclamation per step that calls tools", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness(
+      [
+        toolCall("snapshot", {}),
+        toolCall("click", { ref: "1" }, "c2"),
+        { text: "done", toolCalls: [], stopReason: "end_turn" },
+      ],
+      { madman: true },
+    );
+    await runAgentTask(cp, deps);
+    const madman = events.filter(
+      (e): e is Extract<StepEvent, { kind: "madman" }> => e.kind === "madman",
+    );
+    expect(madman).toHaveLength(2);
+    // Every exclamation carries a curse word — the core contract.
+    for (const m of madman) expect(m.message).toMatch(/fuck|shit|damn|hell|ass|bastard|goddamn|piss|crap|bloody/i);
+  });
+
+  it("stays silent on a run that only answers, never acting", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness(
+      [{ text: "no tools needed", toolCalls: [], stopReason: "end_turn" }],
+      { madman: true },
+    );
+    await runAgentTask(cp, deps);
+    expect(events.some((e) => e.kind === "madman")).toBe(false);
+  });
+});
+
+describe("madman tool_call labels", () => {
+  it("decorates every tool_call event with a cuss word when on", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness(
+      [
+        toolCall("snapshot", {}),
+        toolCall("click", { ref: "1" }, "c2"),
+        { text: "done", toolCalls: [], stopReason: "end_turn" },
+      ],
+      { madman: true },
+    );
+    await runAgentTask(cp, deps);
+    const calls = events.filter(
+      (e): e is Extract<StepEvent, { kind: "tool_call" }> => e.kind === "tool_call",
+    );
+    expect(calls).toHaveLength(2);
+    for (const c of calls) {
+      expect(c.label).toBeDefined();
+      // The label carries a cuss word AND still names the tool.
+      expect(c.label!).toContain(c.name);
+      expect(c.label!).toMatch(/fuck|shit|damn|hell|ass|bastard|goddamn|piss|crap|bloody/i);
+    }
+  });
+
+  it("omits the label entirely when off", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([
+      toolCall("snapshot", {}),
+      { text: "done", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    await runAgentTask(cp, deps);
+    const call = events.find(
+      (e): e is Extract<StepEvent, { kind: "tool_call" }> => e.kind === "tool_call",
+    )!;
+    expect(call.label).toBeUndefined();
   });
 });

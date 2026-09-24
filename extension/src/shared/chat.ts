@@ -9,6 +9,8 @@ import type { StepEvent } from "./protocol";
 
 export interface ToolCard {
   name: string;
+  /** Madman mode: cuss-decorated display label; falls back to `name`. */
+  label?: string;
   args: string;
   result: string;
   ok: boolean;
@@ -121,6 +123,8 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
         kind: "tool",
         card: {
           name: e.name,
+          // Madman mode decorates the label; `name` stays raw for matching.
+          label: e.label,
           args: JSON.stringify(e.args ?? {}),
           result: "",
           ok: true,
@@ -146,6 +150,11 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
         kind: "confirm",
         confirm: { id: e.id, tool: e.tool, summary: e.summary },
       });
+      break;
+    case "madman":
+      // Mid-run exclamation — its own line, so it reads as an outburst
+      // between the tool cards rather than merging into the running answer.
+      appendText(assistantTurn(), `${e.message}\n`);
       break;
     case "done": {
       // The streamed answer already carries the summary — only fill a blank.

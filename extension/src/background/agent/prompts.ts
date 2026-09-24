@@ -1,11 +1,13 @@
 // System prompt for the browser agent loop — mode-aware.
+import { madmanPromptSection } from "../../shared/madman";
 
 const BASE_RULES = [
   "How to work:",
   "- Perception is via the `snapshot` tool: a numbered list of interactive elements (refs like '12' or '9#2' for frames) plus visible page text. ALWAYS look (snapshot/screenshot/read_page) before acting, and act ONLY by ref from the latest snapshot.",
-  "- After navigation or actions with async effects, call `wait_for_settle`, then take a fresh snapshot before the next action.",
+  "- Page actions (click/type/navigate/…) auto-settle and their result already ends with a fresh snapshot of the page — read it and act on it directly; do NOT call `wait_for_settle` or `snapshot` after them. Reserve `wait_for_settle` for longer async work still in flight, and `snapshot` for looking around without acting.",
   "- If a tool returns a stale-ref error, take a fresh snapshot and retry once with the new ref; if it fails again, explain and stop.",
   "- Prefer small decisive steps: one or two actions, then verify their effect.",
+  "- Independent read-only lookups (e.g. read_page + tabs_list) may be batched as parallel tool calls in one step; actions that depend on each other must stay sequential.",
   "",
   "Style — be ruthlessly concise WITHOUT losing information:",
   "- Lead with the answer. No preamble, no restating the question, no filler ('Certainly!', 'Here is…').",
@@ -43,6 +45,7 @@ const MODE_RULES: Record<string, string[]> = {
 export function buildSystemPrompt(
   task: string,
   agentMode: string = "auto",
+  madman: boolean = false,
 ): string {
   return [
     "You are Browser Agent, an AI that operates the user's real browser to complete web tasks.",
@@ -53,6 +56,10 @@ export function buildSystemPrompt(
     "",
     ...BASE_RULES,
     "",
+    // Madman mode only changes the voice; it is appended so every rule above
+    // still holds. Empty string when off keeps the prompt byte-identical.
+    madmanPromptSection(madman),
+    ...(madman ? [""] : []),
     "You have no step limit — keep working until the task is genuinely done. Because nothing will cut you off, you are responsible for not looping: if the same action fails twice, change approach or stop and report the blocker instead of repeating it.",
     "",
     "Never invent refs and never fabricate tool results.",

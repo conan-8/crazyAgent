@@ -1,6 +1,7 @@
 // Agent settings persisted in chrome.storage.local (personal-use key storage).
 import type { ControlMode } from "../shared/protocol";
 import type { AgentMode } from "../shared/modes";
+import type { ThinkingLevel } from "../shared/llm";
 
 /**
  * One saved connection: a credential plus the endpoint and model it belongs to.
@@ -44,10 +45,18 @@ export interface AgentSettings {
   maxTokens: number;
   /** Model context window for the live usage bar. */
   contextWindow: number;
-  /** Ask the model to emit its reasoning before answering. */
-  thinking: boolean;
-  /** Token budget for the thinking block, where the provider accepts one. */
-  thinkingBudget: number;
+  /**
+   * Reasoning effort ("thinking") level: off / low / medium / high. Each
+   * provider translates it to its own knob (Anthropic budget tokens,
+   * enable_thinking, reasoning_effort); unsupported providers ignore it.
+   */
+  thinking: ThinkingLevel;
+  /**
+   * Madman mode: the agent swears. Seeds a profane voice into the system
+   * prompt (so replies and mid-run exclamations cuss) and decorates every
+   * tool-call label with a cuss word. Off by default.
+   */
+  madman: boolean;
 }
 
 /** Defaults for a brand-new connection. */
@@ -68,9 +77,33 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   agentMode: "auto",
   maxTokens: 8_192,
   contextWindow: 128_000,
-  thinking: false,
-  thinkingBudget: 2_048,
+  // Thinking on at the lowest level: a cheap reasoning block by default.
+  thinking: "low",
+  // Straight-laced by default; Madman mode is opt-in.
+  madman: false,
 };
+
+const THINKING_VALUES: ThinkingLevel[] = ["off", "low", "medium", "high"];
+
+/**
+ * Migrate the legacy `thinking: boolean` (+ numeric `thinkingBudget`) into
+ * the level dropdown, mapping a custom budget to its nearest level.
+ */
+export function migrateThinking(stored: {
+  thinking?: unknown;
+  thinkingBudget?: unknown;
+}): ThinkingLevel {
+  const raw = stored.thinking;
+  if (typeof raw === "string" && (THINKING_VALUES as string[]).includes(raw)) {
+    return raw as ThinkingLevel;
+  }
+  if (typeof raw !== "boolean") return DEFAULT_SETTINGS.thinking;
+  if (!raw) return "off";
+  const budget = typeof stored.thinkingBudget === "number" ? stored.thinkingBudget : 2_048;
+  if (budget <= 1_536) return "low";
+  if (budget <= 8_192) return "medium";
+  return "high";
+}
 
 const KEY = "baSettings";
 
@@ -154,8 +187,11 @@ export function normalizeSettings(
   }
 
   const active = activeConnection({ apiKeys: keys, activeKeyId });
+  // Drop the removed numeric budget if an old stored object still carries it.
+  const rest: Record<string, unknown> = { ...merged };
+  delete rest.thinkingBudget;
   return {
-    ...merged,
+    ...(rest as unknown as AgentSettings),
     apiKeys: keys,
     activeKeyId,
     // Mirrors: the active connection is the single source of truth.
@@ -163,6 +199,10 @@ export function normalizeSettings(
     baseUrl: active?.baseUrl ?? globals.baseUrl,
     model: active?.model ?? globals.model,
     apiKey: activeApiKey({ apiKeys: keys, activeKeyId, apiKey: merged.apiKey }),
+    // Legacy boolean thinking (+ budget) becomes the level dropdown.
+    thinking: migrateThinking(merged),
+    // Coerce: only a real `true` turns Madman mode on.
+    madman: merged.madman === true,
   };
 }
 
