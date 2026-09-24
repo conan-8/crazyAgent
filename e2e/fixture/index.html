@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — home</title>
+  </head>
+  <body>
+    <h1>Fixture home</h1>
+    <nav>
+      <a id="docs-link" href="http://127.0.0.1:8790/docs.html">Docs</a>
+      <a id="login-link" href="http://127.0.0.1:8790/login.html">Log in</a>
+    </nav>
+
+    <section id="search-section">
+      <form id="search-form" action="http://127.0.0.1:8790/docs.html">
+        <label for="q">Search</label>
+        <input id="q" name="q" type="text" placeholder="search terms" />
+        <select id="scope" name="scope">
+          <option value="all">All</option>
+          <option value="titles">Titles</option>
+        </select>
+        <label><input id="deep" name="deep" type="checkbox" /> Deep search</label>
+        <button id="search-btn" type="submit">Search</button>
+      </form>
+    </section>
+
+    <section id="dynamic-section">
+      <h2>Dynamic list</h2>
+      <button id="add-item">Add item</button>
+      <ul id="item-list"></ul>
+    </section>
+
+    <section id="widget-section">
+      <h2>Widget</h2>
+      <div id="shadow-host"></div>
+    </section>
+
+    <section id="frame-section">
+      <h2>Cross-origin frame</h2>
+      <iframe
+        id="xo-frame"
+        src="http://127.0.0.1:8791/framed.html"
+        width="400"
+        height="160"
+      ></iframe>
+    </section>
+
+    <script>
+      // Dynamic list: 3 items immediately, then stops (so the page settles).
+      const list = document.getElementById("item-list");
+      let n = 0;
+      function addItem() {
+        n++;
+        const li = document.createElement("li");
+        li.textContent = "item " + n;
+        const b = document.createElement("button");
+        b.textContent = "delete item " + n;
+        li.appendChild(b);
+        list.appendChild(li);
+      }
+      document.getElementById("add-item").addEventListener("click", addItem);
+      addItem(); addItem(); addItem();
+
+      // Open shadow-root widget with its own interactive elements.
+      const host = document.getElementById("shadow-host");
+      const sr = host.attachShadow({ mode: "open" });
+      sr.innerHTML = `
+        <style>button { padding: 4px; }</style>
+        <input id="shadow-input" placeholder="shadow input" />
+        <button id="shadow-btn">Shadow button</button>
+      `;
+    </script>
+  </body>
+</html>

@@ -1,0 +1,121 @@
+// Shared wire types between the side panel, service worker, content scripts
+// and (Phase 7) the native-messaging helper daemon. This file is the single
+// cross-boundary contract for the extension.
+
+export const PORT_NAME = "panel";
+
+export type ControlMode = "standard" | "unlimited";
+
+import type { LlmMessage, LlmToolSpec } from "./llm";
+import type { Conversation, ConversationSummary } from "./chat";
+export type { LlmMessage };
+export type { Conversation, ConversationSummary };
+
+/** Parameters for the Phase 1 demo/echo task (also the mock harness hook). */
+export interface DemoConfig {
+  steps: number;
+  intervalMs: number;
+}
+
+export interface RunAttachment {
+  name: string;
+  kind: "image" | "text";
+  /** Data URL for images, raw content for text. */
+  data: string;
+}
+
+/** Persisted after every step so a killed service worker can resume the run. */
+export interface Checkpoint {
+  task: string;
+  mode: ControlMode;
+  demo?: DemoConfig;
+  /** Chat thread this run belongs to (history + follow-up context). */
+  conversationId?: string;
+  stepIndex: number;
+  messages: LlmMessage[];
+  /** LLM tool specs frozen at run start (kept for faithful resume). */
+  toolSpecs?: LlmToolSpec[];
+  startedAt: number;
+  updatedAt: number;
+  done: boolean;
+}
+
+export type StepEvent =
+  | { kind: "info"; message: string }
+  | { kind: "step_started"; stepIndex: number }
+  | { kind: "tool_call"; stepIndex: number; name: string; args: unknown }
+  | {
+      kind: "tool_result";
+      stepIndex: number;
+      name: string;
+      result: string;
+      ok: boolean;
+      /** Screenshot thumbnail (data URL) for the panel viewer. */
+      image?: string;
+    }
+  /** Live run statistics for the composer's stats bar. */
+  | {
+      kind: "usage";
+      totalTokens: number;
+      outputTokens: number;
+      tokensPerSec: number;
+      contextTokens: number;
+      contextWindow: number;
+      elapsedMs: number;
+    }
+  | { kind: "token_delta"; text: string }
+  | { kind: "need_confirm"; id: string; tool: string; summary: string }
+  | { kind: "done"; summary: string }
+  | { kind: "error"; message: string };
+
+/** Panel → service worker, over the long-lived port. */
+export type PortRequest =
+  | { kind: "ping" }
+  | {
+      kind: "run";
+      task: string;
+      mode: ControlMode;
+      demo?: DemoConfig;
+      /** Continue an existing chat thread (multi-turn context). */
+      conversationId?: string;
+      /** File attachments (text inlined into the task, images to the model). */
+      attachments?: RunAttachment[];
+    }
+  | { kind: "stop" }
+  | { kind: "state" }
+  /** Chat history (conversation store). */
+  | { kind: "history.list" }
+  | { kind: "history.get"; conversationId: string }
+  | { kind: "history.delete"; conversationId: string }
+  /** Resolve a pending Phase 6 confirmation. */
+  | { kind: "confirm.resolve"; id: string; allow: boolean; always?: boolean }
+  /** Dev/test + Phase 4 loop: run one registered tool against a tab. */
+  | {
+      kind: "run_tool";
+      id: string;
+      name: string;
+      args: Record<string, unknown>;
+      tabId?: number;
+    }
+  /**
+   * Dev/test hook (scripts + e2e): simulate a browser that lets the worker
+   * die — suppresses all keepalive wakeups so checkpoint/resume is testable.
+   */
+  | { kind: "test_suspend" };
+
+export type PanelToSw = PortRequest | { type: "ping" };
+
+/** Service worker → panel. */
+export type SwToPanel =
+  | { type: "agent.event"; event: StepEvent }
+  | { type: "agent.state"; running: boolean; checkpoint: Checkpoint | null }
+  | { type: "pong"; from: "sw"; startedAt: number; ts: number }
+  | {
+      type: "tool_result";
+      id: string;
+      ok: boolean;
+      payload?: unknown;
+      error?: string;
+    }
+  | { type: "history.list"; conversations: ConversationSummary[] }
+  | { type: "history.get"; conversation: Conversation | null };

@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — framed</title>
+  </head>
+  <body>
+    <h3>Framed page (origin 8791)</h3>
+    <input id="frame-input" type="text" placeholder="frame input" />
+    <button id="frame-btn">Frame button</button>
+    <p id="frame-status">idle</p>
+    <script>
+      document.getElementById("frame-btn").addEventListener("click", () => {
+        document.getElementById("frame-status").textContent =
+          "clicked " + document.getElementById("frame-input").value;
+      });
+    </script>
+  </body>
+</html>

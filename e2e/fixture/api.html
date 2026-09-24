@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — api</title>
+  </head>
+  <body>
+    <h1>API consumer</h1>
+    <p id="result">loading…</p>
+    <script>
+      fetch("/api/data")
+        .then((r) => r.json())
+        .then((data) => {
+          document.getElementById("result").textContent = "value: " + data.value;
+        })
+        .catch((e) => {
+          document.getElementById("result").textContent = "error: " + e;
+        });
+    </script>
+  </body>
+</html>

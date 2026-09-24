@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Agent",
+  "version": "0.1.0",
+  "description": "AI browser agent in a sidebar that operates your browser.",
+  "minimum_chrome_version": "114",
+  "permissions": [
+    "alarms",
+    "sidePanel",
+    "debugger",
+    "scripting",
+    "tabs",
+    "storage",
+    "unlimitedStorage",
+    "cookies",
+    "downloads",
+    "webNavigation",
+    "declarativeNetRequest",
+    "declarativeNetRequestFeedback",
+    "nativeMessaging",
+    "clipboardWrite",
+    "activeTab"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background/sw.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "action": {
+    "default_title": "Browser Agent"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/main.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

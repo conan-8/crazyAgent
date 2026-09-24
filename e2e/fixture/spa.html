@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — spa</title>
+  </head>
+  <body>
+    <h1>SPA list</h1>
+    <ul id="spa-list"></ul>
+    <script>
+      // Re-renders the whole list on an interval (fresh DOM nodes each time) —
+      // the stale-ref stress test: element identity is destroyed regularly.
+      // ?fast=1 re-renders every 250ms, which never lets the page settle.
+      const interval = new URLSearchParams(location.search).has("fast")
+        ? 250
+        : 1500;
+      const list = document.getElementById("spa-list");
+      let round = 0;
+      function render() {
+        round++;
+        list.innerHTML = "";
+        for (let i = 1; i <= 5; i++) {
+          const li = document.createElement("li");
+          const b = document.createElement("button");
+          b.textContent = `row ${i} · round ${round}`;
+          b.addEventListener("click", () => {
+            document.title = `clicked ${i} round ${round}`;
+          });
+          li.appendChild(b);
+          list.appendChild(li);
+        }
+      }
+      render();
+      setInterval(render, interval);
+    </script>
+  </body>
+</html>
