@@ -205,25 +205,76 @@ async function main() {
       return document.querySelector(".drawer")?.innerHTML ?? "(no drawer)";
     })()`);
     check("P5-0 settings drawer renders its fields", drawerReady === "ready", drawerReady.slice(0, 120));
-    // Set field values first; Preact state flushes on a later tick, so the
-    // Save click MUST be a separate step or it saves the stale defaults.
+    // Connections start empty, so the drawer shows "Add connection" and no card
+    // exists yet. Create one, expand it, then address fields by their visible
+    // label — positional `inputs[n]` indexing silently hit the global fields
+    // ("Context window", "Max output / call") once this layout landed.
     await panel.eval(`
       (() => {
-        const setVal = (el, v) => {
-          el.value = v;
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-        };
         const drawer = document.querySelector(".drawer");
-        const inputs = drawer.querySelectorAll("input");
-        setVal(inputs[0], "http://127.0.0.1:8792/v1");   // baseUrl
-        setVal(inputs[1], "mock-model");                  // model
-        setVal(inputs[2], "test-key");                    // apiKey
-        const selects = drawer.querySelectorAll("select");
-        selects[0].value = "openai-compatible";
-        selects[0].dispatchEvent(new Event("change", { bubbles: true }));
-        return "filled";
+        if (!drawer.querySelector(".key-label-btn")) drawer.querySelector(".keys-add")?.click();
+        return "added";
       })()
     `);
+    let expanded = "no-card";
+    for (let i = 0; i < 20; i++) {
+      const hasCard = await panel.eval(`Boolean(document.querySelector(".drawer .key-label-btn"))`);
+      if (hasCard) {
+        // A new card starts collapsed — open it so its fields mount.
+        await panel.eval(`
+          (() => {
+            const d = document.querySelector(".drawer");
+            if (!d.querySelector(".key-body")) d.querySelector(".key-label-btn")?.click();
+            return "toggled";
+          })()
+        `);
+      }
+      expanded = await panel.eval(
+        `document.querySelector(".drawer .key-body") ? "open" : "closed"`,
+      );
+      if (expanded === "open") break;
+      await sleep(150);
+    }
+    check("P5-0b connection card expands to reveal its fields", expanded === "open", expanded);
+    // Set field values first; Preact state flushes on a later tick, so the
+    // Save click MUST be a separate step or it saves the stale defaults.
+    // Fill one field per tick. Each handler calls patch(), which rebuilds the
+// keys array from the closure captured at render time — firing all three
+// input events in one synchronous block makes them read the same stale
+// array, so only the last write survives.
+    const setField = (label, value) =>
+      panel.eval(`
+        (() => {
+          const scope = document.querySelector(".drawer .key-body")
+            ?? document.querySelector(".drawer");
+          const f = [...scope.querySelectorAll(".field")].find(
+            (f) => f.querySelector("span")?.textContent?.trim() === ${JSON.stringify(label)},
+          );
+          const el = f?.querySelector("input");
+          if (!el) return "missing";
+          el.value = ${JSON.stringify(value)};
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          return "ok";
+        })()
+      `);
+    const rBase = await setField("Base URL", "http://127.0.0.1:8792/v1");
+    await sleep(150);
+    const rModel = await setField("Model", "mock-model");
+    await sleep(150);
+    const rKey = await setField("API key", "test-key");
+    await sleep(150);
+    const filled = rBase === "ok" && rModel === "ok" && rKey === "ok"
+      ? "filled"
+      : `missing:${rBase}/${rModel}/${rKey}`;
+    await panel.eval(`
+      (() => {
+        const selects = document.querySelector(".drawer").querySelectorAll("select");
+        selects[0].value = "openai-compatible";
+        selects[0].dispatchEvent(new Event("change", { bubbles: true }));
+        return "provider set";
+      })()
+    `);
+    check("P5-0c connection fields addressed by label", filled === "filled", filled.slice(0, 200));
     await sleep(200);
     await panel.eval(`
       [...document.querySelector(".drawer").querySelectorAll("button")]
