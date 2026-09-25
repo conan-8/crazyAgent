@@ -25,6 +25,13 @@ export interface FrameSnapshot {
   text: string;
   elements: ElementInfo[];
   timestamp: number;
+  /**
+   * How many <canvas> elements this frame paints into, and how much DOM text
+   * it produced. Together they let the worker tell "this frame is empty" apart
+   * from "this frame draws its content into a canvas, which no tool can read".
+   */
+  canvases: number;
+  textChars: number;
 }
 
 const INTERACTIVE = [
@@ -156,6 +163,21 @@ function textDigest(): string {
     .slice(0, 2_000);
 }
 
+/** The frame's full body-text length, before the 2 KB digest cap. */
+function rawTextLength(): number {
+  return (document.body?.innerText ?? document.body?.textContent ?? "").replace(/\s+/g, " ").trim()
+    .length;
+}
+
+/** How many canvases this frame paints into (a known unreadable surface). */
+function safeCanvasCount(): number {
+  try {
+    return document.querySelectorAll("canvas").length;
+  } catch {
+    return 0;
+  }
+}
+
 export class ElementRegistry {
   #registrations = new Map<string, Registration>();
 
@@ -223,12 +245,26 @@ export class ElementRegistry {
       text: textDigest(),
       elements,
       timestamp: Date.now(),
+      canvases: safeCanvasCount(),
+      textChars: rawTextLength(),
     };
   }
 
   /** Lightweight page read that does NOT renumber refs (unlike collect). */
-  read(): { href: string; title: string; text: string } {
-    return { href: location.href, title: document.title, text: textDigest() };
+  read(): {
+    href: string;
+    title: string;
+    text: string;
+    canvases: number;
+    textChars: number;
+  } {
+    return {
+      href: location.href,
+      title: document.title,
+      text: textDigest(),
+      canvases: safeCanvasCount(),
+      textChars: rawTextLength(),
+    };
   }
 
   /** Resolve a ref to a live element, recovering from SPA re-renders. */

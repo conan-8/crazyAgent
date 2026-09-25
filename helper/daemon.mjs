@@ -307,6 +307,17 @@ async function onCdpEvent(targetId, msg) {
     }
     await cdpSend(targetId, "Fetch.continueRequest", { requestId }).catch(() => {});
   }
+  // Forward execution-context events to the extension. `Runtime.evaluate` can
+  // target a specific frame by execution context, and contexts are announced
+  // only through these events — without them there is no way to run JS inside an
+  // iframe, which is the Google Docs / embedded-Slides case.
+  if (
+    msg.method === "Runtime.executionContextCreated" ||
+    msg.method === "Runtime.executionContextDestroyed" ||
+    msg.method === "Runtime.executionContextsCleared"
+  ) {
+    send({ id: 0, event: "cdp", result: { targetId, method: msg.method, params: msg.params } });
+  }
 }
 
 function matchUrl(url, pattern) {

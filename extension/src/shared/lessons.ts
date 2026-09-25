@@ -197,10 +197,21 @@ export function mergeLessons(
     }
     fresh.push(lesson);
   }
-  // New lessons lead, in the order the coach ranked them; the sort is stable,
-  // so lessons learned in the same millisecond keep that order.
-  const lessons = [...fresh, ...all].sort((a, b) => b.at - a.at);
-  return { lessons: lessons.slice(0, max), added: fresh.length, merged };
+  // New lessons lead, in the order the coach ranked them. Ordering must NOT
+  // rely on `sort` stability: lessons learned in the same review share a
+  // timestamp down to the millisecond, and equal keys left the order to the
+  // engine's tie-breaking (this was a real, reproducible test flake). So rank
+  // explicitly — batch order first, then time — and only then sort.
+  const ranked = [
+    ...fresh.map((lesson, index) => ({ lesson, batch: index, group: 0 })),
+    ...all.map((lesson) => ({ lesson, batch: 0, group: 1 })),
+  ];
+  ranked.sort((a, b) => {
+    if (a.group !== b.group) return a.group - b.group; // fresh before stored
+    if (a.group === 0 && a.batch !== b.batch) return a.batch - b.batch;
+    return b.lesson.at - a.lesson.at; // newest first within a group
+  });
+  return { lessons: ranked.slice(0, max).map((r) => r.lesson), added: fresh.length, merged };
 }
 
 function findLessonByKey(all: Lesson[], fresh: Lesson[], key: string): Lesson | undefined {

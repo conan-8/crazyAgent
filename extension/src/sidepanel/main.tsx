@@ -88,7 +88,7 @@ let currentConv: Conversation | null = null;
 let postPort: ((req: PortRequest) => void) | null = null;
 const toolWaiters = new Map<
   string,
-  (msg: { ok: boolean; payload?: unknown; error?: string }) => void
+  (msg: { ok: boolean; payload?: unknown; text?: string; error?: string }) => void
 >();
 
 function runTool(
@@ -96,6 +96,19 @@ function runTool(
   args: Record<string, unknown> = {},
   tabId?: number,
 ): Promise<unknown> {
+  return runToolFull(name, args, tabId).then((m) => m.payload);
+}
+
+/**
+ * Like `runTool`, but also hands back the compact rendering the agent loop
+ * would send the model. Driver scripts use this when what matters is what the
+ * model actually reads (e.g. whether iframe content reached the snapshot).
+ */
+function runToolFull(
+  name: string,
+  args: Record<string, unknown> = {},
+  tabId?: number,
+): Promise<{ payload?: unknown; text?: string }> {
   return new Promise((resolve, reject) => {
     if (!postPort) {
       reject(new Error("port not connected"));
@@ -103,7 +116,7 @@ function runTool(
     }
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     toolWaiters.set(id, (m) =>
-      m.ok ? resolve(m.payload) : reject(new Error(m.error ?? "tool failed")),
+      m.ok ? resolve({ payload: m.payload, text: m.text }) : reject(new Error(m.error ?? "tool failed")),
     );
     postPort({ kind: "run_tool", id, name, args, tabId });
   });
@@ -2288,6 +2301,12 @@ function App() {
       runTool(name, args, tabId).then(
         (payload) => ({ ok: true, payload }),
         (err) => ({ ok: false, error: String((err as Error)?.stack ?? err) }),
+      ),
+    /** The model-facing text of one tool run (non-rejecting). */
+    toolText: (name: string, args?: Record<string, unknown>, tabId?: number) =>
+      runToolFull(name, args, tabId).then(
+        (r) => r.text ?? "",
+        (err) => `ERROR: ${String((err as Error)?.message ?? err)}`,
       ),
     state: () => ({ running, pings, swStartedAt, checkpoint }),
     events: () => [...eventBuffer],

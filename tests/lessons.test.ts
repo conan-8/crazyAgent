@@ -417,3 +417,48 @@ describe("export", () => {
     expect(lessonsToMarkdown([])).toContain("No lessons recorded yet");
   });
 });
+describe("mergeLessons ordering", () => {
+  // Regression: ordering used to lean on `sort` stability with equal keys.
+  // Lessons learned in one review share a millisecond timestamp, so the order
+  // was left to the engine and flaked (a real CI failure).
+  it("keeps the coach's order for lessons learned in the same millisecond", () => {
+    const sameMs = 1_700_000_000_000;
+    const batch = ["first learned", "second learned", "third learned", "fourth learned"].map(
+      (text, i) => lesson(text, { id: `n${i}`, at: sameMs }),
+    );
+    for (let run = 0; run < 50; run++) {
+      const { lessons } = mergeLessons([], batch);
+      expect(lessons.map((l) => l.text)).toEqual([
+        "first learned",
+        "second learned",
+        "third learned",
+        "fourth learned",
+      ]);
+    }
+  });
+
+  it("keeps new lessons ahead of stored ones, even at identical timestamps", () => {
+    const sameMs = 1_700_000_000_000;
+    const stored = [lesson("old one", { id: "a", at: sameMs }), lesson("old two", { id: "b", at: sameMs })];
+    const { lessons } = mergeLessons(stored, [
+      lesson("brand new one", { id: "x", at: sameMs }),
+      lesson("brand new two", { id: "y", at: sameMs }),
+    ]);
+    expect(lessons.map((l) => l.text)).toEqual([
+      "brand new one",
+      "brand new two",
+      "old one",
+      "old two",
+    ]);
+  });
+
+  it("sorts stored lessons newest-first across distinct times", () => {
+    const stored = [
+      lesson("middle", { id: "m", at: 200 }),
+      lesson("oldest", { id: "o", at: 100 }),
+      lesson("newest", { id: "n", at: 300 }),
+    ];
+    const { lessons } = mergeLessons(stored, []);
+    expect(lessons.map((l) => l.text)).toEqual(["newest", "middle", "oldest"]);
+  });
+});

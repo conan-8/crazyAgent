@@ -9,6 +9,15 @@ interface RpcReply {
   ok: boolean;
   result?: unknown;
   error?: string;
+  /** Set on unsolicited daemon→extension pushes (CDP events). */
+  event?: string;
+}
+
+/** One forwarded CDP event (see `CdpAdapter.onCdpEvent`). */
+export interface CdpEvent {
+  targetId: string;
+  method: string;
+  params: unknown;
 }
 
 /** The daemon answered — with an application-level failure. Never retried. */
@@ -24,6 +33,13 @@ export class CdpAdapter implements BrowserAdapter {
   #targets = new Map<number, string>(); // tabId → CDP targetId
   /** `${targetId}:${domain}` pairs already enabled on this connection. */
   #enabled = new Set<string>();
+  #eventListeners = new Set<(event: CdpEvent) => void>();
+
+  /** Subscribe to forwarded CDP events (execution contexts, etc.). */
+  onCdpEvent(listener: (event: CdpEvent) => void): () => void {
+    this.#eventListeners.add(listener);
+    return () => this.#eventListeners.delete(listener);
+  }
 
   async connect(cdpPort: number): Promise<void> {
     this.#cdpPort = cdpPort;
@@ -46,6 +62,11 @@ export class CdpAdapter implements BrowserAdapter {
       );
       port.onMessage.addListener((msg: RpcReply) => {
         if (msg.id === 0) {
+          // Unsolicited pushes share id 0 with the hello frame.
+          if (msg.event === "cdp") {
+            for (const listener of this.#eventListeners) listener(msg.result as CdpEvent);
+            return;
+          }
           clearTimeout(helloTimer);
           helloResolve?.();
           return;

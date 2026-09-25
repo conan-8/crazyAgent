@@ -171,6 +171,8 @@ export type SwToPanel =
       id: string;
       ok: boolean;
       payload?: unknown;
+      /** Compact model-facing rendering (what the agent loop would send). */
+      text?: string;
       error?: string;
     }
   | { type: "history.list"; conversations: ConversationSummary[] }

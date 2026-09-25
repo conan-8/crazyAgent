@@ -885,6 +885,10 @@ async function handleRequest(
         id: msg.id,
         ok: res.ok,
         payload: res.payload,
+        // The compact rendering the agent loop would hand the model. Driver
+        // scripts assert on `text` when what matters is what the model actually
+        // reads (e.g. whether iframe content reached the snapshot).
+        text: res.text,
         error: res.error,
       });
       break;

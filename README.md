@@ -94,6 +94,15 @@ teardown and browser restarts. Open one for a per-turn timeline, or **Export
 JSONL / Export MD** to write the whole archive (or a single run) into your
 Downloads folder for keeping alongside the project. Demo runs aren't logged.
 
+**Iframes and embedded docs**: content inside iframes (embedded Google
+Docs/Slides, school portals that frame their tools) is first-class. The snapshot
+carries **every** frame's text, each labelled with its frame id and URL, plus a
+`Frames:` map so a ref like `9#12` is interpretable; the `frames` tool lists each
+frame and whether it can be read; and `evaluate_js frame:9` runs JavaScript
+*inside* that frame. One honest caveat: content painted into a `<canvas>` — the
+Google Docs editor, the Slides surface — has no DOM text at all, and the tools
+now say so explicitly instead of returning a plausible-looking empty page.
+
 **Lessons (self-improvement)**: this agent fails a lot, so it keeps notes on
 itself. When a run ends badly — it errored, you stopped it, or it looped on a
 tool call that kept failing — a **second agent on the same model** reads that
@@ -154,6 +163,7 @@ prompt and stays out of the chat/run record, with both switches honoured
 (`scripts/lessons-smoke.mjs`); `evaluate_js` evaluates over CDP in the page's
 main world, so it keeps working on strict-CSP sites like Google Docs and
 Schoology that refuse isolated-world `eval`, and reports a CSP refusal with the
-retry that actually helps (`scripts/evaluate-csp-smoke.mjs`). A
+retry that actually helps (`scripts/evaluate-csp-smoke.mjs`); iframe text,
+frame listing and in-frame `evaluate_js` are covered by `scripts/frames-smoke.mjs`. A
 live-LLM run ("search Hacker News for X and summarize") needs your API key in
 Settings — the machinery is covered by the mock-LLM suite.

@@ -15,6 +15,12 @@ export interface BrowserAdapter {
     method: string,
     params?: object,
   ): Promise<T>;
+  /**
+   * The default execution context id of the given CDP frame, once the Runtime
+   * domain has reported it (via `sendEnabled`). Null when unknown — callers
+   * then fall back to the main frame. Optional so minimal adapters stay simple.
+   */
+  contextIdForFrame?(tabId: number, frameId: number): number | null;
   screenshot(tabId: number): Promise<{ dataUrl: string }>;
   /** Network interception (Unlimited mode only). */
   intercept?(

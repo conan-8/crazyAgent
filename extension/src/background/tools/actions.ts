@@ -2,7 +2,9 @@
 // synthesizer there (works in cross-origin frames too, since the content
 // script runs in every frame).
 import type { ActionResult } from "../../content/actions";
+import { detectOpaqueSurface } from "../../shared/frames";
 import type { ElementProbe } from "../policy";
+import { collectFramePairs } from "./perception";
 import { registerTool } from "./types";
 
 function parseRef(ref: string): { frameId: number; localRef: string } {
@@ -150,33 +152,74 @@ registerTool({
 registerTool({
   name: "read_page",
   description:
-    "Extract visible text from every frame (lightweight; does not invalidate element refs).",
+    "Extract visible text from the top document AND every iframe (lightweight; does not invalidate element refs). Each frame's text is labelled with its frame id and URL — use those ids with `evaluate_js frame:N` or as the `N#ref` prefix on action tools.",
   parameters: { type: "object", properties: {} },
   async run(_args, ctx) {
+    // Refreshing the frame-id pairing here means `evaluate_js frame:N` works
+    // right after the read the model just did, without an extra `frames` call.
+    await collectFramePairs(ctx.tabId, ctx.adapter).catch(() => null);
     const results = await chrome.scripting.executeScript({
       target: { tabId: ctx.tabId, allFrames: true },
       func: () => {
         const g = globalThis as {
           __baRegistry?: {
-            read(): { href: string; title: string; text: string };
+            read(): {
+              href: string;
+              title: string;
+              text: string;
+              canvases: number;
+              textChars: number;
+            };
           };
         };
         return g.__baRegistry ? g.__baRegistry.read() : null;
       },
     });
-    return results.map((r) => ({
-      frameId: r.frameId ?? 0,
-      href: (r.result as { href?: string } | null)?.href ?? "",
-      title: (r.result as { title?: string } | null)?.title ?? "",
-      text: (r.result as { text?: string } | null)?.text ?? "",
-    }));
+    return results.map((r) => {
+      const info = r.result as {
+        href?: string;
+        title?: string;
+        text?: string;
+        canvases?: number;
+        textChars?: number;
+      } | null;
+      return {
+        frameId: r.frameId ?? 0,
+        href: info?.href ?? "",
+        title: info?.title ?? "",
+        text: info?.text ?? "",
+        canvases: info?.canvases ?? 0,
+        textChars: info?.textChars ?? 0,
+        // A frame whose content script never ran returns null — that is NOT an
+        // empty frame, and the distinction matters when deciding to retry.
+        instrumented: info !== null,
+      };
+    });
   },
   present(payload) {
-    const pages = payload as { frameId: number; href: string; text: string }[];
-    return {
-      text: pages
-        .map((p) => `--- frame ${p.frameId} (${p.href}) ---\n${p.text}`)
-        .join("\n"),
-    };
+    const pages = payload as {
+      frameId: number;
+      href: string;
+      text: string;
+      canvases: number;
+      textChars: number;
+      instrumented: boolean;
+    }[];
+    const body = pages
+      .map((p) => {
+        const head = `--- frame ${p.frameId} (${p.href || "no url"}) ---`;
+        if (!p.instrumented) return `${head}\n[no content script in this frame — cannot be read]`;
+        if (!p.text.trim() && p.canvases > 0) {
+          return `${head}\n[content is drawn into ${p.canvases} <canvas> — unreadable by any tool; use screenshot]`;
+        }
+        return `${head}\n${p.text}`;
+      })
+      .join("\n");
+    const opaque = detectOpaqueSurface({
+      canvases: pages.reduce((n, p) => n + p.canvases, 0),
+      domTextChars: pages.reduce((n, p) => n + p.textChars, 0),
+      frames: pages.length,
+    });
+    return { text: opaque ? `${body}\n\n${opaque}` : body };
   },
 });

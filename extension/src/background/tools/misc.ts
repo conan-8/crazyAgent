@@ -72,25 +72,51 @@ const EVAL_TIMEOUT_MS = 30_000;
  * the domain is enabled, and without that a page with a strict CSP (Google
  * Docs, most school portals) refuses every expression — the failure this tool
  * used to report as an unusable CDP error.
+ *
+ * `frameId` addresses an iframe's execution context when the adapter can
+ * resolve one (enabling Runtime is what populates its context table). The main
+ * frame — and any frame we cannot resolve — evaluates in the tab's default
+ * context.
  */
-function evaluateVia<T extends EvaluateResponse>(
+async function evaluateVia<T extends EvaluateResponse>(
   adapter: ToolContext["adapter"],
   tabId: number,
   params: Record<string, unknown>,
+  frameId?: number,
 ): Promise<T> {
-  return adapter.sendEnabled
-    ? adapter.sendEnabled<T>(tabId, "Runtime", "Runtime.evaluate", params)
-    : adapter.send<T>(tabId, "Runtime.evaluate", params);
+  const evaluate = (extra: Record<string, unknown>) =>
+    adapter.sendEnabled
+      ? adapter.sendEnabled<T>(tabId, "Runtime", "Runtime.evaluate", extra)
+      : adapter.send<T>(tabId, "Runtime.evaluate", extra);
+  if (!frameId) return evaluate(params);
+  if (adapter.sendEnabled && adapter.contextIdForFrame?.(tabId, frameId) == null) {
+    // Enabling Runtime is what makes the browser announce frame contexts.
+    await adapter
+      .sendEnabled<T>(tabId, "Runtime", "Runtime.enable", {})
+      .catch(() => null);
+  }
+  const contextId = adapter.contextIdForFrame?.(tabId, frameId);
+  if (contextId === null || contextId === undefined) {
+    throw new Error(
+      `no execution context for frame ${frameId} — the frame may have navigated or still be loading; take a fresh snapshot to see the current frames`,
+    );
+  }
+  return evaluate({ ...params, contextId });
 }
 
 registerTool({
   name: "evaluate_js",
   description:
-    "Evaluate a JavaScript expression in the page's main world via the DevTools protocol and return the JSON-stringified result (promises are awaited). Works on most sites, including ones with a strict Content-Security-Policy. If it ever comes back CSP-BLOCKED, retry ONCE with bypass_csp:true rather than repeating the same call, or switch to read_page / snapshot and the ref-based action tools, which are never affected by CSP. Top-frame only: it cannot reach inside iframes — for anything in an iframe use the ref-based tools with the frame-scoped ref ('3#12').",
+    "Evaluate a JavaScript expression in a page's main world via the DevTools protocol and return the JSON-stringified result (promises are awaited). Works on most sites, including ones with a strict Content-Security-Policy. Runs in the top document by default; pass `frame` to run it inside an iframe instead (the frame ids and URLs are listed under 'Frames:' in every snapshot). Note this reads the DOM — it cannot read content drawn into a <canvas> (e.g. the Google Docs editor), where no tool except screenshot can see anything. If it ever comes back CSP-BLOCKED, retry ONCE with bypass_csp:true rather than repeating the same call, or switch to read_page / snapshot and the ref-based action tools, which are never affected by CSP.",
   parameters: {
     type: "object",
     properties: {
       expression: { type: "string", description: "JavaScript expression to evaluate" },
+      frame: {
+        type: "number",
+        description:
+          "CDP frame id to evaluate in (0 or omitted = top document). Frame ids appear in the snapshot's 'Frames:' list — use it to read inside an iframe.",
+      },
       bypass_csp: {
         type: "boolean",
         description:
@@ -106,13 +132,19 @@ registerTool({
       await ctx.adapter.send(ctx.tabId, "Page.setBypassCSP", { enabled: true });
       cspBypass = "enabled for this tab; reload or navigate to lift the current document's CSP";
     }
+    const frameId = typeof args.frame === "number" ? args.frame : undefined;
     const res = await Promise.race([
-      evaluateVia<EvaluateResponse>(ctx.adapter, ctx.tabId, {
-        expression: String(args.expression),
-        awaitPromise: true,
-        returnByValue: true,
-        allowUnsafeEvalBlockedByCSP: true,
-      }),
+      evaluateVia<EvaluateResponse>(
+        ctx.adapter,
+        ctx.tabId,
+        {
+          expression: String(args.expression),
+          awaitPromise: true,
+          returnByValue: true,
+          allowUnsafeEvalBlockedByCSP: true,
+        },
+        frameId,
+      ),
       new Promise<never>((_, reject) =>
         setTimeout(
           () => reject(new Error(`evaluation did not settle within ${EVAL_TIMEOUT_MS / 1000}s`)),

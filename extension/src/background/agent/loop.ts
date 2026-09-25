@@ -75,6 +75,7 @@ const RETRY_DELAYS_MS = [1_000, 3_000];
 const PARALLEL_SAFE = new Set([
   "snapshot",
   "read_page",
+  "frames",
   "screenshot",
   "wait_for_settle",
   "tabs_list",

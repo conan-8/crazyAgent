@@ -286,6 +286,65 @@ answers them from `coachScript` and logs them separately — so a review firing
 after a failed run can never consume a scripted agent turn or perturb the
 `requests()`/`lastRequest()` assertions the other smokes rely on.
 
+## Frames and iframes (perception + evaluation)
+
+A page's content is frequently **not** in the top document: Google Docs keeps it
+in a kix frame, school portals embed Docs/Slides in iframes. Until this change
+the snapshot computed every frame's text and then kept only the main frame's
+(`text` was assigned only when `frameId === 0`), so the model could click a
+button inside an iframe but could not read a word of it — the failure behind a
+real run that stalled for dozens of turns on Schoology and Docs.
+
+- `shared/frames.ts` (pure, `tests/frames.test.ts`) — `orderFrames` (main first),
+  `buildFrameText` (main text, then every other frame's, each labelled
+  `--- frame N (url) ---`, with a per-frame cap of 1.2 KB and a 4 KB total so one
+  huge frame or a page full of ad frames cannot crowd out the document),
+  `formatFrameMap` (id → host, so a ref like `9#12` is interpretable),
+  `detectOpaqueSurface` (see below).
+- The content script's `collect()`/`read()` also report `canvases` and
+  `textChars` per frame, which is what lets the worker distinguish "empty frame"
+  from "frame that paints into a canvas".
+- **Canvas content is unreadable — and now says so.** The Google Docs editor and
+  the Slides surface are `<canvas>`: there is no DOM text to extract, and every
+  tool including `evaluate_js` returns nothing useful. Rather than coming back
+  with a plausible-looking empty page (which invites retries), `snapshot` and
+  `read_page` emit an explicit note that the content is canvas-drawn and no tool
+  can read it.
+- **`frames` tool** — lists every frame with its id, URL, title and whether it is
+  readable, and records the id mapping below.
+- **Two frame id spaces, joined by URL.** `chrome.scripting` reports frames as
+  small integers that are NOT sequential (the cross-origin fixture comes back as
+  `9`, not `1`) and refs are built from those; CDP identifies frames by 32-hex
+  ids, and only CDP's execution contexts carry the form `Runtime.evaluate` needs.
+  Neither can be derived from the other, so `collectFramePairs` gathers both
+  (`chrome.scripting` + `Page.getFrameTree`) and pairs them on URL —
+  `DebuggerAdapter.mapFrames` stores the result and `contextIdForFrame` maps a
+  scripting frameId to a live execution context (re-resolving after navigation,
+  and forgetting everything on detach).
+- **`evaluate_js frame:N`** runs the expression inside that frame by passing
+  `contextId`. An unresolvable frame fails with an explicit message instead of
+  silently evaluating in the top document. `read_page` refreshes the pairing, so
+  frame evaluation works right after the read the model just did.
+- Unlimited mode needed one daemon change: `helper/daemon.mjs` now forwards
+  `Runtime.executionContext*` events (`event: "cdp"` pushes on id 0), which is
+  the only way contexts reach the extension over the native-messaging bridge.
+
+Known limits: a frame the content script never reached
+(`about:blank`/`srcdoc`/`data:` — the manifest has no `match_about_blank`) cannot
+be read or evaluated; `read_page` now reports those as
+`[no content script in this frame]` rather than as empty, and the frames tool
+marks them `not readable`. Cross-origin frames are fine — what matters is that
+the content script ran there.
+
+`scripts/frames-smoke.mjs` (in `npm run verify`) proves all of it against the
+real cross-origin fixture: iframe text reaches the snapshot, frames are listed
+with URLs, `read_page` labels and flags them, `evaluate_js frame:N` really runs
+inside the frame (verified against `location.port` and by proving the top
+document cannot see the frame's element), an unknown frame fails loudly, canvas
+content is signalled, and a plain single-frame page is unchanged.
+`scripts/phase2-smoke.mjs` also asserts the fixture iframe's text now appears in
+the snapshot digest.
+
 ## Helper daemon (Unlimited mode)
 
 `helper/daemon.mjs` — native-messaging host (4-byte LE framing) bridging RPC
@@ -303,6 +362,11 @@ writes `NativeMessagingHosts/*.json` for Chrome/Chromium/Edge/Brave;
   mocks (same-origin navigations keep them).
 - Packaging the daemon as a single binary (bun/pkg) is optional; node + the
   wrapper is the shipped form.
+- `evaluate_js` cannot read content drawn into a `<canvas>` (Google Docs'
+  editor, Slides' surface) — no tool can; the snapshot says so rather than
+  looking empty. Frames whose content script never ran (`about:blank`,
+  `srcdoc`, `data:`) can be neither read nor evaluated, and from the next
+  navigation onward the /preview view of a Doc is the readable route.
 - Lessons are per browser profile (`chrome.storage.local`, never synced) and
   capped at 300; one review covers one run (max 6 lessons), so a long broken
   thread is learned one turn at a time. Reviews are serialized and best-effort:

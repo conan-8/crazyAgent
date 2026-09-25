@@ -164,6 +164,12 @@ async function main() {
       snap.text.includes("Fixture home"),
       snap.text.slice(0, 60),
     );
+    check(
+      "S4b snapshot text includes the IFRAME's text too, labelled with its frame id",
+      snap.text.includes("Framed page (origin 8791)") &&
+        /--- frame \d+ \(http:\/\/127\.0\.0\.1:8791\/framed\.html\) ---/.test(snap.text),
+      snap.text.slice(-160),
+    );
 
     // ---- screenshot ----
     const shot = await panel.eval(`__ba.runTool("screenshot", {}, ${tabId})`);
