@@ -50,6 +50,22 @@ const MODE_RULES: Record<string, string[]> = {
 const JUDGE_RULE =
   "- For bulk per-item judgments (relevance, filtering, yes/no over many items), prefer ONE `judge` call with one question per item over examining them step by step; keep counting, arithmetic and date comparisons in your own reasoning.";
 
+/**
+ * Document editors (Google Docs/Slides, Office on the web, anything built like
+ * them) paint the document into a <canvas> and route typing through a hidden
+ * editable element. Every rule here is verified against the local
+ * canvas-editor/canvas-sink fixtures (scripts/docs-smoke.mjs), so this is a
+ * procedure known to work rather than a guess.
+ */
+const DOCUMENT_EDITOR_RULES = [
+  "Canvas document editors (Google Docs, Slides, Office on the web, and anything shaped like them):",
+  "- The document BODY is painted into a <canvas>. No tool can read it — not read_page, not snapshot, not evaluate_js, not any expression you can write. Hunting for a clever selector wastes turns: pixel content has no DOM.",
+  "- Typing goes into a SEPARATE hidden editable element (Docs calls it the text-event-target iframe; it usually has role=textbox or contenteditable and lives in its own frame). It shows up in the snapshot as an editable ref — often `N#1`, named like \"Document body\". That ref is your typing target; do not try to click the canvas.",
+  "- So: `type` to write, click toolbar refs to format (Bold, Undo, …), and read the document with the page's own affordances rather than the DOM.",
+  "- To READ a document (not just write it), the edit view will not help: change the URL first. A Google Doc reads as text at /document/d/<id>/preview or /document/d/<id>/mobilebasic; a Slides deck at /presentation/d/<id>/preview. Export/text URLs often download instead of rendering. Navigate there, read_page, then go back if you need to edit.",
+  "- When a frame reports 'content is drawn into a <canvas>', that is a statement of fact, not a transient error: do NOT retry read_page / snapshot / evaluate_js hoping for different output. Use screenshot if seeing it matters, then work with the toolbar refs and the typing sink, or switch to the readable URL above.",
+];
+
 export function buildSystemPrompt(
   task: string,
   agentMode: string = "auto",
@@ -65,6 +81,8 @@ export function buildSystemPrompt(
     "",
     ...BASE_RULES,
     ...(hasJudge ? [JUDGE_RULE] : []),
+    "",
+    ...DOCUMENT_EDITOR_RULES,
     "",
     // Madman mode only changes the voice; it is appended so every rule above
     // still holds. Empty string when off keeps the prompt byte-identical.

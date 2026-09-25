@@ -1,4 +1,5 @@
 // Sensitive tools, gated behind confirmation by the policy layer.
+import { CSP_BLOCKED_MARKER } from "../../shared/tool-failure";
 import type { ToolContext } from "./types";
 import { registerTool } from "./types";
 
@@ -40,7 +41,7 @@ export function isCspBlocked(error: string): boolean {
 export function describeEvalFailure(error: string): string {
   if (!isCspBlocked(error)) return error;
   return [
-    "CSP-BLOCKED: this page's Content-Security-Policy forbids evaluating JavaScript (no 'unsafe-eval'), so this expression could not run.",
+    `${CSP_BLOCKED_MARKER}: this page's Content-Security-Policy forbids evaluating JavaScript (no 'unsafe-eval'), so this expression could not run.`,
     error,
     "Do NOT retry the same expression. Options, in order: (1) retry once with bypass_csp:true — that lifts this site's CSP for the tab; (2) use read_page / snapshot / click / type with element refs instead of JavaScript, which is unaffected by CSP; (3) if neither works, report the page as unreadable by script and stop.",
   ].join("\n");

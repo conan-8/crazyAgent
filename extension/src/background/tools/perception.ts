@@ -252,6 +252,66 @@ export async function downscaleJpeg(
 }
 
 registerTool({
+  name: "page_health",
+  description:
+    "Quick check that the tools can actually reach the current tab, reporting which layer works: content script injection, tab access, and the debugger channel used by screenshot / evaluate_js. Call this when several tools in a row fail, instead of retrying them one by one — it tells you whether the problem is the page or the connection to it.",
+  parameters: { type: "object", properties: {} },
+  async run(_args, ctx) {
+    const report = {
+      url: "",
+      injection: "unknown" as string,
+      frames: 0,
+      tabAccess: "unknown" as string,
+      debuggerChannel: "unknown" as string,
+      advice: "",
+    };
+    try {
+      const tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+      report.url = tab?.url ?? "";
+      report.tabAccess = tab ? "ok" : "no active tab";
+    } catch (err) {
+      report.tabAccess = String((err as Error)?.message ?? err);
+    }
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: ctx.tabId, allFrames: true },
+        func: () => location.href,
+      });
+      report.frames = results.length;
+      report.injection = results.length ? "ok" : "no frames";
+    } catch (err) {
+      report.injection = String((err as Error)?.message ?? err).slice(0, 200);
+    }
+    try {
+      await ctx.adapter.send(ctx.tabId, "Page.getFrameTree", {});
+      report.debuggerChannel = "ok";
+    } catch (err) {
+      report.debuggerChannel = String((err as Error)?.message ?? err).slice(0, 200);
+    }
+    const broken: string[] = [];
+    if (report.injection !== "ok") broken.push("content scripts cannot run in this page");
+    if (report.debuggerChannel !== "ok") broken.push("the debugger channel to the tab is down");
+    report.advice = broken.length
+      ? `Do NOT keep retrying tools. ${broken.join("; ")}. Reload the tab (or switch away and back) and check again; if the page is chrome://, a PDF viewer or an extension page, it cannot be automated.`
+      : "All layers respond — a tool that failed was failing for its own reason (bad ref, CSP, or a frame you cannot address), not because the page is unreachable.";
+    return report;
+  },
+  present(payload) {
+    const r = payload as Record<string, string | number>;
+    return {
+      text: [
+        `url: ${r.url || "(none)"}`,
+        `tab access: ${r.tabAccess}`,
+        `content-script injection: ${r.injection} (${r.frames} frame(s))`,
+        `debugger channel: ${r.debuggerChannel}`,
+        "",
+        String(r.advice),
+      ].join("\n"),
+    };
+  },
+});
+
+registerTool({
   name: "frames",
   description:
     "List every frame of the current page: its frame id, URL, title and whether it can be read. Use this when content seems to be missing from the snapshot — embedded documents, slide decks and portals that frame their tools live in frames, and their text is in the snapshot's `Visible text` while this list tells you which id maps to which URL (for `evaluate_js frame:N` and for `N#ref` action refs).",

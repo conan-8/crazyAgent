@@ -345,6 +345,52 @@ content is signalled, and a plain single-frame page is unchanged.
 `scripts/phase2-smoke.mjs` also asserts the fixture iframe's text now appears in
 the snapshot digest.
 
+## Canvas document editors (Docs / Slides) and tool-failure reporting
+
+Two problems came out of the same real run ("type something into this Google
+Doc"), and both are fixed and pinned by `scripts/docs-smoke.mjs`.
+
+**1. Failures did not say which layer failed.** The model was shown the bare
+string `fetch failed` — a thrown `TypeError`'s message — so it could not tell a
+dead tab from a bad ref from a CSP refusal, and retried the same call until it
+gave up. `shared/tool-failure.ts` (pure, `tests/tool-failure.test.ts`) now
+classifies every failure into a layer and appends the next move:
+`TRANSPORT-FAILED` (debugger/daemon link — reload the tab, do not hammer it),
+`INJECTION-FAILED` (no content script: chrome://, PDF viewer, still loading),
+`CSP-FAILED`, `FRAME-FAILED` (stale/unaddressable ref or frame), `INPUT-FAILED`
+(bad arguments), `TOOL-FAILED`. `describeToolFailure` wraps every exit from
+`executeTool` — including the validation and no-active-tab early returns that
+used to bypass it — and never re-wraps a message that already carries guidance
+(`evaluate_js` tags its own CSP refusals with `CSP_BLOCKED_MARKER`, shared with
+the classifier so the two cannot drift). Advice is only appended when the
+original message does not already give it, so Chrome's "take a fresh snapshot"
+is not repeated twice.
+
+**2. There was no procedure for a canvas editor.** The document body in Docs,
+Slides and Office-on-the-web is painted into a `<canvas>`: there is no DOM text
+and no expression can extract it. But typing *does* work — into a **separate
+hidden editable element** (Docs' `docs-texteventtarget-iframe`) that appears in
+the snapshot as an editable frame-scoped ref. `buildSystemPrompt` now carries
+that procedure as `DOCUMENT_EDITOR_RULES`: the body is unreadable and must not
+be retried; type into the sink ref, do not click the canvas; format via toolbar
+refs; and to *read* a document change the URL first (`/document/d/<id>/preview`,
+`/mobilebasic`, `/presentation/d/<id>/preview`).
+
+The fixture pair `e2e/fixture/canvas-editor.html` + `canvas-sink.html`
+reproduces the shape locally (pixels on a canvas, keystrokes routed through a
+hidden contenteditable in another frame), which is what makes the playbook
+verifiable rather than folklore. `scripts/docs-smoke.mjs` proves: the canvas is
+declared unreadable; the sink is exposed as an editable `N#1` ref; `type` into
+it lands in the document (confirmed by the page's own counter *and* by the top
+frame being blind to the sink, so it cannot have gone the easy way); toolbar
+refs work with no DOM body; `page_health` reports each layer; and bad
+refs/arguments/unaddressable frames all come back classified.
+
+**`page_health`** is the escape hatch for "several tools just failed": it
+reports tab access, content-script injection and the debugger channel
+separately, and says explicitly whether the page is unreachable or the failure
+was tool-specific — so the model stops retrying and reports.
+
 ## Helper daemon (Unlimited mode)
 
 `helper/daemon.mjs` — native-messaging host (4-byte LE framing) bridging RPC

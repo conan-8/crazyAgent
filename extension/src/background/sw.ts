@@ -88,6 +88,7 @@ import {
   type JevClient,
 } from "./agent/jev";
 import { isMutating } from "../shared/modes";
+import { describeToolFailure } from "../shared/tool-failure";
 import { probeElement } from "./tools/actions";
 import {
   collectSnapshot,
@@ -593,12 +594,14 @@ async function executeTool(
   if (!tool) return { ok: false, error: `unknown tool: ${name}` };
   const validation = validateToolArgs(tool, args);
   if (validation.error) {
-    return { ok: false, error: validation.error.replace(/^ERROR: /, "") };
+    return { ok: false, error: describeToolFailure(validation.error.replace(/^ERROR: /, "")) };
   }
   const targetTabId =
     tabId ??
     (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
-  if (targetTabId === undefined) return { ok: false, error: "no active tab" };
+  if (targetTabId === undefined) {
+    return { ok: false, error: describeToolFailure("no active tab") };
+  }
   try {
     const adapter = await adapterForMode();
     const payload = await tool.run(args, { tabId: targetTabId, adapter, emit });
@@ -610,7 +613,7 @@ async function executeTool(
     ) {
       return {
         ok: false,
-        error: String((payload as { error?: string }).error ?? "tool failed"),
+        error: describeToolFailure((payload as { error?: unknown }).error ?? "tool failed"),
       };
     }
     const presented = tool.present?.(payload);
@@ -621,7 +624,9 @@ async function executeTool(
       image: presented?.image,
     };
   } catch (err) {
-    return { ok: false, error: String((err as Error)?.message ?? err) };
+    // Name the layer that failed and the next move. A bare "fetch failed" here
+    // is what left a real run retrying a dead call 20 times.
+    return { ok: false, error: describeToolFailure(err) };
   }
 }
 

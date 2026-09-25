@@ -69,3 +69,35 @@ describe("buildSystemPrompt", () => {
     expect(p).toContain("Madman mode — ON");
   });
 });
+describe("canvas document editor rules", () => {
+  // The playbook the agent needed for "type something into this Google Doc":
+  // verified against the canvas-editor fixture in scripts/docs-smoke.mjs.
+  const prompt = buildSystemPrompt("type something into this doc", "auto");
+
+  it("tells the model the canvas body cannot be read, and not to retry", () => {
+    expect(prompt).toContain("painted into a <canvas>");
+    expect(prompt).toContain("No tool can read it");
+    expect(prompt).toContain("do NOT retry");
+  });
+
+  it("names the hidden typing sink as the real typing target", () => {
+    expect(prompt).toContain("hidden editable element");
+    expect(prompt).toContain("text-event-target");
+    expect(prompt).toContain("do not try to click the canvas");
+  });
+
+  it("gives the readable URL route for Docs and Slides", () => {
+    expect(prompt).toContain("/document/d/<id>/preview");
+    expect(prompt).toContain("/mobilebasic");
+    expect(prompt).toContain("/presentation/d/<id>/preview");
+  });
+
+  it("is byte-stable across calls and independent of madman mode", () => {
+    expect(buildSystemPrompt("t", "auto")).toBe(buildSystemPrompt("t", "auto"));
+    const off = buildSystemPrompt("t", "auto", false);
+    const on = buildSystemPrompt("t", "auto", true);
+    // Madman only appends a voice; the editor rules survive intact.
+    expect(on).toContain("painted into a <canvas>");
+    expect(off).toContain("painted into a <canvas>");
+  });
+});

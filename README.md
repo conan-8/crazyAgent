@@ -103,6 +103,18 @@ frame and whether it can be read; and `evaluate_js frame:9` runs JavaScript
 Google Docs editor, the Slides surface — has no DOM text at all, and the tools
 now say so explicitly instead of returning a plausible-looking empty page.
 
+**Canvas document editors (Google Docs, Slides, Office on the web)**: the
+document body is a `<canvas>` — no tool can read it — but typing works through
+the hidden editable element (Docs' text-event-target), which appears in the
+snapshot as an editable ref. The agent is told this procedure explicitly, told
+not to retry a canvas page, and given the readable URL route
+(`/document/d/<id>/preview`, `/presentation/d/<id>/preview`) for documents it
+must actually read. Tool failures also name their layer now
+(`TRANSPORT-FAILED`, `INJECTION-FAILED`, `FRAME-FAILED`, `CSP-FAILED`,
+`INPUT-FAILED`) with the next move, instead of the bare `fetch failed` that
+used to send a run into a 20-turn retry loop, and `page_health` reports whether
+the page is reachable at all.
+
 **Lessons (self-improvement)**: this agent fails a lot, so it keeps notes on
 itself. When a run ends badly — it errored, you stopped it, or it looped on a
 tool call that kept failing — a **second agent on the same model** reads that
@@ -164,6 +176,8 @@ prompt and stays out of the chat/run record, with both switches honoured
 main world, so it keeps working on strict-CSP sites like Google Docs and
 Schoology that refuse isolated-world `eval`, and reports a CSP refusal with the
 retry that actually helps (`scripts/evaluate-csp-smoke.mjs`); iframe text,
-frame listing and in-frame `evaluate_js` are covered by `scripts/frames-smoke.mjs`. A
+frame listing and in-frame `evaluate_js` are covered by `scripts/frames-smoke.mjs`;
+the canvas-editor playbook and layered failure reporting by
+`scripts/docs-smoke.mjs`. A
 live-LLM run ("search Hacker News for X and summarize") needs your API key in
 Settings — the machinery is covered by the mock-LLM suite.
