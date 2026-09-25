@@ -10,7 +10,12 @@ that risk.
 ## Controls
 
 - **Gated autonomy (Phase 6 policy).** Always-confirm rules:
-  - `evaluate_js` — arbitrary script execution
+  - `evaluate_js` — arbitrary script execution in the page's main world
+    (via CDP `Runtime.evaluate`, so the page's CSP does not block it)
+  - `evaluate_js` with `bypass_csp` — separate rule (`csp_bypass`): turns
+    off the site's CSP for that tab (`Page.setBypassCSP`) until the
+    debugger session ends, so an "Always allow" on plain JS never
+    extends to disabling CSP
   - typing into `input[type=password]`
   - form submission (submit-button click, typed submit, Enter in a form)
   - purchase/checkout navigation and purchase-control clicks (URL/text heuristics)

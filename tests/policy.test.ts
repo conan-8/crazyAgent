@@ -52,6 +52,16 @@ describe("assess — policy matrix", () => {
     });
   });
 
+  it("gives evaluate_js with bypass_csp its own rule", () => {
+    expect(assess("evaluate_js", { expression: "1+1", bypass_csp: true })).toMatchObject({
+      level: "confirm",
+      rule: "csp_bypass",
+    });
+    expect(assess("evaluate_js", { expression: "1+1", bypass_csp: false })).toMatchObject({
+      rule: "evaluate_js",
+    });
+  });
+
   it("confirms purchase/checkout navigation and clicks", () => {
     expect(assess("navigate", { url: "https://shop.example/checkout?x=1" })).toMatchObject({
       level: "confirm",

@@ -29,11 +29,19 @@ export function assess(
 ): Risk {
   switch (name) {
     case "evaluate_js":
-      return {
-        level: "confirm",
-        rule: "evaluate_js",
-        summary: `Run JavaScript: ${String(args.expression ?? "").slice(0, 140)}`,
-      };
+      // CSP bypass is its own rule so "always allow" on plain JS doesn't
+      // silently extend to disabling a site's CSP.
+      return args.bypass_csp === true
+        ? {
+            level: "confirm",
+            rule: "csp_bypass",
+            summary: `Disable this site's CSP and run JavaScript: ${String(args.expression ?? "").slice(0, 120)}`,
+          }
+        : {
+            level: "confirm",
+            rule: "evaluate_js",
+            summary: `Run JavaScript: ${String(args.expression ?? "").slice(0, 140)}`,
+          };
     case "download":
       return {
         level: "confirm",

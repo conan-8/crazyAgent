@@ -169,6 +169,5 @@ writes `NativeMessagingHosts/*.json` for Chrome/Chromium/Edge/Brave;
 - CdpAdapter tab→target matching is by URL (same-URL tabs may alias).
 - Intercept state is per page target: a cross-process navigation can drop
   mocks (same-origin navigations keep them).
-- `evaluate_js` runs in the isolated world (not the page's main world).
 - Packaging the daemon as a single binary (bun/pkg) is optional; node + the
   wrapper is the shipped form.
