@@ -52,6 +52,11 @@ export interface LoopDeps {
   madman?: boolean;
   /** Jev sidecar configured: the `judge` tool is in the spec list. */
   judgeAvailable?: boolean;
+  /**
+   * Per-run appendix for the system prompt (lessons learned from previous
+   * runs). Sent as a separate, uncached system block — see LlmRequest.
+   */
+  lessonsBlock?: string;
 }
 
 const MAX_RESULT_CHARS = 24_000;
@@ -137,6 +142,7 @@ export async function runAgentTask(
             deps.madman === true,
             deps.judgeAvailable === true,
           ),
+          systemSuffix: deps.lessonsBlock || undefined,
           messages: truncateHistory(cp.messages, HISTORY_BUDGET_CHARS),
           tools,
           maxTokens: deps.maxTokens,

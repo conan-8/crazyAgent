@@ -2,7 +2,7 @@
 import type { ControlMode } from "../shared/protocol";
 import type { AgentMode } from "../shared/modes";
 import type { ThinkingLevel } from "../shared/llm";
-import { JEV_DEFAULTS } from "../shared/jev";
+import { JEV_TRANSPORT_DEFAULTS, normalizeJevTransport, type JevTransport } from "../shared/jev";
 
 /**
  * One saved connection: a credential plus the endpoint and model it belongs to.
@@ -19,16 +19,31 @@ export interface ApiKeyEntry {
 }
 
 /**
- * Jev (TypeSafe System-One) sidecar config. Deliberately NOT an ApiKeyEntry
- * connection: Jev is a decision model that works alongside the selected chat
- * model (risk gating, the `judge` tool, effort routing) — it can never drive
- * the agent loop itself.
+ * Jev sidecar config. Deliberately NOT an ApiKeyEntry connection: Jev is a
+ * decision model that works alongside the selected chat model (risk gating,
+ * the `judge` tool, effort routing) — it can never drive the agent loop itself.
  */
 export interface JevSettings {
   enabled: boolean;
+  /**
+   * `typesafe` (native /systemone — real Jev) or `openai` (any OpenAI-compatible
+   * /chat/completions endpoint, e.g. OpenRouter with your OpenRouter key).
+   */
+  transport: JevTransport;
   apiKey: string;
   baseUrl: string;
   model: string;
+}
+
+/**
+ * Self-improvement ("coach") config. `enabled` is the master switch for the
+ * whole loop — lessons are read back into the system prompt AND new ones are
+ * written after a run. `auto` additionally reviews runs that went wrong
+ * without being asked; manual reviews work either way.
+ */
+export interface LearnSettings {
+  enabled: boolean;
+  auto: boolean;
 }
 
 export interface AgentSettings {
@@ -83,6 +98,12 @@ export interface AgentSettings {
    * `jev.enabled`.
    */
   autoThinking: boolean;
+  /**
+   * Self-improvement: a second agent (same model) reviews finished runs and
+   * writes lessons into this profile's local log, which later runs read back.
+   * On by default — auto-review only fires on runs that failed.
+   */
+  learn: LearnSettings;
 }
 
 /** Defaults for a brand-new connection. */
@@ -107,14 +128,19 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   thinking: "low",
   // Straight-laced by default; Madman mode is opt-in.
   madman: false,
-  // Jev sidecar off until the user pastes a TypeSafe key.
+  // Jev sidecar off until the user pastes a key (TypeSafe, or OpenRouter for
+  // the chat-completions transport).
   jev: {
     enabled: false,
+    transport: "typesafe",
     apiKey: "",
-    baseUrl: JEV_DEFAULTS.baseUrl,
-    model: JEV_DEFAULTS.model,
+    baseUrl: JEV_TRANSPORT_DEFAULTS.typesafe.baseUrl,
+    model: JEV_TRANSPORT_DEFAULTS.typesafe.model,
   },
   autoThinking: false,
+  // Self-improvement on by default: lessons already learned are applied to
+  // later runs, and runs that failed are reviewed automatically.
+  learn: { enabled: true, auto: true },
 };
 
 const THINKING_VALUES: ThinkingLevel[] = ["off", "low", "medium", "high"];
@@ -141,20 +167,45 @@ export function migrateThinking(stored: {
 
 const KEY = "baSettings";
 
+/**
+ * Legacy blocks carry no `transport`. They were written when TypeSafe was the
+ * only option — except one case worth rescuing: a stored baseUrl pointing at
+ * OpenRouter could never have worked (no /systemone there), so it is inferred
+ * as the chat transport and starts working instead of 404-ing. An explicit
+ * `transport` always wins.
+ */
+function inferJevTransport(raw: Partial<JevSettings>): JevTransport {
+  if (raw.transport !== undefined) return normalizeJevTransport(raw.transport);
+  const baseUrl = typeof raw.baseUrl === "string" ? raw.baseUrl.toLowerCase() : "";
+  return baseUrl.includes("openrouter.ai") ? "openai" : "typesafe";
+}
+
 /** Backfill/coerce a stored Jev block (missing or partial → safe defaults). */
 export function normalizeJev(stored: unknown): JevSettings {
   const raw = (stored && typeof stored === "object" ? stored : {}) as Partial<JevSettings>;
+  const transport = inferJevTransport(raw);
+  const defaults = JEV_TRANSPORT_DEFAULTS[transport];
   return {
     // Only a real `true` enables the sidecar; anything else stays off.
     enabled: raw.enabled === true,
+    transport,
     apiKey: typeof raw.apiKey === "string" ? raw.apiKey : "",
     baseUrl:
       typeof raw.baseUrl === "string" && raw.baseUrl.trim()
         ? raw.baseUrl.trim()
-        : JEV_DEFAULTS.baseUrl,
+        : defaults.baseUrl,
     model:
-      typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : JEV_DEFAULTS.model,
+      typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : defaults.model,
   };
+}
+
+/** Backfill/coerce a stored coach block. Unlike Jev this ships ON: only an
+ * explicit `false` turns either switch off, so older stored settings (which
+ * have no `learn` block at all) get the feature rather than silently losing
+ * it. */
+export function normalizeLearn(stored: unknown): LearnSettings {
+  const raw = (stored && typeof stored === "object" ? stored : {}) as Partial<LearnSettings>;
+  return { enabled: raw.enabled !== false, auto: raw.auto !== false };
 }
 
 /** Stable-enough id for a new entry (crypto.randomUUID needs a secure ctx). */
@@ -256,6 +307,8 @@ export function normalizeSettings(
     // Jev sidecar: backfill partial stored objects; coerce the toggles.
     jev: normalizeJev(merged.jev),
     autoThinking: merged.autoThinking === true,
+    // Coach: on unless explicitly disabled (see normalizeLearn).
+    learn: normalizeLearn(merged.learn),
   };
 }
 

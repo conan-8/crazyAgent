@@ -1,13 +1,18 @@
 // Jev client — the System-One sidecar that runs ALONGSIDE the selected chat
 // provider (it is deliberately not an LlmClient: Jev answers typed questions,
-// it never streams text or requests tools). One POST to {baseUrl}/systemone
-// per decision point; every caller treats failure as "no Jev signal" and falls
-// back to the deterministic path, so a run never depends on Jev being up.
+// it never streams text or requests tools). One POST per decision point:
+//   - typesafe transport → {baseUrl}/systemone      (Jev proper)
+//   - openai transport   → {baseUrl}/chat/completions (OpenRouter et al.)
+// Every caller treats failure as "no Jev signal" and falls back to the
+// deterministic path, so a run never depends on Jev being up.
 import {
   JEV_COMPLEXITY_CRITERIA,
-  JEV_DEFAULTS,
+  buildOpenAiJevBody,
   buildSystemOneBody,
   describeJevHttpError,
+  jevDefaultsFor,
+  normalizeJevTransport,
+  parseOpenAiJevResponse,
   parseSystemOneResponse,
   thinkingForComplexity,
   type JevAnswer,
@@ -15,13 +20,24 @@ import {
   type JevQuestion,
   type JevResult,
   type JevState,
+  type JevTransport,
 } from "../../shared/jev";
 import type { ThinkingLevel } from "../../shared/llm";
+
+/**
+ * Floor for the chat-completions transport. TypeSafe answers in milliseconds,
+ * but a chat model is a full round-trip, so the callers' short time-boxes (the
+ * risk gate allows 2s) would expire before a healthy answer could land. This
+ * only widens the window Jev has to answer — a slow or dead endpoint still
+ * resolves as "no Jev signal" and fails open exactly as before.
+ */
+export const JEV_CHAT_MIN_TIMEOUT_MS = 6_000;
 
 export interface JevClientConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  transport: JevTransport;
 }
 
 export interface JevCallOptions {
@@ -44,37 +60,59 @@ export class JevError extends Error {
 export class JevClient {
   constructor(private cfg: JevClientConfig) {}
 
+  /** Which wire this client speaks. */
+  get transport(): JevTransport {
+    return this.cfg.transport;
+  }
+
+  /** True for the OpenRouter / OpenAI-compatible chat transport. */
+  get isChatTransport(): boolean {
+    return this.cfg.transport === "openai";
+  }
+
   async decide(
     state: JevState,
     questions: Record<string, JevQuestion>,
     opts: JevCallOptions = {},
   ): Promise<JevResult> {
-    const timeoutMs = opts.timeoutMs ?? 8_000;
+    const requested = opts.timeoutMs ?? 8_000;
+    const timeoutMs = this.isChatTransport
+      ? Math.max(requested, JEV_CHAT_MIN_TIMEOUT_MS)
+      : requested;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const onOuterAbort = (): void => controller.abort();
     opts.signal?.addEventListener("abort", onOuterAbort);
+    const chat = this.isChatTransport;
+    const model = this.cfg.model || jevDefaultsFor(this.cfg.transport).model;
     try {
-      const res = await fetch(`${this.cfg.baseUrl.replace(/\/+$/, "")}/systemone`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${this.cfg.apiKey}`,
+      const res = await fetch(
+        `${this.cfg.baseUrl.replace(/\/+$/, "")}${chat ? "/chat/completions" : "/systemone"}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.cfg.apiKey}`,
+            // OpenRouter attribution header (ignored by other gateways).
+            ...(chat ? { "x-title": "crazyAgent" } : {}),
+          },
+          body: JSON.stringify(
+            chat
+              ? buildOpenAiJevBody(state, questions, model)
+              : buildSystemOneBody(state, questions, model),
+          ),
+          signal: controller.signal,
         },
-        body: JSON.stringify(
-          buildSystemOneBody(state, questions, this.cfg.model || JEV_DEFAULTS.model),
-        ),
-        signal: controller.signal,
-      });
+      );
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
         throw new JevError(
-          `${describeJevHttpError(res.status)}${detail ? ` ${detail.slice(0, 200)}` : ""}`,
+          `${describeJevHttpError(res.status, this.cfg.transport)}${detail ? ` ${detail.slice(0, 200)}` : ""}`,
           res.status,
         );
       }
       const json: unknown = await res.json().catch(() => null);
-      return parseSystemOneResponse(json);
+      return chat ? parseOpenAiJevResponse(json, questions) : parseSystemOneResponse(json);
     } catch (err) {
       if (err instanceof JevError) throw err;
       const timedOut = controller.signal.aborted && !opts.signal?.aborted;
@@ -115,9 +153,15 @@ export class JevClient {
   }
 }
 
-/** Null when the sidecar is off or unconfigured — callers skip Jev entirely. */
+/**
+ * Null when the sidecar is off or unconfigured — callers skip Jev entirely.
+ * A blank baseUrl/model resolves to the selected transport's defaults, so
+ * switching transport in Settings without editing those fields does the
+ * obvious thing (TypeSafe's endpoint vs OpenRouter's).
+ */
 export function createJevClient(jev: {
   enabled?: boolean;
+  transport?: string;
   apiKey?: string;
   baseUrl?: string;
   model?: string;
@@ -125,10 +169,13 @@ export function createJevClient(jev: {
   if (!jev?.enabled) return null;
   const apiKey = (jev.apiKey ?? "").trim();
   if (!apiKey) return null;
+  const transport = normalizeJevTransport(jev.transport);
+  const defaults = jevDefaultsFor(transport);
   return new JevClient({
     apiKey,
-    baseUrl: (jev.baseUrl ?? "").trim() || JEV_DEFAULTS.baseUrl,
-    model: (jev.model ?? "").trim() || JEV_DEFAULTS.model,
+    transport,
+    baseUrl: (jev.baseUrl ?? "").trim() || defaults.baseUrl,
+    model: (jev.model ?? "").trim() || defaults.model,
   });
 }
 

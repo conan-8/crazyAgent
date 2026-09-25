@@ -248,6 +248,41 @@ describe("madman setting", () => {
   });
 });
 
+describe("learn (self-improvement) settings", () => {
+  // Partial/junk stored blocks are the point of these tests, so they are cast
+  // past the top-level Partial<AgentSettings> shape.
+  const stored = (o: Record<string, unknown>) => normalizeSettings(o as never).learn;
+
+  it("ships on for both switches, and for settings stored before it existed", () => {
+    expect(DEFAULT_SETTINGS.learn).toEqual({ enabled: true, auto: true });
+    expect(normalizeSettings(undefined).learn).toEqual({ enabled: true, auto: true });
+    expect(stored({ madman: true })).toEqual({ enabled: true, auto: true });
+  });
+
+  it("keeps a partial block's other switch at its default", () => {
+    expect(stored({ learn: { auto: false } })).toEqual({ enabled: true, auto: false });
+    expect(stored({ learn: { enabled: false } })).toEqual({ enabled: false, auto: true });
+  });
+
+  it("turns a switch off only on an explicit false", () => {
+    expect(stored({ learn: { enabled: false, auto: false } })).toEqual({
+      enabled: false,
+      auto: false,
+    });
+    expect(stored({ learn: "off" })).toEqual({ enabled: true, auto: true });
+    expect(stored({ learn: null })).toEqual({ enabled: true, auto: true });
+    expect(stored({ learn: { enabled: 0, auto: "no" } })).toEqual({
+      enabled: true,
+      auto: true,
+    });
+  });
+
+  it("survives a save/load round trip", () => {
+    const once = normalizeSettings({ learn: { enabled: true, auto: false } });
+    expect(normalizeSettings(once).learn).toEqual({ enabled: true, auto: false });
+  });
+});
+
 describe("makeEntry", () => {
   it("fills every field from the defaults", () => {
     const e = makeEntry();

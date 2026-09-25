@@ -4,6 +4,9 @@
 //   POST …/messages          (Anthropic Messages, streamed tool_use blocks)
 // Plus the TypeSafe Jev decision endpoint (plain JSON):
 //   POST …/systemone         (noul/choice/score answers, scripted overrides)
+// Plus the Jev chat-completions transport (OpenRouter et al.), recognised by
+// the `response_format.json_schema.name === "jev_answers"` marker and answered
+// with a non-streaming completion whose content is the same answers JSON.
 // The scripted "model" advances one turn per completed tool result already in
 // the conversation, so runs are stateless and replayable.
 import http from "node:http";
@@ -133,18 +136,74 @@ function defaultJevAnswer(q) {
   };
 }
 
-export function startMockLlm({ script, port = 8792, jevScript = null }) {
+/**
+ * The coach (self-improvement reviewer) is recognised structurally, by the one
+ * tool only it sends — the main agent never has `record_lessons`. Its calls are
+ * answered from `coachScript` and logged SEPARATELY, so a review that fires
+ * after a failed run can never consume a scripted agent turn or show up in
+ * `requests()`/`lastRequest()` (which existing smokes assert on).
+ */
+const COACH_TOOL = "record_lessons";
+
+function isCoachCall(body) {
+  return (body?.tools ?? []).some(
+    (t) => t?.function?.name === COACH_TOOL || t?.name === COACH_TOOL,
+  );
+}
+
+/** Default coach answer: a review that learns nothing (explicit empty list). */
+const DEFAULT_COACH_SCRIPT = [
+  { toolCalls: [{ name: COACH_TOOL, args: { lessons: [] } }] },
+];
+
+export function startMockLlm({ script, port = 8792, jevScript = null, coachScript = null }) {
   let activeScript = script;
   /**
    * Jev overrides: null (typed defaults), "fail" (503s), or a map of
    * question id → answer fields merged over the default for that type.
    */
   let activeJevScript = jevScript;
-  const hits = { openai: 0, anthropic: 0, jev: 0 };
+  /** Scripted turns for coach reviews (one step per completed tool result). */
+  let activeCoachScript = coachScript ?? DEFAULT_COACH_SCRIPT;
+  const hits = { openai: 0, anthropic: 0, jev: 0, coach: 0 };
   let lastBody = null;
   let lastJevBody = null;
+  let lastCoachBody = null;
+  /** Which wire the last Jev call used: "systemone" | "chat" | null. */
+  let lastJevTransport = null;
   /** Every request body seen, in order — lets a smoke assert prompt content. */
   const bodies = [];
+  /** Coach review bodies, kept out of `bodies` on purpose (see isCoachCall). */
+  const coachBodies = [];
+
+  /** Canned/overridden answers for one questions map. */
+  const answerFor = (questions) => {
+    const answers = {};
+    for (const [id, q] of Object.entries(questions ?? {})) {
+      const override = activeJevScript?.[id];
+      answers[id] = override ? { type: q.type, ...override } : defaultJevAnswer(q);
+    }
+    return answers;
+  };
+
+  /**
+   * The chat transport carries the questions inside the prompt (that is the
+   * whole point of the prompt shape): lift the trailing `questions:` JSON back
+   * out so the same scripted overrides drive both wires.
+   */
+  const questionsFromChat = (body) => {
+    const messages = body?.messages ?? [];
+    const user = [...messages].reverse().find((m) => m?.role === "user");
+    const text = typeof user?.content === "string" ? user.content : "";
+    const at = text.lastIndexOf("questions:");
+    if (at === -1) return {};
+    try {
+      return JSON.parse(text.slice(at + "questions:".length));
+    } catch {
+      return {};
+    }
+  };
+
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -157,32 +216,74 @@ export function startMockLlm({ script, port = 8792, jevScript = null }) {
     if (url.includes("systemone")) {
       hits.jev++;
       lastJevBody = body;
+      lastJevTransport = "systemone";
       if (activeJevScript === "fail") {
         res.writeHead(503, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "mock jev overloaded" }));
         return;
       }
-      const answers = {};
-      for (const [id, q] of Object.entries(body.questions ?? {})) {
-        const override = activeJevScript?.[id];
-        answers[id] = override ? { type: q.type, ...override } : defaultJevAnswer(q);
-      }
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
         JSON.stringify({
           model: body.model ?? "mock-jev",
-          answers,
+          answers: answerFor(body.questions),
           usage: { input_tokens: 100, output_tokens: 0 },
         }),
       );
       return;
     }
+    // Jev over the chat-completions transport (OpenRouter et al.), recognised
+    // by our structured-output schema marker so it never collides with the
+    // agent's own streaming chat calls.
+    if (
+      url.includes("chat/completions") &&
+      body?.response_format?.json_schema?.name === "jev_answers"
+    ) {
+      hits.jev++;
+      lastJevBody = body;
+      lastJevTransport = "chat";
+      if (activeJevScript === "fail") {
+        res.writeHead(503, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "mock jev overloaded" }));
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          id: "gen-mock-jev",
+          model: body.model ?? "mock-jev",
+          choices: [
+            {
+              index: 0,
+              finish_reason: "stop",
+              message: {
+                role: "assistant",
+                content: JSON.stringify({ answers: answerFor(questionsFromChat(body)) }),
+              },
+            },
+          ],
+          usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+        }),
+      );
+      return;
+    }
     const kind = url.includes("chat/completions") ? "openai" : "anthropic";
-    hits[kind]++;
-    lastBody = body;
-    bodies.push(body);
+    // A coach review is a real model call on the same wire, but it is not part
+    // of any smoke's agent script: answer it from its own script and keep it
+    // out of the agent request log.
+    const coach = isCoachCall(body);
+    const scriptFor = coach ? activeCoachScript : activeScript;
     const turn = countToolResults(body, kind);
-    const step = activeScript[Math.min(turn, activeScript.length - 1)];
+    const step = scriptFor[Math.min(turn, scriptFor.length - 1)];
+    if (coach) {
+      hits.coach++;
+      lastCoachBody = body;
+      coachBodies.push(body);
+    } else {
+      hits[kind]++;
+      lastBody = body;
+      bodies.push(body);
+    }
     if (step.delayMs) await delay(step.delayMs);
     res.writeHead(200, {
       "content-type": "text/event-stream",
@@ -200,8 +301,17 @@ export function startMockLlm({ script, port = 8792, jevScript = null }) {
     /** All request bodies seen so far, in order. */
     requests: () => bodies,
     lastJevRequest: () => lastJevBody,
+    /** "systemone" | "chat" | null — which Jev wire the last call used. */
+    lastJevTransport: () => lastJevTransport,
+    /** Last coach (lesson review) body — never the agent's own request. */
+    lastCoachRequest: () => lastCoachBody,
+    /** Every coach review body, in order. */
+    coachRequests: () => coachBodies,
     setScript(s) {
       activeScript = s;
+    },
+    setCoachScript(s) {
+      activeCoachScript = s ?? DEFAULT_COACH_SCRIPT;
     },
     setJevScript(s) {
       activeJevScript = s;

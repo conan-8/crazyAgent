@@ -99,16 +99,21 @@ export function buildAnthropicBody(
       type: "ephemeral",
     };
   }
+  // The per-run appendix is its own block WITHOUT a cache breakpoint: the
+  // cached prefix (base system + tools) stays reusable across runs while the
+  // appendix changes freely.
+  const system: unknown[] = [
+    {
+      type: "text",
+      text: req.system,
+      cache_control: { type: "ephemeral" },
+    },
+  ];
+  if (req.systemSuffix) system.push({ type: "text", text: req.systemSuffix });
   const body: Record<string, unknown> = {
     model,
     max_tokens: req.maxTokens ?? 4_096,
-    system: [
-      {
-        type: "text",
-        text: req.system,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
+    system,
     tools,
     messages: toAnthropicMessages(req.messages),
     stream: true,
@@ -186,7 +191,9 @@ export function buildOpenAiBody(
     [strictOpenAi && reasoner ? "max_completion_tokens" : "max_tokens"]:
       req.maxTokens ?? 4_096,
     messages: [
-      { role: "system", content: req.system },
+      // One system message on this wire: the appendix (lessons learned) is
+      // appended to the base prompt, keeping the cacheable prefix first.
+      { role: "system", content: req.systemSuffix ? `${req.system}\n\n${req.systemSuffix}` : req.system },
       ...toOpenAiMessages(req.messages),
     ],
     tools: req.tools.map((t) => ({

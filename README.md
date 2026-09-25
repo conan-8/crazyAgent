@@ -30,8 +30,9 @@ npm install && npm run build        # produces dist/
 4. Click the toolbar icon → the side panel opens. In **⚙ Settings** choose a
    provider (Anthropic or any OpenAI-compatible endpoint: OpenAI, OpenRouter,
    DeepSeek, local Ollama/vLLM…), model and API key, plus the control mode.
-   Optionally add a [TypeSafe key](https://console.typesafe.ai/keys) under
-   **Fast decisions (Jev)** — see below.
+   Optionally add a key under **Fast decisions (Jev)** — a
+   [TypeSafe key](https://console.typesafe.ai/keys) or your OpenRouter key —
+   see below.
 
 > Why a cloned profile for Unlimited mode: since Chrome 136,
 > `--remote-debugging-port` is ignored on the default user-data-dir (Google's
@@ -66,8 +67,19 @@ missed get a confirmation card ("Jev flags this as likely completing a purchase
 (relevance filters, best-of picks) in one near-free call, and optional **Auto
 effort** lets Jev grade each task and lower reasoning effort on trivial ones.
 Everything fails open: if Jev is slow, down or unconfigured, runs proceed on
-the rule-based policy exactly as before. Off by default; needs a TypeSafe API
-key ($0.042/M input tokens, output free).
+the rule-based policy exactly as before. Off by default; needs a key.
+
+**Two Jev endpoints** (Settings → **Jev endpoint**). **TypeSafe** is Jev proper:
+calibrated probabilities, answers in milliseconds ($0.042/M input tokens, output
+free — [key](https://console.typesafe.ai/keys)). **OpenRouter /
+OpenAI-compatible** sends the same typed questions to any `/chat/completions`
+endpoint, so an OpenRouter key drives the whole sidecar too. Note OpenRouter
+routes **no** Jev model and does not implement `/systemone`, so this transport is
+a full model round-trip per decision: slower than TypeSafe, and its
+probabilities are model-estimated rather than calibrated. Pick a model that
+supports structured outputs (the default, `openai/gpt-oss-20b`, does). The three
+features, the gating rules and the fail-open behaviour are identical on both
+transports.
 
 **Chat history**: every task is a thread. **History** lists past threads
 (title, time, turn count) — click one to reopen its transcript, **✕** to
@@ -81,6 +93,24 @@ tool call its raw args, result and how long it took. Records survive worker
 teardown and browser restarts. Open one for a per-turn timeline, or **Export
 JSONL / Export MD** to write the whole archive (or a single run) into your
 Downloads folder for keeping alongside the project. Demo runs aren't logged.
+
+**Lessons (self-improvement)**: this agent fails a lot, so it keeps notes on
+itself. When a run ends badly — it errored, you stopped it, or it looped on a
+tool call that kept failing — a **second agent on the same model** reads that
+run's record and writes down what went wrong and what to do instead. Lessons
+live in `chrome.storage.local` **per browser profile** (key `baLessons`, ring
+of 300, deduped by wording) and the relevant ones are appended to the system
+prompt of later runs, so a failure you already paid for is not repeated
+blindly. Clean runs are not reviewed automatically: the **Lessons** drawer
+reviews the latest run on demand, and **Learn from this run** in the Run logs
+detail reviews any archived run. There you can read, edit, pin, delete and
+export what it remembers — the user owns what the agent is allowed to learn.
+Settings → **Self-improvement** has two switches: *Learn from my runs* (master:
+lessons are applied AND new ones are written) and *Review failed runs
+automatically* (off = manual reviews only; lessons still apply). Lessons are
+framed as reference material appended after the real instructions, never as
+rules that could outrank your task, and a review can never touch the page, your
+chat thread or the run archive.
 
 ## Development
 
@@ -100,8 +130,8 @@ agent can and cannot do to you.
 ## Layout
 
 ```
-extension/src/shared/      protocol + LLM wire types (the cross-boundary contracts)
-extension/src/background/  service worker, agent loop, tools, adapters, policy
+extension/src/shared/      protocol + LLM wire types, run-log and lesson folders
+extension/src/background/  service worker, agent loop, tools, adapters, policy, coach
 extension/src/content/     per-frame element registry, actions, settle detector
 extension/src/sidepanel/   panel UI (chat, tool cards, confirm cards, settings)
 helper/                    native-messaging daemon (Unlimited mode) + installers
@@ -117,7 +147,10 @@ perception handles cross-origin frames and shadow DOM; actions recover from
 SPA re-renders or fail cleanly; the agent loop streams and tools correctly on
 both provider wire formats; the UI and policy gates behave as specified; the
 helper daemon serves full CDP including network interception and crash
-recovery; the Jev sidecar gates, judges, routes effort and fails open
-(`scripts/jev-smoke.mjs`, mock `/systemone` endpoint). A live-LLM run ("search
-Hacker News for X and summarize") needs your API key in Settings — the
-machinery is covered by the mock-LLM suite.
+recovery; the Jev sidecar gates, judges, routes effort and fails open on both transports
+(`scripts/jev-smoke.mjs`, mock `/systemone` + `/chat/completions` endpoints);
+the coach reviews a failed run, stores the lesson, feeds it into the next run's
+prompt and stays out of the chat/run record, with both switches honoured
+(`scripts/lessons-smoke.mjs`). A
+live-LLM run ("search Hacker News for X and summarize") needs your API key in
+Settings — the machinery is covered by the mock-LLM suite.

@@ -6,6 +6,7 @@ import {
   type ControlMode,
   type DemoConfig,
   type LlmMessage,
+  type LogExportFormat,
   type PortRequest,
   type RunAttachment,
   type StepEvent,
@@ -55,6 +56,22 @@ import {
   listSummaries,
   saveRecord,
 } from "./runlog";
+import {
+  clearLessons,
+  deleteLesson,
+  listLessons,
+  markLessonsUsed,
+  saveLessons,
+  updateLesson,
+} from "./lessons";
+import {
+  formatLessonsBlock,
+  lessonsToJsonl,
+  lessonsToMarkdown,
+  rankLessonsForTask,
+  shouldAutoReview,
+} from "../shared/lessons";
+import { learnFromRun } from "./agent/coach";
 import {
   JEV_RISK_QUESTIONS,
   assess,
@@ -241,6 +258,115 @@ async function closeLogRecord(): Promise<void> {
   await flushLog();
 }
 
+// ---- self-improvement ("coach"): lessons learned from finished runs ----
+// A SECOND agent on the SAME model reviews a finished run and writes what it
+// learned (what failed, what to do instead) into this profile's local lesson
+// log; later runs read the relevant ones back in their system prompt. Every
+// path here is best-effort and deliberately silent: the coach emits no
+// StepEvents, so its activity never lands in the chat thread or the run
+// archive, and a review that fails costs one call, never the run it reviewed.
+
+/** Lessons the run that is currently executing received in its prompt. */
+let injectedLessonIds: string[] = [];
+/**
+ * Reviews are chained: each one reads-modifies-writes the same storage key, so
+ * a manual review landing during an auto review must not interleave with it.
+ */
+let reviewChain: Promise<void> = Promise.resolve();
+
+function lessonFilename(format: LogExportFormat): string {
+  const stamp = new Date().toISOString().replace(/\.\d+Z$/, "").replace(/:/g, "-");
+  return `crazyagent-lessons-${stamp}.${format}`;
+}
+
+/**
+ * Queue one review behind any other. `announce` marks user-triggered reviews,
+ * which get a `started` status so the panel can show progress; auto reviews
+ * only report their outcome.
+ */
+function queueReview(
+  rec: LogTurnRecord,
+  source: "auto" | "manual",
+  announce: boolean,
+): void {
+  reviewChain = reviewChain
+    .then(async () => {
+      if (announce) {
+        broadcast({ type: "lessons.review", status: "started", task: rec.task, source });
+      }
+      const settings = await loadSettings();
+      if (!settings.apiKey) {
+        broadcast({
+          type: "lessons.review",
+          status: "error",
+          task: rec.task,
+          source,
+          message: "no API key configured — add one in Settings",
+        });
+        return;
+      }
+      const outcome = await learnFromRun({
+        llm: createLlmClient(settings),
+        record: rec,
+        existing: await listLessons(),
+        source,
+        save: saveLessons,
+      });
+      broadcast({
+        type: "lessons.review",
+        status: outcome.status,
+        task: rec.task,
+        source,
+        added: outcome.added,
+        merged: outcome.merged,
+        total: outcome.total,
+        message:
+          outcome.status === "error"
+            ? outcome.message
+            : outcome.notes.length
+              ? outcome.notes.join("; ")
+              : undefined,
+      });
+      if (outcome.status === "added") {
+        broadcast({ type: "lessons.list", lessons: await listLessons() });
+      }
+    })
+    .catch((err) => {
+      broadcast({
+        type: "lessons.review",
+        status: "error",
+        task: rec.task,
+        source,
+        message: String((err as Error)?.message ?? err),
+      });
+    });
+}
+
+/** Review runs that went wrong, unprompted — cheap, and exactly the ones worth
+ * learning from. Clean runs are reviewed only when the user asks. */
+async function maybeAutoReview(rec: LogTurnRecord): Promise<void> {
+  if (!shouldAutoReview(rec).review) return;
+  const settings = await loadSettings();
+  if (!settings.learn.enabled || !settings.learn.auto) return;
+  if (!settings.apiKey) return;
+  queueReview(rec, "auto", false);
+}
+
+/** Post-run bookkeeping: usage stamps for injected lessons + auto review. */
+function afterRun(rec: LogTurnRecord): void {
+  const used = injectedLessonIds;
+  injectedLessonIds = [];
+  if (used.length) void markLessonsUsed(used);
+  void maybeAutoReview(rec);
+}
+
+/** The run a manual review targets: the newest finished one by default. */
+async function recordForReview(logId?: string): Promise<LogTurnRecord | null> {
+  if (logId) return getRecord(logId);
+  const records = await listRecords();
+  return records.find((r) => r.status !== "running") ?? records[0] ?? null;
+}
+
 // ---- chat conversation (history) for the current run ----
 let currentConv: Conversation | null = null;
 let currentCp: Checkpoint | null = null;
@@ -277,6 +403,7 @@ async function runFrom(cp: Checkpoint): Promise<void> {
   if (loopRunning) return;
   loopRunning = true;
   currentCp = cp;
+  injectedLessonIds = [];
   keepalive.start();
   try {
     if (cp.demo) {
@@ -293,6 +420,15 @@ async function runFrom(cp: Checkpoint): Promise<void> {
       setActiveJevClient(currentJev);
       jevFallbackNoted = false;
       const jevEnabled = currentJev !== null;
+      // Lessons learned: the relevant ones ride in a separate, uncached system
+      // block so the base prompt stays cache-stable across runs. Ranked here
+      // (not in the loop) because these exact lessons are the ones we stamp as
+      // "used" once the run is over.
+      const rankedLessons = settings.learn.enabled
+        ? rankLessonsForTask(await listLessons(), cp.task)
+        : [];
+      injectedLessonIds = rankedLessons.map((l) => l.id);
+      const lessonsBlock = formatLessonsBlock(rankedLessons);
       // The judge tool only reaches the model when Jev can actually answer.
       // Specs freeze here, so the tool list stays byte-stable across the run's
       // steps (provider prompt caching) and across a checkpoint resume.
@@ -327,6 +463,7 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         madman: settings.madman,
         judgeAvailable:
           jevEnabled && (cp.toolSpecs?.some((t) => t.name === "judge") ?? false),
+        lessonsBlock,
         execute: (name, args) => executeToolGated(name, args),
       });
     }
@@ -335,8 +472,12 @@ async function runFrom(cp: Checkpoint): Promise<void> {
   } finally {
     loopRunning = false;
     keepalive.stop();
+    const finished = currentLog;
     await closeLogRecord();
     await clearCheckpoint();
+    // Only after the run is fully closed and its record persisted: whatever the
+    // coach does next must not appear in the record it is reviewing.
+    if (finished) afterRun(finished);
   }
 }
 
@@ -673,6 +814,51 @@ async function handleRequest(
         format: msg.format,
         filename: logFilename(msg.format, records.length),
         content: msg.format === "jsonl" ? toJsonl(records) : toMarkdown(records),
+      });
+      break;
+    }
+    case "lessons.list": {
+      port.postMessage({ type: "lessons.list", lessons: await listLessons() });
+      break;
+    }
+    case "lessons.review": {
+      const rec = await recordForReview(msg.logId);
+      if (!rec) {
+        broadcast({
+          type: "lessons.review",
+          status: "error",
+          source: "manual",
+          message: "no finished run to review yet — run a task first",
+        });
+        break;
+      }
+      queueReview(rec, "manual", true);
+      break;
+    }
+    case "lessons.update": {
+      await updateLesson(msg.id, {
+        ...(msg.text !== undefined ? { text: msg.text } : {}),
+        ...(msg.pinned !== undefined ? { pinned: msg.pinned } : {}),
+        ...(msg.category !== undefined ? { category: msg.category } : {}),
+      });
+      port.postMessage({ type: "lessons.list", lessons: await listLessons() });
+      break;
+    }
+    case "lessons.delete":
+      await deleteLesson(msg.id);
+      port.postMessage({ type: "lessons.list", lessons: await listLessons() });
+      break;
+    case "lessons.clear":
+      await clearLessons();
+      port.postMessage({ type: "lessons.list", lessons: [] });
+      break;
+    case "lessons.export": {
+      const all = await listLessons();
+      port.postMessage({
+        type: "lessons.export",
+        format: msg.format,
+        filename: lessonFilename(msg.format),
+        content: msg.format === "jsonl" ? lessonsToJsonl(all) : lessonsToMarkdown(all),
       });
       break;
     }

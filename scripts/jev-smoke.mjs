@@ -8,6 +8,8 @@
 //    the user's 'high' to 'low' and the provider request carries it.
 // D: fail-open — Jev endpoint unreachable: one info event, run proceeds on
 //    the rule-based policy, no confirm, no error.
+// E: OpenRouter transport — the same judge round-trip over the OpenAI-compatible
+//    /chat/completions wire, pinned by the strict `jev_answers` schema marker.
 // Usage: node scripts/jev-smoke.mjs
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -355,6 +357,50 @@ async function main() {
         !evsD.some((e) => e.kind === "error") &&
         evsD.some((e) => e.kind === "done" && e.summary.includes("FALLBACK_DONE")),
       infoD?.message ?? "(no fallback info)",
+    );
+
+    // ============ E: OpenRouter transport (Jev over /chat/completions) ============
+    // Same questions and the same features, but the sidecar now speaks the
+    // OpenAI-compatible wire — which is the only way an OpenRouter key (or any
+    // non-TypeSafe endpoint) can drive it.
+    mock.setScript(S_JUDGE);
+    mock.setJevScript({ item_0: { noul: 0.42 } });
+    await configure(panel, {
+      jev: {
+        ...BASE_SETTINGS.jev,
+        transport: "openai",
+        apiKey: "sk-or-mock",
+        model: "mock-jev-chat",
+      },
+    });
+    await panel.eval(`__ba.runTask("Pick the shoe listing"); "started"`);
+    const evsE = await waitDone(panel);
+    const judgeE = evsE.find((e) => e.kind === "tool_result" && e.name === "judge");
+    const jevReqE = mock.lastJevRequest();
+    const formatE = jevReqE?.response_format ?? {};
+    check(
+      "J10 openai transport speaks /chat/completions with the strict schema marker",
+      mock.lastJevTransport() === "chat" &&
+        formatE?.type === "json_schema" &&
+        formatE?.json_schema?.name === "jev_answers" &&
+        formatE?.json_schema?.strict === true &&
+        jevReqE?.model === "mock-jev-chat" &&
+        (jevReqE?.messages ?? []).some((m) => m.role === "system") &&
+        (jevReqE?.messages ?? []).some(
+          (m) => m.role === "user" && String(m.content).includes("questions:"),
+        ),
+      `${mock.lastJevTransport()} | ${JSON.stringify(formatE).slice(0, 160)}`,
+    );
+    check(
+      "J11 judge answers flow back through the chat transport",
+      judgeE?.ok === true && String(judgeE?.result).includes("item_0: 0.42"),
+      judgeE?.result ?? "(no judge result)",
+    );
+    check(
+      "J12 the agent's own chat stream is untouched by the Jev chat call",
+      (mock.lastRequest()?.tools ?? []).some((t) => t?.function?.name === "judge") &&
+        evsE.some((e) => e.kind === "done" && e.summary.includes("JUDGE_DONE")),
+      `tools: ${(mock.lastRequest()?.tools ?? []).map((t) => t?.function?.name).join(",")}`,
     );
 
     panel.close();

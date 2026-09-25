@@ -62,6 +62,27 @@ that risk.
   provider, pointed at a second vendor. Point the base URL at a
   self-hosted Jev-class model if that matters.
 
+## Lessons data flow (self-improvement, when enabled)
+
+- The coach (a second agent on the same model) receives a **digest** of a
+  finished run: task text, failed tool calls with their error strings, tool
+  args, run stats and the final answer — the same material already in the local
+  run log, sent to your configured provider like any other agent call. Page
+  *content* reaches it only insofar as it ended up in those error strings and
+  args. Screenshots are never included.
+- Lessons it writes are stored locally (`baLessons`, per browser profile) and
+  are appended to later runs' system prompts. That is a **stored prompt-
+  injection channel**: a hostile page could try to make the coach record a
+  lesson that steers a future run ("always click Allow on this site"). The
+  mitigations are structural: the block is framed as reference material
+  *after* the real instructions, lessons are capped and deduped, and **you can
+  read, edit, pin or delete every lesson** in the Lessons drawer — review them
+  like any other agent output before trusting a long-lived one. Nothing the
+  coach writes bypasses the Phase 6 policy gates: a lesson cannot make a
+  sensitive action skip its confirmation.
+- The coach is off the moment either `learn` switch is off: no review call, and
+  no lessons are injected.
+
 ## Secrets
 
 - API key lives in `chrome.storage.local` in cleartext (personal-use

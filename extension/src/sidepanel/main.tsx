@@ -16,6 +16,7 @@ import {
   type LogExportFormat,
   type LogSummary,
   type LogTurnRecord,
+  type Lesson,
   type PortRequest,
   type RunAttachment,
   type StepEvent,
@@ -37,7 +38,11 @@ import {
 } from "../shared/modes";
 import { THINKING_LEVELS } from "../shared/llm";
 import { madmanExclamation } from "../shared/madman";
-import { JEV_DEFAULTS } from "../shared/jev";
+import {
+  JEV_TRANSPORT_DEFAULTS,
+  JEV_TRANSPORT_OPTIONS,
+  type JevTransport,
+} from "../shared/jev";
 import {
   fetchModelsFor,
 } from "../shared/models";
@@ -51,6 +56,7 @@ import {
   CONNECTION_DEFAULTS,
   type AgentSettings,
   type ApiKeyEntry,
+  type JevSettings,
 } from "../background/settings";
 import { Icon, ICONS } from "./icons";
 import { Collapse, useAutosize, usePresence, useStickToBottom } from "./motion";
@@ -971,6 +977,25 @@ function NumberField({
   );
 }
 
+/**
+ * Switching Jev transport moves the endpoint/model to the new transport's
+ * defaults when the current values are still the other transport's defaults
+ * (or blank) — the pair travels together, but a hand-typed endpoint is never
+ * clobbered.
+ */
+function switchJevTransport(jev: JevSettings, transport: JevTransport): JevSettings {
+  const next = JEV_TRANSPORT_DEFAULTS[transport];
+  const prev = JEV_TRANSPORT_DEFAULTS[jev.transport] ?? JEV_TRANSPORT_DEFAULTS.typesafe;
+  const untouched = (value: string, fallback: string): boolean =>
+    !value.trim() || value.trim() === fallback;
+  return {
+    ...jev,
+    transport,
+    baseUrl: untouched(jev.baseUrl, prev.baseUrl) ? next.baseUrl : jev.baseUrl,
+    model: untouched(jev.model, prev.model) ? next.model : jev.model,
+  };
+}
+
 function SettingsBody({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<AgentSettings | null>(null);
   const [saved, setSaved] = useState(false);
@@ -1118,16 +1143,33 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 checked={s.jev.enabled}
                 onChange={(v) => set("jev", { ...s.jev, enabled: v })}
                 title="Enable Jev"
-                hint="TypeSafe System-One model working alongside your selected model: risk checks on sensitive actions, a judge tool for bulk decisions, optional effort routing"
+                hint="A decision model working alongside your selected model: risk checks on sensitive actions, a judge tool for bulk decisions, optional effort routing"
               />
               {s.jev.enabled ? (
                 <>
+                  <SelectRow
+                    title="Jev endpoint"
+                    hint={
+                      s.jev.transport === "openai"
+                        ? "Any OpenAI-compatible /chat/completions endpoint — use OpenRouter with your OpenRouter key. One model round-trip per decision (slower than TypeSafe, and probabilities are model-estimated)"
+                        : "TypeSafe's own decision API — calibrated probabilities, answers in milliseconds (needs a console.typesafe.ai key)"
+                    }
+                    value={s.jev.transport}
+                    options={JEV_TRANSPORT_OPTIONS}
+                    onChange={(t) => set("jev", switchJevTransport(s.jev, t))}
+                  />
                   <label class="field">
-                    <span>TypeSafe API key</span>
+                    <span>
+                      {s.jev.transport === "openai" ? "OpenRouter API key" : "TypeSafe API key"}
+                    </span>
                     <input
                       type="password"
                       value={s.jev.apiKey}
-                      placeholder="console.typesafe.ai/keys"
+                      placeholder={
+                        s.jev.transport === "openai"
+                          ? "openrouter.ai/keys"
+                          : "console.typesafe.ai/keys"
+                      }
                       onInput={(e) =>
                         set("jev", {
                           ...s.jev,
@@ -1147,7 +1189,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                       <span>Base URL</span>
                       <input
                         value={s.jev.baseUrl}
-                        placeholder={JEV_DEFAULTS.baseUrl}
+                        placeholder={JEV_TRANSPORT_DEFAULTS[s.jev.transport].baseUrl}
                         onInput={(e) =>
                           set("jev", {
                             ...s.jev,
@@ -1160,7 +1202,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                       <span>Model</span>
                       <input
                         value={s.jev.model}
-                        placeholder={JEV_DEFAULTS.model}
+                        placeholder={JEV_TRANSPORT_DEFAULTS[s.jev.transport].model}
                         onInput={(e) =>
                           set("jev", {
                             ...s.jev,
@@ -1172,6 +1214,24 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                   </div>
                 </>
               ) : null}
+            </section>
+
+            <section class="set-group" style="--i:6">
+              <h3 class="set-title">
+                <Icon d={ICONS.bulb} size={12} /> Self-improvement
+              </h3>
+              <Switch
+                checked={s.learn.enabled}
+                onChange={(v) => set("learn", { ...s.learn, enabled: v })}
+                title="Learn from my runs"
+                hint="A second agent on the same model writes down failures and what to do instead; later runs read those lessons back"
+              />
+              <Switch
+                checked={s.learn.auto}
+                onChange={(v) => set("learn", { ...s.learn, auto: v })}
+                title="Review failed runs automatically"
+                hint="Runs that errored, were stopped, or looped on a failing call get reviewed without asking; clean runs are reviewed only from the Lessons drawer"
+              />
             </section>
           </div>
           <footer class="sheet-foot">
@@ -1357,6 +1417,7 @@ function LogsBody({
   onDelete,
   onClear,
   onExport,
+  onLearn,
   onClose,
 }: {
   logs: LogSummary[];
@@ -1366,6 +1427,7 @@ function LogsBody({
   onDelete: (id: string) => void;
   onClear: () => void;
   onExport: (format: LogExportFormat, logId?: string) => void;
+  onLearn: (logId: string) => void;
   onClose: () => void;
 }) {
   if (detail) {
@@ -1386,6 +1448,9 @@ function LogsBody({
           </button>
           <button class="btn-ghost" onClick={() => onExport("md", detail.id)}>
             Export MD
+          </button>
+          <button class="btn-ghost" onClick={() => onLearn(detail.id)}>
+            Learn from this run
           </button>
         </div>
         <div class="sheet-body log-body">
@@ -1528,6 +1593,188 @@ function isoLocal(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// ------------------------------ lessons (coach) ------------------------------
+
+/** Progress of the last coach review, for the drawer's status line. */
+type CoachStatus = {
+  state: "idle" | "running" | "added" | "empty" | "error";
+  message?: string;
+};
+
+/**
+ * The lessons drawer: what the second (coach) agent learned from past runs.
+ * The list is the agent's own reference material — editable and removable
+ * here, because the user owns what it is allowed to remember.
+ */
+function LessonsBody({
+  lessons,
+  status,
+  onReview,
+  onUpdate,
+  onDelete,
+  onClear,
+  onExport,
+  onClose,
+}: {
+  lessons: Lesson[];
+  status: CoachStatus;
+  onReview: () => void;
+  onUpdate: (id: string, patch: { text?: string; pinned?: boolean }) => void;
+  onDelete: (id: string) => void;
+  onClear: () => void;
+  onExport: (format: LogExportFormat) => void;
+  onClose: () => void;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+
+  const startEdit = (lesson: Lesson) => {
+    setEditing(lesson.id);
+    setDraft(lesson.text);
+  };
+  const commitEdit = (id: string) => {
+    const text = draft.trim();
+    if (text) onUpdate(id, { text });
+    setEditing(null);
+  };
+
+  return (
+    <>
+      <SheetHead
+        title="Lessons"
+        sub={`${lessons.length} lesson${lessons.length === 1 ? "" : "s"} learned in this browser profile`}
+        icon={ICONS.bulb}
+        onClose={onClose}
+      />
+      <div class="lesson-actions">
+        <button
+          class="btn-soft"
+          onClick={onReview}
+          disabled={status.state === "running"}
+        >
+          <Icon d={ICONS.sparkles} size={12} />
+          {status.state === "running" ? "Reviewing…" : "Review latest run"}
+        </button>
+        <span class="toolbar-spacer" />
+        <button class="btn-ghost" onClick={() => onExport("jsonl")}>
+          Export JSONL
+        </button>
+        <button class="btn-ghost" onClick={() => onExport("md")}>
+          Export MD
+        </button>
+        <button class="btn-ghost" onClick={onClear} disabled={!lessons.length}>
+          Clear
+        </button>
+      </div>
+      {status.state !== "idle" && status.message ? (
+        <p
+          class={`lesson-status${status.state === "error" ? " is-error" : ""}${status.state === "running" ? " is-running" : ""}`}
+        >
+          {status.message}
+        </p>
+      ) : null}
+      <div class="sheet-body hist-body">
+        {lessons.length === 0 ? (
+          <div class="empty">
+            <span class="empty-icon">
+              <Icon d={ICONS.bulb} size={20} />
+            </span>
+            <b>No lessons yet</b>
+            <p class="hint">
+              After a run fails — or whenever you press Review — a second agent on
+              the same model writes down what went wrong and what to do instead.
+              Later runs read these back, so the same mistake is not repeated.
+            </p>
+          </div>
+        ) : (
+          lessons.map((lesson, i) => (
+            <div
+              class="hist-row lesson-row"
+              key={lesson.id}
+              style={`--i:${Math.min(i, 12)}`}
+            >
+              <div class="lesson-item">
+                <div class="lesson-tags">
+                  <span class="lesson-tag">{lesson.category}</span>
+                  {lesson.host ? (
+                    <span class="lesson-tag">{lesson.host}</span>
+                  ) : null}
+                  {lesson.tool ? (
+                    <span class="lesson-tag">{lesson.tool}</span>
+                  ) : null}
+                  <span class="lesson-tag is-soft">
+                    {lesson.source}
+                    {lesson.hits > 1 ? ` · seen ${lesson.hits}×` : ""}
+                  </span>
+                  {lesson.pinned ? (
+                    <span class="lesson-tag is-pin">pinned</span>
+                  ) : null}
+                </div>
+                {editing === lesson.id ? (
+                  <div class="lesson-edit">
+                    <textarea
+                      value={draft}
+                      onInput={(e) =>
+                        setDraft((e.target as HTMLTextAreaElement).value)
+                      }
+                    />
+                    <div class="lesson-edit-actions">
+                      <button class="btn-soft" onClick={() => commitEdit(lesson.id)}>
+                        Save
+                      </button>
+                      <button class="btn-ghost" onClick={() => setEditing(null)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p class="lesson-text">{lesson.text}</p>
+                )}
+                {lesson.evidence ? (
+                  <p class="lesson-evidence">{lesson.evidence}</p>
+                ) : null}
+                <p class="lesson-meta">
+                  {relativeTime(lesson.at)} · from a {lesson.outcome} run:{" "}
+                  {lesson.task || "untitled"}
+                </p>
+              </div>
+              <div class="lesson-tools">
+                <button
+                  class="btn-icon btn-icon-sm"
+                  onClick={() => onUpdate(lesson.id, { pinned: !lesson.pinned })}
+                  aria-label={lesson.pinned ? "Unpin lesson" : "Pin lesson"}
+                  data-tip={lesson.pinned ? "Unpin" : "Pin"}
+                  data-tip-align="end"
+                >
+                  <Icon d={ICONS.tag} size={13} />
+                </button>
+                <button
+                  class="btn-icon btn-icon-sm"
+                  onClick={() => startEdit(lesson)}
+                  aria-label="Edit lesson"
+                  data-tip="Edit"
+                  data-tip-align="end"
+                >
+                  <Icon d={ICONS.doc} size={13} />
+                </button>
+                <button
+                  class="btn-icon btn-icon-sm hist-del"
+                  onClick={() => onDelete(lesson.id)}
+                  aria-label="Delete lesson"
+                  data-tip="Delete"
+                  data-tip-align="end"
+                >
+                  <Icon d={ICONS.trash} size={13} />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
 // ------------------------------ welcome ------------------------------
 
 const SUGGESTIONS = [
@@ -1635,6 +1882,10 @@ function App() {
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<LogSummary[]>([]);
   const [logDetail, setLogDetail] = useState<LogTurnRecord | null>(null);
+  const [showLessons, setShowLessons] = useState(false);
+  const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [coachStatus, setCoachStatus] = useState<CoachStatus>({ state: "idle" });
+  const [lessonBadge, setLessonBadge] = useState(false);
   const [viewer, setViewer] = useState<string | null>(null);
   const [resolved, setResolved] = useState<Map<string, Decision>>(new Map());
   const [openMenu, setOpenMenu] = useState<"mode" | "model" | null>(null);
@@ -1751,6 +2002,31 @@ function App() {
           setLogDetail(msg.log);
         } else if (msg.type === "logs.export") {
           downloadLog(msg.filename, msg.content);
+        } else if (msg.type === "lessons.list") {
+          setLessons(msg.lessons);
+        } else if (msg.type === "lessons.review") {
+          // The coach runs in the worker: surface its progress in the drawer,
+          // never in the chat thread (reviews are not part of the user's task).
+          const status: CoachStatus =
+            msg.status === "started"
+              ? { state: "running", message: "The coach is reading the last run…" }
+              : msg.status === "added"
+                ? {
+                    state: "added",
+                    message: `Learned ${msg.added ?? 0} new lesson${(msg.added ?? 0) === 1 ? "" : "s"}${msg.merged ? ` (${msg.merged} already known)` : ""}.`,
+                  }
+                : msg.status === "empty"
+                  ? {
+                      state: "empty",
+                      message: msg.message || "Nothing new to learn from that run.",
+                    }
+                  : { state: "error", message: msg.message || "Review failed." };
+          setCoachStatus(status);
+          // Never yank the drawer open mid-conversation: mark the toolbar
+          // button instead, and let the user look when they want to.
+          if (msg.status === "added") setLessonBadge(true);
+        } else if (msg.type === "lessons.export") {
+          downloadLog(msg.filename, msg.content);
         }
       });
       port.onDisconnect.addListener(() => {
@@ -1803,10 +2079,12 @@ function App() {
       else if (openMenu) setOpenMenu(null);
       else if (showSettings) setShowSettings(false);
       else if (showHistory) setShowHistory(false);
+      else if (showLogs) setShowLogs(false);
+      else if (showLessons) setShowLessons(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [viewer, openMenu, showSettings, showHistory]);
+  }, [viewer, openMenu, showSettings, showHistory, showLogs, showLessons]);
 
   // Accepts real-agent runs (string) and Phase 1 demo runs (demo object).
   const startRun = (
@@ -1892,6 +2170,27 @@ function App() {
 
   const exportLogs = (format: LogExportFormat, logId?: string) =>
     postPort?.({ kind: "logs.export", format, logId });
+
+  const openLessons = () => {
+    setShowSettings(false);
+    setShowHistory(false);
+    setShowLogs(false);
+    setShowLessons(true);
+    setLessonBadge(false);
+    postPort?.({ kind: "lessons.list" });
+  };
+
+  const reviewLessons = () => postPort?.({ kind: "lessons.review" });
+
+  const updateLesson = (id: string, patch: { text?: string; pinned?: boolean }) =>
+    postPort?.({ kind: "lessons.update", id, ...patch });
+
+  const deleteLesson = (id: string) => postPort?.({ kind: "lessons.delete", id });
+
+  const clearLessons = () => postPort?.({ kind: "lessons.clear" });
+
+  const exportLessons = (format: LogExportFormat) =>
+    postPort?.({ kind: "lessons.export", format });
 
   const newChat = () => {
     currentConv = null;
@@ -2014,6 +2313,12 @@ function App() {
         .get("baRunLogs")
         .then((r) => (r.baRunLogs as LogTurnRecord[]) ?? []),
     logsUI: () => ({ open: showLogs, detail: logDetail?.id ?? null }),
+    lessons: () =>
+      chrome.storage.local
+        .get("baLessons")
+        .then((r) => (r.baLessons as Lesson[] | undefined) ?? []),
+    lessonsUI: () => ({ open: showLessons, status: coachStatus, badge: lessonBadge }),
+    reviewLessons,
     // control bar surface
     usage: () => usage,
     addAttachment: (a: RunAttachment) => setAttachments((prev) => [...prev, a].slice(0, 4)),
@@ -2119,6 +2424,15 @@ function App() {
             class={showLogs ? "is-on" : ""}
             onClick={() => (showLogs ? setShowLogs(false) : openLogs())}
           />
+          <span class={`badge-wrap${lessonBadge ? " has-badge" : ""}`}>
+            <IconButton
+              icon={ICONS.bulb}
+              tip="Lessons"
+              label="Lessons"
+              class={showLessons ? "is-on" : ""}
+              onClick={() => (showLessons ? setShowLessons(false) : openLessons())}
+            />
+          </span>
           <IconButton
             icon={ICONS.settings}
             tip="Settings"
@@ -2393,10 +2707,30 @@ function App() {
           onDelete={deleteLog}
           onClear={clearLogs}
           onExport={exportLogs}
+          onLearn={(logId) => postPort?.({ kind: "lessons.review", logId })}
           onClose={() => {
             setShowLogs(false);
             setLogDetail(null);
           }}
+        />
+      </Sheet>
+
+      <Sheet
+        open={showLessons}
+        side="left"
+        class="history-view lessons-view"
+        label="Lessons"
+        onClose={() => setShowLessons(false)}
+      >
+        <LessonsBody
+          lessons={lessons}
+          status={coachStatus}
+          onReview={reviewLessons}
+          onUpdate={updateLesson}
+          onDelete={deleteLesson}
+          onClear={clearLessons}
+          onExport={exportLessons}
+          onClose={() => setShowLessons(false)}
         />
       </Sheet>
 

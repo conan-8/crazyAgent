@@ -3156,6 +3156,171 @@ input[type="number"]::-webkit-inner-spin-button {
   margin: 0;
 }
 
+/* ---------------- lessons (coach) ---------------- */
+
+/* Toolbar button carrying an unread dot when the coach learned something new. */
+.badge-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.badge-wrap.has-badge::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+  animation: fade-in 0.4s var(--ease-out) both;
+  pointer-events: none;
+}
+
+.lesson-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 16px 0;
+}
+
+.lesson-actions .btn-soft {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.lesson-actions .btn-ghost {
+  font-size: 11.5px;
+}
+
+.lesson-status {
+  margin: 10px 16px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.lesson-status.is-error {
+  border-color: transparent;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.lessons-view .sheet-body {
+  gap: 10px;
+}
+
+/* A lesson is a card, not a link row: it stays open while you read it. */
+.lesson-row {
+  --i: 0;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 8px 10px 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  animation: hist-in 0.5s var(--ease-out) both;
+  animation-delay: calc(0.1s + var(--i) * 0.03s);
+}
+
+.lesson-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.lesson-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lesson-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.lesson-tag.is-soft {
+  background: var(--surface-2);
+  color: var(--text-faint);
+}
+
+.lesson-tag.is-pin {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.lesson-text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.lesson-evidence {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.lesson-meta {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+
+.lesson-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lesson-tools .btn-icon {
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.2s, transform 0.3s var(--spring), background-color 0.2s, color 0.2s;
+}
+
+.lesson-row:hover .lesson-tools .btn-icon,
+.lesson-tools .btn-icon:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.lesson-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lesson-edit textarea {
+  min-height: 62px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.lesson-edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
 /* ---------------- viewer ---------------- */
 
 .viewer {

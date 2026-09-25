@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   JEV_DEFAULTS,
   JEV_LIMITS,
+  JEV_OPENAI_SCHEMA_NAME,
+  JEV_TRANSPORT_DEFAULTS,
+  buildJevAnswersSchema,
+  buildOpenAiJevBody,
   buildSystemOneBody,
   clipJevText,
   describeJevHttpError,
+  extractChatCompletionText,
   formatJevAnswerLine,
+  normalizeJevTransport,
   normalizeJudgeQuestions,
   parseJevAnswer,
+  parseOpenAiJevResponse,
   parseSystemOneResponse,
   serializeJevState,
   thinkingForComplexity,
@@ -40,6 +47,224 @@ describe("buildSystemOneBody", () => {
 
   it("falls back to the default model on an empty string", () => {
     expect(buildSystemOneBody("s", {}, "").model).toBe(JEV_DEFAULTS.model);
+  });
+});
+
+// ---------------- chat-completions transport (OpenRouter et al.) ----------------
+
+const MIXED_QUESTIONS = {
+  relevant: { type: "noul" as const, instructions: "Is it relevant?" },
+  best: {
+    type: "choice" as const,
+    instructions: "Which is best?",
+    criteria: { "Item A": "cheap", "Item B": "fast" },
+  },
+  quality: {
+    type: "score" as const,
+    instructions: "How good?",
+    criteria: ["bad", "ok", "great"],
+  },
+};
+
+describe("normalizeJevTransport", () => {
+  it("accepts openai and coerces everything else to typesafe", () => {
+    expect(normalizeJevTransport("openai")).toBe("openai");
+    expect(normalizeJevTransport("typesafe")).toBe("typesafe");
+    expect(normalizeJevTransport(undefined)).toBe("typesafe");
+    expect(normalizeJevTransport("")).toBe("typesafe");
+    expect(normalizeJevTransport("OpenAI")).toBe("typesafe");
+    expect(normalizeJevTransport({ transport: "openai" })).toBe("typesafe");
+  });
+
+  it("documents an OpenRouter default endpoint and a structured-output model", () => {
+    expect(JEV_TRANSPORT_DEFAULTS.openai.baseUrl).toBe("https://openrouter.ai/api/v1");
+    expect(JEV_TRANSPORT_DEFAULTS.openai.model).toContain("/");
+    expect(JEV_TRANSPORT_DEFAULTS.typesafe).toEqual({
+      baseUrl: JEV_DEFAULTS.baseUrl,
+      model: JEV_DEFAULTS.model,
+    });
+  });
+});
+
+describe("buildJevAnswersSchema", () => {
+  it("requires exactly one answer per question id and nothing else", () => {
+    const schema = buildJevAnswersSchema(MIXED_QUESTIONS) as {
+      additionalProperties: boolean;
+      required: string[];
+      properties: { answers: { required: string[]; additionalProperties: boolean } };
+    };
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.required).toEqual(["answers"]);
+    expect(schema.properties.answers.required).toEqual(["relevant", "best", "quality"]);
+    expect(schema.properties.answers.additionalProperties).toBe(false);
+  });
+
+  it("pins choice answers to the offered options (no invented choices)", () => {
+    const schema = buildJevAnswersSchema(MIXED_QUESTIONS) as {
+      properties: { answers: { properties: Record<string, { properties: Record<string, unknown> }> } };
+    };
+    const choice = schema.properties.answers.properties.best!.properties.choice as {
+      enum: string[];
+    };
+    const probabilities = schema.properties.answers.properties.best!.properties
+      .probabilities as { required: string[] };
+    expect(choice.enum).toEqual(["Item A", "Item B"]);
+    expect(probabilities.required).toEqual(["Item A", "Item B"]);
+  });
+
+  it("uses enum-of-one rather than const (strict-mode subset)", () => {
+    const json = JSON.stringify(buildJevAnswersSchema(MIXED_QUESTIONS));
+    expect(json).not.toContain('"const"');
+    expect(json).toContain('"enum":["noul"]');
+  });
+});
+
+describe("buildOpenAiJevBody", () => {
+  it("is a strict structured-output chat request that names our schema", () => {
+    const body = buildOpenAiJevBody("some state", MIXED_QUESTIONS, "openai/gpt-oss-20b") as {
+      model: string;
+      temperature: number;
+      max_tokens: number;
+      messages: { role: string; content: string }[];
+      response_format: { type: string; json_schema: { name: string; strict: boolean } };
+    };
+    expect(body.model).toBe("openai/gpt-oss-20b");
+    expect(body.temperature).toBe(0);
+    expect(body.max_tokens).toBeGreaterThan(0);
+    expect(body.response_format.type).toBe("json_schema");
+    expect(body.response_format.json_schema.name).toBe(JEV_OPENAI_SCHEMA_NAME);
+    expect(body.response_format.json_schema.strict).toBe(true);
+    expect(body.messages.map((m) => m.role)).toEqual(["system", "user"]);
+  });
+
+  it("carries the state and the questions in the user message", () => {
+    const body = buildOpenAiJevBody(["a", "b"], MIXED_QUESTIONS, "m") as {
+      messages: { content: string }[];
+    };
+    const user = body.messages[1]!.content;
+    expect(user).toContain('"a"');
+    // The trailing questions block is machine-readable (the mock relies on it).
+    const json = JSON.parse(user.slice(user.indexOf("questions:") + "questions:".length));
+    expect(Object.keys(json)).toEqual(["relevant", "best", "quality"]);
+    expect(json.best.criteria).toEqual({ "Item A": "cheap", "Item B": "fast" });
+  });
+
+  it("falls back to the OpenRouter default model on an empty string", () => {
+    expect(buildOpenAiJevBody("s", {}, "").model).toBe(JEV_TRANSPORT_DEFAULTS.openai.model);
+  });
+});
+
+/** Wrap answer objects in a chat-completion envelope like a gateway would. */
+function chatEnvelope(content: unknown, extra: Record<string, unknown> = {}): unknown {
+  return {
+    id: "gen-1",
+    model: "openai/gpt-oss-20b",
+    choices: [
+      {
+        index: 0,
+        finish_reason: "stop",
+        message: { role: "assistant", content: typeof content === "string" ? content : JSON.stringify(content) },
+      },
+    ],
+    usage: { prompt_tokens: 123, completion_tokens: 45, total_tokens: 168 },
+    ...extra,
+  };
+}
+
+describe("extractChatCompletionText", () => {
+  it("reads string content, content parts, and reasoning fallbacks", () => {
+    expect(extractChatCompletionText(chatEnvelope("hello"))).toBe("hello");
+    expect(
+      extractChatCompletionText({
+        choices: [{ message: { content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] } }],
+      }),
+    ).toBe("ab");
+    expect(
+      extractChatCompletionText({
+        choices: [{ message: { content: "", reasoning: '{"answers":{}}' } }],
+      }),
+    ).toBe('{"answers":{}}');
+    expect(extractChatCompletionText({})).toBe("");
+    expect(extractChatCompletionText(null)).toBe("");
+  });
+});
+
+describe("parseOpenAiJevResponse", () => {
+  it("parses all three answer types out of a chat completion", () => {
+    const result = parseOpenAiJevResponse(
+      chatEnvelope({
+        answers: {
+          relevant: { type: "noul", noul: 0.82 },
+          best: {
+            type: "choice",
+            choice: "Item B",
+            probabilities: { "Item A": 0.2, "Item B": 0.8 },
+            confidence: 0.77,
+          },
+          quality: { type: "score", score: 2, confidence: 0.6 },
+        },
+      }),
+      MIXED_QUESTIONS,
+    );
+    expect(result.model).toBe("openai/gpt-oss-20b");
+    expect(result.answers.relevant).toEqual({ type: "noul", noul: 0.82 });
+    expect(result.answers.best).toEqual({
+      type: "choice",
+      choice: "Item B",
+      probabilities: { "Item A": 0.2, "Item B": 0.8 },
+      confidence: 0.77,
+    });
+    // The model is never asked to echo the rubric — we rebuild the legend.
+    expect(result.answers.quality).toEqual({
+      type: "score",
+      score: 2,
+      legend: { "0": "bad", "1": "ok", "2": "great" },
+      probabilities: {},
+      confidence: 0.6,
+    });
+    expect(result.usage).toEqual({ inputTokens: 123, outputTokens: 45 });
+  });
+
+  it("tolerates fenced JSON and prose around the object", () => {
+    const fenced = "```json\n" + JSON.stringify({ answers: { relevant: { type: "noul", noul: 0.5 } } }) + "\n```";
+    expect(parseOpenAiJevResponse(chatEnvelope(fenced), MIXED_QUESTIONS).answers.relevant).toEqual({
+      type: "noul",
+      noul: 0.5,
+    });
+    const prose = `Sure! ${JSON.stringify({ answers: { relevant: { type: "noul", noul: 0.1 } } })} Hope that helps.`;
+    expect(parseOpenAiJevResponse(chatEnvelope(prose), MIXED_QUESTIONS).answers.relevant).toEqual({
+      type: "noul",
+      noul: 0.1,
+    });
+  });
+
+  it("infers a missing type from the question and clamps out-of-range scores", () => {
+    const result = parseOpenAiJevResponse(
+      chatEnvelope({ answers: { relevant: { noul: 0.3 }, quality: { score: 9, confidence: 0.2 } } }),
+      MIXED_QUESTIONS,
+    );
+    expect(result.answers.relevant).toEqual({ type: "noul", noul: 0.3 });
+    expect((result.answers.quality as { score: number }).score).toBe(2); // clamped to the rubric
+  });
+
+  it("accepts a bare id → answer map and drops malformed entries", () => {
+    const result = parseOpenAiJevResponse(
+      chatEnvelope({ relevant: { type: "noul", noul: 0.4 }, junk: { nope: true } }),
+      MIXED_QUESTIONS,
+    );
+    expect(Object.keys(result.answers)).toEqual(["relevant"]);
+  });
+
+  it("returns no answers (never throws) on garbage or empty content", () => {
+    for (const bad of ["", "not json at all", "{}", "[]", "null"]) {
+      const result = parseOpenAiJevResponse(chatEnvelope(bad), MIXED_QUESTIONS);
+      expect(result.answers).toEqual({});
+    }
+    expect(parseOpenAiJevResponse(null, MIXED_QUESTIONS)).toEqual({
+      model: undefined,
+      answers: {},
+      usage: undefined,
+    });
   });
 });
 
@@ -267,6 +492,16 @@ describe("describeJevHttpError", () => {
     expect(describeJevHttpError(529)).toContain("overloaded");
     expect(describeJevHttpError(500)).toContain("HTTP 500");
   });
+
+  it("names the gateway causes on the openai transport", () => {
+    expect(describeJevHttpError(401, "openai")).toContain("rejected the API key");
+    expect(describeJevHttpError(402, "openai")).toContain("insufficient credits");
+    // The 404 must point at the real cause: OpenRouter serves no /systemone.
+    expect(describeJevHttpError(404, "openai")).toContain("openrouter.ai/api/v1");
+    expect(describeJevHttpError(404, "openai")).toContain("/systemone");
+    expect(describeJevHttpError(429, "openai")).toContain("rate limit");
+    expect(describeJevHttpError(500, "openai")).toContain("HTTP 500");
+  });
 });
 
 // ---------------- policy integration ----------------
@@ -390,6 +625,7 @@ describe("settings — jev block", () => {
     const s = normalizeSettings(undefined);
     expect(s.jev).toEqual({
       enabled: false,
+      transport: "typesafe",
       apiKey: "",
       baseUrl: JEV_DEFAULTS.baseUrl,
       model: JEV_DEFAULTS.model,
@@ -404,6 +640,8 @@ describe("settings — jev block", () => {
     });
     expect(s.jev).toEqual({
       enabled: true,
+      // Legacy blocks predate transports — they were TypeSafe-only.
+      transport: "typesafe",
       apiKey: "tsk-1",
       baseUrl: JEV_DEFAULTS.baseUrl,
       model: JEV_DEFAULTS.model,
@@ -411,14 +649,71 @@ describe("settings — jev block", () => {
     expect(s.autoThinking).toBe(false); // only a real true enables
   });
 
+  it("resolves blank endpoint/model from the selected transport", () => {
+    const s = normalizeSettings({
+      jev: { enabled: true, transport: "openai", apiKey: "sk-or-1" } as never,
+    });
+    expect(s.jev).toEqual({
+      enabled: true,
+      transport: "openai",
+      apiKey: "sk-or-1",
+      baseUrl: JEV_TRANSPORT_DEFAULTS.openai.baseUrl,
+      model: JEV_TRANSPORT_DEFAULTS.openai.model,
+    });
+  });
+
+  it("coerces an unknown transport back to typesafe", () => {
+    const s = normalizeSettings({
+      jev: { enabled: true, transport: "gemini" as never, apiKey: "k" } as never,
+    });
+    expect(s.jev.transport).toBe("typesafe");
+  });
+
+  it("infers the chat transport for a legacy block already pointed at OpenRouter", () => {
+    // Such a block could never have worked (OpenRouter has no /systemone), so
+    // it is rescued rather than left 404-ing — and a blank model then resolves
+    // from the inferred transport.
+    const s = normalizeSettings({
+      jev: {
+        enabled: true,
+        apiKey: "sk-or-legacy",
+        baseUrl: "https://openrouter.ai/api/v1",
+        model: "",
+      } as never,
+    });
+    expect(s.jev.transport).toBe("openai");
+    expect(s.jev.model).toBe(JEV_TRANSPORT_DEFAULTS.openai.model);
+    expect(s.jev.baseUrl).toBe("https://openrouter.ai/api/v1");
+  });
+
+  it("keeps an explicit transport even when the base URL looks like another", () => {
+    const s = normalizeSettings({
+      jev: {
+        enabled: true,
+        transport: "typesafe",
+        apiKey: "k",
+        baseUrl: "https://openrouter.ai/api/v1",
+        model: "jev-latest",
+      } as never,
+    });
+    expect(s.jev.transport).toBe("typesafe");
+  });
+
   it("survives a save/load round-trip", () => {
     const once = normalizeSettings({
       ...DEFAULT_SETTINGS,
-      jev: { enabled: true, apiKey: "tsk-2", baseUrl: "http://127.0.0.1:9/v1", model: "jev-mock" },
+      jev: {
+        enabled: true,
+        transport: "openai",
+        apiKey: "sk-or-2",
+        baseUrl: "http://127.0.0.1:9/v1",
+        model: "jev-mock",
+      },
       autoThinking: true,
     });
     const twice = normalizeSettings(once);
     expect(twice.jev).toEqual(once.jev);
+    expect(twice.jev.transport).toBe("openai");
     expect(twice.autoThinking).toBe(true);
   });
 });
@@ -432,6 +727,27 @@ describe("createJevClient", () => {
 
   it("builds a client when enabled with a key", () => {
     expect(createJevClient({ enabled: true, apiKey: "tsk-x" })).not.toBeNull();
+  });
+
+  it("defaults to the TypeSafe transport (legacy blocks keep working)", () => {
+    const client = createJevClient({ enabled: true, apiKey: "tsk-x" });
+    expect(client?.transport).toBe("typesafe");
+    expect(client?.isChatTransport).toBe(false);
+  });
+
+  it("resolves the OpenRouter endpoint and model for the openai transport", () => {
+    const client = createJevClient({
+      enabled: true,
+      transport: "openai",
+      apiKey: "sk-or-x",
+      baseUrl: "",
+      model: "",
+    });
+    expect(client?.transport).toBe("openai");
+    expect(client?.isChatTransport).toBe(true);
+    // Blank fields resolve from the transport, not from TypeSafe.
+    expect(JSON.stringify(client)).toContain(JEV_TRANSPORT_DEFAULTS.openai.baseUrl);
+    expect(JSON.stringify(client)).toContain(JEV_TRANSPORT_DEFAULTS.openai.model);
   });
 });
 

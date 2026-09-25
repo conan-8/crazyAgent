@@ -158,6 +158,45 @@ describe("provider request shaping", () => {
   });
 });
 
+describe("system prompt appendix (lessons learned)", () => {
+  it("leaves the Anthropic system block untouched when unset", () => {
+    const body = buildAnthropicBody(req, "m1") as unknown as ShapedBody;
+    expect(body.system).toEqual([
+      { type: "text", text: "sys", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("sends the appendix as a second, uncached block so the cached prefix survives", () => {
+    const body = buildAnthropicBody(
+      { ...req, systemSuffix: "APPENDIX — lessons" },
+      "m1",
+    ) as unknown as ShapedBody;
+    expect(body.system).toHaveLength(2);
+    // Base prompt keeps the single cache breakpoint; the per-run appendix
+    // deliberately carries none, so it never invalidates the cached prefix.
+    expect(body.system[0]).toEqual({
+      type: "text",
+      text: "sys",
+      cache_control: { type: "ephemeral" },
+    });
+    expect(body.system[1]).toEqual({ type: "text", text: "APPENDIX — lessons" });
+    expect(body.system[1]!.cache_control).toBeUndefined();
+  });
+
+  it("appends the appendix to the single OpenAI system message", () => {
+    const withSuffix = buildOpenAiBody(
+      { ...req, systemSuffix: "APPENDIX — lessons" },
+      "m2",
+    ) as unknown as ShapedBody;
+    expect(withSuffix.messages[0]).toEqual({
+      role: "system",
+      content: "sys\n\nAPPENDIX — lessons",
+    });
+    const plain = buildOpenAiBody(req, "m2") as unknown as ShapedBody;
+    expect(plain.messages[0]).toEqual({ role: "system", content: "sys" });
+  });
+});
+
 describe("SSE aggregators", () => {
   it("aggregates an Anthropic stream with text and a tool_use", () => {
     const texts: string[] = [];

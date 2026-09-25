@@ -65,6 +65,14 @@ export function thinkingBudgetFor(level: ThinkingLevel): number {
 
 export interface LlmRequest {
   system: string;
+  /**
+   * Per-run appendix (e.g. lessons learned from previous runs), sent as a
+   * SEPARATE system block after `system`. Splitting it out keeps the base
+   * prompt byte-stable, so provider prompt caching still hits on the expensive
+   * prefix while the appendix changes from run to run. Providers without
+   * block-level system prompts concatenate the two.
+   */
+  systemSuffix?: string;
   messages: LlmMessage[];
   tools: LlmToolSpec[];
   maxTokens?: number;

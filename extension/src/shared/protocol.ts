@@ -12,9 +12,11 @@ export type LogExportFormat = "jsonl" | "md";
 import type { LlmMessage, LlmToolSpec } from "./llm";
 import type { Conversation, ConversationSummary } from "./chat";
 import type { LogSummary, LogTurnRecord } from "./logging";
+import type { Lesson, LessonCategory } from "./lessons";
 export type { LlmMessage };
 export type { Conversation, ConversationSummary };
 export type { LogSummary, LogTurnRecord };
+export type { Lesson, LessonCategory };
 
 /** Parameters for the Phase 1 demo/echo task (also the mock harness hook). */
 export interface DemoConfig {
@@ -125,6 +127,22 @@ export type PortRequest =
   | { kind: "logs.clear" }
   /** Export to a file on disk (panel triggers the download). */
   | { kind: "logs.export"; format: LogExportFormat; logId?: string }
+  /**
+   * Self-improvement ("coach") layer: review a finished run with a second
+   * agent on the same model and keep what it learned about what works.
+   */
+  | { kind: "lessons.list" }
+  | { kind: "lessons.review"; logId?: string }
+  | {
+      kind: "lessons.update";
+      id: string;
+      text?: string;
+      pinned?: boolean;
+      category?: LessonCategory;
+    }
+  | { kind: "lessons.delete"; id: string }
+  | { kind: "lessons.clear" }
+  | { kind: "lessons.export"; format: LogExportFormat }
   /** Resolve a pending Phase 6 confirmation. */
   | { kind: "confirm.resolve"; id: string; allow: boolean; always?: boolean }
   /** Dev/test + Phase 4 loop: run one registered tool against a tab. */
@@ -159,6 +177,23 @@ export type SwToPanel =
   | { type: "history.get"; conversation: Conversation | null }
   | { type: "logs.list"; logs: LogSummary[] }
   | { type: "logs.get"; log: LogTurnRecord | null }
+  | { type: "lessons.list"; lessons: Lesson[] }
+  /**
+   * Progress of one coach review. `started` is emitted for manual reviews so
+   * the panel can show a spinner; auto reviews go straight to a terminal
+   * status (the user asked for nothing, so there is nothing to spin).
+   */
+  | {
+      type: "lessons.review";
+      status: "started" | "added" | "empty" | "error";
+      task?: string;
+      source?: "auto" | "manual";
+      added?: number;
+      merged?: number;
+      total?: number;
+      message?: string;
+    }
+  | { type: "lessons.export"; format: LogExportFormat; filename: string; content: string }
   | {
       type: "logs.export";
       format: LogExportFormat;

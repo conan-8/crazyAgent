@@ -15,6 +15,7 @@ const steps = [
   ["run logs (archive + export)", "node", ["scripts/phase10-smoke.mjs"]],
   ["madman mode", "node", ["scripts/madman-smoke.mjs"]],
   ["jev fast decisions (sidecar)", "node", ["scripts/jev-smoke.mjs"]],
+  ["self-improvement (coach lessons)", "node", ["scripts/lessons-smoke.mjs"]],
   ["phase 1 — lifecycle (quick)", "node", ["scripts/phase1-smoke.mjs", "quick"]],
 ];
 
