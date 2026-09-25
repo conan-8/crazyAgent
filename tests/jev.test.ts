@@ -563,6 +563,28 @@ describe("assessWithJev — union-only merge", () => {
       assessWithJev(allow, { purchase: 0.9, credential: 0.99, irreversible: 0.99, beyondTask: 0.99 }),
     ).toMatchObject({ rule: "purchase" });
   });
+
+  it("marks every Jev-raised confirm for the pink highlight", () => {
+    // Each branch must carry jev: true, or the panel would style a
+    // Jev-raised confirmation like an ordinary rule-based one.
+    const raised = [
+      assessWithJev(allow, { purchase: 0.95 }),
+      assessWithJev(allow, { credential: 0.95 }),
+      assessWithJev(allow, { irreversible: 0.95 }),
+      assessWithJev(allow, { beyondTask: 0.95 }),
+    ];
+    for (const risk of raised) expect(risk).toMatchObject({ level: "confirm", jev: true });
+  });
+
+  it("never marks a rule-based confirm as Jev", () => {
+    // An existing regex confirm passes through untouched — no jev flag, so it
+    // keeps the neutral amber styling.
+    const base = assess("evaluate_js", { expression: "1+1" });
+    expect(base.level).toBe("confirm");
+    const merged = assessWithJev(base, { purchase: 0.95 }, "x");
+    expect(merged).toBe(base);
+    expect((merged as { jev?: boolean }).jev).toBeUndefined();
+  });
 });
 
 describe("toRiskAnswers", () => {

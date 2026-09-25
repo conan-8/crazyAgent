@@ -57,6 +57,12 @@ export type StepEvent =
       args: unknown;
       /** Madman mode: cuss-decorated display label for the tool card. */
       label?: string;
+      /**
+       * Jev sidecar: this call went through Jev (the `judge` tool). The panel
+       * tints the card bright pink so a Jev-assisted step is visible at a
+       * glance. Set from the tool name at emission time, not by the model.
+       */
+      jev?: boolean;
     }
   /** Madman mode: a mid-run exclamation shown between tool cards. */
   | { kind: "madman"; message: string }
@@ -82,7 +88,7 @@ export type StepEvent =
   | { kind: "token_delta"; text: string }
   /** Streamed model reasoning ("thinking"); rendered in a collapsed block. */
   | { kind: "reasoning_delta"; text: string }
-  | { kind: "need_confirm"; id: string; tool: string; summary: string }
+  | { kind: "need_confirm"; id: string; tool: string; summary: string; jev?: boolean }
   /** `stats` are the final numbers, so the bar survives the run ending. */
   | { kind: "done"; summary: string; stats?: RunStats }
   | { kind: "error"; message: string };

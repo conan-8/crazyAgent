@@ -247,4 +247,54 @@ describe("run log export", () => {
     expect(toJsonl([])).toBe("");
     expect(toMarkdown([])).toBe("");
   });
+
+  it("records Jev provenance on judge calls and Jev-raised confirms", () => {
+    const rec = newTurnRecord("Judge it", { mode: "standard", at: 0 });
+    foldLogEvent(
+      rec,
+      { kind: "tool_call", stepIndex: 0, name: "judge", args: { questions: [] }, jev: true },
+      10,
+    );
+    foldLogEvent(
+      rec,
+      { kind: "tool_call", stepIndex: 0, name: "click", args: { ref: "1" } },
+      12,
+    );
+    foldLogEvent(
+      rec,
+      {
+        kind: "need_confirm",
+        id: "cf1",
+        tool: "purchase",
+        summary: "Jev flags this as likely completing a purchase (95%)",
+        jev: true,
+      },
+      20,
+    );
+    foldLogEvent(rec, { kind: "done", summary: "ok" }, 30);
+
+    // JSONL keeps the structured flag...
+    const parsed = JSON.parse(toJsonl([rec]).trim());
+    expect(parsed.turns[0].tools[0].jev).toBe(true);
+    expect(parsed.turns[0].tools[1].jev).toBeUndefined();
+    expect(parsed.turns[0].confirmations[0].jev).toBe(true);
+
+    // ...and the Markdown export states it in words.
+    const md = toMarkdown([rec]);
+    expect(md).toContain("via Jev");
+    expect(md).toContain("(Jev): purchase");
+  });
+
+  it("marks a rule-based confirmation as coming from the rules", () => {
+    const rec = newTurnRecord("Type it", { mode: "standard", at: 0 });
+    foldLogEvent(
+      rec,
+      { kind: "need_confirm", id: "cf2", tool: "password", summary: "pw" },
+      10,
+    );
+    foldLogEvent(rec, { kind: "done", summary: "ok" }, 20);
+    const md = toMarkdown([rec]);
+    expect(md).toContain("(rules): password");
+    expect(md).not.toContain("via Jev");
+  });
 });

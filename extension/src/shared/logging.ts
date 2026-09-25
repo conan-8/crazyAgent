@@ -35,6 +35,8 @@ export interface LogToolCall {
   /** Screenshot bytes are recorded as a marker, never inline (log size). */
   image?: boolean;
   truncated?: boolean;
+  /** This call went through the Jev sidecar (the `judge` tool). */
+  jev?: boolean;
 }
 
 /** Everything that happened inside one assistant turn, in arrival order. */
@@ -54,7 +56,14 @@ export interface LogTurn {
   /** Madman-mode exclamations, kept as their own timestamped lines. */
   exclamations: { at: number; message: string }[];
   /** Sensitive actions that paused for user confirmation. */
-  confirmations: { at: number; id: string; tool: string; summary: string }[];
+  confirmations: {
+    at: number;
+    id: string;
+    tool: string;
+    summary: string;
+    /** Jev raised this confirmation rather than the keyword rules. */
+    jev?: boolean;
+  }[];
   errors: { at: number; message: string }[];
   /** Final summary from the `done` event. */
   summary?: string;
@@ -175,6 +184,7 @@ export function foldLogEvent(
         label: e.label,
         args: safeJson(e.args),
         at,
+        jev: e.jev === true ? true : undefined,
       });
       rec.toolCalls += 1;
       break;
@@ -205,6 +215,7 @@ export function foldLogEvent(
         id: e.id,
         tool: e.tool,
         summary: e.summary,
+        jev: e.jev === true ? true : undefined,
       });
       break;
     case "error": {
@@ -358,8 +369,10 @@ export function toMarkdown(records: LogTurnRecord[]): string {
       if (turn.exclamations.length) out.push("");
       for (const call of turn.tools) {
         const status = call.ok === false ? "✗" : call.ok === true ? "✓" : "…";
+        // Jev provenance is recorded, not inferred — it survives export.
+        const via = call.jev ? " · via Jev" : "";
         out.push(
-          `- **${status} ${call.name}** (call ${call.index + 1}, ${iso(call.at)}, ${fmtDuration(call.durationMs)})`,
+          `- **${status} ${call.name}** (call ${call.index + 1}, ${iso(call.at)}, ${fmtDuration(call.durationMs)}${via})`,
         );
         out.push("  - args: `" + call.args.replace(/`/g, "\\`") + "`");
         if (call.result !== undefined) {
@@ -373,7 +386,10 @@ export function toMarkdown(records: LogTurnRecord[]): string {
         out.push("");
       }
       for (const c of turn.confirmations) {
-        out.push(`- ⚠ confirmation requested at ${iso(c.at)}: ${c.tool} — ${c.summary}`);
+        const via = c.jev ? "Jev" : "rules";
+        out.push(
+          `- ⚠ confirmation requested at ${iso(c.at)} (${via}): ${c.tool} — ${c.summary}`,
+        );
       }
       for (const err of turn.errors) {
         out.push(`- ⚠ error at ${iso(err.at)}: ${err.message}`);

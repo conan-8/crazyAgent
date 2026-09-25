@@ -253,6 +253,30 @@ async function main() {
       offClean && offLabels && offExclaim && after.length > 0,
       `cleanPrompt=${offClean} cleanLabels=${offLabels} noExclaim=${offExclaim}`,
     );
+
+    // ---- M6: the wall clock reaches the provider wire ----
+    // The model has no other time source, so the prompt must carry a real,
+    // parseable local timestamp — and it must sit at the END so the stable
+    // prefix above it stays cacheable.
+    const clock = after.filter((s) => s.includes("Current date and time:"));
+    const stamps = clock.map((s) => s.match(/Current date and time: (\S+)/)?.[1] ?? "");
+    const parsed = stamps.map((s) => Date.parse(s));
+    const nowMs = Date.now();
+    const fresh = parsed.filter((t) => Number.isFinite(t) && Math.abs(nowMs - t) < 10 * 60_000);
+    check(
+      "M6 the wall clock reaches the LLM system prompt, fresh and parseable",
+      clock.length === after.length && fresh.length === clock.length,
+      `withClock=${clock.length}/${after.length} parsed=${stamps.filter(Boolean).length} fresh=${fresh.length} sample=${stamps[0]}`,
+    );
+    check(
+      "M6b the clock is appended last so the cached prefix survives",
+      clock.length > 0 &&
+        clock.every((s) => {
+          const at = s.indexOf("Current date and time:");
+          return at > s.indexOf("Never invent refs") && s.indexOf("Current task:") > at;
+        }),
+      "",
+    );
   } finally {
     try {
       edge.kill("SIGKILL");

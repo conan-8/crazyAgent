@@ -137,6 +137,34 @@ describe("ConfirmGate", () => {
     expect(await p).toEqual({ allow: true });
   });
 
+  it("forwards the Jev flag so the card can be highlighted pink", async () => {
+    const { events, deps } = gateHarness();
+    const gate = new ConfirmGate(deps);
+    await gate.ready();
+    const p = gate.request({ ...risk, jev: true });
+    const confirm = events.find((e) => e.kind === "need_confirm") as Extract<
+      StepEvent,
+      { kind: "need_confirm" }
+    >;
+    expect(confirm.jev).toBe(true);
+    gate.resolve(confirm.id, false, false);
+    await p;
+  });
+
+  it("omits the Jev flag on a rule-based confirm", async () => {
+    const { events, deps } = gateHarness();
+    const gate = new ConfirmGate(deps);
+    await gate.ready();
+    const p = gate.request(risk);
+    const confirm = events.find((e) => e.kind === "need_confirm") as Extract<
+      StepEvent,
+      { kind: "need_confirm" }
+    >;
+    expect(confirm.jev).toBeUndefined();
+    gate.resolve(confirm.id, false, false);
+    await p;
+  });
+
   it("deny returns a cancellation reason", async () => {
     const { events, deps } = gateHarness();
     const gate = new ConfirmGate(deps);

@@ -35,7 +35,8 @@ The **policy** (`background/policy.ts`) wraps agent tool calls: pure `assess()`
 `ConfirmGate` (need_confirm round-trip over the bus, allowlist persistence).
 When the Jev sidecar is configured, `assessWithJev()` merges Jev's risk
 probabilities into the verdict — union-only: it can add a confirm the regex
-rules missed, never remove one (see "Jev decision layer" below).
+rules missed, never remove one (see "Jev decision layer" below). A confirm Jev
+raised is marked `jev: true` so the panel can highlight it pink.
 
 **Chat & history** hang off `shared/chat.ts` — one pure event-folder
 (`foldEvent`) consumed twice: the panel folds StepEvents into the visible
@@ -108,6 +109,31 @@ when the model forgets. `madman-smoke.mjs` proves all of it against a real
 browser and a scripted mock LLM. Turning it off must leave the prompt
 byte-identical to the pre-Madman prompt (`tests/prompts.test.ts` asserts this).
 
+## The model's clock
+
+`buildSystemPrompt()` ends with `timeLine(now)` — a local-time stamp
+(`2026-09-24T18:34:22`, weekday, UTC offset, IANA zone) plus instructions to
+resolve relative dates against it and to distrust stale page timestamps. It is
+the model's ONLY time source: nothing else in the tool surface or history
+carries a clock, so without it "next Tuesday", "expires in 3 days" and
+staleness checks are unanswerable.
+
+Two properties are load-bearing and tested:
+
+- **Read per step, not per run.** `loop.ts` calls `buildSystemPrompt(…, now)`
+  with a fresh `new Date()` inside the step loop, so a long run — or one
+  resumed from a checkpoint hours later — sees the real time rather than the
+  time the task started. This is why `now` is an injected parameter rather
+  than `new Date()` buried in `prompts.ts`: the clock must be injectable for
+  tests and variable per step.
+- **Appended last.** The clock changes every call, so anything rendered below
+  it would defeat the byte-stable prefix that provider prompt caching depends
+  on. Only `Current task:` follows it. `tests/prompts.test.ts` asserts both the
+  ordering and that the prefix above the clock is identical across steps.
+
+`madman-smoke.mjs` (M6/M6b) proves the stamped line reaches the provider wire
+in a real browser run, parseable and within minutes of now.
+
 ## Jev decision layer (System-One sidecar)
 
 [Jev](https://docs.typesafe.ai/api) (TypeSafe's "System One" decision model)
@@ -173,6 +199,31 @@ defaults noul→0.05). Known Jev weak spots (numbers, dates,
 counting, adversarial content — the vendor's "jaggedness" doc) are designed
 around: questions stay literal, math stays in code, and `beyond_task` carries
 the highest threshold (0.85).
+
+### Pink highlight (seeing when Jev was used)
+
+Jev is invisible by construction — it returns no text and calls no tools — so
+the UI marks every step it actually influenced. Two surfaces:
+
+- **The `judge` card.** `loop.ts` sets `jev: true` on that `tool_call` event
+  *from the tool name*, never from a model-supplied field, so the highlight
+  can't be spoofed or forgotten. It flows through `StepEvent` →
+  `chat.ts` `ToolCard.jev` → the `.card-jev` class and a `Jev · judge` chip.
+- **A confirmation Jev raised.** `assessWithJev` stamps `jev: true` on the
+  `Risk` it returns (only its own four branches, not the pass-through regex
+  verdict), `ConfirmGate.request` forwards it onto `need_confirm`, and the card
+  renders `.confirm-card.is-jev` with a "Jev flagged this" eyebrow instead of
+  the neutral amber "Needs your approval".
+
+Styling lives in one place: the `--jev*` token pair in `styles.css`, defined
+for **both** the dark root and the `color-scheme: light` block, so the pink
+never washes out in light mode. The highlight is always paired with the word
+"Jev" — colour alone never carries the meaning (colour-blind users, greyscale
+screenshots). `scripts/jev-smoke.mjs` asserts the flag on the wire, the classes
+in the DOM, and that the token resolves to real pink in the live document
+(J4b–J4d, J5b–J5c); `tests/jev-style.test.ts` covers the panel wiring, and
+`tests/chat.test.ts` / `tests/policy.test.ts` pin that non-Jev cards stay
+unflagged (`undefined`, not `false`).
 
 ## evaluate_js and page CSP (why it runs over CDP)
 

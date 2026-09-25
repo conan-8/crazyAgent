@@ -132,6 +132,7 @@ export async function runAgentTask(
     if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
     deps.emit({ kind: "step_started", stepIndex: step });
 
+    const now = new Date();
     let result;
     try {
       result = await completeWithRetry(
@@ -142,6 +143,9 @@ export async function runAgentTask(
             deps.agentMode ?? "auto",
             deps.madman === true,
             deps.judgeAvailable === true,
+            // Clock is read per step (not once per run) so a long run — or one
+            // resumed from a checkpoint hours later — always sees the real time.
+            now,
           ),
           systemSuffix: deps.lessonsBlock || undefined,
           messages: truncateHistory(cp.messages, HISTORY_BUDGET_CHARS),
@@ -248,6 +252,10 @@ export async function runAgentTask(
         name: call.name,
         args: call.args,
         label: madman ? madmanLabel(call.name, `${step}:${call.name}`) : undefined,
+        // A `judge` call IS a Jev call — the sidecar answers it. Flagged here
+        // from the tool name (not model-supplied), so the pink highlight in the
+        // panel cannot be spoofed or missed.
+        jev: call.name === "judge" ? true : undefined,
       });
     };
     const canParallel =

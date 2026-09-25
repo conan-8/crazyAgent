@@ -15,6 +15,11 @@ export interface ToolCard {
   result: string;
   ok: boolean;
   image?: string;
+  /**
+   * This call went through the Jev sidecar (the `judge` tool). The panel tints
+   * the card bright pink so Jev-assisted steps stand out in the timeline.
+   */
+  jev?: boolean;
   /** fold bookkeeping: whether a tool_result already filled this card */
   filled?: boolean;
 }
@@ -23,6 +28,8 @@ export interface ConfirmMarker {
   id: string;
   tool: string;
   summary: string;
+  /** Jev raised this confirmation (not the regex rules) — pink highlight. */
+  jev?: boolean;
 }
 
 export type ChatBlock =
@@ -128,6 +135,7 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
           args: JSON.stringify(e.args ?? {}),
           result: "",
           ok: true,
+          jev: e.jev === true ? true : undefined,
         },
       });
       break;
@@ -148,7 +156,12 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
     case "need_confirm":
       assistantTurn().blocks.push({
         kind: "confirm",
-        confirm: { id: e.id, tool: e.tool, summary: e.summary },
+        confirm: {
+          id: e.id,
+          tool: e.tool,
+          summary: e.summary,
+          jev: e.jev === true ? true : undefined,
+        },
       });
       break;
     case "madman":

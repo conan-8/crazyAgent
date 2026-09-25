@@ -66,11 +66,53 @@ const DOCUMENT_EDITOR_RULES = [
   "- When a frame reports 'content is drawn into a <canvas>', that is a statement of fact, not a transient error: do NOT retry read_page / snapshot / evaluate_js hoping for different output. Use screenshot if seeing it matters, then work with the toolbar refs and the typing sink, or switch to the readable URL above.",
 ];
 
+/**
+ * Wall-clock line. The model otherwise has NO clock: page-derived dates are the
+ * only time signal it ever sees, so relative dates ("next Tuesday", "expires in
+ * 3 days"), staleness checks and post-resume runs (a checkpoint can revive a
+ * task hours later) are all blind. Rendered at the END of the prompt so every
+ * stable prefix above it is unchanged within a run — provider prompt caching
+ * keys on those bytes.
+ */
+export function timeLine(now: Date = new Date()): string {
+  const iso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const weekday = WEEKDAYS[now.getDay()];
+  const offsetMin = -now.getTimezoneOffset();
+  const sign = offsetMin < 0 ? "-" : "+";
+  const abs = Math.abs(offsetMin);
+  const tz = `UTC${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  return `Current date and time: ${iso} (${weekday}, ${tz}${ZONE_NAME ? `, ${ZONE_NAME}` : ""}). This is the real clock — resolve every relative date ("today", "next Tuesday", "in 2 hours", "expires tomorrow") against it, and state dates absolutely. Page text may be stale: if it claims a time, weight it against this clock. A resumed task may have paused for a long while; re-check anything time-sensitive before trusting it.`;
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+
+/** IANA zone name when the runtime exposes one; empty string otherwise. */
+const ZONE_NAME = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+  } catch {
+    return "";
+  }
+})();
+
 export function buildSystemPrompt(
   task: string,
   agentMode: string = "auto",
   madman: boolean = false,
   hasJudge: boolean = false,
+  now: Date = new Date(),
 ): string {
   return [
     "You are Browser Agent, an AI that operates the user's real browser to complete web tasks.",
@@ -91,6 +133,10 @@ export function buildSystemPrompt(
     "You have no step limit — keep working until the task is genuinely done. Because nothing will cut you off, you are responsible for not looping: if the same action fails twice, change approach or stop and report the blocker instead of repeating it.",
     "",
     "Never invent refs and never fabricate tool results.",
+    "",
+    // Appended last: the clock changes every call, so anything below it would
+    // defeat the byte-stable prefix that provider prompt caching relies on.
+    timeLine(now),
     "",
     `Current task: ${task}`,
   ].join("\n");

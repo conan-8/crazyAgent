@@ -155,9 +155,21 @@ function check(name, ok, detail = "") {
   log(ok ? "PASS" : "FAIL", name, String(detail).slice(0, 160));
 }
 
+/** Confirm-card DOM captured at the moment driveConfirm resolved it. */
+let lastConfirmDom = [];
+
+/** #rrggbb → "rgb(r, g, b)" so one pink predicate can judge hex and computed values. */
+function hexToRgb(hex) {
+  const h = String(hex).replace(/^#/, "");
+  if (h.length !== 6) return hex;
+  const n = parseInt(h, 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
+
 /** Wait for the run to hit a need_confirm and resolve it per `choice`. */
 async function driveConfirm(panel, choice) {
   const resolved = new Set();
+  lastConfirmDom = [];
   for (let i = 0; i < 200; i++) {
     const evs = await panel.eval("JSON.stringify(__ba.events())").then(JSON.parse);
     const pending = evs.find(
@@ -165,6 +177,14 @@ async function driveConfirm(panel, choice) {
     );
     if (pending) {
       resolved.add(pending.id);
+      // Snapshot the live confirm card BEFORE resolving it — this is the only
+      // moment it exists in the DOM.
+      lastConfirmDom = await panel.eval(
+        `JSON.stringify([...document.querySelectorAll(".confirm-card")].map(c => ({
+           cls: c.className,
+           eyebrow: c.querySelector(".confirm-eyebrow")?.textContent ?? "",
+         })))`,
+      ).then(JSON.parse);
       await panel.eval(
         `__ba.resolveConfirm(${JSON.stringify(pending.id)}, ${choice.allow}, ${choice.always}); "ok"`,
       );
@@ -287,6 +307,53 @@ async function main() {
         !evsA.some((e) => e.kind === "error"),
     );
 
+    // J4b/J4c: the pink highlight. The flag rides the event stream (pinned by
+    // tool name, not by the model) and the card renders with the Jev classes.
+    const judgeCall = evsA.find((e) => e.kind === "tool_call" && e.name === "judge");
+    const otherCalls = evsA.filter((e) => e.kind === "tool_call" && e.name !== "judge");
+    check(
+      "J4b judge tool_call carries the jev flag, others do not",
+      judgeCall?.jev === true && otherCalls.every((e) => e.jev === undefined),
+      `judge=${judgeCall?.jev} others=${JSON.stringify(otherCalls.map((e) => e.jev))}`,
+    );
+    const jevCard = await panel.eval(
+      `JSON.stringify({
+         cards: [...document.querySelectorAll(".card-jev")].map(e => e.textContent),
+         pinkChip: [...document.querySelectorAll(".tool-chip.is-jev")].map(e => e.textContent),
+         total: document.querySelectorAll(".card").length
+       })`,
+    ).then(JSON.parse);
+    const jevTok = await panel.eval(
+      `JSON.stringify({
+         dark: getComputedStyle(document.documentElement).getPropertyValue("--jev").trim(),
+         cardBg: (() => {
+           const el = document.querySelector(".card-jev");
+           return el ? getComputedStyle(el).borderColor : "";
+         })(),
+       })`,
+    ).then(JSON.parse);
+    check(
+      "J4c judge card renders with the Jev pink class + chip label",
+      jevCard.cards.length >= 1 &&
+        jevCard.pinkChip.some((c) => c.includes("Jev")) &&
+        jevCard.cards.every((c) => c.includes("judge")),
+      `jevCards=${jevCard.cards.length}/${jevCard.total} chip=${JSON.stringify(jevCard.pinkChip)}`,
+    );
+    // The token must resolve to pink IN THE LIVE DOCUMENT, and the card must
+    // actually paint with it — a class with no rule would pass a DOM check.
+    const isPink = (v) => {
+      const m = String(v).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (!m) return false;
+      const [r, g, b] = [1, 2, 3].map((i) => Number(m[i]));
+      return r > 0xdc && g < 0x80 && b > 0x80 && b < r;
+    };
+    check(
+      "J4d the pink token resolves and paints on the judge card",
+      isPink(jevTok.dark.replace(/^#/, "").length === 6 ? hexToRgb(jevTok.dark) : jevTok.dark) &&
+        isPink(jevTok.cardBg),
+      `--jev=${jevTok.dark} cardBorder=${jevTok.cardBg}`,
+    );
+
     // ============ B: Jev risk gate on a regex-allowed click ============
     mock.setScript(S_GATE);
     mock.setJevScript({ purchase: { noul: 0.95 } });
@@ -303,6 +370,21 @@ async function main() {
         String(confirmB?.summary).includes("Jev") &&
         String(confirmB?.summary).includes("95%"),
       confirmB ? `${confirmB.tool}: ${confirmB.summary}` : "(no confirm)",
+    );
+
+    // J5b: a Jev-raised confirmation is highlighted pink and says so in words.
+    check(
+      "J5b Jev-raised confirm carries the jev flag",
+      confirmB?.jev === true,
+      `jev=${confirmB?.jev}`,
+    );
+    const jevConfirmCard = lastConfirmDom.find((c) => c.cls.includes("is-jev"));
+    check(
+      "J5c Jev-raised confirm card renders pink with a Jev eyebrow",
+      lastConfirmDom.length >= 1 &&
+        jevConfirmCard !== undefined &&
+        jevConfirmCard.eyebrow.includes("Jev"),
+      `cards=${JSON.stringify(lastConfirmDom)}`,
     );
     check(
       "J6 gate state is small and literal (task/action/element)",

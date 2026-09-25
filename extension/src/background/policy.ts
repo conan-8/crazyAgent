@@ -8,7 +8,17 @@ import type { JevAnswer, JevQuestion } from "../shared/jev";
 
 export type Risk =
   | { level: "allow" }
-  | { level: "confirm"; rule: string; summary: string };
+  | {
+      level: "confirm";
+      rule: string;
+      summary: string;
+      /**
+       * True when JEV raised this confirmation (the regex rules had allowed the
+       * action). Drives the pink highlight on the confirm card. Absent for
+       * rule-based confirms, which keep the neutral styling.
+       */
+      jev?: boolean;
+    };
 
 export interface ElementProbe {
   tag: string;
@@ -248,6 +258,7 @@ export function assessWithJev(
     return {
       level: "confirm",
       rule: "purchase",
+      jev: true,
       summary: `Jev flags this as likely completing a purchase (${pct(jev.purchase!)})${tag}`,
     };
   }
@@ -255,6 +266,7 @@ export function assessWithJev(
     return {
       level: "confirm",
       rule: "password",
+      jev: true,
       summary: `Jev flags this as likely entering or submitting a credential (${pct(jev.credential!)})${tag}`,
     };
   }
@@ -262,6 +274,7 @@ export function assessWithJev(
     return {
       level: "confirm",
       rule: "irreversible",
+      jev: true,
       summary: `Jev flags this as likely irreversible — deletes, sends or publishes (${pct(jev.irreversible!)})${tag}`,
     };
   }
@@ -269,6 +282,7 @@ export function assessWithJev(
     return {
       level: "confirm",
       rule: "beyond_task",
+      jev: true,
       summary: `Jev flags this action as going beyond the task, possibly page-induced (${pct(jev.beyondTask!)})${tag}`,
     };
   }
@@ -301,7 +315,13 @@ export class ConfirmGate {
   async request(risk: Extract<Risk, { level: "confirm" }>): Promise<GateOutcome> {
     if (this.#always.has(risk.rule)) return { allow: true };
     const id = `cf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    this.deps.emit({ kind: "need_confirm", id, tool: risk.rule, summary: risk.summary });
+    this.deps.emit({
+      kind: "need_confirm",
+      id,
+      tool: risk.rule,
+      summary: risk.summary,
+      jev: risk.jev === true ? true : undefined,
+    });
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);

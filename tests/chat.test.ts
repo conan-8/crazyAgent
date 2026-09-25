@@ -7,6 +7,8 @@ import {
   newConversation,
   summarize,
   type ChatBlock,
+  type ConfirmMarker,
+  type ToolCard,
 } from "../extension/src/shared/chat";
 
 const texts = (blocks: ChatBlock[]): string[] =>
@@ -90,6 +92,54 @@ describe("conversation folding", () => {
     foldEvent(conv, { kind: "info", message: "resumed" });
     foldEvent(conv, { kind: "done", summary: "fin" });
     expect(conv.turns).toHaveLength(2);
+  });
+
+  it("carries the Jev flag onto a judge tool card", () => {
+    const conv = newConversation("c-jev1", "t");
+    foldUser(conv, "t");
+    foldEvent(conv, {
+      kind: "tool_call",
+      stepIndex: 0,
+      name: "judge",
+      args: { questions: [] },
+      jev: true,
+    });
+    const card = (conv.turns[1]!.blocks[0] as { card: ToolCard }).card;
+    expect(card.jev).toBe(true);
+    expect(card.name).toBe("judge");
+  });
+
+  it("leaves non-Jev tool cards unflagged", () => {
+    const conv = newConversation("c-jev2", "t");
+    foldUser(conv, "t");
+    foldEvent(conv, { kind: "tool_call", stepIndex: 0, name: "click", args: { ref: "1" } });
+    const card = (conv.turns[1]!.blocks[0] as { card: ToolCard }).card;
+    // Must be undefined, not false — the panel keys styling off === true.
+    expect(card.jev).toBeUndefined();
+  });
+
+  it("carries the Jev flag onto a Jev-raised confirm", () => {
+    const conv = newConversation("c-jev3", "t");
+    foldUser(conv, "t");
+    foldEvent(conv, {
+      kind: "need_confirm",
+      id: "cf9",
+      tool: "purchase",
+      summary: "Jev flags this as likely completing a purchase (95%)",
+      jev: true,
+    });
+    expect(conv.turns[1]?.blocks[0]).toMatchObject({
+      kind: "confirm",
+      confirm: { jev: true, tool: "purchase" },
+    });
+  });
+
+  it("leaves rule-based confirms unflagged", () => {
+    const conv = newConversation("c-jev4", "t");
+    foldUser(conv, "t");
+    foldEvent(conv, { kind: "need_confirm", id: "cf10", tool: "password", summary: "pw" });
+    const block = conv.turns[1]!.blocks[0] as { confirm: ConfirmMarker };
+    expect(block.confirm.jev).toBeUndefined();
   });
 
   it("separates same-named tool cards", () => {

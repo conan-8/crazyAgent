@@ -282,9 +282,10 @@ function ToolRow({
   const meta = TOOL_META[card.name];
   const state: ToolState = card.filled ? (card.ok ? "ok" : "err") : active ? "run" : "idle";
   const preview = useMemo(() => argPreview(card.args), [card.args]);
+  const jev = card.jev === true;
   const toggle = () => setOpen(!open);
   return (
-    <div class={`card card-${state}${open ? " is-open" : ""}`}>
+    <div class={`card card-${state}${jev ? " card-jev" : ""}${open ? " is-open" : ""}`}>
       <div
         class="card-title"
         role="button"
@@ -308,7 +309,10 @@ function ToolRow({
           {preview ? (
             <span class="tool-preview">{preview}</span>
           ) : (
-            <span class="tool-chip">{card.label ?? card.name}</span>
+            <span class={`tool-chip${jev ? " is-jev" : ""}`}>
+              {jev ? "Jev · " : ""}
+              {card.label ?? card.name}
+            </span>
           )}
         </span>
         {card.image ? (
@@ -392,21 +396,29 @@ function ConfirmCardView({
   id,
   tool,
   summary,
+  jev,
   onConfirm,
 }: {
   id: string;
   tool: string;
   summary: string;
+  jev?: boolean;
   onConfirm: (id: string, allow: boolean, always: boolean) => void;
 }) {
   return (
-    <div class="confirm-card" role="alertdialog" aria-label={`Allow ${tool}?`}>
+    <div
+      class={`confirm-card${jev ? " is-jev" : ""}`}
+      role="alertdialog"
+      aria-label={`Allow ${tool}?`}
+    >
       <div class="confirm-title">
         <span class="confirm-icon">
           <Icon d={ICONS.shield} size={14} />
         </span>
         <span>
-          <span class="confirm-eyebrow">Needs your approval</span>
+          <span class="confirm-eyebrow">
+            {jev ? "Jev flagged this — needs your approval" : "Needs your approval"}
+          </span>
           <span class="confirm-tool">{tool}</span>
         </span>
       </div>
@@ -437,21 +449,29 @@ function ConfirmNote({
   tool,
   summary,
   decision,
+  jev,
 }: {
   tool: string;
   summary: string;
   decision?: Decision;
+  jev?: boolean;
 }) {
   const denied = decision === "deny";
   return (
-    <div class={`card confirm-note${denied ? " is-denied" : ""}`} title={summary}>
+    <div
+      class={`card confirm-note${denied ? " is-denied" : ""}${jev ? " card-jev" : ""}`}
+      title={summary}
+    >
       <div class="card-title">
         <span class="tool-icon note-icon">
           <Icon d={ICONS.shield} size={13} />
         </span>
         <span class="tool-text">
           <span class="tool-label">{decision ? DECISION_LABEL[decision] : "Approval"}</span>
-          <span class="tool-chip">{tool}</span>
+          <span class={`tool-chip${jev ? " is-jev" : ""}`}>
+            {jev ? "Jev · " : ""}
+            {tool}
+          </span>
           <span class="tool-preview">{summary}</span>
         </span>
       </div>
@@ -543,6 +563,7 @@ function TurnView({
               id={block.confirm.id}
               tool={block.confirm.tool}
               summary={block.confirm.summary}
+              jev={block.confirm.jev}
               onConfirm={onConfirm}
             />
           ) : (
@@ -551,6 +572,7 @@ function TurnView({
               tool={block.confirm.tool}
               summary={block.confirm.summary}
               decision={resolved.get(block.confirm.id)}
+              jev={block.confirm.jev}
             />
           );
         }
@@ -1498,6 +1520,7 @@ function LogsBody({
                       {call.ok === false ? "✗" : call.ok === true ? "✓" : "…"}
                     </span>
                     <b>{call.label ?? call.name}</b>
+                    {call.jev ? <span class="jev-pill">JEV</span> : null}
                     <span class="log-tool-time">
                       {clockTime(call.at)} · {shortDuration(call.durationMs)}
                     </span>
@@ -1510,8 +1533,9 @@ function LogsBody({
                 </div>
               ))}
               {turn.confirmations.map((c) => (
-                <p class="log-confirm" key={c.id}>
-                  ⚠ {clockTime(c.at)} — {c.tool}: {c.summary}
+                <p class={`log-confirm${c.jev ? " is-jev" : ""}`} key={c.id}>
+                  ⚠ {clockTime(c.at)} {c.jev ? <span class="jev-pill">JEV</span> : null}—{" "}
+                  {c.tool}: {c.summary}
                 </p>
               ))}
               {turn.errors.map((err, i) => (

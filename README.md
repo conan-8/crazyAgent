@@ -51,6 +51,11 @@ downloads, `evaluate_js`, network modification) pause with **Allow once /
 Always allow / Deny** cards; denies return a cancellation the model works
 around. **Stop** aborts between steps.
 
+The agent knows the current date and time (local time, weekday, timezone),
+refreshed every step — so "book the earliest slot next Tuesday", "is this
+coupon still valid" and "how long until the sale ends" resolve against a real
+clock instead of guesswork, and a resumed task can tell that time has passed.
+
 **Madman mode** (Settings → Madman mode) makes the agent swear. Every tool
 call is labelled with a cuss word, and the agent narrates setbacks in the
 middle of a run in character — "Because this shit ass site is so fucking slow
@@ -80,6 +85,11 @@ probabilities are model-estimated rather than calibrated. Pick a model that
 supports structured outputs (the default, `openai/gpt-oss-20b`, does). The three
 features, the gating rules and the fail-open behaviour are identical on both
 transports.
+
+Whenever Jev is actually used, it's **highlighted in bright pink**: the `judge`
+card, and a confirmation Jev raised (instead of the keyword rules), are tinted
+hot pink and labelled "Jev" in words — so you can always see when a decision
+came from the sidecar rather than your chat model or the rules.
 
 **Chat history**: every task is a thread. **History** lists past threads
 (title, time, turn count) — click one to reopen its transcript, **✕** to
@@ -145,7 +155,7 @@ npm run verify       # full suite: unit + every phase's real-browser smoke
 `npm run verify` boots a real Edge/Chrome with the built extension and drives
 it over CDP against a local fixture site and a scripted mock LLM (real
 HTTP/SSE in both wire protocols). See `docs/DEV.md` for architecture,
-workflow and how to add tools/providers; `docs/THREAT-MODEL.md` for what the
+workflow and how to add tools/providers (including the model's clock); `docs/THREAT-MODEL.md` for what the
 agent can and cannot do to you.
 
 ## Layout
