@@ -174,6 +174,48 @@ counting, adversarial content — the vendor's "jaggedness" doc) are designed
 around: questions stay literal, math stays in code, and `beyond_task` carries
 the highest threshold (0.85).
 
+## evaluate_js and page CSP (why it runs over CDP)
+
+`evaluate_js` deliberately does **not** use `chrome.scripting.executeScript` +
+`eval()` in the content script's isolated world — its original implementation.
+An isolated world inherits the *extension's* CSP (`script-src 'self'`), which
+forbids `eval` outright, and a page whose own policy omits `unsafe-eval`
+(Google Docs, Schoology, most school portals) adds a second refusal. A real user
+run showed the cost: **7 of 7** `evaluate_js` calls failed with
+`EvalError: … violates the following Content Security Policy directive because
+'unsafe-eval' is not an allowed source of script`, and the agent burned turns
+retrying it on Google Docs while concluding the page was unreadable by script.
+
+The tool therefore evaluates in the page's **main world over CDP**
+(`Runtime.evaluate` + `allowUnsafeEvalBlockedByCSP`, `awaitPromise`,
+`returnByValue`), which is not subject to that gate — the same mechanism a
+DevTools console uses. Two supporting details:
+
+- `BrowserAdapter.sendEnabled(tabId, domain, method, params)` (optional on the
+  interface, implemented by both adapters) enables `Runtime` once per tab first
+  and re-enables after a detach. `Runtime.evaluate`'s CSP handling is specified
+  to apply while the domain is reporting execution contexts; enabling is
+  idempotent and best-effort, so a domain that refuses to enable never fails
+  the evaluation that follows.
+- A CSP refusal is still possible (an older or managed browser that ignores the
+  flag). When it happens the tool no longer hands the model a bare CDP string:
+  `describeEvalFailure` prefixes it with `CSP-BLOCKED` and spells out the way
+  out — retry once with `bypass_csp:true`, or switch to `read_page` /
+  `snapshot` / ref-based actions, which never touch CSP — because the original
+  wording is exactly what caused the retry loop. Real JS errors are *not*
+  labelled this way, so an ordinary `TypeError` never triggers a CSP retry.
+
+Known limits: `evaluate_js` is **top-frame only** (no `contextId` / `sessionId`
+plumbing, so it cannot reach into an iframe — use the frame-scoped refs `3#12`
+with the action tools for that), and `bypass_csp` still only lifts the policy
+for documents loaded after the call.
+
+`scripts/evaluate-csp-smoke.mjs` (in `npm run verify`) pins all of this against
+headless Edge across four page shapes (the Google Docs directive, a nonce-only
+`strict-dynamic` policy, a `<meta>`-declared policy, and no CSP) and — crucially
+— still runs the OLD implementation side by side to prove it is refused, so the
+fixture cannot silently stop reproducing the bug the tool was fixed for.
+
 ## Lessons / self-improvement (the coach)
 
 The agent fails a lot, so it keeps a per-profile log of what it learned. A

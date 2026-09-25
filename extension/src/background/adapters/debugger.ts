@@ -22,12 +22,19 @@ export class DebuggerAttachError extends Error {
 
 export class DebuggerAdapter {
   #attached = new Set<number>();
+  /** `${tabId}:${domain}` pairs already enabled on this session. */
+  #enabled = new Set<string>();
   #listeners = new Set<DetachListener>();
 
   constructor() {
     chrome.debugger.onDetach.addListener((source, reason) => {
       const tabId = (source as { tabId?: number }).tabId;
       if (tabId !== undefined && this.#attached.delete(tabId)) {
+        // Enabled domains die with the session; forget them so a re-attach
+        // re-enables Runtime (which is what keeps evaluate_js CSP-proof).
+        for (const key of [...this.#enabled]) {
+          if (key.startsWith(`${tabId}:`)) this.#enabled.delete(key);
+        }
         for (const listener of this.#listeners) listener(tabId, reason);
       }
     });
@@ -72,6 +79,31 @@ export class DebuggerAdapter {
       method,
       params,
     )) as T;
+  }
+
+  /**
+   * Like `send`, but enabled once per tab. Some domains only apply their
+   * settings while they are enabled — notably `Runtime`, whose CSP handling
+   * for `Runtime.evaluate` is installed by `Runtime.enable`. Enabling is
+   * idempotent on the browser side and this is best-effort: a domain that
+   * cannot be enabled must not fail the command that follows it.
+   */
+  async sendEnabled<T>(
+    tabId: number,
+    domain: string,
+    method: string,
+    params?: object,
+  ): Promise<T> {
+    const key = `${tabId}:${domain}`;
+    if (!this.#enabled.has(key)) {
+      this.#enabled.add(key);
+      try {
+        await this.send(tabId, `${domain}.enable`, {});
+      } catch {
+        this.#enabled.delete(key); // let the next call try again
+      }
+    }
+    return this.send<T>(tabId, method, params);
   }
 
   /** JPEG screenshot as a data URL. */

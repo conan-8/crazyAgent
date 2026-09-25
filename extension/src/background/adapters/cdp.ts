@@ -22,6 +22,8 @@ export class CdpAdapter implements BrowserAdapter {
   #nextId = 1;
   #cdpPort = 0;
   #targets = new Map<number, string>(); // tabId → CDP targetId
+  /** `${targetId}:${domain}` pairs already enabled on this connection. */
+  #enabled = new Set<string>();
 
   async connect(cdpPort: number): Promise<void> {
     this.#cdpPort = cdpPort;
@@ -158,6 +160,36 @@ export class CdpAdapter implements BrowserAdapter {
       cdpMethod: method,
       cdpParams: params ?? {},
     }) as Promise<T>;
+  }
+
+  /**
+   * Like `send`, but enabled once per target. `Runtime.enable` is what makes
+   * `Runtime.evaluate`'s CSP handling take effect (`allowUnsafeEvalBlockedByCSP`
+   * is only honoured once the domain reports execution contexts), so the
+   * evaluate path goes through here. Best-effort: a domain we cannot enable
+   * must not fail the command that follows it.
+   */
+  async sendEnabled<T>(
+    tabId: number,
+    domain: string,
+    method: string,
+    params?: object,
+  ): Promise<T> {
+    const targetId = await this.#targetFor(tabId);
+    const key = `${targetId}:${domain}`;
+    if (!this.#enabled.has(key)) {
+      this.#enabled.add(key);
+      try {
+        await this.#rpc("cdp", {
+          targetId,
+          cdpMethod: `${domain}.enable`,
+          cdpParams: {},
+        });
+      } catch {
+        this.#enabled.delete(key);
+      }
+    }
+    return this.send<T>(tabId, method, params);
   }
 
   async screenshot(tabId: number): Promise<{ dataUrl: string }> {

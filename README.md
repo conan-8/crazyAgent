@@ -151,6 +151,9 @@ recovery; the Jev sidecar gates, judges, routes effort and fails open on both tr
 (`scripts/jev-smoke.mjs`, mock `/systemone` + `/chat/completions` endpoints);
 the coach reviews a failed run, stores the lesson, feeds it into the next run's
 prompt and stays out of the chat/run record, with both switches honoured
-(`scripts/lessons-smoke.mjs`). A
+(`scripts/lessons-smoke.mjs`); `evaluate_js` evaluates over CDP in the page's
+main world, so it keeps working on strict-CSP sites like Google Docs and
+Schoology that refuse isolated-world `eval`, and reports a CSP refusal with the
+retry that actually helps (`scripts/evaluate-csp-smoke.mjs`). A
 live-LLM run ("search Hacker News for X and summarize") needs your API key in
 Settings — the machinery is covered by the mock-LLM suite.

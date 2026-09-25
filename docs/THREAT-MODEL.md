@@ -11,7 +11,9 @@ that risk.
 
 - **Gated autonomy (Phase 6 policy).** Always-confirm rules:
   - `evaluate_js` — arbitrary script execution in the page's main world
-    (via CDP `Runtime.evaluate`, so the page's CSP does not block it)
+    (via CDP `Runtime.evaluate`, so neither the page's CSP nor the
+    extension's own `script-src 'self'` blocks it). Top-frame only: it
+    cannot reach into iframes.
   - `evaluate_js` with `bypass_csp` — separate rule (`csp_bypass`): turns
     off the site's CSP for that tab (`Page.setBypassCSP`) until the
     debugger session ends, so an "Always allow" on plain JS never
