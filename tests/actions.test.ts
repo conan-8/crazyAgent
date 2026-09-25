@@ -160,4 +160,79 @@ describe("Actions", () => {
       expect(res.error).toContain("not typable");
     });
   });
+
+  // The trusted-input driver needs two things from the frame that owns a ref:
+  // real focus (CDP keystrokes go wherever the renderer has focused) and the
+  // frame's shape, which is how the worker recognises a canvas editor's hidden
+  // sink. Both come back from one `focus` action.
+  describe("focus (trusted-input handshake)", () => {
+    it("focuses the element and reports that it took", () => {
+      setBody(`<input id="i" placeholder="name" />`);
+      const res = actions.run({ action: "focus", ref: refOf("name") });
+      expect(res.ok).toBe(true);
+      expect((res.data as { focused: boolean }).focused).toBe(true);
+      expect(document.activeElement).toBe(document.getElementById("i"));
+    });
+
+    it("reports the hints the routing decision is made from", () => {
+      setBody(`<input id="i" placeholder="name" /><canvas id="c"></canvas>`);
+      const res = actions.run({ action: "focus", ref: refOf("name") });
+      const hints = (res.data as { hints: Record<string, unknown> }).hints;
+      expect(hints.editable).toBe(true);
+      expect(hints.inIframe).toBe(false);
+      expect(hints.activeIsFrame).toBe(false);
+      expect(hints.frameCanvases).toBe(1);
+      expect(hints.frameUrl).toBe(location.href);
+      expect(typeof hints.boxHidden).toBe("boolean");
+    });
+
+    it("recognises a named canvas-editor sink by signature", () => {
+      setBody(
+        `<div id="sink" class="docs-texteventtarget-body" role="textbox" aria-label="Document body" contenteditable="true"></div>`,
+      );
+      const res = actions.run({ action: "focus", ref: refOf("Document body") });
+      const hints = (res.data as { hints: { sinkSignature: boolean; editable: boolean } }).hints;
+      expect(hints.editable).toBe(true);
+      expect(hints.sinkSignature).toBe(true);
+    });
+
+    it("focuses whatever is already focused when no ref is given", () => {
+      setBody(`<input id="i" placeholder="name" />`);
+      document.getElementById("i")!.focus();
+      const res = actions.run({ action: "focus" });
+      expect(res.ok).toBe(true);
+      expect((res.data as { focused: boolean }).focused).toBe(true);
+    });
+
+    it("says so instead of guessing when nothing is focused", () => {
+      setBody(`<p>text</p>`);
+      const res = actions.run({ action: "focus" });
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("pass a ref");
+    });
+
+    it("reports a stale ref the same way every other action does", () => {
+      setBody(`<input id="i" placeholder="name" />`);
+      refOf("name");
+      const res = actions.run({ action: "focus", ref: "9999" });
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("stale or unknown ref");
+    });
+
+    it("canvasPoint is null when there is no canvas to click", () => {
+      setBody(`<p>text</p>`);
+      const res = actions.run({ action: "canvasPoint" });
+      expect(res.ok).toBe(true);
+      expect(res.data).toBeNull();
+    });
+
+    it("canvasPoint does not throw when a canvas exists", () => {
+      setBody(`<canvas id="c" width="400" height="200"></canvas>`);
+      const res = actions.run({ action: "canvasPoint" });
+      expect(res.ok).toBe(true);
+      // jsdom lays nothing out, so a zero-size canvas yields no point.
+      const data = res.data as { x?: number } | null;
+      expect(data === null || typeof data.x === "number").toBe(true);
+    });
+  });
 });

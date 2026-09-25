@@ -1,52 +1,48 @@
 // Action tools — route a ref to its frame and run the content-script action
 // synthesizer there (works in cross-origin frames too, since the content
-// script runs in every frame).
+// script runs in every frame). `type`/`key` additionally choose between that
+// synthesizer and trusted keystrokes through the browser's input pipeline:
+// canvas document editors (Google Docs, Slides, Office on the web) only respond
+// to the latter — see shared/trusted-input.ts.
 import type { ActionResult } from "../../content/actions";
 import { detectOpaqueSurface } from "../../shared/frames";
+import { shouldUseTrustedInput, type InputHints } from "../../shared/trusted-input";
 import type { ElementProbe } from "../policy";
+import { runContentAction } from "./content-action";
 import { collectFramePairs } from "./perception";
-import { registerTool } from "./types";
-
-function parseRef(ref: string): { frameId: number; localRef: string } {
-  const hash = ref.indexOf("#");
-  if (hash === -1) return { frameId: 0, localRef: ref };
-  return {
-    frameId: Number(ref.slice(0, hash)),
-    localRef: ref.slice(hash + 1),
-  };
-}
-
-async function runAction(
-  tabId: number,
-  req: Record<string, unknown>,
-): Promise<ActionResult> {
-  const ref = typeof req.ref === "string" ? req.ref : null;
-  const frameId = ref ? parseRef(ref).frameId : 0;
-  const payload = ref
-    ? { ...req, ref: parseRef(ref).localRef }
-    : req;
-  const results = await chrome.scripting.executeScript({
-    target: { tabId, frameIds: [frameId] },
-    func: (p: unknown) => {
-      const g = globalThis as {
-        __baActions?: { run(r: unknown): unknown };
-      };
-      return g.__baActions
-        ? g.__baActions.run(p)
-        : { ok: false, error: "actions-not-loaded" };
-    },
-    args: [payload],
-  });
-  return (results[0]?.result ?? { ok: false, error: "no result" }) as ActionResult;
-}
+import { focusTarget, runTrustedInput } from "./trusted-input";
+import { registerTool, type ToolContext } from "./types";
 
 /** Element introspection for the Phase 6 policy layer (no side effects). */
 export async function probeElement(
   tabId: number,
   ref: string,
 ): Promise<ElementProbe | null> {
-  const res = await runAction(tabId, { action: "probe", ref });
+  const res = await runContentAction(tabId, { action: "probe", ref });
   return res.ok ? (res.data as ElementProbe) : null;
+}
+
+/**
+ * The route a `type`/`key` call takes. One content-script round trip both
+ * focuses the target (which the content-script path needs anyway) and reports
+ * the frame's shape — a hidden 1px editable inside a canvas page is a document
+ * editor's sink, and only real keystrokes reach it.
+ *
+ * A failed inspection is NOT an error here: it just leaves the decision to the
+ * explicit flag, and the action itself will report the real failure.
+ */
+async function decideInputRoute(
+  ctx: ToolContext,
+  ref: string | undefined,
+  explicit: boolean | undefined,
+): Promise<{ use: boolean; reason: string }> {
+  // No ref = whatever the frame already has focused (a `key` call).
+  const inspected = await focusTarget(ctx.tabId, ref ?? "").catch(() => null);
+  const hints: InputHints = {
+    explicit,
+    ...(inspected && "hints" in inspected ? inspected.hints : {}),
+  };
+  return shouldUseTrustedInput(hints);
 }
 
 const REF_PROP = {
@@ -57,29 +53,45 @@ registerTool({
   name: "click",
   description: "Click the element with the given ref (scrolled into view first).",
   parameters: { type: "object", properties: { ...REF_PROP }, required: ["ref"] },
-  run: (args, ctx) => runAction(ctx.tabId, { action: "click", ref: args.ref }),
+  run: (args, ctx) => runContentAction(ctx.tabId, { action: "click", ref: args.ref }),
 });
 
 registerTool({
   name: "type",
   description:
-    "Type text into the element with the given ref (replaces its value). Set submit=true to submit the enclosing form afterwards.",
+    "Type text into the element with the given ref (replaces its value). Set submit=true to submit the enclosing form afterwards. For canvas document editors (Google Docs/Slides, Office on the web) type into the editor's hidden text sink; the tool detects those and sends real keystrokes, which insert at the caret instead of replacing a value. Pass trusted=true to force real keystrokes anywhere, trusted=false to force the DOM path.",
   parameters: {
     type: "object",
     properties: {
       ...REF_PROP,
-      text: { type: "string", description: "Text to enter" },
+      text: { type: "string", description: "Text to enter (newlines become paragraph breaks)" },
       submit: { type: "boolean", description: "Submit the form after typing" },
+      trusted: {
+        type: "boolean",
+        description:
+          "true = send real keystrokes through the browser's input pipeline; false = synthesise DOM events. Omit to let the tool decide.",
+      },
     },
     required: ["ref", "text"],
   },
-  run: (args, ctx) =>
-    runAction(ctx.tabId, {
-      action: "type",
-      ref: args.ref,
-      text: String(args.text ?? ""),
-      submit: Boolean(args.submit),
-    }),
+  async run(args, ctx): Promise<ActionResult> {
+    const ref = String(args.ref ?? "");
+    const text = String(args.text ?? "");
+    const submit = Boolean(args.submit);
+    const explicit = typeof args.trusted === "boolean" ? args.trusted : undefined;
+    const route = await decideInputRoute(ctx, ref, explicit);
+    if (route.use) {
+      return runTrustedInput({
+        tabId: ctx.tabId,
+        adapter: ctx.adapter,
+        ref,
+        text,
+        submit,
+        reason: route.reason,
+      });
+    }
+    return runContentAction(ctx.tabId, { action: "type", ref, text, submit });
+  },
 });
 
 registerTool({
@@ -94,7 +106,7 @@ registerTool({
     required: ["ref", "value"],
   },
   run: (args, ctx) =>
-    runAction(ctx.tabId, {
+    runContentAction(ctx.tabId, {
       action: "select",
       ref: args.ref,
       value: String(args.value ?? ""),
@@ -104,28 +116,43 @@ registerTool({
 registerTool({
   name: "key",
   description:
-    "Press a key or combo on the given ref (or the focused element), e.g. 'Enter', 'Escape', 'Control+a', 'Shift+Tab'. Enter in a form field submits the form.",
+    "Press a key or combo on the given ref (or the focused element), e.g. 'Enter', 'Escape', 'Control+a', 'Shift+Tab'. Enter in a form field submits the form. In canvas document editors (Google Docs/Slides) this sends real keystrokes, so editor shortcuts work: 'Control+b' bold, 'Control+i' italic, 'Control+Alt+1' heading, 'Control+Home' to the start. Pass trusted=true to force real keystrokes anywhere, trusted=false to force the DOM path.",
   parameters: {
     type: "object",
     properties: {
       ...REF_PROP,
       key: { type: "string", description: "Key combo, e.g. 'Enter' or 'Control+a'" },
+      trusted: {
+        type: "boolean",
+        description:
+          "true = send the key through the browser's input pipeline; false = dispatch DOM key events. Omit to let the tool decide.",
+      },
     },
     required: ["key"],
   },
-  run: (args, ctx) =>
-    runAction(ctx.tabId, {
-      action: "key",
-      ref: typeof args.ref === "string" ? args.ref : undefined,
-      key: String(args.key ?? ""),
-    }),
+  async run(args, ctx): Promise<ActionResult> {
+    const key = String(args.key ?? "");
+    const ref = typeof args.ref === "string" ? args.ref : undefined;
+    const explicit = typeof args.trusted === "boolean" ? args.trusted : undefined;
+    const route = await decideInputRoute(ctx, ref, explicit);
+    if (route.use) {
+      return runTrustedInput({
+        tabId: ctx.tabId,
+        adapter: ctx.adapter,
+        ref,
+        key,
+        reason: route.reason,
+      });
+    }
+    return runContentAction(ctx.tabId, { action: "key", ref, key });
+  },
 });
 
 registerTool({
   name: "hover",
   description: "Hover the mouse over the element with the given ref.",
   parameters: { type: "object", properties: { ...REF_PROP }, required: ["ref"] },
-  run: (args, ctx) => runAction(ctx.tabId, { action: "hover", ref: args.ref }),
+  run: (args, ctx) => runContentAction(ctx.tabId, { action: "hover", ref: args.ref }),
 });
 
 registerTool({
@@ -141,7 +168,7 @@ registerTool({
     },
   },
   run: (args, ctx) =>
-    runAction(ctx.tabId, {
+    runContentAction(ctx.tabId, {
       action: "scroll",
       ref: typeof args.ref === "string" ? args.ref : undefined,
       dx: typeof args.dx === "number" ? args.dx : 0,

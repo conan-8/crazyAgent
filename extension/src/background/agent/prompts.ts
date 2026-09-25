@@ -54,16 +54,22 @@ const JUDGE_RULE =
  * Document editors (Google Docs/Slides, Office on the web, anything built like
  * them) paint the document into a <canvas> and route typing through a hidden
  * editable element. Every rule here is verified against the local
- * canvas-editor/canvas-sink fixtures (scripts/docs-smoke.mjs), so this is a
- * procedure known to work rather than a guess.
+ * canvas-editor/canvas-sink fixtures (scripts/docs-smoke.mjs), and the
+ * keystroke claims are measured: trusted CDP input arrives `isTrusted: true`
+ * inside the sink frame and makes the browser emit the editing events
+ * (beforeinput insertText / insertParagraph / formatBold) that such editors
+ * listen for — see shared/trusted-input.ts. So this is a procedure known to
+ * work rather than a guess.
  */
 const DOCUMENT_EDITOR_RULES = [
   "Canvas document editors (Google Docs, Slides, Office on the web, and anything shaped like them):",
   "- The document BODY is painted into a <canvas>. No tool can read it — not read_page, not snapshot, not evaluate_js, not any expression you can write. Hunting for a clever selector wastes turns: pixel content has no DOM.",
   "- Typing goes into a SEPARATE hidden editable element (Docs calls it the text-event-target iframe; it usually has role=textbox or contenteditable and lives in its own frame). It shows up in the snapshot as an editable ref — often `N#1`, named like \"Document body\". That ref is your typing target; do not try to click the canvas.",
-  "- So: `type` to write, click toolbar refs to format (Bold, Undo, …), and read the document with the page's own affordances rather than the DOM.",
+  "- `type` and `key` recognise these editors and switch to REAL keystrokes through the browser's input pipeline — the only thing such an editor responds to (synthesised DOM events are ignored by them). Consequences: `type` INSERTS at the caret instead of replacing a value, newlines become paragraph breaks, and `key` drives the editor's own shortcuts — Control+b bold, Control+i italic, Control+Alt+1 heading, Control+Home start of document, Control+z undo, plus Backspace and the arrows. Toolbar refs (Bold, Undo, …) still work as clicks.",
+  "- An edit here cannot be read back — the pixels are the only copy, so an empty-looking snapshot afterwards proves nothing. Confirm with screenshot, or read the document at its /preview URL.",
   "- To READ a document (not just write it), the edit view will not help: change the URL first. A Google Doc reads as text at /document/d/<id>/preview or /document/d/<id>/mobilebasic; a Slides deck at /presentation/d/<id>/preview. Export/text URLs often download instead of rendering. Navigate there, read_page, then go back if you need to edit.",
   "- When a frame reports 'content is drawn into a <canvas>', that is a statement of fact, not a transient error: do NOT retry read_page / snapshot / evaluate_js hoping for different output. Use screenshot if seeing it matters, then work with the toolbar refs and the typing sink, or switch to the readable URL above.",
+  "- If a `type`/`key` result warns that the target lost focus, part of the text may not have landed: look (screenshot) before retyping — retyping blind duplicates whatever did arrive.",
 ];
 
 /**

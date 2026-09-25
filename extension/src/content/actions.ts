@@ -5,6 +5,7 @@
 
 import type { ElementRegistry } from "./registry";
 import { isEditableHost } from "./registry";
+import { SINK_SIGNATURE_RE, type InputHints } from "../shared/trusted-input";
 
 export type ActionRequest =
   | { action: "click"; ref: string }
@@ -14,6 +15,8 @@ export type ActionRequest =
   | { action: "hover"; ref: string }
   | { action: "scroll"; ref?: string; dx?: number; dy?: number }
   | { action: "history"; dir: number }
+  | { action: "focus"; ref?: string }
+  | { action: "canvasPoint" }
   | { action: "probe"; ref: string };
 
 export interface ActionResult {
@@ -77,6 +80,20 @@ export class Actions {
         history.go(req.dir);
         return { ok: true };
       }
+      case "focus": {
+        const el = req.ref
+          ? this.#resolve(req.ref)
+          : (document.activeElement as HTMLElement | null);
+        if (!el || el === document.body) {
+          return {
+            ok: false,
+            error: "nothing is focused in this frame — pass a ref to focus one",
+          };
+        }
+        return this.#focus(el);
+      }
+      case "canvasPoint":
+        return canvasPointOf();
       case "probe": {
         const el = this.#resolve(req.ref);
         const input = el as HTMLInputElement;
@@ -215,6 +232,32 @@ export class Actions {
     }
   }
 
+  /**
+   * Focus an element and report what its frame looks like from the inside.
+   *
+   * Both halves matter. Trusted keystrokes (CDP `Input.*`) go to whatever the
+   * renderer currently has focused, so focus has to be established BEFORE they
+   * are sent — and a canvas editor's sink lives in its own frame, where a click
+   * on the canvas cannot reach it. The hints are how the worker tells that sink
+   * apart from an ordinary input without guessing from the page URL alone.
+   */
+  #focus(el: HTMLElement): ActionResult {
+    try {
+      el.focus?.();
+    } catch {
+      // focus() can throw on odd nodes; the check below reports the real state.
+    }
+    const doc = el.ownerDocument;
+    const active = doc.activeElement;
+    return {
+      ok: true,
+      data: {
+        focused: active === el || (active !== null && el.contains(active)),
+        hints: collectInputHints(el),
+      },
+    };
+  }
+
   #select(el: HTMLElement, value: string): ActionResult {
     const select = el as HTMLSelectElement;
     select.value = value;
@@ -266,6 +309,129 @@ function readValue(el: HTMLElement): string {
     return el.value;
   }
   return (el.innerText ?? el.textContent ?? "").trim();
+}
+
+function safeCount(fn: () => number): number {
+  try {
+    return fn();
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Everything the worker needs to decide HOW to type into this element, gathered
+ * inside the frame that owns it (the only place that can see it).
+ *
+ * The distinguishing shape of a canvas editor's typing sink: an editable
+ * element that is visually nothing — 1px, transparent, opacity 0 — inside a
+ * frame of a page whose content is a <canvas>. Docs' is literally named
+ * `docs-texteventtarget-iframe`, which is checked too since a name match beats
+ * any heuristic.
+ */
+function collectInputHints(el: HTMLElement): InputHints {
+  const win = el.ownerDocument.defaultView;
+  const doc = el.ownerDocument;
+  const style = win?.getComputedStyle?.(el);
+  const rect = safeRect(el);
+  const opacity = style ? Number.parseFloat(style.opacity) : 1;
+  const boxHidden =
+    rect === null ||
+    rect.width <= 4 ||
+    rect.height <= 4 ||
+    style?.visibility === "hidden" ||
+    style?.display === "none" ||
+    (Number.isFinite(opacity) && opacity <= 0.05);
+  const colorTransparent = /transparent|rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/.test(
+    style?.color ?? "",
+  );
+
+  let inIframe = false;
+  try {
+    inIframe = win ? win.top !== win.self : false;
+  } catch {
+    inIframe = true; // reading `top` threw → we are framed by another origin
+  }
+  let topCanvases: number | undefined;
+  let topUrl: string | undefined;
+  try {
+    const topDoc = win?.top?.document;
+    if (topDoc) {
+      topCanvases = topDoc.querySelectorAll("canvas").length;
+      topUrl = topDoc.location.href;
+    }
+  } catch {
+    // cross-origin: the top document is not readable, and that is fine —
+    // the frame's own signals plus the signature still decide it.
+  }
+  let frameMarker = "";
+  try {
+    const frameElement = win?.frameElement;
+    if (frameElement) {
+      frameMarker = [
+        (frameElement as HTMLElement).className ?? "",
+        frameElement.id ?? "",
+        frameElement.getAttribute("src") ?? "",
+      ].join(" ");
+    }
+  } catch {
+    // cross-origin frameElement access throws
+  }
+  const sinkSignature = SINK_SIGNATURE_RE.test(
+    [
+      (el as HTMLElement).className ?? "",
+      el.id ?? "",
+      frameMarker,
+      location.href,
+      doc.documentElement?.getAttribute("class") ?? "",
+    ].join(" "),
+  );
+
+  return {
+    frameUrl: location.href,
+    topUrl,
+    editable: isEditableHost(el),
+    // A `key` call with no ref lands on whatever is focused; when that is an
+    // iframe, the real target is inside it and keystrokes must be trusted to
+    // reach it at all.
+    activeIsFrame: el.tagName === "IFRAME",
+    inIframe,
+    boxHidden,
+    colorTransparent,
+    frameCanvases: safeCount(() => doc.querySelectorAll("canvas").length),
+    frameTextChars: safeCount(
+      () => (doc.body?.innerText ?? doc.body?.textContent ?? "").replace(/\s+/g, " ").trim().length,
+    ),
+    topCanvases,
+    sinkSignature,
+  };
+}
+
+function safeRect(el: HTMLElement): { width: number; height: number } | null {
+  try {
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0 && el.getClientRects().length === 0) return null;
+    return { width: rect.width, height: rect.height };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Centre of this document's first <canvas>, in viewport coordinates — where a
+ * trusted click lands when an editor's hidden sink will not take focus on its
+ * own (clicking the document surface is how a person wakes it up).
+ */
+function canvasPointOf(): ActionResult {
+  const canvas = document.querySelector("canvas") as HTMLElement | null;
+  if (!canvas) return { ok: true, data: null };
+  canvas.scrollIntoView?.({ block: "center", inline: "center" });
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return { ok: true, data: null };
+  return {
+    ok: true,
+    data: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+  };
 }
 
 const DOWN_SEQUENCE = [

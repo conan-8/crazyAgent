@@ -39,6 +39,26 @@ that risk.
 - **Checkpointing** (`chrome.storage.session`) makes runs auditable and
   resumable; history of recent tasks is kept (`baHistory`).
 
+## Trusted input (canvas document editors)
+
+- `type`/`key` have a second route for canvas editors (Google Docs, Slides,
+  Office on the web), which ignore synthesised DOM events: keystrokes and clicks
+  sent through the browser's input pipeline (CDP `Input.*`). It grants **no new
+  capability** — it is the same typing a person does, aimed at editors that would
+  otherwise be untypable — and it does **not** bypass any gate: the policy layer
+  assesses the call (element probe, password/form/purchase rules, optional Jev)
+  *before* the tool chooses a route, so both routes are gated identically.
+- Two honest side effects. Events produced this way are `isTrusted: true`, so a
+  page that gates on "was this a real user?" cannot tell the difference — that is
+  the point of the route, and it means anti-automation checks on such editors are
+  not a barrier. And because input only reaches the **active** tab, a run may
+  switch focus to the tab it is driving (`chrome.tabs.update({active:true})` plus
+  window focus), which you will see happen.
+- The driver verifies focus before and after sending. Focus lost mid-type is
+  reported as a warning on a successful result rather than as a failure,
+  deliberately: a failure invites a retry, and retrying would duplicate whatever
+  text did land.
+
 ## Limits of the heuristics
 
 - Purchase/form detection is URL + button-text regex — a checkout button

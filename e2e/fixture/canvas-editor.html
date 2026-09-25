@@ -28,16 +28,25 @@
       Reproduces the Google Docs shape without Docs: the *visible* content is
       painted into a <canvas> (so no tool can read it), while typing goes
       through a hidden contenteditable "text event target" that key events are
-      forwarded from. This is what lets us verify the documented playbook:
+      forwarded from.
 
+      The document model lives HERE, in this frame, and only accepts what a real
+      editing pipeline produces (see canvas-sink.html): trusted `beforeinput` /
+      `keydown`. Synthetic events and `execCommand` are counted as rejections
+      instead of editing the document, so a smoke that passes on this fixture has
+      really sent keystrokes.
+
+      What this pins down:
         - snapshot/read_page report the canvas surface as unreadable
         - refs still find the toolbar and the editable sink
-        - typing works by focusing the sink and pressing keys
+        - typing works only by real keystrokes into the focused sink
+        - Enter starts a new paragraph; Ctrl+B reaches the model as a format op
     -->
     <div class="toolbar" role="toolbar">
       <button id="bold" aria-label="Bold">B</button>
       <button id="undo" aria-label="Undo">Undo</button>
       <span id="wordcount">0 words</span>
+      <span id="rejected">0 rejected</span>
     </div>
 
     <iframe class="docs-texteventtarget-iframe" src="canvas-sink.html" title="Text event target"></iframe>
@@ -49,7 +58,15 @@
     <script>
       const status = document.getElementById("status");
       const wc = document.getElementById("wordcount");
-      let typed = "";
+      const rej = document.getElementById("rejected");
+
+      // The document. Pixels on the canvas are its only rendered form.
+      const doc = { paragraphs: [""], bold: false };
+      const rejections = [];
+      let keyCount = 0;
+      window.__doc = doc; // fixture introspection for the smoke driver only
+
+      const text = () => doc.paragraphs.join("\n");
 
       function paint() {
         const ctx = document.getElementById("canvas").getContext("2d");
@@ -59,24 +76,69 @@
         ctx.font = "18px Georgia, serif";
         // Content that exists ONLY as pixels — exactly like the Docs editor.
         ctx.fillText("RENDERED DOCUMENT TEXT", 40, 60);
-        ctx.font = "14px Georgia, serif";
-        ctx.fillText("Typed so far: " + (typed || "(nothing)"), 40, 100);
+        ctx.font = doc.bold ? "bold 14px Georgia, serif" : "14px Georgia, serif";
+        const lines = doc.paragraphs.length ? doc.paragraphs : [""];
+        lines.slice(0, 8).forEach((line, i) => {
+          ctx.fillText(line || " ", 40, 100 + i * 22);
+        });
       }
-      paint();
 
-      // The sink reports what it received so a smoke can assert on it.
+      function render(note) {
+        const words = text().trim().split(/\s+/).filter(Boolean).length;
+        wc.textContent = words + " words";
+        rej.textContent = rejections.length + " rejected";
+        // Clipped: this page must stay under the DOM-text threshold that makes
+        // the canvas surface report itself as unreadable.
+        status.textContent = note || "typed: " + text().slice(0, 60);
+        paint();
+      }
+
       window.addEventListener("message", (e) => {
-        if (e.data && e.data.type === "ba-sink") {
-          typed += e.data.text;
-          wc.textContent = typed.trim().split(/\s+/).filter(Boolean).length + " words";
-          status.textContent = "typed: " + typed;
-          paint();
+        const m = e.data;
+        if (!m || m.type !== "ba-sink") return;
+        if (m.rejected) {
+          rejections.push(m.rejected);
+          render("rejected: " + m.rejected);
+          return;
         }
+        const last = doc.paragraphs.length - 1;
+        if (m.op === "insert") {
+          doc.paragraphs[last] = (doc.paragraphs[last] ?? "") + (m.text ?? "");
+        } else if (m.op === "paragraph") {
+          doc.paragraphs.push("");
+        } else if (m.op === "delete") {
+          const cur = doc.paragraphs[last] ?? "";
+          if (cur) doc.paragraphs[last] = cur.slice(0, -1);
+          else if (last > 0) doc.paragraphs.pop();
+        } else if (m.op === "format") {
+          if (m.format === "formatBold") doc.bold = !doc.bold;
+          render((m.format === "formatBold" ? "bold toggled" : m.format) + " via " + m.format);
+          return;
+        } else if (m.op === "key") {
+          keyCount++;
+          // Real editors bind their own shortcuts on keydown AND receive the
+          // browser's `beforeinput(formatBold)`; accept either. Only trusted
+          // keys ever get here — the sink rejects everything synthesised.
+          if (m.key && m.key.toLowerCase() === "b" && (m.ctrl || m.meta)) {
+            doc.bold = !doc.bold;
+            render("bold toggled");
+          }
+          return;
+        }
+        render();
       });
 
       document.getElementById("bold").addEventListener("click", () => {
-        status.textContent = "bold toggled";
+        doc.bold = !doc.bold;
+        render("bold toggled");
       });
+      document.getElementById("undo").addEventListener("click", () => {
+        doc.paragraphs = [""];
+        doc.bold = false;
+        render("undone");
+      });
+
+      render();
     </script>
   </body>
 </html>

@@ -30,6 +30,13 @@ world. Refs are snapshot-scoped (`frameId#n`); `registry.resolve` recovers
 stale refs across SPA re-renders (CSS-path, then tag+text fallback) or fails
 with an explicit "take a fresh snapshot" error.
 
+Actions have **two routes**. The default synthesises framework-friendly DOM
+events inside the frame that owns the ref. Canvas document editors ignore those,
+so `type`/`key` can instead send real keystrokes and clicks over the adapter's
+CDP session (`background/tools/trusted-input.ts`, with the pure key table and
+routing decision in `shared/trusted-input.ts`) — see "Canvas document editors"
+below for what was measured and why the split exists.
+
 The **policy** (`background/policy.ts`) wraps agent tool calls: pure `assess()`
 (classifies risk, optionally via a side-effect-free element probe) +
 `ConfirmGate` (need_confirm round-trip over the bus, allowlist persistence).
@@ -424,18 +431,82 @@ hidden editable element** (Docs' `docs-texteventtarget-iframe`) that appears in
 the snapshot as an editable frame-scoped ref. `buildSystemPrompt` now carries
 that procedure as `DOCUMENT_EDITOR_RULES`: the body is unreadable and must not
 be retried; type into the sink ref, do not click the canvas; format via toolbar
-refs; and to *read* a document change the URL first (`/document/d/<id>/preview`,
-`/mobilebasic`, `/presentation/d/<id>/preview`).
+refs or the editor's own shortcuts; and to *read* a document change the URL
+first (`/document/d/<id>/preview`, `/mobilebasic`,
+`/presentation/d/<id>/preview`).
+
+**3. Synthesised DOM events cannot edit a canvas document.** The sink is a
+scratch buffer for the browser's editing/IME machinery — the document model is
+JavaScript, driven by real key events. So the content-script synthesizer
+(`execCommand("insertText")`, or `dispatchEvent(new InputEvent(...))`) reaches the
+sink but not the document: a dispatched event arrives `isTrusted: false` and is
+ignored, and `execCommand` produces a trusted `input` with **no** `keydown` and
+**no** `beforeinput`, which is not what an editing pipeline listens to.
+
+What does work is the browser's own input pipeline — CDP `Input.*` — measured on
+a real browser with both of this extension's transports:
+
+| primitive | what the page receives |
+|---|---|
+| `Input.insertText` | `beforeinput(insertText)` + `input`, `isTrusted: true` |
+| `Input.dispatchKeyEvent` Ctrl+B | `keydown(mod=ctrl)` + `beforeinput(formatBold)` |
+| `Input.dispatchKeyEvent` Enter | `keydown` + `keypress` + `beforeinput(insertParagraph)` |
+| `Input.dispatchKeyEvent` Backspace | `keydown` + `beforeinput(deleteContentBackward)` |
+| `Input.dispatchMouseEvent` at x,y | trusted `mousedown`/`mouseup`/`click` on the canvas |
+
+Two consequences worth remembering:
+
+- **Standard mode is enough.** `chrome.debugger` permits the whole `Input`
+  domain (`insertText`, `dispatchKeyEvent`, `dispatchMouseEvent`,
+  `setIgnoreInputEvents`, `dispatchDragEvent`, `synthesizeTapGesture` all
+  accepted). The helper daemon / Unlimited mode buys network interception and no
+  banner — not the ability to type into Docs.
+- **Input only reaches the ACTIVE tab's render widget, and a miss is silent.**
+  On a background tab `Input.insertText` resolves successfully and nothing
+  happens. That is exactly the shape of failure that sends a run into a retry
+  loop, so the driver activates the tab (`chrome.tabs.update({active:true})` +
+  `Page.bringToFront`), focuses the sink, *verifies* focus took, sends, then
+  verifies focus survived. A target that would not take focus is retried once the
+  way a person would — one trusted click on the document surface, which is how
+  editors move focus into their own sink — and only then fails, pre-tagged
+  `TRANSPORT-FAILED` with the next move. Losing focus *mid-type* is reported as a
+  warning on an otherwise successful result, never as a failure, because a blind
+  retry would duplicate whatever did land.
+
+The split is `shared/trusted-input.ts` (pure: the key table and combo parser, the
+typing plan, and `shouldUseTrustedInput`, unit-tested in
+`tests/trusted-input.test.ts`) and `background/tools/trusted-input.ts` (the CDP
+driver). `type` and `key` decide per call: one `focus` content action returns both
+the focus the DOM path needs anyway and the frame's shape — hidden 1px editable,
+inside a frame, canvas in the top document, `docs-texteventtarget` signature — and
+the decision comes from those hints. Ordinary pages keep the DOM path, which
+*replaces* an input's value and keeps React's value tracker happy; trusted
+keystrokes *insert at the caret*, which is right for a document and wrong for a
+form field. `trusted: true/false` on either tool forces the route. Newlines are
+sent as real Enter keys, not as `\n` inside `insertText`: measured, the latter
+splits a `<div>` but never emits `insertParagraph`, so paragraph structure would
+be wrong. Keys with no CDP mapping (accented letters, emoji, CJK) fall back to
+`insertText`, which is the correct primitive for them.
 
 The fixture pair `e2e/fixture/canvas-editor.html` + `canvas-sink.html`
 reproduces the shape locally (pixels on a canvas, keystrokes routed through a
-hidden contenteditable in another frame), which is what makes the playbook
-verifiable rather than folklore. `scripts/docs-smoke.mjs` proves: the canvas is
-declared unreadable; the sink is exposed as an editable `N#1` ref; `type` into
-it lands in the document (confirmed by the page's own counter *and* by the top
-frame being blind to the sink, so it cannot have gone the easy way); toolbar
-refs work with no DOM body; `page_health` reports each layer; and bad
-refs/arguments/unaddressable frames all come back classified.
+hidden contenteditable in another frame), and the sink is **strict**: its
+document model lives in the parent frame, is painted only into the canvas, and
+accepts only trusted `beforeinput`/`keydown` — untrusted events are counted as
+rejections, the sink's own DOM is emptied after every accepted event so nothing
+can be read back from it, and `execCommand` is ignored exactly as an editor that
+keeps its own model ignores it. The first version of this fixture accepted
+synthetic events, which let a broken implementation pass; that is the regression
+D3a–D3f now pin. `scripts/docs-smoke.mjs` proves: the canvas is declared
+unreadable; the sink is exposed as an editable `N#1` ref; `type` into it lands in
+the document *as trusted keystrokes with focus verified* (confirmed by the page's
+own counter *and* by the top frame being blind to the sink, so it cannot have
+gone the easy way); a newline starts a real paragraph; `Control+b` reaches the
+model as a format command; synthetic DOM events are rejected and counted;
+toolbar refs work with no DOM body; `page_health` reports each layer; bad
+refs/arguments/unaddressable frames all come back classified; and typing into an
+ordinary input on an ordinary page still takes the DOM path (D9 — the trusted
+route must not hijack normal form filling).
 
 **`page_health`** is the escape hatch for "several tools just failed": it
 reports tab access, content-script injection and the debugger channel
@@ -464,6 +535,12 @@ writes `NativeMessagingHosts/*.json` for Chrome/Chromium/Edge/Brave;
   looking empty. Frames whose content script never ran (`about:blank`,
   `srcdoc`, `data:`) can be neither read nor evaluated, and from the next
   navigation onward the /preview view of a Doc is the readable route.
+- Trusted input types at the caret; there is no exposed way to *place* the caret
+  by coordinate (a canvas has no refs, and the driver only clicks the document
+  surface as focus recovery). Navigating a long document therefore goes through
+  the editor's own keys (`Control+Home`, arrows, find-and-replace) or its
+  toolbar/menu refs. A `click_at x,y` tool over `Input.dispatchMouseEvent` is the
+  obvious next step if that becomes limiting.
 - Lessons are per browser profile (`chrome.storage.local`, never synced) and
   capped at 300; one review covers one run (max 6 lessons), so a long broken
   thread is learned one turn at a time. Reviews are serialized and best-effort:

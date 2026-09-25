@@ -116,10 +116,24 @@ now say so explicitly instead of returning a plausible-looking empty page.
 **Canvas document editors (Google Docs, Slides, Office on the web)**: the
 document body is a `<canvas>` — no tool can read it — but typing works through
 the hidden editable element (Docs' text-event-target), which appears in the
-snapshot as an editable ref. The agent is told this procedure explicitly, told
-not to retry a canvas page, and given the readable URL route
-(`/document/d/<id>/preview`, `/presentation/d/<id>/preview`) for documents it
-must actually read. Tool failures also name their layer now
+snapshot as an editable ref. Such an editor keeps its document model in
+JavaScript and ignores synthesised DOM events, so `type` and `key` recognise
+these editors and switch to **real keystrokes through the browser's input
+pipeline** (CDP `Input.insertText` / `Input.dispatchKeyEvent`, verified to arrive
+`isTrusted: true` in the sink's frame on *both* control modes — the debug banner
+is the only cost). That buys the editor's own behaviour: newlines become real
+paragraph breaks, and `Control+b`, `Control+i`, `Control+Alt+1`, `Control+Home`,
+`Backspace` and the arrows reach the document as the shortcuts they are. Ordinary
+pages keep the DOM path, which replaces an input's value — trusted keys insert at
+the caret instead, so the route is chosen per call from what the frame looks like
+(a hidden 1px editable inside a canvas page, Docs' sink signature) and can be
+forced with `trusted: true/false`. Because keystrokes only reach the **active**
+tab and a miss fails silently, the driver activates the tab, focuses the sink and
+verifies focus before and after; losing focus mid-type is reported as a warning,
+never as a failure, so a retry cannot duplicate text. The agent is told all of
+this explicitly, told not to retry a canvas page, and given the readable URL
+route (`/document/d/<id>/preview`, `/presentation/d/<id>/preview`) for documents
+it must actually read. Tool failures also name their layer now
 (`TRANSPORT-FAILED`, `INJECTION-FAILED`, `FRAME-FAILED`, `CSP-FAILED`,
 `INPUT-FAILED`) with the next move, instead of the bare `fetch failed` that
 used to send a run into a 20-turn retry loop, and `page_health` reports whether
@@ -187,7 +201,9 @@ main world, so it keeps working on strict-CSP sites like Google Docs and
 Schoology that refuse isolated-world `eval`, and reports a CSP refusal with the
 retry that actually helps (`scripts/evaluate-csp-smoke.mjs`); iframe text,
 frame listing and in-frame `evaluate_js` are covered by `scripts/frames-smoke.mjs`;
-the canvas-editor playbook and layered failure reporting by
-`scripts/docs-smoke.mjs`. A
+the canvas-editor playbook — real keystrokes into a strict sink that rejects
+anything synthesised, paragraphs from Enter, `Control+b` reaching the document
+model, and ordinary inputs still taking the DOM path — plus layered failure
+reporting by `scripts/docs-smoke.mjs`. A
 live-LLM run ("search Hacker News for X and summarize") needs your API key in
 Settings — the machinery is covered by the mock-LLM suite.

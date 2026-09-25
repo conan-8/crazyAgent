@@ -16,25 +16,84 @@
   </head>
   <body>
     <!--
-      The typing sink: a contenteditable that receives keystrokes and reports
-      them to its parent, mirroring how Google Docs routes typing into a hidden
-      contenteditable while painting the result into a canvas.
+      The typing sink: a hidden contenteditable that receives keystrokes, shaped
+      like Google Docs' `docs-texteventtarget-iframe` body.
 
-      It is the element a ref-based `type`/`key` call must target.
+      It is STRICT on purpose, because the first version of this fixture was not
+      and it let a broken implementation pass: a content script synthesising
+      `new InputEvent(...)` (or `execCommand("insertText")`) looked exactly like
+      typing here, while a real canvas editor ignores both. The document model
+      lives in the PARENT frame and is painted into a canvas, so nothing can be
+      inferred from this element's DOM either — the sink is a scratch buffer, as
+      it is in Docs.
+
+      Acceptance rules (all verified against a real browser):
+        - `isTrusted: false` events are rejected and counted. Synthetic events
+          dispatched from any script are untrusted, so the DOM path cannot edit
+          the document.
+        - only the browser's editing pipeline changes the model: a trusted
+          `beforeinput` (what CDP `Input.insertText` and `Input.dispatchKeyEvent`
+          produce) or a trusted `keydown` (what real shortcuts produce, and which
+          also arrive as `beforeinput formatBold` etc.).
+        - `execCommand("insertText")` from a script produces a trusted `input`
+          with NO `beforeinput`, so it is ignored here exactly as it is by an
+          editor that keeps its own model.
     -->
     <div id="sink" contenteditable="true" role="textbox" aria-label="Document body"></div>
     <script>
       const sink = document.getElementById("sink");
-      const report = () => {
-        const text = sink.innerText;
+      const send = (payload) => {
         try {
-          parent.postMessage({ type: "ba-sink", text }, "*");
+          parent.postMessage(Object.assign({ type: "ba-sink" }, payload), "*");
         } catch {}
       };
-      sink.addEventListener("input", report);
-      sink.addEventListener("keyup", report);
-      // Focus the sink as soon as the frame loads: Docs moves focus into its
-      // sink when the user clicks the page body.
+
+      sink.addEventListener("beforeinput", (e) => {
+        if (!e.isTrusted) {
+          send({ rejected: "untrusted " + e.type + " (" + e.inputType + ")" });
+          return;
+        }
+        const t = e.inputType || "";
+        if (t === "insertText" || t === "insertReplacementText") {
+          send({ op: "insert", text: e.data == null ? "" : String(e.data) });
+        } else if (t === "insertParagraph" || t === "insertLineBreak") {
+          send({ op: "paragraph" });
+        } else if (t === "deleteContentBackward") {
+          send({ op: "delete" });
+        } else if (t === "insertFromPaste") {
+          let text = "";
+          try {
+            text = (e.dataTransfer && e.dataTransfer.getData("text/plain")) || "";
+          } catch {}
+          send({ op: "insert", text });
+        } else if (t.indexOf("format") === 0) {
+          send({ op: "format", format: t });
+        } else {
+          send({ op: "other", inputType: t });
+        }
+        // The scratch buffer is emptied after every accepted event: the document
+        // is the parent's model, never this element's contents.
+        setTimeout(() => {
+          sink.textContent = "";
+        }, 0);
+      });
+
+      sink.addEventListener("keydown", (e) => {
+        if (!e.isTrusted) {
+          send({ rejected: "untrusted keydown" });
+          return;
+        }
+        send({
+          op: "key",
+          key: e.key,
+          ctrl: e.ctrlKey,
+          shift: e.shiftKey,
+          alt: e.altKey,
+          meta: e.metaKey,
+        });
+      });
+
+      // Docs moves focus into its sink when the user clicks the page body.
       sink.focus();
     </script>
   </body>
