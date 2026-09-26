@@ -75,6 +75,12 @@ Blob download into the browser's Downloads folder). Demo/echo runs are excluded.
 - `npm run watch` rebuilds `dist/` on change; reload the extension at
   `chrome://extensions` (service worker + content scripts re-inject on next
   navigation; the panel needs a reopen).
+- Every build stamps the built manifest's `version_name` with the git sha
+  (`build/build.mjs` → `git rev-parse`, `-dirty` when the tree has uncommitted
+  changes, `unknown` without git). The Settings drawer renders it
+  (`shared/version.ts`), chrome://extensions shows it beside the version, and
+  `capability-smoke`'s V1 check proves the loaded build names its own commit —
+  so "did my reload actually pick up the new code?" is verifiable, not faith.
 - `npm test` — vitest unit suites (protocol-adjacent logic is pure by design).
 - `npm run verify` — the real-browser acceptance suite. Each
   `scripts/phase*-smoke.mjs` boots Edge headless with `--load-extension`

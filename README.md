@@ -51,6 +51,12 @@ downloads, `evaluate_js`, network modification) pause with **Allow once /
 Always allow / Deny** cards; denies return a cancellation the model works
 around. **Stop** aborts between steps.
 
+Every build is stamped with the commit it came from: the bottom of **⚙
+Settings** shows `Version 0.1.0 · build <sha>` (with `-dirty` when it was built
+from modified sources), and the same string appears in `chrome://extensions`,
+so "is the loaded extension the code I think it is?" is answerable at a glance.
+Rebuild (`npm run build`) after pulling or switching commits to refresh it.
+
 The agent knows the current date and time (local time, weekday, timezone),
 refreshed every step — so "book the earliest slot next Tuesday", "is this
 coupon still valid" and "how long until the sale ends" resolve against a real

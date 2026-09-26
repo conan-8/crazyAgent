@@ -28,12 +28,13 @@
 //       run; a promo button on the very same login page is not blocked
 //   H3  the tiny invisible-recaptcha badge on an ordinary page is NOT a captcha
 //   H4  one handoff per wall per run (no repeat prompts)
+//   V1  the Settings drawer names the build's commit (build stamp)
 //
 // Usage: node scripts/capability-smoke.mjs   (run `npm run build` first)
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { startFixtureServers } from "./fixture-server.mjs";
 
 const PORT = 9246;
@@ -460,6 +461,33 @@ async function main() {
       "H3 the tiny invisible-recaptcha badge is not a captcha (no handoff)",
       badgeClick.ok === true && (await countFrom(markH3, "need_human")) === 0,
       `human events: ${await countFrom(markH3, "need_human")}`,
+    );
+
+    // ================= V: build identity =================
+    // The point of a stamped build: the loaded extension names its own commit,
+    // so "am I on the right version?" is answerable from Settings (and from
+    // chrome://extensions) instead of by faith.
+    const headSha = execSync("git rev-parse --short=7 HEAD", {
+      cwd: new URL("..", import.meta.url).pathname,
+    })
+      .toString()
+      .trim();
+    const distManifest = JSON.parse(
+      readFileSync(new URL("../dist/manifest.json", import.meta.url), "utf8"),
+    );
+    await panel.eval(
+      `(() => { [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "⚙")?.click(); return "opened"; })()`,
+    );
+    let versionLine = "";
+    for (let i = 0; i < 20 && !versionLine; i++) {
+      versionLine = await panel.eval(`document.querySelector(".version-line")?.textContent ?? ""`);
+      if (!versionLine) await sleep(100);
+    }
+    check(
+      "V1 Settings names the build's commit (and dist/manifest.json carries the same stamp)",
+      versionLine.includes(headSha) &&
+        String(distManifest.version_name ?? "").includes(headSha),
+      `${versionLine} | manifest version_name=${distManifest.version_name}`,
     );
 
     panel.close();

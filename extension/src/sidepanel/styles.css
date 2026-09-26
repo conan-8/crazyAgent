@@ -1824,6 +1824,16 @@ input[type="number"]::-webkit-inner-spin-button {
   text-overflow: ellipsis;
 }
 
+/* Settings drawer footer: which commit this build came from. */
+.version-line {
+  font-family: var(--mono);
+  font-size: 11px;
+  opacity: 0.55;
+  padding: 2px 14px 8px;
+  text-align: right;
+  user-select: text;
+}
+
 .is-human-note .note-icon {
   color: var(--human);
 }

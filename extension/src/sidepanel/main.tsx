@@ -38,6 +38,7 @@ import {
 } from "../shared/modes";
 import { THINKING_LEVELS } from "../shared/llm";
 import { madmanExclamation } from "../shared/madman";
+import { versionLabel } from "../shared/version";
 import {
   JEV_TRANSPORT_DEFAULTS,
   JEV_TRANSPORT_OPTIONS,
@@ -1362,6 +1363,12 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 hint="Runs that errored, were stopped, or looped on a failing call get reviewed without asking; clean runs are reviewed only from the Lessons drawer"
               />
             </section>
+          </div>
+          <div class="version-line">
+            {versionLabel({
+              version: chrome.runtime.getManifest().version,
+              stamp: chrome.runtime.getManifest().version_name,
+            })}
           </div>
           <footer class="sheet-foot">
             <span class={`save-state${saved ? " is-saved" : ""}`}>
