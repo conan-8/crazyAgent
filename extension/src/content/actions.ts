@@ -4,8 +4,19 @@
 // via chrome.scripting.executeScript; reached through globalThis.__baActions.
 
 import type { ElementRegistry } from "./registry";
-import { isEditableHost } from "./registry";
+import { isEditableHost, nearestInteractive } from "./registry";
 import { SINK_SIGNATURE_RE, type InputHints } from "../shared/trusted-input";
+import type { HitInfo, ViewportInfo, CoordSpace, Point } from "../shared/coords";
+import { toViewportPoint } from "../shared/coords";
+import type { AuthSignals } from "../shared/handoff";
+
+/** One file an `upload` attaches: inline text or base64 bytes. */
+export interface UploadFileSpec {
+  name: string;
+  mime?: string;
+  text?: string;
+  base64?: string;
+}
 
 export type ActionRequest =
   | { action: "click"; ref: string }
@@ -17,7 +28,12 @@ export type ActionRequest =
   | { action: "history"; dir: number }
   | { action: "focus"; ref?: string }
   | { action: "canvasPoint" }
-  | { action: "probe"; ref: string };
+  | { action: "probe"; ref: string }
+  | { action: "probeAt"; x: number; y: number; space?: CoordSpace }
+  | { action: "upload"; ref: string; files: UploadFileSpec[] }
+  | { action: "uploadMark"; ref: string; token: string }
+  | { action: "readEl"; ref: string; depth?: number }
+  | { action: "authSignals" };
 
 export interface ActionResult {
   ok: boolean;
@@ -96,17 +112,33 @@ export class Actions {
         return canvasPointOf();
       case "probe": {
         const el = this.#resolve(req.ref);
-        const input = el as HTMLInputElement;
+        return { ok: true, data: probeOf(el) };
+      }
+      case "probeAt":
+        return this.#probeAt(req.x, req.y, req.space);
+      case "authSignals":
+        return { ok: true, data: authSignalsOf() };
+      case "readEl": {
+        const el = this.#resolve(req.ref);
         return {
           ok: true,
           data: {
-            tag: el.tagName.toLowerCase(),
-            type: input.type,
-            role: el.getAttribute("role") ?? undefined,
-            text: (el.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
-            inForm: Boolean(el.closest("form")),
+            text: scopedText(el, typeof req.depth === "number" ? req.depth : undefined),
           },
         };
+      }
+      case "upload":
+        return this.#upload(this.#resolve(req.ref), req.files ?? []);
+      case "uploadMark": {
+        // Tag the input so the background can find it in CDP's DOM world
+        // (`DOM.setFileInputFiles` needs a node, and refs only exist here).
+        const el = this.#resolve(req.ref);
+        if (req.token) {
+          el.setAttribute("data-ba-upload", req.token);
+        } else {
+          el.removeAttribute("data-ba-upload");
+        }
+        return { ok: true, data: { token: req.token } };
       }
     }
   }
@@ -117,6 +149,80 @@ export class Actions {
       throw new Error(`stale or unknown ref: ${ref} — take a fresh snapshot`);
     }
     return el as HTMLElement;
+  }
+
+  /**
+   * What sits under a point — the policy probe for coordinate input. Prefers
+   * the nearest interactive ancestor (the control a click would really act on)
+   * and reports canvas/iframe hits honestly: a canvas has no DOM to act on, and
+   * an iframe means the real target is out of this frame's reach. Page-space
+   * points are converted here (this is the frame that owns the scroll).
+   */
+  #probeAt(x: number, y: number, space?: CoordSpace): ActionResult {
+    const point = toViewportPoint(
+      { x, y },
+      space === "page" ? "page" : "viewport",
+      { scrollX: window.scrollX, scrollY: window.scrollY },
+    );
+    let raw: Element | null = null;
+    try {
+      raw = document.elementFromPoint(point.x, point.y);
+    } catch {
+      return { ok: false, error: `document.elementFromPoint(${point.x}, ${point.y}) failed` };
+    }
+    const target = nearestInteractive(raw);
+    const el = target ?? raw;
+    const probe = el ? probeOf(el) : null;
+    const hit: HitInfo | null =
+      el && probe
+        ? {
+            ...probe,
+            ref: this.registry.refFor(el) ?? undefined,
+            canvas: raw?.tagName === "CANVAS",
+            overIframe: raw?.tagName === "IFRAME" || raw?.tagName === "FRAME",
+          }
+        : null;
+    const viewport: ViewportInfo = {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+    };
+    return { ok: true, data: { hit, viewport, point } };
+  }
+
+  /**
+   * Attach files to a file input. The in-memory route (a DataTransfer) works
+   * for content the model produced; the CDP `DOM.setFileInputFiles` route in
+   * the tool layer covers paths the browser can read directly.
+   */
+  #upload(el: HTMLElement, files: UploadFileSpec[]): ActionResult {
+    const input = el as HTMLInputElement;
+    if (!(el instanceof HTMLInputElement) || String(input.type).toLowerCase() !== "file") {
+      return {
+        ok: false,
+        error: `ref is a ${el.tagName.toLowerCase()}, not a file input — pass the ref of an <input type="file"> from a fresh snapshot`,
+      };
+    }
+    if (!files.length) {
+      return { ok: false, error: "no files given — pass at least one entry in `files`" };
+    }
+    const made = files.map((f) => {
+      const part: BlobPart = f.base64 ? base64ToArrayBuffer(f.base64) : (f.text ?? "");
+      return new File([part], f.name, { type: f.mime || "application/octet-stream" });
+    });
+    const dt = new DataTransfer();
+    for (const f of made) dt.items.add(f);
+    input.files = dt.files;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return {
+      ok: true,
+      data: {
+        attached: made.map((f) => ({ name: f.name, size: f.size, type: f.type })),
+        events: ["input", "change"],
+      },
+    };
   }
 
   #mouse(el: HTMLElement, types: string[]): void {
@@ -415,6 +521,89 @@ function safeRect(el: HTMLElement): { width: number; height: number } | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Depth-limited text of a subtree: `depth: 0` reads only the root's own text
+ * nodes, `depth: 1` adds its children's, and no depth means the whole subtree
+ * — which is what a scoped `read_page` wants.
+ */
+function scopedText(el: Element, depth?: number): string {
+  const walk = (node: Element, d: number): string => {
+    const own = Array.from(node.childNodes)
+      .filter((n) => n.nodeType === Node.TEXT_NODE)
+      .map((n) => n.textContent ?? "")
+      .join(" ");
+    if (depth !== undefined && d >= depth) return own;
+    return [own, ...Array.from(node.children).map((c) => walk(c, d + 1))].join(" ");
+  };
+  return walk(el, 0).replace(/\s+/g, " ").trim();
+}
+
+/** CAPTCHA / bot-check widgets — their presence is always a human's job. */
+const CAPTCHA_SELECTOR = [
+  'iframe[src*="recaptcha"]',
+  'iframe[src*="hcaptcha"]',
+  'iframe[src*="challenges.cloudflare.com"]',
+  'iframe[title*="captcha" i]',
+  ".g-recaptcha",
+  ".h-captcha",
+  '[class*="turnstile"]',
+  "#challenge-form",
+  "[data-sitekey]",
+].join(", ");
+
+/**
+ * What the page looks like from an auth standpoint. Read-only and cheap — the
+ * handoff detector (shared/handoff.ts) decides with it; this only reports.
+ */
+function authSignalsOf(): AuthSignals {
+  let captcha = false;
+  try {
+    captcha = Array.from(document.querySelectorAll(CAPTCHA_SELECTOR)).some((el) => {
+      if (el.id === "challenge-form") return true;
+      const r = el.getBoundingClientRect();
+      // Size filter: the invisible reCAPTCHA badge rides on many ordinary
+      // pages and is tiny — a real widget (checkbox, Turnstile, challenge) is
+      // a box of this order.
+      return r.width >= 200 && r.height >= 50;
+    });
+  } catch {
+    // an exotic selector implementation — treat as "no widget seen"
+  }
+  return {
+    url: location.href,
+    title: document.title,
+    captcha,
+    passwordField: Boolean(document.querySelector('input[type="password"]')),
+  };
+}
+
+/** The policy probe of one element — shared by `probe` and `probeAt`. */
+function probeOf(el: Element): {
+  tag: string;
+  type?: string;
+  role?: string;
+  text: string;
+  inForm: boolean;
+} {
+  const input = el as HTMLInputElement;
+  const ht = el as HTMLElement;
+  return {
+    tag: el.tagName.toLowerCase(),
+    type: input.type,
+    role: el.getAttribute("role") ?? undefined,
+    text: (ht.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
+    inForm: Boolean(el.closest("form")),
+  };
+}
+
+function base64ToArrayBuffer(b64: string): ArrayBuffer {
+  const bin = atob(b64);
+  const out = new ArrayBuffer(bin.length);
+  const view = new Uint8Array(out);
+  for (let i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
+  return out;
 }
 
 /**

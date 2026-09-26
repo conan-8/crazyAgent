@@ -89,7 +89,10 @@ import {
 } from "./agent/jev";
 import { isMutating } from "../shared/modes";
 import { describeToolFailure } from "../shared/tool-failure";
+import { handoffMessage } from "../shared/handoff";
+import { detectAuthWall, HumanGate } from "./handoff";
 import { probeElement } from "./tools/actions";
+import { probeElementAt } from "./tools/coords";
 import {
   collectSnapshot,
   formatSnapshot,
@@ -99,6 +102,9 @@ import "./tools/perception"; // registers snapshot / screenshot / wait_for_settl
 import "./tools/actions"; // registers click / type / select / key / hover / scroll / read_page
 import "./tools/tabs"; // registers navigate / reload / back / forward / tabs_*
 import "./tools/misc"; // registers evaluate_js / download (sensitive)
+import "./tools/coords"; // registers click_at / hover_at / drag_at / element_at
+import "./tools/diagnostics"; // registers console_read / network_read
+import { startNetlogCapture } from "./tools/diagnostics";
 import "./tools/network"; // registers network_* (Unlimited mode)
 import "./tools/jev"; // registers judge (Jev sidecar; offered only when configured)
 
@@ -125,6 +131,24 @@ const gate = new ConfirmGate({
   },
 });
 void gate.ready();
+
+/**
+ * Human handoff (sign-in / CAPTCHA walls). Separate from the confirm gate:
+ * this one is not about risk, it is about a step no agent can honestly do.
+ * Only in-page actions are checked — navigating AWAY from a wall is exactly
+ * what the agent should do.
+ */
+const humanGate = new HumanGate(emit);
+
+/** In-page acting tools — the ones that must not fire against a wall. */
+const HANDOFF_CHECK_TOOLS = new Set([
+  "click",
+  "click_at",
+  "drag_at",
+  "type",
+  "key",
+  "select",
+]);
 
 const debuggerAdapter = new DebuggerAdapter();
 const cdpAdapter = new CdpAdapter();
@@ -527,10 +551,21 @@ async function executeToolGated(
   args: Record<string, unknown>,
 ): Promise<ExecuteResult> {
   let probe: ElementProbe | null = null;
-  const needsProbe = name === "type" || name === "click" || name === "key";
+  // `click_at`/`drag_at` carry a point instead of a ref; the probe then comes
+  // from whatever sits under that point, so coordinate clicks are gated
+  // exactly like ref-based ones.
+  const needsProbe =
+    name === "type" ||
+    name === "click" ||
+    name === "key" ||
+    name === "click_at" ||
+    name === "drag_at";
   const tabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
-  if (needsProbe && typeof args.ref === "string" && tabId !== undefined) {
-    probe = await probeElement(tabId, args.ref).catch(() => null);
+  if (needsProbe && tabId !== undefined) {
+    probe =
+      typeof args.ref === "string"
+        ? await probeElement(tabId, args.ref).catch(() => null)
+        : await probeElementAt(tabId, args).catch(() => null);
   }
   let risk = assess(name, args, probe);
   // Jev risk gate: mutating actions the regex rules allowed get one batched,
@@ -559,6 +594,18 @@ async function executeToolGated(
     const outcome = await gate.request(risk);
     if (!outcome.allow) {
       return { ok: false, error: outcome.reason };
+    }
+  }
+  // Human handoff: acting on a sign-in wall or a CAPTCHA is where a run goes
+  // wrong — the model retries the impossible, or "completes" a task that never
+  // happened. One prompt per wall per run; read-only tools are never gated.
+  if (HANDOFF_CHECK_TOOLS.has(name) && tabId !== undefined) {
+    const wall = await detectAuthWall(tabId, currentTask, probe).catch(() => null);
+    if (wall && !humanGate.alreadySeen(wall.url)) {
+      const { handled } = await humanGate.request(wall.reason, wall.url);
+      // In-band: the tool does NOT run against the wall, and the model is told
+      // exactly what happened so it re-looks instead of retrying blindly.
+      return { ok: true, text: handoffMessage(wall.reason, handled) };
     }
   }
   const res = await executeTool(name, args);
@@ -645,6 +692,18 @@ async function startRun(
   // Reset the stop flag BEFORE any await — a stop that lands during setup
   // must not be clobbered later (real race: Run then Stop within ms).
   stopRequested = false;
+  humanGate.reset();
+  // Console/network capture starts with the run, so the read tools see this
+  // run's traffic instead of an empty buffer. Observability extra: best
+  // effort, never able to fail or slow a run.
+  void (async () => {
+    try {
+      const tabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+      if (tabId !== undefined) await startNetlogCapture(tabId, await adapterForMode());
+    } catch {
+      // no capture on this transport — console_read/network_read say so
+    }
+  })();
 
   // Fold attachments into the user message: text is inlined, images ride
   // along as multimodal blocks (capped).
@@ -883,8 +942,15 @@ async function handleRequest(
     case "confirm.resolve":
       gate.resolve(msg.id, msg.allow, msg.always ?? false);
       break;
+    case "human.resolve":
+      humanGate.resolve(msg.id, msg.handled);
+      break;
     case "run_tool": {
-      const res = await executeTool(msg.name, msg.args ?? {}, msg.tabId);
+      // `gated` routes through the policy + handoff gate (what the agent loop
+      // uses); without it the call is raw execution, as before.
+      const res = msg.gated
+        ? await executeToolGated(msg.name, msg.args ?? {})
+        : await executeTool(msg.name, msg.args ?? {}, msg.tabId);
       port.postMessage({
         type: "tool_result",
         id: msg.id,

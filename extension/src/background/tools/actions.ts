@@ -8,8 +8,8 @@ import type { ActionResult } from "../../content/actions";
 import { detectOpaqueSurface } from "../../shared/frames";
 import { shouldUseTrustedInput, type InputHints } from "../../shared/trusted-input";
 import type { ElementProbe } from "../policy";
-import { runContentAction } from "./content-action";
-import { collectFramePairs } from "./perception";
+import { runContentAction, parseRef } from "./content-action";
+import { collectFramePairs, truncateWithNote } from "./perception";
 import { focusTarget, runTrustedInput } from "./trusted-input";
 import { registerTool, type ToolContext } from "./types";
 
@@ -176,12 +176,160 @@ registerTool({
     }),
 });
 
+/**
+ * Attach local paths through CDP's DOM world. The ref only exists in the
+ * content script, so the input is tagged with a token there and looked up by
+ * that token in CDP (`DOM.setFileInputFiles` needs a node). Only the top
+ * document is reachable this way — an input inside an iframe takes the inline
+ * `files` route instead, which runs in its own frame.
+ */
+async function uploadPaths(
+  ctx: ToolContext,
+  ref: string,
+  paths: string[],
+): Promise<unknown> {
+  const token = `up-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const marked = await runContentAction(ctx.tabId, { action: "uploadMark", ref, token });
+  if (!marked.ok) return marked;
+  try {
+    const doc = await ctx.adapter.send<{ root: { nodeId: number } }>(
+      ctx.tabId,
+      "DOM.getDocument",
+      { depth: 0 },
+    );
+    const found = await ctx.adapter.send<{ nodeId: number }>(ctx.tabId, "DOM.querySelector", {
+      nodeId: doc.root.nodeId,
+      selector: `[data-ba-upload="${token}"]`,
+    });
+    if (!found.nodeId) {
+      throw new Error(
+        "the input is not in the top document (a file input inside an iframe) — pass files:[{name, text|base64}] instead of paths",
+      );
+    }
+    await ctx.adapter.send(ctx.tabId, "DOM.setFileInputFiles", {
+      files: paths,
+      nodeId: found.nodeId,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: `could not attach the file path(s): ${String((err as Error)?.message ?? err)} — the browser reads these paths itself, so they must exist on this machine; otherwise pass files:[{name, text|base64}]`,
+    };
+  } finally {
+    await runContentAction(ctx.tabId, { action: "uploadMark", ref, token: "" }).catch(
+      () => undefined,
+    );
+  }
+  return {
+    ok: true,
+    data: { attached: paths.map((p) => ({ path: p })), via: "DOM.setFileInputFiles" },
+  };
+}
+
+registerTool({
+  name: "upload",
+  description:
+    "Attach file(s) to the page's file input (`<input type=\"file\">`) — for upload forms and import dialogs. Give `files` for content you hold as text or base64 (works in any frame), or `paths` for absolute file paths on this machine that the browser can read. The page sees the files with the usual input/change events (SENSITIVE — confirmation required).",
+  parameters: {
+    type: "object",
+    properties: {
+      ...REF_PROP,
+      paths: {
+        type: "array",
+        description: "Absolute file paths to attach; the browser reads them from disk",
+        items: { type: "string" },
+      },
+      files: {
+        type: "array",
+        description:
+          "Inline files: [{name, mime?, text? | base64?}] — text for text files, base64 for binary",
+        items: { type: "object" },
+      },
+    },
+    required: ["ref"],
+  },
+  sensitive: true,
+  async run(args, ctx) {
+    const ref = String(args.ref ?? "");
+    const paths = Array.isArray(args.paths) ? args.paths.map((p) => String(p)) : [];
+    const files = Array.isArray(args.files)
+      ? (args.files as { name: string; mime?: string; text?: string; base64?: string }[])
+      : [];
+    if (!paths.length && !files.length) {
+      return {
+        ok: false,
+        error: "nothing to attach — pass `files` (inline content) or `paths` (absolute paths)",
+      };
+    }
+    const results: unknown[] = [];
+    if (files.length) {
+      results.push(await runContentAction(ctx.tabId, { action: "upload", ref, files }));
+    }
+    if (paths.length) {
+      results.push(await uploadPaths(ctx, ref, paths));
+    }
+    const failed = results.find((r) => (r as ActionResult)?.ok === false) as
+      | ActionResult
+      | undefined;
+    if (failed) return failed;
+    return {
+      attached: results.flatMap(
+        (r) => ((r as ActionResult).data as { attached?: unknown[] })?.attached ?? [],
+      ),
+    };
+  },
+  present(payload) {
+    const d = (payload ?? {}) as { attached?: { name?: string; path?: string }[] };
+    const names = (d.attached ?? []).map((f) => f.name ?? f.path ?? "file");
+    return { text: `attached ${names.length} file(s): ${names.join(", ")}` };
+  },
+});
+
 registerTool({
   name: "read_page",
   description:
-    "Extract visible text from the top document AND every iframe (lightweight; does not invalidate element refs). Each frame's text is labelled with its frame id and URL — use those ids with `evaluate_js frame:N` or as the `N#ref` prefix on action tools.",
-  parameters: { type: "object", properties: {} },
-  async run(_args, ctx) {
+    "Extract visible text from the top document AND every iframe (lightweight; does not invalidate element refs). Each frame's text is labelled with its frame id and URL — use those ids with `evaluate_js frame:N` or as the `N#ref` prefix on action tools. Pass `ref` to read just one element's subtree (with `depth` to limit how deep the walk goes), and `max_chars` to cap output on long pages (a truncated read ends with a truncation note).",
+  parameters: {
+    type: "object",
+    properties: {
+      ...REF_PROP,
+      depth: {
+        type: "number",
+        description: "With `ref`: how many levels below the element to read (default: whole subtree)",
+      },
+      max_chars: {
+        type: "number",
+        description: "Cap each read's text (default 50000); a truncated read says so",
+      },
+    },
+  },
+  async run(args, ctx) {
+    const maxChars =
+      typeof args.max_chars === "number" && args.max_chars > 0 ? args.max_chars : 50_000;
+    // Scoped read: one element's subtree, through the content script that owns
+    // the ref (works cross-origin, unlike a CDP evaluation).
+    if (typeof args.ref === "string") {
+      const ref = String(args.ref);
+      const res = await runContentAction(ctx.tabId, {
+        action: "readEl",
+        ref,
+        depth: typeof args.depth === "number" ? args.depth : undefined,
+      });
+      if (!res.ok) return res;
+      const text = String((res.data as { text?: string })?.text ?? "");
+      return [
+        {
+          frameId: parseRef(ref).frameId,
+          scopedTo: ref,
+          href: "",
+          title: "",
+          text: truncateWithNote(text, maxChars, `read_page of ${ref}`),
+          canvases: 0,
+          textChars: text.length,
+          instrumented: true,
+        },
+      ];
+    }
     // Refreshing the frame-id pairing here means `evaluate_js frame:N` works
     // right after the read the model just did, without an extra `frames` call.
     await collectFramePairs(ctx.tabId, ctx.adapter).catch(() => null);
@@ -214,7 +362,7 @@ registerTool({
         frameId: r.frameId ?? 0,
         href: info?.href ?? "",
         title: info?.title ?? "",
-        text: info?.text ?? "",
+        text: truncateWithNote(info?.text ?? "", maxChars, "read_page"),
         canvases: info?.canvases ?? 0,
         textChars: info?.textChars ?? 0,
         // A frame whose content script never ran returns null — that is NOT an
@@ -231,10 +379,13 @@ registerTool({
       canvases: number;
       textChars: number;
       instrumented: boolean;
+      scopedTo?: string;
     }[];
     const body = pages
       .map((p) => {
-        const head = `--- frame ${p.frameId} (${p.href || "no url"}) ---`;
+        const head = p.scopedTo
+          ? `--- ${p.scopedTo} ---`
+          : `--- frame ${p.frameId} (${p.href || "no url"}) ---`;
         if (!p.instrumented) return `${head}\n[no content script in this frame — cannot be read]`;
         if (!p.text.trim() && p.canvases > 0) {
           return `${head}\n[content is drawn into ${p.canvases} <canvas> — unreadable by any tool; use screenshot]`;

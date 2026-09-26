@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Verify you are human</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
+      .widget {
+        width: 304px;
+        height: 78px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        background: #fafafa;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      A CAPTCHA wall: an explicit "I'm not a robot" widget of REAL size (the
+      invisible badge on ordinary pages is tiny and must not count — see
+      console-net.html). No agent can honestly complete this; the run must
+      pause and hand over to the human.
+    -->
+    <h1>Verify you are human</h1>
+    <div class="g-recaptcha widget" data-sitekey="fixture" id="widget">
+      <span>I'm not a robot</span>
+    </div>
+    <button id="continue" type="submit">Continue</button>
+    <div id="status">not clicked</div>
+    <script>
+      document.getElementById("continue").addEventListener("click", () => {
+        document.getElementById("status").textContent = "clicked";
+      });
+    </script>
+  </body>
+</html>

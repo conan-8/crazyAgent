@@ -84,7 +84,12 @@ describe("canvas document editor rules", () => {
   it("names the hidden typing sink as the real typing target", () => {
     expect(prompt).toContain("hidden editable element");
     expect(prompt).toContain("text-event-target");
-    expect(prompt).toContain("do not try to click the canvas");
+    expect(prompt).toContain("That ref is your typing target");
+  });
+
+  it("routes caret placement through click_at now that coordinate clicks exist", () => {
+    expect(prompt).toContain("`click_at` at the target position");
+    expect(prompt).toContain("insert at that caret");
   });
 
   it("gives the readable URL route for Docs and Slides", () => {

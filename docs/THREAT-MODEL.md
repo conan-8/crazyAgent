@@ -59,11 +59,39 @@ that risk.
   deliberately: a failure invites a retry, and retrying would duplicate whatever
   text did land.
 
+## Coordinate input, uploads, diagnostics, handoff
+
+- `click_at`/`hover_at`/`drag_at` send **trusted mouse events at arbitrary
+  points** (CDP `Input.dispatchMouseEvent`), including into canvas-drawn UI
+  where no ref exists. Same guarantee and same caveat as trusted keystrokes:
+  indistinguishable from a human's mouse. They are gated like `click` — the
+  point is probed (`document.elementFromPoint`) and the probe goes through the
+  same rules — **except** for controls *painted* into a canvas: pixels carry no
+  DOM text, so purchase/form rules cannot read them and only the optional Jev
+  layer sees the call at all. Treat a canvas click as ungated for policy
+  purposes; it is exactly as capable and as dangerous as a person's click.
+- `upload` is **file egress**: whatever the model attached leaves the machine
+  into the page. Always confirmed (`upload` rule), with the file names shown.
+- `screenshot save_to_disk` writes a JPEG into the Downloads folder (confirmed
+  under the `download` rule; the filename is sanitised to a basename).
+- `console_read`/`network_read` are read-only but pull **page traffic into the
+  transcript and run logs** — request URLs can carry tokens and query secrets.
+  Capture covers what arrived since the run started, both control modes.
+- The **human handoff** pauses the run and shows you the page URL and reason
+  (CAPTCHA / sign-in form). It sends nothing anywhere. The *prompt* is
+  page-driven: a hostile page can raise one as a nuisance (bounded — one per
+  URL per run, and only the user can answer it; the page cannot).
+- The handoff deliberately fires only on strong signals (a CAPTCHA widget of
+  real size — the invisible reCAPTCHA badge that rides on ordinary pages is
+  excluded — or an action targeting a sign-in form when the task never asked
+  for one). False negatives just mean today's behaviour: the agent continues.
+
 ## Limits of the heuristics
 
 - Purchase/form detection is URL + button-text regex — a checkout button
-  labeled "Continue" will not match. The password gate is the most reliable;
-  the purchase gate is best-effort. The optional Jev risk gate (above) covers
+  labeled "Continue" will not match, and a canvas-painted control has no text
+  to match at all (see above). The password gate is the most reliable; the
+  purchase gate is best-effort. The optional Jev risk gate (above) covers
   many of these misses, but is itself probabilistic and adversarial pages are
   a documented Jev weak spot — treat both layers as reduction, not proof.
 - Deny cancels the specific tool call; the model may attempt an equivalent

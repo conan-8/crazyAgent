@@ -64,6 +64,18 @@ export interface LogTurn {
     /** Jev raised this confirmation rather than the keyword rules. */
     jev?: boolean;
   }[];
+  /**
+   * Human handoffs — sign-in walls and CAPTCHAs where the run paused for the
+   * user. Optional: records archived before this field existed have none.
+   */
+  handoffs?: {
+    at: number;
+    id: string;
+    reason: string;
+    url: string;
+    /** True when the user reported they handled it (vs. skipping). */
+    handled?: boolean;
+  }[];
   errors: { at: number; message: string }[];
   /** Final summary from the `done` event. */
   summary?: string;
@@ -218,6 +230,12 @@ export function foldLogEvent(
         jev: e.jev === true ? true : undefined,
       });
       break;
+    case "need_human": {
+      const turn = currentTurn(rec, at);
+      turn.handoffs = turn.handoffs ?? [];
+      turn.handoffs.push({ at, id: e.id, reason: e.reason, url: e.url });
+      break;
+    }
     case "error": {
       const turn = currentTurn(rec, at);
       turn.errors.push({ at, message: e.message });
@@ -389,6 +407,11 @@ export function toMarkdown(records: LogTurnRecord[]): string {
         const via = c.jev ? "Jev" : "rules";
         out.push(
           `- ⚠ confirmation requested at ${iso(c.at)} (${via}): ${c.tool} — ${c.summary}`,
+        );
+      }
+      for (const h of turn.handoffs ?? []) {
+        out.push(
+          `- 🖐 human handoff at ${iso(h.at)}: ${h.reason} — ${h.url}${h.handled ? " (user handled it)" : ""}`,
         );
       }
       for (const err of turn.errors) {

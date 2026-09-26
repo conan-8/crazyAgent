@@ -123,6 +123,13 @@ export class DebuggerAdapter {
     return () => this.#eventListeners.delete(listener);
   }
 
+  /** BrowserAdapter's tab-resolved event subscription (same stream here). */
+  onTabEvent(
+    listener: (tabId: number, method: string, params: unknown) => void,
+  ): () => void {
+    return this.onCdpEvent(listener);
+  }
+
   /**
    * The default execution context id of the frame with this scripting frameId,
    * or null when it cannot be resolved yet. Requires `Runtime.enable` first —

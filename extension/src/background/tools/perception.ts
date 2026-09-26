@@ -10,6 +10,7 @@ import {
   type AggregatedSnapshot,
   type FrameSnapshotLike,
 } from "../../shared/frames";
+import { screenshotFilename } from "../../shared/filenames";
 import { registerTool } from "./types";
 
 export type { AggregatedSnapshot };
@@ -154,13 +155,48 @@ export async function collectSnapshot(tabId: number): Promise<AggregatedSnapshot
 }
 
 /**
+ * Rendering options for `formatSnapshot` — the perception tuning Claude in
+ * Chrome has (cheap refs-only reads, hard caps): a long page used to explode
+ * the context window because the render was unbounded.
+ */
+export interface SnapshotFormatOpts {
+  /** "interactive" skips the (large) visible-text digest; refs only. */
+  filter?: "all" | "interactive";
+  /** Hard cap on the rendered text, with an explicit truncation note. */
+  maxChars?: number;
+  /** Scope the render to one frame id (from the snapshot's Frames: list). */
+  frame?: number;
+}
+
+export const SNAPSHOT_DEFAULT_MAX_CHARS = 50_000;
+
+/**
+ * Cap rendered text and SAY SO. A silent clip is indistinguishable from a
+ * short page, which is exactly how a model comes to believe it has seen
+ * everything.
+ */
+export function truncateWithNote(text: string, max: number, what: string): string {
+  return text.length <= max
+    ? text
+    : `${text.slice(0, max)}\n[${what} truncated at ${max} chars — raise max_chars for more, or use read_page for the full text]`;
+}
+
+/**
  * Compact LLM-facing rendering of a snapshot: the main frame's URL, the text of
  * EVERY frame (main first, each labelled with its frame id and URL), a map of
  * the frames whose refs are addressable, and one note when the page paints its
  * content into a canvas that no tool can read.
  */
-export function formatSnapshot(snap: AggregatedSnapshot): string {
-  const lines = snap.elements.map((e) => {
+export function formatSnapshot(
+  snap: AggregatedSnapshot,
+  opts: SnapshotFormatOpts = {},
+): string {
+  const scoped = opts.frame === undefined;
+  const elements = scoped
+    ? snap.elements
+    : snap.elements.filter((e) => e.frameId === opts.frame);
+  const frames = scoped ? snap.frames : snap.frames.filter((f) => f.frameId === opts.frame);
+  const lines = elements.map((e) => {
     const bits = [
       e.ref,
       e.tag + (e.type ? `[${e.type}]` : ""),
@@ -172,19 +208,29 @@ export function formatSnapshot(snap: AggregatedSnapshot): string {
     return bits.join(" ");
   });
   const parts = [
-    `URL: ${snap.frames.find((f) => f.frameId === 0)?.href ?? snap.frames[0]?.href ?? ""}`,
-    `Visible text: ${snap.text || buildFrameText(snap)}`,
+    `URL: ${frames.find((f) => f.frameId === 0)?.href ?? frames[0]?.href ?? ""}`,
   ];
-  const frameMap = formatFrameMap(snap);
+  if (opts.filter !== "interactive") {
+    parts.push(
+      `Visible text: ${scoped ? snap.text || buildFrameText(snap) : frames[0]?.text ?? ""}`,
+    );
+  }
+  const frameMap = formatFrameMap(scoped ? snap : { ...snap, frames });
   if (frameMap) parts.push(frameMap);
   const opaque = detectOpaqueSurface({
-    canvases: snap.frames.reduce((n, f) => n + (f.canvases ?? 0), 0),
-    domTextChars: snap.frames.reduce((n, f) => n + (f.textChars ?? 0), 0),
-    frames: snap.frames.length,
+    canvases: frames.reduce((n, f) => n + (f.canvases ?? 0), 0),
+    domTextChars: frames.reduce((n, f) => n + (f.textChars ?? 0), 0),
+    frames: frames.length,
   });
   if (opaque) parts.push(opaque);
-  parts.push(`Interactive elements (ref tag "name"):\n${lines.join("\n")}`);
-  return parts.join("\n");
+  parts.push(
+    `Interactive elements (ref tag "name"):\n${lines.join("\n") || "(none in this frame)"}`,
+  );
+  return truncateWithNote(
+    parts.join("\n"),
+    opts.maxChars ?? SNAPSHOT_DEFAULT_MAX_CHARS,
+    "snapshot",
+  );
 }
 
 /**
@@ -369,27 +415,75 @@ registerTool({
 registerTool({
   name: "snapshot",
   description:
-    "Capture the current page as a numbered list of interactive elements (clickable, typable) plus a digest of visible text. Elements are listed once per frame (cross-origin frames included, refs look like 'frameId#n'). Act on elements by ref with the action tools.",
-  parameters: { type: "object", properties: {} },
-  run: (_args, ctx) => collectSnapshot(ctx.tabId),
+    "Capture the current page as a numbered list of interactive elements (clickable, typable) plus a digest of visible text. Elements are listed once per frame (cross-origin frames included, refs look like 'frameId#n'). Act on elements by ref with the action tools. On long pages use filter:'interactive' (refs only) or max_chars to keep the output manageable — a truncated output always ends with a truncation note.",
+  parameters: {
+    type: "object",
+    properties: {
+      filter: {
+        type: "string",
+        description: "'all' (default) = refs + visible text; 'interactive' = refs only",
+      },
+      max_chars: {
+        type: "number",
+        description: `Cap the rendered output (default ${SNAPSHOT_DEFAULT_MAX_CHARS}); a truncated output ends with an explicit note`,
+      },
+      frame: {
+        type: "number",
+        description: "Limit to one frame id (from the snapshot's Frames: list)",
+      },
+    },
+  },
+  async run(args, ctx) {
+    const snap = await collectSnapshot(ctx.tabId);
+    const format: SnapshotFormatOpts = {
+      filter: args.filter === "interactive" ? "interactive" : "all",
+      maxChars: typeof args.max_chars === "number" ? args.max_chars : undefined,
+      frame: typeof args.frame === "number" ? args.frame : undefined,
+    };
+    return { ...snap, format };
+  },
   present(payload) {
-    return { text: formatSnapshot(payload as AggregatedSnapshot) };
+    const p = payload as AggregatedSnapshot & { format?: SnapshotFormatOpts };
+    return { text: formatSnapshot(p, p.format) };
   },
 });
 
 registerTool({
   name: "screenshot",
   description:
-    "Capture a JPEG screenshot of the visible viewport as a data URL. Use for visual understanding (multimodal models) or after actions to verify effects.",
-  parameters: { type: "object", properties: {} },
-  async run(_args, ctx) {
+    "Capture a JPEG screenshot of the visible viewport as a data URL. Use for visual understanding (multimodal models) or after actions to verify effects. save_to_disk:true additionally writes the JPEG into the Downloads folder (SENSITIVE — confirmation required).",
+  parameters: {
+    type: "object",
+    properties: {
+      save_to_disk: {
+        type: "boolean",
+        description: "Also write the JPEG to the Downloads folder (confirmation required)",
+      },
+      filename: {
+        type: "string",
+        description: "File name for the saved image (default screenshot-<timestamp>.jpg)",
+      },
+    },
+  },
+  async run(args, ctx) {
     const { dataUrl } = await ctx.adapter.screenshot(ctx.tabId);
-    return { dataUrl: await downscaleJpeg(dataUrl) };
+    const jpeg = await downscaleJpeg(dataUrl);
+    if (args.save_to_disk !== true) return { dataUrl: jpeg };
+    // Downloads only ever gets a bare filename — never a path the model (or a
+    // page that influenced it) could point at an arbitrary location.
+    const filename = screenshotFilename(args.filename);
+    const downloadId = await chrome.downloads.download({
+      url: jpeg,
+      filename,
+      saveAs: false,
+    });
+    return { dataUrl: jpeg, saved: { downloadId, filename } };
   },
   present(payload) {
+    const p = payload as { dataUrl: string; saved?: { filename: string } };
     return {
-      text: "[screenshot captured]",
-      image: (payload as { dataUrl: string }).dataUrl,
+      text: p.saved ? `[screenshot captured and saved as ${p.saved.filename}]` : "[screenshot captured]",
+      image: p.dataUrl,
     };
   },
 });

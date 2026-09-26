@@ -139,6 +139,30 @@ it must actually read. Tool failures also name their layer now
 used to send a run into a 20-turn retry loop, and `page_health` reports whether
 the page is reachable at all.
 
+**Beyond refs — coordinates, uploads, diagnostics, handoff** (the capability
+set Claude in Chrome had and this agent now matches): a canvas-drawn surface
+has no refs, so `click_at` / `hover_at` / `drag_at` send real mouse events at
+**viewport coordinates — exactly the frame a screenshot shows** (element boxes
+report page coordinates; pass `space: "page"`), and `element_at` reports what
+is under a point before you click it. The strokes arrive `isTrusted: true`
+like the keystrokes above, and they are gated exactly like a ref-based `click`
+— the point is probed with `elementFromPoint` and the same purchase/password/
+form rules apply (one honest gap: a control *painted* into a canvas carries no
+DOM text, so those rules cannot read it — see THREAT-MODEL.md). This is also
+how the caret is placed in a canvas editor: `click_at` the position, then
+`type` into the sink ref. `upload` attaches files to an `<input type="file">`
+ref (`files` for content as text/base64, `paths` for files on this machine) —
+always confirmed. `console_read` / `network_read` show what the page logged
+and fetched since the run started (read-only, both control modes).
+`screenshot save_to_disk:true` writes the JPEG into Downloads (confirmed). On
+long pages, `snapshot` takes `filter:'interactive'` and `max_chars`, and
+`read_page` takes `ref`/`depth`/`max_chars` — every clipped output ends with a
+truncation note rather than looking complete. And when the page turns into a
+CAPTCHA or the agent reaches for a sign-in form the task never asked for, the
+run **pauses and hands the keyboard to you** (a "Your turn" card: *I've handled
+it* / *Skip — let the agent try*); the tool does not run against the wall and
+the model is told exactly what happened.
+
 **Lessons (self-improvement)**: this agent fails a lot, so it keeps notes on
 itself. When a run ends badly — it errored, you stopped it, or it looped on a
 tool call that kept failing — a **second agent on the same model** reads that

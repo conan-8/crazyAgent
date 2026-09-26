@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — canvas board</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 8px; }
+      #board { display: block; width: 600px; height: 320px; background: #fff; border: 1px solid #ccc; }
+      #status, #hover { font: 12px monospace; white-space: pre-wrap; }
+      #hint { max-width: 600px; color: #444; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Two "buttons" and a drawing area are PAINTED into the canvas: nothing
+      about them exists in the DOM, so no ref can ever point at them — only
+      coordinate input can reach them. Every mouse event records where it
+      landed (canvas-relative) AND whether it arrived isTrusted, so the smoke
+      can prove the strokes came through the browser's input pipeline.
+    -->
+    <h1>Canvas board</h1>
+    <p id="hint">
+      The GREEN and RED buttons below are painted, not DOM. "Buy now" is a real
+      DOM button (for policy parity: coordinate clicks get the same gate).
+    </p>
+    <div>
+      <button id="buy" type="submit">Buy now</button>
+    </div>
+    <canvas id="board" width="600" height="320"></canvas>
+    <div id="hover">no hover yet</div>
+    <div id="status">no events yet</div>
+    <script>
+      const board = document.getElementById("board");
+      const ctx = board.getContext("2d");
+      const status = document.getElementById("status");
+      const hover = document.getElementById("hover");
+      const events = [];
+
+      function paint() {
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, 600, 320);
+        ctx.fillStyle = "#2b6cb0";
+        ctx.fillRect(40, 40, 160, 48);
+        ctx.fillStyle = "#c53030";
+        ctx.fillRect(40, 120, 160, 48);
+        ctx.fillStyle = "#fff";
+        ctx.font = "16px sans-serif";
+        ctx.fillText("GREEN", 78, 70);
+        ctx.fillText("RED", 100, 150);
+        ctx.fillStyle = "#222";
+        ctx.fillText("DRAW AREA", 300, 160);
+      }
+      paint();
+
+      function record(type, e) {
+        const r = board.getBoundingClientRect();
+        events.push({
+          type,
+          x: Math.round(e.clientX - r.left),
+          y: Math.round(e.clientY - r.top),
+          trusted: e.isTrusted,
+          buttons: e.buttons,
+        });
+        status.textContent = JSON.stringify(events);
+      }
+
+      board.addEventListener("mousedown", (e) => record("down", e));
+      board.addEventListener("mouseup", (e) => record("up", e));
+      board.addEventListener("click", (e) => record("click", e));
+      board.addEventListener("mousemove", (e) => {
+        const r = board.getBoundingClientRect();
+        hover.textContent = `move ${Math.round(e.clientX - r.left)},${Math.round(e.clientY - r.top)} trusted=${e.isTrusted}`;
+      });
+
+      document.getElementById("buy").addEventListener("click", () => {
+        document.getElementById("status").textContent = "BUY_CLICKED";
+      });
+    </script>
+  </body>
+</html>

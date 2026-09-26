@@ -41,6 +41,22 @@ export class CdpAdapter implements BrowserAdapter {
     return () => this.#eventListeners.delete(listener);
   }
 
+  /**
+   * BrowserAdapter's tab-resolved subscription: the daemon addresses targets,
+   * so the target id is mapped back to the tab it was resolved for. An event
+   * from an unknown target is dropped rather than attributed to the wrong tab.
+   */
+  onTabEvent(listener: (tabId: number, method: string, params: unknown) => void): () => void {
+    return this.onCdpEvent(({ targetId, method, params }) => {
+      for (const [tabId, id] of this.#targets) {
+        if (id === targetId) {
+          listener(tabId, method, params);
+          return;
+        }
+      }
+    });
+  }
+
   async connect(cdpPort: number): Promise<void> {
     this.#cdpPort = cdpPort;
     if (this.#native) return;

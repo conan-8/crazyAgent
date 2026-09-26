@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — console &amp; network</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
+      #out { font: 13px monospace; }
+      .grecaptcha-badge {
+        /* The invisible reCAPTCHA badge shape: tiny, rides on ordinary pages.
+           Its presence must NOT read as "this page has a CAPTCHA". */
+        width: 70px;
+        height: 60px;
+        border: 1px solid #ddd;
+        opacity: 0.5;
+        position: fixed;
+        right: 4px;
+        bottom: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Console &amp; network</h1>
+    <p>
+      This page logs and fetches ONLY when its button is pressed, so a capture
+      that starts mid-run can see it: the honest limit of console/network
+      capture is that output before capture started is gone.
+    </p>
+    <button id="go">log + fetch</button>
+    <button id="boom">throw</button>
+    <div id="out">nothing yet</div>
+    <!-- tiny badge, deliberately smaller than a real captcha widget -->
+    <div class="grecaptcha-badge" data-sitekey="fixture-badge"></div>
+    <script>
+      document.getElementById("go").addEventListener("click", () => {
+        console.log("fixture-log-line");
+        console.warn("fixture-warn-line");
+        console.error("fixture-error-line");
+        fetch("index.html")
+          .then((r) => r.text())
+          .then((t) => {
+            document.getElementById("out").textContent = `fetched ${t.length} bytes`;
+          });
+      });
+      document.getElementById("boom").addEventListener("click", () => {
+        setTimeout(() => {
+          throw new Error("fixture-uncaught-boom");
+        }, 10);
+      });
+    </script>
+  </body>
+</html>

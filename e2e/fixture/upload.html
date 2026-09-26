@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — upload</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
+      #list { font: 13px monospace; }
+      #events { color: #666; }
+    </style>
+  </head>
+  <body>
+    <!--
+      A plain file input that reports exactly what it received: name, size and
+      type per file, plus the event sequence (input + change must both fire,
+      or framework forms never notice the attachment).
+    -->
+    <h1>Upload form</h1>
+    <form id="form">
+      <label for="file">Attachment</label>
+      <input id="file" type="file" multiple />
+      <button id="send" type="submit">Send</button>
+    </form>
+    <ul id="list"></ul>
+    <div id="events">no events yet</div>
+    <script>
+      const input = document.getElementById("file");
+      const list = document.getElementById("list");
+      const evs = document.getElementById("events");
+      const seen = [];
+      input.addEventListener("input", () => {
+        seen.push("input");
+        evs.textContent = seen.join(" ");
+      });
+      input.addEventListener("change", () => {
+        seen.push("change");
+        evs.textContent = seen.join(" ");
+        list.innerHTML = "";
+        for (const f of input.files) {
+          const li = document.createElement("li");
+          li.textContent = `${f.name} ${f.size} ${f.type || "(no type)"}`;
+          list.appendChild(li);
+        }
+      });
+    </script>
+  </body>
+</html>

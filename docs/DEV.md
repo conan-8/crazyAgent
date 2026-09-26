@@ -513,6 +513,66 @@ reports tab access, content-script injection and the debugger channel
 separately, and says explicitly whether the page is unreachable or the failure
 was tool-specific — so the model stops retrying and reports.
 
+## Capability tools (coordinate input, upload, netlog, handoff)
+
+The functional gaps where Claude in Chrome was ahead — coordinate clicks, file
+upload, console/network reading, screenshot-to-disk, cheap perception on long
+pages, and pausing for a human on login/CAPTCHA walls. Layout:
+
+- **Coordinates** — `shared/coords.ts` is the pure half (arg shaping, the
+  viewport↔page conversion, bounds checks, mouse-stroke plans; all pinned by
+  `tests/coords.test.ts`); `background/tools/coords.ts` is the CDP half
+  (`Input.dispatchMouseEvent` strokes, reusing `ensureTabActive` — input only
+  reaches the active tab). Points are viewport CSS px, i.e. exactly the frame
+  `screenshot` captures, so the model points at what it saw; `space:"page"`
+  converts using the scroll offsets read in the frame that owns them. A
+  point outside the viewport fails `INPUT-FAILED` **with the bounds**, never a
+  silent miss.
+- **Policy parity** — the content action `probeAt` reports what sits under a
+  point (`elementFromPoint` + nearest interactive ancestor + its snapshot ref),
+  and `probeElementAt` feeds that to the same `assess()` a ref-based `click`
+  gets. The gate in `sw.ts` probes `click_at`/`drag_at` by point. The one
+  honest gap (documented in THREAT-MODEL.md): a control *painted* into a canvas
+  has no DOM text, so the purchase/form rules cannot read it.
+- **Upload** — `upload` has two routes. Paths go through CDP
+  (`DOM.setFileInputFiles`), reached by tagging the input with a token the
+  content script can see and `DOM.querySelector` can find (refs only exist in
+  the content script; this bridge is `uploadMark`). Inline `files` (text or
+  base64) are built into a `DataTransfer` inside the frame that owns the ref,
+  which also covers model-generated content and iframe inputs. New `upload`
+  policy rule — always confirmed, names shown.
+- **Console/network** — `background/netlog.ts` keeps per-tab ring buffers (500)
+  fed through the adapters' `onTabEvent`; capture starts at run start and on
+  the first read tool. `helper/daemon.mjs` forwards a **closed list** of
+  Runtime/Log/Network events (a daemon change applies on the next native
+  connection). Reads are honest about the limit: what arrived before capture
+  started is simply not retrievable, and the tools say so instead of returning
+  an empty-looking "clean" log.
+- **Screenshot to disk** — `screenshot save_to_disk:true` writes via
+  `chrome.downloads` with a sanitised basename (`shared/filenames.ts`), gated
+  under the existing `download` rule.
+- **Perception tuning** — `formatSnapshot` takes `filter`/`maxChars`/`frame`
+  and `truncateWithNote` caps output; `read_page` takes `ref`/`depth`
+  (depth-limited subtree walk) /`max_chars`. Every clipped render ends with a
+  truncation note — a silent clip is indistinguishable from a short page.
+- **Human handoff** — `shared/handoff.ts` decides (pure; `tests/handoff.test.ts`):
+  a CAPTCHA widget of real size (the invisible reCAPTCHA badge on ordinary
+  pages is deliberately excluded by a size filter) or an action targeting a
+  sign-in form when the task never mentioned logging in. `background/handoff.ts`
+  gates it (`HumanGate`, one prompt per URL per run, timeout → continue), the
+  protocol grows `need_human` / `human.resolve`, and the panel renders a teal
+  "Your turn" card. The gated executor returns `handoffMessage(...)` **in place
+  of running the tool** — the model is told what happened and re-looks, instead
+  of retrying a wall. Run logs record the pause (`handoffs`).
+
+Tests: `tests/coords|handoff|netlog|filenames.test.ts` + policy additions, and
+`scripts/capability-smoke.mjs` (22 checks C/U/N/P/S/H) against the fixtures
+`e2e/fixture/canvas-click.html` (painted buttons that record where trusted
+clicks land), `upload.html`, `console-net.html` (logs + fetch + the tiny badge
+that must NOT count) and `captcha.html`. The smoke drives the **gated** path
+through the `run_tool` port's `gated: true` flag (hook: `__ba.toolGated`), so
+policy and handoff are exercised without standing up a mock LLM.
+
 ## Helper daemon (Unlimited mode)
 
 `helper/daemon.mjs` — native-messaging host (4-byte LE framing) bridging RPC
@@ -535,12 +595,13 @@ writes `NativeMessagingHosts/*.json` for Chrome/Chromium/Edge/Brave;
   looking empty. Frames whose content script never ran (`about:blank`,
   `srcdoc`, `data:`) can be neither read nor evaluated, and from the next
   navigation onward the /preview view of a Doc is the readable route.
-- Trusted input types at the caret; there is no exposed way to *place* the caret
-  by coordinate (a canvas has no refs, and the driver only clicks the document
-  surface as focus recovery). Navigating a long document therefore goes through
-  the editor's own keys (`Control+Home`, arrows, find-and-replace) or its
-  toolbar/menu refs. A `click_at x,y` tool over `Input.dispatchMouseEvent` is the
-  obvious next step if that becomes limiting.
+- `click_at` places the caret on canvas editors and clicks painted UI, but the
+  reading half is unchanged: canvas content has no DOM text (screenshot is the
+  only read), and a canvas-painted button cannot be policy-classified for the
+  same reason. Upload needs a real `<input type="file">` ref — drop-zone-only
+  widgets are not supported. Console/network capture covers only what arrived
+  since the run started, and out-of-process iframe traffic may be missing in
+  Standard mode.
 - Lessons are per browser profile (`chrome.storage.local`, never synced) and
   capped at 300; one review covers one run (max 6 lessons), so a long broken
   thread is learned one turn at a time. Reviews are serialized and best-effort:

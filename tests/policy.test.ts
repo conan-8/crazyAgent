@@ -217,6 +217,45 @@ describe("ConfirmGate", () => {
   });
 });
 
+describe("assess — new capability tools (coords, upload, screenshot-to-disk)", () => {
+  it("gates click_at exactly like click, from the probe of the point", () => {
+    expect(assess("click_at", { x: 10, y: 10 }, buyProbe)).toMatchObject({
+      level: "confirm",
+      rule: "purchase",
+    });
+    expect(assess("click_at", { x: 10, y: 10 }, submitProbe)).toMatchObject({
+      level: "confirm",
+      rule: "form_submit",
+    });
+    expect(assess("click_at", { x: 10, y: 10 }, plainProbe)).toEqual({ level: "allow" });
+  });
+
+  it("leaves hover_at / element_at / drag_at free (read or inert)", () => {
+    expect(assess("hover_at", { x: 1, y: 1 })).toEqual({ level: "allow" });
+    expect(assess("element_at", { x: 1, y: 1 })).toEqual({ level: "allow" });
+    expect(assess("drag_at", { x: 1, y: 1, to_x: 2, to_y: 2 })).toEqual({ level: "allow" });
+  });
+
+  it("always confirms upload and names the files it would send", () => {
+    const risk = assess("upload", {
+      ref: "3",
+      files: [{ name: "notes.txt" }],
+      paths: ["/home/me/report.pdf"],
+    });
+    expect(risk).toMatchObject({ level: "confirm", rule: "upload" });
+    expect(risk.level === "confirm" && risk.summary).toContain("notes.txt");
+    expect(risk.level === "confirm" && risk.summary).toContain("report.pdf");
+  });
+
+  it("gates only the save_to_disk half of screenshot", () => {
+    expect(assess("screenshot", {})).toEqual({ level: "allow" });
+    expect(assess("screenshot", { save_to_disk: true, filename: "proof.jpg" })).toMatchObject({
+      level: "confirm",
+      rule: "download",
+    });
+  });
+});
+
 describe("vi sanity", () => {
   it("keeps vi imported for future spies", () => {
     expect(typeof vi.fn).toBe("function");

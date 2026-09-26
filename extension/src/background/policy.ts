@@ -58,6 +58,30 @@ export function assess(
         rule: "download",
         summary: `Download file: ${String(args.url ?? "")}`,
       };
+    case "screenshot":
+      // A capture is free; the gated half is writing it to disk.
+      return args.save_to_disk === true
+        ? {
+            level: "confirm",
+            rule: "download",
+            summary: `Save a screenshot to the Downloads folder${typeof args.filename === "string" && args.filename ? ` as ${String(args.filename).slice(0, 60)}` : ""}`,
+          }
+        : { level: "allow" };
+    case "upload": {
+      // File egress — whatever the model attached leaves the machine into the
+      // page. Always gated, whatever the target input looks like.
+      const files = Array.isArray(args.files) ? args.files : [];
+      const paths = Array.isArray(args.paths) ? args.paths : [];
+      const names = [
+        ...files.map((f) => String((f as { name?: string })?.name ?? "file")),
+        ...paths.map((p) => String(p).split(/[\\/]/).pop() ?? String(p)),
+      ];
+      return {
+        level: "confirm",
+        rule: "upload",
+        summary: `Upload ${names.length} file(s) to the page: ${names.slice(0, 4).join(", ")}${names.length > 4 ? ", …" : ""}`,
+      };
+    }
     case "network_mock":
     case "network_rewrite":
       return {
@@ -92,7 +116,10 @@ export function assess(
       }
       return { level: "allow" };
     }
-    case "click": {
+    // `click_at` is the same action by a different address — coordinate clicks
+    // get the identical rules, fed by the probe of what is under the point.
+    case "click":
+    case "click_at": {
       if (probe && PURCHASE_RE.test(probe.text)) {
         return {
           level: "confirm",

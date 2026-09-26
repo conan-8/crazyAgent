@@ -32,11 +32,21 @@ export interface ConfirmMarker {
   jev?: boolean;
 }
 
+/** A pause for the human: sign-in wall or CAPTCHA. */
+export interface HumanMarker {
+  id: string;
+  reason: string;
+  url: string;
+  /** Set once the user answered (so a re-render shows the outcome). */
+  handled?: boolean;
+}
+
 export type ChatBlock =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
   | { kind: "tool"; card: ToolCard }
-  | { kind: "confirm"; confirm: ConfirmMarker };
+  | { kind: "confirm"; confirm: ConfirmMarker }
+  | { kind: "human"; human: HumanMarker };
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -162,6 +172,12 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
           summary: e.summary,
           jev: e.jev === true ? true : undefined,
         },
+      });
+      break;
+    case "need_human":
+      assistantTurn().blocks.push({
+        kind: "human",
+        human: { id: e.id, reason: e.reason, url: e.url },
       });
       break;
     case "madman":

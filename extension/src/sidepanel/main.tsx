@@ -108,6 +108,7 @@ function runToolFull(
   name: string,
   args: Record<string, unknown> = {},
   tabId?: number,
+  gated = false,
 ): Promise<{ payload?: unknown; text?: string }> {
   return new Promise((resolve, reject) => {
     if (!postPort) {
@@ -118,7 +119,7 @@ function runToolFull(
     toolWaiters.set(id, (m) =>
       m.ok ? resolve({ payload: m.payload, text: m.text }) : reject(new Error(m.error ?? "tool failed")),
     );
-    postPort({ kind: "run_tool", id, name, args, tabId });
+    postPort({ kind: "run_tool", id, name, args, tabId, gated });
   });
 }
 
@@ -479,6 +480,75 @@ function ConfirmNote({
   );
 }
 
+/** The agent hit a sign-in wall or CAPTCHA and paused for a human. */
+function HumanCardView({
+  id,
+  reason,
+  url,
+  onHuman,
+}: {
+  id: string;
+  reason: string;
+  url: string;
+  onHuman: (id: string, handled: boolean) => void;
+}) {
+  return (
+    <div
+      class="confirm-card is-human"
+      role="alertdialog"
+      aria-label="The agent needs you to take over"
+    >
+      <div class="confirm-title">
+        <span class="confirm-icon">
+          <Icon d={ICONS.key} size={14} />
+        </span>
+        <span>
+          <span class="confirm-eyebrow">Your turn — the agent paused</span>
+          <span class="confirm-tool">human handoff</span>
+        </span>
+      </div>
+      <div class="confirm-summary">{reason}</div>
+      <div class="confirm-summary confirm-url" title={url}>
+        {url}
+      </div>
+      <div class="confirm-actions">
+        <button class="btn-primary" onClick={() => onHuman(id, true)}>
+          I've handled it — continue
+        </button>
+        <button class="btn-soft" onClick={() => onHuman(id, false)}>
+          Skip — let the agent try
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** A settled handoff, drawn as a timeline step. */
+function HumanNote({
+  reason,
+  url,
+  handled,
+}: {
+  reason: string;
+  url: string;
+  handled?: boolean;
+}) {
+  return (
+    <div class="card confirm-note is-human-note" title={url}>
+      <div class="card-title">
+        <span class="tool-icon note-icon">
+          <Icon d={ICONS.key} size={13} />
+        </span>
+        <span class="tool-text">
+          <span class="tool-label">{handled ? "You took over" : "Handoff skipped"}</span>
+          <span class="tool-chip">human handoff</span>
+          <span class="tool-preview">{reason}</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -506,6 +576,8 @@ function TurnView({
   onZoom,
   onConfirm,
   resolved,
+  onHuman,
+  humanResolved,
 }: {
   turn: ChatTurn;
   /** Last turn of the thread (confirm cards stay actionable). */
@@ -515,6 +587,8 @@ function TurnView({
   onZoom: (src: string) => void;
   onConfirm: (id: string, allow: boolean, always: boolean) => void;
   resolved: Map<string, Decision>;
+  onHuman: (id: string, handled: boolean) => void;
+  humanResolved: Map<string, boolean>;
 }) {
   if (turn.role === "user") {
     return (
@@ -576,6 +650,25 @@ function TurnView({
             />
           );
         }
+        if (block.kind === "human") {
+          const pending = live && !humanResolved.has(block.human.id);
+          return pending ? (
+            <HumanCardView
+              key={i}
+              id={block.human.id}
+              reason={block.human.reason}
+              url={block.human.url}
+              onHuman={onHuman}
+            />
+          ) : (
+            <HumanNote
+              key={i}
+              reason={block.human.reason}
+              url={block.human.url}
+              handled={humanResolved.get(block.human.id)}
+            />
+          );
+        }
         if (block.kind === "reasoning") {
           return <ReasoningBlock key={i} text={block.text} live={active && i === lastIndex} />;
         }
@@ -595,6 +688,7 @@ function activityLabel(conv: Conversation | null): string {
     return last.card.filled ? "Deciding next step" : (TOOL_META[last.card.name]?.active ?? "Working");
   }
   if (last.kind === "confirm") return "Waiting for approval";
+  if (last.kind === "human") return "Waiting for you";
   if (last.kind === "reasoning") return "Thinking";
   return "Writing";
 }
@@ -1925,6 +2019,7 @@ function App() {
   const [lessonBadge, setLessonBadge] = useState(false);
   const [viewer, setViewer] = useState<string | null>(null);
   const [resolved, setResolved] = useState<Map<string, Decision>>(new Map());
+  const [humanResolved, setHumanResolved] = useState<Map<string, boolean>>(new Map());
   const [openMenu, setOpenMenu] = useState<"mode" | "model" | null>(null);
   const [settings, setSettingsState] = useState<AgentSettings | null>(null);
   const [attachments, setAttachments] = useState<RunAttachment[]>([]);
@@ -2172,6 +2267,11 @@ function App() {
     postPort?.({ kind: "confirm.resolve", id, allow, always });
   };
 
+  const resolveHuman = (id: string, handled: boolean) => {
+    setHumanResolved((prev) => new Map(prev).set(id, handled));
+    postPort?.({ kind: "human.resolve", id, handled });
+  };
+
   const openHistory = () => {
     setShowSettings(false);
     setShowLogs(false);
@@ -2332,6 +2432,12 @@ function App() {
         (r) => r.text ?? "",
         (err) => `ERROR: ${String((err as Error)?.message ?? err)}`,
       ),
+    /** Gated execution — policy confirms and human handoff apply (driver scripts). */
+    toolGated: (name: string, args?: Record<string, unknown>, tabId?: number) =>
+      runToolFull(name, args, tabId, true).then(
+        (r) => ({ ok: true, payload: r.payload, text: r.text }),
+        (err) => ({ ok: false, error: String((err as Error)?.message ?? err) }),
+      ),
     state: () => ({ running, pings, swStartedAt, checkpoint }),
     events: () => [...eventBuffer],
     swPing: () => chrome.runtime.sendMessage({ type: "ping" }),
@@ -2339,6 +2445,7 @@ function App() {
     onEvent: (cb: (e: StepEvent) => void) => listeners.add(cb),
     suspendKeepalive: () => postPort?.({ kind: "test_suspend" }),
     resolveConfirm,
+    resolveHuman,
     getSettings: () => loadSettings(),
     setSettings: (s: AgentSettings) => saveSettings(s).then(refreshSettings),
     // chat/history surface
@@ -2507,6 +2614,8 @@ function App() {
                   onZoom={(src) => setViewer(src)}
                   onConfirm={resolveConfirm}
                   resolved={resolved}
+                  onHuman={resolveHuman}
+                  humanResolved={humanResolved}
                 />
               ))
             )}

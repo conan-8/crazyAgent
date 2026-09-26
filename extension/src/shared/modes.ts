@@ -19,7 +19,10 @@ export const AGENT_MODES: Record<
 /** Tools that change page state — blocked in Plan mode. */
 export const MUTATING_TOOLS = new Set([
   "click",
+  "click_at",
+  "drag_at",
   "type",
+  "upload",
   "select",
   "key",
   "download",

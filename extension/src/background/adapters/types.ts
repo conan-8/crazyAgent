@@ -22,6 +22,12 @@ export interface BrowserAdapter {
    */
   contextIdForFrame?(tabId: number, frameId: number): number | null;
   screenshot(tabId: number): Promise<{ dataUrl: string }>;
+  /**
+   * Subscribe to raw CDP events with a RESOLVED tab id — what console/network
+   * capture needs. Optional: an adapter without it simply yields no captured
+   * entries, and the read tools say so instead of returning a fake empty log.
+   */
+  onTabEvent?(listener: (tabId: number, method: string, params: unknown) => void): () => void;
   /** Network interception (Unlimited mode only). */
   intercept?(
     tabId: number,

@@ -314,7 +314,15 @@ async function onCdpEvent(targetId, msg) {
   if (
     msg.method === "Runtime.executionContextCreated" ||
     msg.method === "Runtime.executionContextDestroyed" ||
-    msg.method === "Runtime.executionContextsCleared"
+    msg.method === "Runtime.executionContextsCleared" ||
+    // Console + network capture (console_read / network_read). Deliberately a
+    // closed list: everything else stays on the daemon's side of the wire.
+    msg.method === "Runtime.consoleAPICalled" ||
+    msg.method === "Runtime.exceptionThrown" ||
+    msg.method === "Log.entryAdded" ||
+    msg.method === "Network.requestWillBeSent" ||
+    msg.method === "Network.responseReceived" ||
+    msg.method === "Network.loadingFailed"
   ) {
     send({ id: 0, event: "cdp", result: { targetId, method: msg.method, params: msg.params } });
   }

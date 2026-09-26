@@ -89,6 +89,11 @@ export type StepEvent =
   /** Streamed model reasoning ("thinking"); rendered in a collapsed block. */
   | { kind: "reasoning_delta"; text: string }
   | { kind: "need_confirm"; id: string; tool: string; summary: string; jev?: boolean }
+  /**
+   * Human handoff: a sign-in or CAPTCHA wall the agent must not fake its way
+   * past. The run pauses until the user takes over — or says to continue.
+   */
+  | { kind: "need_human"; id: string; reason: string; url: string }
   /** `stats` are the final numbers, so the bar survives the run ending. */
   | { kind: "done"; summary: string; stats?: RunStats }
   | { kind: "error"; message: string };
@@ -151,6 +156,8 @@ export type PortRequest =
   | { kind: "lessons.export"; format: LogExportFormat }
   /** Resolve a pending Phase 6 confirmation. */
   | { kind: "confirm.resolve"; id: string; allow: boolean; always?: boolean }
+  /** Resolve a pending human handoff (sign-in / CAPTCHA wall). */
+  | { kind: "human.resolve"; id: string; handled: boolean }
   /** Dev/test + Phase 4 loop: run one registered tool against a tab. */
   | {
       kind: "run_tool";
@@ -158,6 +165,8 @@ export type PortRequest =
       name: string;
       args: Record<string, unknown>;
       tabId?: number;
+      /** Route through the policy/handoff gate instead of raw execution. */
+      gated?: boolean;
     }
   /**
    * Dev/test hook (scripts + e2e): simulate a browser that lets the worker

@@ -110,6 +110,29 @@ export function cssPath(el: Element): string {
   return parts.join(" > ");
 }
 
+/** True when the element matches the interactive set the registry collects. */
+export function isInteractive(el: Element): boolean {
+  try {
+    return el.matches(INTERACTIVE);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The nearest interactive element at or above `el` — what a click at a point
+ * would really be acting on. Coordinate input feeds this to the policy layer
+ * so `click_at` is gated exactly like a ref-based `click`.
+ */
+export function nearestInteractive(el: Element | null): Element | null {
+  let cur: Element | null = el;
+  while (cur) {
+    if (isInteractive(cur)) return cur;
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
 function isVisible(el: Element): boolean {
   if ((el as HTMLElement).hidden) return false;
   const style = getComputedStyle(el);
@@ -265,6 +288,14 @@ export class ElementRegistry {
       canvases: safeCanvasCount(),
       textChars: rawTextLength(),
     };
+  }
+
+  /** Reverse lookup: the snapshot ref of a live element, if the registry has one. */
+  refFor(el: Element): string | null {
+    for (const [ref, reg] of this.#registrations) {
+      if (reg.el.deref() === el) return ref;
+    }
+    return null;
   }
 
   /** Resolve a ref to a live element, recovering from SPA re-renders. */

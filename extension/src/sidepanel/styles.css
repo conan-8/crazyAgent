@@ -56,6 +56,9 @@
   --jev-line: rgba(255, 47, 160, 0.5);
   --jev-glow: rgba(255, 47, 160, 0.22);
   --jev-contrast: #1a0410;
+  --human: #33c3b0;
+  --human-soft: rgba(51, 195, 176, 0.14);
+  --human-line: rgba(51, 195, 176, 0.5);
 
   --blob-1: rgba(124, 108, 255, 0.55);
   --blob-2: rgba(45, 212, 191, 0.32);
@@ -118,6 +121,9 @@
     --jev-line: rgba(209, 0, 122, 0.42);
     --jev-glow: rgba(209, 0, 122, 0.16);
     --jev-contrast: #ffffff;
+    --human: #0e9c8a;
+    --human-soft: rgba(14, 156, 138, 0.1);
+    --human-line: rgba(14, 156, 138, 0.42);
     --blob-1: rgba(139, 122, 255, 0.38);
     --blob-2: rgba(45, 212, 191, 0.26);
     --blob-3: rgba(244, 114, 182, 0.22);
@@ -1775,6 +1781,51 @@ input[type="number"]::-webkit-inner-spin-button {
   background: linear-gradient(135deg, #ffcb6b, #ff9f43);
   color: #2a1700;
   box-shadow: 0 6px 18px -6px rgba(255, 159, 67, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/*
+ * Human handoff: a sign-in wall or CAPTCHA. Deliberately NOT the amber warn
+ * palette of the approval cards (this is not a risk decision) and not Jev
+ * pink (no sidecar involved) — a cool teal that reads as "your turn".
+ */
+.confirm-card.is-human {
+  background: linear-gradient(160deg, var(--human-soft), transparent 70%), var(--surface);
+  border-color: var(--human-line);
+  box-shadow: var(--inner-hi), 0 16px 40px -18px color-mix(in srgb, var(--human) 55%, transparent);
+}
+
+.confirm-card.is-human::before {
+  border-color: var(--human);
+  animation: none;
+}
+
+.confirm-card.is-human .confirm-icon {
+  background: color-mix(in srgb, var(--human) 18%, transparent);
+  color: var(--human);
+}
+
+.confirm-card.is-human .confirm-eyebrow {
+  color: var(--human);
+}
+
+.confirm-card.is-human .confirm-actions .btn-primary {
+  background: linear-gradient(135deg, #7fe3d8, #33c3b0);
+  color: #03241f;
+  box-shadow: 0 6px 18px -6px rgba(51, 195, 176, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.confirm-url {
+  font-family: var(--mono);
+  font-size: 11px;
+  opacity: 0.75;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.is-human-note .note-icon {
+  color: var(--human);
 }
 
 /* Settled approval: a non-interactive timeline step. */
