@@ -98,6 +98,30 @@ describe("canvas document editor rules", () => {
     expect(prompt).toContain("/presentation/d/<id>/preview");
   });
 
+  it("tells the model to stop hunting when the sink ref never appears", () => {
+    expect(prompt).toContain("NOT guaranteed to appear");
+    expect(prompt).toContain("stop hunting");
+    expect(prompt).toContain("DOM-only route");
+  });
+
+  it("triages a dead debugger channel once instead of retrying dead tools", () => {
+    expect(prompt).toContain("page_health` ONCE");
+    expect(prompt).toContain("trusted keystrokes AND coordinate clicks AND JS evaluation are ALL dead");
+    expect(prompt).toContain("Reload the tab once and re-check once");
+  });
+
+  it("spells out trusted:false for ordinary inputs on editor URLs", () => {
+    expect(prompt).toContain("`trusted:false` explicitly");
+  });
+
+  it("carries the Find-and-replace DOM-only insertion fallback", () => {
+    expect(prompt).toContain("Find and replace");
+    expect(prompt).toContain("Find = anchor");
+    expect(prompt).toContain("<new text> <anchor>");
+    expect(prompt).toContain("Nothing is deleted");
+    expect(prompt).toContain("Replace all inserts at every match");
+  });
+
   it("is byte-stable across calls and independent of madman mode", () => {
     expect(buildSystemPrompt("t", "auto")).toBe(buildSystemPrompt("t", "auto"));
     const off = buildSystemPrompt("t", "auto", false);

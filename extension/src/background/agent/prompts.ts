@@ -65,13 +65,23 @@ const JUDGE_RULE =
  * (beforeinput insertText / insertParagraph / formatBold) that such editors
  * listen for — see shared/trusted-input.ts. So this is a procedure known to
  * work rather than a guess.
+ *
+ * The DOM-only fallback (Find-and-replace insertion) is proven the expensive
+ * way: a live Google Docs run (2026-09-26) spent 200+ turns hunting for a sink
+ * ref that never appeared while the debugger channel was down for the whole
+ * session. Anchored Find ▸ Replace completed the edit — that route is pinned
+ * here so the next run takes it immediately.
  */
 const DOCUMENT_EDITOR_RULES = [
   "Canvas document editors (Google Docs, Slides, Office on the web, and anything shaped like them):",
   "- The document BODY is painted into a <canvas>. No tool can read it — not read_page, not snapshot, not evaluate_js, not any expression you can write. Hunting for a clever selector wastes turns: pixel content has no DOM.",
   "- Typing goes into a SEPARATE hidden editable element (Docs calls it the text-event-target iframe; it usually has role=textbox or contenteditable and lives in its own frame). It shows up in the snapshot as an editable ref — often `N#1`, named like \"Document body\". That ref is your typing target.",
+  "- The sink ref is NOT guaranteed to appear: its frame can load without a content script, and the snapshot then shows no editable body ref at all. Look once (a full `snapshot`, then `frames`); if it is not there, stop hunting — frame-hopping will not conjure it. Use the DOM-only route below instead.",
   "- `type` and `key` recognise these editors and switch to REAL keystrokes through the browser's input pipeline — the only thing such an editor responds to (synthesised DOM events are ignored by them). Consequences: `type` INSERTS at the caret instead of replacing a value, newlines become paragraph breaks, and `key` drives the editor's own shortcuts — Control+b bold, Control+i italic, Control+Alt+1 heading, Control+Home start of document, Control+z undo, plus Backspace and the arrows. Toolbar refs (Bold, Undo, …) still work as clicks.",
   "- Place the caret (or select text) by clicking the document surface: `screenshot` to see the page, `click_at` at the target position (or `drag_at` to select), then `type` into the sink ref — trusted keystrokes insert at that caret. `Control+Home` / arrows also move it without coordinates.",
+  "- When typing, `screenshot`, `click_at` or `evaluate_js` fail with a transport error, check `page_health` ONCE. 'debugger channel: …' down means trusted keystrokes AND coordinate clicks AND JS evaluation are ALL dead for the session. Reload the tab once and re-check once; if it stays down, stop retrying those tools — ref `click` and `type trusted:false` over the content script still work, and they are enough to edit the document.",
+  "- On a canvas-editor URL, `type`/`key` default to real keystrokes even in ordinary dialogs and menus. So with the debugger down, pass `trusted:false` explicitly to fill any real input (Find and replace fields, rename boxes, side panels) through the content script.",
+  "- DOM-only fallback that still edits the document: Edit ▸ Find and replace (click the menu refs; its fields are ordinary inputs). To INSERT text with no keystrokes at all: pick an anchor string the document already contains exactly once (the dialog counts matches, e.g. '1 of 1'), set Find = anchor and Replace with = '<new text> <anchor>' (or '<anchor> <new text>'), click Replace. Nothing is deleted; with a repeated anchor, Replace all inserts at every match. Then verify at the /mobilebasic or /preview URL.",
   "- An edit here cannot be read back — the pixels are the only copy, so an empty-looking snapshot afterwards proves nothing. Confirm with screenshot, or read the document at its /preview URL.",
   "- To READ a document (not just write it), the edit view will not help: change the URL first. A Google Doc reads as text at /document/d/<id>/preview or /document/d/<id>/mobilebasic; a Slides deck at /presentation/d/<id>/preview. Export/text URLs often download instead of rendering. Navigate there, read_page, then go back if you need to edit.",
   "- When a frame reports 'content is drawn into a <canvas>', that is a statement of fact, not a transient error: do NOT retry read_page / snapshot / evaluate_js hoping for different output. Use screenshot if seeing it matters, then work with the toolbar refs and the typing sink, or switch to the readable URL above.",
