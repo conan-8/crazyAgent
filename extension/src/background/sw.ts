@@ -18,6 +18,7 @@ import {
   saveCheckpoint,
 } from "./checkpoint";
 import { Keepalive } from "./keepalive";
+import { sameObservation } from "../shared/observation";
 import { runEchoTask } from "./tasks/echo";
 import { DebuggerAdapter } from "./adapters/debugger";
 import { CdpAdapter } from "./adapters/cdp";
@@ -528,6 +529,13 @@ const AUTO_OBSERVE_TOOLS = new Set([
 
 const OBSERVATION_MAX_CHARS = 12_000;
 
+/**
+ * Last full observation per tab, for the unchanged-page collapse: a canvas
+ * editor's chrome snapshot repeats thousands of tokens per keystroke, and the
+ * model gains nothing from a byte-identical dump.
+ */
+const lastObservations = new Map<number, string>();
+
 /** Best-effort settle + compact snapshot after an action; null on failure. */
 async function observeAfterAction(tabId: number): Promise<string | null> {
   try {
@@ -537,6 +545,11 @@ async function observeAfterAction(tabId: number): Promise<string | null> {
     const snap = await collectSnapshot(tabId);
     if (!snap.frames.length) return null;
     const text = formatSnapshot(snap);
+    const prev = lastObservations.get(tabId);
+    lastObservations.set(tabId, text);
+    if (prev && sameObservation(prev, text)) {
+      return "[page unchanged since the previous observation]";
+    }
     return text.length > OBSERVATION_MAX_CHARS
       ? `${text.slice(0, OBSERVATION_MAX_CHARS)}…[truncated]`
       : text;

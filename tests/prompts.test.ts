@@ -81,27 +81,35 @@ describe("canvas document editor rules", () => {
     expect(prompt).toContain("do NOT retry");
   });
 
-  it("names the hidden typing sink as the real typing target", () => {
-    expect(prompt).toContain("hidden editable element");
-    expect(prompt).toContain("text-event-target");
-    expect(prompt).toContain("That ref is your typing target");
+  it("tells the model the sink ref will not exist and not to hunt for it", () => {
+    expect(prompt).toContain("almost NEVER in the snapshot");
+    expect(prompt).toContain("no ref exists for it");
+    expect(prompt).toContain("Do not hunt for an editable ref");
+    expect(prompt).toContain("never `type` into a toolbar/menu ref");
+  });
+
+  it("routes writes through ONE ref-less type call, never per-keystroke", () => {
+    expect(prompt).toContain("WRITE WITH ONE `type` CALL AND NO REF");
+    expect(prompt).toContain("NEVER type character-by-character");
+    expect(prompt).toContain("silently drop or duplicate a character");
   });
 
   it("routes caret placement through click_at now that coordinate clicks exist", () => {
     expect(prompt).toContain("`click_at` at the target position");
-    expect(prompt).toContain("insert at that caret");
+    expect(prompt).toContain("Text inserts at the caret");
+  });
+
+  it("gives the one cheap verification: the export fetch", () => {
+    expect(prompt).toContain("VERIFY ONCE, CHEAPLY");
+    expect(prompt).toContain("/export?format=txt");
+    expect(prompt).toContain("font-weight:700");
+    expect(prompt).toContain("do NOT stack screenshots");
   });
 
   it("gives the readable URL route for Docs and Slides", () => {
     expect(prompt).toContain("/document/d/<id>/preview");
     expect(prompt).toContain("/mobilebasic");
     expect(prompt).toContain("/presentation/d/<id>/preview");
-  });
-
-  it("tells the model to stop hunting when the sink ref never appears", () => {
-    expect(prompt).toContain("NOT guaranteed to appear");
-    expect(prompt).toContain("stop hunting");
-    expect(prompt).toContain("DOM-only route");
   });
 
   it("triages a dead debugger channel once instead of retrying dead tools", () => {
@@ -114,12 +122,12 @@ describe("canvas document editor rules", () => {
     expect(prompt).toContain("`trusted:false` explicitly");
   });
 
-  it("carries the Find-and-replace DOM-only insertion fallback", () => {
+  it("carries the Find-and-replace DOM-only fallback with its empty-doc caveat", () => {
     expect(prompt).toContain("Find and replace");
     expect(prompt).toContain("Find = anchor");
     expect(prompt).toContain("<new text> <anchor>");
     expect(prompt).toContain("Nothing is deleted");
-    expect(prompt).toContain("Replace all inserts at every match");
+    expect(prompt).toContain("In a blank document there is no anchor");
   });
 
   it("is byte-stable across calls and independent of madman mode", () => {

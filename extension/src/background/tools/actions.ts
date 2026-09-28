@@ -7,6 +7,7 @@
 import type { ActionResult } from "../../content/actions";
 import { detectOpaqueSurface } from "../../shared/frames";
 import { shouldUseTrustedInput, type InputHints } from "../../shared/trusted-input";
+import { failureTag } from "../../shared/tool-failure";
 import type { ElementProbe } from "../policy";
 import { runContentAction, parseRef } from "./content-action";
 import { collectFramePairs, truncateWithNote } from "./perception";
@@ -59,7 +60,7 @@ registerTool({
 registerTool({
   name: "type",
   description:
-    "Type text into the element with the given ref (replaces its value). Set submit=true to submit the enclosing form afterwards. For canvas document editors (Google Docs/Slides, Office on the web) type into the editor's hidden text sink; the tool detects those and sends real keystrokes, which insert at the caret instead of replacing a value. Pass trusted=true to force real keystrokes anywhere, trusted=false to force the DOM path.",
+    "Type text into the element with the given ref (replaces its value) — or, with NO ref, as real keystrokes at whatever is focused. Canvas document editors (Google Docs/Slides, Office on the web) are typed WITHOUT a ref: one call finds the editor's hidden typing sink and inserts the WHOLE string at the caret (real keystrokes — the only thing such editors respond to). Never type into them character by character. Set submit=true to submit the enclosing form afterwards. Pass trusted=true to force real keystrokes anywhere, trusted=false to force the DOM path (which needs a ref).",
   parameters: {
     type: "object",
     properties: {
@@ -72,13 +73,30 @@ registerTool({
           "true = send real keystrokes through the browser's input pipeline; false = synthesise DOM events. Omit to let the tool decide.",
       },
     },
-    required: ["ref", "text"],
+    required: ["text"],
   },
   async run(args, ctx): Promise<ActionResult> {
-    const ref = String(args.ref ?? "");
+    const ref = typeof args.ref === "string" && args.ref.trim() ? args.ref : undefined;
     const text = String(args.text ?? "");
     const submit = Boolean(args.submit);
     const explicit = typeof args.trusted === "boolean" ? args.trusted : undefined;
+    if (!ref) {
+      // No ref = the canvas-editor route: real keystrokes at the focused
+      // target / editor sink. The DOM path has nothing to target without a ref.
+      if (explicit === false) {
+        return {
+          ok: false,
+          error: `${failureTag("input")}: \`type\` without a ref types real keystrokes at the focused target — pass trusted:true (or omit trusted), or give a ref for the DOM path.`,
+        };
+      }
+      return runTrustedInput({
+        tabId: ctx.tabId,
+        adapter: ctx.adapter,
+        text,
+        submit,
+        reason: explicit === true ? "requested (trusted: true)" : "no ref: real keystrokes at the focused target / editor sink",
+      });
+    }
     const route = await decideInputRoute(ctx, ref, explicit);
     if (route.use) {
       return runTrustedInput({

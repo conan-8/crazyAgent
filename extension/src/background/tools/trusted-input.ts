@@ -105,6 +105,70 @@ async function clickPoint(
   await adapter.send(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", ...common });
 }
 
+/**
+ * The hidden typing sink of a canvas document editor (Docs' text-event-target
+ * shape): a contenteditable / role=textbox scratch buffer inside its own iframe.
+ * Real Google Docs never exposes it as a ref — the iframe carries no content
+ * script — so ref-less typing finds it through the browser instead. Deliberately
+ * frame-scoped: it never reaches into an ordinary page's inputs, so typing with
+ * no ref cannot steal focus from a dialog field.
+ */
+function sinkJs(focus: boolean): string {
+  return `(() => {
+  const pick = (d) => d ? (d.querySelector('[role="textbox"][contenteditable="true"], [role="textbox"], [contenteditable="true"]') || null) : null;
+  const sinkFrames = document.querySelectorAll('iframe.docs-texteventtarget-iframe, .docs-texteventtarget-iframe');
+  const list = [...sinkFrames].concat([...document.querySelectorAll('iframe')]);
+  let target = null;
+  for (const f of list) {
+    let d = null;
+    try { d = f.contentDocument; } catch { d = null; }
+    target = pick(d);
+    if (target) break;
+  }
+  if (!target) return false;
+  const activeOf = () => (target.ownerDocument || document).activeElement;
+  const has = () => { const a = activeOf(); return a === target || !!(a && target.contains(a)); };
+  ${focus ? "if (!has()) { try { target.focus(); } catch { return false; } }" : ""}
+  return has();
+})()`;
+}
+
+/** Run the sink expression in the page; false whenever anything throws. */
+async function editorSink(
+  tabId: number,
+  adapter: BrowserAdapter,
+  focus: boolean,
+): Promise<boolean> {
+  const params = { expression: sinkJs(focus), returnByValue: true };
+  try {
+    const res = (await (adapter.sendEnabled
+      ? adapter.sendEnabled(tabId, "Runtime", "Runtime.evaluate", params)
+      : adapter.send(tabId, "Runtime.evaluate", params))) as { result?: { value?: unknown } };
+    return res?.result?.value === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Where ref-less input should land: leave a real editable alone, otherwise
+ * claim a canvas editor's sink if the page has one, otherwise accept the
+ * browser's current focus (often the sink iframe itself).
+ */
+async function resolveNoRefFocus(
+  tabId: number,
+  adapter: BrowserAdapter,
+): Promise<"focused" | "sink" | "none"> {
+  const st = await focusTarget(tabId, "").catch(() => null);
+  const hints = st && !("error" in st) ? st.hints : {};
+  // A real editable (a dialog field, an input) already has focus — never steal
+  // it on behalf of an editor sink the user is not typing into.
+  if (hints.editable && !hints.sinkSignature && !hints.boxHidden) return "focused";
+  if (await editorSink(tabId, adapter, true)) return "sink";
+  if (hints.editable || hints.activeIsFrame) return "focused";
+  return "none";
+}
+
 export interface TrustedInputRequest {
   tabId: number;
   adapter: BrowserAdapter;
@@ -130,6 +194,22 @@ export async function runTrustedInput(
 
   let focusState: FocusState | null = null;
   let primed = false;
+  let noRefFocus: "focused" | "sink" | "none" | null = null;
+  if (!req.ref) {
+    // Ref-less input (the canvas-editor route): make sure the keystrokes have
+    // somewhere real to land before sending them — a silent no-op is exactly
+    // the failure that sends a run into a retry loop.
+    noRefFocus = await resolveNoRefFocus(tabId, adapter);
+    if (noRefFocus === "none" && req.text !== undefined) {
+      return {
+        ok: false,
+        error: trustedInputFailure(
+          "nothing editable is focused and the page exposes no editor sink to type into",
+          "nothing was typed. Click the target once (`click_at`) or focus it with `evaluate_js`, then retry — or pass a ref.",
+        ),
+      };
+    }
+  }
   if (req.ref) {
     const first = await focusTarget(tabId, req.ref);
     if ("error" in first) return { ok: false, error: first.error };
@@ -158,7 +238,7 @@ export async function runTrustedInput(
         ok: false,
         error: trustedInputFailure(
           `the typing target (${req.ref}) would not take focus${primed ? ", even after a trusted click on the document surface" : ""}`,
-          "nothing was typed. Take a fresh snapshot and target the editor's hidden text sink (the editable ref in its own frame, often N#1), or navigate to the document first if it is still loading.",
+          "nothing was typed. On a canvas editor the typing sink has NO ref — call `type` with the text and no ref (it finds and focuses the sink itself); for anything else, take a fresh snapshot and pick a real editable ref, or navigate to the document first if it is still loading.",
         ),
       };
     }
@@ -206,6 +286,8 @@ export async function runTrustedInput(
   if (req.ref) {
     const after = await focusTarget(tabId, req.ref);
     focusHeld = "error" in after ? false : after.focused;
+  } else if (noRefFocus === "sink") {
+    focusHeld = await editorSink(tabId, adapter, false);
   }
 
   const parts = [
@@ -213,10 +295,14 @@ export async function runTrustedInput(
     inserted ? `${inserted} char(s) of text` : null,
     keysSent ? `${keysSent} key press(es)` : null,
     primed ? "the document surface was clicked once first to take focus" : null,
+    noRefFocus === "sink" ? "the editor's hidden typing sink was found and focused for you" : null,
+    noRefFocus === "none"
+      ? "WARNING: nothing editable was focused — the keystrokes may have gone nowhere"
+      : null,
     focusHeld
       ? null
-      : "WARNING: the target lost focus while typing — some text may not have landed; verify with screenshot and do NOT retype blindly",
-    "a canvas editor paints its document into pixels, so this cannot be read back: verify with screenshot, or read the document at its /preview URL",
+      : "WARNING: the target lost focus while typing — some text may not have landed; verify before retyping and do NOT retype blindly",
+    "a canvas editor paints its document into pixels, so this cannot be read back cheaply: verify ONCE with an evaluate_js fetch of the document's /export?format=txt (text) or ?format=html (formatting, e.g. font-weight:700 = bold), or a single screenshot",
   ].filter(Boolean);
 
   return {

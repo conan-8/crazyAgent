@@ -17,7 +17,10 @@
 // the browser's editing pipeline, so `type`/`key` now send real keystrokes over
 // CDP `Input.*` when they detect one (shared/trusted-input.ts) — and the fixture
 // rejects and counts anything untrusted, which is what D3a..D3f assert. D9 keeps
-// the honest other half: an ordinary input still takes the DOM path.
+// the honest other half: an ordinary input still takes the DOM path. D3g pins
+// the long-run path: ONE ref-less `type` call must land the whole string (real
+// Docs never exposes its sink as a ref — per-keystroke writes are what burned
+// 61 turns and 2.38M tokens on a five-letter task).
 //
 // Drives the real tools against the local canvas-editor fixture, which
 // reproduces the Docs shape: pixels on a <canvas> + a hidden contenteditable
@@ -300,6 +303,32 @@ async function main() {
       "D4 the top frame is blind to the sink, so D3 went through the frame ref",
       blind.ok === true && blind.payload?.value === "true",
       JSON.stringify(blind).slice(0, 160),
+    );
+
+    // ---- D3g: one ref-less `type` call lands the WHOLE string (the long-run path) ----
+    // Real Google Docs never exposes the sink as a ref (its frame has no content
+    // script), so the model must be able to type with NO ref at all: the driver
+    // finds the sink itself and sends one trusted insertText. Typing "hello" a
+    // keystroke at a time is what made a live run cost 61 turns / 2.38M tokens
+    // — and per-key writes silently dropped a character. One call, whole string.
+    const refless = await call("type", { text: " refless" });
+    await sleep(700);
+    const reflessModel = jsonOf(
+      await call("evaluate_js", {
+        expression:
+          "JSON.stringify({p: window.__doc.paragraphs, w: document.getElementById('wordcount').textContent})",
+      }),
+    );
+    check(
+      "D3g one ref-less type call types the whole string into the sink",
+      refless.ok === true &&
+        refless.payload?.data?.mode === "trusted" &&
+        refless.payload?.data?.insertedChars === 8 &&
+        /typing sink was found and focused/.test(String(refless.payload?.data?.note ?? "")) &&
+        Array.isArray(reflessModel.p) &&
+        reflessModel.p[1] === "second line refless" &&
+        reflessModel.w === "5 words",
+      `${JSON.stringify(refless.payload ?? refless.error ?? null).slice(0, 220)} | model: ${JSON.stringify(reflessModel).slice(0, 160)}`,
     );
 
     // ---- D5: toolbar refs still work on a canvas page ----
