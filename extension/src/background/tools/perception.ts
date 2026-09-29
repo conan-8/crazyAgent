@@ -11,7 +11,7 @@ import {
   type FrameSnapshotLike,
 } from "../../shared/frames";
 import { screenshotFilename } from "../../shared/filenames";
-import { registerTool } from "./types";
+import { registerTool, type ToolContext } from "./types";
 
 export type { AggregatedSnapshot };
 
@@ -297,6 +297,84 @@ export async function downscaleJpeg(
   }
 }
 
+/**
+ * Best-effort "you have to SEE this" capture. Whenever text perception comes
+ * back empty — or a tool fails — one screenshot rides back with the result:
+ * the model looks at the page instead of guessing, retrying blindly, or
+ * concluding the page is empty. Never throws: a capture exists to help the
+ * result, not to replace it.
+ */
+export async function captureBlindShot(
+  adapter: ToolContext["adapter"],
+  tabId: number,
+): Promise<string | undefined> {
+  try {
+    const { dataUrl } = await adapter.screenshot(tabId);
+    return await downscaleJpeg(dataUrl);
+  } catch {
+    return undefined;
+  }
+}
+
+/** True when the text tools genuinely see nothing — not just a trimmed read. */
+export function isBlind(snap: {
+  elements: unknown[];
+  text?: string;
+}): boolean {
+  return snap.elements.length === 0 && (snap.text ?? "").trim().length < 32;
+}
+
+const IMAGE_URL_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)($|\?)/i;
+
+/**
+ * Fetch an image straight to a data URL. The extension holds host permissions
+ * for every origin, so this fetch is not subject to page CORS — the trick a
+ * real run wasted a turn on before opening the file in its own tab.
+ */
+async function fetchImageDataUrl(url: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return undefined;
+    const mime = (res.headers.get("content-type") ?? "").split(";")[0]!.trim();
+    if (!mime.startsWith("image/") && !IMAGE_URL_EXT.test(url)) return undefined;
+    const buf = new Uint8Array(await res.arrayBuffer());
+    let binary = "";
+    const chunk = 0x8_000;
+    for (let i = 0; i < buf.length; i += chunk) {
+      binary += String.fromCharCode(...buf.subarray(i, i + chunk));
+    }
+    return `data:${mime.startsWith("image/") ? mime : "image/png"};base64,${btoa(binary)}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Last resort for hotlink-protected images: let the BROWSER load the URL in a
+ * hidden tab (no CORS on a top-level image document) and capture what renders.
+ */
+async function shotOfUrl(
+  ctx: ToolContext,
+  url: string,
+): Promise<string | undefined> {
+  let tabId: number | undefined;
+  try {
+    tabId = (await chrome.tabs.create({ url, active: false })).id;
+    if (tabId === undefined) return undefined;
+    for (let i = 0; i < 20; i++) {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      if (tab?.status === "complete") break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    const { dataUrl } = await ctx.adapter.screenshot(tabId);
+    return await downscaleJpeg(dataUrl);
+  } catch {
+    return undefined;
+  } finally {
+    if (tabId !== undefined) await chrome.tabs.remove(tabId).catch(() => null);
+  }
+}
+
 registerTool({
   name: "page_health",
   description:
@@ -440,18 +518,34 @@ registerTool({
       maxChars: typeof args.max_chars === "number" ? args.max_chars : undefined,
       frame: typeof args.frame === "number" ? args.frame : undefined,
     };
-    return { ...snap, format };
+    // Nothing readable is not "an empty page" — it is this tool being blind.
+    // Attach a screenshot so the model SEE the state instead of concluding
+    // there is nothing there (a live run lost its first three turns exactly
+    // here, staring at "(none in this frame)" while the page was on screen).
+    const blindShot = isBlind(snap)
+      ? await captureBlindShot(ctx.adapter, ctx.tabId)
+      : undefined;
+    return { ...snap, format, blindShot };
   },
   present(payload) {
-    const p = payload as AggregatedSnapshot & { format?: SnapshotFormatOpts };
-    return { text: formatSnapshot(p, p.format) };
+    const p = payload as AggregatedSnapshot & {
+      format?: SnapshotFormatOpts;
+      blindShot?: string;
+    };
+    const text = formatSnapshot(p, p.format);
+    return p.blindShot
+      ? {
+          text: `${text}\n\n[The text tools see NOTHING on this page — a screenshot is attached. LOOK at it before concluding anything about the page, and prefer acting on what it shows over retrying the text tools.]`,
+          image: p.blindShot,
+        }
+      : { text };
   },
 });
 
 registerTool({
   name: "screenshot",
   description:
-    "Capture a JPEG screenshot of the visible viewport as a data URL. Use for visual understanding (multimodal models) or after actions to verify effects. save_to_disk:true additionally writes the JPEG into the Downloads folder (SENSITIVE — confirmation required).",
+    "Capture a JPEG screenshot of the visible viewport. The image is ATTACHED to this result and you WILL see it — looking at it is the fastest way to resolve any confusion about what the page shows. Take one whenever you are confused, uncertain, or concerned — before guessing, before retrying a failing approach, and before reporting a blocker. save_to_disk:true additionally writes the JPEG into the Downloads folder (SENSITIVE — confirmation required).",
   parameters: {
     type: "object",
     properties: {
@@ -480,9 +574,48 @@ registerTool({
     return { dataUrl: jpeg, saved: { downloadId, filename } };
   },
   present(payload) {
-    const p = payload as { dataUrl: string; saved?: { filename: string } };
+    const p = payload as { dataUrl: string; saved?: { downloadId: number; filename: string } };
     return {
-      text: p.saved ? `[screenshot captured and saved as ${p.saved.filename}]` : "[screenshot captured]",
+      text: p.saved
+        ? `[screenshot captured and saved as ${p.saved.filename} — the image is attached below; look at it]`
+        : "[screenshot captured — the image is attached to this message; look at it]",
+      image: p.dataUrl,
+    };
+  },
+});
+
+registerTool({
+  name: "view_image",
+  description:
+    "Fetch an image by URL and ATTACH it to this result so you SEE it — one call replaces every pixel-archaeology workaround (canvas draws, color histograms, ASCII renders: NEVER do those). Use it for any image the page or network traffic points at: an <img> src, a PNG/SVG URL from network_read or evaluate_js, a CDN asset. The image below the result is the actual file, exactly as the server serves it.",
+  parameters: {
+    type: "object",
+    properties: {
+      url: {
+        type: "string",
+        description: "Image URL (http(s) or data:) — e.g. an img src or a request URL from network_read",
+      },
+    },
+    required: ["url"],
+  },
+  async run(args, ctx) {
+    const url = String(args.url ?? "");
+    let dataUrl = url.startsWith("data:image/")
+      ? url
+      : await fetchImageDataUrl(url);
+    if (!dataUrl) dataUrl = await shotOfUrl(ctx, url);
+    if (!dataUrl) {
+      return {
+        ok: false,
+        error: `view_image could not fetch ${url.slice(0, 160)} — the server may block direct fetches; screenshot the page where the image renders instead`,
+      };
+    }
+    return { url, dataUrl: await downscaleJpeg(dataUrl) };
+  },
+  present(payload) {
+    const p = payload as { url: string; dataUrl: string };
+    return {
+      text: `[image attached: ${p.url.slice(0, 160)} — the image below is the file itself; look at it]`,
       image: p.dataUrl,
     };
   },

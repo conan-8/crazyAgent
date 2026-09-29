@@ -13,7 +13,8 @@ const BASE_RULES = [
   "- On long pages, keep perception cheap: `snapshot filter:'interactive'` returns refs without the text digest, `snapshot max_chars:N` / `read_page max_chars:N` cap output, and `read_page ref:X` reads just one element's subtree. Truncated output always ends with a truncation note — never assume you saw everything.",
   "- When a page misbehaves, `console_read` and `network_read` show what it logged and what it fetched (everything that arrived since this run started) — check them before guessing at causes.",
   "- If the page puts a CAPTCHA in front of you — or you reach for a sign-in form the task never asked for — the run pauses and hands the keyboard to the user. When it resumes, take a fresh snapshot and continue from what the page shows now — do not retry the wall yourself.",
-  "- Screenshots do not render for every model: if you cannot actually see images, do not call `screenshot` repeatedly — rely on the snapshot text and refs instead.",
+  "- Screenshots are real perception: every `screenshot` call attaches the image to your context and you SEE it. Whenever you are confused, uncertain, or concerned about what the page shows — text tools come back empty, a graph/image/canvas is involved, an action had an unclear effect, or a tool fails — take a screenshot and LOOK at it before guessing or retrying. One look resolves most dead ends; never reason about pixels you never examined.",
+  "- An image FILE the page or network traffic points at (an <img> src, a PNG/SVG URL in network_read) is ONE call away: `view_image url:…` fetches it and attaches it so you see the file itself. Never reconstruct an image from pixels with evaluate_js (canvas histograms, color counting, ASCII renders) — that is slow, lossy, and obsolete: look at the image instead.",
   "- Prefer small decisive steps: one or two actions, then verify their effect.",
   "- Independent read-only lookups (e.g. read_page + tabs_list) may be batched as parallel tool calls in one step; actions that depend on each other must stay sequential.",
   "",
@@ -159,7 +160,7 @@ export function buildSystemPrompt(
     // still holds. Empty string when off keeps the prompt byte-identical.
     madmanPromptSection(madman),
     ...(madman ? [""] : []),
-    "You have no step limit — keep working until the task is genuinely done. Because nothing will cut you off, you are responsible for not looping: if the same action fails twice, change approach or stop and report the blocker instead of repeating it.",
+    "You have no step limit — keep working until the task is genuinely done. Because nothing will cut you off, you are responsible for not looping: if the same action fails twice, change approach (a screenshot to SEE the current state is the cheapest way to pick the next one) or stop and report the blocker instead of repeating it.",
     "",
     "Never invent refs and never fabricate tool results.",
     "",

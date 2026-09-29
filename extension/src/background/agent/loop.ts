@@ -40,7 +40,6 @@ export interface LoopDeps {
    * runs until the model answers, the user stops it, or an error aborts it.
    */
   stepCap?: number;
-  sendScreenshots: boolean;
   maxTokens?: number;
   /** "plan" blocks mutating tools; default "auto". */
   agentMode?: string;
@@ -62,6 +61,15 @@ export interface LoopDeps {
 const MAX_RESULT_CHARS = 24_000;
 const HISTORY_BUDGET_CHARS = 120_000;
 const MAX_LIVE_IMAGES = 4;
+/**
+ * Token accounting for truncation: system prompt + tool specs + margin that
+ * never ride in `messages` but DO count against the context window, and the
+ * approximate cost of one attached screenshot (chars-equivalent so one budget
+ * math covers text and images).
+ */
+const CONTEXT_RESERVE_TOKENS = 20_000;
+const IMAGE_CHARS_EQUIV = 6_000;
+const TOOL_CALL_ARGS_KEEP_CHARS = 200;
 
 /** Total attempts per LLM call (1 try + retries) and the backoff between them. */
 const LLM_ATTEMPTS = 3;
@@ -77,11 +85,52 @@ const PARALLEL_SAFE = new Set([
   "read_page",
   "frames",
   "screenshot",
+  "view_image",
   "wait_for_settle",
   "tabs_list",
   "network_observe",
   "judge", // read-only external decision call — never touches page state
 ]);
+
+/**
+ * Stuck-loop detection. A live run spent 15 turns re-running a frame probe
+ * that failed identically every time, then 9 more on a doomed workaround —
+ * nothing told the model it was grinding. Three failures of the same tool in a
+ * row (or a literal re-run of a call that already failed) now land a note IN
+ * the tool result, with the one move that breaks the loop: look at the page.
+ */
+export interface StuckGuard {
+  note(name: string, args: Record<string, unknown>, failed: boolean): string;
+}
+
+export function createStuckGuard(): StuckGuard {
+  const streak = new Map<string, number>();
+  const calls = new Map<string, number>();
+  return {
+    note(name, args, failed) {
+      let key: string;
+      try {
+        key = `${name}:${JSON.stringify(args ?? {})}`;
+      } catch {
+        key = `${name}:(unserializable)`;
+      }
+      const repeats = (calls.get(key) ?? 0) + 1;
+      calls.set(key, repeats);
+      const n = failed ? (streak.get(name) ?? 0) + 1 : 0;
+      streak.set(name, n);
+      if (failed && repeats > 1) {
+        return `\n\n[RETRY WARNING: this exact call has already failed in this run — repeating it will fail again. Do NOT run it again. Change the approach; if you are unsure what the page shows, take a screenshot and look at it.]`;
+      }
+      if (failed && n >= 3) {
+        return `\n\n[STUCK: ${name} has now failed ${n} times in a row. Do not retry it. Take a screenshot to SEE what the page actually shows, switch to read_page / snapshot / ref-based tools, or report the blocker and stop.]`;
+      }
+      if (repeats >= 3) {
+        return `\n\n[This exact call has now run ${repeats} times and returns the same thing — vary the approach instead of polling it again. If you are unsure what you are seeing, take a screenshot.]`;
+      }
+      return "";
+    },
+  };
+}
 
 /** One LLM call with retry + backoff on transient failures (429/5xx/network). */
 async function completeWithRetry(
@@ -124,9 +173,17 @@ export async function runAgentTask(
   let reasoningChars = 0;
   let lastStats: RunStats | undefined;
   let invalidStreak = 0;
+  const guard = createStuckGuard();
   // Uncapped by default. `Infinity` keeps the loop condition identical to the
   // capped path, so there is one code path rather than two.
   const stepCap = deps.stepCap ?? Number.POSITIVE_INFINITY;
+  // What history may occupy after system prompt, tool specs and the reply are
+  // paid for — the old char-only budget let tool-call args balloon past the
+  // window (a real run ended at 131k tokens in a 128k window).
+  const historyTokenBudget = Math.max(
+    4_000,
+    contextWindow - (deps.maxTokens ?? 4_096) - CONTEXT_RESERVE_TOKENS,
+  );
 
   for (let step = cp.stepIndex; step < stepCap; step++) {
     if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
@@ -148,7 +205,7 @@ export async function runAgentTask(
             now,
           ),
           systemSuffix: deps.lessonsBlock || undefined,
-          messages: truncateHistory(cp.messages, HISTORY_BUDGET_CHARS),
+          messages: truncateHistory(cp.messages, HISTORY_BUDGET_CHARS, historyTokenBudget),
           tools,
           maxTokens: deps.maxTokens,
           thinking: deps.thinking,
@@ -266,14 +323,14 @@ export async function runAgentTask(
     if (canParallel) {
       for (const call of calls) announce(call);
       const outcomes = await Promise.all(
-        calls.map((call) => runOne(call, deps, step, specsByName, planOnly)),
+        calls.map((call) => runOne(call, deps, step, specsByName, planOnly, guard)),
       );
       for (const outcome of outcomes) record(outcome);
     } else {
       for (const call of calls) {
         if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
         announce(call);
-        record(await runOne(call, deps, step, specsByName, planOnly));
+        record(await runOne(call, deps, step, specsByName, planOnly, guard));
         if (aborted) break;
       }
     }
@@ -292,6 +349,7 @@ async function runOne(
   stepIndex: number,
   specs: Map<string, LlmToolSpec>,
   planOnly: boolean,
+  guard: StuckGuard,
 ): Promise<{ message: LlmMessage; event: StepEvent; invalid: boolean }> {
   if (call.invalidJson !== undefined) {
     const error = `ERROR: tool arguments were not valid JSON: ${call.invalidJson.slice(0, 200)}`;
@@ -330,16 +388,28 @@ async function runOne(
     const res = await deps.execute(call.name, call.args);
     if (!res.ok) {
       const error = res.error ?? "tool failed";
+      const content = `ERROR: ${error}${guard.note(call.name, call.args, true)}`;
       return {
         invalid: error.includes("missing required") || error.includes("must be"),
-        message: { role: "tool", toolCallId: call.id, content: `ERROR: ${error}` },
-        event: { kind: "tool_result", stepIndex, name: call.name, result: error, ok: false },
+        message: {
+          role: "tool",
+          toolCallId: call.id,
+          content,
+          // A failing tool may still have seen something — the harness attaches
+          // a screenshot of the failure state, and the model should get it.
+          images: res.image ? [res.image] : undefined,
+        },
+        event: { kind: "tool_result", stepIndex, name: call.name, result: content, ok: false },
       };
     }
-    const image = res.image && deps.sendScreenshots ? res.image : undefined;
+    // Screenshots always ride with their tool result: the configured model
+    // takes image input, and a silently dropped image is a blind model (this
+    // is exactly how a run spent 10 minutes tracing a PNG by pixel statistics
+    // instead of looking at it).
+    const image = res.image;
     const content =
-      res.text ??
-      clip(JSON.stringify(res.payload ?? null), MAX_RESULT_CHARS);
+      (res.text ?? clip(JSON.stringify(res.payload ?? null), MAX_RESULT_CHARS)) +
+      guard.note(call.name, call.args, false);
     return {
       invalid: false,
       message: {
@@ -359,10 +429,11 @@ async function runOne(
     };
   } catch (err) {
     const error = String((err as Error)?.message ?? err);
+    const content = `ERROR: ${error}${guard.note(call.name, call.args, true)}`;
     return {
       invalid: false,
-      message: { role: "tool", toolCallId: call.id, content: `ERROR: ${error}` },
-      event: { kind: "tool_result", stepIndex, name: call.name, result: error, ok: false },
+      message: { role: "tool", toolCallId: call.id, content },
+      event: { kind: "tool_result", stepIndex, name: call.name, result: content, ok: false },
     };
   }
 }
@@ -393,14 +464,25 @@ function clip(text: string, max: number): string {
 }
 
 /**
- * Keep only the newest messages under a character budget: old tool results
- * collapse to a note and only the most recent screenshots stay attached.
+ * Keep only the newest messages under a budget: old tool results collapse to a
+ * note, old tool-call arguments are elided, and only the most recent
+ * screenshots stay attached.
+ *
+ * The budget counts what the API actually re-sends: message text, the JSON of
+ * every tool call's arguments (a multi-KB `evaluate_js` expression is real
+ * context whether or not it lives in `content`), and an estimate per attached
+ * image. A char-only budget that ignored tool-call args is how a run ended up
+ * sending 131k tokens into a 128k window.
  */
 export function truncateHistory(
   messages: LlmMessage[],
   budgetChars: number,
+  tokenBudget?: number,
 ): LlmMessage[] {
-  const out = messages.map((m) => ({ ...m }));
+  const out = messages.map((m) => ({
+    ...m,
+    toolCalls: m.toolCalls?.map((tc) => ({ ...tc })),
+  }));
   let imagesSeen = 0;
   for (let i = out.length - 1; i >= 0; i--) {
     const m = out[i]!;
@@ -409,13 +491,29 @@ export function truncateHistory(
       if (imagesSeen > MAX_LIVE_IMAGES) m.images = undefined;
     }
   }
-  let total = out.reduce((sum, m) => sum + m.content.length, 0);
-  for (let i = 0; i < out.length && total > budgetChars; i++) {
+  const argsChars = (m: LlmMessage): number =>
+    m.toolCalls?.reduce((sum, tc) => sum + JSON.stringify(tc.args ?? {}).length, 0) ?? 0;
+  const size = (m: LlmMessage): number =>
+    m.content.length + argsChars(m) + (m.images?.length ?? 0) * IMAGE_CHARS_EQUIV;
+  let total = out.reduce((sum, m) => sum + size(m), 0);
+  const cap = Math.min(budgetChars, tokenBudget ? tokenBudget * 4 : Number.POSITIVE_INFINITY);
+  for (let i = 0; i < out.length && total > cap; i++) {
     const m = out[i]!;
     if (m.role === "tool" && m.content.length > 64) {
       total -= m.content.length - 64;
       m.content = "[older tool result omitted]";
       m.images = undefined;
+    }
+    if (m.role === "assistant" && m.toolCalls?.length) {
+      for (const tc of m.toolCalls) {
+        const len = JSON.stringify(tc.args ?? {}).length;
+        // The id and name must survive (they pair with the tool result); the
+        // arguments of an old call are dead weight the model never re-reads.
+        if (len > TOOL_CALL_ARGS_KEEP_CHARS) {
+          total -= len;
+          tc.args = { note: "args elided" };
+        }
+      }
     }
   }
   return out;

@@ -127,7 +127,7 @@ export function classifyFailure(input: unknown): ToolFailure {
       message: withAdvice(
         "frame",
         detail,
-        "get the current frame ids and refs with snapshot or frames, then retry with those.",
+        "get the current frame ids with `frames`, then retry with one of those; read_page / snapshot keep working on frames evaluate_js cannot reach.",
       ),
     };
   }

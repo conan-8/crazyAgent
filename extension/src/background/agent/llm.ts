@@ -55,10 +55,18 @@ export function toAnthropicMessages(messages: LlmMessage[]): unknown[] {
       const blocks: unknown[] = [];
       while (i < messages.length && messages[i]!.role === "tool") {
         const t = messages[i]!;
+        // Screenshots ride INSIDE the tool_result block as image blocks —
+        // dropping them here is what left the model blind to its own captures.
+        const content = t.images?.length
+          ? [
+              { type: "text", text: t.content || "(screenshot attached)" },
+              ...t.images.map(toAnthropicImage),
+            ]
+          : t.content;
         blocks.push({
           type: "tool_result",
           tool_use_id: t.toolCallId ?? "",
-          content: t.content,
+          content,
           ...(t.content.startsWith("ERROR") ? { is_error: true } : {}),
         });
         i++;
@@ -134,13 +142,16 @@ export function buildAnthropicBody(
 
 export function toOpenAiMessages(messages: LlmMessage[]): unknown[] {
   const out: unknown[] = [];
-  for (const m of messages) {
+  let i = 0;
+  while (i < messages.length) {
+    const m = messages[i]!;
     if (m.role === "user") {
       const content: unknown[] = [{ type: "text", text: m.content || "(see attached)" }];
       for (const img of m.images ?? []) {
         content.push({ type: "image_url", image_url: { url: img } });
       }
       out.push({ role: "user", content });
+      i++;
     } else if (m.role === "assistant") {
       out.push({
         role: "assistant",
@@ -158,12 +169,33 @@ export function toOpenAiMessages(messages: LlmMessage[]): unknown[] {
             }
           : {}),
       });
+      i++;
     } else {
-      out.push({
-        role: "tool",
-        tool_call_id: m.toolCallId ?? "",
-        content: m.content,
-      });
+      // A run of tool results. The `tool` role is text-only on this wire, so
+      // screenshots cannot ride on it: every image in the run is forwarded in
+      // one trailing user message instead of being silently dropped (which is
+      // exactly what left the model blind to its own screenshot calls).
+      const images: string[] = [];
+      while (i < messages.length && messages[i]!.role === "tool") {
+        const t = messages[i]!;
+        out.push({
+          role: "tool",
+          tool_call_id: t.toolCallId ?? "",
+          content: t.content,
+        });
+        for (const img of t.images ?? []) images.push(img);
+        i++;
+      }
+      if (images.length) {
+        const content: unknown[] = [
+          {
+            type: "text",
+            text: `[${images.length} screenshot${images.length > 1 ? "s" : ""} from the tool results above — attached as images; look at them]`,
+          },
+          ...images.map((img) => ({ type: "image_url", image_url: { url: img } })),
+        ];
+        out.push({ role: "user", content });
+      }
     }
   }
   return out;

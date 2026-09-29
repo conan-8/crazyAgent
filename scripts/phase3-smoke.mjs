@@ -205,8 +205,10 @@ async function main() {
       const t3 = await tool("type", { ref: fInput, text: "hello there" });
       const c4 = await tool("click", { ref: fBtn });
       await sleep(300);
-      const pages = await tool("read_page");
-      const frameText = (pages ?? []).map((p) => p.text).join(" | ");
+      const readRes = await tool("read_page");
+      // payload is { pages, blindShot? } since blind reads carry a screenshot
+      const pages = Array.isArray(readRes) ? readRes : (readRes?.pages ?? []);
+      const frameText = pages.map((p) => p.text).join(" | ");
       check(
         `${R}8 iframe interaction applied`,
         t3.ok && c4.ok && frameText.includes("clicked hello there"),

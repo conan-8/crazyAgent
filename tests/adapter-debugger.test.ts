@@ -122,35 +122,35 @@ describe("DebuggerAdapter execution contexts (frame addressing)", () => {
     ]);
   }
 
-  it("resolves a scripting frameId to that frame's execution context", () => {
+  it("resolves a scripting frameId to that frame's execution context", async () => {
     const adapter = new DebuggerAdapter();
     pair(adapter, 7);
     announceContext(7, 42, "AAAA");
     announceContext(7, 43, "BBBB");
-    expect(adapter.contextIdForFrame(7, 9)).toBe(43);
+    expect(await adapter.contextIdForFrame(7, 9)).toBe(43);
   });
 
-  it("returns null for the main frame — it evaluates in the default context", () => {
+  it("returns null for the main frame — it evaluates in the default context", async () => {
     const adapter = new DebuggerAdapter();
     pair(adapter, 7);
     announceContext(7, 42, "AAAA");
-    expect(adapter.contextIdForFrame(7, 0)).toBeNull();
+    expect(await adapter.contextIdForFrame(7, 0)).toBeNull();
   });
 
-  it("returns null when the frame has no known CDP counterpart", () => {
+  it("returns null when the frame has no known CDP counterpart", async () => {
     const adapter = new DebuggerAdapter();
     pair(adapter, 7);
-    expect(adapter.contextIdForFrame(7, 99)).toBeNull();
+    expect(await adapter.contextIdForFrame(7, 99)).toBeNull();
   });
 
-  it("returns null when the context has not been announced yet", () => {
+  it("returns null when the context has not been announced yet", async () => {
     const adapter = new DebuggerAdapter();
     pair(adapter, 7);
     announceContext(7, 42, "AAAA");
-    expect(adapter.contextIdForFrame(7, 9)).toBeNull(); // BBBB unseen
+    expect(await adapter.contextIdForFrame(7, 9)).toBeNull(); // BBBB unseen
   });
 
-  it("ignores non-default contexts (isolated worlds, extensions)", () => {
+  it("ignores non-default contexts (isolated worlds, extensions)", async () => {
     const adapter = new DebuggerAdapter();
     pair(adapter, 7);
     eventListeners.forEach((fn) =>
@@ -158,23 +158,23 @@ describe("DebuggerAdapter execution contexts (frame addressing)", () => {
         context: { id: 5, auxData: { frameId: "BBBB", isDefault: false } },
       }),
     );
-    expect(adapter.contextIdForFrame(7, 9)).toBeNull();
+    expect(await adapter.contextIdForFrame(7, 9)).toBeNull();
   });
 
-  it("keeps the newest context when a frame navigates and is re-created", () => {
+  it("keeps the newest context when a frame navigates and is re-created", async () => {
     const adapter = new DebuggerAdapter();
     pair(adapter, 7);
     announceContext(7, 42, "BBBB");
     announceContext(7, 77, "BBBB"); // reloaded iframe: new context, same frame
-    expect(adapter.contextIdForFrame(7, 9)).toBe(77);
+    expect(await adapter.contextIdForFrame(7, 9)).toBe(77);
   });
 
-  it("drops every context when the browser clears them", () => {
+  it("drops every context when the browser clears them", async () => {
     const adapter = new DebuggerAdapter();
     pair(adapter, 7);
     announceContext(7, 42, "BBBB");
     eventListeners.forEach((fn) => fn({ tabId: 7 }, "Runtime.executionContextsCleared", {}));
-    expect(adapter.contextIdForFrame(7, 9)).toBeNull();
+    expect(await adapter.contextIdForFrame(7, 9)).toBeNull();
   });
 
   it("scopes frames and contexts per tab, and forgets them on detach", async () => {
@@ -186,11 +186,41 @@ describe("DebuggerAdapter execution contexts (frame addressing)", () => {
     pair(adapter, 8);
     announceContext(7, 42, "BBBB");
     announceContext(8, 99, "BBBB");
-    expect(adapter.contextIdForFrame(7, 9)).toBe(42);
-    expect(adapter.contextIdForFrame(8, 9)).toBe(99);
+    expect(await adapter.contextIdForFrame(7, 9)).toBe(42);
+    expect(await adapter.contextIdForFrame(8, 9)).toBe(99);
 
     detachListeners.forEach((fn) => fn({ tabId: 7 }, "target_closed"));
-    expect(adapter.contextIdForFrame(7, 9)).toBeNull();
-    expect(adapter.contextIdForFrame(8, 9)).toBe(99); // other tab untouched
+    expect(await adapter.contextIdForFrame(7, 9)).toBeNull();
+    expect(await adapter.contextIdForFrame(8, 9)).toBe(99); // other tab untouched
+  });
+
+  it("falls back to the DOM-stamp join when URL pairing cannot resolve", async () => {
+    // The real-world failure this guards: the two id spaces disagree about the
+    // frame's URL (navigation, hash/query drift), so URL pairing misses — the
+    // stamp written into each frame's DOM still identifies the frame exactly.
+    const adapter = new DebuggerAdapter();
+    announceContext(7, 42, "AAAA");
+    announceContext(7, 43, "BBBB");
+    (globalThis as { chrome: Record<string, unknown> }).chrome.scripting = {
+      executeScript: vi.fn().mockResolvedValue([
+        { frameId: 0, result: "stamp-top" },
+        { frameId: 9, result: "stamp-embed" },
+      ]),
+    };
+    sendCommand.mockImplementation(
+      (_src: unknown, method: string, params: { contextId?: number }) => {
+        if (method === "Runtime.evaluate") {
+          return Promise.resolve({
+            result: {
+              type: "string",
+              value: params.contextId === 43 ? "stamp-embed" : "stamp-top",
+            },
+          });
+        }
+        return Promise.resolve({ ok: true });
+      },
+    );
+    expect(await adapter.contextIdForFrame(7, 9)).toBe(43);
+    expect(await adapter.contextIdForFrame(7, 0)).toBeNull(); // main frame = default context
   });
 });

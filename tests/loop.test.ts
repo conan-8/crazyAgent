@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createStuckGuard,
   runAgentTask,
   truncateHistory,
   type ExecuteResult,
@@ -90,7 +91,6 @@ function harness(script: LlmResult[], overrides: Partial<LoopDeps> = {}) {
       return { ok: true, payload: { fine: true } };
     },
     stepCap: 5,
-    sendScreenshots: true,
     ...overrides,
   };
   return { events, saves, executed, deps };
@@ -364,7 +364,9 @@ describe("runAgentTask", () => {
     expect(outcome).toBe("stopped");
   });
 
-  it("attaches screenshot images to tool messages and honors sendScreenshots", async () => {
+  it("attaches screenshot images to tool messages — always, and on failures too", async () => {
+    // The model takes image input: a dropped screenshot is a blind model (a
+    // real run traced a PNG pixel-by-pixel for 10 minutes because of this).
     const big: ExecuteResult = { ok: true, payload: {}, text: "[shot]", image: "data:image/jpeg;base64,AAA" };
     const finisher: LlmResult = { text: "x", toolCalls: [], stopReason: "end" };
     const cp1 = makeCheckpoint();
@@ -375,12 +377,19 @@ describe("runAgentTask", () => {
       "data:image/jpeg;base64,AAA",
     ]);
 
+    // A failed tool that still captured the page state passes the image along.
+    const failed: ExecuteResult = {
+      ok: false,
+      error: "FRAME-FAILED: nope",
+      image: "data:image/jpeg;base64,BBB",
+    };
     const cp2 = makeCheckpoint();
-    await runAgentTask(cp2, harness([toolCall("screenshot", {}, "s"), { ...finisher }], {
-      execute: async () => big,
-      sendScreenshots: false,
+    await runAgentTask(cp2, harness([toolCall("snapshot", {}, "s"), { ...finisher }], {
+      execute: async () => failed,
     }).deps);
-    expect(cp2.messages.find((m) => m.role === "tool")?.images).toBeUndefined();
+    const failMsg = cp2.messages.find((m) => m.role === "tool");
+    expect(failMsg?.images).toEqual(["data:image/jpeg;base64,BBB"]);
+    expect(failMsg?.content).toContain("FRAME-FAILED");
   });
 
   it("saves a checkpoint after every tool step", async () => {
@@ -440,6 +449,62 @@ describe("truncateHistory", () => {
     // only the newest images survive
     const withImages = out.filter((m) => m.images?.length);
     expect(withImages.length).toBeLessThanOrEqual(4);
+  });
+
+  it("elides old tool-call arguments — they are context too", () => {
+    const fat = { expression: "x".repeat(4_000) };
+    const messages: LlmMessage[] = [
+      { role: "user", content: "task" },
+      ...Array.from({ length: 8 }, (_, i) => ({
+        role: "assistant" as const,
+        content: "",
+        toolCalls: [{ id: `c${i}`, name: "evaluate_js", args: { ...fat } }],
+      })),
+      { role: "assistant", content: "done" },
+    ];
+    const out = truncateHistory(messages, 20_000);
+    const first = out[1]?.toolCalls?.[0];
+    // the args of an old call are dead weight; the id must survive (it pairs
+    // with the tool result) and the checkpoint itself must not be mutated
+    expect(first?.args).toEqual({ note: "args elided" });
+    expect(first?.id).toBe("c0");
+    expect(messages[1]?.toolCalls?.[0]?.args).toEqual(fat);
+  });
+
+  it("honors a token budget on top of the char budget", () => {
+    const messages: LlmMessage[] = [
+      { role: "user", content: "task" },
+      ...Array.from({ length: 6 }, (_, i) => ({
+        role: "tool" as const,
+        toolCallId: `t${i}`,
+        content: `x${i}${"y".repeat(4_000)}`,
+      })),
+    ];
+    // Room for roughly one of these messages: everything older collapses.
+    const out = truncateHistory(messages, 1_000_000, 4_500);
+    const omitted = out.filter((m) => m.content === "[older tool result omitted]");
+    expect(omitted.length).toBeGreaterThan(0);
+    expect(out.at(-1)?.content).not.toBe("[older tool result omitted]");
+  });
+});
+
+describe("createStuckGuard", () => {
+  it("flags a literal retry of a failed call and a failing streak", () => {
+    const guard = createStuckGuard();
+    expect(guard.note("evaluate_js", { frame: 287 }, true)).toBe("");
+    // exact same call again → hard warning, not another silent retry
+    expect(guard.note("evaluate_js", { frame: 287 }, true)).toContain("RETRY WARNING");
+    // third consecutive failure of the tool (fresh args) → stuck
+    expect(guard.note("evaluate_js", { other: 1 }, true)).toContain("STUCK");
+    // success resets the streak
+    expect(guard.note("evaluate_js", { other: 2 }, false)).toBe("");
+    expect(guard.note("evaluate_js", { other: 3 }, true)).toBe("");
+  });
+
+  it("nags only after several identical successful polls", () => {
+    const guard = createStuckGuard();
+    for (let i = 0; i < 2; i++) expect(guard.note("snapshot", {}, false)).toBe("");
+    expect(guard.note("snapshot", {}, false)).toContain("run 3 times");
   });
 });
 

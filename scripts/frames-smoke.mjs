@@ -268,9 +268,18 @@ async function main() {
     );
     check(
       "F7b read_page reports instrumentation instead of pretending a frame is empty",
-      read.payload.every((f) => typeof f.instrumented === "boolean") &&
-        read.payload.some((f) => f.instrumented === true),
-      JSON.stringify(read.payload.map((f) => [f.frameId, f.instrumented])).slice(0, 200),
+      // payload is { pages, blindShot? } since blind reads carry a screenshot
+      (() => {
+        const pages = read.payload?.pages ?? read.payload ?? [];
+        return (
+          pages.every((f) => typeof f.instrumented === "boolean") &&
+          pages.some((f) => f.instrumented === true)
+        );
+      })(),
+      JSON.stringify((read.payload?.pages ?? []).map((f) => [f.frameId, f.instrumented])).slice(
+        0,
+        200,
+      ),
     );
 
     // ---------------- canvas-only content is signalled, not silently empty ----------------

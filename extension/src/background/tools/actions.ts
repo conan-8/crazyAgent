@@ -10,7 +10,7 @@ import { shouldUseTrustedInput, type InputHints } from "../../shared/trusted-inp
 import { failureTag } from "../../shared/tool-failure";
 import type { ElementProbe } from "../policy";
 import { runContentAction, parseRef } from "./content-action";
-import { collectFramePairs, truncateWithNote } from "./perception";
+import { captureBlindShot, collectFramePairs, truncateWithNote } from "./perception";
 import { focusTarget, runTrustedInput } from "./trusted-input";
 import { registerTool, type ToolContext } from "./types";
 
@@ -335,7 +335,7 @@ registerTool({
       });
       if (!res.ok) return res;
       const text = String((res.data as { text?: string })?.text ?? "");
-      return [
+      const pages = [
         {
           frameId: parseRef(ref).frameId,
           scopedTo: ref,
@@ -347,6 +347,11 @@ registerTool({
           instrumented: true,
         },
       ];
+      // An empty read is the moment to LOOK: one screenshot rides back with it.
+      const blindShot = text.trim()
+        ? undefined
+        : await captureBlindShot(ctx.adapter, ctx.tabId);
+      return { pages, blindShot };
     }
     // Refreshing the frame-id pairing here means `evaluate_js frame:N` works
     // right after the read the model just did, without an extra `frames` call.
@@ -368,7 +373,7 @@ registerTool({
         return g.__baRegistry ? g.__baRegistry.read() : null;
       },
     });
-    return results.map((r) => {
+    const pages = results.map((r) => {
       const info = r.result as {
         href?: string;
         title?: string;
@@ -388,17 +393,27 @@ registerTool({
         instrumented: info !== null,
       };
     });
+    // Nothing readable anywhere is this tool being blind, not an empty page:
+    // attach a screenshot so the model sees the state instead of guessing.
+    const blindShot = pages.every((p) => !p.text.trim())
+      ? await captureBlindShot(ctx.adapter, ctx.tabId)
+      : undefined;
+    return { pages, blindShot };
   },
   present(payload) {
-    const pages = payload as {
-      frameId: number;
-      href: string;
-      text: string;
-      canvases: number;
-      textChars: number;
-      instrumented: boolean;
-      scopedTo?: string;
-    }[];
+    const p = payload as {
+      pages: {
+        frameId: number;
+        href: string;
+        text: string;
+        canvases: number;
+        textChars: number;
+        instrumented: boolean;
+        scopedTo?: string;
+      }[];
+      blindShot?: string;
+    };
+    const pages = p.pages ?? [];
     const body = pages
       .map((p) => {
         const head = p.scopedTo
@@ -416,6 +431,13 @@ registerTool({
       domTextChars: pages.reduce((n, p) => n + p.textChars, 0),
       frames: pages.length,
     });
-    return { text: opaque ? `${body}\n\n${opaque}` : body };
+    return {
+      text: p.blindShot
+        ? `${opaque ? `${body}\n\n${opaque}` : body}\n\n[The text tools see NOTHING on this page — a screenshot is attached. LOOK at it before concluding anything about the page.]`
+        : opaque
+          ? `${body}\n\n${opaque}`
+          : body,
+      image: p.blindShot,
+    };
   },
 });

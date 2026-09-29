@@ -74,10 +74,12 @@ const EVAL_TIMEOUT_MS = 30_000;
  * Docs, most school portals) refuses every expression — the failure this tool
  * used to report as an unusable CDP error.
  *
- * `frameId` addresses an iframe's execution context when the adapter can
- * resolve one (enabling Runtime is what populates its context table). The main
- * frame — and any frame we cannot resolve — evaluates in the tab's default
- * context.
+ * `frameId` addresses an iframe's execution context. Resolving it takes the
+ * adapter's frame map (URL pairing) and, when that has gone stale, the
+ * DOM-stamp join that survives navigations — both need `Runtime.enable` to
+ * have announced the frame contexts, so enabling happens BEFORE resolution.
+ * A frame that still cannot be resolved fails loudly with next steps; it never
+ * silently evaluates in the wrong document.
  */
 async function evaluateVia<T extends EvaluateResponse>(
   adapter: ToolContext["adapter"],
@@ -90,16 +92,15 @@ async function evaluateVia<T extends EvaluateResponse>(
       ? adapter.sendEnabled<T>(tabId, "Runtime", "Runtime.evaluate", extra)
       : adapter.send<T>(tabId, "Runtime.evaluate", extra);
   if (!frameId) return evaluate(params);
-  if (adapter.sendEnabled && adapter.contextIdForFrame?.(tabId, frameId) == null) {
-    // Enabling Runtime is what makes the browser announce frame contexts.
+  if (adapter.sendEnabled) {
     await adapter
       .sendEnabled<T>(tabId, "Runtime", "Runtime.enable", {})
       .catch(() => null);
   }
-  const contextId = adapter.contextIdForFrame?.(tabId, frameId);
+  const contextId = await adapter.contextIdForFrame?.(tabId, frameId);
   if (contextId === null || contextId === undefined) {
     throw new Error(
-      `no execution context for frame ${frameId} — the frame may have navigated or still be loading; take a fresh snapshot to see the current frames`,
+      `no execution context for frame ${frameId} — the frame map was refreshed and the frame still cannot be addressed (it may have navigated, been replaced, or have no document). Call \`frames\` once and retry with an id it reports; \`read_page\` / \`snapshot\` go through the content script and keep working on frames evaluate_js cannot reach`,
     );
   }
   return evaluate({ ...params, contextId });

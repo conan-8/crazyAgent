@@ -16,11 +16,17 @@ export interface BrowserAdapter {
     params?: object,
   ): Promise<T>;
   /**
-   * The default execution context id of the given CDP frame, once the Runtime
-   * domain has reported it (via `sendEnabled`). Null when unknown — callers
-   * then fall back to the main frame. Optional so minimal adapters stay simple.
+   * The default execution context id of the given scripting frame id, once the
+   * Runtime domain has reported its contexts (via `sendEnabled`). Resolves to
+   * null when the frame cannot be addressed at all — callers then fail the
+   * evaluation with guidance rather than silently running in the wrong
+   * document. May need round trips (the DOM-stamp join probes contexts).
+   * Optional so minimal adapters stay simple.
    */
-  contextIdForFrame?(tabId: number, frameId: number): number | null;
+  contextIdForFrame?(
+    tabId: number,
+    frameId: number,
+  ): Promise<number | null> | number | null;
   screenshot(tabId: number): Promise<{ dataUrl: string }>;
   /**
    * Subscribe to raw CDP events with a RESOLVED tab id — what console/network

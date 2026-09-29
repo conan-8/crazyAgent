@@ -95,6 +95,7 @@ import { detectAuthWall, HumanGate } from "./handoff";
 import { probeElement } from "./tools/actions";
 import { probeElementAt } from "./tools/coords";
 import {
+  captureBlindShot,
   collectSnapshot,
   formatSnapshot,
   settleTab,
@@ -484,7 +485,6 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         maxTokens: settings.maxTokens,
         agentMode: settings.agentMode,
         contextWindow: settings.contextWindow,
-        sendScreenshots: settings.sendScreenshots,
         thinking,
         madman: settings.madman,
         judgeAvailable:
@@ -558,6 +558,27 @@ async function observeAfterAction(tabId: number): Promise<string | null> {
   }
 }
 
+/**
+ * When a tool fails, the model's next move depends on SEEING the page — a real
+ * run retried a dead frame probe six times and then reconstructed a graph from
+ * PNG pixel statistics because no failure ever showed it the screen. One
+ * best-effort screenshot now rides back with every failure.
+ */
+async function withFailureShot(
+  name: string,
+  res: ExecuteResult,
+  tabId: number | undefined,
+): Promise<ExecuteResult> {
+  if (name === "screenshot" || tabId === undefined || stopRequested) return res;
+  const shot = await captureBlindShot(await adapterForMode(), tabId);
+  if (!shot) return res;
+  return {
+    ...res,
+    error: `${res.error ?? "tool failed"}\n[screenshot attached — this is what the page looked like when the call failed; LOOK at it before choosing your next move]`,
+    image: shot,
+  };
+}
+
 /** Policy-gated executor used by the agent loop (Phase 6). */
 async function executeToolGated(
   name: string,
@@ -622,15 +643,29 @@ async function executeToolGated(
     }
   }
   const res = await executeTool(name, args);
-  if (!res.ok || !AUTO_OBSERVE_TOOLS.has(name) || stopRequested) return res;
+  // A failure is exactly the "concerned" moment: show the page, don't guess.
+  if (!res.ok) return withFailureShot(name, res, tabId);
+  if (!AUTO_OBSERVE_TOOLS.has(name) || stopRequested) return res;
   // Observe whichever tab is active NOW — tabs_create/tabs_switch moved it.
   const obsTabId =
     (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id ??
     tabId;
   if (obsTabId === undefined) return res;
   const observation = await observeAfterAction(obsTabId);
-  if (!observation || stopRequested) return res;
+  if (stopRequested) return res;
   const base = res.text ?? JSON.stringify(res.payload ?? null);
+  if (!observation || observation.trim().length < 32) {
+    // The action landed but the text tools see nothing: attach a screenshot so
+    // the model verifies with its eyes instead of assuming nothing happened.
+    const shot = await captureBlindShot(await adapterForMode(), obsTabId);
+    return shot
+      ? {
+          ...res,
+          text: `${base}\n\n--- page after action ---\n[The text tools see nothing — screenshot attached. LOOK at it to verify what the action did.]`,
+          image: shot,
+        }
+      : res;
+  }
   return {
     ...res,
     text: `${base}\n\n--- page after action (auto-settled, fresh snapshot) ---\n${observation}`,

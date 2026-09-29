@@ -23,7 +23,12 @@ export interface LlmMessage {
   thinkingSignature?: string;
   /** Tool messages: which call this result answers. */
   toolCallId?: string;
-  /** Screenshot data URLs attached to this message (multimodal models). */
+  /**
+   * Screenshot data URLs attached to this message. The model takes image
+   * input, so these ALWAYS ride along — the provider shapers place them where
+   * each wire accepts images (Anthropic: inside tool_result; OpenAI: a
+   * trailing user message, since its tool role is text-only).
+   */
   images?: string[];
 }
 

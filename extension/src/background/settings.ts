@@ -61,8 +61,6 @@ export interface AgentSettings {
   model: string;
   apiKey: string;
   mode: ControlMode;
-  /** Attach screenshot data URLs for multimodal models. */
-  sendScreenshots: boolean;
   /** DevTools port of the Unlimited-mode browser (helper daemon attaches). */
   cdpPort: number;
   /** Agent behavior mode (Auto / Plan / Build) — drives prompts and gating. */
@@ -119,7 +117,6 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   ...CONNECTION_DEFAULTS,
   apiKey: "",
   mode: "standard",
-  sendScreenshots: true,
   cdpPort: 9222,
   agentMode: "auto",
   maxTokens: 8_192,

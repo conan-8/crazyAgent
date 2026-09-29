@@ -91,6 +91,68 @@ describe("provider request shaping", () => {
     expect(body.tools[0]).toMatchObject({ type: "function", function: { name: "click" } });
   });
 
+  // Regression: tool-result screenshots used to be silently DROPPED on both
+  // wires — the model called screenshot and never saw the image. A real run
+  // spent 10 minutes reconstructing a graph from PNG pixel statistics because
+  // of this.
+  const reqWithShot: LlmRequest = {
+    system: "sys",
+    tools: [],
+    messages: [
+      { role: "user", content: "look" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "c1", name: "screenshot", args: {} }],
+      },
+      {
+        role: "tool",
+        toolCallId: "c1",
+        content: "[screenshot captured]",
+        images: ["data:image/jpeg;base64,AAA"],
+      },
+    ],
+  };
+
+  it("carries tool-result screenshots inside the Anthropic tool_result block", () => {
+    const body = buildAnthropicBody(reqWithShot, "m1") as unknown as ShapedBody;
+    const toolUser = body.messages.find(
+      (m) =>
+        m.role === "user" &&
+        Array.isArray(m.content) &&
+        (m.content as { type: string }[]).some((b) => b.type === "tool_result"),
+    );
+    const blocks = toolUser!.content as Record<string, unknown>[];
+    expect(blocks[0]).toMatchObject({
+      type: "tool_result",
+      tool_use_id: "c1",
+      content: [
+        { type: "text", text: "[screenshot captured]" },
+        {
+          type: "image",
+          source: { type: "base64", media_type: "image/jpeg", data: "AAA" },
+        },
+      ],
+    });
+  });
+
+  it("carries tool-result screenshots on the OpenAI wire in a trailing user message", () => {
+    // The `tool` role is text-only there, so the image rides right after the
+    // tool run instead of being dropped.
+    const body = buildOpenAiBody(reqWithShot, "m2") as unknown as ShapedBody;
+    const msgs = body.messages; // system, user, assistant(tool_calls), tool, user(images)
+    expect(msgs[3]).toEqual({
+      role: "tool",
+      tool_call_id: "c1",
+      content: "[screenshot captured]",
+    });
+    expect(msgs[4]!.role).toBe("user");
+    expect(msgs[4]!.content).toEqual([
+      { type: "text", text: expect.stringContaining("screenshot") },
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64,AAA" } },
+    ]);
+  });
+
   it("omits thinking by default", () => {
     const a = buildAnthropicBody(req, "m1") as Record<string, unknown>;
     const o = buildOpenAiBody(req, "m1") as Record<string, unknown>;

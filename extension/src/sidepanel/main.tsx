@@ -1219,12 +1219,6 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
               <h3 class="set-title">
                 <Icon d={ICONS.bolt} size={12} /> Behaviour
               </h3>
-              <Switch
-                checked={s.sendScreenshots}
-                onChange={(v) => set("sendScreenshots", v)}
-                title="Send screenshots"
-                hint="Let the model see the page, not just its text"
-              />
               <SelectRow
                 title="Reasoning effort"
                 hint={

@@ -115,6 +115,65 @@ export class DebuggerAdapter {
     return null;
   }
 
+  /** Newest (live) execution context of a CDP frame, or null when unseen. */
+  #newestContext(tabId: number, cdpFrameId: string): number | null {
+    let newest: number | null = null;
+    for (const [contextId, owningFrame] of this.#contexts.get(tabId) ?? []) {
+      // A frame can be re-created by navigation; the highest id is the live one.
+      if (owningFrame === cdpFrameId) newest = Math.max(newest ?? -1, Number(contextId));
+    }
+    return newest;
+  }
+
+  /**
+   * The DOM-stamp join: give every frame's document a unique `data-ba-stamp`
+   * attribute (written from the content-script world — the isolated world and
+   * the page's main world share one DOM), then probe each tracked execution
+   * context for the stamp. This identifies the frame beyond any doubt: no URL
+   * involved, immune to hash/query navigation and to the two id spaces
+   * disagreeing about a URL. That disagreement is what made `evaluate_js
+   * frame:N` fail forever on a real assessment iframe while read_page read the
+   * same frame fine.
+   */
+  async #contextIdByStamp(tabId: number, scriptingFrameId: number): Promise<number | null> {
+    let stamped: { frameId: number; stamp: string }[] = [];
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: () => {
+          const stamp = `ba-${Math.random().toString(36).slice(2, 12)}`;
+          document.documentElement.setAttribute("data-ba-stamp", stamp);
+          return stamp;
+        },
+      });
+      stamped = results.map((r) => ({
+        frameId: r.frameId ?? 0,
+        stamp: String(r.result ?? ""),
+      }));
+    } catch {
+      return null; // no content script anywhere — nothing to join with
+    }
+    const wanted = stamped.find((s) => s.frameId === scriptingFrameId)?.stamp;
+    if (!wanted) return null;
+    for (const key of [...(this.#contexts.get(tabId)?.keys() ?? [])]) {
+      try {
+        const res = await this.send<{ result?: { value?: unknown } }>(
+          tabId,
+          "Runtime.evaluate",
+          {
+            expression: 'document.documentElement.getAttribute("data-ba-stamp")||""',
+            contextId: Number(key),
+            returnByValue: true,
+          },
+        );
+        if (res.result?.value === wanted) return Number(key);
+      } catch {
+        // destroyed or stale context — keep probing the rest
+      }
+    }
+    return null;
+  }
+
   /** Subscribe to raw CDP events for a tab. */
   onCdpEvent(
     listener: (tabId: number, method: string, params: unknown) => void,
@@ -132,19 +191,22 @@ export class DebuggerAdapter {
 
   /**
    * The default execution context id of the frame with this scripting frameId,
-   * or null when it cannot be resolved yet. Requires `Runtime.enable` first —
-   * `sendEnabled` does that on the evaluate path.
+   * or null when it cannot be resolved. Requires `Runtime.enable` first —
+   * `sendEnabled` does that on the evaluate path, and enabling is what
+   * populates the context table probed here.
+   *
+   * Two joins, in order: the cheap URL pairing from the last `mapFrames()`
+   * (stale the moment a frame navigates), then the DOM-stamp join below, which
+   * survives navigations and URL disagreements entirely.
    */
-  contextIdForFrame(tabId: number, frameId: number): number | null {
+  async contextIdForFrame(tabId: number, frameId: number): Promise<number | null> {
     if (frameId === 0) return null; // main frame = the default context
     const cdpFrameId = this.cdpFrameIdFor(tabId, frameId);
-    if (!cdpFrameId) return null;
-    let newest: number | null = null;
-    for (const [contextId, owningFrame] of this.#contexts.get(tabId) ?? []) {
-      // A frame can be re-created by navigation; the highest id is the live one.
-      if (owningFrame === cdpFrameId) newest = Math.max(newest ?? -1, Number(contextId));
+    if (cdpFrameId) {
+      const newest = this.#newestContext(tabId, cdpFrameId);
+      if (newest != null) return newest;
     }
-    return newest;
+    return this.#contextIdByStamp(tabId, frameId);
   }
 
   onDetach(listener: DetachListener): () => void {
