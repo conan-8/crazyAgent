@@ -160,4 +160,21 @@ describe("ElementRegistry", () => {
     expect(dm?.disabled).toBeUndefined();
     expect(dm?.checked).toBeUndefined();
   });
+
+  // Regression: describe() used `el.value` as its last name fallback and then
+  // called `.trim()` on the result. Elements matched via [onclick]/role are not
+  // form controls, so their `.value` need not be a string — <li value="2">
+  // exposes it as a number — and collect() died with
+  // "name.trim is not a function" before a single element was registered.
+  it("survives interactive elements whose .value is not a string", () => {
+    setBody(`<ul><li id="row" value="2" onclick="void 0">   </li></ul>`);
+    // Sanity: the fixture reproduces the type confusion this guards against.
+    expect(typeof (document.getElementById("row") as HTMLLIElement).value).toBe(
+      "number",
+    );
+
+    const snap = registry.collect(); // must not throw
+    const row = snap.elements.find((e) => e.tag === "li");
+    expect(row?.name).toBe("2");
+  });
 });

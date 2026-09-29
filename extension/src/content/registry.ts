@@ -155,6 +155,11 @@ function describe(el: Element): { name: string; text: string } {
   const labelText =
     input.labels?.[0]?.textContent?.replace(/\s+/g, " ").trim() ??
     el.closest("label")?.textContent?.replace(/\s+/g, " ").trim();
+  // `.value` is a string only on real form controls. Elements matched via
+  // [onclick]/role can carry a non-string one (<li value="2"> is a number,
+  // a custom element can be anything), and `??` only filters null/undefined —
+  // so normalize here before the result reaches `.trim()`.
+  const value = String(input.value ?? "");
   const name =
     el.getAttribute("aria-label") ??
     labelText ??
@@ -162,8 +167,7 @@ function describe(el: Element): { name: string; text: string } {
     el.getAttribute("title") ??
     el.getAttribute("alt") ??
     (text || undefined) ??
-    input.value ??
-    "";
+    value;
   return { name: name.trim(), text };
 }
 
