@@ -2464,7 +2464,18 @@ function App() {
 
   const sendTask = () => {
     const task = taskText.trim();
-    if ((!task && !attachments.length) || running) return;
+    if (!task && !attachments.length) return;
+    if (running) {
+      // Mid-run steering: queue the message for the running agent — it lands
+      // as a normal user turn the model sees on its next step. Text only; a
+      // new task (with attachments) is one Stop away.
+      if (!task) return;
+      postPort?.({ kind: "run.input", text: task });
+      if (currentConv) foldUser(currentConv, task);
+      bump();
+      setTaskText("");
+      return;
+    }
     startRun(task || "(see attachments)");
   };
 
@@ -2648,9 +2659,12 @@ function App() {
             ref={inputRef}
             class="task-input"
             rows={1}
-            placeholder={running ? "Working on it…" : "Ask crazyAgent to do anything on the web…"}
+            placeholder={
+              running
+                ? "Steer the agent — it reads this on its next step…"
+                : "Ask crazyAgent to do anything on the web…"
+            }
             value={taskText}
-            disabled={running}
             onInput={(e) => setTaskText((e.target as HTMLTextAreaElement).value)}
             onPaste={(e) => {
               const files = e.clipboardData?.files;

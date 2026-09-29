@@ -392,6 +392,20 @@ describe("runAgentTask", () => {
     expect(failMsg?.content).toContain("FRAME-FAILED");
   });
 
+  it("appends mid-run user input before the next model call", async () => {
+    // Steer without stopping: queued input lands as a normal user turn.
+    const queue = ["also check the sidebar", ""];
+    const { deps } = harness(
+      [toolCall("snapshot", {}, "1"), { text: "fin", toolCalls: [], stopReason: "end" }],
+      { takeUserInput: () => queue.splice(0) },
+    );
+    const cp = makeCheckpoint();
+    await runAgentTask(cp, deps);
+    const userTexts = cp.messages.filter((m) => m.role === "user").map((m) => m.content);
+    expect(userTexts).toContain("also check the sidebar");
+    expect(userTexts).not.toContain(""); // blanks are ignored
+  });
+
   it("saves a checkpoint after every tool step", async () => {
     const cp = makeCheckpoint();
     const { saves, deps } = harness([

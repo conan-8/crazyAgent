@@ -127,6 +127,12 @@ export type PortRequest =
     }
   | { kind: "stop" }
   | { kind: "state" }
+  /**
+   * Mid-run steering: a user message queued for the running agent. It lands
+   * as a normal user turn the model sees on its next step — corrections,
+   * extra context, "also do X" — without stopping the run.
+   */
+  | { kind: "run.input"; text: string }
   /** Chat history (conversation store). */
   | { kind: "history.list" }
   | { kind: "history.get"; conversationId: string }

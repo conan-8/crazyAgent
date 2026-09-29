@@ -170,6 +170,13 @@ const ports = new Set<chrome.runtime.Port>();
 let loopRunning = false;
 let stopRequested = false;
 
+/**
+ * Mid-run steering: messages the panel queued for the running agent. Drained
+ * by the loop before every LLM call, so the model sees them as ordinary user
+ * turns — corrections and additions without stopping the run.
+ */
+const pendingUserInputs: string[] = [];
+
 /** Resolvers of in-flight step waits, woken early when stop is requested. */
 const stopWaiters = new Set<() => void>();
 
@@ -205,7 +212,43 @@ function broadcast(msg: SwToPanel): void {
   }
 }
 
-function emit(event: StepEvent): void {
+/**
+ * Streamed deltas arrive per SSE chunk — broadcasting one browser message and
+ * one panel re-render per chunk is what made the UI (and with it the browser)
+ * stutter during long answers. Coalesce for a few ms; every other event
+ * flushes the buffer first, so ordering stays exact.
+ */
+const DELTA_COALESCE_MS = 80;
+let deltaText = "";
+let deltaReasoning = "";
+let deltaTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleDeltaFlush(): void {
+  if (deltaTimer) return;
+  deltaTimer = setTimeout(() => {
+    deltaTimer = null;
+    flushDeltas();
+  }, DELTA_COALESCE_MS);
+}
+
+function flushDeltas(): void {
+  if (deltaTimer) {
+    clearTimeout(deltaTimer);
+    deltaTimer = null;
+  }
+  if (deltaText) {
+    const text = deltaText;
+    deltaText = "";
+    emitNow({ kind: "token_delta", text });
+  }
+  if (deltaReasoning) {
+    const text = deltaReasoning;
+    deltaReasoning = "";
+    emitNow({ kind: "reasoning_delta", text });
+  }
+}
+
+function emitNow(event: StepEvent): void {
   broadcast({ type: "agent.event", event });
   if (currentConv) {
     foldEvent(currentConv, event);
@@ -218,6 +261,21 @@ function emit(event: StepEvent): void {
   if (event.kind === "done") {
     void recordHistory(currentTask, event);
   }
+}
+
+function emit(event: StepEvent): void {
+  if (event.kind === "token_delta") {
+    deltaText += event.text;
+    scheduleDeltaFlush();
+    return;
+  }
+  if (event.kind === "reasoning_delta") {
+    deltaReasoning += event.text;
+    scheduleDeltaFlush();
+    return;
+  }
+  flushDeltas();
+  emitNow(event);
 }
 let currentTask = "";
 
@@ -490,6 +548,15 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         judgeAvailable:
           jevEnabled && (cp.toolSpecs?.some((t) => t.name === "judge") ?? false),
         lessonsBlock,
+        takeUserInput: () => {
+          const inputs = pendingUserInputs.splice(0);
+          // The conversation keeps its own transcript for display/history.
+          for (const text of inputs) {
+            if (currentConv) foldUser(currentConv, text);
+          }
+          if (inputs.length) scheduleConvFlush(false);
+          return inputs;
+        },
         execute: (name, args) => executeToolGated(name, args),
       });
     }
@@ -498,6 +565,10 @@ async function runFrom(cp: Checkpoint): Promise<void> {
   } finally {
     loopRunning = false;
     keepalive.stop();
+    // Release the debugger: a session left attached keeps Runtime interception
+    // on the user's tab and the debug banner up — real, persistent browser lag
+    // for a run that is already over. The next run re-attaches on demand.
+    void debuggerAdapter.detachAll();
     const finished = currentLog;
     await closeLogRecord();
     await clearCheckpoint();
@@ -740,6 +811,9 @@ async function startRun(
   // Reset the stop flag BEFORE any await — a stop that lands during setup
   // must not be clobbered later (real race: Run then Stop within ms).
   stopRequested = false;
+  // Steered input belongs to the run it was typed for — never leak it into
+  // the next one.
+  pendingUserInputs.length = 0;
   humanGate.reset();
   // Console/network capture starts with the run, so the read tools see this
   // run's traffic instead of an empty buffer. Observability extra: best
@@ -893,6 +967,13 @@ async function handleRequest(
         type: "history.list",
         conversations: conversations.map(summarize),
       });
+      break;
+    }
+    case "run.input": {
+      // Mid-run steering: queue it; the loop appends it as a user message
+      // before its next model call. Without a run there is nothing to steer.
+      const text = String((msg as { text?: unknown }).text ?? "").trim();
+      if (text && loopRunning) pendingUserInputs.push(text);
       break;
     }
     case "stop":

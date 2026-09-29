@@ -58,4 +58,27 @@ describe("checkpoint", () => {
     await saveCheckpoint({ ...cp, stepIndex: 5 });
     expect((await loadCheckpoint())?.stepIndex).toBe(5);
   });
+
+  it("strips old screenshot bytes on save and keeps the newest", async () => {
+    // A checkpoint saves every step; keeping every past capture made each save
+    // heavier than the whole task. Only the newest few images are ever sent.
+    const withImages: Checkpoint = {
+      ...cp,
+      messages: [
+        { role: "user", content: "task" },
+        ...Array.from({ length: 6 }, (_, i) => ({
+          role: "tool" as const,
+          toolCallId: `t${i}`,
+          content: "shot",
+          images: [`data:image/jpeg;base64,IMG${i}`],
+        })),
+      ],
+    };
+    await saveCheckpoint(withImages);
+    const kept = ((await loadCheckpoint())?.messages ?? []).filter((m) => m.images?.length);
+    expect(kept.length).toBe(4);
+    // the newest survive; the live object keeps everything
+    expect(kept.at(-1)?.images?.[0]).toContain("IMG5");
+    expect(withImages.messages.filter((m) => m.images?.length).length).toBe(6);
+  });
 });

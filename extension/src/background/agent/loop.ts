@@ -56,6 +56,12 @@ export interface LoopDeps {
    * runs). Sent as a separate, uncached system block — see LlmRequest.
    */
   lessonsBlock?: string;
+  /**
+   * Mid-run steering: user messages queued from the panel since the last
+   * step. Drained before every LLM call and appended as ordinary user turns,
+   * so corrections and additions reach the model without stopping the run.
+   */
+  takeUserInput?: () => string[];
 }
 
 const MAX_RESULT_CHARS = 24_000;
@@ -188,6 +194,12 @@ export async function runAgentTask(
   for (let step = cp.stepIndex; step < stepCap; step++) {
     if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
     deps.emit({ kind: "step_started", stepIndex: step });
+
+    // Mid-run steering: whatever the user typed since the last step lands as
+    // normal user messages this call will see.
+    for (const text of deps.takeUserInput?.() ?? []) {
+      if (text.trim()) cp.messages.push({ role: "user", content: text });
+    }
 
     const now = new Date();
     let result;

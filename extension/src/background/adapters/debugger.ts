@@ -241,6 +241,18 @@ export class DebuggerAdapter {
     }
   }
 
+  /**
+   * Detach from every attached tab. A live debugger session is not free: it
+   * keeps Runtime interception installed on the tab and the "extension is
+   * debugging this browser" banner up, and users feel that as general browser
+   * lag long after the run that needed it has ended.
+   */
+  async detachAll(): Promise<void> {
+    for (const tabId of [...this.#attached]) {
+      await this.detach(tabId);
+    }
+  }
+
   async send<T>(tabId: number, method: string, params?: object): Promise<T> {
     await this.attach(tabId);
     return (await chrome.debugger.sendCommand(
