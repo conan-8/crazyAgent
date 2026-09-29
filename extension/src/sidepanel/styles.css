@@ -365,6 +365,49 @@ kbd {
   overflow: hidden;
 }
 
+/* The one "the agent is working" signal: an ember comet circling the rim of
+   the whole panel. Motion is spent here and nowhere else — the topbar, the
+   composer and the stop button all stay calm while it turns. */
+.window-glow {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--spin),
+    transparent 0 50%,
+    var(--c1) 72%,
+    var(--c3) 90%,
+    var(--c4)
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s var(--ease-out);
+  animation: rim-spin 5s linear infinite;
+}
+
+.window-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: inherit;
+  filter: blur(12px);
+  opacity: 0.45;
+}
+
+.shell.is-running .window-glow {
+  opacity: 1;
+}
+
+@keyframes rim-spin {
+  to {
+    --spin: 360deg;
+  }
+}
+
 .topbar {
   position: absolute;
   top: 0;
@@ -418,39 +461,6 @@ kbd {
 .topbar-actions {
   display: flex;
   gap: 2px;
-}
-
-.run-progress {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  overflow: hidden;
-  opacity: 0;
-  transition: opacity 0.4s var(--ease-out);
-}
-
-.run-progress::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: 45%;
-  background: linear-gradient(90deg, transparent, var(--c1), var(--c3), var(--c4), transparent);
-  animation: progress-sweep 1.6s var(--ease-io) infinite;
-}
-
-.is-running .run-progress {
-  opacity: 1;
-}
-
-@keyframes progress-sweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(230%);
-  }
 }
 
 .stage {
@@ -1840,52 +1850,9 @@ input[type="number"]::-webkit-inner-spin-button {
     transform 0.4s var(--spring);
 }
 
-/* Ember comet that circles the rim while the agent works. Focus alone gets a
-   plain accent ring (below) — motion is reserved for "something is happening". */
-.composer-glow {
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: conic-gradient(from var(--spin), transparent 0 50%, var(--c1) 72%, var(--c3) 90%, var(--c4));
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.45s var(--ease-out);
-  animation: rim-spin 5s linear infinite;
-}
-
-.composer-glow::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: inherit;
-  filter: blur(10px);
-  opacity: 0.4;
-}
-
-@keyframes rim-spin {
-  to {
-    --spin: 360deg;
-  }
-}
-
 .composer:focus-within {
   border-color: var(--accent-line);
   box-shadow: var(--inner-hi), var(--shadow-md), 0 0 0 3px var(--accent-soft);
-}
-
-.composer.is-running {
-  border-color: var(--border);
-  box-shadow: var(--inner-hi), var(--shadow-md);
-}
-
-.composer.is-running .composer-glow {
-  opacity: 1;
-  animation-duration: 2.2s;
 }
 
 .composer .task-input {
@@ -2051,17 +2018,6 @@ input[type="number"]::-webkit-inner-spin-button {
 .send.stop .i-stop {
   opacity: 1;
   transform: none;
-}
-
-.send.stop::before {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border-radius: 999px;
-  background: conic-gradient(from 0deg, transparent 0 30%, var(--c1), var(--c4));
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
-  animation: spin 1s linear infinite;
 }
 
 /* ---------------- menus ---------------- */

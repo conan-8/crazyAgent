@@ -2537,10 +2537,11 @@ function App() {
 
   return (
     <div class={`shell${running ? " is-running" : ""}${conv ? " has-conv" : ""}`} {...dragHandlers}>
+      <span class="window-glow" aria-hidden="true" />
 
       <header class="topbar">
         <div class="brand">
-          <Orb size={24} active={running} />
+          <Orb size={24} />
           <div class="brand-text">
             <span class="brand-name">crazyAgent</span>
             <span class="brand-sub" key={running ? "run" : "idle"}>
@@ -2593,7 +2594,6 @@ function App() {
             }}
           />
         </nav>
-        <span class="run-progress" aria-hidden="true" />
       </header>
 
       <div class="stage">
@@ -2653,8 +2653,7 @@ function App() {
           </div>
         ) : null}
 
-        <div class={`composer${running ? " is-running" : ""}`}>
-          <span class="composer-glow" aria-hidden="true" />
+        <div class="composer">
           <textarea
             ref={inputRef}
             class="task-input"
