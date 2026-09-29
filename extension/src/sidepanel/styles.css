@@ -3421,6 +3421,15 @@ input[type="number"]::-webkit-inner-spin-button {
   vertical-align: 1px;
 }
 
+/* One-line system notes in the timeline (Jev notes today). */
+.info-line {
+  margin: 4px 0 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
 /* Info lines carrying a Jev note (routing grade, fallback). */
 .info-line.is-jev {
   color: var(--jev);
@@ -3428,6 +3437,40 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .info-line.is-jev .jev-pill {
   margin-right: 6px;
+}
+
+/* Actions the Jev risk layer CHECKED and allowed: a quiet pink rail + dot.
+   Deliberately below the full Jev card tint — a passed check is routine, so
+   the mark only needs to whisper, while the `Jev` tooltip names it. */
+.card-gate-jev {
+  box-shadow: inset 2px 0 0 var(--jev-line);
+}
+
+.card-gate-jev:hover,
+.card-gate-jev.is-open {
+  box-shadow: inset 2px 0 0 var(--jev);
+}
+
+.jev-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--jev);
+  box-shadow: 0 0 0 2px var(--jev-soft);
+}
+
+/* Jev itself is the thing running: the orbit dots go pink. */
+.typing.is-jev .typing-orbit span {
+  background: var(--jev);
+}
+
+.typing.is-jev .typing-orbit span:nth-child(2) {
+  background: var(--jev-strong);
+}
+
+.typing.is-jev .typing-orbit span:nth-child(3) {
+  background: var(--jev-line);
 }
 
 /* ---------------- reduced motion ---------------- */

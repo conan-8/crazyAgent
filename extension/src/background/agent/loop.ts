@@ -27,6 +27,11 @@ export interface ExecuteResult {
   image?: string;
   /** Pre-formatted compact text for the LLM (instead of raw JSON). */
   text?: string;
+  /**
+   * The Jev risk layer checked this mutating action and allowed it. Passed
+   * through to the tool_result event so the panel can mark the card.
+   */
+  jevGate?: boolean;
 }
 
 export interface LoopDeps {
@@ -411,7 +416,14 @@ async function runOne(
           // a screenshot of the failure state, and the model should get it.
           images: res.image ? [res.image] : undefined,
         },
-        event: { kind: "tool_result", stepIndex, name: call.name, result: content, ok: false },
+        event: {
+          kind: "tool_result",
+          stepIndex,
+          name: call.name,
+          result: content,
+          ok: false,
+          jevGate: res.jevGate === true ? true : undefined,
+        },
       };
     }
     // Screenshots always ride with their tool result: the configured model
@@ -437,6 +449,7 @@ async function runOne(
         result: clip(content, 400),
         ok: true,
         image,
+        jevGate: res.jevGate === true ? true : undefined,
       },
     };
   } catch (err) {

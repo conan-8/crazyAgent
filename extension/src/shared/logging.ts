@@ -37,6 +37,8 @@ export interface LogToolCall {
   truncated?: boolean;
   /** This call went through the Jev sidecar (the `judge` tool). */
   jev?: boolean;
+  /** The Jev risk layer checked this mutating action and allowed it. */
+  jevGate?: boolean;
 }
 
 /** Everything that happened inside one assistant turn, in arrival order. */
@@ -77,6 +79,12 @@ export interface LogTurn {
     handled?: boolean;
   }[];
   errors: { at: number; message: string }[];
+  /**
+   * Jev sidecar notes (effort routing grade, fallback) — the only `info`
+   * events the log keeps. Optional: records archived before this field
+   * existed have none.
+   */
+  jevNotes?: { at: number; message: string }[];
   /** Final summary from the `done` event. */
   summary?: string;
   stats?: RunStats;
@@ -215,6 +223,7 @@ export function foldLogEvent(
         call.finishedAt = at;
         call.durationMs = Math.max(0, at - call.at);
         if (e.image) call.image = true;
+        call.jevGate = e.jevGate === true ? true : undefined;
       }
       break;
     }
@@ -257,6 +266,14 @@ export function foldLogEvent(
       break;
     }
     case "info":
+      // Jev sidecar notes are kept (they answer "was Jev used, and what did
+      // it decide?"); generic info stays telemetry noise.
+      if (e.jev === true) {
+        const turn = currentTurn(rec, at);
+        turn.jevNotes = turn.jevNotes ?? [];
+        turn.jevNotes.push({ at, message: e.message });
+      }
+      break;
     case "usage":
       // Activity/telemetry noise: the panel shows it live, the log skips it
       // (token totals already arrive on `done`).
@@ -388,7 +405,7 @@ export function toMarkdown(records: LogTurnRecord[]): string {
       for (const call of turn.tools) {
         const status = call.ok === false ? "✗" : call.ok === true ? "✓" : "…";
         // Jev provenance is recorded, not inferred — it survives export.
-        const via = call.jev ? " · via Jev" : "";
+        const via = call.jev ? " · via Jev" : call.jevGate ? " · jev checked" : "";
         out.push(
           `- **${status} ${call.name}** (call ${call.index + 1}, ${iso(call.at)}, ${fmtDuration(call.durationMs)}${via})`,
         );
@@ -408,6 +425,9 @@ export function toMarkdown(records: LogTurnRecord[]): string {
         out.push(
           `- ⚠ confirmation requested at ${iso(c.at)} (${via}): ${c.tool} — ${c.summary}`,
         );
+      }
+      for (const n of turn.jevNotes ?? []) {
+        out.push(`- 🧠 **Jev** at ${iso(n.at)}: ${n.message}`);
       }
       for (const h of turn.handoffs ?? []) {
         out.push(

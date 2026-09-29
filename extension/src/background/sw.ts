@@ -530,6 +530,7 @@ async function runFrom(cp: Checkpoint): Promise<void> {
           emit({
             kind: "info",
             message: `thinking: ${thinking} (task graded '${routed.complexity}' by Jev)`,
+            jev: true,
           });
         }
       }
@@ -675,7 +676,10 @@ async function executeToolGated(
   let risk = assess(name, args, probe);
   // Jev risk gate: mutating actions the regex rules allowed get one batched,
   // time-boxed decision call. Union-only — Jev can add a confirm, never drop
-  // one — and any failure falls through to the deterministic verdict.
+  // one — and any failure falls through to the deterministic verdict. A
+  // completed check is stamped on the result (`jevGate`) so the panel can
+  // mark the card pink — the check itself is otherwise invisible.
+  let jevChecked = false;
   if (risk.level === "allow" && isMutating(name) && currentJev && !stopRequested) {
     try {
       const result = await currentJev.decide(
@@ -683,6 +687,7 @@ async function executeToolGated(
         JEV_RISK_QUESTIONS,
         { timeoutMs: JEV_GATE_TIMEOUT_MS },
       );
+      jevChecked = true;
       risk = assessWithJev(risk, toRiskAnswers(result.answers), probe?.text ?? undefined);
     } catch (err) {
       if (!jevFallbackNoted) {
@@ -691,6 +696,7 @@ async function executeToolGated(
         emit({
           kind: "info",
           message: `Jev unavailable (${msg}) — continuing with rule-based policy only`,
+          jev: true,
         });
       }
     }
@@ -714,6 +720,7 @@ async function executeToolGated(
     }
   }
   const res = await executeTool(name, args);
+  if (jevChecked) res.jevGate = true;
   // A failure is exactly the "concerned" moment: show the page, don't guess.
   if (!res.ok) return withFailureShot(name, res, tabId);
   if (!AUTO_OBSERVE_TOOLS.has(name) || stopRequested) return res;

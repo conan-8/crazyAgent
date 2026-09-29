@@ -52,9 +52,15 @@ const MODE_RULES: Record<string, string[]> = {
 };
 
 // Only in the prompt when the Jev sidecar is configured, so the model never
-// sees a `judge` rule for a tool it doesn't have. Byte-stable within a run.
-const JUDGE_RULE =
-  "- For bulk per-item judgments (relevance, filtering, yes/no over many items), prefer ONE `judge` call with one question per item over examining them step by step; keep counting, arithmetic and date comparisons in your own reasoning.";
+// sees `judge` rules for a tool it doesn't have. Byte-stable within a run.
+const JUDGE_RULES = [
+  "`judge` (the Jev sidecar) makes fast structured decisions about text — one call answers up to 20 typed questions in parallel, each with a probability/confidence. It is far faster than one slow step per candidate: whenever a step is purely weighing TEXT candidates, spend ONE `judge` call instead of grinding through them yourself.",
+  "- Bulk per-item judgments (relevance, filtering, yes/no over many items): one `judge` call with one question per item — e.g. which of 15 search rows or inbox threads match a topic.",
+  "- Disambiguation among candidates: which tab / file / search result / user is the right one (e.g. a display name vs a username) — one `choice` question, candidates as options, their distinguishing details as criteria.",
+  "- Quiz and multiple-choice answers: one `choice` question per question, the question text and options as the state.",
+  "- Best-of picks and rubric scores: `choice` over shortlisted options, `score` against a 2–10 level rubric.",
+  "- `judge` never sees images and never does arithmetic, counting, or date comparisons — keep those in your own reasoning. Treat low-confidence answers as uncertain and verify cheaply before acting on them.",
+];
 
 /**
  * Document editors (Google Docs/Slides, Office on the web, anything built like
@@ -152,7 +158,7 @@ export function buildSystemPrompt(
     ...MANDATE,
     "",
     ...BASE_RULES,
-    ...(hasJudge ? [JUDGE_RULE] : []),
+    ...(hasJudge ? JUDGE_RULES : []),
     "",
     ...DOCUMENT_EDITOR_RULES,
     "",

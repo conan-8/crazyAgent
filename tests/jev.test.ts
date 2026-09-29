@@ -652,7 +652,8 @@ describe("settings — jev block", () => {
       baseUrl: JEV_DEFAULTS.baseUrl,
       model: JEV_DEFAULTS.model,
     });
-    expect(s.autoThinking).toBe(false);
+    // Auto effort routing is on by default (settings rev 2).
+    expect(s.autoThinking).toBe(true);
   });
 
   it("backfills partial stored blocks and coerces the toggles", () => {
@@ -668,7 +669,8 @@ describe("settings — jev block", () => {
       baseUrl: JEV_DEFAULTS.baseUrl,
       model: JEV_DEFAULTS.model,
     });
-    expect(s.autoThinking).toBe(false); // only a real true enables
+    // Only a real `false` opts out; junk falls back to the default (on).
+    expect(s.autoThinking).toBe(true);
   });
 
   it("resolves blank endpoint/model from the selected transport", () => {
@@ -781,10 +783,12 @@ describe("buildSystemPrompt — judge rule", () => {
     expect(buildSystemPrompt("t", "auto")).not.toContain("`judge`");
   });
 
-  it("adds the bulk-judgment rule when Jev is available", () => {
+  it("adds the judge playbook when Jev is available", () => {
     const p = buildSystemPrompt("t", "auto", false, true);
     expect(p).toContain("ONE `judge` call");
-    expect(p).toContain("keep counting, arithmetic and date comparisons");
+    expect(p).toContain("arithmetic, counting, or date comparisons");
+    expect(p).toContain("Disambiguation among candidates");
+    expect(p).toContain("Quiz and multiple-choice answers");
   });
 
   it("coexists with madman mode", () => {

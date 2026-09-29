@@ -299,3 +299,35 @@ describe("makeEntry", () => {
     expect(a.label).toBe("one");
   });
 });
+
+describe("auto effort routing (autoThinking)", () => {
+  it("is on by default and stamps the settings rev", () => {
+    const s = normalizeSettings(undefined);
+    expect(s.autoThinking).toBe(true);
+    expect(s.rev).toBe(2);
+  });
+
+  it("flips a rev-1 stored false once — that was the old default artifact", () => {
+    // Pre-rev-2 profiles had `false` normalised INTO storage by the old
+    // default; it is not an opt-out, so the migration turns routing on.
+    const s = normalizeSettings({ autoThinking: false });
+    expect(s.autoThinking).toBe(true);
+  });
+
+  it("honours an explicit opt-out from rev 2 on", () => {
+    const s = normalizeSettings({ autoThinking: false, rev: 2 });
+    expect(s.autoThinking).toBe(false);
+  });
+
+  it("stays on when explicitly enabled at rev 2", () => {
+    const s = normalizeSettings({ autoThinking: true, rev: 2 });
+    expect(s.autoThinking).toBe(true);
+  });
+
+  it("the migration fires once: re-saving keeps a later opt-out", () => {
+    const migrated = normalizeSettings({ autoThinking: false });
+    expect(migrated.autoThinking).toBe(true);
+    const optedOut = normalizeSettings({ ...migrated, autoThinking: false });
+    expect(optedOut.autoThinking).toBe(false);
+  });
+});

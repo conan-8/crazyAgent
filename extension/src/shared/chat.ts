@@ -20,6 +20,11 @@ export interface ToolCard {
    * the card bright pink so Jev-assisted steps stand out in the timeline.
    */
   jev?: boolean;
+  /**
+   * The Jev risk layer checked this mutating action and allowed it — a small
+   * pink accent (rail + dot) marks the card without the full Jev tint.
+   */
+  jevGate?: boolean;
   /** fold bookkeeping: whether a tool_result already filled this card */
   filled?: boolean;
 }
@@ -46,7 +51,14 @@ export type ChatBlock =
   | { kind: "reasoning"; text: string }
   | { kind: "tool"; card: ToolCard }
   | { kind: "confirm"; confirm: ConfirmMarker }
-  | { kind: "human"; human: HumanMarker };
+  | { kind: "human"; human: HumanMarker }
+  | {
+      /** A one-line system note (only Jev-flagged info folds into chat). */
+      kind: "note";
+      text: string;
+      /** Note is about the Jev sidecar — rendered pink with a `Jev` pill. */
+      jev?: boolean;
+    };
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -159,6 +171,7 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
         block.card.result = e.result;
         block.card.ok = e.ok;
         block.card.image = e.image;
+        block.card.jevGate = e.jevGate === true ? true : undefined;
         block.card.filled = true;
       }
       break;
@@ -197,8 +210,15 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
     case "error":
       appendText(assistantTurn(), `⚠ ${e.message}\n`);
       break;
+    case "info":
+      // Generic info stays activity noise — but Jev notes (effort routing,
+      // sidecar fallback) are exactly what the user wants to see in pink.
+      if (e.jev === true) {
+        assistantTurn().blocks.push({ kind: "note", text: e.message, jev: true });
+      }
+      break;
     default:
-      // info / step_started: activity noise, not chat content
+      // step_started: activity noise, not chat content
       break;
   }
   conv.updatedAt = Date.now();

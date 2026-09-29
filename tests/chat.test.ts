@@ -257,3 +257,68 @@ describe("madman tool card labels", () => {
     expect(card.label).toBeUndefined();
   });
 });
+
+describe("Jev gate marks and Jev notes", () => {
+  it("carries the gate flag onto a risk-checked tool card", () => {
+    const conv = newConversation("c-gate1", "t");
+    foldUser(conv, "t");
+    foldEvent(conv, { kind: "tool_call", stepIndex: 0, name: "click", args: { ref: "1" } });
+    foldEvent(conv, {
+      kind: "tool_result",
+      stepIndex: 0,
+      name: "click",
+      result: "ok",
+      ok: true,
+      jevGate: true,
+    });
+    const card = (conv.turns[1]!.blocks[0] as { card: ToolCard }).card;
+    expect(card.jevGate).toBe(true);
+    expect(card.filled).toBe(true);
+    // A checked action is NOT a Jev card — the full tint stays for `judge`.
+    expect(card.jev).toBeUndefined();
+  });
+
+  it("leaves unchecked cards unflagged", () => {
+    const conv = newConversation("c-gate2", "t");
+    foldUser(conv, "t");
+    foldEvent(conv, { kind: "tool_call", stepIndex: 0, name: "click", args: { ref: "1" } });
+    foldEvent(conv, { kind: "tool_result", stepIndex: 0, name: "click", result: "ok", ok: true });
+    const card = (conv.turns[1]!.blocks[0] as { card: ToolCard }).card;
+    expect(card.jevGate).toBeUndefined();
+  });
+
+  it("matches gate flags to the right card in a parallel batch", () => {
+    const conv = newConversation("c-gate3", "t");
+    foldUser(conv, "t");
+    foldEvent(conv, { kind: "tool_call", stepIndex: 0, name: "click", args: { ref: "1" } });
+    foldEvent(conv, { kind: "tool_call", stepIndex: 0, name: "type", args: { ref: "2" } });
+    foldEvent(conv, {
+      kind: "tool_result",
+      stepIndex: 0,
+      name: "click",
+      result: "ok",
+      ok: true,
+      jevGate: true,
+    });
+    foldEvent(conv, { kind: "tool_result", stepIndex: 0, name: "type", result: "ok", ok: true });
+    const cards = conv.turns[1]!.blocks.map((b) => (b as { card: ToolCard }).card);
+    expect(cards[0]!.jevGate).toBe(true);
+    expect(cards[1]!.jevGate).toBeUndefined();
+  });
+
+  it("folds a Jev-flagged info into a note block and keeps generic info as noise", () => {
+    const conv = newConversation("c-note1", "t");
+    foldUser(conv, "t");
+    foldEvent(conv, { kind: "info", message: "resumed" });
+    foldEvent(conv, {
+      kind: "info",
+      message: "thinking: low (task graded 'simple' by Jev)",
+      jev: true,
+    });
+    foldEvent(conv, { kind: "done", summary: "fin" });
+    expect(conv.turns[1]!.blocks).toEqual([
+      { kind: "note", text: "thinking: low (task graded 'simple' by Jev)", jev: true },
+      { kind: "text", text: "fin" },
+    ]);
+  });
+});

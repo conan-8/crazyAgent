@@ -192,3 +192,22 @@ describe("the model's clock", () => {
     expect(a).not.toBe(b);
   });
 });
+
+describe("judge playbook (Jev sidecar)", () => {
+  it("teaches the fast-decision patterns when judge is available", () => {
+    const p = buildSystemPrompt("t", "auto", false, true);
+    expect(p).toContain("weighing TEXT candidates");
+    expect(p).toContain("Disambiguation among candidates");
+    expect(p).toContain("Quiz and multiple-choice answers");
+    expect(p).toContain("Bulk per-item judgments");
+    // The hard exclusions survive the new playbook.
+    expect(p).toContain("never sees images");
+    expect(p).toContain("arithmetic, counting, or date comparisons");
+  });
+
+  it("stays out of the prompt when judge is unavailable", () => {
+    const p = buildSystemPrompt("t", "auto", false, false);
+    expect(p).not.toContain("Jev sidecar");
+    expect(p).not.toContain("`judge`");
+  });
+});

@@ -93,9 +93,15 @@ export interface AgentSettings {
   /**
    * Let Jev grade each task's complexity at run start and LOWER the reasoning
    * effort for trivial tasks (never raises it above `thinking`). Requires
-   * `jev.enabled`.
+   * `jev.enabled`. On by default from settings rev 2 — the routing call is
+   * tiny and fail-open; the switch is a real opt-out.
    */
   autoThinking: boolean;
+  /**
+   * Settings schema revision, stamped by the normaliser. Absent (or 1) means
+   * the object was saved before one-time default migrations existed.
+   */
+  rev?: number;
   /**
    * Self-improvement: a second agent (same model) reviews finished runs and
    * writes lessons into this profile's local log, which later runs read back.
@@ -110,6 +116,9 @@ export const CONNECTION_DEFAULTS = {
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-4o-mini",
 };
+
+/** Bumped when a default change needs a one-time migration of stored profiles. */
+const SETTINGS_REV = 2;
 
 export const DEFAULT_SETTINGS: AgentSettings = {
   apiKeys: [],
@@ -134,7 +143,10 @@ export const DEFAULT_SETTINGS: AgentSettings = {
     baseUrl: JEV_TRANSPORT_DEFAULTS.typesafe.baseUrl,
     model: JEV_TRANSPORT_DEFAULTS.typesafe.model,
   },
-  autoThinking: false,
+  // Auto effort routing on by default: one tiny fail-open Jev call per run
+  // that can only LOWER thinking. The switch turns it off.
+  autoThinking: true,
+  rev: SETTINGS_REV,
   // Self-improvement on by default: lessons already learned are applied to
   // later runs, and runs that failed are reviewed automatically.
   learn: { enabled: true, auto: true },
@@ -260,6 +272,9 @@ export function normalizeSettings(
   defaults: AgentSettings = DEFAULT_SETTINGS,
 ): AgentSettings {
   const merged: AgentSettings = { ...defaults, ...(stored ?? {}) };
+  // The rev that matters is the STORED one: absent means the profile predates
+  // default migrations and needs their one-time flips.
+  const rev = typeof stored?.rev === "number" ? stored.rev : 1;
   const raw = Array.isArray(merged.apiKeys) ? merged.apiKeys : [];
 
   // Global provider/baseUrl/model were authoritative before profiles existed.
@@ -303,7 +318,13 @@ export function normalizeSettings(
     madman: merged.madman === true,
     // Jev sidecar: backfill partial stored objects; coerce the toggles.
     jev: normalizeJev(merged.jev),
-    autoThinking: merged.autoThinking === true,
+    // Auto effort routing is on from rev 2. Before that the default `false`
+    // was normalised INTO every saved profile, so a stored `false` from a
+    // rev-1 profile is the old default artifact, not an opt-out — flipped
+    // once here. From rev 2 on, an explicit `false` is honoured as a real
+    // opt-out.
+    autoThinking: merged.autoThinking !== false || rev < 2,
+    rev: SETTINGS_REV,
     // Coach: on unless explicitly disabled (see normalizeLearn).
     learn: normalizeLearn(merged.learn),
   };

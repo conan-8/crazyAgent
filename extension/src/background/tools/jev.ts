@@ -23,7 +23,7 @@ interface JudgePayload {
 registerTool({
   name: "judge",
   description:
-    "Fast structured decisions about text or a list of items, via a decision model (Jev). Use ONE call for bulk per-item judgments — relevance filtering, picking the best option, rubric scores, yes/no checks over many items; all questions are evaluated in parallel, far faster than examining items one by one. Do NOT use it for arithmetic, counting, or date comparisons (do those yourself), and it never generates text. Every answer carries a probability/confidence — treat low-confidence answers as uncertain.",
+    "Fast structured decisions about text or a list of items, via a decision model (Jev). Use ONE call whenever a step is purely weighing TEXT candidates — it is far faster than one slow step per candidate. Built for: bulk per-item judgments (relevance filtering, yes/no over many items), disambiguation among candidates (which tab/file/result/user is the right one — one choice question, candidates as options), quiz/multiple-choice answers (one choice question per question), best-of picks, and rubric scores; all questions are evaluated in parallel. Do NOT use it for arithmetic, counting, or date comparisons (do those yourself), it never generates text, and it cannot see images. Every answer carries a probability/confidence — treat low-confidence answers as uncertain.",
   parameters: {
     type: "object",
     properties: {

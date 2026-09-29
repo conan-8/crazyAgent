@@ -48,7 +48,16 @@ export interface Checkpoint {
 }
 
 export type StepEvent =
-  | { kind: "info"; message: string }
+  | {
+      kind: "info";
+      message: string;
+      /**
+       * This note is about the Jev sidecar (effort routing, fallback). The
+       * panel folds it into a pink `Jev` note and the run log keeps it —
+       * generic info stays transient.
+       */
+      jev?: boolean;
+    }
   | { kind: "step_started"; stepIndex: number }
   | {
       kind: "tool_call";
@@ -74,6 +83,12 @@ export type StepEvent =
       ok: boolean;
       /** Screenshot thumbnail (data URL) for the panel viewer. */
       image?: string;
+      /**
+       * The Jev risk layer checked this mutating action and allowed it. The
+       * panel marks the card with a small pink accent so silent risk checks
+       * are visible; set by the executor, not by the model.
+       */
+      jevGate?: boolean;
     }
   /** Live run statistics for the composer's stats bar. */
   | {

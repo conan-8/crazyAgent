@@ -202,6 +202,7 @@ const TOOL_META: Record<string, { icon: string; done: string; active: string }> 
   scroll: { icon: ICONS.updown, done: "Scrolled", active: "Scrolling" },
   download: { icon: ICONS.download, done: "Downloaded", active: "Downloading" },
   evaluate_js: { icon: ICONS.code, done: "Evaluated", active: "Evaluating" },
+  judge: { icon: ICONS.sparkles, done: "Judged", active: "Judging" },
   network_mock: { icon: ICONS.activity, done: "Mocked", active: "Mocking" },
   network_rewrite: { icon: ICONS.activity, done: "Rewrote", active: "Rewriting" },
   network_observe: { icon: ICONS.activity, done: "Observed", active: "Observing" },
@@ -274,9 +275,12 @@ function ToolRow({
   const state: ToolState = card.filled ? (card.ok ? "ok" : "err") : active ? "run" : "idle";
   const preview = useMemo(() => argPreview(card.args), [card.args]);
   const jev = card.jev === true;
+  // Silent Jev risk checks get a subtle mark (rail + dot); the full pink tint
+  // stays reserved for calls Jev actually answered (judge) or escalated.
+  const gate = card.jevGate === true && !jev;
   const toggle = () => setOpen(!open);
   return (
-    <div class={`card card-${state}${jev ? " card-jev" : ""}${open ? " is-open" : ""}`}>
+    <div class={`card card-${state}${jev ? " card-jev" : ""}${gate ? " card-gate-jev" : ""}${open ? " is-open" : ""}`}>
       <div
         class="card-title"
         role="button"
@@ -319,6 +323,13 @@ function ToolRow({
           </button>
         ) : null}
         <StatusGlyph state={state} />
+        {card.jevGate === true ? (
+          <span
+            class="jev-dot"
+            title="risk-checked by Jev — allowed"
+            aria-label="risk-checked by Jev"
+          />
+        ) : null}
         <span class="chev">
           <Icon d={ICONS.chevron} size={12} />
         </span>
@@ -662,6 +673,15 @@ function TurnView({
         if (block.kind === "reasoning") {
           return <ReasoningBlock key={i} text={block.text} live={active && i === lastIndex} />;
         }
+        if (block.kind === "note") {
+          // Jev sidecar notes: pink line with a `Jev` pill (never colour alone).
+          return (
+            <p key={i} class={`info-line${block.jev ? " is-jev" : ""}`}>
+              {block.jev ? <span class="jev-pill">Jev</span> : null}
+              {block.text}
+            </p>
+          );
+        }
         return <Markdown key={i} text={block.text} streaming={active && i === lastIndex} />;
       })}
     </div>
@@ -683,9 +703,17 @@ function activityLabel(conv: Conversation | null): string {
   return "Writing";
 }
 
-function WorkingIndicator({ label }: { label: string }) {
+/** True while the Jev sidecar is the thing actually running right now. */
+function jevActivity(conv: Conversation | null): boolean {
+  const turn = conv?.turns[conv.turns.length - 1];
+  if (!turn || turn.role !== "assistant") return false;
+  const last = turn.blocks[turn.blocks.length - 1];
+  return last?.kind === "tool" && last.card.jev === true && !last.card.filled;
+}
+
+function WorkingIndicator({ label, jev }: { label: string; jev?: boolean }) {
   return (
-    <div class="typing" role="status">
+    <div class={`typing${jev ? " is-jev" : ""}`} role="status">
       <span class="typing-orbit">
         <span />
         <span />
@@ -1295,7 +1323,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                     checked={s.autoThinking}
                     onChange={(v) => set("autoThinking", v)}
                     title="Auto effort"
-                    hint="Let Jev grade each task and lower reasoning effort on trivial ones (never raises it)"
+                    hint="Let Jev grade each task and lower reasoning effort on trivial ones (never raises it; on by default)"
                   />
                   <div class="field-grid">
                     <label class="field">
@@ -2616,7 +2644,7 @@ function App() {
                 />
               ))
             )}
-            {running ? <WorkingIndicator label={activityLabel(conv)} /> : null}
+            {running ? <WorkingIndicator label={activityLabel(conv)} jev={jevActivity(conv)} /> : null}
           </div>
         </main>
         <button

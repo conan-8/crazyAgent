@@ -34,4 +34,25 @@ describe("Jev highlight wiring", () => {
     // The pink is driven by the tool name, not by a model-supplied field.
     expect(panel).toContain("TOOL_META");
   });
+
+  it("keys the quiet risk-check mark off card.jevGate", () => {
+    expect(panel).toContain("card.jevGate === true");
+    expect(panel).toContain("card-gate-jev");
+    expect(panel).toContain("jev-dot");
+  });
+
+  it("names the risk-check mark in words (title/aria), not just pink", () => {
+    expect(panel).toContain("risk-checked by Jev");
+  });
+
+  it("renders Jev notes with the Jev pill", () => {
+    expect(panel).toContain('block.kind === "note"');
+    expect(panel).toContain("info-line");
+    expect(panel).toContain("jev-pill");
+  });
+
+  it("tints the working orbit only while Jev itself runs", () => {
+    expect(panel).toContain("jevActivity");
+    expect(panel).toMatch(/typing\$\{jev \? " is-jev" : ""\}/);
+  });
 });

@@ -10,6 +10,8 @@
 //    the rule-based policy, no confirm, no error.
 // E: OpenRouter transport — the same judge round-trip over the OpenAI-compatible
 //    /chat/completions wire, pinned by the strict `jev_answers` schema marker.
+// F: a risk check that PASSES — the quiet pink mark (rail + named dot) on the
+//    executed action, plus the pink Jev note for routing/fallback (in C/D).
 // Usage: node scripts/jev-smoke.mjs
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -419,6 +421,21 @@ async function main() {
         chatReqC?.reasoning_effort === "low",
       `${infoC?.message ?? "(no routing info)"} | reasoning_effort=${chatReqC?.reasoning_effort}`,
     );
+    // J8b/J8c: the routing note is a Jev note — flagged on the event, and
+    // rendered as a pink line with a `Jev` pill (never colour alone).
+    check("J8b routing info carries the jev flag", infoC?.jev === true, `jev=${infoC?.jev}`);
+    const noteC = await panel.eval(
+      `JSON.stringify({
+         lines: [...document.querySelectorAll(".info-line.is-jev")].map(e => e.textContent ?? ""),
+         pills: [...document.querySelectorAll(".info-line .jev-pill")].map(e => e.textContent ?? ""),
+       })`,
+    ).then(JSON.parse);
+    check(
+      "J8c routing note renders pink with a Jev pill",
+      noteC.lines.some((l) => l.includes("graded 'simple' by Jev")) &&
+        noteC.pills.some((p) => p.includes("Jev")),
+      JSON.stringify(noteC).slice(0, 200),
+    );
 
     // ============ D: fail-open when Jev is unreachable ============
     mock.setScript(S_FALLBACK);
@@ -435,10 +452,18 @@ async function main() {
     check(
       "J9 unreachable Jev fails open with one info event",
       infoD &&
+        infoD.jev === true &&
         !evsD.some((e) => e.kind === "need_confirm") &&
         !evsD.some((e) => e.kind === "error") &&
         evsD.some((e) => e.kind === "done" && e.summary.includes("FALLBACK_DONE")),
       infoD?.message ?? "(no fallback info)",
+    );
+    // No Jev answer existed, so the action must NOT claim it was checked.
+    const uncheckedD = evsD.find((e) => e.kind === "tool_result" && e.name === "click");
+    check(
+      "J9b unchecked action carries no jevGate mark",
+      uncheckedD?.jevGate === undefined,
+      `jevGate=${uncheckedD?.jevGate}`,
     );
 
     // ============ E: OpenRouter transport (Jev over /chat/completions) ============
@@ -483,6 +508,35 @@ async function main() {
       (mock.lastRequest()?.tools ?? []).some((t) => t?.function?.name === "judge") &&
         evsE.some((e) => e.kind === "done" && e.summary.includes("JUDGE_DONE")),
       `tools: ${(mock.lastRequest()?.tools ?? []).map((t) => t?.function?.name).join(",")}`,
+    );
+
+    // ============ F: a risk check that PASSES leaves the quiet pink mark ============
+    // The same "Upgrade plan" click as B, but Jev answers boring (noul 0.05):
+    // the gate runs, allows, and the executed action is marked as checked —
+    // rail + dot, without the full Jev card tint.
+    mock.setScript(S_GATE);
+    mock.setJevScript(null);
+    await configure(panel, { autoThinking: false, jev: { ...BASE_SETTINGS.jev } });
+    await panel.eval(`__ba.runTask("Upgrade my account"); "started"`);
+    const evsF = await waitDone(panel);
+    const passedF = evsF.find((e) => e.kind === "tool_result" && e.name === "click");
+    check(
+      "J13 risk-checked click carries the jevGate flag",
+      passedF?.ok === true && passedF?.jevGate === true,
+      `ok=${passedF?.ok} jevGate=${passedF?.jevGate}`,
+    );
+    const gateDom = await panel.eval(
+      `JSON.stringify({
+         rails: document.querySelectorAll(".card-gate-jev").length,
+         dots: [...document.querySelectorAll(".jev-dot")].map(
+           (d) => d.getAttribute("aria-label") ?? d.getAttribute("title") ?? "",
+         ),
+       })`,
+    ).then(JSON.parse);
+    check(
+      "J14 the checked card renders the pink rail + named dot",
+      gateDom.rails >= 1 && gateDom.dots.some((d) => /Jev/.test(d)),
+      JSON.stringify(gateDom),
     );
 
     panel.close();

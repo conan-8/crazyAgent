@@ -297,4 +297,36 @@ describe("run log export", () => {
     expect(md).toContain("(rules): password");
     expect(md).not.toContain("via Jev");
   });
+
+  it("records Jev gate checks and keeps Jev notes", () => {
+    const rec = newTurnRecord("Act", { mode: "standard", at: 0 });
+    foldLogEvent(rec, { kind: "tool_call", stepIndex: 0, name: "click", args: { ref: "1" } }, 10);
+    foldLogEvent(
+      rec,
+      { kind: "tool_result", stepIndex: 0, name: "click", result: "ok", ok: true, jevGate: true },
+      20,
+    );
+    foldLogEvent(rec, { kind: "info", message: "resumed" }, 21);
+    foldLogEvent(
+      rec,
+      { kind: "info", message: "thinking: off (task graded 'simple' by Jev)", jev: true },
+      22,
+    );
+    foldLogEvent(rec, { kind: "done", summary: "ok" }, 30);
+
+    // JSONL keeps the structured flags...
+    const parsed = JSON.parse(toJsonl([rec]).trim());
+    expect(parsed.turns[0].tools[0].jevGate).toBe(true);
+    expect(parsed.turns[0].jevNotes).toEqual([
+      { at: 22, message: "thinking: off (task graded 'simple' by Jev)" },
+    ]);
+
+    // ...and the Markdown export states them in words.
+    const md = toMarkdown([rec]);
+    expect(md).toContain("jev checked");
+    expect(md).toContain("🧠 **Jev**");
+    expect(md).toContain("graded 'simple' by Jev");
+    // Generic info stays telemetry noise.
+    expect(md).not.toContain("resumed");
+  });
 });
