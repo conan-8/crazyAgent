@@ -1,4 +1,6 @@
-/* crazyAgent side panel — luminous glass on a drifting aurora.
+/* crazyAgent side panel — graphite surfaces, one ember accent.
+   Neutral near-black chrome with hairline borders; colour is spent on the
+   ember mark, the primary action and live activity, nothing else.
    Motion rules: transforms/opacity only, spring easing for arrivals, quick
    ease-out for exits, everything off under prefers-reduced-motion. */
 
@@ -11,32 +13,34 @@
 :root {
   color-scheme: dark;
 
-  --bg: #07070b;
-  --bg-raised: #0e0e15;
-  --surface: rgba(255, 255, 255, 0.035);
-  --surface-2: rgba(255, 255, 255, 0.055);
-  --surface-hover: rgba(255, 255, 255, 0.08);
-  --surface-solid: #111119;
-  --glass: rgba(14, 14, 21, 0.72);
-  --border: rgba(255, 255, 255, 0.075);
-  --border-strong: rgba(255, 255, 255, 0.14);
-  --inner-hi: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --bg: #0c0c0d;
+  --bg-raised: #121213;
+  --surface: rgba(255, 255, 255, 0.028);
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --surface-hover: rgba(255, 255, 255, 0.075);
+  --surface-solid: #151516;
+  --glass: rgba(12, 12, 13, 0.86);
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --inner-hi: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
-  --text: #ededf2;
-  --text-soft: #a3a3b0;
-  --text-faint: #6c6c7a;
+  --text: #ededed;
+  --text-soft: #a3a3a3;
+  --text-faint: #6b6b6b;
 
-  --c1: #b197fc;
-  --c2: #7c6cff;
-  --c3: #4f8bff;
-  --c4: #2dd4bf;
-  --accent: #8f7dff;
-  --accent-strong: #a495ff;
-  --accent-soft: rgba(143, 125, 255, 0.14);
-  --accent-line: rgba(143, 125, 255, 0.45);
-  --accent-contrast: #ffffff;
-  --grad: linear-gradient(135deg, var(--c1) 0%, var(--c2) 38%, var(--c3) 72%, var(--c4) 100%);
-  --grad-btn: linear-gradient(135deg, #9d87ff 0%, #6f5cff 55%, #4f7dff 100%);
+  /* Ember ramp, crimson → amber. Only the mark, progress and live-activity
+     motion use the full ramp; everything else takes the single --accent. */
+  --c1: #e8263b;
+  --c2: #ff4d2e;
+  --c3: #ff7a2f;
+  --c4: #ffb547;
+  --accent: #ff6b2c;
+  --accent-strong: #ff8450;
+  --accent-soft: rgba(255, 107, 44, 0.13);
+  --accent-line: rgba(255, 107, 44, 0.5);
+  --accent-contrast: #1a0900;
+  --grad: linear-gradient(100deg, var(--c1) 0%, var(--c2) 35%, var(--c3) 65%, var(--c4) 100%);
+  --grad-btn: linear-gradient(180deg, #ff7a3d 0%, #ff5f22 100%);
 
   --ok: #3ddc97;
   --ok-soft: rgba(61, 220, 151, 0.14);
@@ -44,11 +48,12 @@
   --danger-soft: rgba(255, 107, 122, 0.13);
   --warn: #ffc15e;
   --warn-soft: rgba(255, 193, 94, 0.1);
+  --warn-contrast: #1d1300;
 
   /* Jev sidecar — "bright pink" highlight. A dedicated token pair (never a
      one-off literal) so the accent stays tunable and survives theming. Chosen
-     to sit clearly apart from --c2 (violet), --danger (rose) and the
-     --blob-3 aurora (magenta): hot pink, high chroma, reads as "this step was
+     to sit clearly apart from the ember accent (orange), --danger (rose):
+     hot pink, high chroma, reads as "this step was
      a Jev decision" at a glance. */
   --jev: #ff2fa0;
   --jev-strong: #ff6cbb;
@@ -59,25 +64,23 @@
   --human: #33c3b0;
   --human-soft: rgba(51, 195, 176, 0.14);
   --human-line: rgba(51, 195, 176, 0.5);
-
-  --blob-1: rgba(124, 108, 255, 0.55);
-  --blob-2: rgba(45, 212, 191, 0.32);
-  --blob-3: rgba(236, 72, 153, 0.28);
-  --aurora-opacity: 0.55;
+  --human-contrast: #03241f;
 
   --radius-xl: 20px;
   --radius-lg: 16px;
   --radius-md: 12px;
   --radius-sm: 8px;
 
-  --font: "Inter var", Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter var", Inter,
     "Segoe UI Variable Text", "Segoe UI", Roboto, system-ui, sans-serif;
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter var", Inter,
+    "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --mono: "JetBrains Mono", "SF Mono", ui-monospace, "Cascadia Code", Menlo,
     Consolas, monospace;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 10px 30px -8px rgba(0, 0, 0, 0.55);
-  --shadow-lg: 0 30px 70px -12px rgba(0, 0, 0, 0.7);
+  --shadow-md: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 30px 70px -12px rgba(0, 0, 0, 0.75);
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
@@ -91,29 +94,31 @@
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;
-    --bg: #f6f6fa;
+    --bg: #f7f7f6;
     --bg-raised: #ffffff;
-    --surface: rgba(255, 255, 255, 0.62);
-    --surface-2: rgba(20, 20, 50, 0.04);
-    --surface-hover: rgba(20, 20, 50, 0.065);
+    --surface: #ffffff;
+    --surface-2: rgba(0, 0, 0, 0.04);
+    --surface-hover: rgba(0, 0, 0, 0.06);
     --surface-solid: #ffffff;
-    --glass: rgba(250, 250, 253, 0.72);
-    --border: rgba(20, 20, 60, 0.08);
-    --border-strong: rgba(20, 20, 60, 0.15);
+    --glass: rgba(247, 247, 246, 0.86);
+    --border: rgba(0, 0, 0, 0.08);
+    --border-strong: rgba(0, 0, 0, 0.14);
     --inner-hi: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-    --text: #15151d;
-    --text-soft: #5b5b6b;
-    --text-faint: #94949f;
-    --accent: #6a55f5;
-    --accent-strong: #5a44ee;
-    --accent-soft: rgba(106, 85, 245, 0.1);
-    --accent-line: rgba(106, 85, 245, 0.4);
+    --text: #111111;
+    --text-soft: #555555;
+    --text-faint: #999999;
+    --accent: #f0561a;
+    --accent-strong: #d9480f;
+    --accent-soft: rgba(240, 86, 26, 0.1);
+    --accent-line: rgba(240, 86, 26, 0.45);
+    --accent-contrast: #ffffff;
     --ok: #0f9d6b;
     --ok-soft: rgba(15, 157, 107, 0.1);
     --danger: #e0364c;
     --danger-soft: rgba(224, 54, 76, 0.08);
     --warn: #c97a00;
     --warn-soft: rgba(230, 150, 20, 0.09);
+    --warn-contrast: #ffffff;
     /* Jev pink, darkened for contrast on the light surface. */
     --jev: #d1007a;
     --jev-strong: #b30068;
@@ -124,13 +129,10 @@
     --human: #0e9c8a;
     --human-soft: rgba(14, 156, 138, 0.1);
     --human-line: rgba(14, 156, 138, 0.42);
-    --blob-1: rgba(139, 122, 255, 0.38);
-    --blob-2: rgba(45, 212, 191, 0.26);
-    --blob-3: rgba(244, 114, 182, 0.22);
-    --aurora-opacity: 0.7;
-    --shadow-sm: 0 1px 2px rgba(20, 20, 60, 0.06);
-    --shadow-md: 0 10px 30px -10px rgba(30, 30, 80, 0.18);
-    --shadow-lg: 0 30px 70px -16px rgba(30, 30, 80, 0.28);
+    --human-contrast: #ffffff;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 10px 30px -12px rgba(0, 0, 0, 0.16);
+    --shadow-lg: 0 30px 70px -16px rgba(0, 0, 0, 0.24);
   }
 }
 
@@ -282,7 +284,7 @@ kbd {
 }
 
 .grad-text {
-  background: var(--grad);
+  background: linear-gradient(100deg, var(--c1), var(--c3), var(--c4), var(--c3), var(--c1));
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -290,90 +292,11 @@ kbd {
   animation: shimmer 6s linear infinite;
 }
 
-/* ---------------- aurora ---------------- */
+/* ---------------- mark (brand) ---------------- */
 
-.aurora {
-  position: fixed;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 0;
-  opacity: var(--aurora-opacity);
-  transition: opacity 1.2s var(--ease-out);
-}
-
-.has-conv .aurora {
-  opacity: calc(var(--aurora-opacity) * 0.55);
-}
-
-.is-running .aurora {
-  opacity: var(--aurora-opacity);
-}
-
-.blob {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(70px);
-  will-change: transform;
-}
-
-.blob-1 {
-  width: 340px;
-  height: 340px;
-  background: var(--blob-1);
-  top: -120px;
-  left: -90px;
-  animation: drift-1 22s var(--ease-io) infinite alternate;
-}
-
-.blob-2 {
-  width: 300px;
-  height: 300px;
-  background: var(--blob-2);
-  top: 30%;
-  right: -150px;
-  animation: drift-2 27s var(--ease-io) infinite alternate;
-}
-
-.blob-3 {
-  width: 280px;
-  height: 280px;
-  background: var(--blob-3);
-  bottom: -140px;
-  left: 10%;
-  animation: drift-3 31s var(--ease-io) infinite alternate;
-}
-
-.is-running .blob {
-  animation-duration: 9s, 11s, 13s;
-}
-
-@keyframes drift-1 {
-  to {
-    transform: translate(120px, 160px) scale(1.25);
-  }
-}
-@keyframes drift-2 {
-  to {
-    transform: translate(-140px, -90px) scale(0.85);
-  }
-}
-@keyframes drift-3 {
-  to {
-    transform: translate(90px, -150px) scale(1.2);
-  }
-}
-
-.grain {
-  position: absolute;
-  inset: 0;
-  opacity: 0.06;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-}
-
-/* ---------------- orb (brand mark) ---------------- */
-
+/* A rounded tile holding a slowly turning ember field; a soft top-left
+   highlight and an inner hairline keep it reading as an object, not a blob.
+   While the agent works the field spins faster and the tile breathes. */
 .orb {
   --orb: 22px;
   position: relative;
@@ -381,44 +304,44 @@ kbd {
   flex: none;
   width: var(--orb);
   height: var(--orb);
-  border-radius: 50%;
+  border-radius: calc(var(--orb) * 0.3);
   overflow: hidden;
   isolation: isolate;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 2px 10px -2px color-mix(in srgb, var(--c2) 70%, transparent);
+  background: var(--c2);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 2px 8px -3px var(--c2);
   transition: box-shadow 0.6s var(--ease-out);
 }
 
 .orb::before {
   content: "";
   position: absolute;
-  inset: -30%;
+  inset: -35%;
   background: conic-gradient(
     from 0deg,
     var(--c1),
     var(--c2),
-    var(--c3),
     var(--c4),
-    #f472b6,
+    var(--c3),
+    #b3122e,
     var(--c1)
   );
-  filter: blur(calc(var(--orb) * 0.12));
-  animation: spin 9s linear infinite;
+  filter: blur(calc(var(--orb) * 0.14));
+  animation: spin 8s linear infinite;
 }
 
 .orb::after {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: 50%;
-  background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.85), transparent 38%),
-    radial-gradient(circle at 70% 80%, rgba(0, 0, 0, 0.35), transparent 55%);
+  border-radius: inherit;
+  background: radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.55), transparent 45%),
+    radial-gradient(circle at 75% 85%, rgba(60, 0, 0, 0.35), transparent 55%);
   mix-blend-mode: soft-light;
 }
 
 .orb-active {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12),
-    0 0 18px 1px color-mix(in srgb, var(--c2) 75%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 0 3px var(--accent-soft),
+    0 0 16px -2px var(--c2);
   animation: orb-pulse 1.8s var(--ease-io) infinite;
 }
 
@@ -428,7 +351,7 @@ kbd {
 
 @keyframes orb-pulse {
   50% {
-    transform: scale(1.08);
+    transform: scale(1.06);
   }
 }
 
@@ -455,8 +378,8 @@ kbd {
   gap: 8px;
   padding: 0 10px 0 14px;
   background: var(--glass);
-  backdrop-filter: blur(18px) saturate(1.6);
-  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--border);
 }
 
@@ -475,6 +398,7 @@ kbd {
 }
 
 .brand-name {
+  font-family: var(--display);
   font-weight: 650;
   font-size: 14px;
   letter-spacing: -0.015em;
@@ -576,15 +500,13 @@ button:disabled {
   background: var(--grad-btn);
   color: var(--accent-contrast);
   font-weight: 600;
-  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--c2) 80%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 10px 24px -6px color-mix(in srgb, var(--c2) 90%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
-  filter: brightness(1.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 6px 16px -8px var(--accent);
+  filter: brightness(1.06);
 }
 
 .btn-soft {
@@ -772,10 +694,10 @@ input[type="number"]::-webkit-inner-spin-button {
   margin: auto 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  align-items: flex-start;
+  text-align: left;
   gap: 8px;
-  padding: 8px 0 12px;
+  padding: 8px 4px 12px;
 }
 
 .welcome > * {
@@ -794,68 +716,31 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .hero-orb {
-  position: relative;
-  width: 118px;
-  height: 118px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 
 .hero-orb .orb {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1),
-    0 12px 40px -6px color-mix(in srgb, var(--c2) 80%, transparent);
   animation: float 6s var(--ease-io) infinite;
 }
 
 @keyframes float {
   50% {
-    transform: translateY(-5px);
+    transform: translateY(-4px);
   }
 }
 
-.hero-halo {
-  position: absolute;
-  inset: 12px;
-  border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--c2) 45%, transparent), transparent 70%);
-  filter: blur(14px);
-  animation: breathe 5s var(--ease-io) infinite;
-}
-
-.hero-ring {
-  position: absolute;
-  border-radius: 50%;
-  border: 1px solid transparent;
-  -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-}
-
-.ring-1 {
-  inset: 14px;
-  background: conic-gradient(from 0deg, transparent 0 55%, var(--c1), var(--c4), transparent 90%) border-box;
-  animation: spin 7s linear infinite;
-}
-
-.ring-2 {
-  inset: 2px;
-  background: conic-gradient(from 180deg, transparent 0 65%, var(--c3), transparent 95%) border-box;
-  animation: spin 11s linear infinite reverse;
-  opacity: 0.7;
-}
-
 .welcome-title {
-  font-size: 20px;
+  font-family: var(--display);
+  font-size: 24px;
   font-weight: 650;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.03em;
   line-height: 1.25;
   margin: 0;
 }
 
 .welcome-sub {
-  margin: 0 0 12px;
-  max-width: 290px;
+  margin: 0 0 18px;
+  max-width: 320px;
   font-size: 12.5px;
   color: var(--text-soft);
 }
@@ -863,9 +748,8 @@ input[type="number"]::-webkit-inner-spin-button {
 .suggestions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  max-width: 380px;
 }
 
 .chip {
@@ -877,19 +761,15 @@ input[type="number"]::-webkit-inner-spin-button {
   border-radius: var(--radius-md);
   background: var(--surface);
   border: 1px solid var(--border);
-  box-shadow: var(--inner-hi);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   white-space: normal;
   animation: rise 0.7s var(--ease-out) both;
   animation-delay: calc(0.26s + var(--i) * 0.07s);
 }
 
 .chip:hover {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  transform: translateY(-2px);
-  box-shadow: var(--inner-hi), 0 12px 26px -12px color-mix(in srgb, var(--c2) 70%, transparent);
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  transform: translateY(-1px);
 }
 
 .chip-icon {
@@ -901,14 +781,14 @@ input[type="number"]::-webkit-inner-spin-button {
   border-radius: 10px;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  color: var(--accent-strong);
+  color: var(--text-soft);
   transition: transform 0.4s var(--spring), background 0.3s var(--ease-out), color 0.3s;
 }
 
 .chip:hover .chip-icon {
   transform: rotate(-8deg) scale(1.08);
-  background: var(--grad-btn);
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-contrast);
   border-color: transparent;
 }
 
@@ -944,7 +824,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .chip:hover .chip-arrow {
   opacity: 1;
   transform: none;
-  color: var(--accent-strong);
+  color: var(--text);
 }
 
 /* ---------------- bubbles ---------------- */
@@ -958,16 +838,9 @@ input[type="number"]::-webkit-inner-spin-button {
   align-self: flex-end;
   max-width: 88%;
   padding: 9px 14px;
-  border-radius: 18px 18px 6px 18px;
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--c2) 26%, transparent),
-    color-mix(in srgb, var(--c3) 18%, transparent)
-  );
-  border: 1px solid color-mix(in srgb, var(--c2) 35%, transparent);
-  box-shadow: var(--inner-hi), 0 8px 24px -14px color-mix(in srgb, var(--c2) 90%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border-radius: 16px 16px 4px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   transform-origin: bottom right;
@@ -1183,7 +1056,7 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .md li::marker {
-  color: var(--accent);
+  color: var(--text-faint);
 }
 
 .md code {
@@ -1216,10 +1089,8 @@ input[type="number"]::-webkit-inner-spin-button {
 .md blockquote {
   margin: 0.7em 0;
   padding: 4px 14px;
-  border-left: 2px solid transparent;
-  border-image: var(--grad) 1;
+  border-left: 2px solid var(--accent);
   color: var(--text-soft);
-  background: var(--surface);
 }
 
 .md table {
@@ -1778,9 +1649,9 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .confirm-actions .btn-primary {
-  background: linear-gradient(135deg, #ffcb6b, #ff9f43);
-  color: #2a1700;
-  box-shadow: 0 6px 18px -6px rgba(255, 159, 67, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  background: var(--warn);
+  color: var(--warn-contrast);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 /*
@@ -1809,9 +1680,9 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .confirm-card.is-human .confirm-actions .btn-primary {
-  background: linear-gradient(135deg, #7fe3d8, #33c3b0);
-  color: #03241f;
-  box-shadow: 0 6px 18px -6px rgba(51, 195, 176, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  background: var(--human);
+  color: var(--human-contrast);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .confirm-url {
@@ -1962,22 +1833,21 @@ input[type="number"]::-webkit-inner-spin-button {
   gap: 6px;
   padding: 10px 8px 8px 14px;
   border-radius: var(--radius-xl);
-  background: var(--glass);
-  backdrop-filter: blur(20px) saturate(1.5);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  background: var(--surface-solid);
   border: 1px solid var(--border-strong);
   box-shadow: var(--inner-hi), var(--shadow-md);
   transition: border-color 0.3s var(--ease-out), box-shadow 0.4s var(--ease-out),
     transform 0.4s var(--spring);
 }
 
-/* Animated gradient rim — fades in on focus, spins while the agent works. */
+/* Ember comet that circles the rim while the agent works. Focus alone gets a
+   plain accent ring (below) — motion is reserved for "something is happening". */
 .composer-glow {
   position: absolute;
   inset: -1px;
   border-radius: inherit;
   padding: 1.5px;
-  background: conic-gradient(from var(--spin), var(--c1), var(--c3), var(--c4), #f472b6, var(--c1));
+  background: conic-gradient(from var(--spin), transparent 0 50%, var(--c1) 72%, var(--c3) 90%, var(--c4));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -1993,8 +1863,8 @@ input[type="number"]::-webkit-inner-spin-button {
   inset: 0;
   border-radius: inherit;
   background: inherit;
-  filter: blur(12px);
-  opacity: 0.5;
+  filter: blur(10px);
+  opacity: 0.4;
 }
 
 @keyframes rim-spin {
@@ -2004,22 +1874,18 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .composer:focus-within {
-  border-color: transparent;
-  box-shadow: var(--inner-hi), var(--shadow-lg),
-    0 0 40px -12px color-mix(in srgb, var(--c2) 70%, transparent);
-}
-
-.composer:focus-within .composer-glow {
-  opacity: 1;
+  border-color: var(--accent-line);
+  box-shadow: var(--inner-hi), var(--shadow-md), 0 0 0 3px var(--accent-soft);
 }
 
 .composer.is-running {
-  border-color: transparent;
+  border-color: var(--border);
+  box-shadow: var(--inner-hi), var(--shadow-md);
 }
 
 .composer.is-running .composer-glow {
-  opacity: 0.8;
-  animation-duration: 1.8s;
+  opacity: 1;
+  animation-duration: 2.2s;
 }
 
 .composer .task-input {
@@ -2115,19 +1981,17 @@ input[type="number"]::-webkit-inner-spin-button {
   width: 34px;
   height: 34px;
   border-radius: 999px;
-  color: #fff;
+  color: var(--accent-contrast);
   background: var(--grad-btn);
-  box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--c2) 85%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(0, 0, 0, 0.25);
   overflow: visible;
 }
 
 .send:hover:not(:disabled) {
   background: var(--grad-btn);
-  color: #fff;
+  color: var(--accent-contrast);
   transform: translateY(-1px) scale(1.05);
-  box-shadow: 0 10px 22px -6px color-mix(in srgb, var(--c2) 95%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 8px 18px -8px var(--accent);
 }
 
 .send:disabled {
@@ -2194,7 +2058,7 @@ input[type="number"]::-webkit-inner-spin-button {
   position: absolute;
   inset: -3px;
   border-radius: 999px;
-  background: conic-gradient(from 0deg, transparent 0 30%, var(--c2), var(--c4));
+  background: conic-gradient(from 0deg, transparent 0 30%, var(--c1), var(--c4));
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
   animation: spin 1s linear infinite;
@@ -2484,20 +2348,18 @@ input[type="number"]::-webkit-inner-spin-button {
   flex-direction: column;
   width: min(420px, 94vw);
   height: 100%;
-  background: color-mix(in srgb, var(--surface-solid) 92%, transparent);
-  backdrop-filter: blur(30px) saturate(1.6);
-  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  background: var(--surface-solid);
   box-shadow: var(--shadow-lg);
 }
 
 .sheet-right .sheet {
   border-left: 1px solid var(--border-strong);
-  border-radius: 22px 0 0 22px;
+  border-radius: 16px 0 0 16px;
 }
 
 .sheet-left .sheet {
   border-right: 1px solid var(--border-strong);
-  border-radius: 0 22px 22px 0;
+  border-radius: 0 16px 16px 0;
 }
 
 .sheet-layer[data-state="open"] .sheet-backdrop {
@@ -2559,8 +2421,8 @@ input[type="number"]::-webkit-inner-spin-button {
   height: 34px;
   border-radius: 11px;
   background: var(--grad-btn);
-  color: #fff;
-  box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--c2) 80%, transparent);
+  color: var(--accent-contrast);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 .sheet-titles {
@@ -2773,7 +2635,6 @@ input[type="number"]::-webkit-inner-spin-button {
 .key-row.key-active {
   border-color: var(--accent-line);
   background: linear-gradient(160deg, var(--accent-soft), transparent 60%), var(--surface);
-  box-shadow: 0 10px 30px -18px color-mix(in srgb, var(--c2) 90%, transparent);
 }
 
 .key-head {
@@ -3133,7 +2994,7 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .hist-row.is-current {
-  background: var(--accent-soft);
+  background: var(--surface-2);
 }
 
 .hist-row.is-current::before {
@@ -3144,7 +3005,7 @@ input[type="number"]::-webkit-inner-spin-button {
   bottom: 10px;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: var(--grad);
+  background: var(--accent);
 }
 
 .hist-row.is-removing {

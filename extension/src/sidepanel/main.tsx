@@ -132,7 +132,7 @@ function newLocalConversation(task: string): Conversation {
 
 // ------------------------------ primitives ------------------------------
 
-/** Brand mark: a glossy sphere whose colour field rotates (faster while working). */
+/** Brand mark: an ember tile whose colour field rotates (faster while working). */
 function Orb({ size = 22, active = false, class: cls = "" }: { size?: number; active?: boolean; class?: string }) {
   return (
     <span
@@ -170,17 +170,6 @@ function IconButton({
       <Icon d={icon} size={15} />
       {label ? <span class="vh" aria-hidden="true">{label}</span> : null}
     </button>
-  );
-}
-
-function Aurora() {
-  return (
-    <div class="aurora" aria-hidden="true">
-      <span class="blob blob-1" />
-      <span class="blob blob-2" />
-      <span class="blob blob-3" />
-      <span class="grain" />
-    </div>
   );
 }
 
@@ -1934,10 +1923,7 @@ function Welcome({ onPick }: { onPick: (task: string) => void }) {
   return (
     <div class="welcome">
       <div class="hero-orb">
-        <span class="hero-halo" />
-        <span class="hero-ring ring-1" />
-        <span class="hero-ring ring-2" />
-        <Orb size={60} />
+        <Orb size={44} />
       </div>
       <h2 class="welcome-title">
         What should I <span class="grad-text">do</span> for you?
@@ -2546,7 +2532,6 @@ function App() {
 
   return (
     <div class={`shell${running ? " is-running" : ""}${conv ? " has-conv" : ""}`} {...dragHandlers}>
-      <Aurora />
 
       <header class="topbar">
         <div class="brand">
