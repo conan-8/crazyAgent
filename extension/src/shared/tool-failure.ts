@@ -164,7 +164,7 @@ export function classifyFailure(input: unknown): ToolFailure {
       message: withAdvice(
         "transport",
         detail,
-        "the connection to the tab's debugger failed, so this is a transport problem, not a problem with the page. Do NOT retry the same call repeatedly: reload the tab (or switch away and back), then try a plain read_page to confirm the link is back. If it keeps failing, report it.",
+        "the connection to the tab's debugger failed, so this is a transport problem, not a problem with the page. Do NOT retry the same call repeatedly: reload the tab (or switch away and back), then try a plain read_page to confirm the link is back. Once it is back, ONE retry of the call that failed is sanctioned (including an export-fetch verification) — decide that once instead of re-weighing it on later steps. If it keeps failing, report it.",
       ),
     };
   }

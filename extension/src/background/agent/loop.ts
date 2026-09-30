@@ -15,7 +15,7 @@ import type { Checkpoint, RunStats, StepEvent } from "../../shared/protocol";
 import { validateToolArgs } from "../tools/types";
 import { estimateTokens, isMutating } from "../../shared/modes";
 import { madmanExclamation, madmanLabel } from "../../shared/madman";
-import { buildSystemPrompt } from "./prompts";
+import { buildSystemPrompt, buildSystemVolatile } from "./prompts";
 
 export type AgentOutcome = "completed" | "stopped" | "capped";
 
@@ -81,10 +81,35 @@ const MAX_LIVE_IMAGES = 4;
 const CONTEXT_RESERVE_TOKENS = 20_000;
 const IMAGE_CHARS_EQUIV = 6_000;
 const TOOL_CALL_ARGS_KEEP_CHARS = 200;
+/**
+ * Flat token estimate for one attached screenshot in the fallback usage math.
+ * Counting a JPEG's base64 as chars/4 — what the old fallback did against the
+ * UNTRUNCATED checkpoint (which keeps every image ever taken) — inflated a
+ * real run's stats to "73.8M tokens, context 1.2M/128k": garbage that masked
+ * everything the numbers should have shown.
+ */
+const IMAGE_TOKENS_ESTIMATE = 1_500;
 
 /** Total attempts per LLM call (1 try + retries) and the backoff between them. */
 const LLM_ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [1_000, 3_000];
+
+/**
+ * Estimate the tokens of a REQUEST VIEW of the history (what the provider is
+ * actually sent), not the raw checkpoint: message text + tool-call args at
+ * chars/4, attached images at a flat per-image estimate.
+ */
+export function estimateMessages(messages: LlmMessage[]): number {
+  let chars = 0;
+  let images = 0;
+  for (const m of messages) {
+    chars += m.content.length;
+    for (const tc of m.toolCalls ?? []) chars += JSON.stringify(tc.args ?? {}).length;
+    images += m.images?.length ?? 0;
+  }
+  // Same chars/4 heuristic as estimateTokens (which takes text, not a count).
+  return Math.ceil(chars / 4) + images * IMAGE_TOKENS_ESTIMATE;
+}
 
 /**
  * Read-only tools that never touch page state — safe to execute concurrently
@@ -182,6 +207,7 @@ export async function runAgentTask(
   let totalIn = 0;
   let totalOut = 0;
   let reasoningChars = 0;
+  let usageEverEstimated = false;
   let lastStats: RunStats | undefined;
   let invalidStreak = 0;
   const guard = createStuckGuard();
@@ -195,6 +221,20 @@ export async function runAgentTask(
     4_000,
     contextWindow - (deps.maxTokens ?? 4_096) - CONTEXT_RESERVE_TOKENS,
   );
+  // The stable system prompt (rules + task) is byte-identical for the whole
+  // run — built once. Only the clock is per-step, and it rides in
+  // systemVolatile at the END of the request so provider prompt caching hits
+  // on everything expensive (rules, tool specs, the growing conversation).
+  const systemPrompt = buildSystemPrompt(
+    cp.task,
+    deps.agentMode ?? "auto",
+    deps.madman === true,
+    deps.judgeAvailable === true,
+  );
+  const prefixTokens =
+    estimateTokens(systemPrompt) +
+    estimateTokens(deps.lessonsBlock || "") +
+    estimateTokens(JSON.stringify(tools));
 
   for (let step = cp.stepIndex; step < stepCap; step++) {
     if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
@@ -207,22 +247,23 @@ export async function runAgentTask(
     }
 
     const now = new Date();
+    // One truncated view per step, used for BOTH the request and the fallback
+    // usage estimate below — the estimate used to run against the raw
+    // checkpoint (every screenshot ever taken, base64 counted as chars/4) and
+    // reported absurdities like "context 1215933/128000".
+    const history = truncateHistory(cp.messages, HISTORY_BUDGET_CHARS, historyTokenBudget);
     let result;
     try {
       result = await completeWithRetry(
         deps,
         {
-          system: buildSystemPrompt(
-            cp.task,
-            deps.agentMode ?? "auto",
-            deps.madman === true,
-            deps.judgeAvailable === true,
-            // Clock is read per step (not once per run) so a long run — or one
-            // resumed from a checkpoint hours later — always sees the real time.
-            now,
-          ),
+          system: systemPrompt,
           systemSuffix: deps.lessonsBlock || undefined,
-          messages: truncateHistory(cp.messages, HISTORY_BUDGET_CHARS, historyTokenBudget),
+          // Clock is read per step (not once per run) so a long run — or one
+          // resumed from a checkpoint hours later — always sees the real time.
+          // It is the request's volatile TAIL, never part of the cached prefix.
+          systemVolatile: buildSystemVolatile(now),
+          messages: history,
           tools,
           maxTokens: deps.maxTokens,
           thinking: deps.thinking,
@@ -235,14 +276,20 @@ export async function runAgentTask(
       return finish(cp, deps, "stopped", lastStats);
     }
 
-    // Live usage for the stats bar: provider numbers when reported, else
-    // a chars/4 estimate.
+    // Live usage for the stats bar: provider numbers when reported, else an
+    // estimate of what was actually SENT (the truncated request view; images
+    // at a flat per-image cost). Estimated stats are flagged so the log never
+    // renders them as provider truth.
+    const estimated = result.usage === undefined;
     const usage = result.usage ?? {
-      inputTokens: estimateTokens(JSON.stringify(cp.messages)) ,
-      outputTokens: estimateTokens(result.text + JSON.stringify(result.toolCalls)),
+      inputTokens: prefixTokens + estimateMessages(history),
+      outputTokens: estimateTokens(
+        result.text + (result.reasoning ?? "") + JSON.stringify(result.toolCalls),
+      ),
     };
     totalIn += usage.inputTokens;
     totalOut += usage.outputTokens;
+    if (estimated) usageEverEstimated = true;
     if (result.reasoning) reasoningChars += result.reasoning.length;
     const elapsedMs = Math.max(1, Date.now() - runStartedAt);
     const stats: RunStats = {
@@ -255,6 +302,7 @@ export async function runAgentTask(
       contextWindow,
       elapsedMs,
       reasoningChars: reasoningChars || undefined,
+      usageEstimated: usageEverEstimated || undefined,
     };
     lastStats = stats;
     deps.emit({ kind: "usage", ...stats });

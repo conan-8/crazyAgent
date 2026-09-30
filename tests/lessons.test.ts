@@ -382,12 +382,43 @@ describe("prompt injection ranking", () => {
     const block = formatLessonsBlock(rankLessonsForTask(many, "task"));
     expect(block.length).toBeLessThanOrEqual(1_600 + 400);
   });
+
+  it("ages out old unpinned lessons below fresh ones (sites change)", () => {
+    const DAY = 86_400_000;
+    const now = 1_000 * DAY;
+    const fresh = lesson("Fresh generic tip", { id: "fresh", at: now - 1 * DAY });
+    const stale = lesson("Stale generic tip", { id: "stale", at: now - 120 * DAY });
+    // Newest-first input order (as the store provides), so the stale one is
+    // not already winning on recency-of-insertion.
+    const ranked = rankLessonsForTask([fresh, stale], "some task", { now });
+    expect(ranked.map((l) => l.id)).toEqual(["fresh", "stale"]);
+    // And when the STALE one is listed first, age decay still sinks it.
+    const ranked2 = rankLessonsForTask([stale, fresh], "some task", { now });
+    expect(ranked2.map((l) => l.id)).toEqual(["fresh", "stale"]);
+  });
+
+  it("never ages out a pinned lesson", () => {
+    const DAY = 86_400_000;
+    const now = 1_000 * DAY;
+    const ancientPinned = lesson("Ancient but pinned", { id: "pin", at: now - 500 * DAY, pinned: true });
+    const fresh = lesson("Fresh tip", { id: "fresh", at: now - 1 * DAY });
+    const ranked = rankLessonsForTask([fresh, ancientPinned], "task", { now });
+    expect(ranked[0]!.id).toBe("pin");
+  });
 });
 
 describe("the injected block", () => {
   it("is empty with no lessons — the base prompt stays untouched", () => {
     expect(buildPromptLessonsBlock([], "task")).toBe("");
     expect(formatLessonsBlock([])).toBe("");
+  });
+
+  it("warns that a lesson is a hint to verify, not ground truth", () => {
+    const block = formatLessonsBlock([lesson("The viewer exposes loadPageText")]);
+    // A stale "loadPageText exists" hint once sent a run on 13 minutes of API
+    // hunting against a build that no longer had it.
+    expect(block).toContain("HINT, never ground truth");
+    expect(block).toContain("trust the page");
   });
 
   it("frames lessons as reference and tags them", () => {

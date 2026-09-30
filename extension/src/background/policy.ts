@@ -320,7 +320,12 @@ export interface GateDeps {
   emit(event: StepEvent): void;
   loadAlways(): Promise<Set<string>>;
   saveAlways(always: Set<string>): Promise<void>;
-  timeoutMs?: number;
+  /**
+   * Confirmation timeout. A function is re-read per request so the run's
+   * current mode (attended vs unattended) applies without rebuilding the
+   * gate; `undefined` falls back to the 2-minute default.
+   */
+  timeoutMs?: number | (() => number | undefined);
 }
 
 export type GateOutcome = { allow: true } | { allow: false; reason: string };
@@ -349,11 +354,21 @@ export class ConfirmGate {
       summary: risk.summary,
       jev: risk.jev === true ? true : undefined,
     });
+    const configured =
+      typeof this.deps.timeoutMs === "function" ? this.deps.timeoutMs() : this.deps.timeoutMs;
+    const ms = configured ?? 120_000;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        resolve({ allow: false, reason: "confirmation timed out — denied" });
-      }, this.deps.timeoutMs ?? 120_000);
+        // A timeout must read as a closed route, not a mystery: the bare
+        // "timed out — denied" left a real run guessing whether gated tools
+        // work at all, and it avoided the cheap gated route for the rest of
+        // the run.
+        resolve({
+          allow: false,
+          reason: `confirmation timed out after ${Math.round(ms / 1000)}s — nobody responded. This route is unavailable for now: do NOT retry the same call; choose a different approach, or report the blocker and stop.`,
+        });
+      }, ms);
       this.#pending.set(id, (allow, always) => {
         clearTimeout(timer);
         if (allow && always) {

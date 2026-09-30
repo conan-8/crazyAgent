@@ -15,7 +15,12 @@ import {
   JevError,
   createJevClient,
 } from "../extension/src/background/agent/jev";
-import { JEV_TRANSPORT_DEFAULTS, type JevQuestion } from "../extension/src/shared/jev";
+import {
+  JEV_TRANSPORT_DEFAULTS,
+  isJevDecisionsModel,
+  resolveJevTransport,
+  type JevQuestion,
+} from "../extension/src/shared/jev";
 
 const QUESTIONS: Record<string, JevQuestion> = {
   purchase: { type: "noul", instructions: "Does this complete a purchase?" },
@@ -258,5 +263,54 @@ describe("JevClient — failure mapping (fail-open ergonomics)", () => {
   it("gives the chat transport a timeout floor above its caller's time-box", () => {
     // The risk gate allows 2s; a chat model needs longer than that to answer.
     expect(JEV_CHAT_MIN_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000);
+  });
+});
+
+describe("Jev decisions models ride the System One wire", () => {
+  it("recognises Jev decisions-model slugs (and only those)", () => {
+    expect(isJevDecisionsModel("typesafe/jev-1.13")).toBe(true);
+    expect(isJevDecisionsModel("~typesafe/jev-latest")).toBe(true);
+    expect(isJevDecisionsModel("jev-latest")).toBe(true);
+    expect(isJevDecisionsModel("jev-router")).toBe(true);
+    // Chat models used as judges must stay on the chat wire.
+    expect(isJevDecisionsModel("openai/gpt-oss-20b")).toBe(false);
+    expect(isJevDecisionsModel("mock-jev-chat")).toBe(false);
+    expect(isJevDecisionsModel("")).toBe(false);
+  });
+
+  it("redirects a Jev model off the chat wire even when openai is selected", async () => {
+    respond = () => json(systemOnePayload());
+    const client = createJevClient({
+      enabled: true,
+      transport: "openai",
+      apiKey: "sk-or-1",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "typesafe/jev-1.13",
+    });
+    expect(client?.transport).toBe("typesafe");
+    expect(client?.isChatTransport).toBe(false);
+    const result = await client!.decide("s", QUESTIONS, { timeoutMs: 1_000 });
+    expect(lastCall().url).toBe("https://openrouter.ai/api/v1/systemone");
+    expect(result.answers.purchase?.type).toBe("noul");
+  });
+
+  it("keeps chat models on the chat wire", async () => {
+    respond = () => json(chatPayload());
+    const client = createJevClient({
+      enabled: true,
+      transport: "openai",
+      apiKey: "sk-or-1",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "mock-jev-chat",
+    });
+    expect(client?.transport).toBe("openai");
+    await client!.decide("s", QUESTIONS, { timeoutMs: 1_000 });
+    expect(lastCall().url).toBe("https://openrouter.ai/api/v1/chat/completions");
+  });
+
+  it("resolveJevTransport only ever downgrades chat → systemone", () => {
+    expect(resolveJevTransport("openai", "typesafe/jev-1.13")).toBe("typesafe");
+    expect(resolveJevTransport("openai", "openai/gpt-oss-20b")).toBe("openai");
+    expect(resolveJevTransport("typesafe", "jev-latest")).toBe("typesafe");
   });
 });

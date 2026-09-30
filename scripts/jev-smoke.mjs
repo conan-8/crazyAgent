@@ -12,6 +12,8 @@
 //    /chat/completions wire, pinned by the strict `jev_answers` schema marker.
 // F: a risk check that PASSES — the quiet pink mark (rail + named dot) on the
 //    executed action, plus the pink Jev note for routing/fallback (in C/D).
+// G: a real Jev decisions model (typesafe/jev-*) is redirected onto the
+//    /systemone wire even under the chat transport, and says so in pink.
 // Usage: node scripts/jev-smoke.mjs
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -537,6 +539,40 @@ async function main() {
       "J14 the checked card renders the pink rail + named dot",
       gateDom.rails >= 1 && gateDom.dots.some((d) => /Jev/.test(d)),
       JSON.stringify(gateDom),
+    );
+
+    // ============ G: a real Jev decisions model rides /systemone ============
+    // even when the chat transport is selected: OpenRouter hosts Jev
+    // (typesafe/jev-*) on the System One wire only — /chat/completions 400s.
+    mock.setScript(S_JUDGE);
+    mock.setJevScript(null);
+    await configure(panel, {
+      autoThinking: false,
+      jev: {
+        enabled: true,
+        apiKey: "sk-or-mock",
+        baseUrl: LLM,
+        model: "typesafe/jev-1.13",
+        transport: "openai",
+      },
+    });
+    await panel.eval(`__ba.runTask("Pick the shoe listing"); "started"`);
+    const evsG = await waitDone(panel);
+    const judgeG = evsG.find((e) => e.kind === "tool_result" && e.name === "judge");
+    const infoG = evsG.find(
+      (e) => e.kind === "info" && e.jev === true && /decisions model/.test(e.message ?? ""),
+    );
+    check(
+      "J15 a Jev decisions model is redirected onto the /systemone wire",
+      mock.lastJevTransport() === "systemone" &&
+        judgeG?.ok === true &&
+        evsG.some((e) => e.kind === "done"),
+      `transport=${mock.lastJevTransport()} judgeOk=${judgeG?.ok}`,
+    );
+    check(
+      "J15b the redirect is reported as a pink Jev note",
+      infoG !== undefined,
+      infoG?.message ?? "(no redirect note)",
     );
 
     panel.close();

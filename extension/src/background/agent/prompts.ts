@@ -17,6 +17,8 @@ const BASE_RULES = [
   "- An image FILE the page or network traffic points at (an <img> src, a PNG/SVG URL in network_read) is ONE call away: `view_image url:…` fetches it and attaches it so you see the file itself. Never reconstruct an image from pixels with evaluate_js (canvas histograms, color counting, ASCII renders) — that is slow, lossy, and obsolete: look at the image instead.",
   "- Prefer small decisive steps: one or two actions, then verify their effect.",
   "- Independent read-only lookups (e.g. read_page + tabs_list) may be batched as parallel tool calls in one step; actions that depend on each other must stay sequential.",
+  "- Before CREATING anything on a multi-account site (Google, Office, anything with an account chip or avatar menu), check WHICH account is signed in and that it matches the task — a doc created under the wrong account is a full redo (a live run paid 8 minutes for exactly that).",
+  "- When a tool result contradicts what another sense reported (a screenshot showing a different page than the snapshot), STOP and resolve which observation is current before acting on either — name the tab/URL each came from. Do not spend turns theorizing about caches.",
   "",
   "Style — be ruthlessly concise WITHOUT losing information:",
   "- Lead with the answer. No preamble, no restating the question, no filler ('Certainly!', 'Here is…').",
@@ -93,7 +95,7 @@ const DOCUMENT_EDITOR_RULES = [
   "- WRITE WITH ONE `type` CALL AND NO REF: the tool finds and focuses the editor's hidden sink and sends the WHOLE string as real keystrokes (the only thing such an editor responds to — synthesised DOM events are ignored). Text inserts at the caret, newlines become paragraph breaks. One call handles any length of text — NEVER type character-by-character with `key`; each call costs a page observation, and per-key writes can silently drop or duplicate a character.",
   "- `key` (no ref, or trusted:true) then drives the editor's own shortcuts at that sink — Control+b bold, Control+i italic, Control+Alt+1 heading, Control+Home start of document, Control+z undo, plus Backspace and the arrows. Toolbar refs (Bold, Undo, …) still work as clicks.",
   "- Place the caret (or select text) by clicking the document surface: `screenshot` to see the page, `click_at` at the target position (or `drag_at` to select), then `type`. If a call reports nothing editable is focused, click the surface once and retry once.",
-  "- VERIFY ONCE, CHEAPLY: `evaluate_js` `fetch('<doc-url>/export?format=txt')` returns the document text, and `?format=html` shows the formatting (`font-weight:700` = bold) — no navigation, no download. The Bold toolbar button's aria-pressed (with the text selected) is the other cheap signal. An edit cannot be read from the pixels, so one export settles it — do NOT stack screenshots, exports and preview tabs.",
+  "- VERIFY ONCE, CHEAPLY: `evaluate_js` `fetch('<doc-url>/export?format=txt')` returns the document text, and `?format=html` shows the formatting (`font-weight:700` = bold) — no navigation, no download. The Bold toolbar button's aria-pressed (with the text selected) is the other cheap signal. An edit cannot be read from the pixels, so one export settles it — do NOT stack screenshots, exports and preview tabs. If the export fetch fails with a TRANSPORT error, recover per the failure note (reload/page_health ONCE) and then retry the export ONCE — that single retry is sanctioned, not a loop; decide it once and move on instead of re-weighing it every step.",
   "- When typing, `screenshot`, `click_at` or `evaluate_js` fail with a transport error, check `page_health` ONCE. 'debugger channel: …' down means trusted keystrokes AND coordinate clicks AND JS evaluation are ALL dead for the session. Reload the tab once and re-check once; if it stays down, stop retrying those tools — ref `click` and `type trusted:false` over the content script still work, and they are enough to edit the document.",
   "- On a canvas-editor URL, `type`/`key` default to real keystrokes even in ordinary dialogs and menus. So with the debugger down, pass `trusted:false` explicitly to fill any real input (Find and replace fields, rename boxes, side panels) through the content script.",
   "- DOM-only fallback that still edits the document (needs an existing anchor string): Edit ▸ Find and replace (click the menu refs; its fields are ordinary inputs). Pick an anchor the document already contains exactly once (the dialog counts matches, e.g. '1 of 1'), set Find = anchor and Replace with = '<new text> <anchor>', click Replace. Nothing is deleted. In a blank document there is no anchor — use the one-call `type` route above instead.",
@@ -106,18 +108,27 @@ const DOCUMENT_EDITOR_RULES = [
  * Wall-clock line. The model otherwise has NO clock: page-derived dates are the
  * only time signal it ever sees, so relative dates ("next Tuesday", "expires in
  * 3 days"), staleness checks and post-resume runs (a checkpoint can revive a
- * task hours later) are all blind. Rendered at the END of the prompt so every
- * stable prefix above it is unchanged within a run — provider prompt caching
- * keys on those bytes.
+ * task hours later) are all blind.
+ *
+ * This is the request's VOLATILE tail: it changes every step, so it rides in
+ * `LlmRequest.systemVolatile` — placed after the cached system block (and after
+ * the conversation on the OpenAI wire) — never inside the byte-stable prompt.
+ * Minute resolution (not seconds) so several steps within a minute share one
+ * byte-identical volatile tail too.
  */
 export function timeLine(now: Date = new Date()): string {
-  const iso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const iso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
   const weekday = WEEKDAYS[now.getDay()];
   const offsetMin = -now.getTimezoneOffset();
   const sign = offsetMin < 0 ? "-" : "+";
   const abs = Math.abs(offsetMin);
   const tz = `UTC${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
   return `Current date and time: ${iso} (${weekday}, ${tz}${ZONE_NAME ? `, ${ZONE_NAME}` : ""}). This is the real clock — resolve every relative date ("today", "next Tuesday", "in 2 hours", "expires tomorrow") against it, and state dates absolutely. Page text may be stale: if it claims a time, weight it against this clock. A resumed task may have paused for a long while; re-check anything time-sensitive before trusting it.`;
+}
+
+/** The volatile per-step system tail (see timeLine). */
+export function buildSystemVolatile(now: Date = new Date()): string {
+  return timeLine(now);
 }
 
 function pad(n: number): string {
@@ -148,7 +159,6 @@ export function buildSystemPrompt(
   agentMode: string = "auto",
   madman: boolean = false,
   hasJudge: boolean = false,
-  now: Date = new Date(),
 ): string {
   return [
     "You are Browser Agent, an AI that operates the user's real browser to complete web tasks.",
@@ -170,10 +180,9 @@ export function buildSystemPrompt(
     "",
     "Never invent refs and never fabricate tool results.",
     "",
-    // Appended last: the clock changes every call, so anything below it would
-    // defeat the byte-stable prefix that provider prompt caching relies on.
-    timeLine(now),
-    "",
+    // The wall clock is NOT here: it changes every step, and anything volatile
+    // in this block would defeat provider prompt caching on the expensive
+    // stable prefix. It rides in buildSystemVolatile() instead, placed last.
     `Current task: ${task}`,
   ].join("\n");
 }

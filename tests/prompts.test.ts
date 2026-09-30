@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildSystemPrompt, timeLine } from "../extension/src/background/agent/prompts";
+import {
+  buildSystemPrompt,
+  buildSystemVolatile,
+  timeLine,
+} from "../extension/src/background/agent/prompts";
 
 describe("buildSystemPrompt", () => {
   it("pins the concise-but-complete style contract", () => {
@@ -141,55 +145,51 @@ describe("canvas document editor rules", () => {
 });
 
 describe("the model's clock", () => {
-  it("always carries the wall clock", () => {
+  // The clock moved OUT of the cached system prompt into a volatile tail so a
+  // ticking clock no longer defeats provider prompt caching every step.
+  it("keeps the clock out of the stable system prompt", () => {
     const p = buildSystemPrompt("t", "auto");
-    expect(p).toContain("Current date and time:");
-    // The model must be told how to USE the clock, not just what it reads.
-    expect(p).toContain("resolve every relative date");
-    expect(p).toContain("A resumed task may have paused");
+    expect(p).not.toContain("Current date and time:");
+    // The task still rides in the stable block (it is per-run, not per-step).
+    expect(p).toContain("Current task: t");
   });
 
-  it("renders a local-time clock with weekday and offset", () => {
+  it("carries the wall clock in the volatile tail, with usage guidance", () => {
+    const v = buildSystemVolatile(new Date(2024, 0, 9, 14, 5, 3));
+    expect(v).toContain("Current date and time:");
+    // The model must be told how to USE the clock, not just what it reads.
+    expect(v).toContain("resolve every relative date");
+    expect(v).toContain("A resumed task may have paused");
+  });
+
+  it("renders a minute-resolution local-time clock with weekday and offset", () => {
     // Local-time constructor: asserts the rendering, not the host timezone.
+    // Minute resolution (no seconds) so several steps within a minute share a
+    // byte-identical volatile tail — seconds would churn it every call.
     const line = timeLine(new Date(2024, 0, 9, 14, 5, 3)); // Tue 9 Jan 2024
-    expect(line).toContain("2024-01-09T14:05:03");
+    expect(line).toContain("2024-01-09T14:05");
+    expect(line).not.toContain("2024-01-09T14:05:03");
     expect(line).toContain("Tuesday");
     expect(line).toMatch(/UTC[+-]\d{2}:\d{2}/);
   });
 
   it("zero-pads every field", () => {
     const line = timeLine(new Date(2024, 10, 3, 4, 6, 7));
-    expect(line).toContain("2024-11-03T04:06:07");
+    expect(line).toContain("2024-11-03T04:06");
     expect(line).toContain("Sunday");
   });
 
-  it("carries the clock in every mode, madman state and judge config", () => {
-    for (const mode of ["auto", "plan", "build"]) {
-      for (const madman of [false, true]) {
-        for (const judge of [false, true]) {
-          expect(buildSystemPrompt("t", mode, madman, judge)).toContain(
-            "Current date and time:",
-          );
-        }
-      }
-    }
+  it("is byte-stable within a minute but moves across minutes", () => {
+    const a = buildSystemVolatile(new Date(2024, 0, 9, 14, 5, 3));
+    const b = buildSystemVolatile(new Date(2024, 0, 9, 14, 5, 59));
+    const c = buildSystemVolatile(new Date(2024, 0, 9, 14, 6, 0));
+    expect(a).toBe(b); // same minute → identical bytes (cacheable)
+    expect(a).not.toBe(c); // next minute → moves
   });
 
-  it("puts the clock at the end so the stable prefix survives caching", () => {
-    const p = buildSystemPrompt("t", "auto", false, false, new Date(2024, 0, 9, 14, 5, 3));
-    const at = p.indexOf("Current date and time:");
-    expect(at).toBeGreaterThan(p.indexOf("Never invent refs"));
-    // Task stays last; only the clock line separates them.
-    expect(p.indexOf("Current task:")).toBeGreaterThan(at);
-  });
-
-  it("keeps the prefix above the clock byte-stable across steps", () => {
-    const a = buildSystemPrompt("same", "auto", false, false, new Date(2024, 0, 9, 14, 5, 3));
-    const b = buildSystemPrompt("same", "auto", false, false, new Date(2024, 0, 9, 15, 47, 31));
-    const cut = (s: string) => s.slice(0, s.indexOf("Current date and time:"));
-    expect(cut(a)).toBe(cut(b));
-    // But the clock itself really does move.
-    expect(a).not.toBe(b);
+  it("keeps the stable prompt byte-identical regardless of time", () => {
+    // The whole point: the cached block never changes across steps.
+    expect(buildSystemPrompt("same", "auto")).toBe(buildSystemPrompt("same", "auto"));
   });
 });
 

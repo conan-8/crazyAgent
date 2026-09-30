@@ -3,6 +3,8 @@
 // it never streams text or requests tools). One POST per decision point:
 //   - typesafe transport → {baseUrl}/systemone      (Jev proper)
 //   - openai transport   → {baseUrl}/chat/completions (OpenRouter et al.)
+// A real Jev decisions model (typesafe/jev-*) is redirected onto the systemone
+// wire whatever the transport says — the chat wire can never answer it.
 // Every caller treats failure as "no Jev signal" and falls back to the
 // deterministic path, so a run never depends on Jev being up.
 import {
@@ -14,6 +16,7 @@ import {
   normalizeJevTransport,
   parseOpenAiJevResponse,
   parseSystemOneResponse,
+  resolveJevTransport,
   thinkingForComplexity,
   type JevAnswer,
   type JevChoiceQuestion,
@@ -169,13 +172,20 @@ export function createJevClient(jev: {
   if (!jev?.enabled) return null;
   const apiKey = (jev.apiKey ?? "").trim();
   if (!apiKey) return null;
-  const transport = normalizeJevTransport(jev.transport);
-  const defaults = jevDefaultsFor(transport);
+  const selected = normalizeJevTransport(jev.transport);
+  const defaults = jevDefaultsFor(selected);
+  const model = (jev.model ?? "").trim() || defaults.model;
+  // A real Jev decisions model never answers on /chat/completions (the
+  // endpoint rejects it outright) — so it rides the System One wire even when
+  // the chat transport is selected. OpenRouter serves /systemone for exactly
+  // this, so the same key/baseUrl keep working; `client.transport` then
+  // reflects the wire actually spoken, and sw.ts reports the redirect.
+  const transport = resolveJevTransport(selected, model);
   return new JevClient({
     apiKey,
     transport,
     baseUrl: (jev.baseUrl ?? "").trim() || defaults.baseUrl,
-    model: (jev.model ?? "").trim() || defaults.model,
+    model,
   });
 }
 

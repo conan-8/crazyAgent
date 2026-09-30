@@ -248,6 +248,26 @@ describe("madman setting", () => {
   });
 });
 
+describe("unattended setting", () => {
+  it("is off by default (confirmations wait for a human)", () => {
+    expect(DEFAULT_SETTINGS.unattended).toBe(false);
+    expect(normalizeSettings(undefined).unattended).toBe(false);
+  });
+
+  it("round-trips when enabled", () => {
+    const s = normalizeSettings({ unattended: true });
+    expect(s.unattended).toBe(true);
+    expect(normalizeSettings(s).unattended).toBe(true);
+  });
+
+  it("coerces only a real true — junk never enables it", () => {
+    const legacy = (o: Record<string, unknown>) => normalizeSettings(o as never);
+    expect(legacy({ unattended: "yes" }).unattended).toBe(false);
+    expect(legacy({ unattended: 1 }).unattended).toBe(false);
+    expect(legacy({ unattended: true }).unattended).toBe(true);
+  });
+});
+
 describe("learn (self-improvement) settings", () => {
   // Partial/junk stored blocks are the point of these tests, so they are cast
   // past the top-level Partial<AgentSettings> shape.

@@ -78,6 +78,14 @@ export interface LlmRequest {
    * block-level system prompts concatenate the two.
    */
   systemSuffix?: string;
+  /**
+   * Per-STEP volatile tail (the wall clock). Placed LAST — after the cached
+   * `system`, the per-run `systemSuffix`, and (on the OpenAI wire) the whole
+   * conversation — so it never invalidates a cached prefix. A run once carried
+   * the clock inside the cached system block, so every one of its 112 steps
+   * re-prefilled the entire prompt from byte zero.
+   */
+  systemVolatile?: string;
   messages: LlmMessage[];
   tools: LlmToolSpec[];
   maxTokens?: number;

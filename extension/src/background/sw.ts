@@ -88,6 +88,7 @@ import {
   setActiveJevClient,
   type JevClient,
 } from "./agent/jev";
+import { normalizeJevTransport } from "../shared/jev";
 import { isMutating } from "../shared/modes";
 import { describeToolFailure } from "../shared/tool-failure";
 import { handoffMessage } from "../shared/handoff";
@@ -99,6 +100,7 @@ import {
   collectSnapshot,
   formatSnapshot,
   settleTab,
+  tabIdentity,
 } from "./tools/perception";
 import "./tools/perception"; // registers snapshot / screenshot / wait_for_settle
 import "./tools/actions"; // registers click / type / select / key / hover / scroll / read_page
@@ -131,6 +133,9 @@ const gate = new ConfirmGate({
   saveAlways: async (always) => {
     await chrome.storage.local.set({ [ALWAYS_KEY]: [...always] });
   },
+  // Unattended runs fail fast instead of idling 2 minutes per gated action
+  // (see currentUnattended). Attended runs keep the default.
+  timeoutMs: () => (currentUnattended ? UNATTENDED_CONFIRM_TIMEOUT_MS : undefined),
 });
 void gate.ready();
 
@@ -169,6 +174,44 @@ const startedAt = Date.now();
 const ports = new Set<chrome.runtime.Port>();
 let loopRunning = false;
 let stopRequested = false;
+
+/**
+ * Unattended runs: nobody is there to click confirmation cards, so the gate
+ * fails fast (~15 s) with text that tells the model the route is unavailable,
+ * instead of idling the full 2 minutes and leaving the model to guess why
+ * nothing happened (a live run then avoided the cheap gated route entirely
+ * and burned 40 minutes on workarounds).
+ */
+let currentUnattended = false;
+const UNATTENDED_CONFIRM_TIMEOUT_MS = 15_000;
+
+/**
+ * The tab the agent is working on, tracked explicitly instead of resolved
+ * per call as "active tab of the focused window". With several windows open
+ * that query silently followed the USER's focus, so tools and screenshots
+ * could observe a different page than the one the agent was acting on — a
+ * live run lost ~10 minutes to screenshots of a tab it had left behind.
+ * Updated by tabs_create / tabs_switch / tabs_close; falls back to the
+ * active tab when unset or closed.
+ */
+let agentTabId: number | undefined;
+
+/** The tab tools should act on right now. */
+async function agentTab(): Promise<number | undefined> {
+  if (agentTabId !== undefined) {
+    const alive = await chrome.tabs.get(agentTabId).catch(() => null);
+    if (alive) return agentTabId;
+    agentTabId = undefined;
+  }
+  agentTabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  return agentTabId;
+}
+
+/** Remember the agent's tab on the checkpoint so a resume continues on the same page. */
+function noteAgentTab(tabId: number | undefined): void {
+  agentTabId = tabId;
+  if (currentCp && currentCp.tabId !== tabId) currentCp.tabId = tabId;
+}
 
 /**
  * Mid-run steering: messages the panel queued for the running agent. Drained
@@ -500,11 +543,23 @@ async function runFrom(cp: Checkpoint): Promise<void> {
       });
     } else {
       const settings = await loadSettings();
+      // Unattended runs make the confirm gate fail fast (see currentUnattended).
+      currentUnattended = settings.unattended === true;
       // Jev sidecar: built per run from settings; null when off/unconfigured.
       currentJev = createJevClient(settings.jev);
       setActiveJevClient(currentJev);
       jevFallbackNoted = false;
       const jevEnabled = currentJev !== null;
+      // A Jev decisions model riding the System One wire despite the chat
+      // transport being selected: say so in pink instead of leaving the user
+      // to wonder which endpoint their model actually answered on.
+      if (currentJev && currentJev.transport !== normalizeJevTransport(settings.jev.transport)) {
+        emit({
+          kind: "info",
+          message: `Jev model '${(settings.jev.model ?? "").trim()}' is a decisions model — using the /systemone decisions wire (chat/completions can never answer it)`,
+          jev: true,
+        });
+      }
       // Lessons learned: the relevant ones ride in a separate, uncached system
       // block so the base prompt stays cache-stable across runs. Ranked here
       // (not in the loop) because these exact lessons are the ones we stamp as
@@ -609,11 +664,14 @@ const OBSERVATION_MAX_CHARS = 12_000;
 const lastObservations = new Map<number, string>();
 
 /** Best-effort settle + compact snapshot after an action; null on failure. */
-async function observeAfterAction(tabId: number): Promise<string | null> {
+async function observeAfterAction(
+  tabId: number,
+  settleMs = 10_000,
+): Promise<string | null> {
   try {
     // Shorter reachability budget than the manual tool: fail fast on pages
     // where the content script can never run (chrome://, PDF viewer, …).
-    await settleTab(tabId, 10_000, 8).catch(() => null);
+    await settleTab(tabId, settleMs, 8).catch(() => null);
     const snap = await collectSnapshot(tabId);
     if (!snap.frames.length) return null;
     const text = formatSnapshot(snap);
@@ -644,9 +702,13 @@ async function withFailureShot(
   if (name === "screenshot" || tabId === undefined || stopRequested) return res;
   const shot = await captureBlindShot(await adapterForMode(), tabId);
   if (!shot) return res;
+  // Name the tab the shot came from: an unidentified image is exactly what
+  // left a real run convinced its screenshot tool was returning stale caches
+  // (it was looking at a different tab).
+  const label = await tabIdentity(tabId);
   return {
     ...res,
-    error: `${res.error ?? "tool failed"}\n[screenshot attached — this is what the page looked like when the call failed; LOOK at it before choosing your next move]`,
+    error: `${res.error ?? "tool failed"}\n[screenshot attached — ${label} — this is what the page looked like when the call failed; LOOK at it before choosing your next move]`,
     image: shot,
   };
 }
@@ -666,7 +728,7 @@ async function executeToolGated(
     name === "key" ||
     name === "click_at" ||
     name === "drag_at";
-  const tabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  const tabId = await agentTab();
   if (needsProbe && tabId !== undefined) {
     probe =
       typeof args.ref === "string"
@@ -693,9 +755,14 @@ async function executeToolGated(
       if (!jevFallbackNoted) {
         jevFallbackNoted = true;
         const msg = err instanceof Error ? err.message : String(err);
+        // The endpoint said it outright: a decisions model was asked to chat.
+        // Name the fix instead of leaving a raw 400 in the transcript.
+        const hint = /chat\/completions|decisions (model|endpoint)/i.test(msg)
+          ? " — set the Jev endpoint to 'TypeSafe (Jev)': decision models never answer on /chat/completions"
+          : "";
         emit({
           kind: "info",
-          message: `Jev unavailable (${msg}) — continuing with rule-based policy only`,
+          message: `Jev unavailable (${msg})${hint} — continuing with rule-based policy only`,
           jev: true,
         });
       }
@@ -723,23 +790,41 @@ async function executeToolGated(
   if (jevChecked) res.jevGate = true;
   // A failure is exactly the "concerned" moment: show the page, don't guess.
   if (!res.ok) return withFailureShot(name, res, tabId);
+  // Tab moves redefine which tab the agent works on for every later call —
+  // tracked explicitly (and checkpointed) so perception can never drift to
+  // "whatever window the user happens to focus".
+  if (name === "tabs_create") {
+    const created = (res.payload as { tabId?: number } | undefined)?.tabId;
+    if (typeof created === "number") noteAgentTab(created);
+  } else if (name === "tabs_switch" && Number.isFinite(Number(args.tabId))) {
+    noteAgentTab(Number(args.tabId));
+  } else if (name === "tabs_close" && Number(args.tabId) === agentTabId) {
+    noteAgentTab(undefined);
+  }
   if (!AUTO_OBSERVE_TOOLS.has(name) || stopRequested) return res;
-  // Observe whichever tab is active NOW — tabs_create/tabs_switch moved it.
-  const obsTabId =
-    (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id ??
-    tabId;
+  // Observe whichever tab the agent is on NOW — tabs_create/tabs_switch moved it.
+  const obsTabId = (await agentTab()) ?? tabId;
   if (obsTabId === undefined) return res;
-  const observation = await observeAfterAction(obsTabId);
+  // Keystroke-level edits on canvas editors never go "quiet" (the editor keeps
+  // painting and saving), so a full settle budget there is pure dead time —
+  // ~10 s per key/type call in a live run. Submit-ish actions keep the budget.
+  const settles =
+    (name === "type" && args.submit !== true) ||
+    (name === "key" && !/enter/i.test(String(args.key ?? "")))
+      ? 3_500
+      : 10_000;
+  const observation = await observeAfterAction(obsTabId, settles);
   if (stopRequested) return res;
   const base = res.text ?? JSON.stringify(res.payload ?? null);
   if (!observation || observation.trim().length < 32) {
     // The action landed but the text tools see nothing: attach a screenshot so
     // the model verifies with its eyes instead of assuming nothing happened.
     const shot = await captureBlindShot(await adapterForMode(), obsTabId);
+    const label = shot ? await tabIdentity(obsTabId) : "";
     return shot
       ? {
           ...res,
-          text: `${base}\n\n--- page after action ---\n[The text tools see nothing — screenshot attached. LOOK at it to verify what the action did.]`,
+          text: `${base}\n\n--- page after action ---\n[The text tools see nothing on ${label} — screenshot attached. LOOK at it to verify what the action did.]`,
           image: shot,
         }
       : res;
@@ -769,9 +854,7 @@ async function executeTool(
   if (validation.error) {
     return { ok: false, error: describeToolFailure(validation.error.replace(/^ERROR: /, "")) };
   }
-  const targetTabId =
-    tabId ??
-    (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  const targetTabId = tabId ?? (await agentTab());
   if (targetTabId === undefined) {
     return { ok: false, error: describeToolFailure("no active tab") };
   }
@@ -822,13 +905,18 @@ async function startRun(
   // the next one.
   pendingUserInputs.length = 0;
   humanGate.reset();
+  // The agent starts on the tab the user is looking at; from here on every
+  // tool call targets THIS tracked tab (see agentTab), not "whatever window
+  // happens to be focused later".
+  agentTabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
   // Console/network capture starts with the run, so the read tools see this
   // run's traffic instead of an empty buffer. Observability extra: best
   // effort, never able to fail or slow a run.
   void (async () => {
     try {
-      const tabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
-      if (tabId !== undefined) await startNetlogCapture(tabId, await adapterForMode());
+      if (agentTabId !== undefined) {
+        await startNetlogCapture(agentTabId, await adapterForMode());
+      }
     } catch {
       // no capture on this transport — console_read/network_read say so
     }
@@ -874,6 +962,7 @@ async function startRun(
     mode,
     demo,
     conversationId: currentConv?.id,
+    tabId: agentTabId,
     stepIndex: 0,
     messages: seedMessages,
     startedAt: Date.now(),
@@ -896,6 +985,9 @@ async function maybeResume(trigger: string): Promise<void> {
     // Restore the task text too: history recording and Jev's risk state both
     // read it, and a resumed run never went through startRun.
     currentTask = cp.task;
+    // Restore the tab the run was driving so the resume continues on the same
+    // page instead of latching onto whatever tab is focused now.
+    agentTabId = cp.tabId;
     stopRequested = false;
     if (cp.conversationId && !cp.demo) {
       currentConv =

@@ -159,6 +159,54 @@ describe("run log folding", () => {
     expect(rec.totalTokens).toBe(120);
     expect(rec.turns[0]!.stats?.steps).toBe(3);
   });
+
+  it("flags estimated usage on the record and labels it in markdown", () => {
+    const rec = newTurnRecord("t", { at: 0 });
+    foldLogEvent(
+      rec,
+      {
+        kind: "done",
+        summary: "s",
+        stats: {
+          steps: 2,
+          totalTokens: 5_000,
+          outputTokens: 500,
+          inputTokens: 4_500,
+          tokensPerSec: 10,
+          contextTokens: 5_000,
+          contextWindow: 128_000,
+          elapsedMs: 1_000,
+          usageEstimated: true,
+        },
+      },
+      10,
+    );
+    expect(rec.tokensEstimated).toBe(true);
+    const md = toMarkdown([rec]);
+    expect(md).toContain("(estimated");
+    // A provider-reported run must NOT carry the label.
+    const clean = newTurnRecord("t2", { at: 0 });
+    foldLogEvent(
+      clean,
+      {
+        kind: "done",
+        summary: "s",
+        stats: {
+          steps: 1,
+          totalTokens: 100,
+          outputTokens: 10,
+          inputTokens: 90,
+          tokensPerSec: 10,
+          contextTokens: 100,
+          contextWindow: 128_000,
+          elapsedMs: 1_000,
+        },
+      },
+      5,
+    );
+    expect(clean.tokensEstimated).toBeUndefined();
+    expect(toMarkdown([clean])).not.toContain("(estimated");
+  });
 });
 
 describe("run log store helpers", () => {

@@ -58,11 +58,21 @@ export function shapeEvalResult(res: EvaluateResponse): EvalOutcome {
   // NaN, Infinity, -0 and bigints have no JSON form.
   if (r.unserializableValue !== undefined) return { ok: true, value: r.unserializableValue };
   if (r.value !== undefined) {
+    // Strings pass through AS TEXT. JSON.stringify on a string result wraps
+    // it in quotes and escapes every inner quote — and expressions commonly
+    // return JSON.stringify(...), so the model received double-encoded soup
+    // ("\"{\\\"value\\\":\\\"…&amp;…\\\"}\"") that wasted tokens and made a
+    // literal "&" indistinguishable from an escaped one.
+    if (typeof r.value === "string") return { ok: true, value: r.value.slice(0, 4_000) };
     return { ok: true, value: JSON.stringify(r.value ?? null).slice(0, 4_000) };
   }
   if (r.type === "undefined") return { ok: true, value: "null" };
   // Functions, symbols etc. don't serialize by value — fall back to their description.
-  return { ok: true, value: JSON.stringify(r.description ?? r.type).slice(0, 4_000) };
+  const described = r.description ?? r.type;
+  return {
+    ok: true,
+    value: (typeof described === "string" ? described : JSON.stringify(described)).slice(0, 4_000),
+  };
 }
 
 const EVAL_TIMEOUT_MS = 30_000;
@@ -109,7 +119,7 @@ async function evaluateVia<T extends EvaluateResponse>(
 registerTool({
   name: "evaluate_js",
   description:
-    "Evaluate a JavaScript expression in a page's main world via the DevTools protocol and return the JSON-stringified result (promises are awaited). Works on most sites, including ones with a strict Content-Security-Policy. Runs in the top document by default; pass `frame` to run it inside an iframe instead (the frame ids and URLs are listed under 'Frames:' in every snapshot). Note this reads the DOM — it cannot read content drawn into a <canvas> (e.g. the Google Docs editor), where no tool except screenshot can see anything. If it ever comes back CSP-BLOCKED, retry ONCE with bypass_csp:true rather than repeating the same call, or switch to read_page / snapshot and the ref-based action tools, which are never affected by CSP.",
+    "Evaluate a JavaScript expression in a page's main world via the DevTools protocol and return the result as text (strings come back verbatim; other values JSON-stringified; promises are awaited). Works on most sites, including ones with a strict Content-Security-Policy. Runs in the top document by default; pass `frame` to run it inside an iframe instead (the frame ids and URLs are listed under 'Frames:' in every snapshot). Note this reads the DOM — it cannot read content drawn into a <canvas> (e.g. the Google Docs editor), where no tool except screenshot can see anything. If it ever comes back CSP-BLOCKED, retry ONCE with bypass_csp:true rather than repeating the same call, or switch to read_page / snapshot and the ref-based action tools, which are never affected by CSP.",
   parameters: {
     type: "object",
     properties: {

@@ -85,6 +85,13 @@ export interface AgentSettings {
    */
   madman: boolean;
   /**
+   * Unattended runs: nobody is around to click confirmation cards, so the
+   * gate fails fast (~15 s) with an explicit "this route is unavailable"
+   * instead of idling the full 2 minutes. Safety is unchanged — gated
+   * actions are still never auto-approved. Off by default.
+   */
+  unattended: boolean;
+  /**
    * Jev (TypeSafe System-One) decision-model sidecar. Works alongside the
    * selected chat model — never replaces it. Off until a key is set; the
    * agent run never depends on Jev being reachable.
@@ -134,6 +141,8 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   thinking: "low",
   // Straight-laced by default; Madman mode is opt-in.
   madman: false,
+  // Attended by default: confirmations wait the full timeout for a human.
+  unattended: false,
   // Jev sidecar off until the user pastes a key (TypeSafe, or OpenRouter for
   // the chat-completions transport).
   jev: {
@@ -316,6 +325,8 @@ export function normalizeSettings(
     thinking: migrateThinking(merged),
     // Coerce: only a real `true` turns Madman mode on.
     madman: merged.madman === true,
+    // Same for unattended runs — an explicit opt-in, never inferred.
+    unattended: merged.unattended === true,
     // Jev sidecar: backfill partial stored objects; coerce the toggles.
     jev: normalizeJev(merged.jev),
     // Auto effort routing is on from rev 2. Before that the default `false`

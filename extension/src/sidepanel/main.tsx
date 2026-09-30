@@ -42,6 +42,7 @@ import { versionLabel } from "../shared/version";
 import {
   JEV_TRANSPORT_DEFAULTS,
   JEV_TRANSPORT_OPTIONS,
+  isJevDecisionsModel,
   type JevTransport,
 } from "../shared/jev";
 import {
@@ -1257,6 +1258,12 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 options={THINKING_LEVELS.map(({ value, label }) => ({ value, label }))}
                 onChange={(v) => set("thinking", v)}
               />
+              <Switch
+                checked={s.unattended}
+                onChange={(v) => set("unattended", v)}
+                title="Unattended runs"
+                hint="Nobody will click confirmations: sensitive actions fail fast (~15s) with a clear 'route unavailable' note instead of idling 2 minutes. Nothing is auto-approved"
+              />
             </section>
 
             <section class="set-group" style="--i:4">
@@ -1292,13 +1299,22 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                     title="Jev endpoint"
                     hint={
                       s.jev.transport === "openai"
-                        ? "Any OpenAI-compatible /chat/completions endpoint — use OpenRouter with your OpenRouter key. One model round-trip per decision (slower than TypeSafe, and probabilities are model-estimated)"
-                        : "TypeSafe's own decision API — calibrated probabilities, answers in milliseconds (needs a console.typesafe.ai key)"
+                        ? "Chat wire (/chat/completions) for CHAT models used as judges (e.g. openai/gpt-oss-20b) — one model round-trip per decision. A real Jev model (typesafe/jev-*) always rides the /systemone decisions wire instead"
+                        : "The System One decisions wire (/systemone) — calibrated probabilities, answers in milliseconds. Works with a console.typesafe.ai key, or an OpenRouter key at https://openrouter.ai/api/v1"
                     }
                     value={s.jev.transport}
                     options={JEV_TRANSPORT_OPTIONS}
                     onChange={(t) => set("jev", switchJevTransport(s.jev, t))}
                   />
+                  {s.jev.transport === "openai" &&
+                  isJevDecisionsModel(s.jev.model ?? "") ? (
+                    <p class="info-line is-jev">
+                      <span class="jev-pill">Jev</span>
+                      {(s.jev.model ?? "").trim()} is a decisions model — it rides
+                      the /systemone decisions wire automatically (chat/completions
+                      can never answer it)
+                    </p>
+                  ) : null}
                   <label class="field">
                     <span>
                       {s.jev.transport === "openai" ? "OpenRouter API key" : "TypeSafe API key"}

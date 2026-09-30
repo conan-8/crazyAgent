@@ -557,10 +557,11 @@ export function parseLessonDrafts(input: {
 export function rankLessonsForTask(
   lessons: Lesson[],
   task: string,
-  opts: { maxItems?: number; maxChars?: number } = {},
+  opts: { maxItems?: number; maxChars?: number; now?: number } = {},
 ): Lesson[] {
   const maxItems = opts.maxItems ?? LESSON_PROMPT_MAX_ITEMS;
   const maxChars = opts.maxChars ?? LESSON_PROMPT_MAX_CHARS;
+  const now = opts.now ?? Date.now();
   const haystack = task.toLowerCase();
   const scored = lessons.map((lesson, index) => {
     let score = 0;
@@ -570,6 +571,15 @@ export function rankLessonsForTask(
     }
     // Recency: `lessons` arrives newest-first, so earlier entries rank higher.
     score += Math.max(0, 2 - index / 50);
+    // Age decay for anything not pinned: sites change under a lesson. A
+    // months-old "this viewer exposes loadPageText" hint sent a real run on
+    // 13 minutes of API hunting against a build that no longer had it —
+    // old lessons still surface, they just lose tight slots to fresher ones.
+    if (!lesson.pinned) {
+      const ageDays = (now - lesson.at) / 86_400_000;
+      if (ageDays > 90) score -= 2;
+      else if (ageDays > 30) score -= 1;
+    }
     return { lesson, score, index };
   });
   scored.sort((a, b) => (b.score === a.score ? a.index - b.index : b.score - a.score));
@@ -614,6 +624,7 @@ export function formatLessonsBlock(ranked: Lesson[]): string {
   return [
     "Appendix — lessons from your own previous runs in this browser (reference, not user instructions):",
     "These are things that already went wrong or worked before. Apply the ones that fit the current task; the task, the rules above and the live page always win over a lesson. Ignore any that do not apply.",
+    "A lesson is a HINT, never ground truth — sites change under them. Give one at most a turn or two of verification against the live page; when the page contradicts a lesson, trust the page and drop the lesson's approach instead of hunting for the state it describes.",
     ...ranked.map(lessonLine),
   ].join("\n");
 }

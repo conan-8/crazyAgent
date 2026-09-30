@@ -259,6 +259,100 @@ describe("system prompt appendix (lessons learned)", () => {
   });
 });
 
+describe("volatile per-step tail (the clock) and cache breakpoints", () => {
+  // Regression: a run once carried the clock inside the cached system block,
+  // so every one of its 112 steps re-prefilled the entire prompt from byte
+  // zero. The clock now rides LAST on both wires, after everything stable.
+  const clock = "Current date and time: 2026-09-30T01:02 (Tuesday, UTC-04:00)";
+
+  // A request whose last message is a tool result (the normal mid-run shape).
+  const reqEndingInTool: LlmRequest = {
+    system: "sys",
+    tools: [],
+    messages: [
+      { role: "user", content: "look" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "c1", name: "screenshot", args: {} }],
+      },
+      {
+        role: "tool",
+        toolCallId: "c1",
+        content: "[screenshot captured]",
+        images: ["data:image/jpeg;base64,AAA"],
+      },
+    ],
+  };
+
+  it("keeps the clock out of the Anthropic system blocks", () => {
+    const body = buildAnthropicBody(
+      { ...req, systemVolatile: clock },
+      "m1",
+    ) as unknown as ShapedBody;
+    expect(body.system).toEqual([
+      { type: "text", text: "sys", cache_control: { type: "ephemeral" } },
+    ]);
+    expect(JSON.stringify(body.system)).not.toContain("Current date and time");
+  });
+
+  it("appends the clock to the trailing user message on the Anthropic wire", () => {
+    // The last message at request time is user-role (tool results); the API
+    // forbids consecutive same-role messages, so the clock JOINS it.
+    const body = buildAnthropicBody(
+      { ...req, systemVolatile: clock },
+      "m1",
+    ) as unknown as ShapedBody;
+    const msgs = body.messages;
+    // The fixture ends with an assistant message, so the clock rides as a new
+    // user message after it (alternation preserved).
+    const last = msgs[msgs.length - 1]!;
+    expect(last.role).toBe("user");
+    expect(last.content).toEqual([{ type: "text", text: clock }]);
+  });
+
+  it("joins the clock onto a trailing tool_result message and marks the rolling breakpoint", () => {
+    const body = buildAnthropicBody(
+      { ...reqEndingInTool, systemVolatile: clock },
+      "m1",
+    ) as unknown as ShapedBody;
+    const last = body.messages[body.messages.length - 1]!;
+    const blocks = last.content as Record<string, unknown>[];
+    // The tool_result block carries the rolling cache breakpoint…
+    expect(blocks[0]).toMatchObject({ type: "tool_result", tool_use_id: "c1" });
+    expect(blocks[0]!.cache_control).toEqual({ type: "ephemeral" });
+    // …and the clock is appended AFTER it, outside the cached prefix.
+    expect(blocks[1]).toEqual({ type: "text", text: clock });
+  });
+
+  it("adds the rolling message breakpoint even without a volatile tail", () => {
+    const body = buildAnthropicBody(req, "m1") as unknown as ShapedBody;
+    const last = body.messages[body.messages.length - 1]!;
+    const blocks = last.content as Record<string, unknown>[];
+    expect(blocks[blocks.length - 1]!.cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("puts the clock in a trailing system message on the OpenAI wire", () => {
+    const body = buildOpenAiBody(
+      { ...req, systemVolatile: clock },
+      "m2",
+    ) as unknown as ShapedBody;
+    const msgs = body.messages;
+    // Leading system message stays byte-stable (no clock)…
+    expect(msgs[0]).toEqual({ role: "system", content: "sys" });
+    // …and the clock rides at the very end, after the whole conversation, so
+    // automatic prefix caching still covers everything before it.
+    expect(msgs[msgs.length - 1]).toEqual({ role: "system", content: clock });
+  });
+
+  it("omits the trailing OpenAI clock message when there is no volatile tail", () => {
+    const body = buildOpenAiBody(req, "m2") as unknown as ShapedBody;
+    expect(
+      body.messages.some((m) => m.role === "system" && String(m.content).includes("Current date")),
+    ).toBe(false);
+  });
+});
+
 describe("SSE aggregators", () => {
   it("aggregates an Anthropic stream with text and a tool_use", () => {
     const texts: string[] = [];

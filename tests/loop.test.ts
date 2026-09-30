@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createStuckGuard,
+  estimateMessages,
   runAgentTask,
   truncateHistory,
   type ExecuteResult,
@@ -614,5 +615,80 @@ describe("madman tool_call labels", () => {
       (e): e is Extract<StepEvent, { kind: "tool_call" }> => e.kind === "tool_call",
     )!;
     expect(call.label).toBeUndefined();
+  });
+});
+
+describe("prompt-cache split and honest usage accounting", () => {
+  // The clock rides in a volatile tail, never inside the cached system block:
+  // a run that put it there re-prefilled its whole prompt on every one of 112
+  // steps. And when the provider reports no usage, the loop must estimate from
+  // what it actually SENT — not the raw checkpoint (whose base64 screenshots
+  // once logged "context 1215933/128000").
+  it("sends a per-step volatile clock tail and a stable system prompt", async () => {
+    const cp = makeCheckpoint();
+    const llm = new FakeLlm([
+      toolCall("snapshot", {}),
+      { text: "done", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    const { deps } = harness([], { llm });
+    await runAgentTask(cp, deps);
+    expect(llm.seen.length).toBeGreaterThanOrEqual(2);
+    for (const req of llm.seen) {
+      // Stable block carries rules + task, never the clock.
+      expect(req.system).toContain("Current task: task");
+      expect(req.system).not.toContain("Current date and time:");
+      // Volatile tail carries the clock.
+      expect(req.systemVolatile).toContain("Current date and time:");
+    }
+    // The stable block is byte-identical across steps (the cacheable prefix).
+    expect(llm.seen[0]!.system).toBe(llm.seen[1]!.system);
+  });
+
+  it("marks usage estimated and counts images flat when the provider reports none", async () => {
+    const cp = makeCheckpoint();
+    // A tool result carrying a big base64 image: the old fallback counted its
+    // chars/4 (~hundreds of thousands of tokens); the fix counts one flat
+    // per-image estimate and works from the truncated request view.
+    const bigImage = `data:image/jpeg;base64,${"A".repeat(400_000)}`;
+    const { events, deps } = harness(
+      [
+        { text: "shoot", toolCalls: [{ id: "c1", name: "screenshot", args: {} }], stopReason: "tool_use" },
+        { text: "done", toolCalls: [], stopReason: "end_turn" }, // no usage reported
+      ],
+      {
+        execute: async () => ({ ok: true, payload: null, image: bigImage }),
+      },
+    );
+    await runAgentTask(cp, deps);
+    const stats = (events.at(-1) as Extract<StepEvent, { kind: "done" }>).stats!;
+    expect(stats.usageEstimated).toBe(true);
+    // Nowhere near the 400k-char image's naive chars/4 (~100k) — one flat
+    // image estimate plus the small text, comfortably under the window.
+    expect(stats.contextTokens).toBeLessThan(20_000);
+    expect(stats.contextTokens).toBeGreaterThan(0);
+  });
+
+  it("leaves usage unmarked when the provider reports real numbers", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([
+      { text: "Done.", toolCalls: [], stopReason: "end_turn", usage: { inputTokens: 700, outputTokens: 50 } },
+    ]);
+    await runAgentTask(cp, deps);
+    const stats = (events.at(-1) as Extract<StepEvent, { kind: "done" }>).stats!;
+    expect(stats.usageEstimated).toBeUndefined();
+    expect(stats.totalTokens).toBe(750);
+  });
+
+  it("estimateMessages counts text at chars/4 and each image at a flat rate", () => {
+    expect(estimateMessages([{ role: "user", content: "abcd" }])).toBe(1);
+    expect(
+      estimateMessages([{ role: "user", content: "", images: ["data:1", "data:2"] }]),
+    ).toBe(2 * 1_500);
+    // Tool-call args are real context whether or not they live in content.
+    expect(
+      estimateMessages([
+        { role: "assistant", content: "", toolCalls: [{ id: "c", name: "n", args: { a: "xxxx" } }] },
+      ]),
+    ).toBeGreaterThan(0);
   });
 });

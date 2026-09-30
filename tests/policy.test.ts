@@ -215,6 +215,25 @@ describe("ConfirmGate", () => {
       reason: expect.stringContaining("timed out"),
     });
   });
+
+  it("names the timeout a closed route so the model moves on instead of guessing", async () => {
+    const { deps } = gateHarness({ timeoutMs: 20 });
+    const gate = new ConfirmGate(deps);
+    await gate.ready();
+    const out = (await gate.request(risk)) as { allow: false; reason: string };
+    // A bare "denied" left a real run convinced gated tools never work; the
+    // reason must say the route is unavailable and point at the next move.
+    expect(out.reason).toContain("route is unavailable");
+    expect(out.reason).toContain("do NOT retry");
+  });
+
+  it("re-reads a function timeoutMs per request (unattended runs fail fast)", async () => {
+    const { deps } = gateHarness({ timeoutMs: () => 20 });
+    const gate = new ConfirmGate(deps);
+    await gate.ready();
+    const out = await gate.request(risk);
+    expect(out).toMatchObject({ allow: false });
+  });
 });
 
 describe("assess — new capability tools (coords, upload, screenshot-to-disk)", () => {

@@ -110,6 +110,12 @@ export interface LogTurnRecord {
   /** Sum of every tool call in the record. */
   toolCalls: number;
   totalTokens?: number;
+  /**
+   * True when the provider never reported usage and the token numbers are the
+   * loop's own estimate. Estimates are labelled in every rendering so they are
+   * never mistaken for provider truth.
+   */
+  tokensEstimated?: boolean;
   /** True when this record was reopened after a service-worker resume. */
   resumed?: boolean;
 }
@@ -259,6 +265,9 @@ export function foldLogEvent(
       if (e.stats) {
         turn.stats = e.stats;
         rec.totalTokens = (rec.totalTokens ?? 0) + e.stats.totalTokens;
+        // Once any step had to estimate, the whole total is an estimate —
+        // label it so a reader never trusts it as provider-reported.
+        if (e.stats.usageEstimated) rec.tokensEstimated = true;
       }
       closeTurn(turn, at);
       rec.status = "done";
@@ -376,7 +385,11 @@ export function toMarkdown(records: LogTurnRecord[]): string {
     out.push(`- **updated:** ${iso(rec.updatedAt)}`);
     out.push(`- **duration:** ${fmtDuration(rec.durationMs)}`);
     out.push(`- **turns:** ${rec.turns.length} · **tool calls:** ${rec.toolCalls}`);
-    if (rec.totalTokens !== undefined) out.push(`- **tokens:** ${rec.totalTokens}`);
+    if (rec.totalTokens !== undefined) {
+      out.push(
+        `- **tokens:** ${rec.totalTokens}${rec.tokensEstimated ? " (estimated — the provider reported no usage)" : ""}`,
+      );
+    }
     if (rec.attachments?.length) {
       out.push(
         `- **attachments:** ${rec.attachments.map((a) => `${a.name} (${a.kind})`).join(", ")}`,
@@ -447,8 +460,9 @@ export function toMarkdown(records: LogTurnRecord[]): string {
       }
       if (turn.stats) {
         out.push("");
+        const est = turn.stats.usageEstimated ? " (estimated)" : "";
         out.push(
-          `_stats: ${turn.stats.steps} steps · ${turn.stats.totalTokens} tokens (${turn.stats.outputTokens} out) · ${turn.stats.tokensPerSec.toFixed(1)} tok/s · context ${turn.stats.contextTokens}/${turn.stats.contextWindow}_`,
+          `_stats: ${turn.stats.steps} steps · ${turn.stats.totalTokens} tokens${est} (${turn.stats.outputTokens} out) · ${turn.stats.tokensPerSec.toFixed(1)} tok/s · context ${turn.stats.contextTokens}/${turn.stats.contextWindow}_`,
         );
       }
       out.push("");

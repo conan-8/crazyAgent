@@ -182,6 +182,19 @@ export function truncateWithNote(text: string, max: number, what: string): strin
 }
 
 /**
+ * Render an input's value for the snapshot. A silent clip is worse than no
+ * value at all: a real run stared at `value="…Read &amp;"` — a 40-char cut of
+ * a longer string — and could not tell a truncated display from a literal
+ * "&amp;" in the field, burning ~20 minutes re-typing a title. Truncated
+ * values now say they were truncated, and how long the real value is.
+ */
+export function clipValue(value: string, max = 40): string {
+  return value.length <= max
+    ? value
+    : `${value.slice(0, max)}…[value truncated: ${value.length} chars total]`;
+}
+
+/**
  * Compact LLM-facing rendering of a snapshot: the main frame's URL, the text of
  * EVERY frame (main first, each labelled with its frame id and URL), a map of
  * the frames whose refs are addressable, and one note when the page paints its
@@ -204,7 +217,7 @@ export function formatSnapshot(
     ];
     if (e.disabled) bits.push("disabled");
     if (e.editable) bits.push("editable");
-    if (e.value && e.tag !== "button") bits.push(`value="${e.value.slice(0, 40)}"`);
+    if (e.value && e.tag !== "button") bits.push(`value="${clipValue(e.value)}"`);
     return bits.join(" ");
   });
   const parts = [
@@ -324,6 +337,21 @@ export function isBlind(snap: {
   return snap.elements.length === 0 && (snap.text ?? "").trim().length < 32;
 }
 
+/**
+ * Human-readable identity of a tab ("tab 123 \"Title\" (url) captured
+ * HH:MM:SS"), so every image an agent sees says WHICH page it shows. Never
+ * throws — an unidentified shot is still a shot.
+ */
+export async function tabIdentity(tabId: number): Promise<string> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const at = new Date().toISOString().slice(11, 19);
+    return `tab ${tabId} "${(tab.title ?? "").slice(0, 60)}" (${(tab.url ?? "").slice(0, 100)}) at ${at}`;
+  } catch {
+    return `tab ${tabId}`;
+  }
+}
+
 const IMAGE_URL_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)($|\?)/i;
 
 /**
@@ -390,7 +418,9 @@ registerTool({
       advice: "",
     };
     try {
-      const tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+      // The tab the agent is on (ctx.tabId) — not "whatever is focused",
+      // which can be a different window entirely.
+      const tab = await chrome.tabs.get(ctx.tabId).catch(() => undefined);
       report.url = tab?.url ?? "";
       report.tabAccess = tab ? "ok" : "no active tab";
     } catch (err) {
@@ -562,7 +592,11 @@ registerTool({
   async run(args, ctx) {
     const { dataUrl } = await ctx.adapter.screenshot(ctx.tabId);
     const jpeg = await downscaleJpeg(dataUrl);
-    if (args.save_to_disk !== true) return { dataUrl: jpeg };
+    // Stamp which tab/URL this image came from. A screenshot with no identity
+    // is how a real run convinced itself the tool was returning stale caches
+    // when it was actually capturing a different window's tab.
+    const ident = await tabIdentity(ctx.tabId);
+    if (args.save_to_disk !== true) return { dataUrl: jpeg, ident };
     // Downloads only ever gets a bare filename — never a path the model (or a
     // page that influenced it) could point at an arbitrary location.
     const filename = screenshotFilename(args.filename);
@@ -571,14 +605,19 @@ registerTool({
       filename,
       saveAs: false,
     });
-    return { dataUrl: jpeg, saved: { downloadId, filename } };
+    return { dataUrl: jpeg, saved: { downloadId, filename }, ident };
   },
   present(payload) {
-    const p = payload as { dataUrl: string; saved?: { downloadId: number; filename: string } };
+    const p = payload as {
+      dataUrl: string;
+      saved?: { downloadId: number; filename: string };
+      ident?: string;
+    };
+    const where = p.ident ? ` of ${p.ident}` : "";
     return {
       text: p.saved
-        ? `[screenshot captured and saved as ${p.saved.filename} — the image is attached below; look at it]`
-        : "[screenshot captured — the image is attached to this message; look at it]",
+        ? `[screenshot captured${where} and saved as ${p.saved.filename} — the image is attached below; look at it]`
+        : `[screenshot captured${where} — the image is attached to this message; look at it]`,
       image: p.dataUrl,
     };
   },

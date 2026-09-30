@@ -19,13 +19,29 @@ describe("shapeEvalResult", () => {
     expect(shapeEvalResult({ result: { type: "undefined" } })).toEqual({ ok: true, value: "null" });
   });
 
+  it("passes string results through verbatim — never double-encoded", () => {
+    // Expressions commonly return JSON.stringify(…); re-stringifying that
+    // produced "\"{\\\"a\\\":1}\" soup and made "&" vs "&amp;" ambiguous.
+    expect(shapeEvalResult({ result: { type: "string", value: '{"a":1}' } })).toEqual({
+      ok: true,
+      value: '{"a":1}',
+    });
+    expect(shapeEvalResult({ result: { type: "string", value: "Read & Respond" } })).toEqual({
+      ok: true,
+      value: "Read & Respond",
+    });
+    // Long strings still clip.
+    const long = shapeEvalResult({ result: { type: "string", value: "x".repeat(5_000) } });
+    expect((long as { value: string }).value.length).toBe(4_000);
+  });
+
   it("passes through unserializable numbers and describes functions", () => {
     expect(
       shapeEvalResult({ result: { type: "number", unserializableValue: "NaN" } }),
     ).toEqual({ ok: true, value: "NaN" });
     expect(
       shapeEvalResult({ result: { type: "function", description: "function f() {}" } }),
-    ).toEqual({ ok: true, value: '"function f() {}"' });
+    ).toEqual({ ok: true, value: "function f() {}" });
   });
 
   it("reports exceptions", () => {
@@ -117,6 +133,7 @@ describe("evaluate_js", () => {
       .run({ expression: "'ok'", bypass_csp: true }, ctxWith(send));
     expect(send.mock.calls[0]).toEqual([7, "Page.setBypassCSP", { enabled: true }]);
     expect(send.mock.calls[1]?.[1]).toBe("Runtime.evaluate");
-    expect(out).toMatchObject({ ok: true, value: '"ok"', cspBypass: expect.any(String) });
+    // String results pass through verbatim (no double-encoding).
+    expect(out).toMatchObject({ ok: true, value: "ok", cspBypass: expect.any(String) });
   });
 });

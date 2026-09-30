@@ -90,6 +90,35 @@ function anthropicSupportsThinking(model: string): boolean {
   return !/claude-(?:2|instant|3-5|3-(?:haiku|sonnet|opus))/i.test(model);
 }
 
+/**
+ * Anthropic tail: a rolling cache breakpoint on the last history block, then
+ * the per-step volatile text (the clock) as the final block of the last user
+ * message. The breakpoint makes each step's conversation a cached prefix for
+ * the next step (only the new tail is re-prefilled); the clock rides AFTER it,
+ * so a ticking clock can never invalidate the cache. The API requires
+ * alternating roles and the last message at request time is user-role, so the
+ * clock joins that message instead of starting a new one.
+ */
+export function applyAnthropicTail(
+  messages: unknown[],
+  volatile?: string,
+): void {
+  if (!messages.length) return;
+  const last = messages[messages.length - 1] as { role: string; content: unknown };
+  const blocks = Array.isArray(last.content)
+    ? (last.content as Record<string, unknown>[])
+    : null;
+  if (blocks?.length) {
+    blocks[blocks.length - 1]!.cache_control = { type: "ephemeral" };
+  }
+  if (!volatile) return;
+  if (blocks && last.role === "user") {
+    blocks.push({ type: "text", text: volatile });
+  } else {
+    messages.push({ role: "user", content: [{ type: "text", text: volatile }] });
+  }
+}
+
 export function buildAnthropicBody(
   req: LlmRequest,
   model: string,
@@ -118,12 +147,17 @@ export function buildAnthropicBody(
     },
   ];
   if (req.systemSuffix) system.push({ type: "text", text: req.systemSuffix });
+  const messages = toAnthropicMessages(req.messages);
+  // Volatile per-step tail (clock) + rolling message breakpoint — see
+  // applyAnthropicTail. NEVER fold the clock into the system blocks: it
+  // changes every step and would miss the cache from byte zero.
+  applyAnthropicTail(messages, req.systemVolatile);
   const body: Record<string, unknown> = {
     model,
     max_tokens: req.maxTokens ?? 4_096,
     system,
     tools,
-    messages: toAnthropicMessages(req.messages),
+    messages,
     stream: true,
   };
   const level = req.thinking ?? "off";
@@ -223,10 +257,19 @@ export function buildOpenAiBody(
     [strictOpenAi && reasoner ? "max_completion_tokens" : "max_tokens"]:
       req.maxTokens ?? 4_096,
     messages: [
-      // One system message on this wire: the appendix (lessons learned) is
-      // appended to the base prompt, keeping the cacheable prefix first.
+      // One stable system message on this wire: base rules + task (+ the
+      // per-run lessons appendix). It is byte-stable for the whole run, so the
+      // endpoint's automatic prefix cache covers it AND the entire growing
+      // conversation below it.
       { role: "system", content: req.systemSuffix ? `${req.system}\n\n${req.systemSuffix}` : req.system },
       ...toOpenAiMessages(req.messages),
+      // The per-step clock rides at the very END, after the conversation, so a
+      // ticking clock never sits inside the cached prefix. (Putting it in the
+      // leading system message — where it used to be — changed message[0] every
+      // step and defeated caching for the whole request.)
+      ...(req.systemVolatile
+        ? [{ role: "system", content: req.systemVolatile }]
+        : []),
     ],
     tools: req.tools.map((t) => ({
       type: "function",

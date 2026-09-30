@@ -75,19 +75,21 @@ export const JEV_DEFAULTS = {
 /**
  * How the sidecar reaches a decision model:
  *
- *   - `typesafe` → TypeSafe's own endpoint, `POST {baseUrl}/systemone`
- *     (Jev proper: calibrated single-pass decisions).
+ *   - `typesafe` → the System One wire, `POST {baseUrl}/systemone`
+ *     (Jev proper: calibrated single-pass decisions). TypeSafe's own endpoint
+ *     AND OpenRouter (`https://openrouter.ai/api/v1/systemone`) both serve it;
+ *     an OpenRouter key authenticates the OpenRouter copy.
  *   - `openai`   → any OpenAI-compatible chat endpoint (OpenRouter, OpenAI,
  *     a local vLLM…): the same typed questions are sent as ONE
  *     `POST {baseUrl}/chat/completions` with a strict JSON-Schema
  *     `response_format`, then parsed back into the same JevAnswer shapes.
  *
- * Why the second transport exists: OpenRouter lists TypeSafe as a provider but
- * routes no Jev model, and it does not implement `/systemone` at all — so an
- * OpenRouter key can only drive the sidecar through `openai`. The chat path is
- * functionally equivalent (same questions, same answer types, same fail-open
- * fallbacks) but is a full model round-trip: slower, and its probabilities are
- * model-estimated rather than calibrated.
+ * The chat wire is for CHAT models used as cheap judges (a full model
+ * round-trip: slower, probabilities model-estimated). A real Jev decisions
+ * model (`typesafe/jev-1.13`, `~typesafe/jev-latest`, …) NEVER answers there —
+ * the endpoint rejects it ("… is a decisions model and cannot be used with the
+ * chat/completions endpoint") — so `resolveJevTransport` moves those onto the
+ * System One wire whatever the picker says.
  */
 export type JevTransport = "typesafe" | "openai";
 
@@ -105,6 +107,28 @@ export const JEV_TRANSPORT_OPTIONS: { value: JevTransport; label: string }[] = [
 /** Anything unrecognised (including legacy absent values) means TypeSafe. */
 export function normalizeJevTransport(value: unknown): JevTransport {
   return value === "openai" ? "openai" : "typesafe";
+}
+
+/**
+ * A real Jev decisions model — `jev-*`, `typesafe/jev-*`, `~typesafe/jev-*`
+ * (jev-latest, jev-1.13, jev-router…). Such models answer ONLY on the System
+ * One / Decisions wire. Chat models used as judges (`openai/gpt-oss-20b`,
+ * `mock-jev-chat`, …) must NOT match: driving those over /chat/completions is
+ * the whole point of the `openai` transport.
+ */
+export function isJevDecisionsModel(model: string): boolean {
+  const cleaned = (model ?? "").trim().replace(/^~/, "");
+  const slug = cleaned.includes("/") ? cleaned.slice(cleaned.lastIndexOf("/") + 1) : cleaned;
+  return /^jev(?:[-._/]|$)/i.test(slug);
+}
+
+/**
+ * The wire a configured model must ride. A Jev decisions model always gets the
+ * System One wire — the chat wire can never answer it — and the redirect is
+ * visible to callers so the UI can say so instead of failing silently later.
+ */
+export function resolveJevTransport(transport: JevTransport, model: string): JevTransport {
+  return transport === "openai" && isJevDecisionsModel(model) ? "typesafe" : transport;
 }
 
 /** Endpoint + model defaults for a transport (used when a field is blank). */

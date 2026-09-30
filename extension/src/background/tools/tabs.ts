@@ -74,8 +74,17 @@ registerTool({
     properties: { url: { type: "string", description: "Absolute URL" } },
     required: ["url"],
   },
-  async run(args) {
-    const tab = await chrome.tabs.create({ url: String(args.url), active: true });
+  async run(args, ctx) {
+    // Create in the SAME window as the tab the agent is working on. A bare
+    // chrome.tabs.create lands in whatever window happens to be focused, and
+    // with several windows open the new tab is then invisible to screenshots
+    // of the agent's window (a live run lost ten minutes to exactly that).
+    const current = await chrome.tabs.get(ctx.tabId).catch(() => null);
+    const tab = await chrome.tabs.create({
+      url: String(args.url),
+      active: true,
+      ...(current ? { windowId: current.windowId } : {}),
+    });
     return { tabId: tab.id };
   },
 });
@@ -103,7 +112,17 @@ registerTool({
     required: ["tabId"],
   },
   async run(args) {
-    await chrome.tabs.update(Number(args.tabId), { active: true });
-    return { ok: true };
+    const tabId = Number(args.tabId);
+    // Activating the tab is not enough when it lives in a different window:
+    // perception (screenshots, snapshots) follows the FOCUSED window, so a
+    // switch that leaves focus elsewhere silently keeps observing the old
+    // page. Focus the tab's window too — that is what a user switching tabs
+    // actually does.
+    const tab = await chrome.tabs.get(tabId);
+    await chrome.tabs.update(tabId, { active: true });
+    if (tab.windowId !== undefined && tab.windowId !== chrome.windows.WINDOW_ID_NONE) {
+      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => null);
+    }
+    return { ok: true, tabId, windowId: tab.windowId };
   },
 });

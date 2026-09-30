@@ -38,6 +38,12 @@ export interface Checkpoint {
   demo?: DemoConfig;
   /** Chat thread this run belongs to (history + follow-up context). */
   conversationId?: string;
+  /**
+   * The tab the agent is working on. Tool calls target this tab (not
+   * "whatever happens to be focused"), and a resumed run picks the task back
+   * up on the same page instead of an unrelated active tab.
+   */
+  tabId?: number;
   stepIndex: number;
   messages: LlmMessage[];
   /** LLM tool specs frozen at run start (kept for faithful resume). */
@@ -125,6 +131,12 @@ export interface RunStats {
   elapsedMs: number;
   /** Reasoning tokens/text reported by the provider, when thinking was on. */
   reasoningChars?: number;
+  /**
+   * True when the provider did not report usage and these numbers are the
+   * loop's own estimate of the request it sent. Estimates must never render
+   * as if they were provider truth (a run once logged "context 1.2M/128k").
+   */
+  usageEstimated?: boolean;
 }
 
 /** Panel → service worker, over the long-lived port. */
