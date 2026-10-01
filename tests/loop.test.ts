@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  capCheckpointImages,
   createStuckGuard,
   estimateMessages,
   runAgentTask,
@@ -117,6 +118,112 @@ describe("runAgentTask", () => {
     ]);
     const done = events.at(-1);
     expect(done).toMatchObject({ kind: "done", summary: "All done!" });
+  });
+
+  it("does not end the run on an empty reply — it re-prompts the model", async () => {
+    // Some models close a step with a reasoning-only or completely empty
+    // reply. The loop used to read "no tool calls" as "final answer" and end
+    // the run as `task finished (no summary)` while the model was still
+    // mid-plan — the mid-run stop. An empty reply is a hiccup: store nothing
+    // for it (a contentless assistant turn is wire-invalid on OpenAI-style
+    // providers and 400s every later request on the thread), nudge the model,
+    // and keep going.
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([
+      toolCall("navigate", { url: "http://x" }),
+      { text: "", toolCalls: [], stopReason: "end_turn", reasoning: "thoughts only" },
+      { text: "All done!", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    // user → assistant(tool_calls) → tool result → user(nudge) → assistant.
+    expect(cp.messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "user",
+      "assistant",
+    ]);
+    expect(cp.messages[3]!.content).toContain("EMPTY");
+    // The run closes on the real answer, not on the dead reply.
+    expect(events.at(-1)).toMatchObject({ kind: "done", summary: "All done!" });
+  });
+
+  it("recovers a reply cut off at the output limit by raising the output cap", async () => {
+    // Reasoning that runs into max_tokens streams back nothing but thinking.
+    // The next attempt needs a bigger output budget, not the same wall again.
+    const cp = makeCheckpoint();
+    const llm = new FakeLlm([
+      { text: "", toolCalls: [], stopReason: "length", reasoning: "cut off mid-thought" },
+      { text: "Done.", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    const { events, deps } = harness([], { llm, maxTokens: 8_192 });
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    expect(llm.seen[0]!.maxTokens).toBe(8_192);
+    expect(llm.seen[1]!.maxTokens).toBeGreaterThan(8_192);
+    expect(
+      events.some((e) => e.kind === "info" && e.message.includes("output token limit")),
+    ).toBe(true);
+  });
+
+  it("falls back to the configured output cap when the raised one is rejected", async () => {
+    // Providers cap output per model (Anthropic 400s on max_tokens above it).
+    // A rejected recovery must not kill the run — retry at the configured cap.
+    const cp = makeCheckpoint();
+    let calls = 0;
+    const llm: LlmClient = {
+      async complete(req) {
+        calls++;
+        if (calls === 1) {
+          return { text: "", toolCalls: [], stopReason: "length" };
+        }
+        if ((req.maxTokens ?? 0) > 8_192) {
+          throw new Error("LLM API error 400: max_tokens: 16384 > 8192");
+        }
+        return { text: "Done.", toolCalls: [], stopReason: "end_turn" };
+      },
+    };
+    const { deps } = harness([], { llm, maxTokens: 8_192 });
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    // The raised-cap request is retried (and rejected) before the fallback.
+    expect(calls).toBeGreaterThanOrEqual(3);
+  }, 15_000);
+
+  it("stops honestly after repeated empty replies instead of looping", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([
+      { text: "", toolCalls: [], stopReason: "end_turn" },
+      { text: "", toolCalls: [], stopReason: "end_turn" },
+      { text: "", toolCalls: [], stopReason: "end_turn" },
+      { text: "", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    const outcome = await runAgentTask(cp, deps);
+    // "stopped", never "completed" — the task was NOT finished.
+    expect(outcome).toBe("stopped");
+    expect(
+      events.some((e) => e.kind === "error" && e.message.includes("no answer")),
+    ).toBe(true);
+    // The empty turns themselves leave no assistant message behind.
+    expect(
+      cp.messages.every((m) => m.role !== "assistant" || m.content || m.toolCalls?.length),
+    ).toBe(true);
+  });
+
+  it("keeps an empty-text assistant turn that carries tool calls", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness([
+      { text: "", toolCalls: [{ id: "c1", name: "click", args: { ref: "1" } }], stopReason: "tool_use" },
+      { text: "Done.", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    await runAgentTask(cp, deps);
+    const callTurn = cp.messages[1]!;
+    // The tool-call turn must survive (the tool result pairs with it) even
+    // with no prose; the wire mapper sends content null + tool_calls.
+    expect(callTurn.role).toBe("assistant");
+    expect(callTurn.content).toBe("");
+    expect(callTurn.toolCalls).toHaveLength(1);
   });
 
   it("reports final run stats on the done event", async () => {
@@ -500,6 +607,38 @@ describe("truncateHistory", () => {
     const omitted = out.filter((m) => m.content === "[older tool result omitted]");
     expect(omitted.length).toBeGreaterThan(0);
     expect(out.at(-1)?.content).not.toBe("[older tool result omitted]");
+  });
+});
+
+describe("capCheckpointImages", () => {
+  it("frees all but the newest MAX_LIVE_IMAGES screenshots in place", () => {
+    const messages: LlmMessage[] = [
+      { role: "user", content: "task" },
+      ...Array.from({ length: 6 }, (_, i) => ({
+        role: "tool" as const,
+        toolCallId: `t${i}`,
+        content: `shot ${i}`,
+        images: [`data:image/jpeg;base64,IMG${i}`],
+      })),
+    ];
+    capCheckpointImages(messages);
+    const kept = messages.filter((m) => m.images?.length);
+    // The loop's request view never re-sends more than the newest 4, so the
+    // older payloads must be released from the checkpoint itself (worker RAM).
+    expect(kept).toHaveLength(4);
+    expect(kept[0]?.images?.[0]).toBe("data:image/jpeg;base64,IMG2");
+    expect(messages[1]?.images).toBeUndefined();
+    // Text content is untouched — only image bytes are freed.
+    expect(messages[1]?.content).toBe("shot 0");
+  });
+
+  it("leaves a checkpoint within the allowance untouched", () => {
+    const messages: LlmMessage[] = [
+      { role: "user", content: "task" },
+      { role: "tool", toolCallId: "t0", content: "s", images: ["data:image/jpeg;base64,A"] },
+    ];
+    capCheckpointImages(messages);
+    expect(messages[1]?.images).toHaveLength(1);
   });
 });
 

@@ -6,6 +6,7 @@ import {
   forStorage,
   newConversation,
   summarize,
+  trimCardImages,
   type ChatBlock,
   type ConfirmMarker,
   type ToolCard,
@@ -162,11 +163,60 @@ describe("conversation folding", () => {
     const conv = newConversation("c6", "task title");
     foldUser(conv, "task title");
     conv.llm.push({ role: "tool", content: "x", images: ["data:image/jpeg;base64,BIG"] });
+    foldEvent(conv, { kind: "tool_call", stepIndex: 0, name: "screenshot", args: {} });
+    foldEvent(conv, {
+      kind: "tool_result",
+      stepIndex: 0,
+      name: "screenshot",
+      result: "ok",
+      ok: true,
+      image: "data:image/jpeg;base64,BIG",
+    });
     const summary = summarize(conv);
-    expect(summary).toMatchObject({ id: "c6", title: "task title", turns: 1 });
+    expect(summary).toMatchObject({ id: "c6", title: "task title", turns: 2 });
     const stored = forStorage(conv);
     expect(stored.llm[0]?.images).toBeUndefined();
     expect(conv.llm[0]?.images).toHaveLength(1); // original untouched
+    // Card screenshots must NOT be persisted either: embedding them in the
+    // stored thread is what bloated the store into an OOM source.
+    const storedCard = stored.turns[1]!.blocks.find(
+      (b) => b.kind === "tool",
+    ) as { card: ToolCard };
+    expect(storedCard.card.image).toBeUndefined();
+    // The live (in-memory) conversation keeps its image for display.
+    const liveCard = conv.turns[1]!.blocks.find((b) => b.kind === "tool") as {
+      card: ToolCard;
+    };
+    expect(liveCard.card.image).toBe("data:image/jpeg;base64,BIG");
+  });
+
+  it("trimCardImages keeps only the newest N screenshots", () => {
+    const conv = newConversation("c10", "t");
+    foldUser(conv, "t");
+    for (let i = 0; i < 6; i++) {
+      foldEvent(conv, { kind: "tool_call", stepIndex: i, name: "screenshot", args: {} });
+      foldEvent(conv, {
+        kind: "tool_result",
+        stepIndex: i,
+        name: "screenshot",
+        result: "ok",
+        ok: true,
+        image: `data:image/jpeg;base64,IMG${i}`,
+      });
+    }
+    trimCardImages(conv, 2);
+    const cards = conv.turns[1]!.blocks
+      .filter((b) => b.kind === "tool")
+      .map((b) => (b as { card: ToolCard }).card.image);
+    // Newest survive (in arrival order), the four older payloads are freed.
+    expect(cards).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "data:image/jpeg;base64,IMG4",
+      "data:image/jpeg;base64,IMG5",
+    ]);
   });
 
   it("folds reasoning deltas into one coalesced block", () => {

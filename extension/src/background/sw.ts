@@ -31,7 +31,7 @@ import { recordHistory } from "./history";
 import {
   deleteConversation,
   getConversation,
-  listConversations,
+  listConversationSummaries,
   saveConversation,
 } from "./conversations";
 import {
@@ -39,7 +39,7 @@ import {
   foldUser,
   forStorage,
   newConversation,
-  summarize,
+  trimCardImages,
   type Conversation,
 } from "../shared/chat";
 import {
@@ -52,6 +52,7 @@ import {
 import {
   clearRecords,
   deleteRecord,
+  findOpenRecord,
   getRecord,
   listRecords,
   listSummaries,
@@ -295,11 +296,15 @@ function emitNow(event: StepEvent): void {
   broadcast({ type: "agent.event", event });
   if (currentConv) {
     foldEvent(currentConv, event);
-    scheduleConvFlush(event.kind === "token_delta");
+    // The folded conversation is the worker's persistence copy — cap the
+    // screenshots it holds (the panel keeps its own, separately capped, for
+    // display). Unbounded base64 accumulation here was an OOM source.
+    trimCardImages(currentConv, 4);
+    scheduleConvFlush();
   }
   if (currentLog) {
     foldLogEvent(currentLog, event);
-    scheduleLogFlush(event.kind === "token_delta");
+    scheduleLogFlush();
   }
   if (event.kind === "done") {
     void recordHistory(currentTask, event);
@@ -328,19 +333,14 @@ let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Token deltas arrive per chunk — flushing on each would hammer storage.
- * Everything else (tool calls/results, confirmations, done) flushes at once so
- * the log survives a service-worker kill mid-turn.
+ * Everything is debounced to one write per second: with the per-record
+ * storage layout a flush rewrites the whole RUNNING record (tool results up
+ * to 8k chars each), so an immediate write on every tool event was both
+ * unnecessary and, under load, a churn source. Durability is bounded by the
+ * 1s window; run-end flushes explicitly (closeLogRecord / flushConv).
  */
-function scheduleLogFlush(deferred: boolean): void {
+function scheduleLogFlush(): void {
   if (!currentLog) return;
-  if (!deferred) {
-    if (logFlushTimer) {
-      clearTimeout(logFlushTimer);
-      logFlushTimer = null;
-    }
-    void flushLog();
-    return;
-  }
   if (!logFlushTimer) {
     logFlushTimer = setTimeout(() => {
       logFlushTimer = null;
@@ -491,8 +491,10 @@ function afterRun(rec: LogTurnRecord): void {
 /** The run a manual review targets: the newest finished one by default. */
 async function recordForReview(logId?: string): Promise<LogTurnRecord | null> {
   if (logId) return getRecord(logId);
-  const records = await listRecords();
-  return records.find((r) => r.status !== "running") ?? records[0] ?? null;
+  // Index-first: picking the newest finished run must not load the archive.
+  const sums = await listSummaries();
+  const pick = sums.find((s) => s.status !== "running") ?? sums[0];
+  return pick ? getRecord(pick.id) : null;
 }
 
 // ---- chat conversation (history) for the current run ----
@@ -500,12 +502,8 @@ let currentConv: Conversation | null = null;
 let currentCp: Checkpoint | null = null;
 let convFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
-function scheduleConvFlush(deferred: boolean): void {
+function scheduleConvFlush(): void {
   if (!currentConv) return;
-  if (!deferred) {
-    void flushConv();
-    return;
-  }
   if (!convFlushTimer) {
     convFlushTimer = setTimeout(() => {
       convFlushTimer = null;
@@ -610,7 +608,7 @@ async function runFrom(cp: Checkpoint): Promise<void> {
           for (const text of inputs) {
             if (currentConv) foldUser(currentConv, text);
           }
-          if (inputs.length) scheduleConvFlush(false);
+          if (inputs.length) scheduleConvFlush();
           return inputs;
         },
         execute: (name, args) => executeToolGated(name, args),
@@ -627,6 +625,13 @@ async function runFrom(cp: Checkpoint): Promise<void> {
     void debuggerAdapter.detachAll();
     const finished = currentLog;
     await closeLogRecord();
+    // Final conversation state must survive the run: the debounced flush may
+    // still be pending when the worker is about to go idle.
+    if (convFlushTimer) {
+      clearTimeout(convFlushTimer);
+      convFlushTimer = null;
+    }
+    await flushConv();
     await clearCheckpoint();
     // Only after the run is fully closed and its record persisted: whatever the
     // coach does next must not appear in the record it is reviewing.
@@ -999,9 +1004,7 @@ async function maybeResume(trigger: string): Promise<void> {
     if (cp.demo) {
       currentLog = null;
     } else {
-      const open = (await listRecords()).find(
-        (r) => r.status === "running" && r.conversationId === cp.conversationId,
-      );
+      const open = await findOpenRecord(cp.conversationId);
       if (open) {
         open.resumed = true;
         currentLog = open;
@@ -1039,10 +1042,11 @@ async function handleRequest(
       void startRun(msg.task, msg.mode, msg.demo, msg.conversationId, msg.attachments);
       break;
     case "history.list": {
-      const conversations = await listConversations();
+      // Summaries straight from the index — listing history must never
+      // deserialize every stored thread.
       port.postMessage({
         type: "history.list",
-        conversations: conversations.map(summarize),
+        conversations: await listConversationSummaries(),
       });
       break;
     }
@@ -1061,10 +1065,9 @@ async function handleRequest(
         }
       }
       await deleteConversation(msg.conversationId);
-      const conversations = await listConversations();
       port.postMessage({
         type: "history.list",
-        conversations: conversations.map(summarize),
+        conversations: await listConversationSummaries(),
       });
       break;
     }

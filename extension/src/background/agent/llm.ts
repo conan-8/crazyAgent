@@ -74,6 +74,35 @@ export function toAnthropicMessages(messages: LlmMessage[]): unknown[] {
       out.push({ role: "user", content: blocks });
     }
   }
+  return mergeAdjacentRoles(out);
+}
+
+/**
+ * Anthropic's wire wants strictly alternating roles, and the loop can leave
+ * two same-role messages in a row: a dropped empty assistant turn, the
+ * harness's "continue" nudge after a dead reply, or mid-run user steering all
+ * produce runs like `tool results → user → user`. Merge adjacent same-role
+ * messages (concatenating their content blocks) so those histories stay legal
+ * here too — consecutive same-role messages are only free on the OpenAI wire.
+ */
+export function mergeAdjacentRoles(messages: unknown[]): unknown[] {
+  const out: unknown[] = [];
+  for (const m of messages) {
+    const prev = out[out.length - 1] as
+      | { role: string; content: unknown[] }
+      | undefined;
+    const cur = m as { role: string; content: unknown[] };
+    if (
+      prev &&
+      prev.role === cur.role &&
+      Array.isArray(prev.content) &&
+      Array.isArray(cur.content)
+    ) {
+      prev.content = [...prev.content, ...cur.content];
+      continue;
+    }
+    out.push(m);
+  }
   return out;
 }
 
@@ -187,6 +216,17 @@ export function toOpenAiMessages(messages: LlmMessage[]): unknown[] {
       out.push({ role: "user", content });
       i++;
     } else if (m.role === "assistant") {
+      // An assistant turn with neither text nor tool calls carries no
+      // information, and OpenAI-compatible providers reject it outright
+      // (DeepSeek: "The content field is a required field."; Moonshot:
+      // "assistant must provide content, reasoning_content or tool_calls").
+      // One such turn — e.g. a stored empty final answer — 400s EVERY later
+      // request on the thread, so drop it at wire-build time. The resulting
+      // consecutive user messages are legal on this wire.
+      if (!m.content && !m.toolCalls?.length) {
+        i++;
+        continue;
+      }
       out.push({
         role: "assistant",
         content: m.content || null,

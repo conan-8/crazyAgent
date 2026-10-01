@@ -234,11 +234,46 @@ export function summarize(conv: Conversation): ConversationSummary {
   };
 }
 
-/** Storage trim: screenshot bytes live on display cards, not in LLM context. */
+/**
+ * Storage trim: NO screenshot bytes are persisted — neither in the LLM
+ * transcript nor on display cards. The panel shows captures live from the
+ * event stream while a run is active; embedding them in the stored thread
+ * grew the conversation store into tens of megabytes that every flush had to
+ * re-serialize, which is what OOM-crash-looped the extension process under
+ * load. Historical threads keep the tool cards, minus the image payload.
+ */
 export function forStorage(conv: Conversation): Conversation {
   return {
     ...conv,
-    turns: conv.turns.map((t) => ({ ...t })),
+    turns: conv.turns.map((t) => ({
+      ...t,
+      blocks: t.blocks.map((b) =>
+        b.kind === "tool" && b.card.image !== undefined
+          ? { kind: "tool" as const, card: { ...b.card, image: undefined } }
+          : b,
+      ),
+    })),
     llm: conv.llm.map((m) => ({ ...m, images: undefined })),
   };
+}
+
+/**
+ * In-place RAM trim: keep only the newest `keep` card screenshots in a folded
+ * conversation and drop the older base64 payloads. Both live consumers (the
+ * worker's persistence copy and the panel's display copy) fold every capture
+ * into card state; without this a vision-heavy run grows the conversation —
+ * and in the panel the decoded <img> bitmaps, several MB each — without bound
+ * until the extension process is killed.
+ */
+export function trimCardImages(conv: Conversation, keep = 4): void {
+  let seen = 0;
+  for (let ti = conv.turns.length - 1; ti >= 0; ti--) {
+    const blocks = conv.turns[ti]!.blocks;
+    for (let bi = blocks.length - 1; bi >= 0; bi--) {
+      const b = blocks[bi]!;
+      if (b.kind !== "tool" || b.card.image === undefined) continue;
+      seen += 1;
+      if (seen > keep) b.card.image = undefined;
+    }
+  }
 }

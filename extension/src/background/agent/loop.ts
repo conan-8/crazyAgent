@@ -95,6 +95,51 @@ const LLM_ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [1_000, 3_000];
 
 /**
+ * Recovery budget for replies that carry no answer (see the non-answer gate
+ * below). A reasoning model can burn its whole output budget on thinking and
+ * stream back nothing at all; each such reply gets a re-prompt and — when it
+ * was an output-limit truncation — a doubled output cap, until this many have
+ * piled up in a row and the run stops honestly instead of claiming success.
+ */
+const MAX_EMPTY_REPLIES = 3;
+/** Ceiling for the truncation-driven output-cap raise (providers cap output). */
+const MAX_OUTPUT_TOKENS = 32_000;
+
+/**
+ * What the loop tells a model whose last reply carried no answer and no tool
+ * call. It lands as an ordinary user turn, so it survives checkpointing and
+ * the model sees its own dead end.
+ */
+function emptyReplyNudge(truncated: boolean): string {
+  return (
+    "[harness] Your previous reply arrived EMPTY — no answer text and no tool calls" +
+    (truncated ? " (the output token limit cut it off mid-stream)" : "") +
+    ". That is not a completion and the task is NOT done. Continue from where you " +
+    "were: call the next tool, or — only if the work is genuinely complete — give " +
+    "the final answer in plain text."
+  );
+}
+
+/**
+ * Free screenshot bytes the loop will never send again, IN PLACE on the raw
+ * checkpoint. `truncateHistory` already strips all but the newest
+ * MAX_LIVE_IMAGES images from every REQUEST VIEW — but the view is a copy, so
+ * the checkpoint itself kept every capture ever taken alive in worker RAM for
+ * the whole run (hundreds of KB of base64 each; a vision-heavy run reached
+ * tens of megabytes and helped OOM-kill the extension process). Nothing the
+ * model ever sees changes: dropped images were already invisible to it.
+ */
+export function capCheckpointImages(messages: LlmMessage[]): void {
+  let seen = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (!m.images?.length) continue;
+    seen += m.images.length;
+    if (seen > MAX_LIVE_IMAGES) m.images = undefined;
+  }
+}
+
+/**
  * Estimate the tokens of a REQUEST VIEW of the history (what the provider is
  * actually sent), not the raw checkpoint: message text + tool-call args at
  * chars/4, attached images at a flat per-image estimate.
@@ -214,13 +259,15 @@ export async function runAgentTask(
   // Uncapped by default. `Infinity` keeps the loop condition identical to the
   // capped path, so there is one code path rather than two.
   const stepCap = deps.stepCap ?? Number.POSITIVE_INFINITY;
-  // What history may occupy after system prompt, tool specs and the reply are
-  // paid for — the old char-only budget let tool-call args balloon past the
-  // window (a real run ended at 131k tokens in a 128k window).
-  const historyTokenBudget = Math.max(
-    4_000,
-    contextWindow - (deps.maxTokens ?? 4_096) - CONTEXT_RESERVE_TOKENS,
-  );
+  // Effective output cap. It starts at the configured value and is raised when
+  // a reply comes back truncated at the limit (a reasoning model happily spends
+  // the whole budget thinking and streams no answer at all) — with a fallback
+  // to the configured cap if the provider rejects the larger one.
+  const baseMaxTokens = deps.maxTokens ?? 4_096;
+  let maxTokens = baseMaxTokens;
+  // Replies that carried no answer and no tool call, in a row. Bounded so a
+  // model that keeps coming back empty stops honestly instead of looping.
+  let emptyReplies = 0;
   // The stable system prompt (rules + task) is byte-identical for the whole
   // run — built once. Only the clock is per-step, and it rides in
   // systemVolatile at the END of the request so provider prompt caching hits
@@ -247,6 +294,14 @@ export async function runAgentTask(
     }
 
     const now = new Date();
+    // What history may occupy after system prompt, tool specs and the reply are
+    // paid for — the old char-only budget let tool-call args balloon past the
+    // window (a real run ended at 131k tokens in a 128k window). Recomputed
+    // per step because the output cap can grow after a truncation.
+    const historyTokenBudget = Math.max(
+      4_000,
+      contextWindow - maxTokens - CONTEXT_RESERVE_TOKENS,
+    );
     // One truncated view per step, used for BOTH the request and the fallback
     // usage estimate below — the estimate used to run against the raw
     // checkpoint (every screenshot ever taken, base64 counted as chars/4) and
@@ -265,14 +320,27 @@ export async function runAgentTask(
           systemVolatile: buildSystemVolatile(now),
           messages: history,
           tools,
-          maxTokens: deps.maxTokens,
+          maxTokens,
           thinking: deps.thinking,
         },
         (text) => deps.emit({ kind: "token_delta", text }),
         (text) => deps.emit({ kind: "reasoning_delta", text }),
       );
     } catch (err) {
-      deps.emit({ kind: "error", message: `LLM call failed: ${String((err as Error)?.message ?? err)}` });
+      const message = String((err as Error)?.message ?? err);
+      if (maxTokens > baseMaxTokens) {
+        // The raised output cap is the likely culprit: some providers 400 on
+        // max_tokens above the model's own limit. Drop back to the configured
+        // cap and run the step again rather than dying mid-task over a
+        // recovery that was itself optional.
+        maxTokens = baseMaxTokens;
+        deps.emit({
+          kind: "info",
+          message: `LLM call failed (${message}) — retrying with the configured output cap ${baseMaxTokens}`,
+        });
+        continue;
+      }
+      deps.emit({ kind: "error", message: `LLM call failed: ${message}` });
       return finish(cp, deps, "stopped", lastStats);
     }
 
@@ -307,22 +375,81 @@ export async function runAgentTask(
     lastStats = stats;
     deps.emit({ kind: "usage", ...stats });
 
-    cp.messages.push({
-      role: "assistant",
-      content: result.text,
-      toolCalls: result.toolCalls.length ? result.toolCalls : undefined,
-      // Persist reasoning only when Anthropic signed it: the signature marks a
-      // thinking block that MUST be replayed on the tool-use continuation.
-      // OpenAI/DeepSeek reasoning has no signature and is streamed live to the
-      // UI only, so we don't bloat the checkpoint replaying it back.
-      thinking: result.reasoningSignature ? result.reasoning || undefined : undefined,
-      thinkingSignature: result.reasoningSignature || undefined,
-    });
+    // Non-answer gate. A reply with no tool calls only ends the task when it
+    // actually CONTAINED an answer: reasoning models routinely stream a long
+    // thinking block and nothing else — often because the output limit cut the
+    // stream mid-reasoning — and the loop used to read "no tool calls" as
+    // "final answer" and close the run as `task finished (no summary)` while
+    // the model was still mid-plan. That is the mid-run stop the user sees;
+    // treat it as a hiccup and keep going instead.
+    const truncated =
+      result.stopReason === "length" || result.stopReason === "max_tokens";
+    if (!result.toolCalls.length && (!result.text.trim() || truncated)) {
+      emptyReplies += 1;
+      if (emptyReplies > MAX_EMPTY_REPLIES) {
+        deps.emit({
+          kind: "error",
+          message: `${emptyReplies} replies in a row carried no answer and no tool calls — stopping the run instead of pretending the task is done`,
+        });
+        return finish(cp, deps, "stopped", lastStats);
+      }
+      if (truncated && maxTokens < MAX_OUTPUT_TOKENS) {
+        // The reply hit the output cap — almost always thinking, not the
+        // answer. Give the next attempt more room instead of re-prompting the
+        // model to repeat the same wall.
+        maxTokens = Math.min(maxTokens * 2, MAX_OUTPUT_TOKENS);
+        deps.emit({
+          kind: "info",
+          message: `reply was cut off at the output token limit — raising the cap to ${maxTokens} and continuing`,
+        });
+      } else {
+        deps.emit({
+          kind: "info",
+          message: truncated
+            ? `reply was cut off at the output limit (cap already ${maxTokens}) — asking the model to continue`
+            : "the model returned an empty reply — asking it to continue",
+        });
+      }
+      cp.messages.push({ role: "user", content: emptyReplyNudge(truncated) });
+      cp.stepIndex = step + 1;
+      cp.updatedAt = Date.now();
+      capCheckpointImages(cp.messages);
+      await deps.save(cp);
+      continue;
+    }
+    emptyReplies = 0;
+
+    const signedThinking = result.reasoningSignature
+      ? result.reasoning || undefined
+      : undefined;
+    // An assistant turn with no text AND no tool calls is wire-invalid for
+    // OpenAI-compatible providers and carries nothing (DeepSeek: "The content
+    // field is a required field."; Moonshot: "assistant must provide content,
+    // reasoning_content or tool_calls"), and one stored empty turn 400s EVERY
+    // later request on the thread. The non-answer gate above now recovers from
+    // those replies, so this is only a belt-and-braces guard; leave nothing
+    // behind rather than a poisoned transcript. Signed thinking is only
+    // replayable inside a tool-use continuation, so it does not justify
+    // keeping a call-less empty turn.
+    if (result.toolCalls.length || result.text) {
+      cp.messages.push({
+        role: "assistant",
+        content: result.text,
+        toolCalls: result.toolCalls.length ? result.toolCalls : undefined,
+        // Persist reasoning only when Anthropic signed it: the signature marks a
+        // thinking block that MUST be replayed on the tool-use continuation.
+        // OpenAI/DeepSeek reasoning has no signature and is streamed live to the
+        // UI only, so we don't bloat the checkpoint replaying it back.
+        thinking: signedThinking,
+        thinkingSignature: result.reasoningSignature || undefined,
+      });
+    }
 
     if (!result.toolCalls.length) {
       // Final answer — the task is done.
       cp.done = true;
       cp.updatedAt = Date.now();
+      capCheckpointImages(cp.messages);
       await deps.save(cp);
       deps.emit({
         kind: "done",
@@ -403,6 +530,7 @@ export async function runAgentTask(
 
     cp.stepIndex = step + 1;
     cp.updatedAt = Date.now();
+    capCheckpointImages(cp.messages);
     await deps.save(cp);
   }
   return finish(cp, deps, "capped", lastStats, stepCap);

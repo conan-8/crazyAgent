@@ -38,6 +38,81 @@ type ShapedBody = {
 };
 
 describe("provider request shaping", () => {
+  it("drops a contentless assistant turn on the OpenAI wire", () => {
+    // A stored empty final answer used to poison the thread forever: DeepSeek
+    // 400s with "The content field is a required field.", Moonshot with
+    // "assistant must provide content, reasoning_content or tool_calls".
+    const poisoned: LlmRequest = {
+      ...req,
+      messages: [
+        { role: "user", content: "first task" },
+        { role: "assistant", content: "" },
+        { role: "user", content: "follow-up" },
+      ],
+    };
+    const body = buildOpenAiBody(poisoned, "m2") as unknown as ShapedBody;
+    // system, user, user — the empty assistant is gone; consecutive user
+    // messages are legal on this wire.
+    expect(body.messages.map((m) => m.role)).toEqual(["system", "user", "user"]);
+  });
+
+  it("keeps an empty-text assistant turn that carries tool_calls", () => {
+    const withCalls: LlmRequest = {
+      ...req,
+      messages: [
+        { role: "user", content: "go" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "c1", name: "click", args: { ref: "1" } }],
+        },
+        { role: "tool", toolCallId: "c1", content: "ok" },
+      ],
+    };
+    const body = buildOpenAiBody(withCalls, "m2") as unknown as ShapedBody;
+    const asst = body.messages[2] as unknown as {
+      content: unknown;
+      tool_calls?: unknown[];
+    };
+    // null content + tool_calls is the OpenAI idiom; the call must survive
+    // (the following tool result pairs with it).
+    expect(asst.tool_calls).toHaveLength(1);
+    expect(asst.content).toBeNull();
+  });
+
+  it("gives a contentless assistant turn a placeholder on the Anthropic wire", () => {
+    const out = toAnthropicMessages([
+      { role: "user", content: "a" },
+      { role: "assistant", content: "" },
+      { role: "user", content: "b" },
+    ]) as { role: string; content: { type: string; text?: string }[] }[];
+    // Anthropic requires alternating roles, so the empty turn is kept with a
+    // minimal text block instead of being dropped.
+    expect(out[1]!.role).toBe("assistant");
+    expect(out[1]!.content).toEqual([{ type: "text", text: "…" }]);
+  });
+
+  it("merges adjacent same-role messages on the Anthropic wire", () => {
+    // Tool results followed by the harness's "continue" nudge (or any user
+    // steering) leave two user messages in a row; Anthropic's wire wants
+    // alternating roles, so they merge into one message with both blocks.
+    const out = toAnthropicMessages([
+      { role: "user", content: "task" },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "c1", name: "click", args: { ref: "1" } }],
+      },
+      { role: "tool", toolCallId: "c1", content: "ok" },
+      { role: "user", content: "keep going" },
+    ]) as { role: string; content: { type: string; text?: string }[] }[];
+    expect(out.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    // The merged tail keeps the tool_result first (Anthropic's rule) and the
+    // nudge text after it.
+    expect(out[2]!.content.map((b) => b.type)).toEqual(["tool_result", "text"]);
+    expect(out[2]!.content[1]!.text).toBe("keep going");
+  });
+
   it("builds an Anthropic body with tool_use/tool_result blocks and images", () => {
     const body = buildAnthropicBody(req, "m1") as unknown as ShapedBody;
     expect(body.model).toBe("m1");

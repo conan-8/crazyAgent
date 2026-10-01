@@ -26,6 +26,7 @@ import {
   foldEvent,
   foldUser,
   newConversation,
+  trimCardImages,
   type ChatBlock,
   type ChatTurn,
   type ToolCard,
@@ -2135,9 +2136,17 @@ function App() {
               steps: s.steps,
               reasoningChars: s.reasoningChars,
             });
-            if (currentConv) foldEvent(currentConv, msg.event);
+            if (currentConv) {
+              foldEvent(currentConv, msg.event);
+              // Cap the screenshots the panel holds: every mounted <img> keeps
+              // a multi-MB decoded bitmap alive in the extension process, and
+              // a vision-heavy run used to accumulate ALL of them until the
+              // process was OOM-killed (the extension vanished from the bar).
+              trimCardImages(currentConv, 6);
+            }
           } else if (currentConv) {
             foldEvent(currentConv, msg.event);
+            trimCardImages(currentConv, 6);
           }
           for (const listener of listeners) listener(msg.event);
           if (msg.event.kind === "done") setRunning(false);
@@ -2212,10 +2221,15 @@ function App() {
     if (!running) return;
     runStartRef.current = Date.now();
     setElapsed(0);
+    // The display ticks every second; the port ping (which resets the SW's
+    // ~30s idle teardown and doubles as a resume probe) only needs to ride
+    // every 5th tick — pinging at 1s was pure churn under load.
+    let ticks = 0;
     const timer = setInterval(() => {
+      ticks += 1;
       setPings((p) => p + 1);
       setElapsed(Date.now() - runStartRef.current);
-      postPort?.({ kind: "ping" });
+      if (ticks % 5 === 1) postPort?.({ kind: "ping" });
     }, 1_000);
     return () => clearInterval(timer);
   }, [running]);
@@ -2481,18 +2495,38 @@ function App() {
     setSettings: (s: AgentSettings) => saveSettings(s).then(refreshSettings),
     // chat/history surface
     currentConversation: () => (currentConv ? structuredClone(currentConv) : null),
-    conversations: () =>
-      chrome.storage.local
-        .get("baConversations")
-        .then((r) => (r.baConversations as Conversation[]) ?? []),
+    /**
+     * All stored threads, newest-first — same shape the smokes have always
+     * seen, but assembled from the per-conversation keys via the summary
+     * index (the legacy single `baConversations` array no longer exists).
+     */
+    conversations: async (): Promise<Conversation[]> => {
+      const head = await chrome.storage.local.get("baConvIndex");
+      const index = (head.baConvIndex as ConversationSummary[] | undefined) ?? [];
+      if (!index.length) return [];
+      const keys = index.map((s) => `baConv:${s.id}`);
+      const out = await chrome.storage.local.get(keys);
+      return keys.flatMap((k) => {
+        const c = out[k] as Conversation | undefined;
+        return c ? [c] : [];
+      });
+    },
     openConversation,
     deleteConversation,
     newChat,
     // run-log surface (timestamped per-turn chat + tool archive)
-    logs: () =>
-      chrome.storage.local
-        .get("baRunLogs")
-        .then((r) => (r.baRunLogs as LogTurnRecord[]) ?? []),
+    /** All archived run records, newest-first, via the summary index. */
+    logs: async (): Promise<LogTurnRecord[]> => {
+      const head = await chrome.storage.local.get("baLogIndex");
+      const index = (head.baLogIndex as LogSummary[] | undefined) ?? [];
+      if (!index.length) return [];
+      const keys = index.map((s) => `baLog:${s.id}`);
+      const out = await chrome.storage.local.get(keys);
+      return keys.flatMap((k) => {
+        const r = out[k] as LogTurnRecord | undefined;
+        return r ? [r] : [];
+      });
+    },
     logsUI: () => ({ open: showLogs, detail: logDetail?.id ?? null }),
     lessons: () =>
       chrome.storage.local
