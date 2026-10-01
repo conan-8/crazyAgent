@@ -24,7 +24,7 @@ import { DebuggerAdapter } from "./adapters/debugger";
 import { CdpAdapter } from "./adapters/cdp";
 import type { BrowserAdapter } from "./adapters/types";
 import { toolRegistry, toLlmTool, validateToolArgs } from "./tools/types";
-import { runAgentTask, type ExecuteResult } from "./agent/loop";
+import { runAgentTask, type ExecuteBatch, type ExecuteResult } from "./agent/loop";
 import { createLlmClient } from "./agent/llm";
 import { loadSettings } from "./settings";
 import { recordHistory } from "./history";
@@ -355,6 +355,21 @@ async function flushLog(): Promise<void> {
   await saveRecord(rec);
 }
 
+/**
+ * Provider/model stamp for a log record. Without it an exported log cannot be
+ * attributed: per-step latency and prompt-cache behaviour are properties of the
+ * endpoint, so "why was this run slow?" is unanswerable after the fact. Failing
+ * to read settings must never block the record — an unstamped run still logs.
+ */
+async function connectionStamp(): Promise<{ provider?: string; model?: string }> {
+  try {
+    const s = await loadSettings();
+    return { provider: s.provider || undefined, model: s.model || undefined };
+  } catch {
+    return {};
+  }
+}
+
 /** Open a fresh log record for a new run. */
 async function openLogRecord(
   task: string,
@@ -365,6 +380,7 @@ async function openLogRecord(
   currentLog = newTurnRecord(task, {
     conversationId,
     mode,
+    ...(await connectionStamp()),
     attachments: attachments?.map((a) => ({ name: a.name, kind: a.kind })),
   });
   await flushLog();
@@ -599,6 +615,7 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         contextWindow: settings.contextWindow,
         thinking,
         madman: settings.madman,
+        batchActions: settings.batchActions === true,
         judgeAvailable:
           jevEnabled && (cp.toolSpecs?.some((t) => t.name === "judge") ?? false),
         lessonsBlock,
@@ -611,7 +628,7 @@ async function runFrom(cp: Checkpoint): Promise<void> {
           if (inputs.length) scheduleConvFlush();
           return inputs;
         },
-        execute: (name, args) => executeToolGated(name, args),
+        execute: (name, args, batch) => executeToolGated(name, args, batch),
       });
     }
   } catch (err) {
@@ -659,7 +676,14 @@ const AUTO_OBSERVE_TOOLS = new Set([
   "tabs_switch",
 ]);
 
-const OBSERVATION_MAX_CHARS = 12_000;
+/**
+ * Cap on one auto-observation. This text is re-sent on every subsequent step
+ * of the run inside the cached prefix, so its size is not a one-off cost: at
+ * 12k chars the observations alone filled the history budget in ~10 actions
+ * and forced the truncator to start rewriting the front of the conversation.
+ * The model acts on refs and a short text digest; the rest was ballast.
+ */
+const OBSERVATION_MAX_CHARS = 6_000;
 
 /**
  * Last full observation per tab, for the unchanged-page collapse: a canvas
@@ -667,6 +691,68 @@ const OBSERVATION_MAX_CHARS = 12_000;
  * model gains nothing from a byte-identical dump.
  */
 const lastObservations = new Map<number, string>();
+
+/**
+ * Tools whose whole output is a page observation — the ones the dedupe below
+ * applies to. Actions are deliberately absent: their result carries the action's
+ * own outcome, which is never redundant.
+ */
+const OBSERVATION_ONLY_TOOLS = new Set(["snapshot", "read_page"]);
+
+/**
+ * The last explicit perception text handed to the model, per tab. Kept
+ * separate from `lastObservations` (which holds the auto-observation text and
+ * drives the unchanged-page collapse for canvas editors): mixing the two would
+ * let a `snapshot filter:'interactive'` overwrite the default-format text that
+ * per-keystroke collapse depends on.
+ */
+const lastPerceptionText = new Map<number, string>();
+
+/** A digest cut off mid-page cannot be compared safely — the tail is unseen. */
+function isTruncatedObservation(text: string): boolean {
+  return text.includes("[truncated");
+}
+
+/**
+ * Collapse a perception result that is identical (modulo the volatile
+ * time/save-state flap) to the observation the model just received.
+ *
+ * Returns null when there is nothing to collapse — a changed page, an image
+ * result, a failure, or no prior read for this tab — so the caller falls
+ * through to the real result. A collapse is safe by construction: the snapshot
+ * was taken fresh, so this reports a genuinely unchanged page, never a guess.
+ * Truncated digests are never collapsed, because two pages that agree only on
+ * their first N characters are not the same page.
+ */
+function collapseRepeatObservation(
+  name: string,
+  res: ExecuteResult,
+  tabId: number | undefined,
+): ExecuteResult | null {
+  if (!OBSERVATION_ONLY_TOOLS.has(name) || !res.ok || tabId === undefined) return null;
+  // A blind-page screenshot is the only way the model can see anything here.
+  if (res.image) return null;
+  const text = res.text;
+  if (!text || text.length < 200) return null;
+  const prev = lastPerceptionText.get(tabId);
+  // Record what the model is being shown either way, so the NEXT identical
+  // read collapses even when this one was the first of its kind.
+  lastPerceptionText.set(tabId, text);
+  if (
+    !prev ||
+    isTruncatedObservation(prev) ||
+    isTruncatedObservation(text) ||
+    !sameObservation(prev, text)
+  ) {
+    return null;
+  }
+  return {
+    ...res,
+    text: "[page unchanged since your last observation — the refs you already have are still current; act on them instead of re-reading the page]",
+    // The panel card should not render a multi-KB dump the model never read.
+    payload: { unchanged: true },
+  };
+}
 
 /** Best-effort settle + compact snapshot after an action; null on failure. */
 async function observeAfterAction(
@@ -722,6 +808,7 @@ async function withFailureShot(
 async function executeToolGated(
   name: string,
   args: Record<string, unknown>,
+  batch?: ExecuteBatch,
 ): Promise<ExecuteResult> {
   let probe: ElementProbe | null = null;
   // `click_at`/`drag_at` carry a point instead of a ref; the probe then comes
@@ -806,7 +893,29 @@ async function executeToolGated(
   } else if (name === "tabs_close" && Number(args.tabId) === agentTabId) {
     noteAgentTab(undefined);
   }
-  if (!AUTO_OBSERVE_TOOLS.has(name) || stopRequested) return res;
+  if (!AUTO_OBSERVE_TOOLS.has(name) || stopRequested) {
+    // Redundant-observation guard. Actions already return a fresh observation,
+    // and a model that ignores that (or re-checks out of habit) used to receive
+    // the identical multi-thousand-token page dump again — the exact text that
+    // fills the history budget and forces the truncator to rewrite the front of
+    // the conversation. The capture still happens (so nothing can be stale);
+    // only the duplicate TEXT is collapsed, and an image result is never
+    // collapsed because a blind shot is the model's only way to see.
+    const deduped = collapseRepeatObservation(name, res, tabId);
+    return deduped ?? res;
+  }
+  // Defer the settle+snapshot to the LAST call of a batch. When the model
+  // batches several actions into one step, only the final page state is ever
+  // read: observing after each intermediate action pays a full settle and
+  // re-sends a snapshot the very next action invalidates. The intermediate
+  // call still reports its own result, so nothing is hidden from the model.
+  if (batch && batch.index < batch.count - 1) {
+    const done = res.text ?? JSON.stringify(res.payload ?? null);
+    return {
+      ...res,
+      text: `${done}\n\n[action applied — the page observation for this step follows after the last call]`,
+    };
+  }
   // Observe whichever tab the agent is on NOW — tabs_create/tabs_switch moved it.
   const obsTabId = (await agentTab()) ?? tabId;
   if (obsTabId === undefined) return res;
@@ -1012,6 +1121,7 @@ async function maybeResume(trigger: string): Promise<void> {
         currentLog = newTurnRecord(cp.task, {
           conversationId: cp.conversationId,
           mode: cp.mode,
+          ...(await connectionStamp()),
           at: cp.startedAt,
         });
       }

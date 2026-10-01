@@ -18,6 +18,66 @@ describe("buildSystemPrompt", () => {
     expect(buildSystemPrompt("Summarize page X", "auto")).toContain("Summarize page X");
   });
 
+  // Fast steps (Settings → Speed) swaps ONLY the step-shaping rules. Anything
+  // else moving between the two modes would be a safety change smuggled in as
+  // a speed change.
+  describe("fast steps (batchActions)", () => {
+    const off = buildSystemPrompt("task", "auto");
+    const on = buildSystemPrompt("task", "auto", false, false, true);
+
+    it("defaults to the sequential wording", () => {
+      expect(off).toContain("Prefer small decisive steps: one or two actions");
+      expect(off).not.toContain("BATCH ONE LOGICAL UNIT INTO ONE STEP");
+    });
+
+    it("swaps in the batching rules when enabled", () => {
+      expect(on).toContain("BATCH ONE LOGICAL UNIT INTO ONE STEP");
+      expect(on).not.toContain("Prefer small decisive steps: one or two actions");
+    });
+
+    it("tells the model not to spend a step re-verifying an action", () => {
+      // The action result already ends with an auto-settled snapshot; the
+      // separate verify step is the round trip this setting exists to remove.
+      expect(on).toContain("Do NOT spend a step verifying an action");
+      expect(on).toContain("auto-settled snapshot");
+    });
+
+    it("keeps the batching rule honest about dependent calls", () => {
+      expect(on).toContain("Keep calls in SEPARATE steps only when a later call needs");
+    });
+
+    it("changes nothing outside the step-shaping rules", () => {
+      const strip = (p: string) =>
+        p
+          .split("\n")
+          .filter(
+            (l) =>
+              !l.startsWith("- BATCH ONE") &&
+              !l.startsWith("- Do NOT spend a step") &&
+              !l.startsWith("- Independent read-only lookups") &&
+              !l.startsWith("- Prefer small decisive steps"),
+          )
+          .join("\n");
+      expect(strip(on)).toBe(strip(off));
+    });
+
+    it("leaves every safety rule in place on both settings", () => {
+      for (const p of [off, on]) {
+        expect(p).toContain("Never invent refs and never fabricate tool results.");
+        expect(p).toContain("Current task: task");
+      }
+    });
+  });
+
+  // Measured from the archive: hand-written DOM sweeps were the largest single
+  // tool cost (310s across 46 evaluate_js calls, one of them 40s).
+  it("warns against hand-rolled DOM sweeps in evaluate_js", () => {
+    for (const p of [buildSystemPrompt("t", "auto"), buildSystemPrompt("t", "auto", false, false, true)]) {
+      expect(p).toContain("Do NOT hand-roll a DOM sweep in `evaluate_js`");
+      expect(p).toContain("real network round trip");
+    }
+  });
+
   it("states there is no step limit and pushes loop discipline instead", () => {
     const p = buildSystemPrompt("t", "auto");
     expect(p).toContain("no step limit");

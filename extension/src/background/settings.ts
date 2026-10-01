@@ -79,6 +79,20 @@ export interface AgentSettings {
    */
   thinking: ThinkingLevel;
   /**
+   * Fast steps: prompt the agent to put one logical unit of work (a form, a
+   * key sequence, a menu walk) into a SINGLE step as multiple tool calls, and
+   * to stop spending a step re-verifying an action whose result already ended
+   * with a fresh snapshot.
+   *
+   * This is a real tradeoff, not a pure win: batching means less mid-sequence
+   * adaptation, which is why it is a switch. Safety is unaffected — every rule,
+   * the confirmation gate and the risk policy are identical, and each gated
+   * action still confirms on its own. On by default: the archived run logs
+   * measured 1.04 tool calls per turn at ~7.5s of fixed cost per round trip,
+   * so the sequential habit was the single largest cost in a run.
+   */
+  batchActions: boolean;
+  /**
    * Madman mode: the agent swears. Seeds a profane voice into the system
    * prompt (so replies and mid-run exclamations cuss) and decorates every
    * tool-call label with a cuss word. Off by default.
@@ -139,6 +153,9 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   contextWindow: 128_000,
   // Thinking on at the lowest level: a cheap reasoning block by default.
   thinking: "low",
+  // Batch one logical unit per step: the measured round-trip cost made the
+  // one-action-then-verify habit the biggest single term in a run.
+  batchActions: true,
   // Straight-laced by default; Madman mode is opt-in.
   madman: false,
   // Attended by default: confirmations wait the full timeout for a human.
@@ -327,6 +344,10 @@ export function normalizeSettings(
     madman: merged.madman === true,
     // Same for unattended runs — an explicit opt-in, never inferred.
     unattended: merged.unattended === true,
+    // Fast steps is NEW, so no stored profile carries it: absent means "take
+    // the default (on)", and only an explicit `false` turns it off. Unlike
+    // autoThinking there is no old default artifact to migrate around.
+    batchActions: merged.batchActions !== false,
     // Jev sidecar: backfill partial stored objects; coerce the toggles.
     jev: normalizeJev(merged.jev),
     // Auto effort routing is on from rev 2. Before that the default `false`

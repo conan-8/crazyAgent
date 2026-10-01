@@ -3,7 +3,8 @@ import { registerTool } from "./types";
 
 registerTool({
   name: "navigate",
-  description: "Navigate the active tab to a URL. Follow with wait_for_settle.",
+  description:
+    "Navigate the active tab to a URL. The result comes back already settled, with a fresh snapshot of the new page appended — read that instead of calling wait_for_settle or snapshot afterwards.",
   parameters: {
     type: "object",
     properties: { url: { type: "string", description: "Absolute URL" } },

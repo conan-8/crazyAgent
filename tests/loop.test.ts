@@ -5,6 +5,7 @@ import {
   estimateMessages,
   runAgentTask,
   truncateHistory,
+  type ExecuteBatch,
   type ExecuteResult,
   type LoopDeps,
 } from "../extension/src/background/agent/loop";
@@ -83,19 +84,21 @@ function harness(script: LlmResult[], overrides: Partial<LoopDeps> = {}) {
   const events: StepEvent[] = [];
   const saves: number[] = [];
   const executed: { name: string; args: Record<string, unknown> }[] = [];
+  const batches: (ExecuteBatch | undefined)[] = [];
   const deps: LoopDeps = {
     llm: new FakeLlm(script),
     emit: (e) => events.push(e),
     save: async (cp) => void saves.push(cp.stepIndex),
     shouldStop: () => false,
-    execute: async (name, args) => {
+    execute: async (name, args, batch) => {
       executed.push({ name, args });
+      batches.push(batch);
       return { ok: true, payload: { fine: true } };
     },
     stepCap: 5,
     ...overrides,
   };
-  return { events, saves, executed, deps };
+  return { events, saves, executed, batches, deps };
 }
 
 describe("runAgentTask", () => {
@@ -252,6 +255,63 @@ describe("runAgentTask", () => {
     expect(events.some((e) => e.kind === "reasoning_delta")).toBe(true);
   });
 
+  // The cache figure is rendered as a share of inputTokens, so a step that
+  // reported no cache number would silently deflate it. Same rule as
+  // usageEstimated: an untrustworthy number is not shown at all.
+  describe("prompt-cache stats", () => {
+    const step = (id: string) => ({
+      text: "",
+      toolCalls: [{ id, name: "snapshot", args: {} }],
+      stopReason: "tool_use" as const,
+    });
+    const doneStats = (events: StepEvent[]) =>
+      (events.at(-1) as Extract<StepEvent, { kind: "done" }>).stats!;
+
+    it("totals cached input when every step reports one", async () => {
+      const cp = makeCheckpoint();
+      const { events, deps } = harness([
+        { ...step("a"), usage: { inputTokens: 1_000, outputTokens: 10, cachedInputTokens: 900 } },
+        { ...step("b"), usage: { inputTokens: 1_200, outputTokens: 10, cachedInputTokens: 1_100 } },
+        {
+          text: "done",
+          toolCalls: [],
+          stopReason: "end_turn",
+          usage: { inputTokens: 1_500, outputTokens: 20, cachedInputTokens: 1_400 },
+        },
+      ]);
+      await runAgentTask(cp, deps);
+      expect(doneStats(events).cachedInputTokens).toBe(3_400);
+      // The fixed prefix is reported too: it is the floor cost per step.
+      expect(doneStats(events).prefixTokens).toBeGreaterThan(0);
+    });
+
+    it("omits the cache total when a step stayed silent about it", async () => {
+      const cp = makeCheckpoint();
+      const { events, deps } = harness([
+        { ...step("a"), usage: { inputTokens: 1_000, outputTokens: 10, cachedInputTokens: 900 } },
+        { ...step("b"), usage: { inputTokens: 1_200, outputTokens: 10 } },
+        {
+          text: "done",
+          toolCalls: [],
+          stopReason: "end_turn",
+          usage: { inputTokens: 1_500, outputTokens: 20 },
+        },
+      ]);
+      await runAgentTask(cp, deps);
+      expect(doneStats(events).cachedInputTokens).toBeUndefined();
+    });
+
+    it("omits the cache total when usage was estimated", async () => {
+      const cp = makeCheckpoint();
+      const { events, deps } = harness([
+        { text: "done", toolCalls: [], stopReason: "end_turn" },
+      ]);
+      await runAgentTask(cp, deps);
+      expect(doneStats(events).usageEstimated).toBe(true);
+      expect(doneStats(events).cachedInputTokens).toBeUndefined();
+    });
+  });
+
   it("counts reasoning characters into the stats", async () => {
     const cp = makeCheckpoint();
     const { events, deps } = harness([
@@ -366,6 +426,42 @@ describe("runAgentTask", () => {
     );
     await runAgentTask(cp, deps);
     expect(order).toEqual(["1", "2"]); // call order, not completion order
+  });
+
+  // The executor defers its settle+snapshot to the LAST call of a step, so the
+  // loop must tell it where each call sits. Getting this wrong either observes
+  // after every action (the duplicated work this exists to remove) or never
+  // observes at all (a blind model).
+  it("tells the executor where each call sits in the step's batch", async () => {
+    const cp = makeCheckpoint();
+    const { batches, deps } = harness([
+      {
+        text: "",
+        toolCalls: [
+          { id: "a", name: "click", args: { ref: "1" } },
+          { id: "b", name: "click", args: { ref: "2" } },
+          { id: "c", name: "click", args: { ref: "3" } },
+        ],
+        stopReason: "tool_use",
+      },
+      { text: "done", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    await runAgentTask(cp, deps);
+    expect(batches).toEqual([
+      { index: 0, count: 3 },
+      { index: 1, count: 3 },
+      { index: 2, count: 3 },
+    ]);
+  });
+
+  it("marks a lone call as the last of its batch", async () => {
+    const cp = makeCheckpoint();
+    const { batches, deps } = harness([
+      { text: "", toolCalls: [{ id: "a", name: "click", args: { ref: "1" } }], stopReason: "tool_use" },
+      { text: "done", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    await runAgentTask(cp, deps);
+    expect(batches).toEqual([{ index: 0, count: 1 }]);
   });
 
   it("feeds validation errors back without executing, then recovers", async () => {
@@ -607,6 +703,117 @@ describe("truncateHistory", () => {
     const omitted = out.filter((m) => m.content === "[older tool result omitted]");
     expect(omitted.length).toBeGreaterThan(0);
     expect(out.at(-1)?.content).not.toBe("[older tool result omitted]");
+  });
+
+  // The property the whole compaction policy exists to protect: a provider
+  // prefix cache matches on the longest byte-identical prefix of the previous
+  // request, so what matters is where the FIRST difference sits. The old sweep
+  // collapsed the single oldest message each time the budget was crossed, which
+  // advanced the rewrite point by a message on nearly every step — the first
+  // difference stayed early and the bulk of the conversation re-prefilled every
+  // step no matter how little was new.
+  describe("prefix stability (prompt-cache property)", () => {
+    const ser = (m: LlmMessage) => JSON.stringify(m);
+
+    /**
+     * Simulate a run: one tool call plus an observation per step, exactly the
+     * shape the archived logs show. Reports how much of each request was a
+     * byte-identical prefix of the previous one, and how often anything moved.
+     *
+     * Measured against the previous creeping sweep, over 60 steps:
+     *
+     *   obs=5KB, budget=120K   old: cached 0.640, 37 rewrites
+     *                          new: cached 0.929, 10 rewrites
+     *   obs=2KB, budget= 80K   old: cached 0.725, 21 rewrites
+     *                          new: cached 0.945,  6 rewrites
+     *
+     * Budget adherence is unchanged (the compacted view lands within ~2% of the
+     * old one), so this is cache stability bought without spending context.
+     */
+    function measure(budget: number, steps: number, observationChars: number) {
+      const msgs: LlmMessage[] = [{ role: "user", content: "task" }];
+      let prev = truncateHistory(msgs, budget);
+      let rewrites = 0;
+      let cachedFraction = 0;
+      for (let i = 0; i < steps; i++) {
+        msgs.push({
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: `c${i}`, name: "click", args: { ref: String(i) } }],
+        });
+        msgs.push({
+          role: "tool",
+          toolCallId: `c${i}`,
+          content: `result ${i} ${"y".repeat(observationChars)}`,
+        });
+        const view = truncateHistory(msgs, budget);
+        let firstDiff = prev.length;
+        for (let k = 0; k < prev.length; k++) {
+          if (ser(prev[k]!) !== ser(view[k]!)) {
+            firstDiff = k;
+            break;
+          }
+        }
+        if (firstDiff < prev.length) rewrites++;
+        cachedFraction += firstDiff / Math.max(1, prev.length);
+        prev = view;
+      }
+      return { rewrites, meanCached: cachedFraction / steps };
+    }
+
+    it("keeps most of every request byte-identical to the previous one", () => {
+      // The real budget and a heavy run (observations at the 6KB auto-observe
+      // cap): the history runs well past the budget, so compaction engages.
+      const { rewrites, meanCached } = measure(120_000, 60, 5_000);
+      expect(meanCached).toBeGreaterThanOrEqual(0.85); // creeping sweep: 0.64
+      expect(rewrites).toBeLessThanOrEqual(20); // creeping sweep: 37
+    });
+
+    it("stays stable on a lighter run too", () => {
+      const { meanCached } = measure(80_000, 60, 2_000);
+      expect(meanCached).toBeGreaterThanOrEqual(0.85); // creeping sweep: 0.73
+    });
+
+    it("leaves the history completely untouched while under budget", () => {
+      const messages: LlmMessage[] = [
+        { role: "user", content: "task" },
+        ...Array.from({ length: 5 }, (_, i) => ({
+          role: "tool" as const,
+          toolCallId: `t${i}`,
+          content: `payload ${i} ${"z".repeat(3_000)}`,
+        })),
+      ];
+      const out = truncateHistory(messages, 1_000_000);
+      expect(out.map((m) => m.content)).toEqual(messages.map((m) => m.content));
+      expect(out.map((m) => m.images)).toEqual(messages.map((m) => m.images));
+    });
+
+    it("never compacts the newest messages, even while still over budget", () => {
+      const messages: LlmMessage[] = [
+        { role: "user", content: "task" },
+        { role: "tool", toolCallId: "old", content: `old ${"y".repeat(3_000)}` },
+        { role: "tool", toolCallId: "new", content: `new ${"y".repeat(3_000)}` },
+      ];
+      // 100 chars is far below the history's size: the sweep still keeps the
+      // newest messages intact rather than leaving the model blind.
+      const out = truncateHistory(messages, 100);
+      expect(out.at(-1)?.content).toContain("new");
+      expect(out.at(-1)?.content).not.toBe("[older tool result omitted]");
+    });
+
+    it("is idempotent — compacting an already-compacted view changes nothing", () => {
+      const messages: LlmMessage[] = [
+        { role: "user", content: "task" },
+        ...Array.from({ length: 12 }, (_, i) => ({
+          role: "tool" as const,
+          toolCallId: `t${i}`,
+          content: `payload ${i} ${"z".repeat(4_000)}`,
+        })),
+      ];
+      const once = truncateHistory(messages, 20_000);
+      const twice = truncateHistory(once, 20_000);
+      expect(twice.map(ser)).toEqual(once.map(ser));
+    });
   });
 });
 

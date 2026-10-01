@@ -17,6 +17,7 @@ import {
   lessonsToMarkdown,
   mergeLessons,
   newLesson,
+  stripHarnessNotes,
   normalizeCategory,
   normalizeHost,
   parseLessonDrafts,
@@ -173,6 +174,83 @@ describe("reading a run", () => {
 
   it("treats a single failure as not a loop", () => {
     expect(repeatedFailures(failedRun())).toHaveLength(0);
+  });
+
+  // The loop appends its own notes to a FAILED tool result: a retry warning on
+  // the second identical failure but not the first, and a tab label stamped
+  // with the wall clock at SECOND resolution. Both made grouping depend on
+  // timing — two identical failures collapsed into "repeated 2×" only when they
+  // happened to land in the same second or fell inside the 400-char log clip.
+  it("still groups repeats across the loop's own volatile failure notes", () => {
+    const rec = newTurnRecord("click the missing button", { at: 1 });
+    const base = "ERROR: FRAME-FAILED: stale or unknown ref: 999 — take a fresh snapshot";
+    const shot = (at: string) =>
+      `\n[screenshot attached — tab 7 "Fixture" (http://127.0.0.1:8790/index.html) at ${at} — this is what the page looked like when the call failed; LOOK at it]`;
+    foldLogEvent(rec, { kind: "tool_call", stepIndex: 0, name: "click", args: { ref: "999" } }, 2);
+    foldLogEvent(
+      rec,
+      { kind: "tool_result", stepIndex: 0, name: "click", result: base + shot("10:00:01"), ok: false },
+      3,
+    );
+    foldLogEvent(rec, { kind: "tool_call", stepIndex: 1, name: "click", args: { ref: "999" } }, 4);
+    foldLogEvent(
+      rec,
+      {
+        kind: "tool_result",
+        stepIndex: 1,
+        name: "click",
+        result:
+          base +
+          shot("10:00:02") +
+          "\n\n[RETRY WARNING: this exact call has already failed in this run — repeating it will fail again. Do NOT run it again.]",
+        ok: false,
+      },
+      5,
+    );
+    const failed = failedCalls(rec);
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.count).toBe(2);
+    // Neither note is part of the tool's failure, so neither is learned.
+    expect(failed[0]!.error).toBe(base);
+    expect(buildRunDigest(rec)).toContain("repeated 2×");
+  });
+
+  it("groups repeats even when the log clip cut the note in half", () => {
+    const rec = newTurnRecord("click it", { at: 1 });
+    const base = "ERROR: FRAME-FAILED: stale or unknown ref: 999".padEnd(390, ".");
+    foldLogEvent(rec, { kind: "tool_call", stepIndex: 0, name: "click", args: { ref: "999" } }, 2);
+    foldLogEvent(rec, { kind: "tool_result", stepIndex: 0, name: "click", result: base, ok: false }, 3);
+    foldLogEvent(rec, { kind: "tool_call", stepIndex: 1, name: "click", args: { ref: "999" } }, 4);
+    foldLogEvent(
+      rec,
+      {
+        kind: "tool_result",
+        stepIndex: 1,
+        name: "click",
+        // Exactly what the loop's `clip(content, 400)` leaves behind.
+        result: `${base}\n\n[RETRY WAR`.slice(0, 400),
+        ok: false,
+      },
+      5,
+    );
+    expect(failedCalls(rec)).toHaveLength(1);
+  });
+
+  it("strips stuck, repeat and screenshot notes without touching a real error", () => {
+    expect(stripHarnessNotes("ERROR: boom")).toBe("ERROR: boom");
+    expect(stripHarnessNotes("ERROR: boom\n\n[STUCK: click has now failed 3 times]")).toBe(
+      "ERROR: boom",
+    );
+    expect(stripHarnessNotes("ERROR: boom\n\n[This exact call has now run 3 times]")).toBe(
+      "ERROR: boom",
+    );
+    expect(
+      stripHarnessNotes("ERROR: boom\n[screenshot attached — tab 1 at 10:00:01]"),
+    ).toBe("ERROR: boom");
+    // A bracket that is part of the error itself is left alone.
+    expect(stripHarnessNotes("ERROR: bad [input] — expected a number")).toBe(
+      "ERROR: bad [input] — expected a number",
+    );
   });
 
   it("builds a digest with the task, the failure and the final answer", () => {

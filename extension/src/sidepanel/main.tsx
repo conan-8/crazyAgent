@@ -1265,6 +1265,12 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 title="Unattended runs"
                 hint="Nobody will click confirmations: sensitive actions fail fast (~15s) with a clear 'route unavailable' note instead of idling 2 minutes. Nothing is auto-approved"
               />
+              <Switch
+                checked={s.batchActions}
+                onChange={(v) => set("batchActions", v)}
+                title="Fast steps"
+                hint="Batch one logical unit of work (a form, a key sequence, a menu walk) into a single step and skip re-verifying actions that already returned a fresh snapshot. Fewer, fuller round trips — each one costs several seconds of fixed latency. Safety gates are unchanged"
+              />
             </section>
 
             <section class="set-group" style="--i:4">
@@ -2016,6 +2022,10 @@ function lastRunTitle(u: UsageStats): string {
     `context: ${formatTokens(u.contextTokens)} / ${formatTokens(u.contextWindow)}`,
   ];
   if (u.reasoningChars) parts.push(`reasoning: ${u.reasoningChars} chars`);
+  if (u.cachedInputTokens !== undefined) {
+    const pct = u.inputTokens ? Math.round((100 * u.cachedInputTokens) / u.inputTokens) : 0;
+    parts.push(`cached input: ${formatTokens(u.cachedInputTokens)} (${pct}% of input)`);
+  }
   return parts.join("\n");
 }
 
@@ -2029,6 +2039,13 @@ interface UsageStats {
   elapsedMs?: number;
   steps?: number;
   reasoningChars?: number;
+  /**
+   * Input tokens the provider served from its prompt cache, when it reports
+   * one. Shown because a step's ~8k-token prefix is re-sent every round trip:
+   * a low cache hit rate is the difference between a 7s and a 35s step.
+   */
+  cachedInputTokens?: number;
+  inputTokens?: number;
 }
 
 function App() {
@@ -2122,6 +2139,8 @@ function App() {
               contextTokens: msg.event.contextTokens,
               contextWindow: msg.event.contextWindow,
               elapsedMs: msg.event.elapsedMs,
+              inputTokens: msg.event.inputTokens,
+              cachedInputTokens: msg.event.cachedInputTokens,
             });
           } else if (msg.event.kind === "done" && msg.event.stats) {
             // Freeze the final numbers so the bar persists after the run.
@@ -2135,6 +2154,8 @@ function App() {
               elapsedMs: s.elapsedMs,
               steps: s.steps,
               reasoningChars: s.reasoningChars,
+              inputTokens: s.inputTokens,
+              cachedInputTokens: s.cachedInputTokens,
             });
             if (currentConv) {
               foldEvent(currentConv, msg.event);
@@ -2881,6 +2902,20 @@ function App() {
                   <span style={`transform:scaleX(${ctxRatio})`} />
                 </span>
               </span>
+              {/* Only when the endpoint reports a cache number — a silent
+                  provider shows nothing rather than a misleading 0%. */}
+              {usage?.cachedInputTokens !== undefined && (
+                <span
+                  class="stat stat-cache"
+                  title="Input tokens served from the provider's prompt cache"
+                >
+                  cache{" "}
+                  {usage.inputTokens
+                    ? Math.round((100 * usage.cachedInputTokens) / usage.inputTokens)
+                    : 0}
+                  %
+                </span>
+              )}
             </>
           ) : (
             <>

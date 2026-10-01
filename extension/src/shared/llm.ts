@@ -101,8 +101,17 @@ export interface LlmResult {
   text: string;
   toolCalls: ToolCall[];
   stopReason: string;
-  /** Provider-reported usage when available (else the loop estimates). */
-  usage?: { inputTokens: number; outputTokens: number };
+  /**
+   * Provider-reported usage when available (else the loop estimates).
+   *
+   * `cachedInputTokens` is the slice of `inputTokens` the provider served from
+   * its prompt cache (Anthropic `cache_read_input_tokens`, OpenAI/OpenRouter
+   * `prompt_tokens_details.cached_tokens`). It answers the one question the
+   * latency numbers cannot: how much of each step's ~8k-token prefix was
+   * re-prefilled from scratch. Undefined means "the provider did not say" —
+   * never "zero".
+   */
+  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number };
   /** Streamed reasoning text, when the model emitted any. */
   reasoning?: string;
   /** Anthropic thinking-block signature, needed to replay it next turn. */

@@ -147,6 +147,99 @@ Two properties are load-bearing and tested:
 `madman-smoke.mjs` (M6/M6b) proves the stamped line reaches the provider wire
 in a real browser run, parseable and within minutes of now.
 
+## Run speed: what the logs priced, and what answers it
+
+The run-log archive is the measurement instrument for this. Export it (**Run
+logs → Export JSONL**) and every claim below is checkable per run: each turn
+carries its wall-clock duration, each tool call its `durationMs`, and the final
+stats line carries input/output tokens, context, `prefixTokens` and — when the
+endpoint reports one — `cachedInputTokens`.
+
+`node scripts/runlog-stats.mjs [export.jsonl …]` does that arithmetic for you
+(no argument = the newest export in `~/Downloads`). Give it two exports and it
+prints a before/after table — that is the check for anything here: export,
+change one thing, export again, compare. On the whole 54-run archive it reports
+78% of wall time in LLM round trips, 22% in tools, 1.01 tools per turn, and a
+fitted 8.9s of fixed cost per round trip.
+
+Fitting 442 turns from the archived post-fix runs gives
+
+```
+llm_ms ≈ 7,500 + 7.5 × output_tokens
+```
+
+i.e. **~7.5 s of fixed cost per LLM round trip** plus ~133 tok/s of generation.
+78% of turns emitted under 500 tokens yet still cost a median 6.1 s, and the
+runs averaged **1.04 tool calls per turn** — the fixed cost, not the work, was
+the bill. Latency correlated with reasoning volume (r = 0.77) and *not* with
+step index (r = −0.16), which is how we know prefill was not the problem.
+
+Five changes answer that, in the order they were made:
+
+1. **Cache telemetry** (`llm.ts`, `RunStats.cachedInputTokens`). `message_start`
+   is now read on the Anthropic wire (the old code read only `message_delta`,
+   which reports output only — so `inputTokens` was being zeroed on every real
+   Anthropic stream) and `prompt_tokens_details.cached_tokens` /
+   `prompt_cache_hit_tokens` on the OpenAI wire. Absent stays `undefined`:
+   "the provider did not report a cache" must never render as "the cache
+   missed". Run records also carry `provider`/`model`, because an exported log
+   was previously unattributable.
+2. **Batch-aware observation** (`sw.ts`). `LoopDeps.execute` now receives an
+   `ExecuteBatch {index, count}`; the settle+snapshot observation runs only
+   after the LAST call of a step instead of after every action in it.
+   `OBSERVATION_MAX_CHARS` dropped 12k → 6k — that text is re-sent on every
+   later step, so its size is not a one-off cost.
+3. **Redundant-observation guard** (`sw.ts`). A `snapshot`/`read_page` whose
+   result matches the last observation the model received collapses to one
+   line. The snapshot is still taken (so nothing can be stale), and a truncated
+   digest is never collapsed — two pages agreeing on their first N characters
+   are not the same page.
+4. **Fast steps** (`AgentSettings.batchActions`, Settings → Speed, default on).
+   Swaps the prompt's step-shaping rules for a batch variant: one logical unit
+   per step, and no separate verification step for an action whose result
+   already ended with a fresh snapshot. This is a genuine tradeoff (less
+   mid-sequence adaptation), which is why it is a switch — and it changes
+   *only* the step-shaping rules, which `tests/prompts.test.ts` asserts by
+   diffing the two prompts line by line. Every safety rule, gate and policy is
+   identical in both modes.
+5. **Quantized compaction** (`truncateHistory`). See below.
+
+### Why compaction is quantized
+
+A provider prefix cache matches on the longest byte-identical prefix of the
+previous request, so what matters is where the FIRST difference sits. The old
+sweep collapsed the single oldest message each time the budget was crossed —
+advancing the rewrite point by a message on nearly every step, keeping the
+first difference early and re-prefilling the bulk of the conversation every
+step. `truncateHistory` now returns the history **completely untouched** while
+it is under budget, and when it does compact it snaps the rewrite point to a
+multiple of `HISTORY_COMPACT_QUANTUM` so it holds still and then jumps. Each
+jump re-prefills only from that point onward, which is always near the end.
+
+Measured over 60 simulated steps, mean byte-identical prefix fraction:
+
+| observation | budget | old | new |
+|---|---|---|---|
+| 5 KB | 120 K | 0.640 | **0.929** |
+| 2 KB | 80 K | 0.725 | **0.945** |
+
+Budget adherence is unchanged — the compacted view lands within ~2% of the old
+one — so this is cache stability bought without spending context.
+`tests/loop.test.ts` asserts the property directly (mean cached fraction and
+rewrite count), with the old numbers recorded in the test so a regression that
+reintroduces creeping fails loudly.
+
+### What is NOT a harness problem
+
+Analysing all 155 `evaluate_js` calls from the archive: 89 were `await fetch(…)`
+(347 s — real network round trips for document exports) and 46 were hand-written
+DOM sweeps (310 s, one of them 40 s) scanning selectors like `span,div` across
+Google Docs' DOM. `sendEnabled` already caches domain enables per tab, so there
+is no per-call harness overhead to remove; the cost is the expression. That is
+answered with a prompt rule against hand-rolled DOM sweeps and a stale
+`navigate` description ("Follow with wait_for_settle") that contradicted the
+auto-observe design and invited a wasted round trip after every navigation.
+
 ## Jev decision layer (System-One sidecar)
 
 [Jev](https://docs.typesafe.ai/api) (TypeSafe's "System One" decision model)

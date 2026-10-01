@@ -101,10 +101,13 @@ export type StepEvent =
       kind: "usage";
       totalTokens: number;
       outputTokens: number;
+      inputTokens: number;
       tokensPerSec: number;
       contextTokens: number;
       contextWindow: number;
       elapsedMs: number;
+      /** Provider-reported prompt-cache read, when the endpoint reports one. */
+      cachedInputTokens?: number;
     }
   | { kind: "token_delta"; text: string }
   /** Streamed model reasoning ("thinking"); rendered in a collapsed block. */
@@ -131,6 +134,19 @@ export interface RunStats {
   elapsedMs: number;
   /** Reasoning tokens/text reported by the provider, when thinking was on. */
   reasoningChars?: number;
+  /**
+   * The slice of `inputTokens` the provider served from its prompt cache.
+   * This is the number that explains per-step latency: a cached prefix costs
+   * no re-prefill, an uncached one re-reads the whole prompt. Undefined means
+   * the provider never reported it — never "the cache missed".
+   */
+  cachedInputTokens?: number;
+  /**
+   * The fixed request prefix this run re-sent on every step: system prompt +
+   * tool specs + lessons appendix. Multiplied by `steps`, it is the floor cost
+   * an uncached run pays before any real work.
+   */
+  prefixTokens?: number;
   /**
    * True when the provider did not report usage and these numbers are the
    * loop's own estimate of the request it sent. Estimates must never render

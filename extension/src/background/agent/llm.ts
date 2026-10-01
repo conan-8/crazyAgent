@@ -338,13 +338,80 @@ export function buildOpenAiBody(
 
 // ---------------- SSE aggregation ----------------
 
+/**
+ * OpenAI-compatible usage, where the cache counter is spelled three ways:
+ * `prompt_tokens_details.cached_tokens` (OpenAI, OpenRouter, most gateways)
+ * and `prompt_cache_hit_tokens` (DeepSeek's own naming). Absent stays
+ * undefined — "the provider did not report cache" is not "the cache missed".
+ */
+export function parseOpenAiUsage(usage: {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number | null } | null;
+  prompt_cache_hit_tokens?: number | null;
+}): StreamUsage {
+  const details = usage.prompt_tokens_details;
+  const cached =
+    typeof details?.cached_tokens === "number"
+      ? details.cached_tokens
+      : typeof usage.prompt_cache_hit_tokens === "number"
+        ? usage.prompt_cache_hit_tokens
+        : undefined;
+  return {
+    inputTokens: usage.prompt_tokens ?? 0,
+    outputTokens: usage.completion_tokens ?? 0,
+    cachedInputTokens: cached,
+  };
+}
+
+/** Provider usage as the aggregators accumulate it. */
+export type StreamUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens?: number;
+};
+
 export interface StreamAggregator {
   feed(line: string): void;
   result(): LlmResult;
   text: string;
   /** Accumulated reasoning text, when the model streamed any. */
   reasoning?: string;
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: StreamUsage;
+}
+
+/**
+ * Anthropic splits usage across two events: `message_start` carries the input
+ * side (including the prompt-cache counters) and `message_delta` carries the
+ * final output count. MERGE rather than overwrite — a `message_delta` reports
+ * output only, so the old overwrite path zeroed `inputTokens` on every real
+ * Anthropic stream, and the cache counters live solely on `message_start`.
+ *
+ * `cachedInputTokens` stays undefined when the provider never mentions cache
+ * fields (an uncached-capable endpoint) — never coerced to 0, which would read
+ * as "the cache missed" instead of "nobody said".
+ */
+export function mergeAnthropicUsage(
+  prev: StreamUsage | undefined,
+  usage: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number | null;
+    cache_creation_input_tokens?: number | null;
+  },
+): StreamUsage {
+  // Cache-read tokens are the ones that skipped re-prefill. Cache *creation*
+  // is the opposite (paid at a premium to populate the cache), so it is
+  // deliberately not folded in here.
+  const cached =
+    typeof usage.cache_read_input_tokens === "number"
+      ? usage.cache_read_input_tokens
+      : prev?.cachedInputTokens;
+  return {
+    inputTokens: usage.input_tokens ?? prev?.inputTokens ?? 0,
+    outputTokens: usage.output_tokens ?? prev?.outputTokens ?? 0,
+    cachedInputTokens: cached,
+  };
 }
 
 export function anthropicAggregator(
@@ -372,7 +439,23 @@ export function anthropicAggregator(
         return;
       }
       const type = event.type as string;
-      if (type === "content_block_start") {
+      if (type === "message_start") {
+        // The input side of usage — including the prompt-cache counters that
+        // say how much of the ~8k-token prefix this step did NOT re-prefill.
+        const usage = (
+          event.message as
+            | {
+                usage?: {
+                  input_tokens?: number;
+                  output_tokens?: number;
+                  cache_read_input_tokens?: number | null;
+                  cache_creation_input_tokens?: number | null;
+                };
+              }
+            | undefined
+        )?.usage;
+        if (usage) agg.usage = mergeAnthropicUsage(agg.usage, usage);
+      } else if (type === "content_block_start") {
         const cb = event.content_block as {
           type: string;
           id?: string;
@@ -417,14 +500,15 @@ export function anthropicAggregator(
       } else if (type === "message_delta") {
         const delta = event.delta as { stop_reason?: string };
         if (delta.stop_reason) stopReason = delta.stop_reason;
-        const usage = (event as { usage?: { input_tokens?: number; output_tokens?: number } })
-          .usage;
-        if (usage) {
-          agg.usage = {
-            inputTokens: usage.input_tokens ?? 0,
-            outputTokens: usage.output_tokens ?? 0,
+        const usage = (event as {
+          usage?: {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_read_input_tokens?: number | null;
+            cache_creation_input_tokens?: number | null;
           };
-        }
+        }).usage;
+        if (usage) agg.usage = mergeAnthropicUsage(agg.usage, usage);
       }
     },
     result() {
@@ -497,14 +581,15 @@ export function openAiAggregator(
       }
       if (choice.finish_reason) stopReason = choice.finish_reason as string;
       const usage = (event as {
-        usage?: { prompt_tokens?: number; completion_tokens?: number };
-      }).usage;
-      if (usage) {
-        agg.usage = {
-          inputTokens: usage.prompt_tokens ?? 0,
-          outputTokens: usage.completion_tokens ?? 0,
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          prompt_tokens_details?: { cached_tokens?: number | null } | null;
+          /** DeepSeek spells the same idea differently. */
+          prompt_cache_hit_tokens?: number | null;
         };
-      }
+      }).usage;
+      if (usage) agg.usage = parseOpenAiUsage(usage);
     },
     result() {
       const toolCalls = [...calls.entries()]

@@ -15,8 +15,33 @@ const BASE_RULES = [
   "- If the page puts a CAPTCHA in front of you — or you reach for a sign-in form the task never asked for — the run pauses and hands the keyboard to the user. When it resumes, take a fresh snapshot and continue from what the page shows now — do not retry the wall yourself.",
   "- Screenshots are real perception: every `screenshot` call attaches the image to your context and you SEE it. Whenever you are confused, uncertain, or concerned about what the page shows — text tools come back empty, a graph/image/canvas is involved, an action had an unclear effect, or a tool fails — take a screenshot and LOOK at it before guessing or retrying. One look resolves most dead ends; never reason about pixels you never examined.",
   "- An image FILE the page or network traffic points at (an <img> src, a PNG/SVG URL in network_read) is ONE call away: `view_image url:…` fetches it and attaches it so you see the file itself. Never reconstruct an image from pixels with evaluate_js (canvas histograms, color counting, ASCII renders) — that is slow, lossy, and obsolete: look at the image instead.",
+];
+
+/**
+ * Step-shaping rules — the one part of the prompt that is a speed/reliability
+ * tradeoff rather than a fact about the world, so it is the one part that is
+ * switchable (Settings → Speed).
+ *
+ * `SEQUENTIAL` is the original wording: act once, then spend a step checking.
+ * `BATCHED` exists because the archived run logs priced that habit — 442 turns
+ * carrying 1.04 tool calls each, 78% of them emitting under 500 tokens, at a
+ * measured ~7.5s of fixed cost per round trip. Nothing here relaxes a safety
+ * rule; the confirmation gate, the risk policy and every rule above and below
+ * are untouched, and each gated action still confirms on its own.
+ */
+const STEP_RULES_SEQUENTIAL = [
   "- Prefer small decisive steps: one or two actions, then verify their effect.",
   "- Independent read-only lookups (e.g. read_page + tabs_list) may be batched as parallel tool calls in one step; actions that depend on each other must stay sequential.",
+];
+
+const STEP_RULES_BATCHED = [
+  "- BATCH ONE LOGICAL UNIT INTO ONE STEP: when several actions belong together — filling a form, pressing a sequence of keys, clicking through a menu — send them ALL as tool calls in a single reply. They execute in order and every result comes back together, turning several slow round trips into one. Keep calls in SEPARATE steps only when a later call needs a ref or value that an earlier one reveals.",
+  "- Independent read-only lookups (e.g. read_page + tabs_list, snapshot + frames) may be batched the same way.",
+  "- Do NOT spend a step verifying an action: every page action's result already ENDS with a fresh, auto-settled snapshot. Read that observation and act on it. Reach for `snapshot` / `read_page` / `screenshot` when you need to look around without acting, or when the action's own observation came back empty, blind, or contradicted what you expected.",
+];
+
+const BASE_RULES_TAIL = [
+  "- Do NOT hand-roll a DOM sweep in `evaluate_js`. A broad selector (`span,div`, `*`, `[class*=…]`) over a big page costs tens of seconds to rebuild what `snapshot` / `read_page ref:X` already returns — measured on a real run, hand-written DOM scans were the single largest tool cost, one of them 40s for a single call. Use `evaluate_js` for ONE value at ONE place you can already name, and reach for the perception tools for anything that amounts to 'look at the page'. An `evaluate_js` that fetches a URL is a real network round trip: spend it when you need the data, never to re-check something you already read.",
   "- Before CREATING anything on a multi-account site (Google, Office, anything with an account chip or avatar menu), check WHICH account is signed in and that it matches the task — a doc created under the wrong account is a full redo (a live run paid 8 minutes for exactly that).",
   "- When a tool result contradicts what another sense reported (a screenshot showing a different page than the snapshot), STOP and resolve which observation is current before acting on either — name the tab/URL each came from. Do not spend turns theorizing about caches.",
   "",
@@ -159,6 +184,7 @@ export function buildSystemPrompt(
   agentMode: string = "auto",
   madman: boolean = false,
   hasJudge: boolean = false,
+  batchActions: boolean = false,
 ): string {
   return [
     "You are Browser Agent, an AI that operates the user's real browser to complete web tasks.",
@@ -168,6 +194,8 @@ export function buildSystemPrompt(
     ...MANDATE,
     "",
     ...BASE_RULES,
+    ...(batchActions ? STEP_RULES_BATCHED : STEP_RULES_SEQUENTIAL),
+    ...BASE_RULES_TAIL,
     ...(hasJudge ? JUDGE_RULES : []),
     "",
     ...DOCUMENT_EDITOR_RULES,

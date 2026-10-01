@@ -248,6 +248,36 @@ describe("madman setting", () => {
   });
 });
 
+describe("fast steps (batchActions) setting", () => {
+  const legacy = (o: Record<string, unknown>) => normalizeSettings(o as never);
+
+  it("is on by default", () => {
+    expect(DEFAULT_SETTINGS.batchActions).toBe(true);
+    expect(normalizeSettings(undefined).batchActions).toBe(true);
+  });
+
+  // Unlike autoThinking there is no historical default artifact to migrate
+  // around: the key is new, so absent means "take the default (on)" and a
+  // stored false is a real opt-out.
+  it("treats a stored profile without the key as on", () => {
+    expect(legacy({ rev: 1, unattended: false }).batchActions).toBe(true);
+    expect(legacy({ rev: 2 }).batchActions).toBe(true);
+  });
+
+  it("honours an explicit opt-out", () => {
+    expect(legacy({ batchActions: false }).batchActions).toBe(false);
+    expect(normalizeSettings(normalizeSettings({ batchActions: false })).batchActions).toBe(
+      false,
+    );
+  });
+
+  it("treats junk as the default rather than as an opt-out", () => {
+    expect(legacy({ batchActions: "no" }).batchActions).toBe(true);
+    expect(legacy({ batchActions: 0 }).batchActions).toBe(true);
+    expect(legacy({ batchActions: null }).batchActions).toBe(true);
+  });
+});
+
 describe("unattended setting", () => {
   it("is off by default (confirmations wait for a human)", () => {
     expect(DEFAULT_SETTINGS.unattended).toBe(false);

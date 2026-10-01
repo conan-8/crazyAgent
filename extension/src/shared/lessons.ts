@@ -236,13 +236,66 @@ function callArgText(call: LogToolCall): string {
   return args.length > 120 ? `${args.slice(0, 119)}…` : args;
 }
 
+/**
+ * Markers the loop appends to a FAILED tool result. They are the harness
+ * talking — about the loop, or about a screenshot it attached — never the
+ * tool's own error.
+ */
+const HARNESS_NOTE_MARKERS = [
+  "[RETRY WARNING",
+  "[STUCK",
+  "[This exact call",
+  "[screenshot attached",
+];
+
+/** True when a trailing line is one of those notes (possibly clipped short). */
+function looksLikeHarnessNote(line: string): boolean {
+  return HARNESS_NOTE_MARKERS.some((marker) => {
+    // The log clips a tool result at 400 chars, so a note can be cut mid-word.
+    // Compare on the shorter of the two, with a floor that keeps a bare "[" or
+    // "[RE" from matching by accident.
+    const n = Math.min(marker.length, line.length);
+    return n >= 6 && line.slice(0, n) === marker.slice(0, n);
+  });
+}
+
+/**
+ * Strip the loop's own trailing notes off a failed tool result before
+ * comparing results.
+ *
+ * Two things in those notes are volatile, and both used to stop `failedCalls`
+ * recognising a repeat:
+ *
+ *  - `createStuckGuard` appends its retry/stuck warning to the SECOND identical
+ *    failure and not the first, so the two attempts record different text.
+ *  - `withFailureShot` appends the tab label, which `tabIdentity` stamps with
+ *    the wall clock at second resolution — so two identical failures grouped
+ *    only when they happened to land in the same second.
+ *
+ * The result was a coach digest (and the lesson learned from it) whose content
+ * depended on timing and on where a 400-char clip happened to land. Neither
+ * note is part of the tool's failure, so neither belongs in the grouping key.
+ */
+export function stripHarnessNotes(text: string): string {
+  let out = text.trimEnd();
+  for (;;) {
+    const at = out.lastIndexOf("\n[");
+    if (at === -1) return out;
+    if (!looksLikeHarnessNote(out.slice(at + 1))) return out;
+    out = out.slice(0, at).trimEnd();
+  }
+}
+
 /** Every failed tool call in the run, with repeats collapsed into `count`. */
 export function failedCalls(rec: LogTurnRecord): FailedCall[] {
   const out: FailedCall[] = [];
   for (const turn of rec.turns) {
     for (const call of turn.tools) {
       if (call.ok !== false) continue;
-      const error = clip(call.result ?? "(no error text)", DIGEST_FAILURE_CHARS);
+      const error = clip(
+        stripHarnessNotes(call.result ?? "(no error text)"),
+        DIGEST_FAILURE_CHARS,
+      );
       const key = `${call.name}|${callArgText(call)}|${error}`;
       const existing = out.find((f) => `${f.name}|${f.args}|${f.error}` === key);
       if (existing) {

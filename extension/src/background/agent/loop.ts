@@ -34,12 +34,32 @@ export interface ExecuteResult {
   jevGate?: boolean;
 }
 
+/**
+ * Where one tool call sits inside its step's batch.
+ *
+ * The executor uses this to defer the settle+snapshot observation to the LAST
+ * call of a batch. Every page action used to pay its own settle and append its
+ * own snapshot, even when the model had batched several actions into one step
+ * and only ever reads the final page state — pure duplicated work on the
+ * critical path between two LLM round trips.
+ */
+export interface ExecuteBatch {
+  /** 0-based position within this step's tool calls. */
+  index: number;
+  /** Total tool calls in this step. */
+  count: number;
+}
+
 export interface LoopDeps {
   llm: LlmClient;
   emit(event: StepEvent): void;
   save(cp: Checkpoint): Promise<void>;
   shouldStop(): boolean;
-  execute(name: string, args: Record<string, unknown>): Promise<ExecuteResult>;
+  execute(
+    name: string,
+    args: Record<string, unknown>,
+    batch?: ExecuteBatch,
+  ): Promise<ExecuteResult>;
   /**
    * Optional ceiling on agent steps. Omitted/Infinity means uncapped: the loop
    * runs until the model answers, the user stops it, or an error aborts it.
@@ -54,6 +74,12 @@ export interface LoopDeps {
   thinking?: ThinkingLevel;
   /** Madman mode: profane voice in the prompt + a cuss on every tool label. */
   madman?: boolean;
+  /**
+   * Fast steps: shape the prompt to batch one logical unit of work into a
+   * single round trip and to stop spending a step re-verifying an action whose
+   * result already carried a fresh observation. See STEP_RULES_BATCHED.
+   */
+  batchActions?: boolean;
   /** Jev sidecar configured: the `judge` tool is in the spec list. */
   judgeAvailable?: boolean;
   /**
@@ -81,6 +107,35 @@ const MAX_LIVE_IMAGES = 4;
 const CONTEXT_RESERVE_TOKENS = 20_000;
 const IMAGE_CHARS_EQUIV = 6_000;
 const TOOL_CALL_ARGS_KEEP_CHARS = 200;
+/**
+ * Compaction is QUANTIZED so the rewrite point JUMPS instead of creeping.
+ *
+ * A provider prefix cache matches on the longest byte-identical prefix of the
+ * previous request, so what matters is where the FIRST difference sits. The
+ * original sweep collapsed the single oldest message each time the budget was
+ * crossed, which advanced the rewrite point by a message on practically every
+ * step — the first difference stayed early in the array and the bulk of the
+ * conversation re-prefilled every step, no matter how little was new.
+ *
+ * Snapping the point to a multiple of HISTORY_COMPACT_QUANTUM keeps it fixed
+ * for several steps at a time, and each jump re-prefills only from that point
+ * onward, which is always near the END of the history (it is derived from the
+ * size budget). The cost of a jump is therefore bounded by the newest messages
+ * rather than by the whole conversation.
+ */
+const HISTORY_COMPACT_QUANTUM = 8;
+/**
+ * Floor on how much history compaction will ever throw away. The size budget
+ * normally keeps far more than this — `cut` below is derived from the target —
+ * so this only binds when a handful of enormous messages would otherwise be
+ * compacted away immediately, leaving the model blind to what it just did.
+ */
+const HISTORY_KEEP_RECENT = 4;
+/**
+ * Hysteresis: once compaction runs, it aims well under the cap, so the next
+ * steps are untouched and their prefix stays byte-identical.
+ */
+const HISTORY_LOW_WATER = 0.6;
 /**
  * Flat token estimate for one attached screenshot in the fallback usage math.
  * Counting a JPEG's base64 as chars/4 — what the old fallback did against the
@@ -251,6 +306,13 @@ export async function runAgentTask(
   const runStartedAt = Date.now();
   let totalIn = 0;
   let totalOut = 0;
+  let totalCached = 0;
+  let cachedEverReported = false;
+  // Cache totals are only meaningful if EVERY step reported one: the figure is
+  // rendered as a share of `inputTokens`, so a step that stayed silent would
+  // silently deflate the percentage. Same rule as `usageEstimated` — a number
+  // that cannot be trusted is not shown at all.
+  let cachedAlwaysReported = true;
   let reasoningChars = 0;
   let usageEverEstimated = false;
   let lastStats: RunStats | undefined;
@@ -277,6 +339,7 @@ export async function runAgentTask(
     deps.agentMode ?? "auto",
     deps.madman === true,
     deps.judgeAvailable === true,
+    deps.batchActions === true,
   );
   const prefixTokens =
     estimateTokens(systemPrompt) +
@@ -349,7 +412,10 @@ export async function runAgentTask(
     // at a flat per-image cost). Estimated stats are flagged so the log never
     // renders them as provider truth.
     const estimated = result.usage === undefined;
-    const usage = result.usage ?? {
+    // Explicitly typed: the fallback carries no cache field, and an estimate
+    // must never be mistaken for a provider-reported cache read.
+    const usage: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } =
+      result.usage ?? {
       inputTokens: prefixTokens + estimateMessages(history),
       outputTokens: estimateTokens(
         result.text + (result.reasoning ?? "") + JSON.stringify(result.toolCalls),
@@ -357,6 +423,12 @@ export async function runAgentTask(
     };
     totalIn += usage.inputTokens;
     totalOut += usage.outputTokens;
+    if (usage.cachedInputTokens !== undefined) {
+      totalCached += usage.cachedInputTokens;
+      cachedEverReported = true;
+    } else {
+      cachedAlwaysReported = false;
+    }
     if (estimated) usageEverEstimated = true;
     if (result.reasoning) reasoningChars += result.reasoning.length;
     const elapsedMs = Math.max(1, Date.now() - runStartedAt);
@@ -370,6 +442,11 @@ export async function runAgentTask(
       contextWindow,
       elapsedMs,
       reasoningChars: reasoningChars || undefined,
+      // Only meaningful when the provider actually reported one: a run on an
+      // endpoint that stays silent shows no cache line, never "0% cached".
+      cachedInputTokens:
+        cachedEverReported && cachedAlwaysReported ? totalCached : undefined,
+      prefixTokens,
       usageEstimated: usageEverEstimated || undefined,
     };
     lastStats = stats;
@@ -515,14 +592,24 @@ export async function runAgentTask(
     if (canParallel) {
       for (const call of calls) announce(call);
       const outcomes = await Promise.all(
-        calls.map((call) => runOne(call, deps, step, specsByName, planOnly, guard)),
+        calls.map((call, i) =>
+          runOne(call, deps, step, specsByName, planOnly, guard, {
+            index: i,
+            count: calls.length,
+          }),
+        ),
       );
       for (const outcome of outcomes) record(outcome);
     } else {
-      for (const call of calls) {
+      for (const [i, call] of calls.entries()) {
         if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
         announce(call);
-        record(await runOne(call, deps, step, specsByName, planOnly, guard));
+        record(
+          await runOne(call, deps, step, specsByName, planOnly, guard, {
+            index: i,
+            count: calls.length,
+          }),
+        );
         if (aborted) break;
       }
     }
@@ -543,6 +630,7 @@ async function runOne(
   specs: Map<string, LlmToolSpec>,
   planOnly: boolean,
   guard: StuckGuard,
+  batch: ExecuteBatch,
 ): Promise<{ message: LlmMessage; event: StepEvent; invalid: boolean }> {
   if (call.invalidJson !== undefined) {
     const error = `ERROR: tool arguments were not valid JSON: ${call.invalidJson.slice(0, 200)}`;
@@ -578,7 +666,7 @@ async function runOne(
     };
   }
   try {
-    const res = await deps.execute(call.name, call.args);
+    const res = await deps.execute(call.name, call.args, batch);
     if (!res.ok) {
       const error = res.error ?? "tool failed";
       const content = `ERROR: ${error}${guard.note(call.name, call.args, true)}`;
@@ -674,6 +762,14 @@ function clip(text: string, max: number): string {
  * context whether or not it lives in `content`), and an estimate per attached
  * image. A char-only budget that ignored tool-call args is how a run ended up
  * sending 131k tokens into a 128k window.
+ *
+ * Compaction is QUANTIZED, because a request prefix that shifts every step
+ * costs far more than the tokens it saves. Messages are only ever shrunk, never
+ * removed (an assistant tool-call must keep its matching tool result or the
+ * wire is invalid), shrinking is monotone, and it happens only when the budget
+ * has been crossed — after which the sweep runs well past the mark, so the next
+ * steps send a byte-identical prefix and the provider's cache can hit. The
+ * newest HISTORY_KEEP_RECENT messages are never touched.
  */
 export function truncateHistory(
   messages: LlmMessage[],
@@ -692,26 +788,45 @@ export function truncateHistory(
       if (imagesSeen > MAX_LIVE_IMAGES) m.images = undefined;
     }
   }
-  const argsChars = (m: LlmMessage): number =>
-    m.toolCalls?.reduce((sum, tc) => sum + JSON.stringify(tc.args ?? {}).length, 0) ?? 0;
   const size = (m: LlmMessage): number =>
-    m.content.length + argsChars(m) + (m.images?.length ?? 0) * IMAGE_CHARS_EQUIV;
-  let total = out.reduce((sum, m) => sum + size(m), 0);
+    m.content.length +
+    (m.toolCalls?.reduce((sum, tc) => sum + JSON.stringify(tc.args ?? {}).length, 0) ?? 0) +
+    (m.images?.length ?? 0) * IMAGE_CHARS_EQUIV;
   const cap = Math.min(budgetChars, tokenBudget ? tokenBudget * 4 : Number.POSITIVE_INFINITY);
-  for (let i = 0; i < out.length && total > cap; i++) {
+  const total = out.reduce((sum, m) => sum + size(m), 0);
+  // Under budget: hand the history back untouched. This is the common case, and
+  // the one that has to stay byte-stable for prompt caching to pay off.
+  if (total <= cap) return out;
+
+  // Over budget. Find where keeping must start for the tail to fit the
+  // low-water target, then SNAP that point to a quantum so it holds still for
+  // several steps and then jumps, instead of following the history one message
+  // at a time. Rounding up collapses a little more than strictly needed, which
+  // is the hysteresis that keeps the next steps untouched.
+  const target = cap * HISTORY_LOW_WATER;
+  let tail = 0;
+  let cut = out.length;
+  while (cut > 0 && tail <= target) {
+    cut--;
+    tail += size(out[cut]!);
+  }
+  const q = HISTORY_COMPACT_QUANTUM;
+  const keepFrom = Math.max(
+    0,
+    Math.min(Math.ceil(cut / q) * q, out.length - HISTORY_KEEP_RECENT),
+  );
+
+  for (let i = 0; i < keepFrom; i++) {
     const m = out[i]!;
     if (m.role === "tool" && m.content.length > 64) {
-      total -= m.content.length - 64;
       m.content = "[older tool result omitted]";
       m.images = undefined;
     }
     if (m.role === "assistant" && m.toolCalls?.length) {
       for (const tc of m.toolCalls) {
-        const len = JSON.stringify(tc.args ?? {}).length;
         // The id and name must survive (they pair with the tool result); the
         // arguments of an old call are dead weight the model never re-reads.
-        if (len > TOOL_CALL_ARGS_KEEP_CHARS) {
-          total -= len;
+        if (JSON.stringify(tc.args ?? {}).length > TOOL_CALL_ARGS_KEEP_CHARS) {
           tc.args = { note: "args elided" };
         }
       }

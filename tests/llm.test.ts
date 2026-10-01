@@ -5,6 +5,7 @@ import {
   toAnthropicMessages,
   anthropicAggregator,
   openAiAggregator,
+  parseOpenAiUsage,
 } from "../extension/src/background/agent/llm";
 import type { LlmRequest } from "../extension/src/shared/llm";
 
@@ -425,6 +426,98 @@ describe("volatile per-step tail (the clock) and cache breakpoints", () => {
     expect(
       body.messages.some((m) => m.role === "system" && String(m.content).includes("Current date")),
     ).toBe(false);
+  });
+});
+
+describe("prompt-cache usage telemetry", () => {
+  it("merges Anthropic message_start input + cache counters with the message_delta output", () => {
+    const agg = anthropicAggregator();
+    agg.feed(
+      `data: ${JSON.stringify({
+        type: "message_start",
+        message: {
+          usage: {
+            input_tokens: 9_000,
+            output_tokens: 1,
+            cache_read_input_tokens: 8_000,
+            cache_creation_input_tokens: 500,
+          },
+        },
+      })}`,
+    );
+    // The delta reports output only — it must not zero the input side.
+    agg.feed(
+      `data: ${JSON.stringify({
+        type: "message_delta",
+        delta: { stop_reason: "end_turn" },
+        usage: { output_tokens: 250 },
+      })}`,
+    );
+    expect(agg.result().usage).toEqual({
+      inputTokens: 9_000,
+      outputTokens: 250,
+      cachedInputTokens: 8_000,
+    });
+  });
+
+  it("leaves cachedInputTokens undefined when Anthropic never reports cache fields", () => {
+    const agg = anthropicAggregator();
+    agg.feed(
+      `data: ${JSON.stringify({
+        type: "message_start",
+        message: { usage: { input_tokens: 1_200, output_tokens: 1 } },
+      })}`,
+    );
+    const usage = agg.result().usage;
+    expect(usage?.inputTokens).toBe(1_200);
+    // Absent is not zero: a silent endpoint must not render as "cache missed".
+    expect(usage?.cachedInputTokens).toBeUndefined();
+  });
+
+  it("reads OpenAI prompt_tokens_details.cached_tokens", () => {
+    const agg = openAiAggregator();
+    agg.feed(
+      `data: ${JSON.stringify({
+        choices: [{ delta: { content: "hi" } }],
+        usage: {
+          prompt_tokens: 12_000,
+          completion_tokens: 90,
+          prompt_tokens_details: { cached_tokens: 11_000 },
+        },
+      })}`,
+    );
+    expect(agg.result().usage).toEqual({
+      inputTokens: 12_000,
+      outputTokens: 90,
+      cachedInputTokens: 11_000,
+    });
+  });
+
+  it("reads DeepSeek's prompt_cache_hit_tokens spelling", () => {
+    const agg = openAiAggregator();
+    agg.feed(
+      `data: ${JSON.stringify({
+        choices: [{ delta: {} }],
+        usage: { prompt_tokens: 4_000, completion_tokens: 10, prompt_cache_hit_tokens: 3_500 },
+      })}`,
+    );
+    expect(agg.result().usage?.cachedInputTokens).toBe(3_500);
+  });
+
+  it("prefers prompt_tokens_details over the DeepSeek spelling when both appear", () => {
+    expect(
+      parseOpenAiUsage({
+        prompt_tokens: 100,
+        completion_tokens: 5,
+        prompt_tokens_details: { cached_tokens: 80 },
+        prompt_cache_hit_tokens: 20,
+      }).cachedInputTokens,
+    ).toBe(80);
+  });
+
+  it("reports no cache field at all when the endpoint is silent", () => {
+    const usage = parseOpenAiUsage({ prompt_tokens: 700, completion_tokens: 12 });
+    expect(usage.cachedInputTokens).toBeUndefined();
   });
 });
 

@@ -100,6 +100,14 @@ export interface LogTurnRecord {
   /** Stable correlation id, also used to match resumed runs. */
   runId: string;
   mode?: string;
+  /**
+   * Provider wire and model this run used. Recorded because an exported log
+   * was previously unattributable: per-step latency and cache behaviour are
+   * properties of the endpoint, and "why was this run slow?" is unanswerable
+   * without knowing which one it ran against.
+   */
+  provider?: string;
+  model?: string;
   startedAt: number;
   updatedAt: number;
   /** `running` until a done/error event closes it, then `done`/`stopped`. */
@@ -133,6 +141,8 @@ export function newTurnRecord(
   opts: {
     conversationId?: string;
     mode?: string;
+    provider?: string;
+    model?: string;
     attachments?: { name: string; kind: "image" | "text" }[];
     at?: number;
   } = {},
@@ -145,6 +155,8 @@ export function newTurnRecord(
     attachments: opts.attachments?.length ? opts.attachments : undefined,
     runId: newId("run"),
     mode: opts.mode,
+    provider: opts.provider,
+    model: opts.model,
     startedAt: at,
     updatedAt: at,
     status: "running",
@@ -380,6 +392,8 @@ export function toMarkdown(records: LogTurnRecord[]): string {
     out.push(`- **id:** \`${rec.id}\``);
     if (rec.conversationId) out.push(`- **conversation:** \`${rec.conversationId}\``);
     if (rec.mode) out.push(`- **mode:** ${rec.mode}`);
+    if (rec.provider) out.push(`- **provider:** ${rec.provider}`);
+    if (rec.model) out.push(`- **model:** ${rec.model}`);
     out.push(`- **status:** ${rec.status}`);
     out.push(`- **started:** ${iso(rec.startedAt)}`);
     out.push(`- **updated:** ${iso(rec.updatedAt)}`);
@@ -464,6 +478,24 @@ export function toMarkdown(records: LogTurnRecord[]): string {
         out.push(
           `_stats: ${turn.stats.steps} steps · ${turn.stats.totalTokens} tokens${est} (${turn.stats.outputTokens} out) · ${turn.stats.tokensPerSec.toFixed(1)} tok/s · context ${turn.stats.contextTokens}/${turn.stats.contextWindow}_`,
         );
+        // Cache + prefix are what explain wall-clock: a step that re-prefills
+        // its whole ~8k-token prefix pays for it on every round trip. Rendered
+        // only when the provider actually reported a cache number.
+        const cached = turn.stats.cachedInputTokens;
+        if (cached !== undefined) {
+          const pct = turn.stats.inputTokens
+            ? Math.round((100 * cached) / turn.stats.inputTokens)
+            : 0;
+          out.push(
+            `_cache: ${cached} of ${turn.stats.inputTokens} input tokens served from cache (${pct}%)_`,
+          );
+        }
+        if (turn.stats.prefixTokens) {
+          const floor = turn.stats.prefixTokens * turn.stats.steps;
+          out.push(
+            `_prefix: ${turn.stats.prefixTokens} tokens re-sent per step × ${turn.stats.steps} steps = ${floor} tokens of fixed cost_`,
+          );
+        }
       }
       out.push("");
     }

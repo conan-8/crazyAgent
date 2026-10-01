@@ -102,6 +102,17 @@ came from the sidecar rather than your chat model or the rules.
 delete, **New chat** to start fresh. Typing into an open thread continues it
 with full prior context (the follow-up really sees the earlier turns).
 
+**Fast steps** (Settings → Speed, on by default) batches one logical unit of
+work — a form, a key sequence, a menu walk — into a single step instead of one
+round trip per action, and stops the agent spending a step re-checking an
+action whose result already ended with a fresh snapshot. It exists because the
+run logs priced the habit: across 442 archived turns the agent averaged **1.04
+tool calls per turn** at a measured **~7.5s of fixed latency per round trip**,
+with 78% of turns emitting under 500 tokens. Turn it off for the old
+one-action-then-verify pacing. Safety is identical either way — the
+confirmation cards, the risk rules and every gate behave the same, and each
+gated action still confirms on its own.
+
 **Run logs**: the **Run logs** button (next to History) archives every task
 locally in `chrome.storage.local` — one timestamped record per run, split into
 turns, each turn carrying its start time, duration and token stats, and each
@@ -109,6 +120,10 @@ tool call its raw args, result and how long it took. Records survive worker
 teardown and browser restarts. Open one for a per-turn timeline, or **Export
 JSONL / Export MD** to write the whole archive (or a single run) into your
 Downloads folder for keeping alongside the project. Demo runs aren't logged.
+Each record names the provider and model it ran against, and each stats line
+reports the fixed prefix it re-sent per step plus — when the endpoint reports
+one — how much of the input came from the provider's prompt cache, so "why was
+this run slow?" is answerable from the archive alone.
 
 **Iframes and embedded docs**: content inside iframes (embedded Google
 Docs/Slides, school portals that frame their tools) is first-class. The snapshot
@@ -194,11 +209,16 @@ npm run watch        # rebuild on change (then reload the extension)
 npm test             # unit tests (vitest)
 npm run typecheck
 npm run verify       # full suite: unit + every phase's real-browser smoke
+node scripts/runlog-stats.mjs before.jsonl after.jsonl   # where the time went
 ```
 
 `npm run verify` boots a real Edge/Chrome with the built extension and drives
 it over CDP against a local fixture site and a scripted mock LLM (real
-HTTP/SSE in both wire protocols). See `docs/DEV.md` for architecture,
+HTTP/SSE in both wire protocols). `runlog-stats.mjs` reads exported run logs
+(no arguments = the newest export in `~/Downloads`) and reports the LLM/tool
+split, per-step latency, the fitted fixed cost per round trip, tool timings and
+prompt-cache hit rate; pass two exports to get a before/after table. See
+`docs/DEV.md` for architecture,
 workflow and how to add tools/providers (including the model's clock); `docs/THREAT-MODEL.md` for what the
 agent can and cannot do to you.
 
