@@ -3,6 +3,7 @@ import {
   capCheckpointImages,
   createStuckGuard,
   estimateMessages,
+  isRoutineStep,
   reasoningCapChars,
   runAgentTask,
   truncateHistory,
@@ -256,6 +257,45 @@ describe("runAgentTask", () => {
     expect(events.some((e) => e.kind === "reasoning_delta")).toBe(true);
   });
 
+  it("emits one turn_timing event per step with the TTFT/decode split", async () => {
+    const cp = makeCheckpoint();
+    const step = (id: string) => ({
+      text: "",
+      toolCalls: [{ id, name: "snapshot", args: {} }],
+      stopReason: "tool_use" as const,
+    });
+    const { events, deps } = harness([step("a"), { text: "done", toolCalls: [], stopReason: "end_turn" }]);
+    await runAgentTask(cp, deps);
+    const timings = events.filter((e) => e.kind === "turn_timing");
+    expect(timings).toHaveLength(2);
+    // The fake client streams a token before returning, so both halves exist.
+    for (const t of timings) {
+      const e = t as Extract<StepEvent, { kind: "turn_timing" }>;
+      expect(e.ttftMs).toBeGreaterThanOrEqual(0);
+      expect(e.decodeMs).toBeGreaterThanOrEqual(0);
+      expect(e.stepIndex).toBeLessThan(2);
+    }
+  });
+
+  it("notes a silent endpoint exactly once, not once per step", async () => {
+    const cp = makeCheckpoint();
+    const step = (id: string) => ({
+      text: "",
+      toolCalls: [{ id, name: "snapshot", args: {} }],
+      stopReason: "tool_use" as const,
+    });
+    const { events, deps } = harness([
+      step("a"),
+      step("b"),
+      { text: "done", toolCalls: [], stopReason: "end_turn" },
+    ]);
+    await runAgentTask(cp, deps);
+    const notes = events.filter(
+      (e) => e.kind === "info" && e.message.includes("returned no usage"),
+    );
+    expect(notes).toHaveLength(1);
+  });
+
   // The cache figure is rendered as a share of inputTokens, so a step that
   // reported no cache number would silently deflate it. Same rule as
   // usageEstimated: an untrustworthy number is not shown at all.
@@ -366,6 +406,40 @@ describe("runAgentTask", () => {
     expect(outcome).toBe("stopped");
     expect(attempts).toBe(3);
     expect(events.some((e) => e.kind === "error")).toBe(true);
+  }, 15_000);
+
+  it("aborts a silent attempt via the TTFT stall guard and retries", async () => {
+    const cp = makeCheckpoint();
+    let attempts = 0;
+    const stalling: LlmClient = {
+      complete(_req, onText, signal) {
+        attempts++;
+        if (attempts === 1) {
+          // A connection that stays alive but never streams a token — the
+          // exact shape of the 108s stall in the archived run. Must honor the
+          // abort signal the way a real fetch-backed stream would.
+          return new Promise((_resolve, reject) => {
+            const t = setTimeout(() => {
+              onText?.("late");
+              _resolve({ text: "late", toolCalls: [], stopReason: "end_turn" });
+            }, 5_000);
+            signal?.addEventListener("abort", () => {
+              clearTimeout(t);
+              reject(new Error("The user aborted a request."));
+            }, { once: true });
+          });
+        }
+        onText?.("fast");
+        return Promise.resolve({ text: "recovered", toolCalls: [], stopReason: "end_turn" });
+      },
+    };
+    const { events, deps } = harness([], { llm: stalling, ttftStallMs: 60 });
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    expect(attempts).toBe(2);
+    expect(
+      events.some((e) => e.kind === "info" && e.message.includes("stalled — no first token")),
+    ).toBe(true);
   }, 15_000);
 
   it("runs read-only batches concurrently but records results in call order", async () => {
@@ -867,6 +941,88 @@ describe("createStuckGuard", () => {
     const guard = createStuckGuard();
     for (let i = 0; i < 2; i++) expect(guard.note("snapshot", {}, false)).toBe("");
     expect(guard.note("snapshot", {}, false)).toContain("run 3 times");
+  });
+
+  it("never nags a wait tool for waiting", () => {
+    const guard = createStuckGuard();
+    for (let i = 0; i < 5; i++) expect(guard.note("wait_for", { text: "done" }, false)).toBe("");
+    for (let i = 0; i < 5; i++) {
+      expect(guard.note("wait_for_settle", { timeoutMs: 5000 }, false)).toBe("");
+    }
+    // Failures still count — a broken wait is a broken tool like any other.
+    expect(guard.note("wait_for", { text: "x" }, true)).toBe("");
+    expect(guard.note("wait_for", { text: "x" }, true)).toContain("RETRY WARNING");
+  });
+});
+
+describe("adaptive per-step thinking", () => {
+  const step = (id: string) => ({
+    text: "",
+    toolCalls: [{ id, name: "snapshot", args: {} }],
+    stopReason: "tool_use" as const,
+    reasoning: "ok",
+  });
+
+  it("isRoutineStep accepts only cheap single-call non-navigating successes", () => {
+    const base = { toolCalls: 1, failed: false, reasoningChars: 100, pageChanging: false };
+    expect(isRoutineStep(base)).toBe(true);
+    expect(isRoutineStep({ ...base, toolCalls: 2 })).toBe(false);
+    expect(isRoutineStep({ ...base, failed: true })).toBe(false);
+    expect(isRoutineStep({ ...base, pageChanging: true })).toBe(false);
+    expect(isRoutineStep({ ...base, reasoningChars: 5_000 })).toBe(false);
+    expect(isRoutineStep({ ...base, toolCalls: 0 })).toBe(false);
+  });
+
+  it("lowers thinking to off after a routine streak, and restores on failure", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness(
+      [step("a"), step("b"), step("c"), step("d"), { text: "done", toolCalls: [], stopReason: "end_turn" }],
+      { thinking: "low", adaptiveThinking: true },
+    );
+    await runAgentTask(cp, deps);
+    const llm = deps.llm as FakeLlm;
+    // Steps 1-3 run at the configured level; step 4 (after 3 routine steps)
+    // is sent with thinking off.
+    expect(llm.seen[0]!.thinking).toBe("low");
+    expect(llm.seen[1]!.thinking).toBe("low");
+    expect(llm.seen[2]!.thinking).toBe("low");
+    expect(llm.seen[3]!.thinking).toBe("off");
+    expect(
+      events.some((e) => e.kind === "info" && e.message.includes("adaptive thinking")),
+    ).toBe(true);
+  });
+
+  it("does not lower when the switch is off", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness(
+      [step("a"), step("b"), step("c"), { text: "done", toolCalls: [], stopReason: "end_turn" }],
+      { thinking: "low" },
+    );
+    await runAgentTask(cp, deps);
+    const llm = deps.llm as FakeLlm;
+    for (const req of llm.seen) expect(req.thinking).toBe("low");
+  });
+
+  it("resets the streak when a step fails or navigates", async () => {
+    const cp = makeCheckpoint();
+    const failing = {
+      text: "",
+      toolCalls: [{ id: "f", name: "navigate", args: { url: "x" } }],
+      stopReason: "tool_use" as const,
+      reasoning: "ok",
+    };
+    const { deps } = harness(
+      [step("a"), step("b"), failing, step("d"), step("e"), step("f2"), step("g"), { text: "done", toolCalls: [], stopReason: "end_turn" }],
+      { thinking: "low", adaptiveThinking: true },
+    );
+    await runAgentTask(cp, deps);
+    const llm = deps.llm as FakeLlm;
+    // The navigate step at index 2 breaks the streak; steps 3,4,5 rebuild it
+    // (0-based: seen[5] is the 4th routine... streak counts AFTER a step), so
+    // seen[6] (step "g") still runs at low — and a run at "off" never applies.
+    for (const [i, req] of llm.seen.entries()) {
+      if (i <= 5) expect(req.thinking).toBe("low");
+    }
   });
 });
 

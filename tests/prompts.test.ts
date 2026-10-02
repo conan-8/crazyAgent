@@ -4,6 +4,7 @@ import {
   buildSystemVolatile,
   timeLine,
 } from "../extension/src/background/agent/prompts";
+import { BUNDLED_SKILLS } from "../extension/src/shared/skills";
 
 describe("buildSystemPrompt", () => {
   it("pins the concise-but-complete style contract", () => {
@@ -54,6 +55,7 @@ describe("buildSystemPrompt", () => {
             (l) =>
               !l.startsWith("- BATCH ONE") &&
               !l.startsWith("- ONE CALL PER PAGE") &&
+              !l.startsWith("- When the procedure is already KNOWN") &&
               !l.startsWith("- Do NOT spend a step") &&
               !l.startsWith("- Independent read-only lookups") &&
               !l.startsWith("- Prefer small decisive steps"),
@@ -167,73 +169,84 @@ describe("buildSystemPrompt", () => {
   });
 });
 
-describe("canvas document editor rules", () => {
-  // The playbook the agent needed for "type something into this Google Doc":
-  // verified against the canvas-editor fixture in scripts/docs-smoke.mjs.
+describe("canvas document editor procedure", () => {
+  // The full playbook moved OUT of the fixed prefix into the bundled
+  // `canvas-doc-editors` skill (shared/skills.ts): ~700 tokens rode every step
+  // of every run for pages that had no editor in sight. The prompt keeps a
+  // one-line pointer; use_skill loads the body on demand.
   const prompt = buildSystemPrompt("type something into this doc", "auto");
+  const skill = BUNDLED_SKILLS.find((s) => s.name === "canvas-doc-editors")!;
+
+  it("keeps a pointer in the prompt and nothing more", () => {
+    expect(prompt).toContain("`use_skill name:canvas-doc-editors`");
+    // The heavy rules are gone from the prefix — that was the point.
+    expect(prompt).not.toContain("No tool can read it");
+    expect(prompt).not.toContain("/export?format=txt");
+    expect(prompt).not.toContain("Find and replace");
+  });
 
   it("tells the model the canvas body cannot be read, and not to retry", () => {
-    expect(prompt).toContain("painted into a <canvas>");
-    expect(prompt).toContain("No tool can read it");
-    expect(prompt).toContain("do NOT retry");
+    expect(skill.body).toContain("painted into a <canvas>");
+    expect(skill.body).toContain("No tool can read it");
+    expect(skill.body).toContain("do NOT retry");
   });
 
   it("tells the model the sink ref will not exist and not to hunt for it", () => {
-    expect(prompt).toContain("almost NEVER in the snapshot");
-    expect(prompt).toContain("no ref exists for it");
-    expect(prompt).toContain("Do not hunt for an editable ref");
-    expect(prompt).toContain("never `type` into a toolbar/menu ref");
+    expect(skill.body).toContain("almost NEVER in the snapshot");
+    expect(skill.body).toContain("no ref exists for it");
+    expect(skill.body).toContain("Do not hunt for an editable ref");
+    expect(skill.body).toContain("never `type` into a toolbar/menu ref");
   });
 
   it("routes writes through ONE ref-less type call, never per-keystroke", () => {
-    expect(prompt).toContain("WRITE WITH ONE `type` CALL AND NO REF");
-    expect(prompt).toContain("NEVER type character-by-character");
-    expect(prompt).toContain("silently drop or duplicate a character");
+    expect(skill.body).toContain("WRITE WITH ONE `type` CALL AND NO REF");
+    expect(skill.body).toContain("NEVER type character-by-character");
+    expect(skill.body).toContain("silently drop or duplicate a character");
   });
 
   it("routes caret placement through click_at now that coordinate clicks exist", () => {
-    expect(prompt).toContain("`click_at` at the target position");
-    expect(prompt).toContain("Text inserts at the caret");
+    expect(skill.body).toContain("`click_at` at the target position");
+    expect(skill.body).toContain("Text inserts at the caret");
   });
 
   it("gives the one cheap verification: the export fetch", () => {
-    expect(prompt).toContain("VERIFY ONCE, CHEAPLY");
-    expect(prompt).toContain("/export?format=txt");
-    expect(prompt).toContain("font-weight:700");
-    expect(prompt).toContain("do NOT stack screenshots");
+    expect(skill.body).toContain("VERIFY ONCE, CHEAPLY");
+    expect(skill.body).toContain("/export?format=txt");
+    expect(skill.body).toContain("font-weight:700");
+    expect(skill.body).toContain("do NOT stack screenshots");
   });
 
   it("gives the readable URL route for Docs and Slides", () => {
-    expect(prompt).toContain("/document/d/<id>/preview");
-    expect(prompt).toContain("/mobilebasic");
-    expect(prompt).toContain("/presentation/d/<id>/preview");
+    expect(skill.body).toContain("/document/d/<id>/preview");
+    expect(skill.body).toContain("/mobilebasic");
+    expect(skill.body).toContain("/presentation/d/<id>/preview");
   });
 
   it("triages a dead debugger channel once instead of retrying dead tools", () => {
-    expect(prompt).toContain("page_health` ONCE");
-    expect(prompt).toContain("trusted keystrokes AND coordinate clicks AND JS evaluation are ALL dead");
-    expect(prompt).toContain("Reload the tab once and re-check once");
+    expect(skill.body).toContain("page_health` ONCE");
+    expect(skill.body).toContain("trusted keystrokes AND coordinate clicks AND JS evaluation are ALL dead");
+    expect(skill.body).toContain("Reload the tab once and re-check once");
   });
 
   it("spells out trusted:false for ordinary inputs on editor URLs", () => {
-    expect(prompt).toContain("`trusted:false` explicitly");
+    expect(skill.body).toContain("`trusted:false` explicitly");
   });
 
   it("carries the Find-and-replace DOM-only fallback with its empty-doc caveat", () => {
-    expect(prompt).toContain("Find and replace");
-    expect(prompt).toContain("Find = anchor");
-    expect(prompt).toContain("<new text> <anchor>");
-    expect(prompt).toContain("Nothing is deleted");
-    expect(prompt).toContain("In a blank document there is no anchor");
+    expect(skill.body).toContain("Find and replace");
+    expect(skill.body).toContain("Find = anchor");
+    expect(skill.body).toContain("<new text> <anchor>");
+    expect(skill.body).toContain("Nothing is deleted");
+    expect(skill.body).toContain("In a blank document there is no anchor");
   });
 
   it("is byte-stable across calls and independent of madman mode", () => {
     expect(buildSystemPrompt("t", "auto")).toBe(buildSystemPrompt("t", "auto"));
     const off = buildSystemPrompt("t", "auto", false);
     const on = buildSystemPrompt("t", "auto", true);
-    // Madman only appends a voice; the editor rules survive intact.
-    expect(on).toContain("painted into a <canvas>");
-    expect(off).toContain("painted into a <canvas>");
+    // Madman only appends a voice; the pointer survives intact.
+    expect(on).toContain("`use_skill name:canvas-doc-editors`");
+    expect(off).toContain("`use_skill name:canvas-doc-editors`");
   });
 });
 

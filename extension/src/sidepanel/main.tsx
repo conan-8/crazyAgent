@@ -19,6 +19,7 @@ import {
   type Lesson,
   type PortRequest,
   type RunAttachment,
+  type Skill,
   type StepEvent,
   type SwToPanel,
 } from "../shared/protocol";
@@ -693,10 +694,24 @@ function TurnView({
 }
 
 /** What the agent is doing right now, derived from the newest block. */
-function activityLabel(conv: Conversation | null): string {
+function activityLabel(
+  conv: Conversation | null,
+  awaiting?: { at: number; contextTokens: number } | null,
+  nowMs?: number,
+): string {
   const turn = conv?.turns[conv.turns.length - 1];
   if (!turn || turn.role !== "assistant") return "Getting started";
   const last = turn.blocks[turn.blocks.length - 1];
+  // The request is on the wire and nothing has streamed back: this is the
+  // provider's queue + prefill of the context we just sent, not local work —
+  // say so, with the size of the send and how long it has been.
+  const waitingOnModel =
+    awaiting && (!last || (last.kind === "tool" && last.card.filled));
+  if (waitingOnModel && awaiting) {
+    const secs = Math.max(0, Math.round(((nowMs ?? Date.now()) - awaiting.at) / 1000));
+    const k = Math.round(awaiting.contextTokens / 1000);
+    return `Sent ${k}k tokens · waiting for model ${secs}s`;
+  }
   if (!last) return "Thinking";
   if (last.kind === "tool") {
     return last.card.filled ? "Deciding next step" : (TOOL_META[last.card.name]?.active ?? "Working");
@@ -1273,6 +1288,25 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 title="Fast steps"
                 hint="Batch one logical unit of work (a form, a key sequence, a menu walk) into a single step and skip re-verifying actions that already returned a fresh snapshot. Fewer, fuller round trips — each one costs several seconds of fixed latency. Safety gates are unchanged"
               />
+              <Switch
+                checked={s.adaptiveThinking === true}
+                onChange={(v) => set("adaptiveThinking", v)}
+                title="Skip thinking on routine steps"
+                hint="After a few consecutive routine steps (one successful call, little reasoning, no navigation), later steps are sent with thinking off until something surprising happens — a failure, a navigation, an empty reply — which restores the configured level immediately"
+              />
+              <div class="field-grid">
+                <button
+                  class="btn-ghost"
+                  title="Turn on the speed profile for relay-style work: thinking off, fast steps on, routine-step thinking skipped"
+                  onClick={() => {
+                    set("thinking", "off");
+                    set("batchActions", true);
+                    set("adaptiveThinking", true);
+                  }}
+                >
+                  Relay (fast) preset
+                </button>
+              </div>
             </section>
 
             <section class="set-group" style="--i:4">
@@ -1780,6 +1814,180 @@ type CoachStatus = {
  * The list is the agent's own reference material — editable and removable
  * here, because the user owns what it is allowed to remember.
  */
+function SkillsBody({
+  skills,
+  error,
+  onNew,
+  onUpdate,
+  onDelete,
+  onClose,
+}: {
+  skills: Skill[];
+  error?: string;
+  onNew: (skill: {
+    name: string;
+    whenToUse: string;
+    body: string;
+    hosts?: string[];
+    keywords?: string[];
+  }) => void;
+  onUpdate: (id: string, patch: { pinned?: boolean; whenToUse?: string; body?: string }) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draftBody, setDraftBody] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newWhen, setNewWhen] = useState("");
+  const [newBody, setNewBody] = useState("");
+
+  return (
+    <>
+      <SheetHead
+        title="Skills"
+        sub={`${skills.length} on-demand procedure${skills.length === 1 ? "" : "s"} — the agent loads them with use_skill when the task matches`}
+        icon={ICONS.doc}
+        onClose={onClose}
+      />
+      <div class="lesson-actions">
+        <button class="btn-soft" onClick={() => setCreating((c) => !c)}>
+          <Icon d={ICONS.plus} size={12} />
+          {creating ? "Cancel" : "New skill"}
+        </button>
+      </div>
+      {error ? <p class="lesson-status is-error">{error}</p> : null}
+      {creating ? (
+        <div class="lesson-edit sheet-pad">
+          <input
+            placeholder="name (kebab-case, e.g. invoice-upload)"
+            value={newName}
+            onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
+          />
+          <input
+            placeholder="when to use it (one line — this is the catalog line)"
+            value={newWhen}
+            onInput={(e) => setNewWhen((e.target as HTMLInputElement).value)}
+          />
+          <textarea
+            rows={8}
+            placeholder="the full procedure (markdown) — what to do, in order, with the exact tool calls"
+            value={newBody}
+            onInput={(e) => setDraftBodySafe(setNewBody, e)}
+          />
+          <div class="lesson-edit-actions">
+            <button
+              class="btn-soft"
+              disabled={!newName.trim() || !newWhen.trim() || !newBody.trim()}
+              onClick={() => {
+                onNew({ name: newName.trim(), whenToUse: newWhen.trim(), body: newBody.trim() });
+                setCreating(false);
+                setNewName("");
+                setNewWhen("");
+                setNewBody("");
+              }}
+            >
+              Create
+            </button>
+            <button class="btn-ghost" onClick={() => setCreating(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <div class="sheet-body hist-body">
+        {skills.length === 0 ? (
+          <div class="empty">
+            <span class="empty-icon">
+              <Icon d={ICONS.doc} size={20} />
+            </span>
+            <b>No skills</b>
+            <p class="hint">
+              Skills are full procedures the agent loads on demand — the catalog
+              line rides every run's prompt appendix, the body only when used.
+              Bundled ones appear after the service worker loads once.
+            </p>
+          </div>
+        ) : (
+          skills.map((skill, i) => (
+            <div class="hist-row lesson-row" key={skill.id} style={`--i:${Math.min(i, 12)}`}>
+              <div class="lesson-item">
+                <div class="lesson-tags">
+                  <span class="lesson-tag">{skill.name}</span>
+                  <span class="lesson-tag is-soft">{skill.source}</span>
+                  {skill.pinned ? <span class="lesson-tag is-pin">pinned</span> : null}
+                  {skill.hosts?.map((h) => (
+                    <span class="lesson-tag" key={h}>
+                      {h}
+                    </span>
+                  ))}
+                </div>
+                {editing === skill.id ? (
+                  <div class="lesson-edit">
+                    <textarea
+                      value={draftBody}
+                      onInput={(e) => setDraftBodySafe(setDraftBody, e)}
+                    />
+                    <div class="lesson-edit-actions">
+                      <button
+                        class="btn-soft"
+                        onClick={() => {
+                          if (draftBody.trim()) onUpdate(skill.id, { body: draftBody.trim() });
+                          setEditing(null);
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button class="btn-ghost" onClick={() => setEditing(null)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p class="lesson-text">{skill.whenToUse}</p>
+                    <details>
+                      <summary class="hint">body ({skill.body.length.toLocaleString()} chars)</summary>
+                      <pre class="skill-body">{skill.body}</pre>
+                    </details>
+                  </>
+                )}
+                <div class="lesson-actions row-actions">
+                  <button
+                    class="btn-ghost"
+                    onClick={() => onUpdate(skill.id, { pinned: !skill.pinned })}
+                  >
+                    {skill.pinned ? "Unpin" : "Pin"}
+                  </button>
+                  <button
+                    class="btn-ghost"
+                    onClick={() => {
+                      setEditing(skill.id);
+                      setDraftBody(skill.body);
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button class="btn-ghost" onClick={() => onDelete(skill.id)}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
+function setDraftBodySafe(
+  set: (v: string) => void,
+  e: { target: EventTarget | null },
+): void {
+  set((e.target as HTMLTextAreaElement).value);
+}
+
 function LessonsBody({
   lessons,
   status,
@@ -2066,6 +2274,20 @@ function App() {
   const [logDetail, setLogDetail] = useState<LogTurnRecord | null>(null);
   const [showLessons, setShowLessons] = useState(false);
   const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [showSkills, setShowSkills] = useState(false);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [skillsError, setSkillsError] = useState<string | undefined>();
+  /**
+   * Set while the step's LLM request is on the wire and nothing has streamed
+   * back — the activity label uses it to say WHAT the wait is (context sent,
+   * provider queue/prefill) instead of the vague "Deciding next step". A ref
+   * twin exists because the port listener is bound once and closes over state.
+   */
+  const [awaitingModel, setAwaitingModel] = useState<{
+    at: number;
+    contextTokens: number;
+  } | null>(null);
+  const awaitingModelRef = useRef<{ at: number; contextTokens: number } | null>(null);
   const [coachStatus, setCoachStatus] = useState<CoachStatus>({ state: "idle" });
   const [lessonBadge, setLessonBadge] = useState(false);
   const [viewer, setViewer] = useState<string | null>(null);
@@ -2167,12 +2389,31 @@ function App() {
               // process was OOM-killed (the extension vanished from the bar).
               trimCardImages(currentConv, 6);
             }
+          } else if (msg.event.kind === "llm_request_sent") {
+            // The "what is it doing" window: the request is on the wire and
+            // nothing has streamed back yet. Ends at the first delta below.
+            const awaiting = {
+              at: Date.now(),
+              contextTokens: msg.event.contextTokens,
+            };
+            awaitingModelRef.current = awaiting;
+            setAwaitingModel(awaiting);
+          } else if (
+            (msg.event.kind === "token_delta" || msg.event.kind === "reasoning_delta") &&
+            awaitingModelRef.current
+          ) {
+            awaitingModelRef.current = null;
+            setAwaitingModel(null);
           } else if (currentConv) {
             foldEvent(currentConv, msg.event);
             trimCardImages(currentConv, 6);
           }
           for (const listener of listeners) listener(msg.event);
-          if (msg.event.kind === "done") setRunning(false);
+          if (msg.event.kind === "done") {
+            setRunning(false);
+            awaitingModelRef.current = null;
+            setAwaitingModel(null);
+          }
           bump();
         } else if (msg.type === "pong") {
           setSwStartedAt(msg.startedAt);
@@ -2199,6 +2440,9 @@ function App() {
           downloadLog(msg.filename, msg.content);
         } else if (msg.type === "lessons.list") {
           setLessons(msg.lessons);
+        } else if (msg.type === "skills.list") {
+          setSkills(msg.skills);
+          setSkillsError(msg.error);
         } else if (msg.type === "lessons.review") {
           // The coach runs in the worker: surface its progress in the drawer,
           // never in the chat thread (reviews are not part of the user's task).
@@ -2281,10 +2525,11 @@ function App() {
       else if (showHistory) setShowHistory(false);
       else if (showLogs) setShowLogs(false);
       else if (showLessons) setShowLessons(false);
+      else if (showSkills) setShowSkills(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [viewer, openMenu, showSettings, showHistory, showLogs, showLessons]);
+  }, [viewer, openMenu, showSettings, showHistory, showLogs, showLessons, showSkills]);
 
   // Accepts real-agent runs (string) and Phase 1 demo runs (demo object).
   const startRun = (
@@ -2396,6 +2641,28 @@ function App() {
 
   const exportLessons = (format: LogExportFormat) =>
     postPort?.({ kind: "lessons.export", format });
+
+  const openSkills = () => {
+    setShowSettings(false);
+    setShowHistory(false);
+    setShowLogs(false);
+    setShowLessons(false);
+    setShowSkills(true);
+    postPort?.({ kind: "skills.list" });
+  };
+
+  const newSkill = (skill: {
+    name: string;
+    whenToUse: string;
+    body: string;
+    hosts?: string[];
+    keywords?: string[];
+  }) => postPort?.({ kind: "skills.new", skill });
+
+  const updateSkill = (id: string, patch: { pinned?: boolean; whenToUse?: string; body?: string }) =>
+    postPort?.({ kind: "skills.update", id, patch });
+
+  const deleteSkill = (id: string) => postPort?.({ kind: "skills.delete", id });
 
   const newChat = () => {
     currentConv = null;
@@ -2557,6 +2824,12 @@ function App() {
         .then((r) => (r.baLessons as Lesson[] | undefined) ?? []),
     lessonsUI: () => ({ open: showLessons, status: coachStatus, badge: lessonBadge }),
     reviewLessons,
+    // skills surface (on-demand procedures)
+    skills: () =>
+      chrome.storage.local
+        .get("baSkills")
+        .then((r) => (r.baSkills as Skill[] | undefined) ?? []),
+    skillsUI: () => ({ open: showSkills }),
     // control bar surface
     usage: () => usage,
     addAttachment: (a: RunAttachment) => setAttachments((prev) => [...prev, a].slice(0, 4)),
@@ -2683,6 +2956,13 @@ function App() {
             />
           </span>
           <IconButton
+            icon={ICONS.doc}
+            tip="Skills (procedures)"
+            label="Skills"
+            class={showSkills ? "is-on" : ""}
+            onClick={() => (showSkills ? setShowSkills(false) : openSkills())}
+          />
+          <IconButton
             icon={ICONS.settings}
             tip="Settings"
             label="⚙"
@@ -2717,7 +2997,12 @@ function App() {
                 />
               ))
             )}
-            {running ? <WorkingIndicator label={activityLabel(conv)} jev={jevActivity(conv)} /> : null}
+            {running ? (
+              <WorkingIndicator
+                label={activityLabel(conv, awaitingModel, Date.now())}
+                jev={jevActivity(conv)}
+              />
+            ) : null}
           </div>
         </main>
         <button
@@ -2997,6 +3282,23 @@ function App() {
           onClear={clearLessons}
           onExport={exportLessons}
           onClose={() => setShowLessons(false)}
+        />
+      </Sheet>
+
+      <Sheet
+        open={showSkills}
+        side="left"
+        class="history-view lessons-view"
+        label="Skills"
+        onClose={() => setShowSkills(false)}
+      >
+        <SkillsBody
+          skills={skills}
+          error={skillsError}
+          onNew={newSkill}
+          onUpdate={updateSkill}
+          onDelete={deleteSkill}
+          onClose={() => setShowSkills(false)}
         />
       </Sheet>
 

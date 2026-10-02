@@ -291,6 +291,31 @@ describe("run log export", () => {
     expect(md).toContain("**Summary:** Summary here.");
   });
 
+  it("folds the per-turn TTFT/decode split and renders it", () => {
+    const rec = newTurnRecord("Time it", { mode: "standard", at: 0 });
+    foldLogEvent(rec, { kind: "step_started", stepIndex: 0 }, 0);
+    foldLogEvent(rec, { kind: "reasoning_delta", text: "hm" }, 6_200);
+    foldLogEvent(
+      rec,
+      { kind: "turn_timing", stepIndex: 0, ttftMs: 6_100, decodeMs: 3_400, reasoningChars: 2 },
+      9_600,
+    );
+    foldLogEvent(rec, { kind: "done", summary: "ok" }, 10_000);
+
+    const turn = rec.turns[0]!;
+    expect(turn.ttftMs).toBe(6_100);
+    expect(turn.decodeMs).toBe(3_400);
+    const md = toMarkdown([rec]);
+    expect(md).toContain("_timing: ttft 6.1s · decode 3.4s_");
+  });
+
+  it("omits the timing line when the export predates turn timing", () => {
+    const rec = newTurnRecord("Old run", { mode: "standard", at: 0 });
+    foldLogEvent(rec, { kind: "step_started", stepIndex: 0 }, 0);
+    foldLogEvent(rec, { kind: "done", summary: "ok" }, 500);
+    expect(toMarkdown([rec])).not.toContain("_timing:");
+  });
+
   it("produces empty output for no records", () => {
     expect(toJsonl([])).toBe("");
     expect(toMarkdown([])).toBe("");

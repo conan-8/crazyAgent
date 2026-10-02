@@ -71,12 +71,16 @@ function analyse(records) {
   let withScreenshot = 0;
   let failedTurns = 0;
   const latencies = [];
+  const ttfts = [];
+  const decodes = [];
   const byTool = new Map();
   for (const t of turns) {
     const tm = (t.tools ?? []).reduce((s, c) => s + (c.durationMs ?? 0), 0);
     toolMs += tm;
     llmMs += Math.max(0, (t.durationMs ?? 0) - tm);
     if (t.durationMs) latencies.push(t.durationMs);
+    if (t.ttftMs !== undefined) ttfts.push(t.ttftMs);
+    if (t.decodeMs !== undefined) decodes.push(t.decodeMs);
     const names = (t.tools ?? []).map((c) => c.name);
     if (names.includes("screenshot")) {
       withScreenshot++;
@@ -93,7 +97,11 @@ function analyse(records) {
     }
   }
   latencies.sort((a, b) => a - b);
+  ttfts.sort((a, b) => a - b);
+  decodes.sort((a, b) => a - b);
   const q = (p) => latencies[Math.min(latencies.length - 1, Math.floor(p * latencies.length))] ?? 0;
+  const qt = (xs, p) => xs[Math.min(xs.length - 1, Math.floor(p * xs.length))] ?? 0;
+  const sum = (xs) => xs.reduce((s, x) => s + x, 0);
 
   const inputTokens = stats.reduce((s, x) => s + (x.inputTokens ?? 0), 0);
   const outputTokens = stats.reduce((s, x) => s + (x.outputTokens ?? 0), 0);
@@ -114,6 +122,12 @@ function analyse(records) {
     withScreenshot,
     failedTurns,
     byTool,
+    ttft: ttfts.length
+      ? { n: ttfts.length, p50: qt(ttfts, 0.5), p90: qt(ttfts, 0.9), total: sum(ttfts) }
+      : null,
+    decode: decodes.length
+      ? { n: decodes.length, p50: qt(decodes, 0.5), p90: qt(decodes, 0.9), total: sum(decodes) }
+      : null,
     inputTokens,
     outputTokens,
     cache: cached.length ? { tokens: cacheReported, input: cacheInput } : null,
@@ -134,6 +148,21 @@ function report(name, a) {
   console.log(
     `step latency: p50 ${secs(a.steps.p50)} · p90 ${secs(a.steps.p90)} · p95 ${secs(a.steps.p95)} · max ${secs(a.steps.max)}`,
   );
+  // The TTFT/decode split attributes the LLM time: high TTFT with a small
+  // decode means the round trip is paying for input (prefill an uncached
+  // prompt or a slow queue); the reverse means reasoning/output is the cost.
+  if (a.ttft) {
+    console.log(
+      `ttft: p50 ${secs(a.ttft.p50)} · p90 ${secs(a.ttft.p90)} · total ${secs(a.ttft.total)} (${a.ttft.n} turns measured)`,
+    );
+  } else {
+    console.log("ttft: not measured (export predates turn timing)");
+  }
+  if (a.decode) {
+    console.log(
+      `decode: p50 ${secs(a.decode.p50)} · p90 ${secs(a.decode.p90)} · total ${secs(a.decode.total)}`,
+    );
+  }
   if (a.fit) {
     console.log(
       `fitted: ${(a.fit.fixedMs / 1000).toFixed(1)}s fixed per round trip + ${a.fit.tokPerSec.toFixed(0)} tok/s generation (n=${a.fit.n})`,
@@ -184,6 +213,16 @@ if (results.length > 1) {
   row("tools per turn", +before.toolsPerTurn.toFixed(2), +after.toolsPerTurn.toFixed(2), false);
   row("turns", before.turns, after.turns);
   row("p50 step (s)", +(before.steps.p50 / 1000).toFixed(1), +(after.steps.p50 / 1000).toFixed(1));
+  if (before.ttft && after.ttft) {
+    row("p50 ttft (s)", +(before.ttft.p50 / 1000).toFixed(1), +(after.ttft.p50 / 1000).toFixed(1));
+  }
+  if (before.decode && after.decode) {
+    row(
+      "decode total (s)",
+      Math.round(before.decode.total / 1000),
+      Math.round(after.decode.total / 1000),
+    );
+  }
   row("screenshot-only turns", before.screenshotOnly, after.screenshotOnly);
   if (before.fit && after.fit) {
     row("fixed cost/step (s)", +(before.fit.fixedMs / 1000).toFixed(1), +(after.fit.fixedMs / 1000).toFixed(1));

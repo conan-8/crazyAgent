@@ -120,6 +120,32 @@ export function toViewportPoint(
 }
 
 /**
+ * Validate only the stroke modifiers (button, click_count) — used by the
+ * ref/frame input modes where x/y are absent by design.
+ */
+export function shapeModifiers(
+  args: Record<string, unknown>,
+): { ok: true; button: MouseButton; clickCount: number } | { ok: false; error: string } {
+  let button: MouseButton = "left";
+  let clickCount = 1;
+  if (args.button !== undefined) {
+    const b = String(args.button);
+    if (!BUTTONS.includes(b as MouseButton)) {
+      return { ok: false, error: `ERROR: parameter button must be one of ${BUTTONS.join(", ")}` };
+    }
+    button = b as MouseButton;
+  }
+  if (args.click_count !== undefined) {
+    const n = args.click_count;
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 3) {
+      return { ok: false, error: "ERROR: parameter click_count must be an integer 1..3" };
+    }
+    clickCount = n;
+  }
+  return { ok: true, button, clickCount };
+}
+
+/**
  * Bounds check in viewport space. A miss must say what the bounds ARE — a bare
  * "out of bounds" sends the model into guessing new coordinates.
  */
@@ -222,4 +248,76 @@ export const COORD_SPACE_PROP = {
     description:
       "Coordinate space: 'viewport' (default) = CSS px from the visible viewport's top-left, matching the screenshot; 'page' = document coordinates (as element boxes report).",
   },
+};
+
+/**
+ * Ceiling on one batched drags list. The graph task that motivated batching
+ * needed ~30 points; a runaway list would spend minutes in strokes with no
+ * checkpoint between them.
+ */
+export const MAX_BATCH_DRAGS = 32;
+
+/** One validated drag of a batch: start and end in viewport space. */
+export interface DragItem {
+  from: Point;
+  to: Point;
+}
+
+export type DragListResult =
+  | { ok: true; drags: DragItem[] }
+  | { ok: false; error: string };
+
+/**
+ * Validate a `drags: [{x, y, to_x, to_y}, …]` list for the batched form of
+ * `drag_at`. Ref-based entries ({ref, to_ref?…}) are validated structurally
+ * (strings) and resolved against the page later — this pure half only checks
+ * what it can see.
+ */
+export function shapeDragList(args: Record<string, unknown>): DragListResult {
+  const raw = args.drags;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { ok: false, error: "ERROR: parameter drags must be a non-empty array of {x, y, to_x, to_y}" };
+  }
+  if (raw.length > MAX_BATCH_DRAGS) {
+    return { ok: false, error: `ERROR: drags is limited to ${MAX_BATCH_DRAGS} entries (got ${raw.length}) — split across calls` };
+  }
+  const drags: DragItem[] = [];
+  for (const [i, item] of raw.entries()) {
+    if (typeof item !== "object" || item === null) {
+      return { ok: false, error: `ERROR: drags[${i}] must be an object` };
+    }
+    const o = item as Record<string, unknown>;
+    // Ref-shaped entries pass through for page-side resolution.
+    if (typeof o.ref === "string" || typeof o.to_ref === "string") {
+      if (typeof o.ref !== "string" && (o.x === undefined || o.y === undefined)) {
+        return { ok: false, error: `ERROR: drags[${i}] needs either ref or x/y for its start point` };
+      }
+      if (typeof o.to_ref !== "string" && (o.to_x === undefined || o.to_y === undefined)) {
+        return { ok: false, error: `ERROR: drags[${i}] needs either to_ref or to_x/to_y for its end point` };
+      }
+      // Numeric coords present alongside refs are validated when used.
+      continue;
+    }
+    const p = shapePoint("", o);
+    if ("error" in p) return { ok: false, error: `ERROR: drags[${i}].${p.error.slice("ERROR: parameter ".length)}` };
+    const t = shapePoint("to", o);
+    if ("error" in t) return { ok: false, error: `ERROR: drags[${i}].${t.error.slice("ERROR: parameter ".length)}` };
+    drags.push({ from: p, to: t });
+  }
+  // Ref entries are resolved later; keep their count in the result so the
+  // caller knows how many page round trips remain.
+  return { ok: true, drags };
+}
+
+/** Count ref-based entries in a raw drags list (they bypass pure validation). */
+export function countRefDrags(args: Record<string, unknown>): number {
+  const raw = args.drags;
+  if (!Array.isArray(raw)) return 0;
+  return raw.filter(
+    (item) =>
+      typeof item === "object" &&
+      item !== null &&
+      (typeof (item as Record<string, unknown>).ref === "string" ||
+        typeof (item as Record<string, unknown>).to_ref === "string"),
+  ).length;
 };

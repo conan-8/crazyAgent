@@ -88,6 +88,13 @@ export interface LogTurn {
   /** Final summary from the `done` event. */
   summary?: string;
   stats?: RunStats;
+  /**
+   * LLM timing split for this turn, when the loop measured it: time to first
+   * streamed token (prefill/queue) and first token → stream end (decode).
+   * Optional: records archived before this field existed have neither.
+   */
+  ttftMs?: number;
+  decodeMs?: number;
 }
 
 /** One logged user message: the task plus metadata, and the turns it spawned. */
@@ -213,6 +220,17 @@ export function foldLogEvent(
       break;
     case "reasoning_delta":
       currentTurn(rec, at).reasoning += e.text;
+      break;
+    case "turn_timing": {
+      // Last write wins (one event per step; the turn it lands in is the
+      // current open one by construction).
+      const turn = currentTurn(rec, at);
+      if (e.ttftMs !== undefined) turn.ttftMs = e.ttftMs;
+      if (e.decodeMs !== undefined) turn.decodeMs = e.decodeMs;
+      break;
+    }
+    case "llm_request_sent":
+      // Live-UI telemetry: the turn_timing event carries the measured result.
       break;
     case "tool_call": {
       const turn = currentTurn(rec, at);
@@ -415,6 +433,13 @@ export function toMarkdown(records: LogTurnRecord[]): string {
         `## Turn ${turn.index + 1} — ${iso(turn.startedAt)} (${fmtDuration(turn.durationMs)})`,
       );
       out.push("");
+      // The timing split explains the duration: TTFT is what the caller waited
+      // before anything streamed (prefill/queue), decode is generation.
+      if (turn.ttftMs !== undefined || turn.decodeMs !== undefined) {
+        out.push(
+          `_timing: ttft ${fmtDuration(turn.ttftMs)} · decode ${fmtDuration(turn.decodeMs)}_`,
+        );
+      }
       if (turn.reasoning.trim()) {
         out.push("<details><summary>reasoning</summary>");
         out.push("");

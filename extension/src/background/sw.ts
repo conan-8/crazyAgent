@@ -67,6 +67,14 @@ import {
   updateLesson,
 } from "./lessons";
 import {
+  createSkill,
+  deleteSkill,
+  listSkills,
+  markSkillsUsed,
+  updateSkill,
+} from "./skills";
+import { formatSkillsCatalog, rankSkillsForTask } from "../shared/skills";
+import {
   formatLessonsBlock,
   lessonsToJsonl,
   lessonsToMarkdown,
@@ -103,12 +111,13 @@ import {
   settleTab,
   tabIdentity,
 } from "./tools/perception";
-import "./tools/perception"; // registers snapshot / screenshot / wait_for_settle
+import "./tools/perception"; // registers snapshot / screenshot / wait_for_settle / wait_for
 import "./tools/actions"; // registers click / type / select / key / hover / scroll / read_page
 import "./tools/paste"; // registers paste_image (staged-capture delivery)
 import "./tools/tabs"; // registers navigate / reload / back / forward / tabs_*
 import "./tools/misc"; // registers evaluate_js / download (sensitive)
 import "./tools/coords"; // registers click_at / hover_at / drag_at / element_at
+import "./tools/skills"; // registers use_skill (on-demand procedures)
 import "./tools/diagnostics"; // registers console_read / network_read
 import { startNetlogCapture } from "./tools/diagnostics";
 import "./tools/network"; // registers network_* (Unlimited mode)
@@ -413,6 +422,8 @@ async function closeLogRecord(): Promise<void> {
 
 /** Lessons the run that is currently executing received in its prompt. */
 let injectedLessonIds: string[] = [];
+/** Skills whose catalog lines this run's appendix carried. */
+let injectedSkillIds: string[] = [];
 /**
  * Reviews are chained: each one reads-modifies-writes the same storage key, so
  * a manual review landing during an auto review must not interleave with it.
@@ -497,11 +508,14 @@ async function maybeAutoReview(rec: LogTurnRecord): Promise<void> {
   queueReview(rec, "auto", false);
 }
 
-/** Post-run bookkeeping: usage stamps for injected lessons + auto review. */
+/** Post-run bookkeeping: usage stamps for injected lessons/skills + auto review. */
 function afterRun(rec: LogTurnRecord): void {
   const used = injectedLessonIds;
   injectedLessonIds = [];
   if (used.length) void markLessonsUsed(used);
+  const usedSkills = injectedSkillIds;
+  injectedSkillIds = [];
+  if (usedSkills.length) void markSkillsUsed(usedSkills);
   void maybeAutoReview(rec);
 }
 
@@ -547,6 +561,7 @@ async function runFrom(cp: Checkpoint): Promise<void> {
   loopRunning = true;
   currentCp = cp;
   injectedLessonIds = [];
+  injectedSkillIds = [];
   keepalive.start();
   try {
     if (cp.demo) {
@@ -584,6 +599,14 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         : [];
       injectedLessonIds = rankedLessons.map((l) => l.id);
       const lessonsBlock = formatLessonsBlock(rankedLessons);
+      // Skills catalog: one line per on-demand procedure, frozen at run start
+      // (byte-stable for the whole run — it rides the same uncached appendix
+      // as the lessons). Full bodies load via use_skill as tool results, so
+      // the cached prefix never mutates mid-run.
+      const rankedSkills = rankSkillsForTask(await listSkills(), cp.task);
+      injectedSkillIds = rankedSkills.map((s) => s.id);
+      const skillsCatalog = formatSkillsCatalog(rankedSkills);
+      const appendix = [lessonsBlock, skillsCatalog].filter(Boolean).join("\n\n");
       // The judge tool only reaches the model when Jev can actually answer.
       // Specs freeze here, so the tool list stays byte-stable across the run's
       // steps (provider prompt caching) and across a checkpoint resume.
@@ -617,9 +640,10 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         thinking,
         madman: settings.madman,
         batchActions: settings.batchActions === true,
+        adaptiveThinking: settings.adaptiveThinking === true,
         judgeAvailable:
           jevEnabled && (cp.toolSpecs?.some((t) => t.name === "judge") ?? false),
-        lessonsBlock,
+        lessonsBlock: appendix || undefined,
         takeUserInput: () => {
           const inputs = pendingUserInputs.splice(0);
           // The conversation keeps its own transcript for display/history.
@@ -975,7 +999,13 @@ async function executeTool(
   }
   try {
     const adapter = await adapterForMode();
-    const payload = await tool.run(args, { tabId: targetTabId, adapter, emit });
+    const payload = await tool.run(args, {
+      tabId: targetTabId,
+      adapter,
+      emit,
+      // Blocking tools (waits) check this between polls so Stop lands fast.
+      stopping: () => stopRequested,
+    });
     // Action-style tools resolve with { ok: false, error } instead of throwing.
     if (
       payload &&
@@ -1257,6 +1287,27 @@ async function handleRequest(
     case "lessons.clear":
       await clearLessons();
       port.postMessage({ type: "lessons.list", lessons: [] });
+      break;
+    case "skills.list":
+      port.postMessage({ type: "skills.list", skills: await listSkills() });
+      break;
+    case "skills.new": {
+      const made = await createSkill(msg.skill);
+      port.postMessage({
+        type: "skills.list",
+        skills: await listSkills(),
+        ...(made.error ? { error: made.error } : {}),
+      });
+      break;
+    }
+    case "skills.update": {
+      if (msg.patch) await updateSkill(msg.id, msg.patch);
+      port.postMessage({ type: "skills.list", skills: await listSkills() });
+      break;
+    }
+    case "skills.delete":
+      await deleteSkill(msg.id);
+      port.postMessage({ type: "skills.list", skills: await listSkills() });
       break;
     case "lessons.export": {
       const all = await listLessons();

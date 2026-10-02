@@ -3218,6 +3218,28 @@ input[type="number"]::-webkit-inner-spin-button {
   gap: 6px;
 }
 
+/* Skills drawer: the procedure body is long — wrap it in a scrollable pre. */
+.skill-body {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 8px;
+  opacity: 0.85;
+}
+
+.sheet-pad {
+  padding: 0 14px;
+}
+
+.row-actions {
+  margin-top: 4px;
+}
+
 /* ---------------- viewer ---------------- */
 
 .viewer {

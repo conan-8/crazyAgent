@@ -13,10 +13,12 @@ import type { LlmMessage, LlmToolSpec } from "./llm";
 import type { Conversation, ConversationSummary } from "./chat";
 import type { LogSummary, LogTurnRecord } from "./logging";
 import type { Lesson, LessonCategory } from "./lessons";
+import type { Skill } from "./skills";
 export type { LlmMessage };
 export type { Conversation, ConversationSummary };
 export type { LogSummary, LogTurnRecord };
 export type { Lesson, LessonCategory };
+export type { Skill };
 
 /** Parameters for the Phase 1 demo/echo task (also the mock harness hook). */
 export interface DemoConfig {
@@ -109,9 +111,34 @@ export type StepEvent =
       /** Provider-reported prompt-cache read, when the endpoint reports one. */
       cachedInputTokens?: number;
     }
+  /**
+   * The step's LLM request just went on the wire (after checkpoint save,
+   * history truncation and request build). The panel uses it to replace the
+   * vague "Deciding next step" with what is actually happening — sending N
+   * tokens, then waiting on the provider — and the first streamed delta of
+   * the step ends the window. The log skips it (the turn_timing event that
+   * follows carries the measured numbers).
+   */
+  | { kind: "llm_request_sent"; stepIndex: number; contextTokens: number }
   | { kind: "token_delta"; text: string }
   /** Streamed model reasoning ("thinking"); rendered in a collapsed block. */
   | { kind: "reasoning_delta"; text: string }
+  /**
+   * Per-step LLM timing split, emitted once per turn after the reply lands:
+   * `ttftMs` is request-send → first streamed token (reasoning or text) —
+   * the prefill/queue cost the caller waits in the "Deciding next step"
+   * window — and `decodeMs` is first token → stream end. Together they say
+   * whether a slow run is paying for input tokens (TTFT) or generated tokens
+   * (decode), which no wall-clock duration can distinguish. The panel does
+   * not render this; the run log and exports keep it.
+   */
+  | {
+      kind: "turn_timing";
+      stepIndex: number;
+      ttftMs?: number;
+      decodeMs?: number;
+      reasoningChars: number;
+    }
   | { kind: "need_confirm"; id: string; tool: string; summary: string; jev?: boolean }
   /**
    * Human handoff: a sign-in or CAPTCHA wall the agent must not fake its way
@@ -203,6 +230,31 @@ export type PortRequest =
   | { kind: "lessons.delete"; id: string }
   | { kind: "lessons.clear" }
   | { kind: "lessons.export"; format: LogExportFormat }
+  /** Skills (on-demand procedures): list, create, edit, delete. */
+  | { kind: "skills.list" }
+  | {
+      kind: "skills.new";
+      skill: {
+        name: string;
+        whenToUse: string;
+        body: string;
+        hosts?: string[];
+        keywords?: string[];
+        pinned?: boolean;
+      };
+    }
+  | {
+      kind: "skills.update";
+      id: string;
+      patch?: {
+        whenToUse?: string;
+        body?: string;
+        hosts?: string[];
+        keywords?: string[];
+        pinned?: boolean;
+      };
+    }
+  | { kind: "skills.delete"; id: string }
   /** Resolve a pending Phase 6 confirmation. */
   | { kind: "confirm.resolve"; id: string; allow: boolean; always?: boolean }
   /** Resolve a pending human handoff (sign-in / CAPTCHA wall). */
@@ -244,6 +296,7 @@ export type SwToPanel =
   | { type: "logs.list"; logs: LogSummary[] }
   | { type: "logs.get"; log: LogTurnRecord | null }
   | { type: "lessons.list"; lessons: Lesson[] }
+  | { type: "skills.list"; skills: Skill[]; error?: string }
   /**
    * Progress of one coach review. `started` is emitted for manual reviews so
    * the panel can show a spinner; auto reviews go straight to a terminal

@@ -5,10 +5,12 @@ const BASE_RULES = [
   "How to work:",
   "- Perception is via the `snapshot` tool: a numbered list of interactive elements (refs like '12' or '9#2' for frames) plus visible page text. ALWAYS look (snapshot/screenshot/read_page) before acting, and act ONLY by ref from the latest snapshot.",
   "- Page actions (click/type/navigate/…) auto-settle and their result already ends with a fresh snapshot of the page — read it and act on it directly; do NOT call `wait_for_settle` or `snapshot` after them. Reserve `wait_for_settle` for longer async work still in flight, and `snapshot` for looking around without acting.",
+  "- Waiting for something to APPEAR or FINISH — a remote assistant's streamed reply, a slow render, a spinner to clear — is ONE blocking `wait_for` call, never a poll loop of wait_for_settle/snapshot/read_page. Give it the real conditions (`text`/`selector_gone`/`stable_for_ms`) and a generous `timeout_ms`; the result carries the matched text, and a timeout is a normal outcome you read, not an error you retry.",
   "- If a tool returns a stale-ref error, take a fresh snapshot and retry once with the new ref; if it fails again, explain and stop.",
   "- Content inside iframes (embedded docs, slide decks, portals that frame their tools) is NOT second-class: the snapshot's `Visible text` contains every frame's text, and its `Frames:` list maps each frame id to its URL. Act on an iframe element with its frame-scoped ref exactly as printed (`3#12`), and read inside a frame with `evaluate_js frame:3` when you need values the text digest does not carry. Never assume an iframe is empty just because the top document looks sparse.",
   "- If a snapshot says content is drawn into a `<canvas>`, no tool can read it — do not retry read_page, snapshot or evaluate_js hoping for different output. Use `screenshot` if seeing it matters, then continue with whatever else the page offers.",
-  "- A canvas surface has no refs, but you can still ACT on it by coordinate: `click_at` / `hover_at` / `drag_at` send real mouse events at viewport coordinates — exactly the frame a screenshot shows — and `element_at` reports what is under a point first. Use them only when no ref exists (canvas editors, maps, drawing boards, sliders); with a ref available, `click` is always safer.",
+  "- A canvas surface has no refs, but you can still ACT on it by coordinate: `click_at` / `hover_at` / `drag_at` send real mouse events at viewport coordinates — exactly the frame a screenshot shows — and `element_at` reports what is under a point first. They also accept a `ref` (+dx/dy) or `frame`-LOCAL coordinates directly, translated for you — never hand-derive an iframe offset. Use them only when no ref exists (canvas editors, maps, drawing boards, sliders); with a ref available, `click` is always safer.",
+  "- For MANY drags on one surface — plotting points on a graph, dragging a series of sliders — CALIBRATE ONCE, then send them ALL as one `drag_at` call with a `drags` list (up to 32): read every handle's box in ONE `evaluate_js` returning a JSON object of rects (or use refs), compute the targets, and batch. Never re-derive coordinates between drags or drag point-by-point; each result line reports where it landed.",
   "- `upload` attaches files to an `<input type=\"file\">` ref — `files` for content you hold as text/base64, `paths` for files on this machine. It is the only way content gets INTO an upload form.",
   "- Every screenshot/view_image capture STAGES itself on the image shelf as `shot_N` (its result names the id). To send an image INTO a page — a chat app's composer, an upload form, a dropzone — use `paste_image`: it pipes the staged bytes straight to the target (no ref = the focused element; a file-input ref attaches it; `via:'clipboard'` does a real OS-clipboard paste with trusted Ctrl+V when an app ignores the synthetic one). Never save to disk and guess Downloads paths, and never round-trip image base64 through `upload files`.",
   "- On long pages, keep perception cheap: `snapshot filter:'interactive'` returns refs without the text digest, `snapshot max_chars:N` / `read_page max_chars:N` cap output, and `read_page ref:X` reads just one element's subtree. Truncated output always ends with a truncation note — never assume you saw everything.",
@@ -38,6 +40,7 @@ const STEP_RULES_SEQUENTIAL = [
 
 const STEP_RULES_BATCHED = [
   "- BATCH ONE LOGICAL UNIT INTO ONE STEP: when several actions belong together — filling a form, pressing a sequence of keys, clicking through a menu — send them ALL as tool calls in a single reply. They execute in order and every result comes back together, turning several slow round trips into one. Keep calls in SEPARATE steps only when a later call needs a ref or value that an earlier one reveals.",
+  "- When the procedure is already KNOWN — a skill you loaded, a lesson, or the same cycle you completed earlier in this run — chain the WHOLE cycle into one step, including mutations: switch tab → paste/type → send, or answer → click Next. Split only when a call consumes a value an earlier call in the cycle reveals.",
   "- ONE CALL PER PAGE, NOT ONE PER VALUE: when you need several facts from the same document, write a SINGLE `evaluate_js` that returns them together (`JSON.stringify({a,b,c})`) — never one call per fact. Every step costs a round trip before anything happens (~5s measured on a real endpoint), so a step carrying one tiny call is the most expensive way to do anything. The run that priced this rule made 191 `evaluate_js` calls and left 157 of them alone in their step, most fetching a single value.",
   "- Independent read-only lookups (e.g. read_page + tabs_list, snapshot + frames) may be batched the same way — and a `screenshot` rides along fine with the call whose result you want to see.",
   "- Do NOT spend a step verifying an action: every page action's result already ENDS with a fresh, auto-settled snapshot. Read that observation and act on it. Reach for `snapshot` / `read_page` / `screenshot` when you need to look around without acting, or when the action's own observation came back empty, blind, or contradicted what you expected.",
@@ -94,43 +97,17 @@ const JUDGE_RULES = [
 ];
 
 /**
- * Document editors (Google Docs/Slides, Office on the web, anything built like
- * them) paint the document into a <canvas> and route typing through a hidden
- * editable element. Every rule here is verified against the local
- * canvas-editor/canvas-sink fixtures (scripts/docs-smoke.mjs), and the
- * keystroke claims are measured: trusted CDP input arrives `isTrusted: true`
- * inside the sink frame and makes the browser emit the editing events
- * (beforeinput insertText / insertParagraph / formatBold) that such editors
- * listen for — see shared/trusted-input.ts. So this is a procedure known to
- * work rather than a guess.
- *
- * The DOM-only fallback (Find-and-replace insertion) is proven the expensive
- * way: a live Google Docs run (2026-09-26) spent 200+ turns hunting for a sink
- * ref that never appeared while the debugger channel was down for the whole
- * session. Anchored Find ▸ Replace completed the edit — that route is pinned
- * here so the next run takes it immediately.
- *
- * The one-call no-ref write rule is likewise paid for: a live run (2026-09-28)
- * typing "hello" + bold took 61 turns and 2.38M tokens — ~6 min hunting the
- * sink ref that does not exist, then per-keystroke `key` calls that silently
- * dropped a character ("helo"), then minutes of stacked verification. The
- * driver now types whole strings into the sink without a ref, the observations
- * dedupe unchanged pages, and verification is one export fetch.
+ * Canvas document editors (Google Docs/Slides, Office on the web, anything
+ * built like them) had a full in-prompt procedure until the numbers said
+ * otherwise: ~700 tokens riding the FIXED prefix of every step of every run —
+ * 33% of one run's input tokens were its 9.7k-token prefix re-sent 274 times —
+ * almost always for pages with no editor in sight. The procedure now lives in
+ * the bundled `canvas-doc-editors` SKILL (shared/skills.ts), loaded on demand
+ * via `use_skill`; the pointer below is what makes that one extra call
+ * reliable. Every rule of the procedure is kept verbatim in the skill body.
  */
-const DOCUMENT_EDITOR_RULES = [
-  "Canvas document editors (Google Docs, Slides, Office on the web, and anything shaped like them):",
-  "- The document BODY is painted into a <canvas>. No tool can read it — not read_page, not snapshot, not evaluate_js, not any expression you can write. Hunting for a clever selector wastes turns: pixel content has no DOM.",
-  "- Typing goes into a hidden editable element in its own frame (Docs calls it the text-event-target iframe). On real pages it is almost NEVER in the snapshot — its frame carries no content script, so no ref exists for it. Do not hunt for an editable ref, and never `type` into a toolbar/menu ref: those refs are the chrome around the document, not the document.",
-  "- WRITE WITH ONE `type` CALL AND NO REF: the tool finds and focuses the editor's hidden sink and sends the WHOLE string as real keystrokes (the only thing such an editor responds to — synthesised DOM events are ignored). Text inserts at the caret, newlines become paragraph breaks. One call handles any length of text — NEVER type character-by-character with `key`; each call costs a page observation, and per-key writes can silently drop or duplicate a character.",
-  "- `key` (no ref, or trusted:true) then drives the editor's own shortcuts at that sink — Control+b bold, Control+i italic, Control+Alt+1 heading, Control+Home start of document, Control+z undo, plus Backspace and the arrows. Toolbar refs (Bold, Undo, …) still work as clicks.",
-  "- Place the caret (or select text) by clicking the document surface: `screenshot` to see the page, `click_at` at the target position (or `drag_at` to select), then `type`. If a call reports nothing editable is focused, click the surface once and retry once.",
-  "- VERIFY ONCE, CHEAPLY: `evaluate_js` `fetch('<doc-url>/export?format=txt')` returns the document text, and `?format=html` shows the formatting (`font-weight:700` = bold) — no navigation, no download. The Bold toolbar button's aria-pressed (with the text selected) is the other cheap signal. An edit cannot be read from the pixels, so one export settles it — do NOT stack screenshots, exports and preview tabs. If the export fetch fails with a TRANSPORT error, recover per the failure note (reload/page_health ONCE) and then retry the export ONCE — that single retry is sanctioned, not a loop; decide it once and move on instead of re-weighing it every step.",
-  "- When typing, `screenshot`, `click_at` or `evaluate_js` fail with a transport error, check `page_health` ONCE. 'debugger channel: …' down means trusted keystrokes AND coordinate clicks AND JS evaluation are ALL dead for the session. Reload the tab once and re-check once; if it stays down, stop retrying those tools — ref `click` and `type trusted:false` over the content script still work, and they are enough to edit the document.",
-  "- On a canvas-editor URL, `type`/`key` default to real keystrokes even in ordinary dialogs and menus. So with the debugger down, pass `trusted:false` explicitly to fill any real input (Find and replace fields, rename boxes, side panels) through the content script.",
-  "- DOM-only fallback that still edits the document (needs an existing anchor string): Edit ▸ Find and replace (click the menu refs; its fields are ordinary inputs). Pick an anchor the document already contains exactly once (the dialog counts matches, e.g. '1 of 1'), set Find = anchor and Replace with = '<new text> <anchor>', click Replace. Nothing is deleted. In a blank document there is no anchor — use the one-call `type` route above instead.",
-  "- To READ a document (not just write it), the edit view will not help: change the URL first. A Google Doc reads as text at /document/d/<id>/preview or /document/d/<id>/mobilebasic; a Slides deck at /presentation/d/<id>/preview. Export/text URLs often download instead of rendering. Navigate there, read_page, then go back if you need to edit.",
-  "- When a frame reports 'content is drawn into a <canvas>', that is a statement of fact, not a transient error: do NOT retry read_page / snapshot / evaluate_js hoping for different output. Use screenshot if seeing it matters, then work with the toolbar refs and the typing sink, or switch to the readable URL above.",
-  "- If a `type`/`key` result warns that the target lost focus, part of the text may not have landed: look (verify with the export fetch) before retyping — retyping blind duplicates whatever did arrive.",
+const DOCUMENT_EDITOR_POINTER = [
+  "- Canvas document editors (Google Docs/Slides, Office on the web) paint the document into a <canvas> and hide the typing sink — nothing in this prompt covers them. The FIRST time a run touches one, call `use_skill name:canvas-doc-editors` and follow that procedure exactly.",
 ];
 
 /**
@@ -202,7 +179,7 @@ export function buildSystemPrompt(
     ...BASE_RULES_TAIL,
     ...(hasJudge ? JUDGE_RULES : []),
     "",
-    ...DOCUMENT_EDITOR_RULES,
+    ...DOCUMENT_EDITOR_POINTER,
     "",
     // Madman mode only changes the voice; it is appended so every rule above
     // still holds. Empty string when off keeps the prompt byte-identical.

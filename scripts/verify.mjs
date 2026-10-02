@@ -21,6 +21,7 @@ const steps = [
   ["image shelf & paste_image", "node", ["scripts/paste-smoke.mjs"]],
   ["jev fast decisions (sidecar)", "node", ["scripts/jev-smoke.mjs"]],
   ["self-improvement (coach lessons)", "node", ["scripts/lessons-smoke.mjs"]],
+  ["skills (on-demand procedures)", "node", ["scripts/skills-smoke.mjs"]],
   ["phase 1 — lifecycle (quick)", "node", ["scripts/phase1-smoke.mjs", "quick"]],
 ];
 

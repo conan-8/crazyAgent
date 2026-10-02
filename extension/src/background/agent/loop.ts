@@ -81,6 +81,13 @@ export interface LoopDeps {
    * result already carried a fresh observation. See STEP_RULES_BATCHED.
    */
   batchActions?: boolean;
+  /**
+   * Adaptive per-step thinking: lower the effective thinking level to "off"
+   * for steps that follow a streak of routine ones, restoring the configured
+   * level on the first surprise (see isRoutineStep). Requires the run level
+   * to not already be "off".
+   */
+  adaptiveThinking?: boolean;
   /** Jev sidecar configured: the `judge` tool is in the spec list. */
   judgeAvailable?: boolean;
   /**
@@ -88,6 +95,12 @@ export interface LoopDeps {
    * runs). Sent as a separate, uncached system block — see LlmRequest.
    */
   lessonsBlock?: string;
+  /**
+   * Ceiling on how long an LLM attempt may stay silent before its first
+   * token (see TTFT_STALL_MS). Override for tests; 0/Infinity disables the
+   * guard. Defaults to TTFT_STALL_MS.
+   */
+  ttftStallMs?: number;
   /**
    * Mid-run steering: user messages queued from the panel since the last
    * step. Drained before every LLM call and appended as ordinary user turns,
@@ -170,6 +183,16 @@ const LLM_ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [1_000, 3_000];
 
 /**
+ * Stall guard: abort an attempt that has produced NO token (reasoning or
+ * text) within this many milliseconds and treat it as a transient failure,
+ * so the existing retry path takes over. A real run sat 108s in one such
+ * window on a 39-char reply — the connection was alive but silent, and
+ * nothing was watching. The value is a ceiling for the common case, not a
+ * target: healthy first tokens arrive in single-digit seconds.
+ */
+export const TTFT_STALL_MS = 25_000;
+
+/**
  * Recovery budget for replies that carry no answer (see the non-answer gate
  * below). A reasoning model can burn its whole output budget on thinking and
  * stream back nothing at all; each such reply gets a re-prompt and — when it
@@ -199,6 +222,57 @@ const MAX_OUTPUT_TOKENS = 32_000;
  * provider that does honour its budget (Anthropic) can never reach it.
  */
 const REASONING_OVERRUN_FACTOR = 3;
+
+/**
+ * How many consecutive steps in a row before a run level above "off" is
+ * lowered for subsequent steps (adaptive thinking).
+ */
+export const ADAPTIVE_ROUTINE_STREAK = 3;
+/**
+ * Reasoning under this many characters counts as "barely thought about" for
+ * the routine-step test. Heavy-reasoning steps median 31s against 7s for the
+ * rest on the measured run — the streak must only count the cheap ones.
+ */
+export const ADAPTIVE_ROUTINE_MAX_REASONING_CHARS = 300;
+
+/** Calls that (re)define where the agent is working — thinking comes back. */
+const PAGE_CHANGING_TOOLS = new Set([
+  "navigate",
+  "reload",
+  "back",
+  "forward",
+  "tabs_switch",
+  "tabs_create",
+  "tabs_close",
+]);
+
+/** What the loop observed about one finished step, for the routine test. */
+export interface StepOutcomeState {
+  /** Tool calls the step made (0 = answer-only or empty reply). */
+  toolCalls: number;
+  /** Any call failed or was invalid. */
+  failed: boolean;
+  /** The step's reasoning size (chars). */
+  reasoningChars: number;
+  /** A navigation/tab change rode the step. */
+  pageChanging: boolean;
+}
+
+/**
+ * The routine-step test for adaptive thinking: exactly one successful tool
+ * call, barely any reasoning, nothing that moved the agent to a new page.
+ * Anything richer keeps the configured thinking level — constructing a batch,
+ * recovering from a failure and orienting on a fresh page are exactly the
+ * moments deliberation pays for.
+ */
+export function isRoutineStep(s: StepOutcomeState): boolean {
+  return (
+    s.toolCalls === 1 &&
+    !s.failed &&
+    !s.pageChanging &&
+    s.reasoningChars < ADAPTIVE_ROUTINE_MAX_REASONING_CHARS
+  );
+}
 
 /**
  * How many capped steps in a row before thinking is switched off for the REST
@@ -281,8 +355,11 @@ const PARALLEL_SAFE = new Set([
   "screenshot",
   "view_image",
   "wait_for_settle",
+  // A blocking wait never touches page state; several may run at once.
+  "wait_for",
   "tabs_list",
   "network_observe",
+  "use_skill", // read-only storage lookup — never touches page state
   "judge", // read-only external decision call — never touches page state
 ]);
 
@@ -292,10 +369,17 @@ const PARALLEL_SAFE = new Set([
  * nothing told the model it was grinding. Three failures of the same tool in a
  * row (or a literal re-run of a call that already failed) now land a note IN
  * the tool result, with the one move that breaks the loop: look at the page.
+ *
+ * Wait tools are exempt from the SUCCESS-repeat note only: re-issuing a wait
+ * with the same arguments is legitimate (waiting on the next reply of the
+ * same page), while their FAILURES still count toward the streak like any
+ * other tool's.
  */
 export interface StuckGuard {
   note(name: string, args: Record<string, unknown>, failed: boolean): string;
 }
+
+const WAIT_LIKE_TOOLS = new Set(["wait_for", "wait_for_settle"]);
 
 export function createStuckGuard(): StuckGuard {
   const streak = new Map<string, number>();
@@ -318,7 +402,7 @@ export function createStuckGuard(): StuckGuard {
       if (failed && n >= 3) {
         return `\n\n[STUCK: ${name} has now failed ${n} times in a row. Do not retry it. Take a screenshot to SEE what the page actually shows, switch to read_page / snapshot / ref-based tools, or report the blocker and stop.]`;
       }
-      if (repeats >= 3) {
+      if (repeats >= 3 && !WAIT_LIKE_TOOLS.has(name)) {
         return `\n\n[This exact call has now run ${repeats} times and returns the same thing — vary the approach instead of polling it again. If you are unsure what you are seeing, take a screenshot.]`;
       }
       return "";
@@ -336,6 +420,12 @@ export function createStuckGuard(): StuckGuard {
  * abort is ours, so it is not a transient failure and burns no retry — but the
  * reasoning it did stream is reported back, because it was generated and paid
  * for, and the run's stats would understate the cost otherwise.
+ *
+ * Timing: each ATTEMPT stamps its own request-start and first-token time, and
+ * the returned `ttftMs`/`decodeMs` describe the attempt whose reply survived
+ * (a failed attempt that never produced a token reports neither). This is the
+ * split that says whether a slow round trip is prefill/queue (TTFT — cut input
+ * tokens) or decode (cut reasoning): wall-clock alone cannot tell them apart.
  */
 async function completeWithRetry(
   deps: LoopDeps,
@@ -343,7 +433,13 @@ async function completeWithRetry(
   onText: (t: string) => void,
   onReasoning: (t: string) => void,
   reasoningCap = 0,
-): Promise<{ result?: LlmResult; capped: boolean; cappedChars: number }> {
+): Promise<{
+  result?: LlmResult;
+  capped: boolean;
+  cappedChars: number;
+  ttftMs?: number;
+  decodeMs?: number;
+}> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < LLM_ATTEMPTS; attempt++) {
     if (attempt > 0) {
@@ -358,29 +454,78 @@ async function completeWithRetry(
     // Per attempt: the cut is only attributable to the attempt that made it.
     let capped = false;
     let chars = 0;
-    const ctl = reasoningCap > 0 ? new AbortController() : undefined;
+    const stallMs = deps.ttftStallMs ?? TTFT_STALL_MS;
+    const guardStall = Number.isFinite(stallMs) && stallMs > 0;
+    // One controller serves both cut paths (reasoning overrun, TTFT stall):
+    // each is armed only when its ceiling exists, and either aborts the stream.
+    const ctl = reasoningCap > 0 || guardStall ? new AbortController() : undefined;
+    const attemptStart = Date.now();
+    let firstDeltaAt = 0;
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearStallTimer = (): void => {
+      if (stallTimer !== undefined) {
+        clearTimeout(stallTimer);
+        stallTimer = undefined;
+      }
+    };
+    const mark = (): void => {
+      if (!firstDeltaAt) {
+        firstDeltaAt = Date.now();
+        // First token landed — the stall guard's job is done for this attempt.
+        clearStallTimer();
+      }
+    };
+    if (ctl && guardStall) {
+      stallTimer = setTimeout(() => {
+        if (!firstDeltaAt) ctl!.abort();
+      }, stallMs);
+    }
     try {
       const result = await deps.llm.complete(
         req,
-        onText,
+        (t) => {
+          mark();
+          onText(t);
+        },
         ctl?.signal,
         (t) => {
+          mark();
           chars += t.length;
           // Reasoning streams BEFORE the answer on every wire we speak, so
-          // cutting here loses nothing but the thinking itself.
-          if (ctl && !capped && chars > reasoningCap) {
+          // cutting here loses nothing but the thinking itself. (The explicit
+          // cap check matters now that `ctl` can exist for the stall guard
+          // alone: a 0 cap must never cut.)
+          if (reasoningCap > 0 && ctl && !capped && chars > reasoningCap) {
             capped = true;
+            clearStallTimer();
             ctl.abort();
           }
           onReasoning(t);
         },
       );
-      return { result, capped, cappedChars: capped ? chars : 0 };
+      clearStallTimer();
+      return {
+        result,
+        capped,
+        cappedChars: capped ? chars : 0,
+        ttftMs: firstDeltaAt ? firstDeltaAt - attemptStart : undefined,
+        decodeMs: firstDeltaAt ? Date.now() - firstDeltaAt : undefined,
+      };
     } catch (err) {
+      clearStallTimer();
       // Cutting the stream can surface as a rejection out of the reader rather
       // than a graceful end. Either way this is the cap doing its job.
       if (capped) return { capped: true, cappedChars: chars };
-      lastErr = err;
+      if (ctl?.signal.aborted && !firstDeltaAt) {
+        // The stall guard fired: the connection produced nothing at all within
+        // the ceiling. That is a transient failure like any other — it burns a
+        // retry and gets named for what it was, not left as a raw AbortError.
+        lastErr = new Error(
+          `stalled — no first token for ${(stallMs / 1000).toFixed(0)}s, attempt aborted`,
+        );
+      } else {
+        lastErr = err;
+      }
     }
   }
   throw lastErr;
@@ -406,6 +551,9 @@ export async function runAgentTask(
   let cachedAlwaysReported = true;
   let reasoningChars = 0;
   let usageEverEstimated = false;
+  // Said once per run, not once per step: the first reply that arrives with no
+  // provider usage is the story; the next 200 identical misses add nothing.
+  let usageSilenceNoted = false;
   let lastStats: RunStats | undefined;
   let invalidStreak = 0;
   const guard = createStuckGuard();
@@ -427,6 +575,13 @@ export async function runAgentTask(
   let thinking = deps.thinking;
   // Consecutive steps whose reasoning had to be cut short.
   let overruns = 0;
+  // Adaptive per-step thinking (deps.adaptiveThinking): consecutive routine
+  // steps so far, whether subsequent steps are currently sent with thinking
+  // off, and whether the lowering has been announced (once per run, not once
+  // per step — the info is a state change, not a heartbeat).
+  let routineStreak = 0;
+  let adaptiveRoutine = false;
+  let adaptiveNoted = false;
   // The stable system prompt (rules + task) is byte-identical for the whole
   // run — built once. Only the clock is per-step, and it rides in
   // systemVolatile at the END of the request so provider prompt caching hits
@@ -467,6 +622,13 @@ export async function runAgentTask(
     // checkpoint (every screenshot ever taken, base64 counted as chars/4) and
     // reported absurdities like "context 1215933/128000".
     const history = truncateHistory(cp.messages, HISTORY_BUDGET_CHARS, historyTokenBudget);
+    // Effective thinking for THIS step: the run level, lowered to "off" while
+    // the adaptive streak says the work is routine (see isRoutineStep). The
+    // overrun machinery and the reasoning cap keep operating on the run level.
+    const effectiveThinking: ThinkingLevel | undefined =
+      deps.adaptiveThinking === true && adaptiveRoutine && thinking !== "off"
+        ? "off"
+        : thinking;
     const request: LlmRequest = {
       system: systemPrompt,
       systemSuffix: deps.lessonsBlock || undefined,
@@ -477,15 +639,26 @@ export async function runAgentTask(
       messages: history,
       tools,
       maxTokens,
-      thinking,
+      thinking: effectiveThinking,
     };
     const onText = (text: string): void => deps.emit({ kind: "token_delta", text });
     const onReasoning = (text: string): void =>
       deps.emit({ kind: "reasoning_delta", text });
+    // The panel's "what is it doing" window starts here: everything before
+    // this line was local bookkeeping, everything after is the provider's
+    // queue + prefill + first token.
+    deps.emit({
+      kind: "llm_request_sent",
+      stepIndex: step,
+      contextTokens: prefixTokens + estimateMessages(history),
+    });
     let result: LlmResult;
     // Reasoning generated by an attempt the cap cut short. Still generated,
     // still paid for, so it is counted even though its reply was thrown away.
     let cappedChars = 0;
+    // Timing of the attempt whose reply survived (see completeWithRetry).
+    let ttftMs: number | undefined;
+    let decodeMs: number | undefined;
     try {
       const first = await completeWithRetry(
         deps,
@@ -495,11 +668,17 @@ export async function runAgentTask(
         reasoningCapChars(thinking),
       );
       cappedChars = first.cappedChars;
+      ttftMs = first.ttftMs;
+      decodeMs = first.decodeMs;
       if (first.capped || !first.result) {
         // The model was still thinking when the ceiling came down. Re-ask the
         // SAME step with thinking off: the run needs an actionable reply, and
         // one cheap round trip costs less than the rest of the soliloquy.
         overruns += 1;
+        // A reasoning overrun is the opposite of routine — adaptive lowering
+        // (if any) lifts immediately.
+        routineStreak = 0;
+        adaptiveRoutine = false;
         deps.emit({
           kind: "info",
           message:
@@ -521,6 +700,8 @@ export async function runAgentTask(
           onReasoning,
         );
         cappedChars += second.cappedChars;
+        ttftMs = second.ttftMs;
+        decodeMs = second.decodeMs;
         if (!second.result) throw new Error("reasoning cap tripped with thinking already off");
         result = second.result;
       } else {
@@ -545,11 +726,28 @@ export async function runAgentTask(
       return finish(cp, deps, "stopped", lastStats);
     }
 
+    // Per-step timing split, once per turn: TTFT (prefill/queue) vs decode.
+    deps.emit({
+      kind: "turn_timing",
+      stepIndex: step,
+      ttftMs,
+      decodeMs,
+      reasoningChars: result.reasoning?.length ?? 0,
+    });
+
     // Live usage for the stats bar: provider numbers when reported, else an
     // estimate of what was actually SENT (the truncated request view; images
     // at a flat per-image cost). Estimated stats are flagged so the log never
     // renders them as provider truth.
     const estimated = result.usage === undefined;
+    if (estimated && !usageSilenceNoted) {
+      usageSilenceNoted = true;
+      deps.emit({
+        kind: "info",
+        message:
+          "the endpoint returned no usage despite stream_options.include_usage — token counts are the loop's own estimates and prompt-cache hits cannot be verified on this run",
+      });
+    }
     // Explicitly typed: the fallback carries no cache field, and an estimate
     // must never be mistaken for a provider-reported cache read.
     const usage: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } =
@@ -633,6 +831,10 @@ export async function runAgentTask(
         });
       }
       cp.messages.push({ role: "user", content: emptyReplyNudge(truncated) });
+      // An empty reply is a surprise by definition: the routine streak (and
+      // any adaptive lowering) resets so the next step thinks at full level.
+      routineStreak = 0;
+      adaptiveRoutine = false;
       cp.stepIndex = step + 1;
       cp.updatedAt = Date.now();
       capCheckpointImages(cp.messages);
@@ -685,6 +887,8 @@ export async function runAgentTask(
     // else stays sequential with a stop check between calls. Outcomes are
     // recorded in call order either way.
     let aborted = false;
+    // Per-step outcome flags for the adaptive-thinking routine test.
+    let stepFailed = false;
     const record = (outcome: {
       message: LlmMessage;
       event: StepEvent;
@@ -692,6 +896,9 @@ export async function runAgentTask(
     }): void => {
       cp.messages.push(outcome.message);
       deps.emit(outcome.event);
+      if (outcome.invalid || outcome.event.kind === "tool_result" && outcome.event.ok === false) {
+        stepFailed = true;
+      }
       invalidStreak = outcome.invalid ? invalidStreak + 1 : 0;
       if (invalidStreak >= 3) {
         deps.emit({
@@ -759,6 +966,34 @@ export async function runAgentTask(
       }
     }
     if (aborted) return finish(cp, deps, "stopped", lastStats);
+
+    // Adaptive thinking: fold this step's outcome into the routine streak.
+    // Only fully-routine steps extend it; anything else resets it AND restores
+    // the configured level for the next step.
+    if (deps.adaptiveThinking === true) {
+      const outcome: StepOutcomeState = {
+        toolCalls: calls.length,
+        failed: stepFailed,
+        reasoningChars: result.reasoning?.length ?? 0,
+        pageChanging: calls.some((c) => PAGE_CHANGING_TOOLS.has(c.name)),
+      };
+      routineStreak = isRoutineStep(outcome) ? routineStreak + 1 : 0;
+      const lower = routineStreak >= ADAPTIVE_ROUTINE_STREAK && thinking !== "off";
+      if (lower && !adaptiveRoutine) {
+        adaptiveRoutine = true;
+        if (!adaptiveNoted) {
+          adaptiveNoted = true;
+          deps.emit({
+            kind: "info",
+            message:
+              `adaptive thinking: ${routineStreak} routine steps in a row — sending routine steps with thinking off ` +
+              "(the configured level returns on the first failure, navigation, empty reply or overrun)",
+          });
+        }
+      } else if (!lower) {
+        adaptiveRoutine = false;
+      }
+    }
 
     cp.stepIndex = step + 1;
     cp.updatedAt = Date.now();

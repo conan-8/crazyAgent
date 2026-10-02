@@ -21,17 +21,19 @@ export function makeRef(frameId: number, localRef: string): string {
 
 /**
  * Run one action in the frame that owns `req.ref`. A ref without a frame prefix
- * means the top frame (0).
+ * means the top frame (0). An explicit `frameId` overrides the routing for
+ * ref-less requests that still belong to a frame (frame-local coordinates).
  */
 export async function runContentAction(
   tabId: number,
   req: Record<string, unknown>,
+  frameId?: number,
 ): Promise<ActionResult> {
   const ref = typeof req.ref === "string" ? req.ref : null;
-  const frameId = ref ? parseRef(ref).frameId : 0;
+  const target = frameId ?? (ref ? parseRef(ref).frameId : 0);
   const payload = ref ? { ...req, ref: parseRef(ref).localRef } : req;
   const results = await chrome.scripting.executeScript({
-    target: { tabId, frameIds: [frameId] },
+    target: { tabId, frameIds: [target] },
     func: (p: unknown) => {
       const g = globalThis as {
         __baActions?: { run(r: unknown): unknown };

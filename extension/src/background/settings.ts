@@ -93,6 +93,16 @@ export interface AgentSettings {
    */
   batchActions: boolean;
   /**
+   * Adaptive per-step thinking: after a few consecutive ROUTINE steps (one
+   * successful tool call, barely any reasoning, no page navigation), the loop
+   * sends subsequent steps with thinking OFF until something surprising
+   * happens — a failure, an empty reply, a navigation, a reasoning overrun —
+   * at which point the configured level is restored immediately. Never raises
+   * thinking, never applies when the run level is already "off". Off by
+   * default: it is a latency/robustness tradeoff the user should choose.
+   */
+  adaptiveThinking: boolean;
+  /**
    * Madman mode: the agent swears. Seeds a profane voice into the system
    * prompt (so replies and mid-run exclamations cuss) and decorates every
    * tool-call label with a cuss word. Off by default.
@@ -156,6 +166,10 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   // Batch one logical unit per step: the measured round-trip cost made the
   // one-action-then-verify habit the biggest single term in a run.
   batchActions: true,
+  // Adaptive per-step thinking off by default: the run-level switch (plus
+  // Jev's auto routing) covers most users; this trims the remaining per-step
+  // thinking on steady routines and restores on the first surprise.
+  adaptiveThinking: false,
   // Straight-laced by default; Madman mode is opt-in.
   madman: false,
   // Attended by default: confirmations wait the full timeout for a human.
@@ -348,6 +362,7 @@ export function normalizeSettings(
     // the default (on)", and only an explicit `false` turns it off. Unlike
     // autoThinking there is no old default artifact to migrate around.
     batchActions: merged.batchActions !== false,
+    adaptiveThinking: merged.adaptiveThinking === true,
     // Jev sidecar: backfill partial stored objects; coerce the toggles.
     jev: normalizeJev(merged.jev),
     // Auto effort routing is on from rev 2. Before that the default `false`

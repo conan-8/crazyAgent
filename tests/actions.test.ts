@@ -61,6 +61,40 @@ describe("Actions", () => {
     expect(submitted).toBe(true);
   });
 
+  it("type with submit clicks the form's own submit button when one exists", () => {
+    setBody(`
+      <form id="f">
+        <input id="i" placeholder="name" />
+        <button type="submit" id="b">Go</button>
+      </form>
+    `);
+    let clicked = false;
+    let submitted = false;
+    document.getElementById("b")!.addEventListener("click", () => (clicked = true));
+    document.getElementById("f")!.addEventListener("submit", (e) => {
+      e.preventDefault();
+      submitted = true;
+    });
+    actions.run({ action: "type", ref: refOf("name"), text: "x", submit: true });
+    // Button-bound handlers are the common SPA quiz pattern; the click must
+    // reach the button, not just the form's submit event.
+    expect(clicked).toBe(true);
+    expect(submitted).toBe(true);
+  });
+
+  it("type with submit outside any form reports the no-op instead of silence", () => {
+    setBody(`<input id="i" placeholder="answer" />`);
+    const res = actions.run({
+      action: "type",
+      ref: refOf("answer"),
+      text: "x",
+      submit: true,
+    });
+    expect(res.ok).toBe(true);
+    const data = (res as { data?: { note?: string } }).data;
+    expect(data?.note).toContain("not inside a <form>");
+  });
+
   it("select sets the value and fires change", () => {
     setBody(`
       <select id="s">
@@ -420,5 +454,68 @@ describe("pasteFiles", () => {
     const res = actions.run({ action: "filesOf", ref: firstRef() });
     expect(res.ok).toBe(true);
     expect((res.data as { count: number }).count).toBe(0);
+  });
+});
+
+describe("resolvePoint (coordinate translation)", () => {
+  let registry: ElementRegistry;
+  let actions: Actions;
+
+  beforeEach(() => {
+    registry = new ElementRegistry();
+    actions = new Actions(registry);
+  });
+
+  function refOfLocal(name: string): string {
+    const snap = registry.collect();
+    const el = snap.elements.find((e) => e.name === name);
+    if (!el) throw new Error(`no element named ${name}`);
+    return el.ref;
+  }
+
+  it("resolves a ref to its centre plus dx/dy, with its rect and hit", () => {
+    setBody(`<div id="wrap"><button id="b" style="width:100px;height:40px">Plot</button></div>`);
+    const btn = document.getElementById("b")!;
+    btn.getBoundingClientRect = () =>
+      ({ x: 200, y: 120, width: 100, height: 40, top: 120, left: 200, bottom: 160, right: 300 } as DOMRect);
+    const res = actions.run({
+      action: "resolvePoint",
+      ref: refOfLocal("Plot"),
+      dx: 10,
+      dy: -5,
+    });
+    expect(res.ok).toBe(true);
+    const data = (res as { data?: { point: { x: number; y: number }; rect?: { x: number; y: number; w: number; h: number }; hit?: { tag: string } } }).data!;
+    // Centre (250, 140) + (10, -5); top-level frame adds no offset.
+    expect(data.point).toEqual({ x: 260, y: 135 });
+    expect(data.rect).toEqual({ x: 200, y: 120, w: 100, h: 40 });
+    expect(data.hit?.tag.toLowerCase()).toBe("button");
+  });
+
+  it("resolves frame-local coordinates at the top frame without an offset", () => {
+    const res = actions.run({ action: "resolvePoint", x: 33, y: 44 });
+    expect(res.ok).toBe(true);
+    const data = (res as { data?: { point: { x: number; y: number } } }).data!;
+    expect(data.point).toEqual({ x: 33, y: 44 });
+  });
+
+  it("reports a blocked frame boundary instead of guessing an offset", () => {
+    // jsdom: window.parent === window at top level, so simulate the boundary
+    // by making a nested-looking window whose frameElement is null.
+    const originalParent = Object.getOwnPropertyDescriptor(window, "parent");
+    Object.defineProperty(window, "parent", { value: { isFakeParent: true }, configurable: true });
+    try {
+      const res = actions.run({ action: "resolvePoint", x: 5, y: 5 });
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error).toContain("frame boundary");
+    } finally {
+      if (originalParent) Object.defineProperty(window, "parent", originalParent);
+      else delete (window as { parent?: unknown }).parent;
+    }
+  });
+
+  it("needs a ref or local coordinates", () => {
+    const res = actions.run({ action: "resolvePoint" });
+    expect(res.ok).toBe(false);
   });
 });

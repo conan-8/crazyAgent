@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   boundsError,
+  countRefDrags,
   describeHit,
+  MAX_BATCH_DRAGS,
   planClick,
   planDrag,
   planHover,
   shapeCoordArgs,
+  shapeDragList,
+  shapeModifiers,
   toViewportPoint,
   type HitInfo,
 } from "../extension/src/shared/coords";
@@ -123,5 +127,70 @@ describe("describeHit", () => {
     expect(out).toContain("Buy now");
     expect(out).toContain("ref 7");
     expect(out).toContain("type=submit");
+  });
+});
+
+describe("shapeDragList (batched drags)", () => {
+  it("accepts a list of numeric drag pairs", () => {
+    const out = shapeDragList({
+      drags: [
+        { x: 10, y: 10, to_x: 20, to_y: 30 },
+        { x: 40, y: 50, to_x: 60, to_y: 70 },
+      ],
+    });
+    expect(out).toMatchObject({
+      ok: true,
+      drags: [
+        { from: { x: 10, y: 10 }, to: { x: 20, y: 30 } },
+        { from: { x: 40, y: 50 }, to: { x: 60, y: 70 } },
+      ],
+    });
+  });
+
+  it("caps the list at the batch ceiling", () => {
+    const drags = Array.from({ length: MAX_BATCH_DRAGS + 1 }, (_, i) => ({
+      x: i,
+      y: i,
+      to_x: i + 1,
+      to_y: i + 1,
+    }));
+    const out = shapeDragList({ drags });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.error).toContain(`${MAX_BATCH_DRAGS}`);
+  });
+
+  it("rejects malformed entries with their index", () => {
+    const out = shapeDragList({ drags: [{ x: 1, y: 1, to_x: 2 }] });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.error).toContain("drags[0]");
+    expect(shapeDragList({ drags: [] }).ok).toBe(false);
+    expect(shapeDragList({}).ok).toBe(false);
+  });
+
+  it("passes ref-based entries through for page-side resolution", () => {
+    const out = shapeDragList({
+      drags: [{ ref: "3#12", to_ref: "3#14" }, { x: 1, y: 2, to_x: 3, to_y: 4 }],
+    });
+    expect(out.ok).toBe(true);
+    // Pure validation only sees the numeric one; refs are counted separately.
+    expect(out.ok && out.drags).toHaveLength(1);
+    expect(countRefDrags({ drags: [{ ref: "3#12", to_ref: "3#14" }, { x: 1, y: 2, to_x: 3, to_y: 4 }] })).toBe(1);
+  });
+});
+
+describe("shapeModifiers (ref/frame modes)", () => {
+  it("defaults button and click_count without requiring x/y", () => {
+    expect(shapeModifiers({ ref: "3#12" })).toEqual({
+      ok: true,
+      button: "left",
+      clickCount: 1,
+    });
+    expect(shapeModifiers({ button: "right", click_count: 3 })).toEqual({
+      ok: true,
+      button: "right",
+      clickCount: 3,
+    });
+    expect(shapeModifiers({ button: "thumb" }).ok).toBe(false);
+    expect(shapeModifiers({ click_count: 0 }).ok).toBe(false);
   });
 });

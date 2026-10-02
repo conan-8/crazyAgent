@@ -30,6 +30,17 @@ export type ActionRequest =
   | { action: "canvasPoint" }
   | { action: "probe"; ref: string }
   | { action: "probeAt"; x: number; y: number; space?: CoordSpace }
+  | {
+      action: "resolvePoint";
+      /** Element to act on (its center, plus dx/dy). */
+      ref?: string;
+      /** Frame-local point instead of a ref. */
+      x?: number;
+      y?: number;
+      space?: CoordSpace;
+      dx?: number;
+      dy?: number;
+    }
   | { action: "upload"; ref: string; files: UploadFileSpec[] }
   | { action: "uploadMark"; ref: string; token: string }
   | {
@@ -123,6 +134,8 @@ export class Actions {
       }
       case "probeAt":
         return this.#probeAt(req.x, req.y, req.space);
+      case "resolvePoint":
+        return this.#resolvePoint(req);
       case "authSignals":
         return { ok: true, data: authSignalsOf() };
       case "readEl": {
@@ -219,6 +232,92 @@ export class Actions {
       scrollY: window.scrollY,
     };
     return { ok: true, data: { hit, viewport, point } };
+  }
+
+  /**
+   * Resolve a ref (element center + dx/dy) or a frame-local point into TOP-
+   * VIEWPORT coordinates — the space CDP Input and `screenshot` use — plus
+   * the element's own box and hit description.
+   *
+   * Why this exists: a real run spent 22 minutes hand-deriving an SVG→viewport
+   * affine map in reasoning because nothing translated frame-local element
+   * boxes into the coordinates the drag tools want. The walk up frameElement
+   * gives the exact offset chain; each level contributes its iframe box as the
+   * parent sees it. Cross-origin boundaries without host permissions return
+   * null frameElement — reported as an error, never a guessed offset.
+   */
+  #resolvePoint(req: {
+    ref?: string;
+    x?: number;
+    y?: number;
+    space?: CoordSpace;
+    dx?: number;
+    dy?: number;
+  }): ActionResult {
+    const dx = Number.isFinite(req.dx) ? (req.dx as number) : 0;
+    const dy = Number.isFinite(req.dy) ? (req.dy as number) : 0;
+    let local: Point;
+    let rect: { x: number; y: number; w: number; h: number } | undefined;
+    let hit: HitInfo | null = null;
+    if (req.ref !== undefined) {
+      const el = this.#resolve(req.ref);
+      const r = el.getBoundingClientRect();
+      rect = { x: r.x, y: r.y, w: r.width, h: r.height };
+      local = { x: r.x + r.width / 2 + dx, y: r.y + r.height / 2 + dy };
+      hit = { ...probeOf(el), ref: this.registry.refFor(el) ?? undefined, canvas: false, overIframe: false };
+    } else {
+      if (typeof req.x !== "number" || typeof req.y !== "number") {
+        return { ok: false, error: "resolvePoint needs a ref or frame-local x/y" };
+      }
+      local = toViewportPoint(
+        { x: req.x, y: req.y },
+        req.space === "page" ? "page" : "viewport",
+        { scrollX: window.scrollX, scrollY: window.scrollY },
+      );
+      local = { x: local.x + dx, y: local.y + dy };
+    }
+    // Offset chain: this frame's viewport → top viewport.
+    let offsetX = 0;
+    let offsetY = 0;
+    let win: Window = window;
+    let depth = 0;
+    while (win !== win.parent && depth < 8) {
+      const fe = (() => {
+        try {
+          return win.frameElement as HTMLElement | null;
+        } catch {
+          return null;
+        }
+      })();
+      if (!fe) {
+        return {
+          ok: false,
+          error:
+            "cannot translate frame-local coordinates to viewport coordinates at this frame boundary (cross-origin without host permission) — use the ref of an element inside the frame, or top-viewport coordinates from the screenshot",
+        };
+      }
+      const r = fe.getBoundingClientRect();
+      offsetX += r.x;
+      offsetY += r.y;
+      win = win.parent;
+      depth++;
+    }
+    return {
+      ok: true,
+      data: {
+        point: { x: local.x + offsetX, y: local.y + offsetY },
+        localPoint: local,
+        frameOffset: { x: offsetX, y: offsetY },
+        rect,
+        hit,
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight,
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+        },
+      },
+    };
   }
 
   /**
@@ -380,8 +479,23 @@ export class Actions {
       el.dispatchEvent(new InputEvent("input", data));
     }
     el.dispatchEvent(new Event("change", { bubbles: true }));
-    if (submit) this.#submitFrom(el);
-    return { ok: true, data: { value: readValue(el) } };
+    let submitNote: string | undefined;
+    if (submit) {
+      const outcome = this.#submitFrom(el);
+      // A silent no-op here cost a real run a whole round trip: submit:true on
+      // an SPA assessment form whose inputs live outside any <form> looked
+      // successful and submitted nothing. Say what happened.
+      if (outcome === "no-form") {
+        submitNote =
+          "submit requested but the element is not inside a <form> — nothing was submitted; find the page's submit control in the snapshot and click it by ref";
+      }
+    }
+    return {
+      ok: true,
+      data: submitNote
+        ? { value: readValue(el), note: submitNote }
+        : { value: readValue(el) },
+    };
   }
 
   /**
@@ -495,11 +609,27 @@ export class Actions {
     return { ok: true };
   }
 
-  #submitFrom(el: HTMLElement): void {
+  /**
+   * Submit the form enclosing `el`. Prefers CLICKING the form's own submit
+   * button (pages that bind handlers on the button itself — very common on
+   * quiz/assessment SPAs — never see a bare form.submit()), then falls back
+   * to requestSubmit()/a synthetic submit event. Returns "no-form" when
+   * nothing encloses the element, so the caller can report it instead of
+   * silently doing nothing.
+   */
+  #submitFrom(el: HTMLElement): "submitted" | "no-form" {
     const form = el.closest("form") as HTMLFormElement | null;
-    if (!form) return;
+    if (!form) return "no-form";
+    const btn = form.querySelector<HTMLButtonElement | HTMLInputElement>(
+      'button[type="submit"], input[type="submit"], button:not([type])',
+    );
+    if (btn && !(btn instanceof HTMLInputElement && btn.disabled) && !(btn instanceof HTMLButtonElement && btn.disabled)) {
+      btn.click();
+      return "submitted";
+    }
     if (typeof form.requestSubmit === "function") form.requestSubmit();
     else form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    return "submitted";
   }
 }
 

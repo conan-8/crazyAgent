@@ -39,6 +39,13 @@ type ShapedBody = {
 };
 
 describe("provider request shaping", () => {
+  it("asks for parallel tool calls on the OpenAI-compatible wire", () => {
+    // Without the flag several providers emit one call per reply; the measured
+    // cost of that default is 254 single-call turns out of 268 in a real run.
+    const body = buildOpenAiBody(req, "m2") as { parallel_tool_calls?: boolean };
+    expect(body.parallel_tool_calls).toBe(true);
+  });
+
   it("drops a contentless assistant turn on the OpenAI wire", () => {
     // A stored empty final answer used to poison the thread forever: DeepSeek
     // 400s with "The content field is a required field.", Moonshot with

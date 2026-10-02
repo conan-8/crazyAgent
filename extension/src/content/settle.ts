@@ -46,7 +46,15 @@ export function waitForSettle(
       if (quiet && ready) {
         finish(true, "settled");
       } else if (now - started > timeoutMs) {
-        finish(false, ready ? "timeout: page still busy" : "timeout: still loading");
+        // Name WHAT was still busy and how recently: the model's next move
+        // differs between "mutations 80ms ago" (keep waiting — or better, use
+        // wait_for with stable_for_ms) and "nothing for 10s" (a real stall).
+        finish(
+          false,
+          ready
+            ? `timeout: page still busy (last mutation ${now - lastMutation}ms ago, last resource ${now - lastResource}ms ago — for streamed/progressive content use wait_for with stable_for_ms instead of polling settle)`
+            : "timeout: still loading",
+        );
       }
     }, 100);
 

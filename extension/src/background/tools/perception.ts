@@ -11,6 +11,13 @@ import {
   type FrameSnapshotLike,
 } from "../../shared/frames";
 import { safeFilename, screenshotFilename } from "../../shared/filenames";
+import { failureTag } from "../../shared/tool-failure";
+import {
+  evalWaitCondition,
+  parseWaitArgs,
+  WAIT_POLL_MS,
+  type WaitObservation,
+} from "../../shared/wait";
 import { stageShelfImage } from "../shelf";
 import { registerTool, type ToolContext } from "./types";
 
@@ -746,7 +753,7 @@ registerTool({
 registerTool({
   name: "wait_for_settle",
   description:
-    "Wait until the page settles (no DOM mutations or network fetches for ~500ms) or the timeout elapses. Action results already settle automatically — use this only to wait for longer async work.",
+    "Wait until the page settles (no DOM mutations or network fetches for ~500ms) or the timeout elapses. Action results already settle automatically — use this only to wait for longer async work. NOT for streamed/progressive content (a chat reply still streaming): mutations can pause longer than the quiet window while the answer is still growing — use `wait_for` with stable_for_ms for that.",
   parameters: {
     type: "object",
     properties: {
@@ -758,4 +765,182 @@ registerTool({
   },
   run: (args, ctx) =>
     settleTab(ctx.tabId, typeof args.timeoutMs === "number" ? args.timeoutMs : 15_000),
+});
+
+/**
+ * What one poll of the page (or one frame of it) saw for the wait conditions.
+ * Injected fresh each poll — no dependency on the registry content script,
+ * so this works on any injectable frame the moment it exists.
+ */
+async function readWaitObservation(
+  tabId: number,
+  frame: number | undefined,
+  selector: string | undefined,
+): Promise<WaitObservation | null> {
+  let results: { frameId?: number; result?: unknown }[];
+  try {
+    results = await chrome.scripting.executeScript({
+      target: frame !== undefined ? { tabId, frameIds: [frame] } : { tabId, allFrames: true },
+      // NOTE: this function is SERIALIZED into the page — it must not close
+      // over anything from the service worker (constants included).
+      func: (sel: string | null) => {
+        let selectorPresent: boolean | null = null;
+        if (sel !== null) {
+          try {
+            selectorPresent = document.querySelector(sel) !== null;
+          } catch {
+            selectorPresent = null; // invalid selector in THIS document
+          }
+        }
+        const text = (document.body?.innerText ?? "").slice(0, 40_000);
+        return { text, selectorPresent };
+      },
+      args: [selector ?? null],
+    });
+  } catch {
+    return null; // not injectable (chrome://, gone tab, dead frame)
+  }
+  if (!results?.length) return null;
+  const parts = results
+    .map((r) => r.result as WaitObservation | null)
+    .filter((p): p is WaitObservation => !!p);
+  if (!parts.length) return null;
+  return {
+    text: parts.map((p) => p.text).join("\n"),
+    selectorPresent:
+      selector === undefined
+        ? null
+        : parts.some((p) => p.selectorPresent === true),
+  };
+}
+
+registerTool({
+  name: "wait_for",
+  description:
+    "Block until a condition holds on the page, then return the matched text in the SAME call — one call replaces whole poll loops of wait_for_settle + read_page. Waiting on a remote assistant's streamed reply = ONE wait_for with stable_for_ms (text stops changing) and a generous timeout_ms. Conditions combine (AND): text appears (substring or /regex/), text_gone, selector appears, selector_gone, stable_for_ms. A timeout is a NORMAL result (matched:false), never an error — read the returned page tail and decide.",
+  parameters: {
+    type: "object",
+    properties: {
+      text: {
+        type: "string",
+        description: "Wait until this substring appears (or /regex/ with flags)",
+      },
+      text_gone: {
+        type: "string",
+        description: "Wait until this substring is no longer on the page",
+      },
+      selector: {
+        type: "string",
+        description: "CSS selector that must appear",
+      },
+      selector_gone: {
+        type: "string",
+        description: "CSS selector that must disappear (a spinner, an overlay)",
+      },
+      stable_for_ms: {
+        type: "number",
+        description:
+          "Additionally require the page text to have been unchanged for this many ms — the right condition for streamed replies that arrive gradually (1500–3000 works well)",
+      },
+      frame: {
+        type: "number",
+        description: "Frame id from the snapshot's Frames: list (default: all frames)",
+      },
+      timeout_ms: {
+        type: "number",
+        description: `Give up after this many ms (default 60000, cap 300000)`,
+      },
+    },
+  },
+  async run(args, ctx) {
+    const shaped = parseWaitArgs(args);
+    if ("error" in shaped) return { ok: false, error: `${failureTag("input")}: ${shaped.error}` };
+    const cond = shaped.cond;
+    const startedAt = Date.now();
+    let lastText = "";
+    let lastChangeAt = startedAt;
+    let first = true;
+    let lastObs: WaitObservation | null = null;
+    let reachFailures = 0;
+    // Poll until matched, timeout or user stop. A short unreachable stretch
+    // (navigation in flight, frame reloading) is retried like settleTab does;
+    // a long one reports honestly instead of hanging to the timeout.
+    for (;;) {
+      const obs = await readWaitObservation(ctx.tabId, cond.frame, cond.selector ?? cond.selectorGone);
+      if (!obs) {
+        reachFailures++;
+        if (reachFailures > 10) {
+          return {
+            matched: false,
+            waitedMs: Date.now() - startedAt,
+            unreachable: true,
+            note: "the page (or frame) could not be read for ~10 polls — it may have navigated away or be a non-injectable page",
+          };
+        }
+      } else {
+        reachFailures = 0;
+        lastObs = obs;
+        if (first || obs.text !== lastText) {
+          lastText = obs.text;
+          lastChangeAt = Date.now();
+          first = false;
+        }
+        const stableMs = Date.now() - lastChangeAt;
+        const evalRes = evalWaitCondition(cond, obs, stableMs);
+        if (evalRes.ok) {
+          return {
+            matched: true,
+            waitedMs: Date.now() - startedAt,
+            stableMs: Math.round(stableMs),
+            excerpt: evalRes.excerpt,
+          };
+        }
+      }
+      const waited = Date.now() - startedAt;
+      if (waited >= cond.timeoutMs) {
+        return {
+          matched: false,
+          timedOut: true,
+          waitedMs: waited,
+          unmet: (() => {
+            const probe = evalWaitCondition(
+              cond,
+              lastObs ?? { text: "", selectorPresent: null },
+              Date.now() - lastChangeAt,
+            );
+            return probe.unmet;
+          })(),
+          pageTail: lastText.slice(-600).trim(),
+        };
+      }
+      if (ctx.stopping?.()) {
+        return { matched: false, stopped: true, waitedMs: waited };
+      }
+      await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
+    }
+  },
+  present(payload) {
+    const p = (payload ?? {}) as {
+      matched?: boolean;
+      waitedMs?: number;
+      timedOut?: boolean;
+      stopped?: boolean;
+      unreachable?: boolean;
+      unmet?: string[];
+      excerpt?: string;
+      pageTail?: string;
+      stableMs?: number;
+    };
+    const secs = ((p.waitedMs ?? 0) / 1000).toFixed(1);
+    if (p.stopped) return { text: `[wait_for] stopped by the user after ${secs}s` };
+    if (p.unreachable) return { text: `[wait_for] could not read the page after ${secs}s` };
+    if (p.matched) {
+      return {
+        text: `[wait_for] matched after ${secs}s${p.stableMs !== undefined ? ` (text stable ${p.stableMs}ms)` : ""}:\n${p.excerpt ?? "(condition without text — selector/stability)"}`,
+      };
+    }
+    return {
+      text: `[wait_for] timed out after ${secs}s — still unmet: ${(p.unmet ?? []).join(", ") || "?"}. Page tail:\n${p.pageTail ?? "(no text read)"}`,
+    };
+  },
 });

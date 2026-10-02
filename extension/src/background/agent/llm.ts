@@ -319,6 +319,12 @@ export function buildOpenAiBody(
         parameters: t.parameters,
       },
     })),
+    // Say batch-friendly out loud: without this flag several providers
+    // default to one tool call per reply, and the measured cost of that habit
+    // is the whole reason Fast-steps exists (a real run: 254 of 268 turns
+    // carried exactly one call). The field is standard on this wire; unknown
+    // fields are ignored by the servers that don't use it.
+    parallel_tool_calls: true,
     stream: true,
     stream_options: { include_usage: true },
   };

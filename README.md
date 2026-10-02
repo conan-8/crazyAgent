@@ -15,6 +15,30 @@ Both modes drive the same tool surface (`snapshot`, `click`, `type`,
 agent loop, with per-step checkpointing (a killed service worker resumes the
 task) and gated autonomy (one-click confirmation for sensitive actions).
 
+### Speed notes (read this before a long run)
+
+A 64-minute archived run was almost entirely **LLM round trips** (~90% of wall
+clock, ~11s median each, a fixed ~9.7k-token prefix re-sent every step). The
+machinery that addresses it:
+
+- **`wait_for`** blocks until a condition holds (text appears/gone, selector
+  appears/gone, page text stable for N ms) and returns the matched text in the
+  same call — waiting on a streamed chat reply is ONE call, never a poll loop.
+- **Batched drags**: `drag_at` takes a `drags` list (up to 32) — calibrate a
+  graph once, send every drag in one call. Coordinate tools also accept a
+  `ref` or **frame-local** coordinates (translated through the iframe chain).
+- **Skills**: curated procedures (`use_skill name`) ride the prompt as a
+  one-line catalog and load in full only when used; the doc-editor playbook
+  left the fixed prefix for that catalog, roughly 2.5k tokens cheaper per step.
+- **Adaptive thinking** (Settings → Behaviour): routine steps skip thinking;
+  the configured level returns on the first surprise. The *Relay (fast)*
+  preset bundles the speed profile.
+- **Per-turn telemetry**: exports carry `ttftMs`/`decodeMs` per turn, and
+  `scripts/runlog-stats.mjs` splits prefill from decode. Prefer a
+  **cache-reporting endpoint** for long runs (DeepSeek's official API reports
+  `prompt_cache_hit_tokens`; some gateways report nothing, which the run log
+  now says out loud).
+
 ## Install (personal use, unpacked)
 
 ```sh
@@ -275,7 +299,10 @@ recovery; the Jev sidecar gates, judges, routes effort and fails open on both tr
 (`scripts/jev-smoke.mjs`, mock `/systemone` + `/chat/completions` endpoints);
 the coach reviews a failed run, stores the lesson, feeds it into the next run's
 prompt and stays out of the chat/run record, with both switches honoured
-(`scripts/lessons-smoke.mjs`); `evaluate_js` evaluates over CDP in the page's
+(`scripts/lessons-smoke.mjs`); skills — the catalog rides the run's appendix,
+`use_skill` returns the full body, the drawer creates/edits/deletes, and the
+doc-editor procedure lives on demand instead of in every step's prefix
+(`scripts/skills-smoke.mjs`); `evaluate_js` evaluates over CDP in the page's
 main world, so it keeps working on strict-CSP sites like Google Docs and
 Schoology that refuse isolated-world `eval`, and reports a CSP refusal with the
 retry that actually helps (`scripts/evaluate-csp-smoke.mjs`); iframe text,

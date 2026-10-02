@@ -8,6 +8,12 @@ export interface ToolContext {
   tabId: number;
   adapter: BrowserAdapter;
   emit(event: StepEvent): void;
+  /**
+   * True once the user pressed Stop (or the run is being torn down). Long-
+   * blocking tools (waits) poll this between iterations so a Stop lands in
+   * seconds, not after the tool's own timeout.
+   */
+  stopping?: () => boolean;
 }
 
 export interface Tool {
