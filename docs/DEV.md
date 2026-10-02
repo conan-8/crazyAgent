@@ -672,6 +672,89 @@ that must NOT count) and `captcha.html`. The smoke drives the **gated** path
 through the `run_tool` port's `gated: true` flag (hook: `__ba.toolGated`), so
 policy and handoff are exercised without standing up a mock LLM.
 
+## Image shelf & paste_image (screenshots into other pages)
+
+The task shape that exposed the gap: "screenshot the question, send it to the
+chat app in the other tab, come back and enter the answer." A real run
+(archived in the log export) burned ~40 turns on it: `screenshot
+save_to_disk:true` wrote a JPEG into Downloads, the model guessed
+`/root/Downloads/q2_physics.jpg` (the real directory belongs to the browser's
+OS user, and the sanitiser had renamed `.png` → `.jpg`), and
+`DOM.setFileInputFiles` **reported success** with the path it never read —
+`input.files` stayed empty on the page, three identical "attached 1 file(s)"
+results in a row. Two structural facts drive the design that answers it:
+
+- Image bytes can never round-trip through the MODEL (a base64 JPEG as a tool
+  argument is ~500k tokens), so `upload files:[{base64}]` was never realistic
+  for "send the screenshot you just took".
+- Disk paths are guesswork the browser cannot verify for the model, and CDP's
+  attach does not fail on a path it cannot read.
+
+So the bytes travel **tool → tool inside the background**, and disk is out of
+the loop:
+
+- **The shelf** (`background/shelf.ts`) — every `screenshot` / `view_image`
+  capture stages itself as `shot_N` (monotonic within the session, ring of 8,
+  > ~9 MB skipped) and the tool result names the id. Pure core
+  (`shelfStage`/`shelfFind`/`shelfSummaries`, `tests/shelf.test.ts`) + a
+  `chrome.storage.session` mirror (`baShelf`) so worker teardown does not drop
+  it; like the checkpoint, screenshot bytes never reach persistent storage.
+- **`paste_image`** (`background/tools/paste.ts`, `sensitive`, gated under the
+  existing `upload` rule so always-allow carries over; in `MUTATING_TOOLS`)
+  resolves a shelf id (default: latest) and delivers:
+  - `via:'file'` → the content-script DataTransfer upload (any frame, hidden
+    inputs like Kimi's `0x0 .hidden-input` included) with real input/change
+    events;
+  - `via:'paste'` / `auto` → new `pasteFiles` content action: a synthetic
+    `ClipboardEvent('paste')` carrying the image `File` (the constructor's
+    `clipboardData` is probed, with a `defineProperty` fallback — a
+    constructor that silently drops the payload would hand the page an empty
+    paste), plus a `DragEvent('drop')` fallback for dropzone-only widgets.
+    `defaultPrevented` is the honest acceptance signal and rides back as
+    `handled`; when nothing consumed the event the result tells the model to
+    retry ONCE with `via:'clipboard'` — never to re-capture or re-send
+    blindly. A file-input target auto-delegates to the upload route.
+  - `via:'clipboard'` → OS clipboard + **trusted Ctrl+V**. The MV3 worker has
+    no document/focus, so the write runs in a transient **offscreen document**
+    (manifest permission `offscreen`, reason `CLIPBOARD`,
+    `src/offscreen/clipboard.{html,ts}`; `background/clipboard.ts` owns the
+    create → message → close lifecycle, retrying the listener-registration
+    race). It converts JPEG → PNG (`ClipboardItem`'s one reliable format) and
+    tries `navigator.clipboard.write` first; measured on headless Linux, that
+    refuses with "Document is not focused" (and can HANG — every primitive
+    there carries its own deadline), so it falls back to the classic
+    extension route: a selected `<img>` in a hidden contenteditable +
+    `execCommand('copy')`, which `clipboardWrite` permits without a gesture.
+    The Ctrl+V leg reuses the trusted-input pipeline (`ensureTabActive` +
+    `Input.dispatchKeyEvent`), so the paste arrives `isTrusted: true`.
+- **`upload paths` fails loudly now** — after `DOM.setFileInputFiles`, the new
+  `filesOf` content action reads the input back; a count mismatch OR a 0-byte
+  entry (what Chrome reports for a path it could not stat) returns
+  `INPUT-FAILED` naming the read-back evidence and pointing at `paste_image`.
+  The silent no-op that anchored the failed run cannot recur.
+- **`screenshot save_to_disk` reports the absolute path** — it polls
+  `chrome.downloads.search` until the item settles and returns
+  `saved.path`, so "where did my file go" is answered by the tool, not
+  guessed by the model.
+
+Known limits: the synthetic paste is `isTrusted: false` — apps that reject
+untrusted events need the clipboard route; whether a CDP-dispatched Ctrl+V
+actually pulls the OS clipboard is environment-dependent (headless Linux has
+no clipboard service — `scripts/paste-smoke.mjs` P8 SKIPs with the reason
+instead of failing); the clipboard route reaches only the active tab's
+focused frame, while `file`/`paste` run in the frame that owns the ref.
+
+Tests: `tests/shelf.test.ts` (pure ring/lookup/summaries), `pasteFiles` /
+`filesOf` in `tests/actions.test.ts` (jsdom needs a DataTransfer stub and a
+files-setter stub — real-browser behavior is the smoke's job), policy/modes
+additions, and `scripts/paste-smoke.mjs` (in `npm run verify`) against
+`e2e/fixture/paste-target.html` — a chat-app shape: document-level paste
+consumer (preventDefault = handled), a Kimi-style hidden file input, and a
+dropzone that ignores paste (stopPropagation) so the drop fallback is
+exercised. P1–P9 cover staging, all three routes, the gate (denial delivers
+nothing), the unreadable-path failure, the absolute download path, and the
+unknown-id error; P8 is best-effort by design.
+
 ## Helper daemon (Unlimited mode)
 
 `helper/daemon.mjs` — native-messaging host (4-byte LE framing) bridging RPC
@@ -697,8 +780,11 @@ writes `NativeMessagingHosts/*.json` for Chrome/Chromium/Edge/Brave;
 - `click_at` places the caret on canvas editors and clicks painted UI, but the
   reading half is unchanged: canvas content has no DOM text (screenshot is the
   only read), and a canvas-painted button cannot be policy-classified for the
-  same reason. Upload needs a real `<input type="file">` ref — drop-zone-only
-  widgets are not supported. Console/network capture covers only what arrived
+  same reason. `upload` needs a real `<input type="file">` ref; a
+  drop-zone-only widget goes through `paste_image` instead (its synthetic
+  paste/drop route targets any element, and `via:'clipboard'` covers apps
+  that reject untrusted events — environment permitting). Console/network
+  capture covers only what arrived
   since the run started, and out-of-process iframe traffic may be missing in
   Standard mode.
 - Lessons are per browser profile (`chrome.storage.local`, never synced) and

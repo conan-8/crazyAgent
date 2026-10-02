@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture — paste target</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
+      #composer { border: 1px solid #888; min-height: 48px; padding: 8px; }
+      #zone { border: 2px dashed #888; padding: 24px; text-align: center; color: #666; margin: 12px 0; }
+      /* Kimi's shape: the real file input is invisible, the UI is a button. */
+      .hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+      #log { font: 12px monospace; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <!--
+      A chat-app composer + dropzone + hidden file input, each recording exactly
+      what it received: paste/drop/change events with the file list and the
+      isTrusted flag. The document-level paste consumer emulates a real chat
+      app (it preventDefaults, which is the "handled" signal paste_image
+      reports); the dropzone deliberately IGNORES paste (stopPropagation, no
+      preventDefault) so the drop fallback route is exercised.
+    -->
+    <h1>Chat composer</h1>
+    <div id="composer" contenteditable="true" role="textbox" aria-label="Message"></div>
+    <div id="zone" role="button" aria-label="Dropzone">Drop images here</div>
+    <input id="file" class="hidden-input" type="file" multiple aria-label="Attachment" />
+    <div id="log">no events yet</div>
+    <script>
+      window.__pasteLog = [];
+      const logEl = document.getElementById("log");
+      function record(entry) {
+        window.__pasteLog.push(entry);
+        logEl.textContent = JSON.stringify(window.__pasteLog);
+      }
+      function filesOf(dt) {
+        const out = [];
+        for (const f of dt?.files ?? []) out.push({ name: f.name, size: f.size, type: f.type });
+        return out;
+      }
+      document.addEventListener("paste", (e) => {
+        e.preventDefault(); // a real chat app consumes the paste
+        record({ type: "paste", trusted: e.isTrusted, files: filesOf(e.clipboardData) });
+      });
+      const zone = document.getElementById("zone");
+      // A dropzone-only widget: paste means nothing to it (and must not reach
+      // the document consumer), drop is the delivery route.
+      zone.addEventListener("paste", (e) => e.stopPropagation());
+      zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        record({ type: "drop", trusted: e.isTrusted, files: filesOf(e.dataTransfer) });
+      });
+      const input = document.getElementById("file");
+      input.addEventListener("change", () => {
+        record({ type: "change", trusted: false, files: filesOf(input) });
+      });
+      document.getElementById("composer").focus();
+    </script>
+  </body>
+</html>

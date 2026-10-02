@@ -32,6 +32,13 @@ export type ActionRequest =
   | { action: "probeAt"; x: number; y: number; space?: CoordSpace }
   | { action: "upload"; ref: string; files: UploadFileSpec[] }
   | { action: "uploadMark"; ref: string; token: string }
+  | {
+      action: "pasteFiles";
+      ref?: string;
+      files: UploadFileSpec[];
+      mode?: "auto" | "paste" | "drop";
+    }
+  | { action: "filesOf"; ref: string }
   | { action: "readEl"; ref: string; depth?: number }
   | { action: "authSignals" };
 
@@ -129,6 +136,29 @@ export class Actions {
       }
       case "upload":
         return this.#upload(this.#resolve(req.ref), req.files ?? []);
+      case "pasteFiles":
+        return this.#pasteFiles(
+          req.ref ? this.#resolve(req.ref) : null,
+          req.files ?? [],
+          req.mode ?? "auto",
+        );
+      case "filesOf": {
+        // Read back what a file input actually holds — the verification half of
+        // the CDP `DOM.setFileInputFiles` route, which reports success even for
+        // paths the browser could not read (a real run "attached" a nonexistent
+        // file three times while input.files stayed empty).
+        const el = this.#resolve(req.ref);
+        const input = el as HTMLInputElement;
+        const files =
+          el instanceof HTMLInputElement && input.files
+            ? Array.from(input.files).map((f) => ({
+                name: f.name,
+                size: f.size,
+                type: f.type,
+              }))
+            : [];
+        return { ok: true, data: { count: files.length, files } };
+      }
       case "uploadMark": {
         // Tag the input so the background can find it in CDP's DOM world
         // (`DOM.setFileInputFiles` needs a node, and refs only exist here).
@@ -221,6 +251,70 @@ export class Actions {
       data: {
         attached: made.map((f) => ({ name: f.name, size: f.size, type: f.type })),
         events: ["input", "change"],
+      },
+    };
+  }
+
+  /**
+   * Deliver files into a page the way a user's paste/drop would: a synthetic
+   * `paste` ClipboardEvent (what chat composers — Kimi, ChatGPT, Slack — listen
+   * for when you paste a screenshot) with a `drop` DragEvent fallback for
+   * dropzone-only widgets. A file-input target delegates to `#upload`, so one
+   * route covers every shape of "attach this image here".
+   *
+   * These events are `isTrusted: false` — apps that reject synthetic events
+   * need the OS-clipboard route in the tool layer (offscreen write + trusted
+   * Ctrl+V). `defaultPrevented` is the honest signal: a handler that consumed
+   * the paste calls preventDefault, and the tool reports it either way.
+   */
+  #pasteFiles(
+    target: HTMLElement | null,
+    files: UploadFileSpec[],
+    mode: "auto" | "paste" | "drop",
+  ): ActionResult {
+    const el =
+      target ?? ((document.activeElement as HTMLElement | null) || document.body);
+    if (!files.length) {
+      return { ok: false, error: "no files given — pass at least one entry in `files`" };
+    }
+    if (el instanceof HTMLInputElement && String(el.type).toLowerCase() === "file") {
+      const res = this.#upload(el, files);
+      return res.ok ? { ...res, data: { ...(res.data as object), route: "file" } } : res;
+    }
+    const made = files.map((f) => {
+      const part: BlobPart = f.base64 ? base64ToArrayBuffer(f.base64) : (f.text ?? "");
+      return new File([part], f.name, { type: f.mime || "application/octet-stream" });
+    });
+    const dt = new DataTransfer();
+    for (const f of made) dt.items.add(f);
+
+    const events: string[] = [];
+    let handled = false;
+    let route = "paste";
+    if (mode !== "drop") {
+      const pasteEv = makeClipboardEvent("paste", dt);
+      el.dispatchEvent(pasteEv);
+      events.push("paste");
+      handled = pasteEv.defaultPrevented;
+    }
+    if (!handled && mode !== "paste") {
+      const dropEv = makeDragEvent("drop", dt);
+      el.dispatchEvent(dropEv);
+      events.push("drop");
+      if (dropEv.defaultPrevented) {
+        handled = true;
+        route = "drop";
+      }
+    }
+    if (mode === "drop") route = "drop";
+    return {
+      ok: true,
+      data: {
+        route,
+        events,
+        handled,
+        targetTag: el.tagName.toLowerCase(),
+        files: made.map((f) => ({ name: f.name, size: f.size, type: f.type })),
       },
     };
   }
@@ -604,6 +698,46 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer {
   const view = new Uint8Array(out);
   for (let i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
   return out;
+}
+
+/**
+ * A paste event carrying a real DataTransfer. Chrome accepts `clipboardData`
+ * in the ClipboardEvent constructor; where it does not (older engines, jsdom),
+ * fall back to a plain Event with the property defined — same probe pattern as
+ * SUPPORTS_VIEW, because a constructor that silently DROPS the payload would
+ * hand the page an empty paste.
+ */
+function makeClipboardEvent(type: string, dt: DataTransfer): Event {
+  try {
+    const ev = new ClipboardEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dt,
+    });
+    if (ev.clipboardData) return ev;
+  } catch {
+    // constructor unsupported — fall through
+  }
+  const ev = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "clipboardData", { value: dt });
+  return ev;
+}
+
+/** Same shape for DragEvent('drop') — the dropzone-only fallback. */
+function makeDragEvent(type: string, dt: DataTransfer): Event {
+  try {
+    const ev = new DragEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: dt,
+    });
+    if (ev.dataTransfer) return ev;
+  } catch {
+    // constructor unsupported — fall through
+  }
+  const ev = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, "dataTransfer", { value: dt });
+  return ev;
 }
 
 /**

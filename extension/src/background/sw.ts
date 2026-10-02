@@ -105,6 +105,7 @@ import {
 } from "./tools/perception";
 import "./tools/perception"; // registers snapshot / screenshot / wait_for_settle
 import "./tools/actions"; // registers click / type / select / key / hover / scroll / read_page
+import "./tools/paste"; // registers paste_image (staged-capture delivery)
 import "./tools/tabs"; // registers navigate / reload / back / forward / tabs_*
 import "./tools/misc"; // registers evaluate_js / download (sensitive)
 import "./tools/coords"; // registers click_at / hover_at / drag_at / element_at

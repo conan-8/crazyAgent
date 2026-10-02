@@ -54,6 +54,7 @@ const options = {
     { in: path.join(ext, "src/background/sw.ts"), out: "background/sw" },
     { in: path.join(ext, "src/content/main.ts"), out: "content/main" },
     { in: path.join(ext, "src/sidepanel/main.tsx"), out: "sidepanel/main" },
+    { in: path.join(ext, "src/offscreen/clipboard.ts"), out: "offscreen/clipboard" },
   ],
   outdir: dist,
 };
@@ -73,6 +74,11 @@ async function copyStatic() {
   for (const f of ["index.html", "styles.css"]) {
     await cp(path.join(ext, "src/sidepanel", f), path.join(dist, "sidepanel", f));
   }
+  await mkdir(path.join(dist, "offscreen"), { recursive: true });
+  await cp(
+    path.join(ext, "src/offscreen/clipboard.html"),
+    path.join(dist, "offscreen/clipboard.html"),
+  );
 }
 
 if (watch) {

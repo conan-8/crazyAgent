@@ -82,6 +82,15 @@ export function assess(
         summary: `Upload ${names.length} file(s) to the page: ${names.slice(0, 4).join(", ")}${names.length > 4 ? ", …" : ""}`,
       };
     }
+    case "paste_image":
+      // Same egress class as `upload` — staged image bytes leave the machine
+      // into the page, by paste event, file attachment, or OS clipboard. Reuses
+      // the `upload` rule id so an always-allow there carries over.
+      return {
+        level: "confirm",
+        rule: "upload",
+        summary: `Send an image into the page (${typeof args.image === "string" && args.image.trim() ? String(args.image).slice(0, 40) : "latest staged capture"}${typeof args.ref === "string" && args.ref.trim() ? ` → ref ${String(args.ref).slice(0, 20)}` : ""}, route ${String(args.via ?? "auto").slice(0, 12)})`,
+      };
     case "network_mock":
     case "network_rewrite":
       return {

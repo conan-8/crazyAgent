@@ -10,7 +10,8 @@ import {
   type AggregatedSnapshot,
   type FrameSnapshotLike,
 } from "../../shared/frames";
-import { screenshotFilename } from "../../shared/filenames";
+import { safeFilename, screenshotFilename } from "../../shared/filenames";
+import { stageShelfImage } from "../shelf";
 import { registerTool, type ToolContext } from "./types";
 
 export type { AggregatedSnapshot };
@@ -403,6 +404,51 @@ async function shotOfUrl(
   }
 }
 
+/**
+ * Absolute path of a finished download, or undefined when it never settled.
+ * A guessable "Downloads/q2.jpg" is what sent a real run attaching
+ * "/root/Downloads/q2.jpg" three times — the browser profile's real download
+ * directory is nobody's guess, so save_to_disk now reports the truth.
+ */
+async function finalDownloadPath(
+  downloadId: number,
+  timeoutMs = 5_000,
+): Promise<string | undefined> {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    try {
+      const items = await chrome.downloads.search({ id: downloadId });
+      const item = items[0];
+      if (item?.state === "complete") return item.filename || undefined;
+      if (item?.state === "interrupted") return undefined;
+    } catch {
+      return undefined;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return undefined;
+}
+
+/** A presentable filename for a viewed image (basename of the URL + mime ext). */
+function imageNameFromUrl(url: string, mime: string): string {
+  const ext = mime.includes("png")
+    ? "png"
+    : mime.includes("webp")
+      ? "webp"
+      : mime.includes("gif")
+        ? "gif"
+        : "jpg";
+  let last = "";
+  if (!url.startsWith("data:")) {
+    try {
+      last = decodeURIComponent(url.split("?")[0]!.split("/").pop() ?? "").slice(0, 80);
+    } catch {
+      last = "";
+    }
+  }
+  return safeFilename(last, ext, "image");
+}
+
 registerTool({
   name: "page_health",
   description:
@@ -575,7 +621,7 @@ registerTool({
 registerTool({
   name: "screenshot",
   description:
-    "Capture a JPEG screenshot of the visible viewport. The image is ATTACHED to this result and you WILL see it — looking at it is the fastest way to resolve any confusion about what the page shows. Take one whenever you are confused, uncertain, or concerned — before guessing, before retrying a failing approach, and before reporting a blocker. save_to_disk:true additionally writes the JPEG into the Downloads folder (SENSITIVE — confirmation required).",
+    "Capture a JPEG screenshot of the visible viewport. The image is ATTACHED to this result and you WILL see it — looking at it is the fastest way to resolve any confusion about what the page shows. Take one whenever you are confused, uncertain, or concerned — before guessing, before retrying a failing approach, and before reporting a blocker. Every capture also STAGES itself on the image shelf (shot_N): `paste_image` can then deliver those exact bytes into another page (chat composer, upload form, dropzone) with no disk and no paths. save_to_disk:true additionally writes the JPEG into the Downloads folder and reports its absolute path (SENSITIVE — confirmation required).",
   parameters: {
     type: "object",
     properties: {
@@ -596,28 +642,44 @@ registerTool({
     // is how a real run convinced itself the tool was returning stale caches
     // when it was actually capturing a different window's tab.
     const ident = await tabIdentity(ctx.tabId);
-    if (args.save_to_disk !== true) return { dataUrl: jpeg, ident };
     // Downloads only ever gets a bare filename — never a path the model (or a
     // page that influenced it) could point at an arbitrary location.
     const filename = screenshotFilename(args.filename);
+    // Stage the bytes on the shelf so a later paste_image/upload can deliver
+    // them tool→tool — the model never has to carry (or re-type) base64, and
+    // never has to guess where Downloads lives on this machine.
+    const staged = await stageShelfImage({
+      dataUrl: jpeg,
+      mime: "image/jpeg",
+      name: filename,
+      tabId: ctx.tabId,
+    });
+    const shot = staged.id ? { id: staged.id, name: filename } : undefined;
+    if (args.save_to_disk !== true) return { dataUrl: jpeg, ident, shot };
     const downloadId = await chrome.downloads.download({
       url: jpeg,
       filename,
       saveAs: false,
     });
-    return { dataUrl: jpeg, saved: { downloadId, filename }, ident };
+    const path = await finalDownloadPath(downloadId);
+    return { dataUrl: jpeg, saved: { downloadId, filename, path }, ident, shot };
   },
   present(payload) {
     const p = payload as {
       dataUrl: string;
-      saved?: { downloadId: number; filename: string };
+      saved?: { downloadId: number; filename: string; path?: string };
       ident?: string;
+      shot?: { id: string; name: string };
     };
     const where = p.ident ? ` of ${p.ident}` : "";
+    const saved = p.saved
+      ? ` and saved as ${p.saved.filename}${p.saved.path ? ` (${p.saved.path})` : ""}`
+      : "";
+    const staged = p.shot
+      ? ` — staged as ${p.shot.id}: paste_image can deliver these exact bytes into another page (no disk, no paths)`
+      : "";
     return {
-      text: p.saved
-        ? `[screenshot captured${where} and saved as ${p.saved.filename} — the image is attached below; look at it]`
-        : `[screenshot captured${where} — the image is attached to this message; look at it]`,
+      text: `[screenshot captured${where}${saved}${staged} — the image is attached below; look at it]`,
       image: p.dataUrl,
     };
   },
@@ -649,12 +711,33 @@ registerTool({
         error: `view_image could not fetch ${url.slice(0, 160)} — the server may block direct fetches; screenshot the page where the image renders instead`,
       };
     }
-    return { url, dataUrl: await downscaleJpeg(dataUrl) };
+    const final = await downscaleJpeg(dataUrl);
+    // Stage viewed images too: "fetch this image, then send it to the chat app"
+    // is the same shelf→paste_image pipe as a screenshot.
+    const mime = final.slice(5, Math.max(final.indexOf(";"), 5)) || "image/jpeg";
+    const name = imageNameFromUrl(url, mime);
+    const staged = await stageShelfImage({
+      dataUrl: final,
+      mime,
+      name,
+      tabId: ctx.tabId,
+      sourceUrl: url.startsWith("data:") ? "" : url.slice(0, 500),
+    });
+    return {
+      url,
+      dataUrl: final,
+      shot: staged.id ? { id: staged.id, name } : undefined,
+    };
   },
   present(payload) {
-    const p = payload as { url: string; dataUrl: string };
+    const p = payload as {
+      url: string;
+      dataUrl: string;
+      shot?: { id: string; name: string };
+    };
+    const staged = p.shot ? ` — staged as ${p.shot.id} (paste_image can deliver it into another page)` : "";
     return {
-      text: `[image attached: ${p.url.slice(0, 160)} — the image below is the file itself; look at it]`,
+      text: `[image attached: ${p.url.slice(0, 160)} — the image below is the file itself; look at it${staged}]`,
       image: p.dataUrl,
     };
   },

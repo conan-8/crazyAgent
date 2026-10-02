@@ -23,6 +23,7 @@ export const MUTATING_TOOLS = new Set([
   "drag_at",
   "type",
   "upload",
+  "paste_image",
   "select",
   "key",
   "download",

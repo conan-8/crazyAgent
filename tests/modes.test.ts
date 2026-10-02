@@ -17,6 +17,8 @@ describe("modes", () => {
       expect(isMutating(t)).toBe(false);
     }
     expect(MUTATING_TOOLS.has("select")).toBe(true);
+    expect(isMutating("paste_image")).toBe(true);
+    expect(isMutating("upload")).toBe(true);
   });
 
   it("exposes mode labels", () => {

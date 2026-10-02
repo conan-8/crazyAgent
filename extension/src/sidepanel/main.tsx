@@ -203,6 +203,8 @@ const TOOL_META: Record<string, { icon: string; done: string; active: string }> 
   hover: { icon: ICONS.cursor, done: "Hovered", active: "Hovering" },
   scroll: { icon: ICONS.updown, done: "Scrolled", active: "Scrolling" },
   download: { icon: ICONS.download, done: "Downloaded", active: "Downloading" },
+  upload: { icon: ICONS.upload, done: "Attached files", active: "Attaching files" },
+  paste_image: { icon: ICONS.upload, done: "Pasted image", active: "Pasting image" },
   evaluate_js: { icon: ICONS.code, done: "Evaluated", active: "Evaluating" },
   judge: { icon: ICONS.sparkles, done: "Judged", active: "Judging" },
   network_mock: { icon: ICONS.activity, done: "Mocked", active: "Mocking" },

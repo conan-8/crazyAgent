@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Browser Agent — clipboard writer</title>
+  </head>
+  <body>
+    <!--
+      Transient offscreen document (reason CLIPBOARD): the MV3 service worker
+      has no DOM and no focus, and navigator.clipboard.write needs a document,
+      so staged images are written to the OS clipboard from here. Opened on
+      demand by background/clipboard.ts and closed right after the write.
+    -->
+    <script src="clipboard.js"></script>
+  </body>
+</html>

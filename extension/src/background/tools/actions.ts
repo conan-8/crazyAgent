@@ -228,6 +228,30 @@ async function uploadPaths(
       files: paths,
       nodeId: found.nodeId,
     });
+    // Verify the attach actually took. CDP reports success even for paths the
+    // browser could not read — a real run "attached" a nonexistent
+    // /root/Downloads/… file THREE times while the page saw nothing. A path the
+    // browser cannot stat comes back as a 0-byte entry (or, once the page has
+    // reset the input, as no entry at all), so both shapes fail loudly here.
+    const readback = await runContentAction(ctx.tabId, { action: "filesOf", ref }).catch(
+      () => null,
+    );
+    const data = readback?.data as
+      | { count?: number; files?: { name: string; size: number }[] }
+      | undefined;
+    const count = data?.count;
+    const empty = (data?.files ?? []).find((f) => f.size === 0);
+    if (typeof count === "number" && (count !== paths.length || empty)) {
+      const what = empty
+        ? `${count} file(s), but ${empty.name} reads as 0 bytes`
+        : `${count} of ${paths.length} file(s)`;
+      return {
+        ok: false,
+        error:
+          `${failureTag("input")}: the browser attached ${what} — it reads these paths itself, so they must exist on this machine exactly as written (a wrong Downloads directory is the usual culprit; a screenshot's real location is the absolute path in its save_to_disk result). ` +
+          `To send a staged screenshot use paste_image — no disk, no paths; for content you hold, files:[{name, text|base64}].`,
+      };
+    }
   } catch (err) {
     return {
       ok: false,
@@ -247,7 +271,7 @@ async function uploadPaths(
 registerTool({
   name: "upload",
   description:
-    "Attach file(s) to the page's file input (`<input type=\"file\">`) — for upload forms and import dialogs. Give `files` for content you hold as text or base64 (works in any frame), or `paths` for absolute file paths on this machine that the browser can read. The page sees the files with the usual input/change events (SENSITIVE — confirmation required).",
+    "Attach file(s) to the page's file input (`<input type=\"file\">`) — for upload forms and import dialogs. Give `files` for content you hold as text or base64 (works in any frame), or `paths` for absolute file paths on this machine that the browser can read (they are verified — a path the browser cannot read fails loudly). To send a SCREENSHOT or viewed image, use `paste_image` instead: staged bytes, no paths, no disk. The page sees the files with the usual input/change events (SENSITIVE — confirmation required).",
   parameters: {
     type: "object",
     properties: {

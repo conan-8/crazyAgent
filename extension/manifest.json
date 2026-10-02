@@ -19,6 +19,7 @@
     "declarativeNetRequestFeedback",
     "nativeMessaging",
     "clipboardWrite",
+    "offscreen",
     "activeTab"
   ],
   "host_permissions": ["<all_urls>"],

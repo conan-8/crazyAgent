@@ -72,8 +72,22 @@ that risk.
   purposes; it is exactly as capable and as dangerous as a person's click.
 - `upload` is **file egress**: whatever the model attached leaves the machine
   into the page. Always confirmed (`upload` rule), with the file names shown.
+  Path attaches are read back and fail loudly when the browser could not read
+  them, so a wrong path can no longer masquerade as a delivery.
+- `paste_image` is the same **file-egress** class: it delivers a staged image
+  (any screenshot/view_image capture) into the page — as a file-input
+  attachment, a synthetic paste/drop event, or through the **OS clipboard**
+  (a transient offscreen document, reason `CLIPBOARD`, closed right after the
+  write; JPEG is converted to PNG there). Always confirmed under the same
+  `upload` rule, and the trusted Ctrl+V leg is indistinguishable from a
+  human's paste. The image shelf itself is session-only RAM
+  (`chrome.storage.session`, ring of 8) — it never touches disk or a
+  persistent store, and a page cannot read it: only tool calls can, and each
+  one is gated.
 - `screenshot save_to_disk` writes a JPEG into the Downloads folder (confirmed
-  under the `download` rule; the filename is sanitised to a basename).
+  under the `download` rule; the filename is sanitised to a basename and the
+  result reports the absolute path it landed at). Every capture — saved or
+  not — also stages onto the shelf above.
 - `console_read`/`network_read` are read-only but pull **page traffic into the
   transcript and run logs** — request URLs can carry tokens and query secrets.
   Capture covers what arrived since the run started, both control modes.

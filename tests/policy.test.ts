@@ -273,6 +273,17 @@ describe("assess — new capability tools (coords, upload, screenshot-to-disk)",
       rule: "download",
     });
   });
+
+  it("gates paste_image under the SAME upload rule (always-allow carries over)", () => {
+    const risk = assess("paste_image", { image: "shot_3", ref: "0#12", via: "clipboard" });
+    expect(risk).toMatchObject({ level: "confirm", rule: "upload" });
+    expect(risk.level === "confirm" && risk.summary).toContain("shot_3");
+    expect(risk.level === "confirm" && risk.summary).toContain("clipboard");
+    // No args at all: still gated, summary falls back to the defaults.
+    const bare = assess("paste_image", {});
+    expect(bare).toMatchObject({ level: "confirm", rule: "upload" });
+    expect(bare.level === "confirm" && bare.summary).toContain("latest staged capture");
+  });
 });
 
 describe("vi sanity", () => {

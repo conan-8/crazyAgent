@@ -236,3 +236,189 @@ describe("Actions", () => {
     });
   });
 });
+
+// ---------------- pasteFiles / filesOf (the paste_image content half) ----------------
+
+describe("pasteFiles", () => {
+  let registry: ElementRegistry;
+  let actions: Actions;
+
+  // jsdom has no DataTransfer; the action only ever does items.add(f) and
+  // reads .files back, so the minimal stand-in is exact for these tests.
+  class FakeDataTransfer {
+    files: File[] = [];
+    items = {
+      add: (f: File) => {
+        this.files.push(f);
+      },
+    };
+  }
+
+  // 8 bytes of "PNG" — enough to prove the base64 decode path end to end.
+  const B64 = "iVBORw0KGgo=";
+
+  beforeEach(() => {
+    (globalThis as { DataTransfer?: unknown }).DataTransfer = FakeDataTransfer;
+    registry = new ElementRegistry();
+    actions = new Actions(registry);
+    document.body.innerHTML = "";
+  });
+
+  /** Ref of the first collected interactive element (bodies hold exactly one). */
+  function firstRef(): string {
+    const snap = registry.collect();
+    const el = snap.elements[0];
+    if (!el) throw new Error("no interactive element collected");
+    return el.ref;
+  }
+
+  function fileArg(name = "q2.jpg"): { name: string; mime: string; base64: string } {
+    return { name, mime: "image/jpeg", base64: B64 };
+  }
+
+  it("dispatches a paste carrying the image file; a consuming handler counts as handled", () => {
+    document.body.innerHTML = `<div id="c" contenteditable="true" role="textbox"></div>`;
+    const el = document.getElementById("c")!;
+    let seen: { name: string; size: number; type: string }[] = [];
+    el.addEventListener("paste", (e) => {
+      e.preventDefault();
+      const dt = (e as unknown as { clipboardData: FakeDataTransfer }).clipboardData;
+      seen = (dt?.files ?? []).map((f) => ({ name: f.name, size: f.size, type: f.type }));
+    });
+    const res = actions.run({
+      action: "pasteFiles",
+      ref: firstRef(),
+      files: [fileArg()],
+    });
+    expect(res.ok).toBe(true);
+    const d = res.data as { route: string; handled: boolean; events: string[] };
+    expect(d.route).toBe("paste");
+    expect(d.handled).toBe(true);
+    expect(d.events).toEqual(["paste"]);
+    expect(seen).toEqual([{ name: "q2.jpg", size: 8, type: "image/jpeg" }]);
+  });
+
+  it("falls back to a drop event when no paste handler consumed the image", () => {
+    document.body.innerHTML = `<div id="z" role="button">drop files here</div>`;
+    const zone = document.getElementById("z")!;
+    let dropped = 0;
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropped += (e as unknown as { dataTransfer: FakeDataTransfer }).dataTransfer?.files.length ?? 0;
+    });
+    const res = actions.run({ action: "pasteFiles", ref: firstRef(), files: [fileArg()] });
+    expect(res.ok).toBe(true);
+    const d = res.data as { route: string; handled: boolean; events: string[] };
+    expect(d.events).toEqual(["paste", "drop"]);
+    expect(d.route).toBe("drop");
+    expect(d.handled).toBe(true);
+    expect(dropped).toBe(1);
+  });
+
+  it("mode:'paste' never fires the drop fallback and reports the event as ignored", () => {
+    document.body.innerHTML = `<div id="z" role="button">zone</div>`;
+    const res = actions.run({
+      action: "pasteFiles",
+      ref: firstRef(),
+      files: [fileArg()],
+      mode: "paste",
+    });
+    const d = res.data as { route: string; handled: boolean; events: string[] };
+    expect(d.events).toEqual(["paste"]);
+    expect(d.handled).toBe(false);
+  });
+
+  it("mode:'drop' goes straight to the dropzone shape", () => {
+    document.body.innerHTML = `<div id="z" role="button">zone</div>`;
+    const zone = document.getElementById("z")!;
+    zone.addEventListener("drop", (e) => e.preventDefault());
+    const res = actions.run({
+      action: "pasteFiles",
+      ref: firstRef(),
+      files: [fileArg()],
+      mode: "drop",
+    });
+    const d = res.data as { route: string; events: string[]; handled: boolean };
+    expect(d.events).toEqual(["drop"]);
+    expect(d.route).toBe("drop");
+    expect(d.handled).toBe(true);
+  });
+
+  it("with no ref it targets the focused element", () => {
+    document.body.innerHTML = `<textarea id="t" aria-label="composer"></textarea>`;
+    const t = document.getElementById("t")!;
+    let pasted = false;
+    t.addEventListener("paste", (e) => {
+      e.preventDefault();
+      pasted = true;
+    });
+    t.focus();
+    const res = actions.run({ action: "pasteFiles", files: [fileArg()] });
+    expect(res.ok).toBe(true);
+    expect(pasted).toBe(true);
+    expect((res.data as { targetTag: string }).targetTag).toBe("textarea");
+  });
+
+  it("delegates a file-input target to the DataTransfer upload route", () => {
+    document.body.innerHTML = `<input id="f" type="file" />`;
+    const input = document.getElementById("f") as HTMLInputElement;
+    // jsdom refuses `input.files = <plain array>` (demands a real FileList) —
+    // real Chrome accepts the DataTransfer's files, which is what
+    // capability-smoke U1 pins in a live browser. Stub the setter here so the
+    // delegation contract (assign + input/change events) is still unit-tested.
+    let assigned: File[] | null = null;
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      get: () => assigned,
+      set: (v: File[] | null) => {
+        assigned = v;
+      },
+    });
+    const events: string[] = [];
+    input.addEventListener("input", () => events.push("input"));
+    input.addEventListener("change", () => events.push("change"));
+    input.focus();
+    const res = actions.run({ action: "pasteFiles", files: [fileArg()] });
+    expect(res.ok).toBe(true);
+    const d = res.data as { route: string; attached: { name: string; size: number; type: string }[] };
+    expect(d.route).toBe("file");
+    expect(d.attached).toEqual([{ name: "q2.jpg", size: 8, type: "image/jpeg" }]);
+    expect(events).toEqual(["input", "change"]);
+    // (TS CFA can't see the setter callback ran — read through a cast.)
+    const attached = assigned as unknown as File[] | null;
+    expect(attached?.length).toBe(1);
+    expect(attached?.[0]?.name).toBe("q2.jpg");
+  });
+
+  it("refuses with no files, like the upload action does", () => {
+    document.body.innerHTML = `<div id="c" contenteditable="true" role="textbox"></div>`;
+    const res = actions.run({ action: "pasteFiles", ref: firstRef(), files: [] });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("no files");
+  });
+
+  it("filesOf reads back what a file input actually holds", () => {
+    document.body.innerHTML = `<input id="f" type="file" />`;
+    const input = document.getElementById("f") as HTMLInputElement;
+    // jsdom will not take a plain array through the files setter in every
+    // version — pin the read-back contract directly.
+    const fake = { length: 2, 0: { name: "a.jpg", size: 3, type: "image/jpeg" }, 1: { name: "b.png", size: 4, type: "image/png" } };
+    Object.defineProperty(input, "files", { value: fake, configurable: true });
+    const res = actions.run({ action: "filesOf", ref: firstRef() });
+    expect(res.ok).toBe(true);
+    expect(res.data).toEqual({
+      count: 2,
+      files: [
+        { name: "a.jpg", size: 3, type: "image/jpeg" },
+        { name: "b.png", size: 4, type: "image/png" },
+      ],
+    });
+  });
+
+  it("filesOf reports zero (not an error) for an empty input — the silent-failure probe", () => {
+    document.body.innerHTML = `<input id="f" type="file" />`;
+    const res = actions.run({ action: "filesOf", ref: firstRef() });
+    expect(res.ok).toBe(true);
+    expect((res.data as { count: number }).count).toBe(0);
+  });
+});
