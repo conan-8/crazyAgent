@@ -11,6 +11,7 @@ import type {
   ThinkingLevel,
   ToolCall,
 } from "../../shared/llm";
+import { thinkingBudgetFor } from "../../shared/llm";
 import type { Checkpoint, RunStats, StepEvent } from "../../shared/protocol";
 import { validateToolArgs } from "../tools/types";
 import { estimateTokens, isMutating } from "../../shared/modes";
@@ -97,7 +98,26 @@ export interface LoopDeps {
 
 const MAX_RESULT_CHARS = 24_000;
 const HISTORY_BUDGET_CHARS = 120_000;
-const MAX_LIVE_IMAGES = 4;
+/**
+ * How many attached screenshots stay visible to the model.
+ *
+ * Cut from 4 to 2 on the numbers from an archived 68-minute run: images were
+ * 1.87M of its 9.44M input tokens (21%), with a mean of 3.94 live per step —
+ * the slot was effectively always full, so every step re-sent four captures to
+ * answer a question about the newest one. Successive screenshots of the same
+ * page supersede each other, and the stale ones are not free either: they are
+ * exactly the "a screenshot showed a different page than the snapshot" conflict
+ * BASE_RULES has to warn about.
+ *
+ * Fewer live images is also kinder to the provider's prefix cache. Retiring a
+ * capture rewrites the message that carried it, and everything after that
+ * re-prefills; with a shorter window the retired capture is a more RECENT one,
+ * so the rewrite point sits later in the array and less is re-sent uncached.
+ *
+ * Two keeps the useful pair — what the page looks like now, and what it looked
+ * like before the last action — at half the token cost.
+ */
+const MAX_LIVE_IMAGES = 2;
 /**
  * Token accounting for truncation: system prompt + tool specs + margin that
  * never ride in `messages` but DO count against the context window, and the
@@ -159,6 +179,44 @@ const RETRY_DELAYS_MS = [1_000, 3_000];
 const MAX_EMPTY_REPLIES = 3;
 /** Ceiling for the truncation-driven output-cap raise (providers cap output). */
 const MAX_OUTPUT_TOKENS = 32_000;
+
+/**
+ * Client-side ceiling on ONE step's reasoning, as a multiple of the selected
+ * thinking level's token budget (see `reasoningCapChars`).
+ *
+ * The wire cannot be trusted to enforce it. An archived 68-minute run asked for
+ * `thinking: low` — a 1,024-token budget — and the model returned 196,918
+ * reasoning tokens, 192× the request, because the OpenAI-compatible endpoint
+ * ignores `reasoning_effort` and no budget ever reached it. Reasoning was 87% of
+ * that run's output tokens and, at a measured 93 tok/s, roughly half its wall
+ * clock; the 62 turns that thought for over 4,000 characters alone accounted
+ * for 51% of it. Two turns ran to 98s each on ~9,000 tokens of thinking.
+ *
+ * So the loop counts reasoning deltas as they stream and cuts the connection at
+ * a generous multiple of what was asked for, then re-asks the SAME step with
+ * thinking off to get an actionable reply. The multiple is deliberately loose:
+ * it is a tail-cutter for runaways, not a trimmer of ordinary thought, and a
+ * provider that does honour its budget (Anthropic) can never reach it.
+ */
+const REASONING_OVERRUN_FACTOR = 3;
+
+/**
+ * How many capped steps in a row before thinking is switched off for the REST
+ * of the run. Each cap costs a second round trip, so a model that overruns
+ * every step is paying double to keep a habit that is not paying for itself;
+ * after this many, the loop stops asking for thinking at all and says so.
+ */
+const MAX_REASONING_OVERRUNS = 3;
+
+/**
+ * The reasoning ceiling for one step, in CHARACTERS (0 = no cap). Derived from
+ * the level's own token budget at the same chars/4 ratio the rest of the token
+ * math uses, so one number means the same thing everywhere.
+ */
+export function reasoningCapChars(level: ThinkingLevel | undefined): number {
+  const budget = thinkingBudgetFor(level ?? "off");
+  return budget > 0 ? budget * 4 * REASONING_OVERRUN_FACTOR : 0;
+}
 
 /**
  * What the loop tells a model whose last reply carried no answer and no tool
@@ -268,13 +326,24 @@ export function createStuckGuard(): StuckGuard {
   };
 }
 
-/** One LLM call with retry + backoff on transient failures (429/5xx/network). */
+/**
+ * One LLM call with retry + backoff on transient failures (429/5xx/network),
+ * and a ceiling on runaway reasoning.
+ *
+ * `reasoningCap` is a character count (0 = uncapped). Past it the stream is cut
+ * and the call comes back `capped` with NO result, so the caller re-asks the
+ * step with thinking off rather than waiting out a 98-second soliloquy. That
+ * abort is ours, so it is not a transient failure and burns no retry — but the
+ * reasoning it did stream is reported back, because it was generated and paid
+ * for, and the run's stats would understate the cost otherwise.
+ */
 async function completeWithRetry(
   deps: LoopDeps,
   req: LlmRequest,
   onText: (t: string) => void,
   onReasoning: (t: string) => void,
-): Promise<LlmResult> {
+  reasoningCap = 0,
+): Promise<{ result?: LlmResult; capped: boolean; cappedChars: number }> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < LLM_ATTEMPTS; attempt++) {
     if (attempt > 0) {
@@ -286,9 +355,31 @@ async function completeWithRetry(
       await new Promise((r) => setTimeout(r, delay));
       if (deps.shouldStop()) break;
     }
+    // Per attempt: the cut is only attributable to the attempt that made it.
+    let capped = false;
+    let chars = 0;
+    const ctl = reasoningCap > 0 ? new AbortController() : undefined;
     try {
-      return await deps.llm.complete(req, onText, undefined, onReasoning);
+      const result = await deps.llm.complete(
+        req,
+        onText,
+        ctl?.signal,
+        (t) => {
+          chars += t.length;
+          // Reasoning streams BEFORE the answer on every wire we speak, so
+          // cutting here loses nothing but the thinking itself.
+          if (ctl && !capped && chars > reasoningCap) {
+            capped = true;
+            ctl.abort();
+          }
+          onReasoning(t);
+        },
+      );
+      return { result, capped, cappedChars: capped ? chars : 0 };
     } catch (err) {
+      // Cutting the stream can surface as a rejection out of the reader rather
+      // than a graceful end. Either way this is the cap doing its job.
+      if (capped) return { capped: true, cappedChars: chars };
       lastErr = err;
     }
   }
@@ -330,6 +421,12 @@ export async function runAgentTask(
   // Replies that carried no answer and no tool call, in a row. Bounded so a
   // model that keeps coming back empty stops honestly instead of looping.
   let emptyReplies = 0;
+  // Effective thinking level. Starts at the configured one and is dropped to
+  // "off" for the rest of the run once the reasoning cap has tripped
+  // MAX_REASONING_OVERRUNS times in a row (see reasoningCapChars).
+  let thinking = deps.thinking;
+  // Consecutive steps whose reasoning had to be cut short.
+  let overruns = 0;
   // The stable system prompt (rules + task) is byte-identical for the whole
   // run — built once. Only the clock is per-step, and it rides in
   // systemVolatile at the END of the request so provider prompt caching hits
@@ -370,25 +467,66 @@ export async function runAgentTask(
     // checkpoint (every screenshot ever taken, base64 counted as chars/4) and
     // reported absurdities like "context 1215933/128000".
     const history = truncateHistory(cp.messages, HISTORY_BUDGET_CHARS, historyTokenBudget);
-    let result;
+    const request: LlmRequest = {
+      system: systemPrompt,
+      systemSuffix: deps.lessonsBlock || undefined,
+      // Clock is read per step (not once per run) so a long run — or one
+      // resumed from a checkpoint hours later — always sees the real time.
+      // It is the request's volatile TAIL, never part of the cached prefix.
+      systemVolatile: buildSystemVolatile(now),
+      messages: history,
+      tools,
+      maxTokens,
+      thinking,
+    };
+    const onText = (text: string): void => deps.emit({ kind: "token_delta", text });
+    const onReasoning = (text: string): void =>
+      deps.emit({ kind: "reasoning_delta", text });
+    let result: LlmResult;
+    // Reasoning generated by an attempt the cap cut short. Still generated,
+    // still paid for, so it is counted even though its reply was thrown away.
+    let cappedChars = 0;
     try {
-      result = await completeWithRetry(
+      const first = await completeWithRetry(
         deps,
-        {
-          system: systemPrompt,
-          systemSuffix: deps.lessonsBlock || undefined,
-          // Clock is read per step (not once per run) so a long run — or one
-          // resumed from a checkpoint hours later — always sees the real time.
-          // It is the request's volatile TAIL, never part of the cached prefix.
-          systemVolatile: buildSystemVolatile(now),
-          messages: history,
-          tools,
-          maxTokens,
-          thinking: deps.thinking,
-        },
-        (text) => deps.emit({ kind: "token_delta", text }),
-        (text) => deps.emit({ kind: "reasoning_delta", text }),
+        request,
+        onText,
+        onReasoning,
+        reasoningCapChars(thinking),
       );
+      cappedChars = first.cappedChars;
+      if (first.capped || !first.result) {
+        // The model was still thinking when the ceiling came down. Re-ask the
+        // SAME step with thinking off: the run needs an actionable reply, and
+        // one cheap round trip costs less than the rest of the soliloquy.
+        overruns += 1;
+        deps.emit({
+          kind: "info",
+          message:
+            `reasoning overran the ${thinkingBudgetFor(thinking ?? "off")}-token budget for '${thinking ?? "off"}'` +
+            ` — cut the stream at ~${Math.ceil(cappedChars / 4).toLocaleString()} tokens and re-asked the step with thinking off`,
+        });
+        if (overruns >= MAX_REASONING_OVERRUNS && thinking !== "off") {
+          thinking = "off";
+          overruns = 0;
+          deps.emit({
+            kind: "info",
+            message: `${MAX_REASONING_OVERRUNS} steps in a row overran the reasoning budget — thinking is off for the rest of this run`,
+          });
+        }
+        const second = await completeWithRetry(
+          deps,
+          { ...request, thinking: "off" },
+          onText,
+          onReasoning,
+        );
+        cappedChars += second.cappedChars;
+        if (!second.result) throw new Error("reasoning cap tripped with thinking already off");
+        result = second.result;
+      } else {
+        overruns = 0;
+        result = first.result;
+      }
     } catch (err) {
       const message = String((err as Error)?.message ?? err);
       if (maxTokens > baseMaxTokens) {
@@ -423,6 +561,13 @@ export async function runAgentTask(
     };
     totalIn += usage.inputTokens;
     totalOut += usage.outputTokens;
+    if (cappedChars) {
+      // An attempt the reasoning cap cut short still generated these tokens and
+      // still cost the wall clock; `usage` above only describes the reply that
+      // survived. Counted here so a capped run never looks cheaper than it was.
+      totalOut += Math.ceil(cappedChars / 4);
+      reasoningChars += cappedChars;
+    }
     if (usage.cachedInputTokens !== undefined) {
       totalCached += usage.cachedInputTokens;
       cachedEverReported = true;

@@ -53,12 +53,21 @@ describe("buildSystemPrompt", () => {
           .filter(
             (l) =>
               !l.startsWith("- BATCH ONE") &&
+              !l.startsWith("- ONE CALL PER PAGE") &&
               !l.startsWith("- Do NOT spend a step") &&
               !l.startsWith("- Independent read-only lookups") &&
               !l.startsWith("- Prefer small decisive steps"),
           )
           .join("\n");
       expect(strip(on)).toBe(strip(off));
+    });
+
+    it("prices the lone-call habit and asks for one call per page", () => {
+      // 191 evaluate_js calls, 157 of them alone in their step: the rule only
+      // exists because the archive measured what each one cost.
+      expect(on).toContain("ONE CALL PER PAGE, NOT ONE PER VALUE");
+      expect(on).toContain("157 of them alone in their step");
+      expect(off).not.toContain("ONE CALL PER PAGE, NOT ONE PER VALUE");
     });
 
     it("leaves every safety rule in place on both settings", () => {
@@ -75,6 +84,30 @@ describe("buildSystemPrompt", () => {
     for (const p of [buildSystemPrompt("t", "auto"), buildSystemPrompt("t", "auto", false, false, true)]) {
       expect(p).toContain("Do NOT hand-roll a DOM sweep in `evaluate_js`");
       expect(p).toContain("real network round trip");
+    }
+  });
+
+  // The no-pixel-reconstruction rule already existed and a live run reasoned
+  // straight past it, because it wanted a NUMBER rather than a picture: 12
+  // consecutive steps and 448s (11% of the run's wall) digitizing one graph.
+  it("closes the digitization loophole the pixel rule left open", () => {
+    for (const p of [buildSystemPrompt("t", "auto"), buildSystemPrompt("t", "auto", false, false, true)]) {
+      expect(p).toContain("Never iterate a pixel-digitization loop");
+      // Reading a value off a chart is explicitly sanctioned, so the rule
+      // cannot be read as "never look at numbers in an image".
+      expect(p).toContain("Reading a NUMBER off a chart or graph is still LOOKING");
+      expect(p).toContain("COMMIT");
+    }
+  });
+
+  // A run got its answer from the named oracle in 6 steps, then spent 20 more
+  // (over 8 minutes) re-solving the problem to second-guess it.
+  it("makes a named source of truth the deliverable, not a claim to re-litigate", () => {
+    for (const p of [buildSystemPrompt("t", "auto"), buildSystemPrompt("t", "auto", false, false, true)]) {
+      expect(p).toContain("that answer IS the deliverable");
+      expect(p).toContain("Do not independently re-derive it");
+      // Doubt is still allowed — once, in the summary, without a re-run.
+      expect(p).toContain("say so ONCE in the final summary");
     }
   });
 

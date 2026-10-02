@@ -113,6 +113,19 @@ one-action-then-verify pacing. Safety is identical either way — the
 confirmation cards, the risk rules and every gate behave the same, and each
 gated action still confirms on its own.
 
+**Thinking** (Settings) sets how much the model reasons before answering — Off /
+Low / Medium / High, Low by default. The level is a real budget, not a hint: it
+is sent to the endpoint as a token budget, and the agent also enforces it
+itself, because an archived 68-minute run asked for **Low (1,024 tokens) and got
+196,918 reasoning tokens back** — 192× the request — from an endpoint that
+ignores the advisory knob. Reasoning was 87% of that run's output tokens, and the
+62 turns that thought hardest were **51% of its wall clock**. So when a step
+runs past three times its budget the agent cuts the stream, says so in the
+transcript, and re-asks that same step with thinking off to get an actionable
+reply; three such steps in a row turn thinking off for the rest of the run. The
+tokens it threw away are still counted in the run's stats, so a capped run never
+looks cheaper than it was.
+
 **Run logs**: the **Run logs** button (next to History) archives every task
 locally in `chrome.storage.local` — one timestamped record per run, split into
 turns, each turn carrying its start time, duration and token stats, and each

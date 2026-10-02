@@ -229,12 +229,19 @@ describe("provider request shaping", () => {
     ]);
   });
 
-  it("omits thinking by default", () => {
+  it("omits thinking by default on the Anthropic wire", () => {
     const a = buildAnthropicBody(req, "m1") as Record<string, unknown>;
-    const o = buildOpenAiBody(req, "m1") as Record<string, unknown>;
     expect(a.thinking).toBeUndefined();
-    expect(o.enable_thinking).toBeUndefined();
+  });
+
+  it("SAYS thinking is off on the OpenAI wire instead of merely omitting it", () => {
+    // A reasoner left alone emits reasoning_content unprompted, so Off has to
+    // be transmitted explicitly — omitting the knob never turned it off.
+    const o = buildOpenAiBody(req, "m1") as Record<string, unknown>;
+    expect(o.enable_thinking).toBe(false);
+    expect(o.chat_template_kwargs).toEqual({ enable_thinking: false });
     expect(o.reasoning_effort).toBeUndefined();
+    expect(o.thinking_budget).toBeUndefined();
   });
 
   it("maps a thinking level to an Anthropic budget", () => {
@@ -269,8 +276,31 @@ describe("provider request shaping", () => {
       unknown
     >;
     expect(body.enable_thinking).toBe(true);
-    expect(body.chat_template_kwargs).toEqual({ enable_thinking: true });
+    expect(body.chat_template_kwargs).toEqual({
+      enable_thinking: true,
+      thinking_budget: 16_384,
+    });
     expect(body.reasoning_effort).toBe("high");
+  });
+
+  it("carries the level's BUDGET on the OpenAI wire, not just its name", () => {
+    // `reasoning_effort` is advisory and the big endpoints ignore it: a run
+    // that asked for "low" came back with 196,918 reasoning tokens, 192× the
+    // 1,024 budget. The number itself has to travel.
+    const low = buildOpenAiBody({ ...req, thinking: "low" }, "m1") as Record<
+      string,
+      unknown
+    >;
+    expect(low.thinking_budget).toBe(1_024);
+    expect(low.chat_template_kwargs).toEqual({
+      enable_thinking: true,
+      thinking_budget: 1_024,
+    });
+    const medium = buildOpenAiBody({ ...req, thinking: "medium" }, "m1") as Record<
+      string,
+      unknown
+    >;
+    expect(medium.thinking_budget).toBe(4_096);
   });
 
   it("keeps thinking knobs away from strict OpenAI non-reasoners", () => {

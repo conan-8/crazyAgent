@@ -322,16 +322,34 @@ export function buildOpenAiBody(
     stream: true,
     stream_options: { include_usage: true },
   };
-  if (level !== "off") {
-    if (!strictOpenAi) {
-      // vLLM/SGLang-style switch; most OpenAI-compatible servers ignore unknown
-      // fields, and DeepSeek reasoners emit reasoning_content unprompted.
-      body.enable_thinking = true;
-      body.chat_template_kwargs = { enable_thinking: true };
+  if (!strictOpenAi) {
+    // vLLM/SGLang-style switch; most OpenAI-compatible servers ignore unknown
+    // fields, and DeepSeek reasoners emit reasoning_content unprompted.
+    //
+    // OFF HAS TO BE SAID, NOT OMITTED: a reasoner left alone thinks anyway, so
+    // the old `if (level !== "off")` guard sent nothing for Off and the model
+    // reasoned regardless of the setting. The switch is now emitted in both
+    // directions.
+    //
+    // `thinking_budget` is the only knob on this wire that bounds HOW MUCH a
+    // server emits. `reasoning_effort` stays for the gateways that map it, but
+    // it is advisory and the big ones ignore it: an archived 68-minute run
+    // asked for "low" (budget 1_024) and came back with 196,918 reasoning
+    // tokens — 192× the request — because nothing on the wire carried the
+    // number. Servers that don't know the field ignore it, and the loop's own
+    // reasoning cap (REASONING_OVERRUN_FACTOR in agent/loop.ts) backstops the
+    // ones that do.
+    const thinking = level !== "off";
+    body.enable_thinking = thinking;
+    body.chat_template_kwargs = thinking
+      ? { enable_thinking: true, thinking_budget: thinkingBudgetFor(level) }
+      : { enable_thinking: false };
+    if (thinking) {
       body.reasoning_effort = level;
-    } else if (reasoner) {
-      body.reasoning_effort = level;
+      body.thinking_budget = thinkingBudgetFor(level);
     }
+  } else if (reasoner && level !== "off") {
+    body.reasoning_effort = level;
   }
   return body;
 }

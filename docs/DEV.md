@@ -240,6 +240,76 @@ answered with a prompt rule against hand-rolled DOM sweeps and a stale
 `navigate` description ("Follow with wait_for_settle") that contradicted the
 auto-observe design and invited a wasted round trip after every navigation.
 
+### The 2026-10-02 run: thinking was 52% of the wall clock
+
+`crazyagent-logs-2026-10-02T04-18-28.jsonl` — one run, 317 turns, 349 tool
+calls, **4,090 s wall**. `runlog-stats.mjs` prices it at 91% LLM round trips /
+9% tools, a fitted **5.0 s fixed + 93 tok/s**, and 9,442,308 in / 226,077 out
+(all estimated: the endpoint reported no `usage`, so the record is flagged
+`tokensEstimated`). Prefix re-send accounts for 2.9 M of the input; the rest is
+conversation.
+
+The headline is on the output side. **196,918 of its 226,077 output tokens (87%)
+were reasoning**, and the run had asked for `thinking: low` — a 1,024-token
+budget. That is a **192× overrun**, and it is not the model misbehaving: the
+OpenAI-compatible wire sent `reasoning_effort: "low"` and *no budget at all*,
+and the big endpoints ignore `reasoning_effort`. `THINKING_LEVELS[].budget` was
+only ever wired to Anthropic. Reasoning volume is what the wall clock tracked —
+the 62 turns that thought for over 4,000 characters were **51% of the run's
+wall**, two turns ran 98 s each on ~9,000 tokens of thinking, and the fast
+episodes (5.5 s/turn) are precisely the ones with little reasoning.
+
+Four changes answer it:
+
+1. **The budget travels** (`llm.ts` → `buildOpenAiBody`). Non-strict endpoints
+   now get `thinking_budget` both top-level and inside `chat_template_kwargs`
+   (vLLM/SGLang/Qwen honour it; servers that don't, ignore it). **Off is now
+   said, not omitted**: the old `if (level !== "off")` guard sent nothing at all
+   for Off, and a reasoner left alone emits `reasoning_content` unprompted, so
+   Off never actually turned thinking off on this wire. Both directions now emit
+   `enable_thinking`.
+2. **The loop enforces what the wire cannot** (`reasoningCapChars`,
+   `completeWithRetry`). Reasoning deltas are counted as they stream; past
+   `budget × 4 chars × REASONING_OVERRUN_FACTOR` (3) the connection is cut and
+   the SAME step is re-asked with thinking off — reasoning streams before the
+   answer on every wire we speak, so nothing but the thinking is lost. The cut
+   is not a transient failure and burns no retry, but its tokens ARE added to
+   `outputTokens`/`reasoningChars`, because they were generated and paid for and
+   a capped run must not look cheaper than it was. Three overruns in a row flip
+   thinking off for the rest of the run (`MAX_REASONING_OVERRUNS`): each cap
+   costs a second round trip, so a model overrunning every step is paying double
+   for a habit that is not paying for itself. The factor is deliberately loose —
+   a tail-cutter for runaways, not a trimmer of ordinary thought, and a provider
+   that honours its budget (Anthropic) can never reach it.
+3. **`MAX_LIVE_IMAGES` 4 → 2**. Images were **1.87 M of 9.44 M input tokens
+   (21%)** at a mean of 3.94 live per step — the slot was effectively always
+   full, so every step re-sent four captures to answer a question about the
+   newest one. Successive screenshots of the same page supersede each other, and
+   the stale ones are exactly the "a screenshot showed a different page than the
+   snapshot" conflict `BASE_RULES` has to warn about. A shorter window is also
+   kinder to the prefix cache: retiring a capture rewrites the message that
+   carried it and everything after re-prefills, so with fewer live images the
+   retired capture is a more *recent* one and the rewrite point sits later.
+4. **Three prompt rules the archive paid for.** `ONE CALL PER PAGE, NOT ONE PER
+   VALUE` — 288 of 317 steps carried exactly one call and 157 of those were a
+   lone `evaluate_js` fetching a single value (191 in total), each paying a full
+   round trip; several facts from one document are one call returning an object.
+   The no-pixel-reconstruction rule already existed and the run reasoned
+   straight past it, because it wanted a *number* rather than a picture: turns
+   303–316 spent **448 s (11% of the wall)** and 122 k reasoning characters
+   digitizing one velocity–time graph, and the answer moved by less than the
+   precision being chased. Reading a value off a chart is now explicitly
+   sanctioned — once, at eye precision, then commit. Finally, when the TASK
+   names another source as the authority ("send it to X and use the reply"),
+   that answer is the deliverable: this run had it in 6 steps and spent 20 more
+   re-solving the problem to second-guess it.
+
+Prefix-cache reuse was *not* the problem here: replaying the run through
+`truncateHistory` gives a mean byte-identical prefix of **86%** against the
+previous request (~2,100 re-prefilled tokens per step), so the quantized
+compaction is doing its job even though compaction fired on 266 of 317 steps.
+The bill was the number of round trips and what each one generated.
+
 ## Jev decision layer (System-One sidecar)
 
 [Jev](https://docs.typesafe.ai/api) (TypeSafe's "System One" decision model)

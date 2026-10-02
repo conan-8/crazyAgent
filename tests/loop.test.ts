@@ -3,6 +3,7 @@ import {
   capCheckpointImages,
   createStuckGuard,
   estimateMessages,
+  reasoningCapChars,
   runAgentTask,
   truncateHistory,
   type ExecuteBatch,
@@ -830,10 +831,10 @@ describe("capCheckpointImages", () => {
     ];
     capCheckpointImages(messages);
     const kept = messages.filter((m) => m.images?.length);
-    // The loop's request view never re-sends more than the newest 4, so the
+    // The loop's request view never re-sends more than the newest 2, so the
     // older payloads must be released from the checkpoint itself (worker RAM).
-    expect(kept).toHaveLength(4);
-    expect(kept[0]?.images?.[0]).toBe("data:image/jpeg;base64,IMG2");
+    expect(kept).toHaveLength(2);
+    expect(kept[0]?.images?.[0]).toBe("data:image/jpeg;base64,IMG4");
     expect(messages[1]?.images).toBeUndefined();
     // Text content is untouched — only image bytes are freed.
     expect(messages[1]?.content).toBe("shot 0");
@@ -1036,5 +1037,119 @@ describe("prompt-cache split and honest usage accounting", () => {
         { role: "assistant", content: "", toolCalls: [{ id: "c", name: "n", args: { a: "xxxx" } }] },
       ]),
     ).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A client that thinks past any cap and only answers once thinking is off —
+ * the shape of the archived run that asked for "low" and got 196,918 reasoning
+ * tokens back. It honours the abort signal the way `readSse` does (the real
+ * stream rejects out of the reader), so the loop's recovery path is exercised
+ * exactly as it is in production.
+ */
+class RunawayLlm implements LlmClient {
+  seen: LlmRequest[] = [];
+  /** Attempts that were cut short by the reasoning cap. */
+  capHits = 0;
+  private offCalls = 0;
+  constructor(private replies: LlmResult[]) {}
+  async complete(
+    req: LlmRequest,
+    onText?: (t: string) => void,
+    signal?: AbortSignal,
+    onReasoning?: (t: string) => void,
+  ): Promise<LlmResult> {
+    this.seen.push(req);
+    if (req.thinking === "off") {
+      const reply =
+        this.replies[this.offCalls++] ?? { text: "done", toolCalls: [], stopReason: "end" };
+      onText?.(reply.text);
+      return reply;
+    }
+    for (let k = 0; k < 80; k++) {
+      onReasoning?.("x".repeat(400));
+      if (signal?.aborted) {
+        this.capHits += 1;
+        throw new Error("aborted");
+      }
+    }
+    return { text: "never reached", toolCalls: [], stopReason: "end" };
+  }
+}
+
+describe("reasoning cap", () => {
+  it("derives the ceiling from the level's own budget, and caps nothing at Off", () => {
+    // low = 1,024 tokens × 4 chars × the overrun factor of 3.
+    expect(reasoningCapChars("low")).toBe(12_288);
+    expect(reasoningCapChars("medium")).toBe(4_096 * 4 * 3);
+    expect(reasoningCapChars("off")).toBe(0);
+    expect(reasoningCapChars(undefined)).toBe(0);
+  });
+
+  it("cuts a runaway stream and re-asks the SAME step with thinking off", async () => {
+    const llm = new RunawayLlm([{ text: "the answer", toolCalls: [], stopReason: "end" }]);
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([], { llm, thinking: "low", stepCap: 2 });
+    const outcome = await runAgentTask(cp, deps);
+
+    expect(outcome).toBe("completed");
+    expect(llm.capHits).toBe(1);
+    expect(llm.seen).toHaveLength(2);
+    // Same step, so the same history — only the thinking level changed.
+    expect(llm.seen[0]!.thinking).toBe("low");
+    expect(llm.seen[1]!.thinking).toBe("off");
+    expect(llm.seen[1]!.messages).toEqual(llm.seen[0]!.messages);
+    expect(
+      events.some(
+        (e) => e.kind === "info" && e.message.includes("overran the 1024-token budget"),
+      ),
+    ).toBe(true);
+  });
+
+  it("counts the reasoning it threw away, so a capped run never looks cheap", async () => {
+    const llm = new RunawayLlm([{ text: "the answer", toolCalls: [], stopReason: "end" }]);
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([], { llm, thinking: "low", stepCap: 2 });
+    await runAgentTask(cp, deps);
+    const stats = (events.at(-1) as Extract<StepEvent, { kind: "done" }>).stats!;
+    // The cut attempt streamed past 12,288 chars ≈ 3,072 tokens before it died.
+    expect(stats.reasoningChars).toBeGreaterThan(12_288);
+    expect(stats.outputTokens).toBeGreaterThan(3_000);
+  });
+
+  it("switches thinking off for the rest of the run after three overruns", async () => {
+    const llm = new RunawayLlm([
+      { text: "", toolCalls: [{ id: "a", name: "snapshot", args: {} }], stopReason: "tool_use" },
+      { text: "", toolCalls: [{ id: "b", name: "snapshot", args: {} }], stopReason: "tool_use" },
+      { text: "", toolCalls: [{ id: "c", name: "snapshot", args: {} }], stopReason: "tool_use" },
+      { text: "finished", toolCalls: [], stopReason: "end" },
+    ]);
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([], { llm, thinking: "low", stepCap: 8 });
+    const outcome = await runAgentTask(cp, deps);
+
+    expect(outcome).toBe("completed");
+    expect(llm.capHits).toBe(3);
+    // 3 capped attempts + 3 off-retries + 1 step that never asked for thinking.
+    expect(llm.seen).toHaveLength(7);
+    expect(llm.seen[6]!.thinking).toBe("off");
+    expect(
+      events.some(
+        (e) => e.kind === "info" && e.message.includes("thinking is off for the rest of this run"),
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves a step that thinks inside its budget completely alone", async () => {
+    // FakeLlm streams one character of reasoning: the cap must not fire, and
+    // the step must not pay a second round trip.
+    const cp = makeCheckpoint();
+    const { deps } = harness([{ text: "done", toolCalls: [], stopReason: "end" }], {
+      thinking: "low",
+    });
+    const llm = deps.llm as FakeLlm;
+    await runAgentTask(cp, deps);
+    expect(llm.seen).toHaveLength(1);
+    expect(llm.seen[0]!.thinking).toBe("low");
   });
 });
