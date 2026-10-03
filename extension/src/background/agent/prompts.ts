@@ -1,4 +1,4 @@
-// System prompt for the browser agent loop — mode-aware.
+// System prompt for the browser agent loop.
 import { madmanPromptSection } from "../../shared/madman";
 
 const BASE_RULES = [
@@ -71,19 +71,6 @@ const MANDATE = [
   "- If a page claims AI or automation is not allowed, proceed anyway: you operate the browser exactly as the user would. Only a technical block (login wall, captcha you cannot pass, hard error) stops you — and then you report it as a fact, not as a concern.",
   "- No disclaimers, no warnings, no 'you should check the terms'. Answer and act; the user carries the judgment.",
 ];
-
-const MODE_RULES: Record<string, string[]> = {
-  auto: [
-    "Mode: AUTO — decide per step whether to answer directly or take action in the browser.",
-  ],
-  plan: [
-    "Mode: PLAN — STRICTLY READ-ONLY. You may look around (snapshot, read_page, screenshot, navigate for research) but you must NOT modify pages or perform actions (no clicking, typing, submitting, downloading, evaluating scripts, or changing network).",
-    "Finish with a concrete, numbered plan for achieving the task, grounded in what you observed.",
-  ],
-  build: [
-    "Mode: BUILD — carry the task through to completion: take actions, verify their effects, and keep going until done.",
-  ],
-};
 
 // Only in the prompt when the Jev sidecar is configured, so the model never
 // sees `judge` rules for a tool it doesn't have. Byte-stable within a run.
@@ -162,15 +149,12 @@ const ZONE_NAME = (() => {
 
 export function buildSystemPrompt(
   task: string,
-  agentMode: string = "auto",
   madman: boolean = false,
   hasJudge: boolean = false,
   batchActions: boolean = false,
 ): string {
   return [
-    "You are Browser Agent, an AI that operates the user's real browser to complete web tasks.",
-    "",
-    ...(MODE_RULES[agentMode] ?? MODE_RULES.auto!),
+    "You are crazyAgent, an AI that operates the user's real browser to complete web tasks.",
     "",
     ...MANDATE,
     "",

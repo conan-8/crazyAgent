@@ -1,22 +1,7 @@
-// Agent run preferences: modes (what the agent may do) and token math for the
-// live stats bar. Pure — unit-tested.
-//
-// There is deliberately no effort/step-cap preset: the agent runs for as many
-// steps as the task needs, stopping only when it answers, the user stops it,
-// or an error aborts the run.
+// Mutating-tool classification (consumed by the Jev risk gate) and token math
+// for the live stats bar. Pure — unit-tested.
 
-export type AgentMode = "auto" | "plan" | "build";
-
-export const AGENT_MODES: Record<
-  AgentMode,
-  { label: string; hint: string }
-> = {
-  auto: { label: "Auto", hint: "Decide per step: answer or act" },
-  plan: { label: "Plan", hint: "Read-only research, then a plan" },
-  build: { label: "Build", hint: "Carry the task through to done" },
-};
-
-/** Tools that change page state — blocked in Plan mode. */
+/** Tools that change page state — the Jev gate double-checks these. */
 export const MUTATING_TOOLS = new Set([
   "click",
   "click_at",

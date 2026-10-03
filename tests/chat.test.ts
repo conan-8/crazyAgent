@@ -360,14 +360,10 @@ describe("Jev gate marks and Jev notes", () => {
     const conv = newConversation("c-note1", "t");
     foldUser(conv, "t");
     foldEvent(conv, { kind: "info", message: "resumed" });
-    foldEvent(conv, {
-      kind: "info",
-      message: "thinking: low (task graded 'simple' by Jev)",
-      jev: true,
-    });
+    foldEvent(conv, { kind: "info", message: "Jev is active", jev: true });
     foldEvent(conv, { kind: "done", summary: "fin" });
     expect(conv.turns[1]!.blocks).toEqual([
-      { kind: "note", text: "thinking: low (task graded 'simple' by Jev)", jev: true },
+      { kind: "note", text: "Jev is active", jev: true },
       { kind: "text", text: "fin" },
     ]);
   });

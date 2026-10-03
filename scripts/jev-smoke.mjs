@@ -13,7 +13,8 @@
 // F: a risk check that PASSES — the quiet pink mark (rail + named dot) on the
 //    executed action, plus the pink Jev note for routing/fallback (in C/D).
 // G: a real Jev decisions model (typesafe/jev-*) is redirected onto the
-//    /systemone wire even under the chat transport, and says so in pink.
+//    /systemone wire even under the chat transport; the run opens with the
+//    single pink "Jev is active" note.
 // Usage: node scripts/jev-smoke.mjs
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -414,16 +415,16 @@ async function main() {
     await panel.eval(`__ba.runTask("What is the capital of France?"); "started"`);
     const evsC = await waitDone(panel);
     const infoC = evsC.find(
-      (e) => e.kind === "info" && /thinking:/.test(e.message ?? ""),
+      (e) => e.kind === "info" && e.message === "Jev is active",
     );
     const chatReqC = mock.lastRequest();
     check(
       "J8 simple task routes thinking high → low",
-      infoC?.message === "thinking: low (task graded 'simple' by Jev)" &&
+      infoC !== undefined &&
         chatReqC?.reasoning_effort === "low",
-      `${infoC?.message ?? "(no routing info)"} | reasoning_effort=${chatReqC?.reasoning_effort}`,
+      `${infoC?.message ?? "(no Jev note)"} | reasoning_effort=${chatReqC?.reasoning_effort}`,
     );
-    // J8b/J8c: the routing note is a Jev note — flagged on the event, and
+    // J8b/J8c: the run-start note is a Jev note — flagged on the event, and
     // rendered as a pink line with a `Jev` pill (never colour alone).
     check("J8b routing info carries the jev flag", infoC?.jev === true, `jev=${infoC?.jev}`);
     const noteC = await panel.eval(
@@ -434,7 +435,7 @@ async function main() {
     ).then(JSON.parse);
     check(
       "J8c routing note renders pink with a Jev pill",
-      noteC.lines.some((l) => l.includes("graded 'simple' by Jev")) &&
+      noteC.lines.some((l) => l.includes("Jev is active")) &&
         noteC.pills.some((p) => p.includes("Jev")),
       JSON.stringify(noteC).slice(0, 200),
     );
@@ -560,7 +561,7 @@ async function main() {
     const evsG = await waitDone(panel);
     const judgeG = evsG.find((e) => e.kind === "tool_result" && e.name === "judge");
     const infoG = evsG.find(
-      (e) => e.kind === "info" && e.jev === true && /decisions model/.test(e.message ?? ""),
+      (e) => e.kind === "info" && e.message === "Jev is active",
     );
     check(
       "J15 a Jev decisions model is redirected onto the /systemone wire",
@@ -570,9 +571,9 @@ async function main() {
       `transport=${mock.lastJevTransport()} judgeOk=${judgeG?.ok}`,
     );
     check(
-      "J15b the redirect is reported as a pink Jev note",
-      infoG !== undefined,
-      infoG?.message ?? "(no redirect note)",
+      "J15b the sidecar's presence is reported as a pink Jev note",
+      infoG?.jev === true,
+      infoG?.message ?? "(no Jev note)",
     );
 
     panel.close();

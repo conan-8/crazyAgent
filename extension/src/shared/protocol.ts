@@ -241,6 +241,7 @@ export type PortRequest =
         hosts?: string[];
         keywords?: string[];
         pinned?: boolean;
+        sections?: { id: string; title: string; useWhen?: string; body: string }[];
       };
     }
   | {
@@ -252,6 +253,7 @@ export type PortRequest =
         hosts?: string[];
         keywords?: string[];
         pinned?: boolean;
+        sections?: { id: string; title: string; useWhen?: string; body: string }[];
       };
     }
   | { kind: "skills.delete"; id: string }

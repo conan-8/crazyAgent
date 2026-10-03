@@ -7,10 +7,13 @@ import {
   BUNDLED_SKILLS,
   SKILLS_KEY,
   SKILL_BODY_MAX_CHARS,
+  SKILL_SECTION_MAX,
+  SKILL_SECTION_MAX_CHARS,
   SKILL_WHEN_MAX_CHARS,
   mergeSkills,
   normalizeSkillName,
   type Skill,
+  type SkillSection,
 } from "../shared/skills";
 
 async function loadAll(): Promise<Skill[]> {
@@ -36,11 +39,20 @@ export async function listSkills(): Promise<Skill[]> {
   return [...user, ...bundled];
 }
 
-/** The full body for `use_skill`, or null when the name is unknown. */
-export async function getSkillBody(name: string): Promise<Skill | null> {
+/**
+ * The skill for `use_skill`, or null when the name is unknown. The
+ * section-aware resolution (outline vs one section) lives in
+ * `skillBodyOf` (shared/skills.ts); this just finds the skill.
+ */
+export async function getSkill(name: string): Promise<Skill | null> {
   const wanted = normalizeSkillName(String(name ?? ""));
   const all = await loadAll();
   return all.find((s) => s.name === wanted) ?? null;
+}
+
+/** The full body for `use_skill`, or null when the name is unknown. */
+export async function getSkillBody(name: string): Promise<Skill | null> {
+  return getSkill(name);
 }
 
 export interface SkillDraft {
@@ -50,6 +62,7 @@ export interface SkillDraft {
   hosts?: string[];
   keywords?: string[];
   pinned?: boolean;
+  sections?: SkillSection[];
 }
 
 /** Validate a draft; returns tool-error text or a storable skill. */
@@ -67,6 +80,17 @@ export function shapeSkillDraft(
   if (body.length > SKILL_BODY_MAX_CHARS) {
     return { error: `body is ${body.length} chars — cap is ${SKILL_BODY_MAX_CHARS}` };
   }
+  const sections = draft.sections?.length
+    ? draft.sections
+        .slice(0, SKILL_SECTION_MAX)
+        .map((s) => ({
+          id: normalizeSkillName(s.id),
+          title: s.title,
+          useWhen: s.useWhen,
+          body: s.body.slice(0, SKILL_SECTION_MAX_CHARS),
+        }))
+        .filter((s) => s.id && s.title && s.body)
+    : undefined;
   return {
     skill: {
       id,
@@ -74,7 +98,8 @@ export function shapeSkillDraft(
       whenToUse: when.slice(0, SKILL_WHEN_MAX_CHARS + 40),
       hosts: draft.hosts?.filter(Boolean),
       keywords: draft.keywords?.filter(Boolean),
-      body,
+      body: sections && sections.length ? "" : body,
+      sections: sections && sections.length ? sections : undefined,
       source: "user",
       pinned: draft.pinned === true || undefined,
       at,
@@ -97,7 +122,7 @@ export async function createSkill(draft: SkillDraft): Promise<{ error?: string; 
 /** Edit a skill (user wording wins over bundled defaults). */
 export async function updateSkill(
   id: string,
-  patch: Partial<Pick<Skill, "whenToUse" | "body" | "hosts" | "keywords" | "pinned">>,
+  patch: Partial<Pick<Skill, "whenToUse" | "body" | "hosts" | "keywords" | "pinned" | "sections">>,
 ): Promise<Skill | null> {
   const all = await loadAll();
   const skill = all.find((s) => s.id === id);
@@ -110,6 +135,10 @@ export async function updateSkill(
   if (patch.hosts !== undefined) next.hosts = patch.hosts.filter(Boolean);
   if (patch.keywords !== undefined) next.keywords = patch.keywords.filter(Boolean);
   if (patch.pinned !== undefined) next.pinned = patch.pinned || undefined;
+  if (patch.sections !== undefined) {
+    next.sections = patch.sections.length ? patch.sections : undefined;
+    if (next.sections) next.body = "";
+  }
   if (next.body.length > SKILL_BODY_MAX_CHARS) return null;
   await saveAll(all.map((s) => (s.id === id ? next : s)));
   return next;

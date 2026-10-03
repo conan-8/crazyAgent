@@ -294,9 +294,13 @@ kbd {
 
 /* ---------------- mark (brand) ---------------- */
 
-/* A rounded tile holding a slowly turning ember field; a soft top-left
+/* An ember circle holding a slowly turning colour field; a soft top-left
    highlight and an inner hairline keep it reading as an object, not a blob.
-   While the agent works the field spins faster and the tile breathes. */
+   While the agent works the ember spins faster and the whole mark comes
+   alive: it morphs through shapes — triangle, square, star, hexagon,
+   pentagon — snapping a quick quarter- or half-turn at each change, then
+   holds still until the next one (see orb-morph). The glow is a
+   drop-shadow, not a box-shadow, so it traces whatever shape it wears. */
 .orb {
   --orb: 22px;
   position: relative;
@@ -304,7 +308,7 @@ kbd {
   flex: none;
   width: var(--orb);
   height: var(--orb);
-  border-radius: calc(var(--orb) * 0.3);
+  border-radius: 50%;
   overflow: hidden;
   isolation: isolate;
   background: var(--c2);
@@ -340,19 +344,90 @@ kbd {
 }
 
 .orb-active {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 0 3px var(--accent-soft),
-    0 0 16px -2px var(--c2);
-  animation: orb-pulse 1.8s var(--ease-io) infinite;
+  filter: drop-shadow(0 0 6px var(--c2)) drop-shadow(0 0 16px var(--accent-soft));
+  animation: orb-morph 12s var(--ease-io) infinite;
 }
 
 .orb-active::before {
   animation-duration: 1.8s;
 }
 
-@keyframes orb-pulse {
-  50% {
-    transform: scale(1.06);
+/* Shape-shifting while a run is live. Every shape is a 10-point polygon
+   (few-cornered shapes repeat vertices) so clip-path can interpolate
+   smoothly between them; the near-circle start/end is a decagon that reads
+   as the idle circle. Rotation only moves during the short morph windows —
+   a twitchy, intermittent spin rather than a constant one — and the final
+   leg whips through a full extra turn back to the circle. */
+@keyframes orb-morph {
+  0%,
+  12% {
+    clip-path: polygon(
+      50% 0%, 79.4% 9.6%, 97.6% 34.6%, 97.6% 65.4%, 79.4% 90.4%,
+      50% 100%, 20.6% 90.4%, 2.4% 65.4%, 2.4% 34.6%, 20.6% 9.6%
+    );
+    transform: rotate(0deg);
   }
+  16%,
+  28% {
+    clip-path: polygon(
+      50% 0%, 50% 0%, 50% 0%, 50% 0%, 93.3% 75%,
+      93.3% 75%, 93.3% 75%, 6.7% 75%, 6.7% 75%, 6.7% 75%
+    );
+    transform: rotate(120deg);
+  }
+  32%,
+  44% {
+    clip-path: polygon(
+      85.4% 14.6%, 85.4% 85.4%, 14.6% 85.4%, 14.6% 14.6%, 85.4% 14.6%,
+      85.4% 85.4%, 14.6% 85.4%, 14.6% 14.6%, 85.4% 14.6%, 85.4% 85.4%
+    );
+    transform: rotate(210deg);
+  }
+  48%,
+  60% {
+    clip-path: polygon(
+      50% 0%, 62.3% 33%, 97.6% 34.6%, 70% 56.5%, 79.4% 90.5%,
+      50% 71%, 20.6% 90.5%, 30% 56.5%, 2.4% 34.6%, 37.7% 33%
+    );
+    transform: rotate(288deg);
+  }
+  64%,
+  76% {
+    clip-path: polygon(
+      50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%,
+      6.7% 25%, 50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%
+    );
+    transform: rotate(396deg);
+  }
+  80%,
+  92% {
+    clip-path: polygon(
+      50% 0%, 97.6% 34.6%, 79.4% 90.5%, 20.6% 90.5%, 2.4% 34.6%,
+      50% 0%, 97.6% 34.6%, 79.4% 90.5%, 20.6% 90.5%, 2.4% 34.6%
+    );
+    transform: rotate(468deg);
+  }
+  100% {
+    clip-path: polygon(
+      50% 0%, 79.4% 9.6%, 97.6% 34.6%, 97.6% 65.4%, 79.4% 90.4%,
+      50% 100%, 20.6% 90.4%, 2.4% 65.4%, 2.4% 34.6%, 20.6% 9.6%
+    );
+    transform: rotate(720deg);
+  }
+}
+
+/* Shared-element handoff at chat start: a ghost of the welcome hero orb
+   shrinks and flies into the first assistant badge. JS measures both rects
+   and drives the flight with WAAPI (left/top/size); the real badge orb hides
+   (.is-inbound) until the ghost lands, so the mark never blinks out. */
+.orb-fly {
+  position: fixed;
+  z-index: 500;
+  pointer-events: none;
+}
+
+.orb.is-inbound {
+  opacity: 0;
 }
 
 /* ---------------- layout ---------------- */
@@ -3507,4 +3582,12 @@ input[type="number"]::-webkit-inner-spin-button {
     transition-duration: 0.001ms !important;
     transition-delay: 0s !important;
   }
+}
+
+.skill-section {
+  margin: 8px 0;
+}
+.skill-section-head {
+  font-size: 11.5px;
+  opacity: 0.85;
 }

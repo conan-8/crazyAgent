@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Browser Agent",
+  "name": "crazyAgent",
   "version": "0.1.0",
   "description": "AI browser agent in a sidebar that operates your browser.",
   "minimum_chrome_version": "114",
@@ -30,7 +30,7 @@
     "default_path": "sidepanel/index.html"
   },
   "action": {
-    "default_title": "Browser Agent"
+    "default_title": "crazyAgent"
   },
   "content_scripts": [
     {

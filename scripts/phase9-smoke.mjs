@@ -267,61 +267,31 @@ async function main() {
       `convs=${convs3.length}`,
     );
 
-    // ---- H7: Plan mode is strictly read-only ----
-    await panel.eval(`__ba.setSettings({
-      provider: "openai-compatible",
-      baseUrl: "http://127.0.0.1:8792/v1",
-      model: "mock-model",
-      apiKey: "test-key",
-      mode: "standard",
-      stepCap: 40,
-      sendScreenshots: true,
-      cdpPort: 9222,
-      agentMode: "plan",
-      effort: "balanced",
-      contextWindow: 128000,
-    }).then(() => "ok")`);
-    mock.setScript([
-      { text: "Trying to interact.", toolCalls: [{ name: "click", args: { ref: "1" } }] },
-      { text: "### Plan\n\n1. Step one\n2. Step two" },
-    ]);
-    await panel.eval(`__ba.runTask("Plan a shopping flow"); "started"`);
-    const evsPlan = await waitDone(panel);
-    const clickRes = evsPlan.find((e) => e.kind === "tool_result" && e.name === "click");
-    check(
-      "H7 plan mode blocks mutating tools",
-      clickRes?.ok === false && String(clickRes.result).includes("planning mode"),
-      clickRes?.result ?? "",
-    );
-
-    // ---- H8: control bar — live stats + mode/model/effort/attach ----
-    await panel.eval(`__ba.getSettings().then((s) =>
-      __ba.setSettings({ ...s, agentMode: "auto" }),
-    ).then(() => "ok")`);
+    // ---- H7: control bar — live stats + model/attach ----
     mock.setScript(S_FLOW);
     await panel.eval(`__ba.runTask("Stats run"); "started"`);
     await sleep(900);
     const statsMid = await panel.eval(`JSON.stringify({
       timer: document.querySelector(".stat-timer")?.textContent ?? "",
       tokens: document.querySelector(".stat-tokens")?.textContent ?? "",
-      tps: document.querySelector(".stat-tps")?.textContent ?? "",
+      noTps: !document.querySelector(".stat-tps"),
       ctx: document.querySelector(".stat-ctx")?.textContent ?? "",
     })`).then(JSON.parse);
     await waitDone(panel);
     const bar = await panel.eval(`JSON.stringify({
-      hasMode: [...document.querySelectorAll(".chip-btn")].some((b) => b.textContent.includes("Auto")),
       hasModel: [...document.querySelectorAll(".chip-btn")].some((b) => b.textContent.includes("mock-model")),
       hasAttach: Boolean([...document.querySelectorAll("button")].find((b) => b.title === "Attach files")),
     })`).then(JSON.parse);
     // Reasoning effort is configured in Settings ("Reasoning effort"), not as
-    // a control-bar chip — the bar carries mode / model / attach.
+    // a control-bar chip — the bar carries model / attach. The tok/s stat was
+    // removed: the bar shows timer, tokens and context only.
     check(
-      "H8 control bar: live stats + mode/model/attach",
+      "H7 control bar: live stats + model/attach",
       /\d:\d\d/.test(statsMid.timer) &&
         /tok/.test(statsMid.tokens) &&
-        /tok\/s/.test(statsMid.tps) &&
+        statsMid.noTps &&
         /ctx/.test(statsMid.ctx) &&
-        bar.hasMode && bar.hasModel && bar.hasAttach,
+        bar.hasModel && bar.hasAttach,
       JSON.stringify({ statsMid, bar }),
     );
 

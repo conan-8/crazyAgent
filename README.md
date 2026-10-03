@@ -27,9 +27,13 @@ machinery that addresses it:
 - **Batched drags**: `drag_at` takes a `drags` list (up to 32) — calibrate a
   graph once, send every drag in one call. Coordinate tools also accept a
   `ref` or **frame-local** coordinates (translated through the iframe chain).
-- **Skills**: curated procedures (`use_skill name`) ride the prompt as a
-  one-line catalog and load in full only when used; the doc-editor playbook
-  left the fixed prefix for that catalog, roughly 2.5k tokens cheaper per step.
+- **Skills**: curated procedures ride the prompt as a one-line catalog and load
+  only when used; the doc-editor playbook left the fixed prefix for that
+  catalog, roughly 2.5k tokens cheaper per step. Skills can be split into
+  sections — `use_skill name:x` gets the outline, `use_skill name:x section:y`
+  gets just one step (e.g. `graph-drag-widgets` has `calibrate`,
+  `derive`, `batch-drag`, `verify`). The catalog pins host-matching skills to
+  the top with a "you are on <host>" note.
 - **Adaptive thinking** (Settings → Behaviour): routine steps skip thinking;
   the configured level returns on the first surprise. The *Relay (fast)*
   preset bundles the speed profile.

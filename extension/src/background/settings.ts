@@ -1,6 +1,5 @@
 // Agent settings persisted in chrome.storage.local (personal-use key storage).
 import type { ControlMode } from "../shared/protocol";
-import type { AgentMode } from "../shared/modes";
 import type { ThinkingLevel } from "../shared/llm";
 import { JEV_TRANSPORT_DEFAULTS, normalizeJevTransport, type JevTransport } from "../shared/jev";
 
@@ -63,8 +62,6 @@ export interface AgentSettings {
   mode: ControlMode;
   /** DevTools port of the Unlimited-mode browser (helper daemon attaches). */
   cdpPort: number;
-  /** Agent behavior mode (Auto / Plan / Build) — drives prompts and gating. */
-  agentMode: AgentMode;
   /**
    * Max output tokens per model call. The agent's *step* count is unlimited;
    * this only bounds a single response, so it stays generous.
@@ -158,7 +155,6 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   apiKey: "",
   mode: "standard",
   cdpPort: 9222,
-  agentMode: "auto",
   maxTokens: 8_192,
   contextWindow: 128_000,
   // Thinking on at the lowest level: a cheap reasoning block by default.
@@ -340,9 +336,11 @@ export function normalizeSettings(
   }
 
   const active = activeConnection({ apiKeys: keys, activeKeyId });
-  // Drop the removed numeric budget if an old stored object still carries it.
+  // Drop the removed numeric budget if an old stored object still carries it,
+  // and the removed agent-mode picker's key likewise.
   const rest: Record<string, unknown> = { ...merged };
   delete rest.thinkingBudget;
+  delete rest.agentMode;
   return {
     ...(rest as unknown as AgentSettings),
     apiKeys: keys,

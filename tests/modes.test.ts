@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  AGENT_MODES,
   estimateTokens,
   formatElapsed,
   formatTokens,
@@ -9,7 +8,7 @@ import {
 } from "../extension/src/shared/modes";
 
 describe("modes", () => {
-  it("classifies mutating tools for plan mode", () => {
+  it("classifies mutating tools for the Jev risk gate", () => {
     for (const t of ["click", "type", "key", "download", "evaluate_js", "network_mock"]) {
       expect(isMutating(t)).toBe(true);
     }
@@ -19,11 +18,6 @@ describe("modes", () => {
     expect(MUTATING_TOOLS.has("select")).toBe(true);
     expect(isMutating("paste_image")).toBe(true);
     expect(isMutating("upload")).toBe(true);
-  });
-
-  it("exposes mode labels", () => {
-    expect(AGENT_MODES.plan.label).toBe("Plan");
-    expect(AGENT_MODES.plan.hint.toLowerCase()).toContain("read-only");
   });
 
   it("estimates and formats tokens", () => {

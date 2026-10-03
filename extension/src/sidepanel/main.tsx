@@ -32,12 +32,7 @@ import {
   type ChatTurn,
   type ToolCard,
 } from "../shared/chat";
-import {
-  AGENT_MODES,
-  formatElapsed,
-  formatTokens,
-  type AgentMode,
-} from "../shared/modes";
+import { formatElapsed, formatTokens } from "../shared/modes";
 import { THINKING_LEVELS } from "../shared/llm";
 import { madmanExclamation } from "../shared/madman";
 import { versionLabel } from "../shared/version";
@@ -135,7 +130,8 @@ function newLocalConversation(task: string): Conversation {
 
 // ------------------------------ primitives ------------------------------
 
-/** Brand mark: an ember tile whose colour field rotates (faster while working). */
+/** Brand mark: an ember circle that, while the agent works, morphs through
+ *  shapes (triangle, square, star, hexagon…) with intermittent rotation. */
 function Orb({ size = 22, active = false, class: cls = "" }: { size?: number; active?: boolean; class?: string }) {
   return (
     <span
@@ -821,12 +817,6 @@ function MenuItem({
     </button>
   );
 }
-
-const MODE_ICONS: Record<AgentMode, string> = {
-  auto: ICONS.sparkles,
-  plan: ICONS.map,
-  build: ICONS.wrench,
-};
 
 // ------------------------------ sheets ------------------------------
 
@@ -1946,10 +1936,27 @@ function SkillsBody({
                 ) : (
                   <>
                     <p class="lesson-text">{skill.whenToUse}</p>
-                    <details>
-                      <summary class="hint">body ({skill.body.length.toLocaleString()} chars)</summary>
-                      <pre class="skill-body">{skill.body}</pre>
-                    </details>
+                    {skill.sections?.length ? (
+                      <details>
+                        <summary class="hint">
+                          {skill.sections.length} sections ({skill.sections.reduce((n, s) => n + s.body.length, 0).toLocaleString()} chars)
+                        </summary>
+                        {skill.sections.map((sec) => (
+                          <div key={sec.id} class="skill-section">
+                            <div class="skill-section-head">
+                              <code>{sec.id}</code> — <b>{sec.title}</b>
+                              {sec.useWhen ? <span class="hint"> · {sec.useWhen}</span> : null}
+                            </div>
+                            <pre class="skill-body">{sec.body}</pre>
+                          </div>
+                        ))}
+                      </details>
+                    ) : (
+                      <details>
+                        <summary class="hint">body ({skill.body.length.toLocaleString()} chars)</summary>
+                        <pre class="skill-body">{skill.body}</pre>
+                      </details>
+                    )}
                   </>
                 )}
                 <div class="lesson-actions row-actions">
@@ -2160,18 +2167,26 @@ function LessonsBody({
 // ------------------------------ welcome ------------------------------
 
 const SUGGESTIONS = [
-  { icon: ICONS.doc, title: "Summarize this page", task: "Summarize the current page" },
   {
-    icon: ICONS.tag,
-    title: "Find the best deal",
-    task: "Find the cheapest option on this page and add it to the cart",
+    icon: ICONS.check,
+    title: "Complete the task at hand",
+    task: "Complete the task on the current page",
   },
   {
     icon: ICONS.form,
-    title: "Fill out a form",
-    task: "Fill this form with my details and review before submitting",
+    title: "Fill out the form",
+    task: "Fill out the form on the current page",
   },
-  { icon: ICONS.layers, title: "Digest my tabs", task: "Summarize my open tabs" },
+  {
+    icon: ICONS.search,
+    title: "Research something",
+    task: "Research ______ and summarize what you find",
+  },
+  {
+    icon: ICONS.clock,
+    title: "Check upcoming tasks",
+    task: "Check the current page for upcoming tasks and list them",
+  },
 ];
 
 function Welcome({ onPick }: { onPick: (task: string) => void }) {
@@ -2181,9 +2196,9 @@ function Welcome({ onPick }: { onPick: (task: string) => void }) {
         <Orb size={44} />
       </div>
       <h2 class="welcome-title">
-        What should I <span class="grad-text">do</span> for you?
+        What can I <span class="grad-text">do</span> for you?
       </h2>
-      <p class="welcome-sub">I navigate, click, type and read pages in your browser — just describe the task.</p>
+      <p class="welcome-sub">I can click, type and use your browser FOR you.</p>
       <div class="suggestions">
         {SUGGESTIONS.map((s, i) => (
           <button key={s.task} class="chip" style={`--i:${i}`} onClick={() => onPick(s.task)}>
@@ -2293,7 +2308,7 @@ function App() {
   const [viewer, setViewer] = useState<string | null>(null);
   const [resolved, setResolved] = useState<Map<string, Decision>>(new Map());
   const [humanResolved, setHumanResolved] = useState<Map<string, boolean>>(new Map());
-  const [openMenu, setOpenMenu] = useState<"mode" | "model" | null>(null);
+  const [openMenu, setOpenMenu] = useState<"model" | null>(null);
   const [settings, setSettingsState] = useState<AgentSettings | null>(null);
   const [attachments, setAttachments] = useState<RunAttachment[]>([]);
   const [usage, setUsage] = useState<UsageStats | null>(null);
@@ -2303,6 +2318,14 @@ function App() {
   const [modelListError, setModelListError] = useState("");
   const [modelFilter, setModelFilter] = useState("");
   const [dragging, setDragging] = useState(false);
+  /**
+   * Shared-element handoff: when a chat starts from the welcome screen, the
+   * hero orb shrinks and flies into the first assistant badge instead of
+   * vanishing and reappearing smaller. Holds the hero's last rect while a
+   * ghost orb is in flight (see the orbFly effect).
+   */
+  const [orbFly, setOrbFly] = useState<{ x: number; y: number; w: number } | null>(null);
+  const orbFlyRef = useRef<HTMLSpanElement | null>(null);
   const modelCacheRef = useRef<{ signature: string; models: string[] } | null>(null);
   const portRef = useRef<chrome.runtime.Port | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -2516,6 +2539,68 @@ function App() {
     return () => document.removeEventListener("pointerdown", onDown);
   }, [openMenu]);
 
+  // Orb handoff flight: the assistant turn (and its badge orb) only mounts
+  // once the first run event arrives, so poll for it, then shrink/fly the
+  // ghost hero orb into place. The real badge orb stays hidden until the
+  // ghost lands; if the welcome comes back (new chat) or nothing shows up
+  // within a few seconds, the ghost is dropped quietly.
+  useEffect(() => {
+    if (!orbFly) return;
+    let cancelled = false;
+    let raf = 0;
+    const started = performance.now();
+    const attempt = () => {
+      if (cancelled) return;
+      if (document.querySelector(".welcome")) {
+        setOrbFly(null);
+        return;
+      }
+      const badge = document.querySelector(".assistant-badge .orb") as HTMLElement | null;
+      if (badge) {
+        const el = orbFlyRef.current;
+        if (!el) {
+          setOrbFly(null);
+          return;
+        }
+        const to = badge.getBoundingClientRect();
+        badge.classList.add("is-inbound");
+        const anim = el.animate(
+          [
+            {
+              left: `${orbFly.x}px`,
+              top: `${orbFly.y}px`,
+              width: `${orbFly.w}px`,
+              height: `${orbFly.w}px`,
+            },
+            {
+              left: `${to.left}px`,
+              top: `${to.top}px`,
+              width: `${to.width}px`,
+              height: `${to.height}px`,
+            },
+          ],
+          { duration: 560, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" },
+        );
+        anim.onfinish = () => {
+          badge.classList.remove("is-inbound");
+          if (!cancelled) setOrbFly(null);
+        };
+        anim.oncancel = () => badge.classList.remove("is-inbound");
+        return;
+      }
+      if (performance.now() - started > 6000) {
+        setOrbFly(null);
+        return;
+      }
+      raf = requestAnimationFrame(attempt);
+    };
+    raf = requestAnimationFrame(attempt);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [orbFly]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -2538,6 +2623,14 @@ function App() {
   ) => {
     const isDemo = typeof taskOrDemo !== "string";
     eventBuffer.length = 0;
+    // Grab the hero orb before the welcome unmounts: a ghost clone flies from
+    // this rect into the first assistant badge once it mounts (orbFly effect).
+    // Skipped under reduced motion — the badge simply appears.
+    const hero = document.querySelector(".hero-orb .orb") as HTMLElement | null;
+    if (hero && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const r = hero.getBoundingClientRect();
+      setOrbFly({ x: r.left, y: r.top, w: r.width });
+    }
     setRunning(true);
     setUsage(null);
     scrollToBottom(false);
@@ -2898,8 +2991,6 @@ function App() {
     });
   };
 
-  const agentMode = settings?.agentMode ?? "auto";
-  const modeLabel = AGENT_MODES[agentMode]?.label ?? "Auto";
   const modelLabel = settings?.model ?? "model";
   const lastTurnIndex = conv ? conv.turns.length - 1 : -1;
   const ctxWindow = usage?.contextWindow ?? settings?.contextWindow ?? 128_000;
@@ -2912,10 +3003,17 @@ function App() {
   return (
     <div class={`shell${running ? " is-running" : ""}${conv ? " has-conv" : ""}`} {...dragHandlers}>
       <span class="window-glow" aria-hidden="true" />
+      {orbFly ? (
+        <span
+          ref={orbFlyRef}
+          class="orb orb-fly"
+          aria-hidden="true"
+          style={`left:${orbFly.x}px;top:${orbFly.y}px;width:${orbFly.w}px;height:${orbFly.w}px;--orb:${orbFly.w}px`}
+        />
+      ) : null}
 
       <header class="topbar">
         <div class="brand">
-          <Orb size={24} />
           <div class="brand-text">
             <span class="brand-name">crazyAgent</span>
             <span class="brand-sub" key={running ? "run" : "idle"}>
@@ -2924,7 +3022,7 @@ function App() {
               ) : (
                 <>
                   <span class="live-dot idle" />
-                  Ready · {modeLabel}
+                  Ready
                 </>
               )}
             </span>
@@ -3086,25 +3184,6 @@ function App() {
             />
 
             <Popover
-              label={modeLabel}
-              icon={MODE_ICONS[agentMode] ?? ICONS.sparkles}
-              open={openMenu === "mode"}
-              onToggle={() => setOpenMenu(openMenu === "mode" ? null : "mode")}
-            >
-              <div class="menu-head">Agent mode</div>
-              {(Object.keys(AGENT_MODES) as AgentMode[]).map((m) => (
-                <MenuItem
-                  key={m}
-                  active={agentMode === m}
-                  icon={MODE_ICONS[m]}
-                  title={AGENT_MODES[m].label}
-                  hint={AGENT_MODES[m].hint}
-                  onClick={() => pickSetting("agentMode", m)}
-                />
-              ))}
-            </Popover>
-
-            <Popover
               label={modelLabel}
               icon={ICONS.cpu}
               open={openMenu === "model"}
@@ -3180,9 +3259,6 @@ function App() {
               <span class="stat stat-tokens">
                 <Icon d={ICONS.activity} size={11} /> {formatTokens(usage?.totalTokens ?? 0)} tok
               </span>
-              <span class="stat stat-tps">
-                <Icon d={ICONS.bolt} size={11} /> {(usage?.tokensPerSec ?? 0).toFixed(1)} tok/s
-              </span>
               <span class="stat stat-ctx" title="Context used">
                 ctx {formatTokens(usage?.contextTokens ?? 0)}/{formatTokens(ctxWindow)}
                 <span class="meter">
@@ -3212,8 +3288,7 @@ function App() {
               {usage ? (
                 <span class="stat stat-last" title={lastRunTitle(usage)}>
                   last run {formatElapsed(usage.elapsedMs ?? 0)} ·{" "}
-                  {formatTokens(usage.totalTokens)} tok ·{" "}
-                  {(usage.tokensPerSec ?? 0).toFixed(1)} tok/s
+                  {formatTokens(usage.totalTokens)} tok
                 </span>
               ) : null}
               {checkpoint && !checkpoint.done ? (

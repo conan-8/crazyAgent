@@ -380,25 +380,21 @@ describe("run log export", () => {
       20,
     );
     foldLogEvent(rec, { kind: "info", message: "resumed" }, 21);
-    foldLogEvent(
-      rec,
-      { kind: "info", message: "thinking: off (task graded 'simple' by Jev)", jev: true },
-      22,
-    );
+    foldLogEvent(rec, { kind: "info", message: "Jev is active", jev: true }, 22);
     foldLogEvent(rec, { kind: "done", summary: "ok" }, 30);
 
     // JSONL keeps the structured flags...
     const parsed = JSON.parse(toJsonl([rec]).trim());
     expect(parsed.turns[0].tools[0].jevGate).toBe(true);
     expect(parsed.turns[0].jevNotes).toEqual([
-      { at: 22, message: "thinking: off (task graded 'simple' by Jev)" },
+      { at: 22, message: "Jev is active" },
     ]);
 
     // ...and the Markdown export states them in words.
     const md = toMarkdown([rec]);
     expect(md).toContain("jev checked");
     expect(md).toContain("🧠 **Jev**");
-    expect(md).toContain("graded 'simple' by Jev");
+    expect(md).toContain("Jev is active");
     // Generic info stays telemetry noise.
     expect(md).not.toContain("resumed");
   });

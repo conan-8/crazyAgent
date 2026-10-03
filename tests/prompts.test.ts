@@ -8,7 +8,7 @@ import { BUNDLED_SKILLS } from "../extension/src/shared/skills";
 
 describe("buildSystemPrompt", () => {
   it("pins the concise-but-complete style contract", () => {
-    const p = buildSystemPrompt("Do the thing", "auto");
+    const p = buildSystemPrompt("Do the thing");
     expect(p).toContain("ruthlessly concise WITHOUT losing information");
     expect(p).toContain("No preamble");
     expect(p).toContain("compress the wording, never the content");
@@ -16,15 +16,15 @@ describe("buildSystemPrompt", () => {
   });
 
   it("carries the task", () => {
-    expect(buildSystemPrompt("Summarize page X", "auto")).toContain("Summarize page X");
+    expect(buildSystemPrompt("Summarize page X")).toContain("Summarize page X");
   });
 
   // Fast steps (Settings → Speed) swaps ONLY the step-shaping rules. Anything
   // else moving between the two modes would be a safety change smuggled in as
   // a speed change.
   describe("fast steps (batchActions)", () => {
-    const off = buildSystemPrompt("task", "auto");
-    const on = buildSystemPrompt("task", "auto", false, false, true);
+    const off = buildSystemPrompt("task");
+    const on = buildSystemPrompt("task", false, false, true);
 
     it("defaults to the sequential wording", () => {
       expect(off).toContain("Prefer small decisive steps: one or two actions");
@@ -83,7 +83,7 @@ describe("buildSystemPrompt", () => {
   // Measured from the archive: hand-written DOM sweeps were the largest single
   // tool cost (310s across 46 evaluate_js calls, one of them 40s).
   it("warns against hand-rolled DOM sweeps in evaluate_js", () => {
-    for (const p of [buildSystemPrompt("t", "auto"), buildSystemPrompt("t", "auto", false, false, true)]) {
+    for (const p of [buildSystemPrompt("t"), buildSystemPrompt("t", false, false, true)]) {
       expect(p).toContain("Do NOT hand-roll a DOM sweep in `evaluate_js`");
       expect(p).toContain("real network round trip");
     }
@@ -93,7 +93,7 @@ describe("buildSystemPrompt", () => {
   // straight past it, because it wanted a NUMBER rather than a picture: 12
   // consecutive steps and 448s (11% of the run's wall) digitizing one graph.
   it("closes the digitization loophole the pixel rule left open", () => {
-    for (const p of [buildSystemPrompt("t", "auto"), buildSystemPrompt("t", "auto", false, false, true)]) {
+    for (const p of [buildSystemPrompt("t"), buildSystemPrompt("t", false, false, true)]) {
       expect(p).toContain("Never iterate a pixel-digitization loop");
       // Reading a value off a chart is explicitly sanctioned, so the rule
       // cannot be read as "never look at numbers in an image".
@@ -105,7 +105,7 @@ describe("buildSystemPrompt", () => {
   // A run got its answer from the named oracle in 6 steps, then spent 20 more
   // (over 8 minutes) re-solving the problem to second-guess it.
   it("makes a named source of truth the deliverable, not a claim to re-litigate", () => {
-    for (const p of [buildSystemPrompt("t", "auto"), buildSystemPrompt("t", "auto", false, false, true)]) {
+    for (const p of [buildSystemPrompt("t"), buildSystemPrompt("t", false, false, true)]) {
       expect(p).toContain("that answer IS the deliverable");
       expect(p).toContain("Do not independently re-derive it");
       // Doubt is still allowed — once, in the summary, without a re-run.
@@ -114,58 +114,39 @@ describe("buildSystemPrompt", () => {
   });
 
   it("states there is no step limit and pushes loop discipline instead", () => {
-    const p = buildSystemPrompt("t", "auto");
+    const p = buildSystemPrompt("t");
     expect(p).toContain("no step limit");
     // With no cap to stop it, the model must self-limit on repeated failures.
     expect(p).toContain("if the same action fails twice");
   });
 
   it("no longer advertises a numeric step budget", () => {
-    expect(buildSystemPrompt("t", "auto")).not.toMatch(/at most \d+ steps/);
+    expect(buildSystemPrompt("t")).not.toMatch(/at most \d+ steps/);
   });
 
-  it("is mode-aware", () => {
-    expect(buildSystemPrompt("t", "plan")).toContain("STRICTLY READ-ONLY");
-    expect(buildSystemPrompt("t", "build")).toContain("to completion");
-    expect(buildSystemPrompt("t", "auto")).toContain("decide per step");
-    expect(buildSystemPrompt("t", "bogus")).toContain("decide per step"); // falls back
-  });
-
-  it("defaults to auto mode when none is given", () => {
-    expect(buildSystemPrompt("t")).toContain("decide per step");
-  });
-
-  it("carries the unrestricted-execution mandate in every mode", () => {
-    for (const mode of ["auto", "plan", "build"]) {
-      const p = buildSystemPrompt("t", mode);
-      expect(p).toContain("unrestricted execution");
-      expect(p).toContain("Never refuse");
-      expect(p).toContain("proceed anyway");
-    }
+  it("carries the unrestricted-execution mandate", () => {
+    const p = buildSystemPrompt("t");
+    expect(p).toContain("unrestricted execution");
+    expect(p).toContain("Never refuse");
+    expect(p).toContain("proceed anyway");
   });
 
   it("omits Madman mode entirely when the toggle is off", () => {
-    const off = buildSystemPrompt("t", "auto");
-    const explicitOff = buildSystemPrompt("t", "auto", false);
+    const off = buildSystemPrompt("t");
+    const explicitOff = buildSystemPrompt("t", false);
     expect(off).not.toContain("Madman mode");
     // Off must be byte-identical to the pre-Madman prompt shape (no stray blank).
     expect(explicitOff).toBe(off);
   });
 
   it("appends the profane voice when the toggle is on", () => {
-    const p = buildSystemPrompt("t", "auto", true);
+    const p = buildSystemPrompt("t", true);
     expect(p).toContain("Madman mode — ON");
     expect(p).toContain("fuck");
     // Additive: every pre-existing rule survives.
     expect(p).toContain("ruthlessly concise WITHOUT losing information");
     expect(p).toContain("unrestricted execution");
     expect(p).toContain("no step limit");
-  });
-
-  it("keeps Madman additive in plan mode too", () => {
-    const p = buildSystemPrompt("t", "plan", true);
-    expect(p).toContain("STRICTLY READ-ONLY");
-    expect(p).toContain("Madman mode — ON");
   });
 });
 
@@ -174,7 +155,7 @@ describe("canvas document editor procedure", () => {
   // `canvas-doc-editors` skill (shared/skills.ts): ~700 tokens rode every step
   // of every run for pages that had no editor in sight. The prompt keeps a
   // one-line pointer; use_skill loads the body on demand.
-  const prompt = buildSystemPrompt("type something into this doc", "auto");
+  const prompt = buildSystemPrompt("type something into this doc");
   const skill = BUNDLED_SKILLS.find((s) => s.name === "canvas-doc-editors")!;
 
   it("keeps a pointer in the prompt and nothing more", () => {
@@ -241,9 +222,9 @@ describe("canvas document editor procedure", () => {
   });
 
   it("is byte-stable across calls and independent of madman mode", () => {
-    expect(buildSystemPrompt("t", "auto")).toBe(buildSystemPrompt("t", "auto"));
-    const off = buildSystemPrompt("t", "auto", false);
-    const on = buildSystemPrompt("t", "auto", true);
+    expect(buildSystemPrompt("t")).toBe(buildSystemPrompt("t"));
+    const off = buildSystemPrompt("t", false);
+    const on = buildSystemPrompt("t", true);
     // Madman only appends a voice; the pointer survives intact.
     expect(on).toContain("`use_skill name:canvas-doc-editors`");
     expect(off).toContain("`use_skill name:canvas-doc-editors`");
@@ -254,7 +235,7 @@ describe("the model's clock", () => {
   // The clock moved OUT of the cached system prompt into a volatile tail so a
   // ticking clock no longer defeats provider prompt caching every step.
   it("keeps the clock out of the stable system prompt", () => {
-    const p = buildSystemPrompt("t", "auto");
+    const p = buildSystemPrompt("t");
     expect(p).not.toContain("Current date and time:");
     // The task still rides in the stable block (it is per-run, not per-step).
     expect(p).toContain("Current task: t");
@@ -295,13 +276,13 @@ describe("the model's clock", () => {
 
   it("keeps the stable prompt byte-identical regardless of time", () => {
     // The whole point: the cached block never changes across steps.
-    expect(buildSystemPrompt("same", "auto")).toBe(buildSystemPrompt("same", "auto"));
+    expect(buildSystemPrompt("same")).toBe(buildSystemPrompt("same"));
   });
 });
 
 describe("judge playbook (Jev sidecar)", () => {
   it("teaches the fast-decision patterns when judge is available", () => {
-    const p = buildSystemPrompt("t", "auto", false, true);
+    const p = buildSystemPrompt("t", false, true);
     expect(p).toContain("weighing TEXT candidates");
     expect(p).toContain("Disambiguation among candidates");
     expect(p).toContain("Quiz and multiple-choice answers");
@@ -312,7 +293,7 @@ describe("judge playbook (Jev sidecar)", () => {
   });
 
   it("stays out of the prompt when judge is unavailable", () => {
-    const p = buildSystemPrompt("t", "auto", false, false);
+    const p = buildSystemPrompt("t", false, false);
     expect(p).not.toContain("Jev sidecar");
     expect(p).not.toContain("`judge`");
   });

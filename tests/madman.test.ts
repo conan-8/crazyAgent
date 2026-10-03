@@ -33,7 +33,6 @@ describe("madmanPromptSection", () => {
     // The swearing is additive: it must not license padding or refusals.
     expect(MADMAN_PROMPT).toContain("still ruthlessly concise");
     expect(MADMAN_PROMPT).toContain("no refusals");
-    expect(MADMAN_PROMPT).toContain("plan mode is read-only");
   });
 
   it("requires facts to survive the profanity", () => {

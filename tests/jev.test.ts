@@ -779,12 +779,12 @@ describe("createJevClient", () => {
 
 describe("buildSystemPrompt — judge rule", () => {
   it("stays byte-identical without the judge tool", () => {
-    expect(buildSystemPrompt("t", "auto", false, false)).toBe(buildSystemPrompt("t", "auto"));
-    expect(buildSystemPrompt("t", "auto")).not.toContain("`judge`");
+    expect(buildSystemPrompt("t", false, false)).toBe(buildSystemPrompt("t"));
+    expect(buildSystemPrompt("t")).not.toContain("`judge`");
   });
 
   it("adds the judge playbook when Jev is available", () => {
-    const p = buildSystemPrompt("t", "auto", false, true);
+    const p = buildSystemPrompt("t", false, true);
     expect(p).toContain("ONE `judge` call");
     expect(p).toContain("arithmetic, counting, or date comparisons");
     expect(p).toContain("Disambiguation among candidates");
@@ -792,7 +792,7 @@ describe("buildSystemPrompt — judge rule", () => {
   });
 
   it("coexists with madman mode", () => {
-    const p = buildSystemPrompt("t", "auto", true, true);
+    const p = buildSystemPrompt("t", true, true);
     expect(p).toContain("`judge`");
     expect(p.toLowerCase()).toMatch(/fuck|shit|damn|hell|ass|crap|bloody/);
   });

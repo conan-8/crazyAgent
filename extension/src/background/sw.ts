@@ -97,7 +97,6 @@ import {
   setActiveJevClient,
   type JevClient,
 } from "./agent/jev";
-import { normalizeJevTransport } from "../shared/jev";
 import { isMutating } from "../shared/modes";
 import { describeToolFailure } from "../shared/tool-failure";
 import { handoffMessage } from "../shared/handoff";
@@ -580,15 +579,10 @@ async function runFrom(cp: Checkpoint): Promise<void> {
       setActiveJevClient(currentJev);
       jevFallbackNoted = false;
       const jevEnabled = currentJev !== null;
-      // A Jev decisions model riding the System One wire despite the chat
-      // transport being selected: say so in pink instead of leaving the user
-      // to wonder which endpoint their model actually answered on.
-      if (currentJev && currentJev.transport !== normalizeJevTransport(settings.jev.transport)) {
-        emit({
-          kind: "info",
-          message: `Jev model '${(settings.jev.model ?? "").trim()}' is a decisions model — using the /systemone decisions wire (chat/completions can never answer it)`,
-          jev: true,
-        });
+      // One quiet line when the sidecar rides along; wire/transport details
+      // stay in Settings rather than itemised in the transcript.
+      if (jevEnabled) {
+        emit({ kind: "info", message: "Jev is active", jev: true });
       }
       // Lessons learned: the relevant ones ride in a separate, uncached system
       // block so the base prompt stays cache-stable across runs. Ranked here
@@ -615,17 +609,11 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         .map(toLlmTool);
       // Auto effort routing: Jev grades the task and may LOWER the thinking
       // level for trivial work (never raises it; falls back on any failure).
+      // Silent by design — "Jev is active" above is the only run-start note.
       let thinking = settings.thinking;
       if (settings.autoThinking && currentJev) {
         const routed = await routeThinkingByJev(currentJev, cp.task, settings.thinking);
         thinking = routed.level;
-        if (routed.complexity) {
-          emit({
-            kind: "info",
-            message: `thinking: ${thinking} (task graded '${routed.complexity}' by Jev)`,
-            jev: true,
-          });
-        }
       }
       await runAgentTask(cp, {
         llm: createLlmClient(settings),
@@ -635,7 +623,6 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         // No stepCap: the agent runs until it answers, the user stops it, or
         // an error aborts it.
         maxTokens: settings.maxTokens,
-        agentMode: settings.agentMode,
         contextWindow: settings.contextWindow,
         thinking,
         madman: settings.madman,
@@ -1387,4 +1374,4 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
 
 chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch((err) => console.error("[browser-agent] setPanelBehavior failed", err));
+  .catch((err) => console.error("[crazyAgent] setPanelBehavior failed", err));

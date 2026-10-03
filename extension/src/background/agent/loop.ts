@@ -14,7 +14,7 @@ import type {
 import { thinkingBudgetFor } from "../../shared/llm";
 import type { Checkpoint, RunStats, StepEvent } from "../../shared/protocol";
 import { validateToolArgs } from "../tools/types";
-import { estimateTokens, isMutating } from "../../shared/modes";
+import { estimateTokens } from "../../shared/modes";
 import { madmanExclamation, madmanLabel } from "../../shared/madman";
 import { buildSystemPrompt, buildSystemVolatile } from "./prompts";
 
@@ -67,8 +67,6 @@ export interface LoopDeps {
    */
   stepCap?: number;
   maxTokens?: number;
-  /** "plan" blocks mutating tools; default "auto". */
-  agentMode?: string;
   /** Model context window for the usage bar. */
   contextWindow?: number;
   /** Reasoning effort level forwarded to the provider ("off" disables). */
@@ -537,7 +535,6 @@ export async function runAgentTask(
 ): Promise<AgentOutcome> {
   const tools: LlmToolSpec[] = cp.toolSpecs ?? [];
   const specsByName = new Map(tools.map((t) => [t.name, t]));
-  const planOnly = deps.agentMode === "plan";
   const contextWindow = deps.contextWindow ?? 128_000;
   const runStartedAt = Date.now();
   let totalIn = 0;
@@ -588,7 +585,6 @@ export async function runAgentTask(
   // on everything expensive (rules, tool specs, the growing conversation).
   const systemPrompt = buildSystemPrompt(
     cp.task,
-    deps.agentMode ?? "auto",
     deps.madman === true,
     deps.judgeAvailable === true,
     deps.batchActions === true,
@@ -945,7 +941,7 @@ export async function runAgentTask(
       for (const call of calls) announce(call);
       const outcomes = await Promise.all(
         calls.map((call, i) =>
-          runOne(call, deps, step, specsByName, planOnly, guard, {
+          runOne(call, deps, step, specsByName, guard, {
             index: i,
             count: calls.length,
           }),
@@ -957,7 +953,7 @@ export async function runAgentTask(
         if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
         announce(call);
         record(
-          await runOne(call, deps, step, specsByName, planOnly, guard, {
+          await runOne(call, deps, step, specsByName, guard, {
             index: i,
             count: calls.length,
           }),
@@ -1008,7 +1004,6 @@ async function runOne(
   deps: LoopDeps,
   stepIndex: number,
   specs: Map<string, LlmToolSpec>,
-  planOnly: boolean,
   guard: StuckGuard,
   batch: ExecuteBatch,
 ): Promise<{ message: LlmMessage; event: StepEvent; invalid: boolean }> {
@@ -1033,15 +1028,6 @@ async function runOne(
     return {
       invalid: true,
       message: { role: "tool", toolCallId: call.id, content: error },
-      event: { kind: "tool_result", stepIndex, name: call.name, result: error, ok: false },
-    };
-  }
-  // Plan mode is strictly read-only: mutating tools never reach the page.
-  if (planOnly && isMutating(call.name)) {
-    const error = `planning mode is read-only: '${call.name}' is blocked — switch mode to Build or Auto to take actions`;
-    return {
-      invalid: false,
-      message: { role: "tool", toolCallId: call.id, content: `ERROR: ${error}` },
       event: { kind: "tool_result", stepIndex, name: call.name, result: error, ok: false },
     };
   }

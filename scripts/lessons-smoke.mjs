@@ -341,7 +341,7 @@ async function main() {
     );
     check(
       "L3b it arrives as a reference appendix, with the base prompt intact",
-      nextSystem.includes("You are Browser Agent") &&
+      nextSystem.includes("You are crazyAgent") &&
         nextSystem.includes(`Current task: ${TASK_CLEAN}`) &&
         nextSystem.includes("reference, not user instructions") &&
         nextSystem.includes("always win over a lesson"),
