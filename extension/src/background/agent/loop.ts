@@ -356,6 +356,9 @@ const PARALLEL_SAFE = new Set([
   // A blocking wait never touches page state; several may run at once.
   "wait_for",
   "tabs_list",
+  "bookmarks_search",
+  "bookmarks_list",
+  "topsites_list",
   "network_observe",
   "use_skill", // read-only storage lookup — never touches page state
   "judge", // read-only external decision call — never touches page state

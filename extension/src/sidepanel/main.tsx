@@ -218,6 +218,9 @@ const TOOL_META: Record<string, { icon: string; done: string; active: string }> 
   tabs_create: { icon: ICONS.window, done: "Opened tab", active: "Opening tab" },
   tabs_switch: { icon: ICONS.window, done: "Switched tab", active: "Switching tab" },
   tabs_close: { icon: ICONS.window, done: "Closed tab", active: "Closing tab" },
+  bookmarks_search: { icon: ICONS.search, done: "Searched bookmarks", active: "Searching bookmarks" },
+  bookmarks_list: { icon: ICONS.list, done: "Listed bookmarks", active: "Listing bookmarks" },
+  topsites_list: { icon: ICONS.layers, done: "Listed shortcuts", active: "Listing shortcuts" },
 };
 
 function parseArgs(args: string): Record<string, unknown> | null {

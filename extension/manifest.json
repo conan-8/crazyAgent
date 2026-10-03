@@ -16,6 +16,8 @@
     "debugger",
     "scripting",
     "tabs",
+    "bookmarks",
+    "topSites",
     "storage",
     "unlimitedStorage",
     "cookies",

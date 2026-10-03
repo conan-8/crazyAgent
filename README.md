@@ -15,6 +15,13 @@ Both modes drive the same tool surface (`snapshot`, `click`, `type`,
 agent loop, with per-step checkpointing (a killed service worker resumes the
 task) and gated autonomy (one-click confirmation for sensitive actions).
 
+**It knows where your sites live.** `bookmarks_search` / `bookmarks_list`
+(match title, URL *and* folder name) and `topsites_list` (New Tab shortcuts)
+run alongside `tabs_list`, so a task that names an activity instead of a URL —
+*"do my homework"* — resolves to the site you already use (Google Classroom,
+Schoology, the class portal) via an open tab, a bookmark or a shortcut, instead
+of a search-engine detour.
+
 ### Speed notes (read this before a long run)
 
 A 64-minute archived run was almost entirely **LLM round trips** (~90% of wall
