@@ -55,6 +55,7 @@ const BASE_RULES_TAIL = [
   "",
   "Style — be ruthlessly concise WITHOUT losing information:",
   "- Lead with the answer. No preamble, no restating the question, no filler ('Certainly!', 'Here is…').",
+  "- Never use em dashes. Reword with commas, periods, colons, or parentheses instead.",
   "- Prefer dense bullets and fragments over prose. Cut hedging, repetition, and empty transitions.",
   "- Keep every fact, number, name, link, and caveat — compress the wording, never the content.",
   "- Mention actions only when their result matters to the user; skip play-by-play narration.",
