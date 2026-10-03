@@ -3,7 +3,7 @@
 // Proves: chat bubbles (user/assistant) with collapsible tool cards, thread
 // persistence to history, reopening a thread from the history overlay,
 // multi-turn follow-ups carrying prior context to the LLM, new-chat thread
-// separation, and history deletion.
+// separation, history deletion, and the composer's slash commands.
 // Usage: node scripts/phase9-smoke.mjs
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -294,6 +294,81 @@ async function main() {
         bar.hasModel && bar.hasAttach,
       JSON.stringify({ statsMid, bar }),
     );
+
+    // ---- H8: slash commands (autocomplete + /sessions /model /rename /new) ----
+    const typeInput = (value) =>
+      panel.eval(
+        `(() => { const ta = document.querySelector('.task-input'); ta.focus(); ta.value = ${JSON.stringify(value)}; ta.dispatchEvent(new Event('input', { bubbles: true })); return 'ok'; })()`,
+      );
+    await typeInput("/");
+    await sleep(300);
+    const menuAll = await panel.eval(
+      `document.querySelectorAll('.slash-menu .slash-item').length`,
+    );
+    await typeInput("/se");
+    await sleep(250);
+    const menuFiltered = await panel
+      .eval(
+        `JSON.stringify([...document.querySelectorAll('.slash-menu .slash-name')].map((e) => e.textContent))`,
+      )
+      .then(JSON.parse);
+    check(
+      "H8 slash autocomplete opens on / and filters while typing",
+      menuAll === 4 &&
+        menuFiltered.length === 1 &&
+        menuFiltered[0].includes("sessions"),
+      `all=${menuAll} filtered=${JSON.stringify(menuFiltered)}`,
+    );
+
+    // Enter on the selected row runs /sessions → the history sheet opens.
+    await panel.eval(
+      `(() => { const ta = document.querySelector('.task-input'); ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 'ok'; })()`,
+    );
+    await sleep(500);
+    const histOpen = await panel.eval(
+      `Boolean(document.querySelector('.history-view'))`,
+    );
+    await panel.eval(
+      `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`,
+    );
+    await sleep(450);
+    check(
+      "H8b Enter runs /sessions (history sheet opens)",
+      histOpen === true,
+      `open=${histOpen}`,
+    );
+
+    // /model <name> switches the active connection's model (write-through).
+    await panel.eval(`__ba.slash('/model other-model')`);
+    await sleep(300);
+    const modelAfter = await panel.eval(`__ba.getSettings().then((s) => s.model)`);
+    await panel.eval(`__ba.slash('/model mock-model')`);
+    await sleep(300);
+    const modelBack = await panel.eval(`__ba.getSettings().then((s) => s.model)`);
+    check(
+      "H8c /model <name> switches the model",
+      modelAfter === "other-model" && modelBack === "mock-model",
+      `${modelAfter} → ${modelBack}`,
+    );
+
+    // /rename retitles the current thread in the view AND the store.
+    await panel.eval(`__ba.slash('/rename Renamed by slash')`);
+    await sleep(500);
+    const titleLocal = await panel.eval(`__ba.currentConversation()?.title ?? ''`);
+    const titleStored = await panel.eval(
+      `__ba.conversations().then((cs) => cs.some((c) => c.title === 'Renamed by slash') ? 'found' : 'missing')`,
+    );
+    check(
+      "H8d /rename retitles the thread (view + store)",
+      titleLocal === "Renamed by slash" && titleStored === "found",
+      `local=${titleLocal} stored=${titleStored}`,
+    );
+
+    // /new returns to the welcome screen.
+    await panel.eval(`__ba.slash('/new')`);
+    await sleep(300);
+    const welcomeBack = await panel.eval(`Boolean(document.querySelector('.welcome'))`);
+    check("H8e /new starts a new chat", welcomeBack === true, `welcome=${welcomeBack}`);
 
     panel.close();
   } finally {

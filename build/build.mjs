@@ -74,6 +74,8 @@ async function copyStatic() {
   for (const f of ["index.html", "styles.css"]) {
     await cp(path.join(ext, "src/sidepanel", f), path.join(dist, "sidepanel", f));
   }
+  // Toolbar/manifest icons (regenerate with `node scripts/make-icons.mjs`).
+  await cp(path.join(ext, "icons"), path.join(dist, "icons"), { recursive: true });
   await mkdir(path.join(dist, "offscreen"), { recursive: true });
   await cp(
     path.join(ext, "src/offscreen/clipboard.html"),

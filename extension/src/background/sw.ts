@@ -32,6 +32,7 @@ import {
   deleteConversation,
   getConversation,
   listConversationSummaries,
+  renameConversation,
   saveConversation,
 } from "./conversations";
 import {
@@ -1197,6 +1198,22 @@ async function handleRequest(
         type: "history.list",
         conversations: await listConversationSummaries(),
       });
+      break;
+    }
+    case "history.rename": {
+      // The live thread object feeds every later flush — retitle it too, or
+      // the next save would overwrite the rename with the old title.
+      const title = String((msg as { title?: unknown }).title ?? "")
+        .trim()
+        .slice(0, 80);
+      if (title) {
+        if (currentConv?.id === msg.conversationId) currentConv.title = title;
+        await renameConversation(msg.conversationId, title);
+        port.postMessage({
+          type: "history.list",
+          conversations: await listConversationSummaries(),
+        });
+      }
       break;
     }
     case "run.input": {

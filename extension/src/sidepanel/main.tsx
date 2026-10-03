@@ -33,6 +33,12 @@ import {
   type ToolCard,
 } from "../shared/chat";
 import { formatElapsed, formatTokens } from "../shared/modes";
+import {
+  matchSlash,
+  parseSlash,
+  SLASH_COMMANDS,
+  type SlashCommand,
+} from "../shared/slash";
 import { THINKING_LEVELS } from "../shared/llm";
 import { madmanExclamation } from "../shared/madman";
 import { versionLabel } from "../shared/version";
@@ -817,6 +823,14 @@ function MenuItem({
     </button>
   );
 }
+
+/** Per-command icon for the autocomplete rows. */
+const SLASH_ICONS: Record<string, string> = {
+  new: ICONS.compose,
+  model: ICONS.cpu,
+  sessions: ICONS.history,
+  rename: ICONS.tag,
+};
 
 // ------------------------------ sheets ------------------------------
 
@@ -2309,6 +2323,8 @@ function App() {
   const [resolved, setResolved] = useState<Map<string, Decision>>(new Map());
   const [humanResolved, setHumanResolved] = useState<Map<string, boolean>>(new Map());
   const [openMenu, setOpenMenu] = useState<"model" | null>(null);
+  /** Selected row in the slash-command autocomplete (clamped at render). */
+  const [slashIdx, setSlashIdx] = useState(0);
   const [settings, setSettingsState] = useState<AgentSettings | null>(null);
   const [attachments, setAttachments] = useState<RunAttachment[]>([]);
   const [usage, setUsage] = useState<UsageStats | null>(null);
@@ -2540,64 +2556,123 @@ function App() {
   }, [openMenu]);
 
   // Orb handoff flight: the assistant turn (and its badge orb) only mounts
-  // once the first run event arrives, so poll for it, then shrink/fly the
-  // ghost hero orb into place. The real badge orb stays hidden until the
-  // ghost lands; if the welcome comes back (new chat) or nothing shows up
-  // within a few seconds, the ghost is dropped quietly.
+  // once the first run event arrives. A MutationObserver wakes the flight the
+  // moment it does (timer-polled as a backstop — no rAF: it starves in
+  // background documents), then the ghost hero orb shrinks into place while
+  // the real badge orb hides until landing. The hide is an INLINE opacity,
+  // not a class: Preact re-diffs the class prop on every streamed event and
+  // would wipe a manually added class. Landing fires from the animation's
+  // finish event AND a timer backstop (animation events need rendering
+  // steps, which can stall), with a small corrective hop for scroll drift
+  // during the flight. If the welcome comes back (new chat) or no badge
+  // shows within a few seconds, the ghost is dropped quietly.
   useEffect(() => {
     if (!orbFly) return;
+    const from = orbFly;
     let cancelled = false;
-    let raf = 0;
+    let settled = false;
+    let timer = 0;
     const started = performance.now();
-    const attempt = () => {
-      if (cancelled) return;
+    const mo = new MutationObserver(attempt);
+
+    function land(badge: HTMLElement) {
+      const el = orbFlyRef.current;
+      if (!el) {
+        if (!cancelled) setOrbFly(null);
+        return;
+      }
+      settled = true;
+      mo.disconnect();
+      clearTimeout(timer);
+      const to = badge.getBoundingClientRect();
+      badge.style.opacity = "0";
+      let revealed = false;
+      const reveal = () => {
+        if (revealed) return;
+        revealed = true;
+        badge.style.opacity = "";
+        if (!cancelled) setOrbFly(null);
+      };
+      const anim = el.animate(
+        [
+          {
+            left: `${from.x}px`,
+            top: `${from.y}px`,
+            width: `${from.w}px`,
+            height: `${from.w}px`,
+          },
+          {
+            left: `${to.left}px`,
+            top: `${to.top}px`,
+            width: `${to.width}px`,
+            height: `${to.height}px`,
+          },
+        ],
+        { duration: 560, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" },
+      );
+      const finish = () => {
+        // The transcript may have scrolled mid-flight: hop the last few px
+        // if the badge drifted from where the ghost landed.
+        const now = badge.getBoundingClientRect();
+        const g = el.getBoundingClientRect();
+        if (Math.abs(now.x - g.x) + Math.abs(now.y - g.y) > 4) {
+          const hop = el.animate(
+            [
+              { left: `${g.x}px`, top: `${g.y}px`, width: `${g.width}px`, height: `${g.height}px` },
+              {
+                left: `${now.x}px`,
+                top: `${now.y}px`,
+                width: `${now.width}px`,
+                height: `${now.height}px`,
+              },
+            ],
+            { duration: 140, easing: "ease-out", fill: "forwards" },
+          );
+          hop.onfinish = reveal;
+          setTimeout(reveal, 300);
+        } else {
+          reveal();
+        }
+      };
+      anim.onfinish = finish;
+      // Finish events only fire on rendering steps; the timer guarantees the
+      // handoff completes even when those stall (occluded/headless documents).
+      setTimeout(finish, 810);
+    }
+
+    function attempt() {
+      if (cancelled || settled) return;
       if (document.querySelector(".welcome")) {
+        settled = true;
+        mo.disconnect();
+        clearTimeout(timer);
         setOrbFly(null);
         return;
       }
       const badge = document.querySelector(".assistant-badge .orb") as HTMLElement | null;
       if (badge) {
-        const el = orbFlyRef.current;
-        if (!el) {
-          setOrbFly(null);
-          return;
-        }
-        const to = badge.getBoundingClientRect();
-        badge.classList.add("is-inbound");
-        const anim = el.animate(
-          [
-            {
-              left: `${orbFly.x}px`,
-              top: `${orbFly.y}px`,
-              width: `${orbFly.w}px`,
-              height: `${orbFly.w}px`,
-            },
-            {
-              left: `${to.left}px`,
-              top: `${to.top}px`,
-              width: `${to.width}px`,
-              height: `${to.height}px`,
-            },
-          ],
-          { duration: 560, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" },
-        );
-        anim.onfinish = () => {
-          badge.classList.remove("is-inbound");
-          if (!cancelled) setOrbFly(null);
-        };
-        anim.oncancel = () => badge.classList.remove("is-inbound");
+        land(badge);
         return;
       }
       if (performance.now() - started > 6000) {
+        settled = true;
+        mo.disconnect();
         setOrbFly(null);
-        return;
       }
-      raf = requestAnimationFrame(attempt);
-    };
-    raf = requestAnimationFrame(attempt);
+    }
+
+    mo.observe(document.body, { childList: true, subtree: true });
+    timer = window.setTimeout(function poll() {
+      attempt();
+      if (!cancelled && !settled) timer = window.setTimeout(poll, 50);
+    }, 50);
+    attempt();
+
     return () => {
       cancelled = true;
-      cancelAnimationFrame(raf);
+      settled = true;
+      mo.disconnect();
+      clearTimeout(timer);
     };
   }, [orbFly]);
 
@@ -2897,6 +2972,7 @@ function App() {
     openConversation,
     deleteConversation,
     newChat,
+    slash: (text: string) => runSlash(text),
     // run-log surface (timestamped per-turn chat + tool archive)
     /** All archived run records, newest-first, via the summary index. */
     logs: async (): Promise<LogTurnRecord[]> => {
@@ -2929,13 +3005,110 @@ function App() {
     attachments: () => attachments,
   };
 
+  // ------------------------------ slash commands ------------------------------
+
+  /** Focus the composer with the caret at the end (after programmatic text). */
+  const focusInputEnd = () => {
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  };
+
+  /**
+   * Execute a known slash command from raw composer text. Returns true when
+   * the text was consumed as a command; unknown `/words` fall through and
+   * are sent as an ordinary task.
+   */
+  const runSlash = (text: string): boolean => {
+    const p = parseSlash(text);
+    if (!p || !p.known) return false;
+    switch (p.command) {
+      case "new":
+        newChat();
+        return true;
+      case "sessions":
+        setTaskText("");
+        if (!showHistory) openHistory();
+        return true;
+      case "model": {
+        setTaskText("");
+        if (!p.arg) {
+          // Bare /model: open the picker.
+          setOpenMenu("model");
+          setModelFilter("");
+          void loadModels();
+          return true;
+        }
+        // Named: exact catalog match wins, then substring; with no catalog
+        // loaded yet take the name as-is (model ids are free-form strings).
+        const q = p.arg.toLowerCase();
+        const hit =
+          modelList.find((m) => m.toLowerCase() === q) ??
+          modelList.find((m) => m.toLowerCase().includes(q));
+        if (hit) {
+          pickSetting("model", hit);
+        } else if (modelList.length) {
+          // No match: open the picker pre-filtered rather than switch blind.
+          setOpenMenu("model");
+          setModelFilter(p.arg);
+          void loadModels();
+        } else {
+          pickSetting("model", p.arg);
+        }
+        return true;
+      }
+      case "rename": {
+        if (!p.arg) {
+          // Nothing to rename to: leave the command waiting for its title.
+          setTaskText("/rename ");
+          focusInputEnd();
+          return true;
+        }
+        if (!currentConv) {
+          setTaskText("");
+          return true;
+        }
+        const title = p.arg.slice(0, 80);
+        // Mutate in place — the state object IS currentConv, so later folds
+        // keep working — then re-render. The worker persists the new title
+        // (and retitles its own live copy so the next flush cannot revert it).
+        currentConv.title = title;
+        bump();
+        postPort?.({ kind: "history.rename", conversationId: currentConv.id, title });
+        setTaskText("");
+        return true;
+      }
+      default:
+        return false;
+    }
+  };
+
+  /**
+   * Autocomplete row activation. `execute` (Enter/click) runs the command —
+   * except a bare /rename, which needs a title and completes instead. Tab
+   * always completes the word without running anything.
+   */
+  const completeSlash = (cmd: SlashCommand, execute: boolean) => {
+    setSlashIdx(0);
+    if (!execute || (cmd.takesArg && cmd.name === "rename")) {
+      setTaskText(`/${cmd.name}${cmd.takesArg ? " " : ""}`);
+      focusInputEnd();
+      return;
+    }
+    runSlash(`/${cmd.name}`);
+  };
+
   const sendTask = () => {
     const task = taskText.trim();
     if (!task && !attachments.length) return;
     if (running) {
       // Mid-run steering: queue the message for the running agent — it lands
       // as a normal user turn the model sees on its next step. Text only; a
-      // new task (with attachments) is one Stop away.
+      // new task (with attachments) is one Stop away. Slash commands are an
+      // idle affordance: mid-run text always steers literally.
       if (!task) return;
       postPort?.({ kind: "run.input", text: task });
       if (currentConv) foldUser(currentConv, task);
@@ -2943,6 +3116,7 @@ function App() {
       setTaskText("");
       return;
     }
+    if (!attachments.length && runSlash(task)) return;
     startRun(task || "(see attachments)");
   };
 
@@ -2998,6 +3172,10 @@ function App() {
   const filteredModels = modelFilter.trim()
     ? modelList.filter((m) => m.toLowerCase().includes(modelFilter.trim().toLowerCase()))
     : modelList;
+  // Slash autocomplete: candidates while the command word is being typed
+  // (matchSlash hides the menu once a space — the argument — appears).
+  const slashMatches = matchSlash(taskText);
+  const slashSel = Math.min(slashIdx, Math.max(0, slashMatches.length - 1));
   const canSend = Boolean(taskText.trim() || attachments.length);
 
   return (
@@ -3138,6 +3316,35 @@ function App() {
         ) : null}
 
         <div class="composer">
+          {slashMatches.length ? (
+            <div class="slash-menu" role="listbox" aria-label="Slash commands">
+              {slashMatches.map((c, i) => (
+                <button
+                  key={c.name}
+                  type="button"
+                  class={`slash-item${i === slashSel ? " is-sel" : ""}`}
+                  role="option"
+                  aria-selected={i === slashSel}
+                  onMouseDown={(e) => {
+                    // preventDefault keeps the textarea focused through the click.
+                    e.preventDefault();
+                    completeSlash(c, true);
+                  }}
+                  onMouseEnter={() => setSlashIdx(i)}
+                >
+                  <span class="slash-icon">
+                    <Icon d={SLASH_ICONS[c.name] ?? ICONS.command} size={13} />
+                  </span>
+                  <span class="slash-name">
+                    /{c.name}
+                    {c.hint ? <em> {c.hint}</em> : null}
+                  </span>
+                  <span class="slash-desc">{c.description}</span>
+                  {i === slashSel ? <span class="slash-enter">↵</span> : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <textarea
             ref={inputRef}
             class="task-input"
@@ -3148,7 +3355,10 @@ function App() {
                 : "Ask crazyAgent to do anything on the web…"
             }
             value={taskText}
-            onInput={(e) => setTaskText((e.target as HTMLTextAreaElement).value)}
+            onInput={(e) => {
+              setTaskText((e.target as HTMLTextAreaElement).value);
+              setSlashIdx(0);
+            }}
             onPaste={(e) => {
               const files = e.clipboardData?.files;
               if (files?.length) {
@@ -3157,6 +3367,27 @@ function App() {
               }
             }}
             onKeyDown={(e) => {
+              if (slashMatches.length) {
+                const sel = slashMatches[slashSel]!;
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const dir = e.key === "ArrowDown" ? 1 : -1;
+                  setSlashIdx(
+                    (slashSel + dir + slashMatches.length) % slashMatches.length,
+                  );
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  completeSlash(sel, true);
+                  return;
+                }
+                if (e.key === "Tab") {
+                  e.preventDefault();
+                  completeSlash(sel, false);
+                  return;
+                }
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 sendTask();
@@ -3284,6 +3515,9 @@ function App() {
             <>
               <span class="stat">
                 <kbd>↵</kbd> run <kbd>⇧↵</kbd> newline
+              </span>
+              <span class="stat">
+                <kbd>/</kbd> commands
               </span>
               {usage ? (
                 <span class="stat stat-last" title={lastRunTitle(usage)}>

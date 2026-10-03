@@ -108,3 +108,23 @@ export async function deleteConversation(id: string): Promise<void> {
     await chrome.storage.local.remove(keyFor(id));
   });
 }
+
+/**
+ * Rename a stored thread: the title lives both in the summary index and on
+ * the conversation itself, so both are rewritten in one serialized step.
+ * No-op when the thread is unknown (e.g. renamed before its first save).
+ */
+export async function renameConversation(id: string, title: string): Promise<void> {
+  await ensureMigrated();
+  await serialized(async () => {
+    const key = keyFor(id);
+    const out = await chrome.storage.local.get(key);
+    const conv = out[key] as Conversation | undefined;
+    const index = await readIndex();
+    const writes: Record<string, unknown> = {
+      [INDEX_KEY]: index.map((s) => (s.id === id ? { ...s, title } : s)),
+    };
+    if (conv) writes[key] = { ...conv, title };
+    await chrome.storage.local.set(writes);
+  });
+}

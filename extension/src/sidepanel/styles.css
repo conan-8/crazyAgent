@@ -419,15 +419,12 @@ kbd {
 /* Shared-element handoff at chat start: a ghost of the welcome hero orb
    shrinks and flies into the first assistant badge. JS measures both rects
    and drives the flight with WAAPI (left/top/size); the real badge orb hides
-   (.is-inbound) until the ghost lands, so the mark never blinks out. */
+   (inline opacity, set by JS) until the ghost lands, so the mark never
+   blinks out. */
 .orb-fly {
   position: fixed;
   z-index: 500;
   pointer-events: none;
-}
-
-.orb.is-inbound {
-  opacity: 0;
 }
 
 /* ---------------- layout ---------------- */
@@ -1928,6 +1925,81 @@ input[type="number"]::-webkit-inner-spin-button {
 .composer:focus-within {
   border-color: var(--accent-line);
   box-shadow: var(--inner-hi), var(--shadow-md), 0 0 0 3px var(--accent-soft);
+}
+
+/* ---------------- slash-command autocomplete ---------------- */
+
+/* Floats above the composer while its first word is a "/…"; styled like the
+   toolbar popovers so the two menus read as one family. */
+.slash-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-radius: 14px;
+  background: var(--surface-solid);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--inner-hi), var(--shadow-lg);
+  transform-origin: bottom center;
+  animation: menu-in 0.18s var(--spring) both;
+}
+
+.slash-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.slash-item.is-sel {
+  background: var(--accent-soft);
+}
+
+.slash-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--accent);
+}
+
+.slash-name {
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.slash-name em {
+  margin-left: 3px;
+  font-style: normal;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.slash-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+}
+
+.slash-enter {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .composer .task-input {

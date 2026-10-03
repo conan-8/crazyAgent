@@ -207,6 +207,7 @@ export type PortRequest =
   | { kind: "history.list" }
   | { kind: "history.get"; conversationId: string }
   | { kind: "history.delete"; conversationId: string }
+  | { kind: "history.rename"; conversationId: string; title: string }
   /** Run logs: timestamped per-turn chat + tool records, archived locally. */
   | { kind: "logs.list" }
   | { kind: "logs.get"; logId: string }
