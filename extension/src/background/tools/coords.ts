@@ -691,7 +691,7 @@ registerTool({
 registerTool({
   name: "input_sequence",
   description:
-    "Chain mouse/keyboard steps into ONE call — the menu-path and fill primitive: [{click:{x,y,space}}, {hover:{x,y}}, {wait_ms:300}, {type:{text, select?}}, {key:'Return'}]. Each click/hover takes click_at's full arg shape (x/y with space:'screenshot'|'viewport'|'page', or ref+dx/dy, or frame-local) resolved AT EXECUTION TIME; key takes any combo ('Control+a'); type inserts at the focused target (optionally select:'all' first); wait_ms lets menus/animations open. Up to 24 steps. Execution stops at the first failure and reports the completed steps, so the next call can resume from there. The glowing cursor rides every click — one screenshot afterwards shows the end state.",
+    "Chain mouse/keyboard steps into ONE call — the menu-path and fill primitive: [{click:{x,y,space}}, {hover:{x,y}}, {wait_ms:300}, {type:{text, select?}}, {key:'Return'}]. Each click/hover takes click_at's full arg shape (x/y with space:'screenshot'|'viewport'|'page', or ref+dx/dy, or frame-local) resolved AT EXECUTION TIME; key takes any combo ('Control+a'); type inserts at the focused target (optionally select:'all' first); wait_ms lets menus/animations open. click_at/type_at/hover_at work as step keys too (type_at expands to click+type). Up to 24 steps. RULE: never chain a click on a target you have not SEEN (a menu row after a click that opens the menu) — its coordinates must come from a screenshot taken after the menu appeared. Sequences are for coordinates you already know, type/key runs, and table fills. Execution stops at the first failure and reports the completed steps. The glowing cursor rides every click — the screenshot after the call shows where each landed.",
   parameters: {
     type: "object",
     properties: {
@@ -702,7 +702,6 @@ registerTool({
         items: { type: "object" },
       },
     },
-    required: ["steps"],
   },
   async run(args, ctx) {
     const shaped = shapeSequenceSteps(args);

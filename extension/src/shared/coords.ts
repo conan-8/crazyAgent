@@ -389,16 +389,49 @@ export type SequenceResult =
   | { ok: false; error: string };
 
 /**
+ * Find the steps list in whatever shape the model produced it: `steps` as
+ * documented, a common alias (`sequence`/`actions`/`calls`), or the single
+ * array-valued key of the arguments. The model called this tool with
+ * `{"click_at": …}` steps and bare arrays in real runs — an error naming
+ * accepted shapes beats "missing required parameter" that helps nobody.
+ */
+function findStepsList(args: Record<string, unknown>): unknown[] | null {
+  if (Array.isArray(args.steps)) return args.steps;
+  for (const [k, v] of Object.entries(args)) {
+    if (Array.isArray(v)) return v;
+    void k;
+  }
+  return null;
+}
+
+/** Step-key → kind, with the tool-name aliases the model reaches for. */
+const STEP_ALIASES: Record<string, "click" | "hover" | "key" | "type" | "wait" | "type_at"> = {
+  click: "click",
+  click_at: "click",
+  hover: "hover",
+  hover_at: "hover",
+  key: "key",
+  press: "key",
+  type: "type",
+  type_at: "type_at",
+  wait_ms: "wait",
+  wait: "wait",
+  sleep: "wait",
+};
+
+/**
  * Validate an `input_sequence` steps list. Accepts each step as
  * {click:{...}} | {hover:{...}} | {key:"Control+a"} | {type:"text"} |
- * {type:{text, select:"all"}} | {wait_ms:250}.
+ * {type:{text, select:"all"}} | {wait_ms:250}, plus the natural aliases the
+ * model writes ({click_at:{…}}, {type_at:{…, text}} → click + type).
  */
 export function shapeSequenceSteps(args: Record<string, unknown>): SequenceResult {
-  const raw = args.steps;
-  if (!Array.isArray(raw) || raw.length === 0) {
+  const raw = findStepsList(args);
+  if (!raw || raw.length === 0) {
     return {
       ok: false,
-      error: "ERROR: parameter steps must be a non-empty array of {click|hover|key|type|wait_ms} steps",
+      error:
+        "ERROR: input_sequence needs a `steps` array — [{click:{x,y,space:'screenshot'}}, {type:'text'}, {key:'Return'}, {wait_ms:250}]; click_at/type_at/hover_at are accepted as step keys too",
     };
   }
   if (raw.length > MAX_SEQUENCE_STEPS) {
@@ -413,34 +446,37 @@ export function shapeSequenceSteps(args: Record<string, unknown>): SequenceResul
       return { ok: false, error: `ERROR: steps[${i}] must be an object` };
     }
     const o = item as Record<string, unknown>;
-    if (o.click !== undefined) {
-      if (typeof o.click !== "object" || o.click === null) {
-        return { ok: false, error: `ERROR: steps[${i}].click must be an object (click_at's arg shape)` };
+    const kindKey = Object.keys(o).find((k) => STEP_ALIASES[k.toLowerCase()]);
+    if (!kindKey) {
+      return {
+        ok: false,
+        error: `ERROR: steps[${i}] needs one of click / hover / key / type / wait_ms (click_at, type_at, hover_at, press, sleep also accepted)`,
+      };
+    }
+    const kind = STEP_ALIASES[kindKey.toLowerCase()]!;
+    const val = o[kindKey];
+    if (kind === "click" || kind === "hover") {
+      if (typeof val !== "object" || val === null) {
+        return { ok: false, error: `ERROR: steps[${i}].${kindKey} must be an object (click_at's arg shape)` };
       }
-      steps.push({ kind: "click", point: o.click as Record<string, unknown> });
+      steps.push({ kind, point: val as Record<string, unknown> });
       continue;
     }
-    if (o.hover !== undefined) {
-      if (typeof o.hover !== "object" || o.hover === null) {
-        return { ok: false, error: `ERROR: steps[${i}].hover must be an object (hover_at's arg shape)` };
-      }
-      steps.push({ kind: "hover", point: o.hover as Record<string, unknown> });
-      continue;
-    }
-    if (o.key !== undefined) {
-      if (typeof o.key !== "string" || !o.key.trim()) {
+    if (kind === "key") {
+      const key = typeof val === "string" ? val : (val as { key?: unknown } | null)?.key;
+      if (typeof key !== "string" || !key.trim()) {
         return { ok: false, error: `ERROR: steps[${i}].key must be a non-empty key combo string` };
       }
-      steps.push({ kind: "key", key: o.key });
+      steps.push({ kind: "key", key });
       continue;
     }
-    if (o.type !== undefined) {
-      if (typeof o.type === "string") {
-        steps.push({ kind: "type", text: o.type });
+    if (kind === "type") {
+      if (typeof val === "string") {
+        steps.push({ kind: "type", text: val });
         continue;
       }
-      if (typeof o.type === "object" && o.type !== null && typeof (o.type as Record<string, unknown>).text === "string") {
-        const t = o.type as Record<string, unknown>;
+      if (typeof val === "object" && val !== null && typeof (val as Record<string, unknown>).text === "string") {
+        const t = val as Record<string, unknown>;
         steps.push({
           kind: "type",
           text: t.text as string,
@@ -450,15 +486,42 @@ export function shapeSequenceSteps(args: Record<string, unknown>): SequenceResul
       }
       return { ok: false, error: `ERROR: steps[${i}].type must be a string or {text, select:'all'}` };
     }
-    if (o.wait_ms !== undefined) {
-      const w = o.wait_ms;
-      if (typeof w !== "number" || !Number.isFinite(w) || w < 0) {
-        return { ok: false, error: `ERROR: steps[${i}].wait_ms must be a non-negative number of milliseconds` };
+    if (kind === "type_at") {
+      // The model writes {type_at:{x, y, text}} — expand to click + type.
+      if (typeof val !== "object" || val === null) {
+        return { ok: false, error: `ERROR: steps[${i}].type_at must be an object (click_at's shape + text)` };
       }
-      steps.push({ kind: "wait", waitMs: Math.min(w, SEQUENCE_MAX_WAIT_MS) });
+      const t = val as Record<string, unknown>;
+      if (typeof t.text !== "string") {
+        return { ok: false, error: `ERROR: steps[${i}].type_at needs a text string` };
+      }
+      if (t.select_to !== undefined) {
+        return {
+          ok: false,
+          error: `ERROR: steps[${i}].type_at with select_to is not supported inside a sequence — use the type_at tool directly for click+shift-click selections`,
+        };
+      }
+      const point: Record<string, unknown> = { ...t };
+      delete point.text;
+      delete point.select;
+      delete point.keys_after;
+      steps.push({ kind: "click", point });
+      steps.push({
+        kind: "type",
+        text: t.text as string,
+        select: t.select === "all" ? "all" : undefined,
+      });
+      if (Array.isArray(t.keys_after)) {
+        for (const k of t.keys_after as unknown[]) steps.push({ kind: "key", key: String(k) });
+      }
       continue;
     }
-    return { ok: false, error: `ERROR: steps[${i}] needs one of click / hover / key / type / wait_ms` };
+    // wait
+    const w = typeof val === "number" ? val : (val as { wait_ms?: unknown } | null)?.wait_ms;
+    if (typeof w !== "number" || !Number.isFinite(w) || w < 0) {
+      return { ok: false, error: `ERROR: steps[${i}].wait_ms must be a non-negative number of milliseconds` };
+    }
+    steps.push({ kind: "wait", waitMs: Math.min(w, SEQUENCE_MAX_WAIT_MS) });
   }
   return { ok: true, steps };
 };

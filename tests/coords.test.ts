@@ -291,4 +291,46 @@ describe("shapeSequenceSteps (input_sequence)", () => {
     const ok = Array.from({ length: MAX_SEQUENCE_STEPS }, () => ({ key: "Tab" }));
     expect(shapeSequenceSteps({ steps: ok }).ok).toBe(true);
   });
+
+  it("accepts the tool-name aliases the model actually writes", () => {
+    // A real run called input_sequence with click_at steps and bare keys —
+    // these must shape, not error.
+    const out = shapeSequenceSteps({
+      steps: [
+        { click_at: { x: 330, y: 375, space: "screenshot", click_count: 2 } },
+        { wait_ms: 200 },
+        { click_at: { space: "screenshot", x: 470, y: 81 } },
+        { type_at: { x: 100, y: 50, text: "hello", select: "all", keys_after: ["Control+b"] } },
+        { press: "Return" },
+      ],
+    });
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.steps.map((s) => s.kind)).toEqual([
+        "click",
+        "wait",
+        "click",
+        "click",
+        "type",
+        "key",
+        "key",
+      ]);
+      expect(out.steps[0]!.point).toMatchObject({ click_count: 2, x: 330 });
+      // type_at expanded: click first, then the text, then its keys_after.
+      expect(out.steps[3]!.point).toMatchObject({ x: 100, y: 50 });
+      expect(out.steps[4]).toMatchObject({ kind: "type", text: "hello", select: "all" });
+      expect(out.steps[5]!.key).toBe("Control+b");
+      expect(out.steps[6]!.key).toBe("Return");
+    }
+    // select_to inside a sequence is rejected with guidance, not silently dropped.
+    expect(
+      shapeSequenceSteps({ steps: [{ type_at: { x: 1, y: 2, text: "t", select_to: { x: 3, y: 4 } } }] }).ok,
+    ).toBe(false);
+  });
+
+  it("finds the steps list under any array-valued key", () => {
+    const out = shapeSequenceSteps({ actions: [{ key: "Return" }] });
+    expect(out.ok && out.steps[0]!.kind).toBe("key");
+    expect(shapeSequenceSteps({ nope: 1 }).ok).toBe(false);
+  });
 });
