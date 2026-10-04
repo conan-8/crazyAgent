@@ -287,6 +287,32 @@ const CANVAS_DOC_EDITORS_SECTIONS: SkillSection[] = [
     ].join("\n"),
   },
   {
+    id: "ui-routes",
+    title: "Menus, tables, images (verified routes)",
+    useWhen: "structure beyond text: page setup, tables, images, TOC, bookmarks, equations",
+    body: [
+      "- Structure lives in MENUS, and every route here was walked end-to-end by a 139-action reference run: File ▸ Page setup (paper size, orientation, margins, OK). Insert ▸ Break ▸ Page break (or Ctrl+Enter). Insert ▸ Horizontal line. Insert ▸ Table — the grid: click the cell at (rows × cols), or drag_at across cells; then fill the table with {type} {key:Tab} steps in ONE input_sequence.",
+      "- Insert ▸ Image ▸ By URL: paste the URL, wait for the preview, INSERT IMAGE. With the image selected, the Image options sidebar has Size & rotation (exact W/H), Text wrapping ▸ Wrap text, and Alt text.",
+      "- Table extras: merge = select across the two cells (drag_at), then click_at button:'right' ▸ Merge cells. Header bold + background = select the row, Ctrl+b, Format ▸ Table ▸ Table options ▸ Color (cell background).",
+      "- Bookmark: caret on the heading, Insert ▸ Bookmark. Then select the phrase, Ctrl+K — the dialog lists Headings and bookmarks, click yours. TOC: Insert ▸ Page elements ▸ Table of contents (after the headings exist); Page numbers live in the same menu. Header: double-click the top margin (click_count:2 above the page), or Insert ▸ Page elements ▸ Headers & footers.",
+      "- Equation: Insert ▸ Symbols ▸ Equation, then type E = mc² (the ² comes from the equation toolbar's superscript, or paste the character).",
+      "- Fonts not in the menu: font dropdown ▸ More fonts — a REAL search dialog; check each font, Done, apply. Never type into the font-name box on the toolbar (it is a div, not an input).",
+    ].join("\n"),
+  },
+  {
+    id: "collaboration",
+    title: "Suggesting, comments, sharing, versions",
+    useWhen: "suggestion edits, comments/@mentions/resolves, sharing, named versions",
+    body: [
+      "- Suggesting: mode dropdown (pencil, top right) ▸ Suggesting — make the 2-3 edits (each shows a green suggestion card in the margin) — then switch BACK to Editing before continuing.",
+      "- Comments: select the anchor (text or a table cell), Ctrl+Alt+M, type the comment; an @email autocompletes — pick the chip (Docs warns it will email; expected); Ctrl+Enter or the Comment button posts. Resolve = the ✓ on the thread card; the Reply field is inside the thread. Comment cards sit in the right margin — click one to open it.",
+      "- Find and replace: Ctrl+H — real inputs; Replace all, and read the dialog's '0 of 0' remaining as the confirmation.",
+      "- Share: the Share button ▸ General access ▸ Anyone with the link ▸ role dropdown ▸ Commenter — the 'Access updated' toast confirms. The link itself is the readonly input at the top of that dialog (evaluate_js .value reads it to hand back).",
+      "- Named version: File ▸ Version history ▸ Name current version ▸ type ▸ Save — the 'Named in version history' toast confirms. Do it LAST, after every other edit.",
+      "- Mistakes are cheap when you LOOK: wrong menu item → Escape, reopen, retry; stray text → select and retype. ONE corrective action each — never a retry loop of the same call.",
+    ].join("\n"),
+  },
+  {
     id: "rebuild",
     title: "Rebuild mode (when the body tangles)",
     useWhen: "styles on wrong lines, duplicated fragments, mis-converted lists",

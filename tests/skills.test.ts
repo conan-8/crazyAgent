@@ -10,6 +10,7 @@ import {
   skillOutline,
   SKILL_BODY_MAX_CHARS,
   SKILL_SECTION_MAX,
+  SKILL_SECTION_MAX_CHARS,
   type Skill,
 } from "../extension/src/shared/skills";
 
@@ -113,7 +114,19 @@ describe("mergeSkills", () => {
 describe("bundled skills sanity", () => {
   it("every body fits the budget and every name is kebab-case", () => {
     for (const s of BUNDLED_SKILLS) {
-      expect(s.body.length).toBeLessThanOrEqual(SKILL_BODY_MAX_CHARS);
+      // A sectioned skill never sends its joined body — the outline routes
+      // loads to ONE section — so its budget is per-section, not per-body.
+      // (Storage-side caps for user edits are unchanged.)
+      if (s.sections?.length) {
+        expect(s.sections.length).toBeLessThanOrEqual(SKILL_SECTION_MAX);
+        for (const sec of s.sections) {
+          expect(sec.body.length).toBeLessThanOrEqual(SKILL_SECTION_MAX_CHARS);
+          expect(sec.body.length).toBeGreaterThan(40);
+        }
+        expect(s.body.length).toBeLessThanOrEqual(SKILL_SECTION_MAX_CHARS * SKILL_SECTION_MAX);
+      } else {
+        expect(s.body.length).toBeLessThanOrEqual(SKILL_BODY_MAX_CHARS);
+      }
       expect(s.body.length).toBeGreaterThan(200);
       expect(normalizeSkillName(s.name)).toBe(s.name);
       expect(s.whenToUse.length).toBeGreaterThan(10);

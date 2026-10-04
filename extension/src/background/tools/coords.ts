@@ -33,6 +33,7 @@ import {
   shapeCoordArgs,
   shapeDragList,
   shapeModifiers,
+  shapeSequenceSteps,
   COORD_SPACE_PROP,
   type HitInfo,
   type Point,
@@ -299,9 +300,19 @@ export async function probeElementAt(
   tabId: number,
   args: Record<string, unknown>,
 ): Promise<ElementProbe | null> {
+  // A drags list is probed at its first start point; an input_sequence at
+  // its first CLICK step (clicks carry the risk, waits/keys do not).
+  const seqClick = Array.isArray(args.steps)
+    ? (args.steps.find(
+        (s) =>
+          typeof s === "object" && s !== null && typeof (s as Record<string, unknown>).click === "object",
+      ) as Record<string, unknown> | undefined)
+    : undefined;
   const first = Array.isArray(args.drags)
     ? ((args.drags[0] ?? {}) as Record<string, unknown>)
-    : {};
+    : seqClick
+      ? ((seqClick.click as Record<string, unknown>) ?? {})
+      : {};
   const probeArgs: Record<string, unknown> = { ...args, ...first };
   if (typeof probeArgs.ref === "string") {
     const res = await runContentAction(tabId, {
@@ -673,6 +684,140 @@ registerTool({
     const keys = t.keys ? ` · ${t.keys} key(s)` : "";
     return {
       text: `typed ${t.chars} char(s) at (${t.at.x},${t.at.y})${sel}${keys} — ${d.hit ?? ""} (focus: ${d.focus ?? "?"})`,
+    };
+  },
+});
+
+registerTool({
+  name: "input_sequence",
+  description:
+    "Chain mouse/keyboard steps into ONE call — the menu-path and fill primitive: [{click:{x,y,space}}, {hover:{x,y}}, {wait_ms:300}, {type:{text, select?}}, {key:'Return'}]. Each click/hover takes click_at's full arg shape (x/y with space:'screenshot'|'viewport'|'page', or ref+dx/dy, or frame-local) resolved AT EXECUTION TIME; key takes any combo ('Control+a'); type inserts at the focused target (optionally select:'all' first); wait_ms lets menus/animations open. Up to 24 steps. Execution stops at the first failure and reports the completed steps, so the next call can resume from there. The glowing cursor rides every click — one screenshot afterwards shows the end state.",
+  parameters: {
+    type: "object",
+    properties: {
+      steps: {
+        type: "array",
+        description:
+          "Ordered steps: {click:{...click_at args}} | {hover:{...}} | {key:'combo'} | {type:'text'} | {type:{text, select:'all'}} | {wait_ms:250}",
+        items: { type: "object" },
+      },
+    },
+    required: ["steps"],
+  },
+  async run(args, ctx) {
+    const shaped = shapeSequenceSteps(args);
+    if (!shaped.ok) return { ok: false, error: shaped.error };
+    await ensureTabActive(ctx.tabId, ctx.adapter);
+    const done: { i: number; what: string }[] = [];
+    let focusChecked = false;
+    let lastClickPoint: Point | null = null;
+    let lastProbed = false;
+    const sendCombo = async (combo: string) => {
+      const parsed = parseKeyCombo(combo);
+      if (!parsed.ok) throw new Error(parsed.error);
+      await ctx.adapter.send(
+        ctx.tabId,
+        "Input.dispatchKeyEvent",
+        keyEventParams(parsed.parsed, "down"),
+      );
+      await ctx.adapter.send(
+        ctx.tabId,
+        "Input.dispatchKeyEvent",
+        keyEventParams(parsed.parsed, "up"),
+      );
+      await sleep(BETWEEN_STEPS_MS);
+    };
+    for (const [i, step] of shaped.steps.entries()) {
+      try {
+        if (step.kind === "wait") {
+          await sleep(step.waitMs ?? 0);
+          done.push({ i, what: `waited ${step.waitMs}ms` });
+          continue;
+        }
+        if (step.kind === "click" || step.kind === "hover") {
+          const payload = step.point ?? {};
+          const mods = shapeModifiers(payload);
+          if (!mods.ok) {
+            return { ok: false, error: `steps[${i}]: ${mods.error}`, completed: done, failedAt: i };
+          }
+          const resolved = await resolveTarget(ctx, payload, { scrollRef: true });
+          if (!resolved.ok) {
+            return { ok: false, error: `steps[${i}]: ${resolved.error}`, completed: done, failedAt: i };
+          }
+          await sendStrokes(
+            ctx,
+            step.kind === "click"
+              ? planClick(resolved.from, mods.button, mods.clickCount)
+              : planHover(resolved.from),
+          );
+          if (step.kind === "click") {
+            lastClickPoint = resolved.from;
+            lastProbed = resolved.probed;
+          }
+          done.push({
+            i,
+            what:
+              step.kind === "hover"
+                ? `hovered (${resolved.from.x},${resolved.from.y})`
+                : `clicked (${resolved.from.x},${resolved.from.y}) — ${resolved.probed ? describeHit(resolved.hit) : "unknown hit"}`,
+          });
+          continue;
+        }
+        if (step.kind === "key") {
+          await sendCombo(step.key!);
+          done.push({ i, what: `key ${step.key}` });
+          continue;
+        }
+        // type
+        if (!focusChecked) {
+          const where = await resolveNoRefFocus(ctx.tabId, ctx.adapter);
+          if (where === "none") {
+            return {
+              ok: false,
+              error: trustedInputFailure(
+                `steps[${i}]: nothing editable is focused for the type step — nothing was typed`,
+                "put a click step before the type step (the click establishes focus), then retry from there",
+              ),
+              completed: done,
+              failedAt: i,
+            };
+          }
+          focusChecked = true;
+        }
+        if (step.select === "all") await sendCombo("Control+a");
+        for (const s of planTyping(step.text ?? "")) {
+          if (s.kind === "insertText") {
+            await ctx.adapter.send(ctx.tabId, "Input.insertText", { text: s.text });
+          } else {
+            await sendCombo(s.key);
+          }
+        }
+        done.push({ i, what: `typed ${step.text?.length ?? 0} char(s)${step.select === "all" ? " (select-all first)" : ""}` });
+      } catch (err) {
+        return {
+          ok: false,
+          error: trustedInputFailure(
+            `steps[${i}] (${step.kind}) failed: ${String((err as Error)?.message ?? err)}`,
+            "check page_health, then resume from the failed step — the completed steps are listed",
+          ),
+          completed: done,
+          failedAt: i,
+        };
+      }
+    }
+    const after = lastClickPoint && lastProbed ? await afterHit(ctx, lastClickPoint) : null;
+    return { sent: done.length, steps: done, ...(after ? { after } : {}) };
+  },
+  present(payload) {
+    const p = (payload ?? {}) as {
+      sent?: number;
+      steps?: { i: number; what: string }[];
+      after?: string | null;
+    };
+    const lines = (p.steps ?? []).map((s) => `${s.i + 1}. ${s.what}`);
+    const tail = p.after ? `\nafter: ${p.after}` : "";
+    return {
+      text: `${p.sent ?? 0} step(s) executed:\n${lines.join("\n")}${tail}`,
     };
   },
 });

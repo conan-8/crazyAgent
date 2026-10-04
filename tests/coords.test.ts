@@ -4,6 +4,7 @@ import {
   countRefDrags,
   describeHit,
   MAX_BATCH_DRAGS,
+  MAX_SEQUENCE_STEPS,
   planClick,
   planDrag,
   planHover,
@@ -11,6 +12,7 @@ import {
   shapeCoordArgs,
   shapeDragList,
   shapeModifiers,
+  shapeSequenceSteps,
   toViewportPoint,
   type HitInfo,
 } from "../extension/src/shared/coords";
@@ -231,5 +233,62 @@ describe("shapeModifiers (ref/frame modes)", () => {
     });
     expect(shapeModifiers({ button: "thumb" }).ok).toBe(false);
     expect(shapeModifiers({ click_count: 0 }).ok).toBe(false);
+  });
+});
+
+describe("shapeSequenceSteps (input_sequence)", () => {
+  it("shapes a full menu-path sequence", () => {
+    const out = shapeSequenceSteps({
+      steps: [
+        { click: { x: 120, y: 40, space: "screenshot" } },
+        { wait_ms: 300 },
+        { click: { x: 220, y: 210 } },
+        { type: "Playfair Display" },
+        { key: "Return" },
+        { type: { text: "replaced body", select: "all" } },
+      ],
+    });
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.steps.map((s) => s.kind)).toEqual([
+        "click",
+        "wait",
+        "click",
+        "type",
+        "key",
+        "type",
+      ]);
+      expect(out.steps[0]!.point).toMatchObject({ x: 120, y: 40, space: "screenshot" });
+      expect(out.steps[3]!.text).toBe("Playfair Display");
+      expect(out.steps[5]!.select).toBe("all");
+      expect(out.steps[1]!.waitMs).toBe(300);
+    }
+  });
+
+  it("clamps wait steps and rejects junk with indexed tool-error text", () => {
+    expect(shapeSequenceSteps({ steps: [{ wait_ms: 99_999 }] })).toMatchObject({
+      ok: true,
+      steps: [{ kind: "wait", waitMs: 5_000 }],
+    });
+    for (const bad of [
+      { steps: [] },
+      { steps: "nope" },
+      { steps: [{}] },
+      { steps: [{ click: "not-an-object" }] },
+      { steps: [{ key: 7 }] },
+      { steps: [{ type: { select: "all" } }] },
+      { steps: [{ wait_ms: -5 }] },
+    ]) {
+      const out = shapeSequenceSteps(bad);
+      expect(out.ok).toBe(false);
+      if (!out.ok) expect(out.error.startsWith("ERROR:")).toBe(true);
+    }
+  });
+
+  it("caps the step count like the drags list", () => {
+    const many = Array.from({ length: MAX_SEQUENCE_STEPS + 1 }, () => ({ key: "Tab" }));
+    expect(shapeSequenceSteps({ steps: many }).ok).toBe(false);
+    const ok = Array.from({ length: MAX_SEQUENCE_STEPS }, () => ({ key: "Tab" }));
+    expect(shapeSequenceSteps({ steps: ok }).ok).toBe(true);
   });
 });

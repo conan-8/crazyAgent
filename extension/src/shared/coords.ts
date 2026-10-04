@@ -358,4 +358,107 @@ export function countRefDrags(args: Record<string, unknown>): number {
       (typeof (item as Record<string, unknown>).ref === "string" ||
         typeof (item as Record<string, unknown>).to_ref === "string"),
   ).length;
+}
+
+// ---------------------------------------------------------------------------
+// input_sequence — chained mouse/keyboard steps in one call. A menu path
+// (open menu → click item → type → Return) or a table fill (type/Tab × N) is
+// one LLM round trip this way, not 8. Pure shaping here; the CDP half lives
+// with the coordinate tools.
+// ---------------------------------------------------------------------------
+
+/** Ceiling on one sequence: enough for a long menu path or a table fill,
+ *  small enough that a runaway list cannot spend minutes unattended. */
+export const MAX_SEQUENCE_STEPS = 24;
+/** One wait step is clamped — waits exist for menus/animations, not naps. */
+export const SEQUENCE_MAX_WAIT_MS = 5_000;
+
+export interface SequenceStep {
+  kind: "click" | "hover" | "key" | "type" | "wait";
+  /** click/hover payload: the full arg shape of click_at/hover_at (x/y +
+   * space, or ref + dx/dy, or frame-local), resolved at EXECUTION time. */
+  point?: Record<string, unknown>;
+  key?: string;
+  text?: string;
+  select?: "all";
+  waitMs?: number;
+}
+
+export type SequenceResult =
+  | { ok: true; steps: SequenceStep[] }
+  | { ok: false; error: string };
+
+/**
+ * Validate an `input_sequence` steps list. Accepts each step as
+ * {click:{...}} | {hover:{...}} | {key:"Control+a"} | {type:"text"} |
+ * {type:{text, select:"all"}} | {wait_ms:250}.
+ */
+export function shapeSequenceSteps(args: Record<string, unknown>): SequenceResult {
+  const raw = args.steps;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return {
+      ok: false,
+      error: "ERROR: parameter steps must be a non-empty array of {click|hover|key|type|wait_ms} steps",
+    };
+  }
+  if (raw.length > MAX_SEQUENCE_STEPS) {
+    return {
+      ok: false,
+      error: `ERROR: steps is limited to ${MAX_SEQUENCE_STEPS} (got ${raw.length}) — split across calls`,
+    };
+  }
+  const steps: SequenceStep[] = [];
+  for (const [i, item] of raw.entries()) {
+    if (typeof item !== "object" || item === null) {
+      return { ok: false, error: `ERROR: steps[${i}] must be an object` };
+    }
+    const o = item as Record<string, unknown>;
+    if (o.click !== undefined) {
+      if (typeof o.click !== "object" || o.click === null) {
+        return { ok: false, error: `ERROR: steps[${i}].click must be an object (click_at's arg shape)` };
+      }
+      steps.push({ kind: "click", point: o.click as Record<string, unknown> });
+      continue;
+    }
+    if (o.hover !== undefined) {
+      if (typeof o.hover !== "object" || o.hover === null) {
+        return { ok: false, error: `ERROR: steps[${i}].hover must be an object (hover_at's arg shape)` };
+      }
+      steps.push({ kind: "hover", point: o.hover as Record<string, unknown> });
+      continue;
+    }
+    if (o.key !== undefined) {
+      if (typeof o.key !== "string" || !o.key.trim()) {
+        return { ok: false, error: `ERROR: steps[${i}].key must be a non-empty key combo string` };
+      }
+      steps.push({ kind: "key", key: o.key });
+      continue;
+    }
+    if (o.type !== undefined) {
+      if (typeof o.type === "string") {
+        steps.push({ kind: "type", text: o.type });
+        continue;
+      }
+      if (typeof o.type === "object" && o.type !== null && typeof (o.type as Record<string, unknown>).text === "string") {
+        const t = o.type as Record<string, unknown>;
+        steps.push({
+          kind: "type",
+          text: t.text as string,
+          select: t.select === "all" ? "all" : undefined,
+        });
+        continue;
+      }
+      return { ok: false, error: `ERROR: steps[${i}].type must be a string or {text, select:'all'}` };
+    }
+    if (o.wait_ms !== undefined) {
+      const w = o.wait_ms;
+      if (typeof w !== "number" || !Number.isFinite(w) || w < 0) {
+        return { ok: false, error: `ERROR: steps[${i}].wait_ms must be a non-negative number of milliseconds` };
+      }
+      steps.push({ kind: "wait", waitMs: Math.min(w, SEQUENCE_MAX_WAIT_MS) });
+      continue;
+    }
+    return { ok: false, error: `ERROR: steps[${i}] needs one of click / hover / key / type / wait_ms` };
+  }
+  return { ok: true, steps };
 };

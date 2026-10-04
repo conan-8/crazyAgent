@@ -834,6 +834,7 @@ async function executeToolGated(
     name === "key" ||
     name === "click_at" ||
     name === "type_at" ||
+    name === "input_sequence" ||
     name === "drag_at";
   const tabId = await agentTab();
   if (needsProbe && tabId !== undefined) {

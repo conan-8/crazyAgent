@@ -5,10 +5,13 @@
 > post-mortem: **`type_at`** (click caret → select → type in one trusted
 > sequence — the primary doc-editing move), **zoom/region screenshots**
 > (`screenshot zoom:2..4` or x/y/w/h crops at native resolution;
-> space:'screenshot' resolves against crops too), and **atomic
+> space:'screenshot' resolves against crops too), **atomic
 > `select:'all'`** in `type`/`type_at` (select-all + insert can no longer be
-> split by a focus shift — the duplication bug). Wheel/scroll_until (4, 5),
-> drag upgrades (8, 9), observe/expect (10, 11) and the gauntlet (14) remain.
+> split by a focus shift — the duplication bug), and **`input_sequence`**
+> (item 13: up to 24 chained click/hover/key/type/wait steps in ONE call —
+> menu paths and table fills; coordinates resolve at execution time).
+> Wheel/scroll_until (4, 5), drag upgrades (8, 9), observe/expect (10, 11)
+> and the gauntlet (14) remain.
 
 Companion to `docs/gdocs-cursor-plan.md` (which covers Google Docs editing and
 the skill/tool delivery fixes). This one is about the pointer itself: every

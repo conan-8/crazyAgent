@@ -147,7 +147,10 @@ export function assess(
     }
     // `type_at` = a coordinate click plus typing in ONE call: the union of
     // the click and type rules, fed by the probe of the click point.
-    case "type_at": {
+    // `input_sequence` chains clicks/typing — same union, probed at its
+    // first click step.
+    case "type_at":
+    case "input_sequence": {
       if (probe?.type === "password") {
         return {
           level: "confirm",
