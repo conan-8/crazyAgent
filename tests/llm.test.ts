@@ -6,6 +6,8 @@ import {
   anthropicAggregator,
   openAiAggregator,
   parseOpenAiUsage,
+  isThinkingKnobError,
+  stripThinkingKnobs,
 } from "../extension/src/background/agent/llm";
 import type { LlmRequest } from "../extension/src/shared/llm";
 
@@ -277,7 +279,9 @@ describe("provider request shaping", () => {
     expect(body.thinking).toBeUndefined();
   });
 
-  it("maps a thinking level to the OpenAI-compatible knobs", () => {
+  it("maps a thinking level to the OpenAI-compatible knobs — ONE knob, never both", () => {
+    // A generic (budget-style) model: the number travels, the advisory
+    // effort name does not — strict gateways 400 on the pair.
     const body = buildOpenAiBody({ ...req, thinking: "high" }, "m1") as Record<
       string,
       unknown
@@ -287,7 +291,44 @@ describe("provider request shaping", () => {
       enable_thinking: true,
       thinking_budget: 16_384,
     });
-    expect(body.reasoning_effort).toBe("high");
+    expect(body.thinking_budget).toBe(16_384);
+    expect(body.reasoning_effort).toBeUndefined();
+
+    // An effort-style model: the name travels, no top-level budget.
+    const effort = buildOpenAiBody(
+      { ...req, thinking: "high" },
+      "kimi-k2-0905-preview",
+    ) as Record<string, unknown>;
+    expect(effort.reasoning_effort).toBe("high");
+    expect(effort.thinking_budget).toBeUndefined();
+  });
+
+  it("strips every thinking knob for the graceful-degradation retry", () => {
+    const built = buildOpenAiBody({ ...req, thinking: "high" }, "m1") as Record<
+      string,
+      unknown
+    >;
+    const stripped = stripThinkingKnobs(built);
+    expect(stripped).not.toBe(built);
+    expect(stripped.reasoning_effort).toBeUndefined();
+    expect(stripped.thinking_budget).toBeUndefined();
+    expect(stripped.enable_thinking).toBeUndefined();
+    expect(stripped.chat_template_kwargs).toBeUndefined();
+    // The payload survives untouched.
+    expect(stripped.model).toBe(built.model);
+    expect(stripped.messages).toEqual(built.messages);
+  });
+
+  it("recognises thinking-knob provider errors (the 'cannot be set simultaneously' 400)", () => {
+    expect(
+      isThinkingKnobError(
+        `data: {"error":{"code":"invalid_parameter_error","param":null,"message":"'reasoning_effort' and 'thinking_budget' cannot be set simultaneously","type":"invalid_request_error"}}`,
+      ),
+    ).toBe(true);
+    expect(isThinkingKnobError("enable_thinking is not supported")).toBe(true);
+    expect(isThinkingKnobError("chat_template_kwargs: unexpected field")).toBe(true);
+    expect(isThinkingKnobError("insufficient_quota")).toBe(false);
+    expect(isThinkingKnobError("Invalid model id")).toBe(false);
   });
 
   it("carries the level's BUDGET on the OpenAI wire, not just its name", () => {

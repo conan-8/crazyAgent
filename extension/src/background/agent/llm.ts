@@ -280,6 +280,32 @@ function isOpenAiReasoner(model: string): boolean {
   return /^(?:o\d|gpt-5)/i.test(model);
 }
 
+/**
+ * Model families that take the EFFORT-style thinking knob. Everything else on
+ * the openai-compatible wire gets the BUDGET-style knob: the number is what
+ * actually bounds emission (`reasoning_effort` is advisory and the big servers
+ * ignore it — an archived run asked for "low" and received 196,918 reasoning
+ * tokens). ONE knob is ever sent: strict gateways reject the pair outright
+ * ("'reasoning_effort' and 'thinking_budget' cannot be set simultaneously").
+ */
+const EFFORT_STYLE_MODELS = /^(?:o\d|gpt-5|gpt-oss|grok|kimi|moonshot)/i;
+
+/** True when a provider error text is about the thinking knobs we sent. */
+export function isThinkingKnobError(detail: string): boolean {
+  return /reasoning_effort|thinking_budget|enable_thinking|chat_template_kwargs/i.test(detail);
+}
+
+/** Remove every thinking knob from a built body — the graceful-degradation
+ *  retry: server-default thinking beats a 400 that kills the whole run. */
+export function stripThinkingKnobs(body: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...body };
+  delete out.reasoning_effort;
+  delete out.thinking_budget;
+  delete out.enable_thinking;
+  delete out.chat_template_kwargs;
+  return out;
+}
+
 export function buildOpenAiBody(
   req: LlmRequest,
   model: string,
@@ -351,8 +377,11 @@ export function buildOpenAiBody(
       ? { enable_thinking: true, thinking_budget: thinkingBudgetFor(level) }
       : { enable_thinking: false };
     if (thinking) {
-      body.reasoning_effort = level;
-      body.thinking_budget = thinkingBudgetFor(level);
+      // Exactly ONE of the two top-level knobs — never both. A gateway that
+      // knows both rejects the pair ("cannot be set simultaneously"), and a
+      // gateway that knows neither ignores whichever one it gets.
+      if (EFFORT_STYLE_MODELS.test(model)) body.reasoning_effort = level;
+      else body.thinking_budget = thinkingBudgetFor(level);
     }
   } else if (reasoner && level !== "off") {
     body.reasoning_effort = level;
@@ -702,17 +731,31 @@ class OpenAiCompatClient implements LlmClient {
     signal?: AbortSignal,
     onReasoning?: LlmReasoningSink,
   ): Promise<LlmResult> {
-    const res = await fetch(`${this.settings.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
+    const url = `${this.settings.baseUrl.replace(/\/$/, "")}/chat/completions`;
+    const init = (body: string) => ({
+      method: "POST" as const,
       signal,
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${this.settings.apiKey}`,
       },
-      body: JSON.stringify(
-        buildOpenAiBody(req, this.settings.model, { baseUrl: this.settings.baseUrl }),
-      ),
+      body,
     });
+    const built = buildOpenAiBody(req, this.settings.model, {
+      baseUrl: this.settings.baseUrl,
+    });
+    let res = await fetch(url, init(JSON.stringify(built)));
+    if (res.status === 400) {
+      const detail = await res.text().catch(() => "");
+      if (isThinkingKnobError(detail)) {
+        // The gateway refused our thinking knobs — retry ONCE with every one
+        // of them stripped. Server-default thinking beats a 400 that kills
+        // the run; the loop's reasoning cap still backstops the output.
+        res = await fetch(url, init(JSON.stringify(stripThinkingKnobs(built))));
+      } else {
+        throw new Error(`LLM API error 400: ${detail.slice(0, 300)}`);
+      }
+    }
     return readSse(res, openAiAggregator(onText, onReasoning), signal);
   }
 }
