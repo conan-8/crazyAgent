@@ -33,7 +33,11 @@ machinery that addresses it:
   same call — waiting on a streamed chat reply is ONE call, never a poll loop.
 - **Batched drags**: `drag_at` takes a `drags` list (up to 32) — calibrate a
   graph once, send every drag in one call. Coordinate tools also accept a
-  `ref` or **frame-local** coordinates (translated through the iframe chain).
+  `ref` (scrolled into view, translated through the iframe chain), **frame-local**
+  coordinates, or `space:'screenshot'` — point at pixels of the latest
+  screenshot image and the tool converts for you (no DPR/downscale math in
+  reasoning). The pre-click probe is best-effort: the click still lands when
+  the content script can't run there.
 - **Skills**: curated procedures ride the prompt as a one-line catalog and load
   only when used; the doc-editor playbook left the fixed prefix for that
   catalog, roughly 2.5k tokens cheaper per step. Skills can be split into
@@ -85,6 +89,12 @@ Sensitive actions (typing passwords, form submission, purchases/checkout,
 downloads, `evaluate_js`, network modification) pause with **Allow once /
 Always allow / Deny** cards; denies return a cancellation the model works
 around. **Stop** aborts between steps.
+
+A **glowing cursor** rides along on the page: a little arrow glides to every
+point the agent touches (ref clicks and coordinate strokes alike), and a
+ripple ring pulses where it presses/releases — so watching a run, you can
+always see what it's doing. Pure overlay: `pointer-events:none`, never
+awaited, and a page that rejects it just shows nothing.
 
 Every build is stamped with the commit it came from: the bottom of **⚙
 Settings** shows `Version 0.1.0 · build <sha>` (with `-dirty` when it was built

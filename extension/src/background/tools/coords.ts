@@ -29,6 +29,7 @@ import {
   planClick,
   planDrag,
   planHover,
+  screenshotToViewportPoint,
   shapeCoordArgs,
   shapeDragList,
   shapeModifiers,
@@ -42,6 +43,8 @@ import { failureTag } from "../../shared/tool-failure";
 import { trustedInputFailure } from "../../shared/trusted-input";
 import type { ElementProbe } from "../policy";
 import { runContentAction } from "./content-action";
+import { cursorPing } from "./cursor-overlay";
+import { layoutViewportCss, viewportShotInfo } from "./perception";
 import { ensureTabActive } from "./trusted-input";
 import { registerTool, type ToolContext } from "./types";
 
@@ -80,18 +83,62 @@ interface ResolvedPoint {
 }
 
 type ResolveOutcome =
-  | { ok: true; source: "ref" | "frame" | "coords"; from: Point; hit: HitInfo | null; viewport: ViewportInfo; resolved?: ResolvedPoint }
+  | { ok: true; source: "ref" | "frame" | "coords"; from: Point; hit: HitInfo | null; viewport: ViewportInfo | null; probed: boolean; resolved?: ResolvedPoint }
   | { ok: false; error: string };
 
+/** Distinguishes an ACTING resolve (click/drag/hover — allowed to scroll a
+ *  ref into view) from a LOOKING one (element_at, the policy probe — no
+ *  page-state changes). */
+interface ResolveOpts {
+  scrollRef?: boolean;
+}
+
 /**
- * Resolve WHERE to act, in top-viewport coordinates, from any of the three
- * input modes: a snapshot `ref` (element centre + dx/dy), a `frame`-local
- * point, or raw viewport/page coordinates. `to` fields are resolved by
- * resolveEnd for drags.
+ * Convert a `space:"screenshot"` point to viewport CSS pixels using the
+ * latest capture's image dims, with the freshest viewport size CDP can get
+ * (the stored capture dims are the fallback). No content script needed.
+ */
+async function fromScreenshotSpace(
+  ctx: ToolContext,
+  point: Point,
+): Promise<{ ok: true; point: Point } | { ok: false; error: string }> {
+  const shot = viewportShotInfo(ctx.tabId);
+  if (!shot) {
+    return {
+      ok: false,
+      error: `${failureTag("input")}: space:'screenshot' needs a screenshot of THIS tab first (none captured this session) — take one with \`screenshot\`, then point at the image`,
+    };
+  }
+  const fresh = await layoutViewportCss(ctx.tabId, ctx.adapter).catch(() => undefined);
+  const width = fresh?.width ?? shot.viewportCssW;
+  const height = fresh?.height ?? shot.viewportCssH;
+  if (typeof width !== "number" || typeof height !== "number") {
+    return {
+      ok: false,
+      error: `${failureTag("input")}: could not determine the viewport's CSS size to convert screenshot pixels — retake the screenshot, or use space:'viewport'`,
+    };
+  }
+  return {
+    ok: true,
+    point: screenshotToViewportPoint(point, shot, { width, height }),
+  };
+}
+
+/**
+ * Resolve WHERE to act, in top-viewport coordinates, from any of the four
+ * input modes: a snapshot `ref` (element centre + dx/dy, optionally scrolled
+ * into view first), a `frame`-local point, screenshot-image pixels, or raw
+ * viewport/page coordinates. `to` fields are resolved by resolveEnd for drags.
+ *
+ * The content-script probe is BEST-EFFORT: it feeds the hit report and the
+ * bounds check, but the stroke itself (CDP Input) does not need it. A page
+ * the registry never reached still gets clicked — the result just says what
+ * could not be verified instead of refusing the action.
  */
 async function resolveTarget(
   ctx: ToolContext,
   args: Record<string, unknown>,
+  opts: ResolveOpts = {},
 ): Promise<ResolveOutcome> {
   const dx = typeof args.dx === "number" ? args.dx : 0;
   const dy = typeof args.dy === "number" ? args.dy : 0;
@@ -101,6 +148,7 @@ async function resolveTarget(
       ref: args.ref,
       dx,
       dy,
+      ...(opts.scrollRef ? { scroll: true } : {}),
     });
     if (!res.ok || !res.data) {
       return {
@@ -115,6 +163,7 @@ async function resolveTarget(
       from: data.point,
       hit: data.hit,
       viewport: data.viewport,
+      probed: true,
       resolved: data,
     };
   }
@@ -149,21 +198,32 @@ async function resolveTarget(
       from: data.point,
       hit: data.hit,
       viewport: data.viewport,
+      probed: true,
       resolved: data,
     };
   }
   const shaped = shapeCoordArgs(args);
   if (!shaped.ok) return { ok: false, error: shaped.error };
-  const probed = await probePoint(ctx.tabId, shaped.from.x, shaped.from.y, shaped.space);
+  let from = shaped.from;
+  if (shaped.space === "screenshot") {
+    const converted = await fromScreenshotSpace(ctx, from);
+    if (!converted.ok) return { ok: false, error: converted.error };
+    from = converted.point;
+  }
+  const probed = await probePoint(ctx.tabId, from.x, from.y, "viewport");
   if (!probed) {
-    return {
-      ok: false,
-      error: `${failureTag("injection")}: could not read the page at (${shaped.from.x}, ${shaped.from.y}) — the content script is not running there (page_health reports which layer is down)`,
-    };
+    // No content script at the point — the stroke still works. Bounds-check
+    // against CDP layout metrics when available; the hit is just "unknown".
+    const viewport = await layoutViewportCss(ctx.tabId, ctx.adapter).catch(() => undefined);
+    if (viewport) {
+      const outOfBounds = boundsError(from, viewport);
+      if (outOfBounds) return { ok: false, error: `${failureTag("input")}: ${outOfBounds}` };
+    }
+    return { ok: true, source: "coords", from, hit: null, viewport: viewport ?? null, probed: false };
   }
   const outOfBounds = boundsError(probed.point, probed.viewport);
   if (outOfBounds) return { ok: false, error: `${failureTag("input")}: ${outOfBounds}` };
-  return { ok: true, source: "coords", from: probed.point, hit: probed.hit, viewport: probed.viewport };
+  return { ok: true, source: "coords", from: probed.point, hit: probed.hit, viewport: probed.viewport, probed: true };
 }
 
 /**
@@ -213,6 +273,11 @@ async function resolveEnd(
     const shaped = shapeCoordArgs(args);
     if (!shaped.ok || !shaped.to) {
       return { ok: false, error: shaped.ok ? `${failureTag("input")}: drag_at needs to_x and to_y (or to_ref / to_dx+to_dy)` : shaped.error };
+    }
+    if (shaped.space === "screenshot") {
+      const converted = await fromScreenshotSpace(ctx, shaped.to);
+      if (!converted.ok) return { ok: false, error: converted.error };
+      return { ok: true, to: converted.point };
     }
     if (shaped.space === "page") {
       // Convert document-space ends through the page (it owns the scroll).
@@ -265,6 +330,22 @@ export async function probeElementAt(
   const x = typeof probeArgs.x === "number" ? probeArgs.x : undefined;
   const y = typeof probeArgs.y === "number" ? probeArgs.y : undefined;
   if (x === undefined || y === undefined) return null;
+  if (probeArgs.space === "screenshot") {
+    // The policy probe has no adapter context: convert with the stored
+    // capture dims, or skip the probe entirely (the gate tolerates null).
+    const shot = viewportShotInfo(tabId);
+    if (!shot || typeof shot.viewportCssW !== "number" || typeof shot.viewportCssH !== "number") {
+      return null;
+    }
+    const p = screenshotToViewportPoint({ x, y }, shot, {
+      width: shot.viewportCssW,
+      height: shot.viewportCssH,
+    });
+    const probedShot = await probePoint(tabId, p.x, p.y, "viewport").catch(() => null);
+    const shotHit = probedShot?.hit;
+    if (!shotHit) return null;
+    return elementProbeOf(shotHit);
+  }
   const space = probeArgs.space === "page" ? "page" : "viewport";
   const probed = await probePoint(tabId, x, y, space).catch(() => null);
   const hit = probed?.hit;
@@ -331,6 +412,15 @@ async function sendStrokes(
         ),
       );
     }
+    // The visible cursor rides the same points the strokes hit. Fire-and-
+    // forget: decoration never adds latency or failure modes to input.
+    cursorPing(
+      ctx.tabId,
+      ctx.adapter,
+      step.x,
+      step.y,
+      step.type === "mousePressed" ? "press" : step.type === "mouseReleased" ? "release" : "move",
+    );
     if (step.type === "mousePressed") pressed = step.button ?? "left";
     if (step.type === "mouseReleased") pressed = null;
     await sleep(BETWEEN_STEPS_MS);
@@ -365,7 +455,7 @@ const FRAME_PROP = {
 registerTool({
   name: "click_at",
   description:
-    "Click at screen coordinates instead of an element ref. Use ONLY when the target is drawn into a <canvas> or otherwise has no ref in the snapshot (canvas editors, maps, drawing boards, sliders) — a ref-based `click` is always safer. Accepts: x/y (CSS px from the visible viewport's top-left, exactly the screenshot's frame; space:'page' for document coordinates), OR ref + dx/dy (element centre, translated through iframes), OR frame + frame-local x/y. The result reports what the point hit before AND after the click. The point is probed before clicking and the same safety rules apply as for `click`.",
+    "Click at screen coordinates instead of an element ref. Use ONLY when the target is drawn into a <canvas> or otherwise has no ref in the snapshot (canvas editors, maps, drawing boards, sliders) — a ref-based `click` is always safer. Accepts: x/y (CSS px from the visible viewport's top-left; space:'page' for document coordinates; space:'screenshot' for pixels of the latest screenshot image — point at exactly what you see and the tool converts), OR ref + dx/dy (element centre, scrolled into view first and translated through iframes), OR frame + frame-local x/y. The point is probed before clicking (best-effort: the click still lands when the probe cannot run, the result just says so) and the result reports what the point hit before AND after the click. The same safety rules apply as for `click`.",
   parameters: {
     type: "object",
     properties: {
@@ -385,19 +475,19 @@ registerTool({
     },
   },
   async run(args, ctx) {
-    const resolved = await resolveTarget(ctx, args);
+    const resolved = await resolveTarget(ctx, args, { scrollRef: true });
     if (!resolved.ok) return { ok: false, error: resolved.error };
     const mods = shapeModifiers(args);
     if (!mods.ok) return { ok: false, error: mods.error };
-    const { from, hit, viewport, source } = resolved;
+    const { from, hit, viewport, source, probed } = resolved;
     await sendStrokes(ctx, planClick(from, mods.button, mods.clickCount));
-    const after = await afterHit(ctx, from);
+    const after = probed ? await afterHit(ctx, from) : null;
     return {
       clicked: { x: from.x, y: from.y, button: mods.button, clickCount: mods.clickCount },
-      hit: describeHit(hit),
+      hit: probed ? describeHit(hit) : "unknown (no content script at that point — the click still landed; verify the effect)",
       after,
       source,
-      viewport: { width: viewport.width, height: viewport.height },
+      viewport: viewport ? { width: viewport.width, height: viewport.height } : undefined,
     };
   },
   present(payload) {
@@ -416,24 +506,24 @@ registerTool({
 registerTool({
   name: "hover_at",
   description:
-    "Move the mouse to screen coordinates without clicking (tooltips, hover menus on canvas surfaces). Same coordinate modes as click_at (x/y, ref+dx/dy, or frame-local).",
+    "Move the mouse to screen coordinates without clicking (tooltips, hover menus on canvas surfaces). Same coordinate modes as click_at (x/y, space:'screenshot' for image pixels, ref+dx/dy, or frame-local).",
   parameters: {
     type: "object",
     properties: { ...POINT_PROPS, ...REF_PROP, ...FRAME_PROP, dx: { type: "number" }, dy: { type: "number" } },
   },
   async run(args, ctx) {
-    const resolved = await resolveTarget(ctx, args);
+    const resolved = await resolveTarget(ctx, args, { scrollRef: true });
     if (!resolved.ok) return { ok: false, error: resolved.error };
-    const { from, hit } = resolved;
+    const { from, hit, probed } = resolved;
     await sendStrokes(ctx, planHover(from));
-    return { movedTo: from, hit: describeHit(hit) };
+    return { movedTo: from, hit: probed ? describeHit(hit) : "unknown (no content script at that point)" };
   },
 });
 
 registerTool({
   name: "drag_at",
   description:
-    "Press at a point, drag to another, and release — for canvas editors' selections and carets, sliders, drawing tools, drag-and-drop surfaces and GRAPH PLOTTING. Same coordinate modes as click_at: x/y→to_x/to_y, or ref→to_ref (element centres, translated through iframes), or ref + to_dx/to_dy (relative), or frame + frame-local coords. For MANY drags on one surface (plotting points on a graph), pass a `drags` LIST (up to 32) — calibrate once, send them all in ONE call; the result reports each drag's from/to and what it hit. Strokes stop at the first failure and report what completed.",
+    "Press at a point, drag to another, and release — for canvas editors' selections and carets, sliders, drawing tools, drag-and-drop surfaces and GRAPH PLOTTING. Same coordinate modes as click_at: x/y→to_x/to_y (space:'screenshot' points at the latest screenshot image), or ref→to_ref (element centres, scrolled into view and translated through iframes), or ref + to_dx/to_dy (relative), or frame + frame-local coords. For MANY drags on one surface (plotting points on a graph), pass a `drags` LIST (up to 32) — calibrate once, send them all in ONE call; the result reports each drag's from/to and what it hit. Strokes stop at the first failure and report what completed.",
   parameters: {
     type: "object",
     properties: {
@@ -461,12 +551,12 @@ registerTool({
       const list = shapeDragList(args);
       if (!list.ok) return { ok: false, error: list.error };
       const frame = typeof args.frame === "number" ? args.frame : undefined;
-      type Item = { from: Point; to: Point; hit: string };
+      type Item = { from: Point; to: Point; hit: string; probed: boolean };
       const items: Item[] = [];
       const rawList = args.drags as Record<string, unknown>[];
       for (const [i, raw] of rawList.entries()) {
         // Resolve this item's start and end through the same three modes.
-        const startRes = await resolveTarget(ctx, { ...raw, frame });
+        const startRes = await resolveTarget(ctx, { ...raw, frame }, { scrollRef: true });
         if (!startRes.ok) {
           return { ok: false, error: `drags[${i}]: ${startRes.error}`, completed: items };
         }
@@ -474,11 +564,11 @@ registerTool({
         if (!endRes.ok) {
           return { ok: false, error: `drags[${i}]: ${endRes.error}`, completed: items };
         }
-        const outOfBounds = boundsError(endRes.to, startRes.viewport);
+        const outOfBounds = startRes.viewport ? boundsError(endRes.to, startRes.viewport) : null;
         if (outOfBounds) {
           return { ok: false, error: `drags[${i}]: ${failureTag("input")}: ${outOfBounds}`, completed: items };
         }
-        items.push({ from: startRes.from, to: endRes.to, hit: describeHit(startRes.hit) });
+        items.push({ from: startRes.from, to: endRes.to, hit: describeHit(startRes.hit), probed: startRes.probed });
       }
       // All points resolved and bounds-checked before ANY stroke is sent.
       const results: { from: Point; to: Point; hit: string; after: string | null }[] = [];
@@ -493,21 +583,21 @@ registerTool({
             stoppedAt: results.length,
           };
         }
-        results.push({ ...item, after: await afterHit(ctx, item.to) });
+        results.push({ ...item, after: item.probed ? await afterHit(ctx, item.to) : null });
       }
       return { drags: results, sent: results.length };
     }
 
     // ---- single form --------------------------------------------------
-    const resolved = await resolveTarget(ctx, args);
+    const resolved = await resolveTarget(ctx, args, { scrollRef: true });
     if (!resolved.ok) return { ok: false, error: resolved.error };
     const endRes = await resolveEnd(ctx, args, resolved.from, resolved.source);
     if (!endRes.ok) return { ok: false, error: endRes.error };
     const to = endRes.to;
-    const outOfBounds = boundsError(to, resolved.viewport);
+    const outOfBounds = resolved.viewport ? boundsError(to, resolved.viewport) : null;
     if (outOfBounds) return { ok: false, error: `${failureTag("input")}: ${outOfBounds}` };
     await sendStrokes(ctx, planDrag(resolved.from, to));
-    const after = await afterHit(ctx, to);
+    const after = resolved.probed ? await afterHit(ctx, to) : null;
     return {
       dragged: { from: resolved.from, to },
       hit: describeHit(resolved.hit),
@@ -550,15 +640,15 @@ registerTool({
   async run(args, ctx) {
     const resolved = await resolveTarget(ctx, args);
     if (!resolved.ok) return { ok: false, error: resolved.error };
-    const { from, hit, viewport, source, resolved: res } = resolved;
+    const { from, hit, viewport, source, probed, resolved: res } = resolved;
     return {
       at: from,
       hit,
-      described: describeHit(hit),
+      described: probed ? describeHit(hit) : "unknown (no content script at that point)",
       source,
       ...(res?.rect ? { targetRect: res.rect } : {}),
       ...(res ? { localPoint: res.localPoint, frameOffset: res.frameOffset } : {}),
-      viewport: { width: viewport.width, height: viewport.height },
+      ...(viewport ? { viewport: { width: viewport.width, height: viewport.height } } : {}),
     };
   },
   present(payload) {

@@ -7,6 +7,7 @@ import {
   planClick,
   planDrag,
   planHover,
+  screenshotToViewportPoint,
   shapeCoordArgs,
   shapeDragList,
   shapeModifiers,
@@ -43,6 +44,37 @@ describe("shapeCoordArgs", () => {
   it("treats space:'page' as document coordinates", () => {
     const out = shapeCoordArgs({ x: 5, y: 5, space: "page" });
     expect(out.ok && out.space).toBe("page");
+  });
+
+  it("treats space:'screenshot' as image pixels (conversion happens at resolve time)", () => {
+    const out = shapeCoordArgs({ x: 640, y: 360, space: "screenshot" });
+    expect(out).toMatchObject({ ok: true, space: "screenshot", from: { x: 640, y: 360 } });
+  });
+});
+
+describe("screenshot-space conversion", () => {
+  it("scales image pixels to viewport CSS px (downscaled device-pixel capture)", () => {
+    // A 1254×1028 CSS viewport captured at DPR 2 and downscaled to 1280 wide:
+    // the model points at image pixels, the tool maps them back.
+    const shot = { imageW: 1280, imageH: 1049 };
+    const vp = { width: 1254, height: 1028 };
+    expect(screenshotToViewportPoint({ x: 640, y: 525 }, shot, vp)).toEqual({
+      x: Math.round((640 * 1254) / 1280),
+      y: Math.round((525 * 1028) / 1049),
+    });
+  });
+
+  it("is identity when the image already matches the viewport", () => {
+    const shot = { imageW: 1000, imageH: 800 };
+    const vp = { width: 1000, height: 800 };
+    expect(screenshotToViewportPoint({ x: 123, y: 456 }, shot, vp)).toEqual({ x: 123, y: 456 });
+  });
+
+  it("maps the corners to the corners", () => {
+    const shot = { imageW: 1280, imageH: 720 };
+    const vp = { width: 1920, height: 1080 };
+    expect(screenshotToViewportPoint({ x: 0, y: 0 }, shot, vp)).toEqual({ x: 0, y: 0 });
+    expect(screenshotToViewportPoint({ x: 1280, y: 720 }, shot, vp)).toEqual({ x: 1920, y: 1080 });
   });
 });
 

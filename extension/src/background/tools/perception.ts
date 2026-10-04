@@ -283,26 +283,30 @@ export async function settleTab(
 /**
  * Downscale a JPEG data URL to at most `maxWidth` px wide (models downscale
  * larger images server-side anyway, so the extra pixels are pure upload
- * latency + token cost). Falls back to the original on any failure.
+ * latency + token cost). Falls back to the original on any failure. The
+ * `Info` variant also reports the resulting image dimensions — the mapping
+ * the coordinate tools need to turn "pixels of the image you are looking
+ * at" into viewport CSS px (see `space:"screenshot"` on click_at).
  */
-export async function downscaleJpeg(
+export async function downscaleJpegInfo(
   dataUrl: string,
   maxWidth = 1_280,
   quality = 0.7,
-): Promise<string> {
+): Promise<{ dataUrl: string; width: number; height: number }> {
   try {
     const blob = await (await fetch(dataUrl)).blob();
     const bmp = await createImageBitmap(blob);
     if (bmp.width <= maxWidth) {
+      const out = { dataUrl, width: bmp.width, height: bmp.height };
       bmp.close();
-      return dataUrl;
+      return out;
     }
     const scale = maxWidth / bmp.width;
     const w = Math.max(1, Math.round(bmp.width * scale));
     const h = Math.max(1, Math.round(bmp.height * scale));
     const canvas = new OffscreenCanvas(w, h);
     const ctx = canvas.getContext("2d");
-    if (!ctx) return dataUrl;
+    if (!ctx) return { dataUrl, width: 0, height: 0 };
     ctx.drawImage(bmp, 0, 0, w, h);
     bmp.close();
     const out = await canvas.convertToBlob({ type: "image/jpeg", quality });
@@ -312,10 +316,85 @@ export async function downscaleJpeg(
     for (let i = 0; i < bytes.length; i += chunk) {
       binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
     }
-    return `data:image/jpeg;base64,${btoa(binary)}`;
+    return { dataUrl: `data:image/jpeg;base64,${btoa(binary)}`, width: w, height: h };
   } catch {
-    return dataUrl; // never fail a screenshot over an optimization
+    return { dataUrl, width: 0, height: 0 }; // never fail a screenshot over an optimization
   }
+}
+
+export async function downscaleJpeg(
+  dataUrl: string,
+  maxWidth = 1_280,
+  quality = 0.7,
+): Promise<string> {
+  return (await downscaleJpegInfo(dataUrl, maxWidth, quality)).dataUrl;
+}
+
+/**
+ * What the latest viewport capture of a tab looks like: image dimensions
+ * (after downscaling) plus the viewport's CSS dimensions at capture time.
+ * The coordinate tools use it to convert `space:"screenshot"` points — the
+ * model points at the image it is looking at, the tool does the scaling.
+ */
+export interface ViewportShotInfo {
+  imageW: number;
+  imageH: number;
+  viewportCssW?: number;
+  viewportCssH?: number;
+  at: number;
+}
+
+const viewportShots = new Map<number, ViewportShotInfo>();
+
+export function viewportShotInfo(tabId: number): ViewportShotInfo | undefined {
+  return viewportShots.get(tabId);
+}
+
+/** The visible viewport's CSS dimensions via CDP layout metrics — works
+ *  without a content script, so the coordinate tools can convert and
+ *  bounds-check even on pages the registry never reached. */
+export async function layoutViewportCss(
+  tabId: number,
+  adapter: ToolContext["adapter"],
+): Promise<{ width: number; height: number; scrollX: number; scrollY: number } | undefined> {
+  try {
+    const m = (await adapter.send(tabId, "Page.getLayoutMetrics", {})) as {
+      cssVisualViewport?: { clientWidth?: number; clientHeight?: number; pageX?: number; pageY?: number };
+      cssLayoutViewport?: { clientWidth?: number; clientHeight?: number };
+    };
+    const width = m?.cssVisualViewport?.clientWidth ?? m?.cssLayoutViewport?.clientWidth;
+    const height = m?.cssVisualViewport?.clientHeight ?? m?.cssLayoutViewport?.clientHeight;
+    if (typeof width !== "number" || typeof height !== "number") return undefined;
+    return {
+      width,
+      height,
+      scrollX: m?.cssVisualViewport?.pageX ?? 0,
+      scrollY: m?.cssVisualViewport?.pageY ?? 0,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Downscale a viewport capture and record its mapping info for the
+ *  coordinate tools. Every viewport capture (screenshot, blind shot) goes
+ *  through here so `space:"screenshot"` always has fresh dims. */
+async function recordViewportShot(
+  tabId: number,
+  adapter: ToolContext["adapter"],
+  dataUrl: string,
+): Promise<{ dataUrl: string; shot: ViewportShotInfo }> {
+  const { dataUrl: jpeg, width, height } = await downscaleJpegInfo(dataUrl);
+  const vp = await layoutViewportCss(tabId, adapter);
+  const shot: ViewportShotInfo = {
+    imageW: width,
+    imageH: height,
+    viewportCssW: vp?.width,
+    viewportCssH: vp?.height,
+    at: Date.now(),
+  };
+  if (width > 0 && height > 0) viewportShots.set(tabId, shot);
+  return { dataUrl: jpeg, shot };
 }
 
 /**
@@ -331,7 +410,7 @@ export async function captureBlindShot(
 ): Promise<string | undefined> {
   try {
     const { dataUrl } = await adapter.screenshot(tabId);
-    return await downscaleJpeg(dataUrl);
+    return (await recordViewportShot(tabId, adapter, dataUrl)).dataUrl;
   } catch {
     return undefined;
   }
@@ -628,7 +707,7 @@ registerTool({
 registerTool({
   name: "screenshot",
   description:
-    "Capture a JPEG screenshot of the visible viewport. The image is ATTACHED to this result and you WILL see it — looking at it is the fastest way to resolve any confusion about what the page shows. Take one whenever you are confused, uncertain, or concerned — before guessing, before retrying a failing approach, and before reporting a blocker. Every capture also STAGES itself on the image shelf (shot_N): `paste_image` can then deliver those exact bytes into another page (chat composer, upload form, dropzone) with no disk and no paths. save_to_disk:true additionally writes the JPEG into the Downloads folder and reports its absolute path (SENSITIVE — confirmation required).",
+    "Capture a JPEG screenshot of the visible viewport. The image is ATTACHED to this result and you WILL see it — looking at it is the fastest way to resolve any confusion about what the page shows. Take one whenever you are confused, uncertain, or concerned — before guessing, before retrying a failing approach, and before reporting a blocker. The result reports the image's pixel dimensions: point at anything you see with click_at/hover_at/drag_at using space:'screenshot' and x/y in image pixels — the tool converts to viewport coordinates for you. Every capture also STAGES itself on the image shelf (shot_N): `paste_image` can then deliver those exact bytes into another page (chat composer, upload form, dropzone) with no disk and no paths. save_to_disk:true additionally writes the JPEG into the Downloads folder and reports its absolute path (SENSITIVE — confirmation required).",
   parameters: {
     type: "object",
     properties: {
@@ -644,7 +723,11 @@ registerTool({
   },
   async run(args, ctx) {
     const { dataUrl } = await ctx.adapter.screenshot(ctx.tabId);
-    const jpeg = await downscaleJpeg(dataUrl);
+    const { dataUrl: jpeg, shot: shotInfo } = await recordViewportShot(
+      ctx.tabId,
+      ctx.adapter,
+      dataUrl,
+    );
     // Stamp which tab/URL this image came from. A screenshot with no identity
     // is how a real run convinced itself the tool was returning stale caches
     // when it was actually capturing a different window's tab.
@@ -662,14 +745,26 @@ registerTool({
       tabId: ctx.tabId,
     });
     const shot = staged.id ? { id: staged.id, name: filename } : undefined;
-    if (args.save_to_disk !== true) return { dataUrl: jpeg, ident, shot };
+    // The image→viewport mapping, so the model can point at what it sees:
+    // click_at space:'screenshot' takes x/y in THIS image's pixels.
+    const coords =
+      shotInfo.imageW > 0
+        ? {
+            image: { width: shotInfo.imageW, height: shotInfo.imageH },
+            viewport_css:
+              typeof shotInfo.viewportCssW === "number"
+                ? { width: shotInfo.viewportCssW, height: shotInfo.viewportCssH }
+                : undefined,
+          }
+        : undefined;
+    if (args.save_to_disk !== true) return { dataUrl: jpeg, ident, shot, coords };
     const downloadId = await chrome.downloads.download({
       url: jpeg,
       filename,
       saveAs: false,
     });
     const path = await finalDownloadPath(downloadId);
-    return { dataUrl: jpeg, saved: { downloadId, filename, path }, ident, shot };
+    return { dataUrl: jpeg, saved: { downloadId, filename, path }, ident, shot, coords };
   },
   present(payload) {
     const p = payload as {
@@ -677,6 +772,7 @@ registerTool({
       saved?: { downloadId: number; filename: string; path?: string };
       ident?: string;
       shot?: { id: string; name: string };
+      coords?: { image: { width: number; height: number } };
     };
     const where = p.ident ? ` of ${p.ident}` : "";
     const saved = p.saved
@@ -685,8 +781,11 @@ registerTool({
     const staged = p.shot
       ? ` — staged as ${p.shot.id}: paste_image can deliver these exact bytes into another page (no disk, no paths)`
       : "";
+    const dims = p.coords
+      ? ` — the image is ${p.coords.image.width}×${p.coords.image.height} px; click_at/hover_at/drag_at with space:'screenshot' take x/y in these image pixels and convert for you`
+      : "";
     return {
-      text: `[screenshot captured${where}${saved}${staged} — the image is attached below; look at it]`,
+      text: `[screenshot captured${where}${saved}${staged}${dims} — the image is attached below; look at it]`,
       image: p.dataUrl,
     };
   },

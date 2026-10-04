@@ -27,6 +27,7 @@ import {
 } from "../../shared/trusted-input";
 import type { BrowserAdapter } from "../adapters/types";
 import { runContentAction } from "./content-action";
+import { cursorPing } from "./cursor-overlay";
 
 /** Let the renderer own the tab before sending input to it. */
 const ACTIVATE_SETTLE_MS = 120;
@@ -38,22 +39,51 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Make this tab the one the browser will deliver input to. Best effort: a tab
- * that is already active costs nothing, and a failure here is reported by the
- * Input call that follows rather than guessed at.
+ * The tab we last verified as front, and when. Trusted input pays a settle
+ * after every activation change (the renderer needs a beat to own the tab),
+ * but paying it on EVERY stroke of a sequence is a flat 120ms tax on work
+ * that changed nothing — so while the same tab stays front, the check is a
+ * cache hit and the call is free.
+ */
+let frontTab: { tabId: number; windowId: number; at: number } | null = null;
+const FRONT_CACHE_MS = 2_000;
+
+/**
+ * Make this tab the one the browser will deliver input to. Cheap when the
+ * tab is already front: no re-activation, no settle — the previous stroke
+ * already proved where input lands.
  */
 export async function ensureTabActive(
   tabId: number,
   adapter: BrowserAdapter,
 ): Promise<void> {
+  if (
+    frontTab &&
+    frontTab.tabId === tabId &&
+    Date.now() - frontTab.at < FRONT_CACHE_MS
+  ) {
+    return;
+  }
+  let changed = false;
+  let windowId = -1;
   try {
     const tab = await chrome.tabs.get(tabId);
-    if (!tab.active) await chrome.tabs.update(tabId, { active: true });
-    if (typeof tab.windowId === "number") {
-      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
+    windowId = typeof tab.windowId === "number" ? tab.windowId : -1;
+    if (!tab.active) {
+      await chrome.tabs.update(tabId, { active: true });
+      changed = true;
     }
+    if (windowId >= 0) {
+      const win = await chrome.windows.get(windowId).catch(() => undefined);
+      if (win && !win.focused) {
+        await chrome.windows.update(windowId, { focused: true }).catch(() => undefined);
+        changed = true;
+      }
+    }
+    frontTab = { tabId, windowId, at: Date.now() };
   } catch {
     // tab closed or the API is unavailable — the next call will say so
+    frontTab = null;
   }
   // bringToFront is the full-CDP equivalent; harmless when already frontmost.
   try {
@@ -61,7 +91,9 @@ export async function ensureTabActive(
   } catch {
     // Page may be unavailable on this transport; Input still works without it
   }
-  await sleep(ACTIVATE_SETTLE_MS);
+  // The settle exists for ownership CHANGES; a tab that was already front
+  // needs no beat before input.
+  if (changed) await sleep(ACTIVATE_SETTLE_MS);
 }
 
 export interface FocusState {
@@ -101,8 +133,11 @@ async function clickPoint(
     x: point.x,
     y: point.y,
   });
+  cursorPing(tabId, adapter, point.x, point.y, "move");
   await adapter.send(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", ...common });
+  cursorPing(tabId, adapter, point.x, point.y, "press");
   await adapter.send(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", ...common });
+  cursorPing(tabId, adapter, point.x, point.y, "release");
 }
 
 /**

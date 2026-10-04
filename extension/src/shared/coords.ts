@@ -12,7 +12,7 @@
 // it sees. `space: "page"` accepts document coordinates (what element boxes
 // report) and is converted using the scroll offsets.
 
-export type CoordSpace = "viewport" | "page";
+export type CoordSpace = "viewport" | "page" | "screenshot";
 export type MouseButton = "left" | "right" | "middle";
 
 export interface Point {
@@ -76,7 +76,8 @@ function shapePoint(
  * caller can hand it straight to the model.
  */
 export function shapeCoordArgs(args: Record<string, unknown>): ShapeResult {
-  const space: CoordSpace = args.space === "page" ? "page" : "viewport";
+  const space: CoordSpace =
+    args.space === "page" ? "page" : args.space === "screenshot" ? "screenshot" : "viewport";
   const from = shapePoint("", args);
   if ("error" in from) return { ok: false, error: from.error };
   const result: Extract<ShapeResult, { ok: true }> = {
@@ -114,9 +115,27 @@ export function toViewportPoint(
   space: CoordSpace,
   scroll: Pick<ViewportInfo, "scrollX" | "scrollY">,
 ): Point {
-  return space === "viewport"
+  return space === "viewport" || space === "screenshot"
     ? point
     : { x: point.x - scroll.scrollX, y: point.y - scroll.scrollY };
+}
+
+/**
+ * Convert a point in SCREENSHOT-image pixels to viewport CSS pixels. The
+ * image the model sees is a device-pixel capture, usually downscaled (≤1280px
+ * wide) — so neither its dimensions nor its scale match the viewport. The
+ * model points at what it sees; this owns the math. Pure, so the conversion
+ * and its rounding are unit-testable without a browser.
+ */
+export function screenshotToViewportPoint(
+  point: Point,
+  shot: { imageW: number; imageH: number },
+  viewport: { width: number; height: number },
+): Point {
+  return {
+    x: Math.round((point.x * viewport.width) / shot.imageW),
+    y: Math.round((point.y * viewport.height) / shot.imageH),
+  };
 }
 
 /**
@@ -246,7 +265,7 @@ export const COORD_SPACE_PROP = {
   space: {
     type: "string",
     description:
-      "Coordinate space: 'viewport' (default) = CSS px from the visible viewport's top-left, matching the screenshot; 'page' = document coordinates (as element boxes report).",
+      "Coordinate space: 'viewport' (default) = CSS px from the visible viewport's top-left; 'screenshot' = pixels of the latest screenshot image (what you are looking at — the tool converts for you); 'page' = document coordinates (as element boxes report).",
   },
 };
 

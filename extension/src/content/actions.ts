@@ -40,6 +40,10 @@ export type ActionRequest =
       space?: CoordSpace;
       dx?: number;
       dy?: number;
+      /** Acting resolves (click/drag/hover) pass this: scroll the ref into
+       *  view first so an off-screen element still resolves to a clickable
+       *  point. Looking resolves (element_at, the policy probe) omit it. */
+      scroll?: boolean;
     }
   | { action: "upload"; ref: string; files: UploadFileSpec[] }
   | { action: "uploadMark"; ref: string; token: string }
@@ -253,6 +257,7 @@ export class Actions {
     space?: CoordSpace;
     dx?: number;
     dy?: number;
+    scroll?: boolean;
   }): ActionResult {
     const dx = Number.isFinite(req.dx) ? (req.dx as number) : 0;
     const dy = Number.isFinite(req.dy) ? (req.dy as number) : 0;
@@ -261,6 +266,13 @@ export class Actions {
     let hit: HitInfo | null = null;
     if (req.ref !== undefined) {
       const el = this.#resolve(req.ref);
+      if (req.scroll) {
+        // Acting resolve: an off-screen ref would resolve to an out-of-
+        // viewport point and fail the bounds check. Bring it into view
+        // (instant — never honour smooth-scroll CSS, the rect is read right
+        // after) and only then measure.
+        el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+      }
       const r = el.getBoundingClientRect();
       rect = { x: r.x, y: r.y, w: r.width, h: r.height };
       local = { x: r.x + r.width / 2 + dx, y: r.y + r.height / 2 + dy };
@@ -422,6 +434,12 @@ export class Actions {
     const rect = el.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
+    // The visible agent cursor rides the same point the events hit.
+    cursorPing(
+      x,
+      y,
+      types === DOWN_SEQUENCE ? "press" : types === UP_SEQUENCE ? "release" : "move",
+    );
     for (const type of types) {
       const pressed = type.endsWith("down") || type === "pointermove" || type === "mousemove";
       el.dispatchEvent(
@@ -897,3 +915,60 @@ const DOWN_SEQUENCE = [
 ];
 const UP_SEQUENCE = ["pointerup", "mouseup"];
 const HOVER_SEQUENCE = ["pointerover", "mouseover", "pointermove", "mousemove"];
+
+// ---------------------------------------------------------------------------
+// The visible agent cursor (content-script half of background's
+// cursor-overlay.ts): a glowing arrow that glides to the action point and a
+// ripple ring where clicks land, so a human watching the browser sees what
+// the agent does. Pure decoration — try/catch wrapped, never awaited.
+// ---------------------------------------------------------------------------
+
+let cursorFadeTimer: number | undefined;
+
+function cursorPing(x: number, y: number, kind: "move" | "press" | "release"): void {
+  try {
+    const root = document.documentElement;
+    if (!root) return;
+    let cur = document.getElementById("__baCursor") as HTMLDivElement | null;
+    if (!cur) {
+      cur = document.createElement("div");
+      cur.id = "__baCursor";
+      cur.innerHTML =
+        "<svg width='24' height='24' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'>" +
+        "<path d='M5.6 3.1 19.7 12l-6.9 1.7L9.5 20.1z' fill='rgba(14,165,233,.92)' " +
+        "stroke='white' stroke-width='1.6' stroke-linejoin='round'/></svg>";
+      cur.style.cssText =
+        "position:fixed;left:-40px;top:-40px;pointer-events:none;z-index:2147483647;opacity:0;" +
+        "transition:left 90ms ease-out,top 90ms ease-out,opacity 240ms ease;" +
+        "filter:drop-shadow(0 0 5px rgba(56,189,248,.95)) drop-shadow(0 0 16px rgba(56,189,248,.55));" +
+        "will-change:left,top";
+      root.appendChild(cur);
+    }
+    cur.style.left = `${Math.round(x) - 4}px`;
+    cur.style.top = `${Math.round(y) - 2}px`;
+    cur.style.opacity = "1";
+    window.clearTimeout(cursorFadeTimer);
+    cursorFadeTimer = window.setTimeout(() => {
+      if (cur?.isConnected) cur.style.opacity = "0";
+    }, 2600);
+    if (kind === "move") return;
+    const size = kind === "press" ? 16 : 26;
+    const ring = document.createElement("div");
+    ring.style.cssText =
+      `position:fixed;left:${Math.round(x) - size / 2}px;top:${Math.round(y) - size / 2}px;` +
+      `width:${size}px;height:${size}px;border-radius:50%;pointer-events:none;` +
+      "z-index:2147483647;border:2px solid rgba(56,189,248,.95);background:rgba(56,189,248,.16);" +
+      "box-shadow:0 0 18px 5px rgba(56,189,248,.75),inset 0 0 12px rgba(56,189,248,.5)";
+    root.appendChild(ring);
+    const anim = ring.animate(
+      [
+        { transform: "scale(.4)", opacity: 1 },
+        { transform: "scale(2.1)", opacity: 0 },
+      ],
+      { duration: 640, easing: "cubic-bezier(.2,.7,.3,1)" },
+    );
+    anim.onfinish = () => ring.remove();
+  } catch {
+    /* decoration only — an action never fails over its own cursor */
+  }
+}
