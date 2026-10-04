@@ -56,25 +56,32 @@ describe("screenshot-space conversion", () => {
   it("scales image pixels to viewport CSS px (downscaled device-pixel capture)", () => {
     // A 1254×1028 CSS viewport captured at DPR 2 and downscaled to 1280 wide:
     // the model points at image pixels, the tool maps them back.
-    const shot = { imageW: 1280, imageH: 1049 };
-    const vp = { width: 1254, height: 1028 };
-    expect(screenshotToViewportPoint({ x: 640, y: 525 }, shot, vp)).toEqual({
+    const m = { imageW: 1280, imageH: 1049, rectX: 0, rectY: 0, rectW: 1254, rectH: 1028 };
+    expect(screenshotToViewportPoint({ x: 640, y: 525 }, m)).toEqual({
       x: Math.round((640 * 1254) / 1280),
       y: Math.round((525 * 1028) / 1049),
     });
   });
 
   it("is identity when the image already matches the viewport", () => {
-    const shot = { imageW: 1000, imageH: 800 };
-    const vp = { width: 1000, height: 800 };
-    expect(screenshotToViewportPoint({ x: 123, y: 456 }, shot, vp)).toEqual({ x: 123, y: 456 });
+    const m = { imageW: 1000, imageH: 800, rectX: 0, rectY: 0, rectW: 1000, rectH: 800 };
+    expect(screenshotToViewportPoint({ x: 123, y: 456 }, m)).toEqual({ x: 123, y: 456 });
   });
 
   it("maps the corners to the corners", () => {
-    const shot = { imageW: 1280, imageH: 720 };
-    const vp = { width: 1920, height: 1080 };
-    expect(screenshotToViewportPoint({ x: 0, y: 0 }, shot, vp)).toEqual({ x: 0, y: 0 });
-    expect(screenshotToViewportPoint({ x: 1280, y: 720 }, shot, vp)).toEqual({ x: 1920, y: 1080 });
+    const m = { imageW: 1280, imageH: 720, rectX: 0, rectY: 0, rectW: 1920, rectH: 1080 };
+    expect(screenshotToViewportPoint({ x: 0, y: 0 }, m)).toEqual({ x: 0, y: 0 });
+    expect(screenshotToViewportPoint({ x: 1280, y: 720 }, m)).toEqual({ x: 1920, y: 1080 });
+  });
+
+  it("resolves points inside a REGION (zoom) capture against the crop's own rect", () => {
+    // A zoom:2 crop of a 1200×800 viewport: 600×400 CSS centered at (300,200).
+    // The crop image is 1200×800 px (native DPR-2), covering rect (300,200,600,400).
+    const m = { imageW: 1200, imageH: 800, rectX: 300, rectY: 200, rectW: 600, rectH: 400 };
+    expect(screenshotToViewportPoint({ x: 0, y: 0 }, m)).toEqual({ x: 300, y: 200 });
+    expect(screenshotToViewportPoint({ x: 1200, y: 800 }, m)).toEqual({ x: 900, y: 600 });
+    // The crop's centre maps to the rect's centre.
+    expect(screenshotToViewportPoint({ x: 600, y: 400 }, m)).toEqual({ x: 600, y: 400 });
   });
 });
 

@@ -825,14 +825,15 @@ async function executeToolGated(
   batch?: ExecuteBatch,
 ): Promise<ExecuteResult> {
   let probe: ElementProbe | null = null;
-  // `click_at`/`drag_at` carry a point instead of a ref; the probe then comes
-  // from whatever sits under that point, so coordinate clicks are gated
-  // exactly like ref-based ones.
+  // `click_at`/`type_at`/`drag_at` carry a point instead of a ref; the probe
+  // then comes from whatever sits under that point, so coordinate actions
+  // are gated exactly like ref-based ones.
   const needsProbe =
     name === "type" ||
     name === "click" ||
     name === "key" ||
     name === "click_at" ||
+    name === "type_at" ||
     name === "drag_at";
   const tabId = await agentTab();
   if (needsProbe && tabId !== undefined) {

@@ -5,6 +5,7 @@
 export const MUTATING_TOOLS = new Set([
   "click",
   "click_at",
+  "type_at",
   "drag_at",
   "type",
   "upload",

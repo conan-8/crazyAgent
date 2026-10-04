@@ -121,20 +121,32 @@ export function toViewportPoint(
 }
 
 /**
- * Convert a point in SCREENSHOT-image pixels to viewport CSS pixels. The
- * image the model sees is a device-pixel capture, usually downscaled (≤1280px
- * wide) — so neither its dimensions nor its scale match the viewport. The
- * model points at what it sees; this owns the math. Pure, so the conversion
- * and its rounding are unit-testable without a browser.
+ * How a captured image maps onto the viewport: the image's pixel dims plus
+ * the viewport CSS rect it covers. A FULL capture covers (0,0,vpW,vpH); a
+ * REGION capture (zoom/crop) covers just its rectangle — the model points at
+ * pixels of whichever image it is looking at, and the math holds for both.
  */
-export function screenshotToViewportPoint(
-  point: Point,
-  shot: { imageW: number; imageH: number },
-  viewport: { width: number; height: number },
-): Point {
+export interface ShotMapping {
+  imageW: number;
+  imageH: number;
+  rectX: number;
+  rectY: number;
+  rectW: number;
+  rectH: number;
+}
+
+/**
+ * Convert a point in SCREENSHOT-image pixels to viewport CSS px — full or
+ * region capture alike: `css = rect.origin + img_px × rect_size / image_size`.
+ * The image the model sees is a device-pixel capture, usually downscaled, so
+ * neither its dimensions nor its scale match the viewport; this owns the
+ * math. Pure, so the conversion and its rounding are unit-testable without
+ * a browser.
+ */
+export function screenshotToViewportPoint(point: Point, m: ShotMapping): Point {
   return {
-    x: Math.round((point.x * viewport.width) / shot.imageW),
-    y: Math.round((point.y * viewport.height) / shot.imageH),
+    x: Math.round(m.rectX + (point.x * m.rectW) / m.imageW),
+    y: Math.round(m.rectY + (point.y * m.rectH) / m.imageH),
   };
 }
 
@@ -190,33 +202,40 @@ export type StrokeStep = {
   y: number;
   button?: MouseButton;
   clickCount?: number;
+  /** CDP modifier bitfield for the stroke: Alt=1, Ctrl=2, Meta=4, Shift=8. */
+  modifiers?: number;
 };
 
-const move = (p: Point): StrokeStep => ({ type: "mouseMoved", x: p.x, y: p.y });
-const down = (p: Point, b: MouseButton, n: number): StrokeStep => ({
+const move = (p: Point, modifiers?: number): StrokeStep => ({ type: "mouseMoved", x: p.x, y: p.y, modifiers });
+const down = (p: Point, b: MouseButton, n: number, modifiers?: number): StrokeStep => ({
   type: "mousePressed",
   x: p.x,
   y: p.y,
   button: b,
   clickCount: n,
+  modifiers,
 });
-const up = (p: Point, b: MouseButton, n: number): StrokeStep => ({
+const up = (p: Point, b: MouseButton, n: number, modifiers?: number): StrokeStep => ({
   type: "mouseReleased",
   x: p.x,
   y: p.y,
   button: b,
   clickCount: n,
+  modifiers,
 });
 
-/** A click stroke. Multi-clicks expand to the real event sequence. */
+/** A click stroke. Multi-clicks expand to the real event sequence.
+ *  `modifiers` (CDP bitfield: Alt=1, Ctrl=2, Meta=4, Shift=8) rides every
+ *  event — Shift+click extends a selection, exactly like a user's. */
 export function planClick(
   point: Point,
   button: MouseButton = "left",
   clickCount = 1,
+  modifiers?: number,
 ): StrokeStep[] {
   const steps: StrokeStep[] = [move(point)];
   for (let n = 1; n <= clickCount; n++) {
-    steps.push(down(point, button, n), up(point, button, n));
+    steps.push(down(point, button, n, modifiers), up(point, button, n, modifiers));
   }
   return steps;
 }

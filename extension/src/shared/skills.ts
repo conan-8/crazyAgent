@@ -254,24 +254,27 @@ export function mergeSkills(
 const CANVAS_DOC_EDITORS_SECTIONS: SkillSection[] = [
   {
     id: "write",
-    title: "Write the document body",
+    title: "Write the document body (LOOK → CLICK → TYPE)",
     useWhen: "adding or changing document text",
     body: [
-      "- The document BODY is painted into a <canvas>. No tool can read it — not read_page, not snapshot, not evaluate_js, not any expression you can write. Hunting for a clever selector wastes turns: pixel content has no DOM.",
-      "- Typing goes into a hidden editable element in its own frame (Docs calls it the text-event-target iframe). On real pages it is almost NEVER in the snapshot — its frame carries no content script, so no ref exists for it. Do not hunt for an editable ref, and never `type` into a toolbar/menu ref: those refs are the chrome around the document, not the document.",
-      "- WRITE WITH ONE `type` CALL AND NO REF: the tool finds and focuses the editor's hidden sink and sends the WHOLE string as real keystrokes (the only thing such an editor responds to — synthesised DOM events are ignored). Text inserts at the caret, newlines become paragraph breaks. One call handles any length of text — NEVER type character-by-character with `key`; each call costs a page observation, and per-key writes can silently drop or duplicate a character.",
-      "- `key` (no ref, or trusted:true) then drives the editor's own shortcuts at that sink — Control+b bold, Control+i italic, Control+Alt+1 heading, Control+Home start of document, Control+z undo, plus Backspace and the arrows. Toolbar refs (Bold, Undo, …) still work as clicks.",
-      "- Place the caret (or select text) by clicking the document surface: `screenshot` to see the page, `click_at` at the target position (or `drag_at` to select), then `type`. If a call reports nothing editable is focused, click the surface once and retry once.",
+      "- The document BODY is painted into a <canvas>: no ref exists for it and no tool reads the pixels back — but you SEE screenshots, and that is the loop: LOOK (`screenshot`; `zoom:2..4` first when the target is one text line), then CLICK+TYPE.",
+      "- THE PRIMARY MOVE IS `type_at`: x/y in space:'screenshot' (image pixels of the capture you are looking at) + the text — it clicks to place the caret AND types in ONE trusted sequence. click_count:2 selects the word at the point, 3 the paragraph; select_to:{x,y} = click start + shift-click end (one visual selection); select:'all' atomically replaces the whole body; keys_after:['Control+b'] formats what just landed.",
+      "- NEVER navigate by Home/arrows/Shift+Down line counting: the canvas does not confirm caret positions, and mis-counts select the wrong lines (a real run rebuilt its document three times that way). Click where the caret goes, on screen, every time.",
+      "- Long text at the caret is ONE no-ref `type` call (the tool finds the editor's hidden typing sink) — same primitive, no click needed. NEVER type character-by-character.",
+      "- STYLE AHEAD OF THE CARET while building: set font/size/bold, then type the block — formatting what you are about to type needs no selection. To re-style existing text: select it visually (select_to / click_count:2/3 / drag_at), then the shortcut.",
+      "- `key` (no ref) still drives editor shortcuts at the sink: Control+b/i/u, Control+Alt+1..6 headings, Control+Enter page break, Control+K link, Control+Home/End, Control+z.",
+      "- If a call reports nothing editable took focus, you clicked chrome (toolbar/menu): look at the screenshot, click the document surface, retry once.",
     ].join("\n"),
   },
   {
     id: "verify",
-    title: "Verify the edit (one export, not three checks)",
+    title: "Verify each block (one export, not three checks)",
     useWhen: "after any write — this is the only cheap way to see it",
     body: [
-      "VERIFY ONCE, CHEAPLY: `evaluate_js` `fetch('<doc-url>/export?format=txt')` returns the document text, and `?format=html` shows the formatting (`font-weight:700` = bold) — no navigation, no download. The Bold toolbar button's aria-pressed (with the text selected) is the other cheap signal. An edit cannot be read from the pixels, so one export settles it — do NOT stack screenshots, exports and preview tabs.",
-      "If the export fetch fails with a TRANSPORT error, recover per the failure note (reload/page_health ONCE) and then retry the export ONCE — that single retry is sanctioned, not a loop; decide it once and move on instead of re-weighing it every step.",
-      "- If a `type`/`key` result warns that the target lost focus, part of the text may not have landed: look (verify with the export fetch) before retyping — retyping blind duplicates whatever did arrive.",
+      "VERIFY ONCE PER BLOCK, CHEAPLY: `evaluate_js` `fetch('<doc-url>/export?format=html')` shows structure AND formatting — font-family, font-weight:700 = bold, color, background-color = highlight, <ol>/<ul>, <table>, <img>, <hr>, <a href>; `fetch('<doc-url>/export?format=txt')` for plain content. Formatting checks MUST use html — txt strips exactly the things a task grades. One export per block; do NOT stack screenshots, exports and preview tabs.",
+      "Screenshots verify VISUAL state (layout, page breaks, image size, what is selected) and you DO see them — one per checkpoint, not one per keystroke.",
+      "If the export fetch fails with a TRANSPORT error, recover per the failure note (reload/page_health ONCE) and retry the export ONCE — decide it once and move on.",
+      "- If a `type`/`type_at` result warns that focus was lost, part of the text may not have landed: verify with the export fetch BEFORE retyping — retyping blind duplicates whatever did arrive.",
     ].join("\n"),
   },
   {
@@ -284,11 +287,22 @@ const CANVAS_DOC_EDITORS_SECTIONS: SkillSection[] = [
     ].join("\n"),
   },
   {
+    id: "rebuild",
+    title: "Rebuild mode (when the body tangles)",
+    useWhen: "styles on wrong lines, duplicated fragments, mis-converted lists",
+    body: [
+      "WHEN THE BODY TANGLES, do not patch — REBUILD. `type`/`type_at` with select:'all' and the full replacement text is ONE atomic select-all + insert: the selection cannot be lost between calls (a separate Ctrl+A call followed by a separate type call is exactly how a document got duplicated).",
+      "- Rebuild top-to-bottom: each block lands via type_at at its caret position with styles set AHEAD of the caret, then ONE export verifies the block. Never re-select earlier text to fix it — re-type the block.",
+      "- For one tangled section only: select_to its span, type the corrected block (replaces the selection), style as you go.",
+      "- A rebuild is one atomic replace plus N verified type_at calls — three undo-patch cycles cost more than one rebuild.",
+    ].join("\n"),
+  },
+  {
     id: "fallback",
     title: "Debugger-down / DOM-only fallback",
     useWhen: "when typing or the export fetch fails with a transport error",
     body: [
-      "- When typing, `screenshot`, `click_at` or `evaluate_js` fail with a transport error, check `page_health` ONCE. 'debugger channel: …' down means trusted keystrokes AND coordinate clicks AND JS evaluation are ALL dead for the session. Reload the tab once and re-check once; if it stays down, stop retrying those tools — ref `click` and `type trusted:false` over the content script still work, and they are enough to edit the document.",
+      "- When typing, `screenshot`, `type_at` or `evaluate_js` fail with a transport error, check `page_health` ONCE. 'debugger channel: …' down means trusted keystrokes AND coordinate clicks AND JS evaluation are ALL dead for the session. Reload the tab once and re-check once; if it stays down, stop retrying those tools — ref `click` and `type trusted:false` over the content script still work, and they are enough to edit the document.",
       "- On a canvas-editor URL, `type`/`key` default to real keystrokes even in ordinary dialogs and menus. So with the debugger down, pass `trusted:false` explicitly to fill any real input (Find and replace fields, rename boxes, side panels) through the content script.",
       "- DOM-only fallback that still edits the document (needs an existing anchor string): Edit ▸ Find and replace (click the menu refs; its fields are ordinary inputs). Pick an anchor the document already contains exactly once (the dialog counts matches, e.g. '1 of 1'), set Find = anchor and Replace with = '<new text> <anchor>', click Replace. Nothing is deleted. In a blank document there is no anchor — use the one-call `type` route above instead.",
     ].join("\n"),

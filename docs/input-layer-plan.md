@@ -1,8 +1,14 @@
 # Input layer plan — making click / drag / scroll REALLY good
 
 > **Status:** P0 accuracy + reliability items 1, 2, 6 and speed item 12 are
-> **implemented** (see "Landed" below). Wheel/scroll_until (4, 5), drag
-> upgrades (8, 9), observe/expect (10, 11) and the gauntlet (14) remain.
+> **implemented**, plus the vision-first additions from the Oct 4 run
+> post-mortem: **`type_at`** (click caret → select → type in one trusted
+> sequence — the primary doc-editing move), **zoom/region screenshots**
+> (`screenshot zoom:2..4` or x/y/w/h crops at native resolution;
+> space:'screenshot' resolves against crops too), and **atomic
+> `select:'all'`** in `type`/`type_at` (select-all + insert can no longer be
+> split by a focus shift — the duplication bug). Wheel/scroll_until (4, 5),
+> drag upgrades (8, 9), observe/expect (10, 11) and the gauntlet (14) remain.
 
 Companion to `docs/gdocs-cursor-plan.md` (which covers Google Docs editing and
 the skill/tool delivery fixes). This one is about the pointer itself: every

@@ -40,12 +40,12 @@ import {
   type ViewportInfo,
 } from "../../shared/coords";
 import { failureTag } from "../../shared/tool-failure";
-import { trustedInputFailure } from "../../shared/trusted-input";
+import { trustedInputFailure, keyEventParams, parseKeyCombo, planTyping } from "../../shared/trusted-input";
 import type { ElementProbe } from "../policy";
 import { runContentAction } from "./content-action";
 import { cursorPing } from "./cursor-overlay";
-import { layoutViewportCss, viewportShotInfo } from "./perception";
-import { ensureTabActive } from "./trusted-input";
+import { layoutViewportCss, viewportShotInfo, viewportShotMapping } from "./perception";
+import { ensureTabActive, resolveNoRefFocus } from "./trusted-input";
 import { registerTool, type ToolContext } from "./types";
 
 /** Keystroke/mouse steps are separate CDP calls; a beat keeps them ordered. */
@@ -95,33 +95,27 @@ interface ResolveOpts {
 
 /**
  * Convert a `space:"screenshot"` point to viewport CSS pixels using the
- * latest capture's image dims, with the freshest viewport size CDP can get
- * (the stored capture dims are the fallback). No content script needed.
+ * LATEST capture's mapping — full shots (viewport rect 0,0) and zoom/region
+ * crops (their own absolute rect) alike. No content script needed.
  */
 async function fromScreenshotSpace(
   ctx: ToolContext,
   point: Point,
 ): Promise<{ ok: true; point: Point } | { ok: false; error: string }> {
-  const shot = viewportShotInfo(ctx.tabId);
-  if (!shot) {
+  if (!viewportShotInfo(ctx.tabId)) {
     return {
       ok: false,
-      error: `${failureTag("input")}: space:'screenshot' needs a screenshot of THIS tab first (none captured this session) — take one with \`screenshot\`, then point at the image`,
+      error: `${failureTag("input")}: space:'screenshot' needs a screenshot of THIS tab first (none captured this session) — take one with \`screenshot\` (zoom:2-4 when precision matters), then point at the image`,
     };
   }
-  const fresh = await layoutViewportCss(ctx.tabId, ctx.adapter).catch(() => undefined);
-  const width = fresh?.width ?? shot.viewportCssW;
-  const height = fresh?.height ?? shot.viewportCssH;
-  if (typeof width !== "number" || typeof height !== "number") {
+  const mapping = await viewportShotMapping(ctx.tabId, ctx.adapter);
+  if (!mapping) {
     return {
       ok: false,
       error: `${failureTag("input")}: could not determine the viewport's CSS size to convert screenshot pixels — retake the screenshot, or use space:'viewport'`,
     };
   }
-  return {
-    ok: true,
-    point: screenshotToViewportPoint(point, shot, { width, height }),
-  };
+  return { ok: true, point: screenshotToViewportPoint(point, mapping) };
 }
 
 /**
@@ -332,15 +326,31 @@ export async function probeElementAt(
   if (x === undefined || y === undefined) return null;
   if (probeArgs.space === "screenshot") {
     // The policy probe has no adapter context: convert with the stored
-    // capture dims, or skip the probe entirely (the gate tolerates null).
+    // capture mapping (crops carry their own absolute rect), or skip the
+    // probe entirely (the gate tolerates null).
     const shot = viewportShotInfo(tabId);
-    if (!shot || typeof shot.viewportCssW !== "number" || typeof shot.viewportCssH !== "number") {
-      return null;
-    }
-    const p = screenshotToViewportPoint({ x, y }, shot, {
-      width: shot.viewportCssW,
-      height: shot.viewportCssH,
-    });
+    if (!shot) return null;
+    const mapping = shot.crop
+      ? {
+          imageW: shot.imageW,
+          imageH: shot.imageH,
+          rectX: shot.crop.x,
+          rectY: shot.crop.y,
+          rectW: shot.crop.w,
+          rectH: shot.crop.h,
+        }
+      : typeof shot.viewportCssW === "number" && typeof shot.viewportCssH === "number"
+        ? {
+            imageW: shot.imageW,
+            imageH: shot.imageH,
+            rectX: 0,
+            rectY: 0,
+            rectW: shot.viewportCssW,
+            rectH: shot.viewportCssH,
+          }
+        : null;
+    if (!mapping) return null;
+    const p = screenshotToViewportPoint({ x, y }, mapping);
     const probedShot = await probePoint(tabId, p.x, p.y, "viewport").catch(() => null);
     const shotHit = probedShot?.hit;
     if (!shotHit) return null;
@@ -368,6 +378,9 @@ function buttonMask(button: string | undefined): number {
   return button === "right" ? 2 : button === "middle" ? 4 : button === "left" ? 1 : 0;
 }
 
+/** CDP modifier bitfield values (Alt=1, Ctrl=2, Meta=4). */
+const SHIFT_MODIFIER = 8;
+
 const POINT_PROPS = {
   x: { type: "number", description: "X in CSS px (see `space`; frame-local with `frame`)" },
   y: { type: "number", description: "Y in CSS px (see `space`; frame-local with `frame`)" },
@@ -382,6 +395,7 @@ function strokeParams(step: StrokeStep, pressed: string | null): Record<string, 
       y: step.y,
       button: "none",
       buttons: buttonMask(pressed ?? undefined),
+      ...(step.modifiers ? { modifiers: step.modifiers } : {}),
     };
   }
   return {
@@ -391,6 +405,7 @@ function strokeParams(step: StrokeStep, pressed: string | null): Record<string, 
     button: step.button ?? "left",
     buttons: step.type === "mousePressed" ? buttonMask(step.button ?? "left") : 0,
     clickCount: step.clickCount ?? 1,
+    ...(step.modifiers ? { modifiers: step.modifiers } : {}),
   };
 }
 
@@ -499,6 +514,165 @@ registerTool({
     const change = d.after && d.after !== d.hit ? ` → now: ${d.after}` : "";
     return {
       text: `clicked (${d.clicked?.x}, ${d.clicked?.y}) — ${d.hit ?? ""}${change}`,
+    };
+  },
+});
+
+registerTool({
+  name: "type_at",
+  description:
+    "Click a point to place the caret (or make a selection), then type — ONE call, the primary move on canvas editors (Google Docs/Slides, Figma, any drawn surface): LOOK (screenshot — zoom:2..4 when the target is a text line), then type_at where the caret should go. Coordinate modes like click_at: x/y with space:'screenshot' (image px of the latest capture, full or crop), 'viewport' CSS px, or 'page', or ref+dx/dy, or frame-local. click_count:2 double-clicks (selects the word), 3 triple-clicks (selects the paragraph). select_to:{x,y} (same space) clicks the start then shift-clicks the end — one visual selection in the same call. select:'all' sends Ctrl+A first (atomic replace). keys_after:['Control+b',…] applies shortcut(s) after the text lands. Click, selection and typing run in ONE trusted sequence — focus cannot shift between them (the two-call version is how a run duplicated its document).",
+  parameters: {
+    type: "object",
+    properties: {
+      ...POINT_PROPS,
+      ...REF_PROP,
+      ...FRAME_PROP,
+      dx: { type: "number", description: "Offset from the ref's centre (viewport CSS px)" },
+      dy: { type: "number", description: "Offset from the ref's centre (viewport CSS px)" },
+      click_count: {
+        type: "number",
+        description: "1 (default) places the caret; 2 selects the word; 3 selects the paragraph",
+      },
+      select_to: {
+        type: "object",
+        description:
+          "Selection end {x, y} in the SAME space as x/y: click the start, shift-click the end",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+      },
+      select: {
+        type: "string",
+        description: "'all' = Ctrl+A immediately before the text (atomic replace)",
+        enum: ["all"],
+      },
+      text: {
+        type: "string",
+        description: "Text to insert at the caret/selection (newlines become paragraph breaks)",
+      },
+      keys_after: {
+        type: "array",
+        description: "Shortcut(s) applied after the text lands, e.g. ['Control+b']",
+        items: { type: "string" },
+      },
+    },
+    required: ["text"],
+  },
+  async run(args, ctx) {
+    const mods = shapeModifiers(args);
+    if (!mods.ok) return { ok: false, error: mods.error };
+    const resolved = await resolveTarget(ctx, args, { scrollRef: true });
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    const from = resolved.from;
+    // Optional selection end, resolved in the same coordinate space.
+    let selectTo: Point | undefined;
+    const st = args.select_to as { x?: unknown; y?: unknown } | undefined;
+    if (st && typeof st === "object") {
+      if (typeof args.ref === "string" || typeof args.frame === "number") {
+        return {
+          ok: false,
+          error: `${failureTag("input")}: select_to belongs to coordinate mode (x/y + space) — ref/frame modes already target an element`,
+        };
+      }
+      if (typeof st.x !== "number" || typeof st.y !== "number") {
+        return {
+          ok: false,
+          error: `${failureTag("input")}: select_to needs numeric x and y in the same space as x/y`,
+        };
+      }
+      const end = await resolveTarget(ctx, { x: st.x, y: st.y, space: args.space });
+      if (!end.ok) return { ok: false, error: `select_to: ${end.error}` };
+      selectTo = end.from;
+    }
+    const adapter = ctx.adapter;
+    try {
+      // ONE trusted sequence: click (×count) → optional shift-click →
+      // verified focus → optional Ctrl+A → text → keys_after. The glowing
+      // cursor rides every stroke via sendStrokes.
+      await sendStrokes(ctx, planClick(from, mods.button, mods.clickCount));
+      if (selectTo) {
+        await sleep(60);
+        await sendStrokes(ctx, planClick(selectTo, mods.button, 1, SHIFT_MODIFIER));
+      }
+      // Verify the click actually focused something typable — BEFORE typing.
+      const where = await resolveNoRefFocus(ctx.tabId, adapter);
+      if (where === "none") {
+        return {
+          ok: false,
+          error: trustedInputFailure(
+            `clicked (${from.x}, ${from.y}) but nothing editable took focus — nothing was typed`,
+            "look at the screenshot: click on the editor's document surface (or a real input), not its toolbar or the page chrome, then retry",
+          ),
+        };
+      }
+      // A beat: editors register the click/selection asynchronously.
+      await sleep(80);
+      let inserted = 0;
+      let keysSent = 0;
+      const sendCombo = async (combo: string) => {
+        const parsed = parseKeyCombo(combo);
+        if (!parsed.ok) throw new Error(parsed.error);
+        await adapter.send(
+          ctx.tabId,
+          "Input.dispatchKeyEvent",
+          keyEventParams(parsed.parsed, "down"),
+        );
+        await adapter.send(
+          ctx.tabId,
+          "Input.dispatchKeyEvent",
+          keyEventParams(parsed.parsed, "up"),
+        );
+        keysSent += 1;
+        await sleep(BETWEEN_STEPS_MS);
+      };
+      if (args.select === "all") await sendCombo("Control+a");
+      for (const step of planTyping(String(args.text ?? ""))) {
+        if (step.kind === "insertText") {
+          await adapter.send(ctx.tabId, "Input.insertText", { text: step.text });
+          inserted += step.text.length;
+        } else {
+          await sendCombo(step.key);
+        }
+      }
+      const keysAfter = Array.isArray(args.keys_after)
+        ? (args.keys_after as unknown[]).map(String)
+        : [];
+      for (const combo of keysAfter) await sendCombo(combo);
+      const after = resolved.probed ? await afterHit(ctx, from) : null;
+      return {
+        typed: {
+          at: from,
+          ...(selectTo ? { selectedTo: selectTo } : {}),
+          chars: inserted,
+          keys: keysSent,
+        },
+        focus: where,
+        hit: resolved.probed
+          ? describeHit(resolved.hit)
+          : "unknown (no content script at that point)",
+        after,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: trustedInputFailure(
+          String((err as Error)?.message ?? err),
+          "the browser rejected part of the click→type sequence — check page_health, then retry once",
+        ),
+      };
+    }
+  },
+  present(payload) {
+    const d = (payload ?? {}) as {
+      typed?: { at: Point; selectedTo?: Point; chars: number; keys: number };
+      focus?: string;
+      hit?: string;
+    };
+    const t = d.typed;
+    if (!t) return { text: "nothing typed" };
+    const sel = t.selectedTo ? ` → selected to (${t.selectedTo.x},${t.selectedTo.y})` : "";
+    const keys = t.keys ? ` · ${t.keys} key(s)` : "";
+    return {
+      text: `typed ${t.chars} char(s) at (${t.at.x},${t.at.y})${sel}${keys} — ${d.hit ?? ""} (focus: ${d.focus ?? "?"})`,
     };
   },
 });

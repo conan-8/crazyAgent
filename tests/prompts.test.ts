@@ -168,33 +168,41 @@ describe("canvas document editor procedure", () => {
 
   it("tells the model the canvas body cannot be read, and not to retry", () => {
     expect(skill.body).toContain("painted into a <canvas>");
-    expect(skill.body).toContain("No tool can read it");
+    expect(skill.body).toContain("no tool reads the pixels back");
     expect(skill.body).toContain("do NOT retry");
   });
 
   it("tells the model the sink ref will not exist and not to hunt for it", () => {
-    expect(skill.body).toContain("almost NEVER in the snapshot");
     expect(skill.body).toContain("no ref exists for it");
-    expect(skill.body).toContain("Do not hunt for an editable ref");
-    expect(skill.body).toContain("never `type` into a toolbar/menu ref");
+    expect(skill.body).toContain("hidden typing sink");
   });
 
-  it("routes writes through ONE ref-less type call, never per-keystroke", () => {
-    expect(skill.body).toContain("WRITE WITH ONE `type` CALL AND NO REF");
+  it("routes writes through type_at / one ref-less type call, never per-keystroke", () => {
+    expect(skill.body).toContain("THE PRIMARY MOVE IS `type_at`");
+    expect(skill.body).toContain("ONE trusted sequence");
+    expect(skill.body).toContain("ONE no-ref `type` call");
     expect(skill.body).toContain("NEVER type character-by-character");
-    expect(skill.body).toContain("silently drop or duplicate a character");
   });
 
-  it("routes caret placement through click_at now that coordinate clicks exist", () => {
-    expect(skill.body).toContain("`click_at` at the target position");
-    expect(skill.body).toContain("Text inserts at the caret");
+  it("forbids line-counting navigation and prefers visual selection", () => {
+    expect(skill.body).toContain("NEVER navigate by Home/arrows/Shift+Down line counting");
+    expect(skill.body).toContain("STYLE AHEAD OF THE CARET");
+    expect(skill.body).toContain("select_to:{x,y}");
+    expect(skill.body).toContain("zoom:2..4");
   });
 
-  it("gives the one cheap verification: the export fetch", () => {
-    expect(skill.body).toContain("VERIFY ONCE, CHEAPLY");
+  it("carries the atomic rebuild mode for tangled bodies", () => {
+    expect(skill.body).toContain("do not patch — REBUILD");
+    expect(skill.body).toContain("select:'all'");
+    expect(skill.body).toContain("cannot be lost between calls");
+  });
+
+  it("gives the one cheap verification: the export fetch (html for formatting)", () => {
+    expect(skill.body).toContain("VERIFY ONCE PER BLOCK, CHEAPLY");
+    expect(skill.body).toContain("/export?format=html");
     expect(skill.body).toContain("/export?format=txt");
     expect(skill.body).toContain("font-weight:700");
-    expect(skill.body).toContain("do NOT stack screenshots");
+    expect(skill.body).toContain("One export per block");
   });
 
   it("gives the readable URL route for Docs and Slides", () => {

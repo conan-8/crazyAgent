@@ -60,12 +60,17 @@ registerTool({
 registerTool({
   name: "type",
   description:
-    "Type text into the element with the given ref (replaces its value) — or, with NO ref, as real keystrokes at whatever is focused. Canvas document editors (Google Docs/Slides, Office on the web) are typed WITHOUT a ref: one call finds the editor's hidden typing sink and inserts the WHOLE string at the caret (real keystrokes — the only thing such editors respond to). Never type into them character by character. Set submit=true to submit the enclosing form afterwards. Pass trusted=true to force real keystrokes anywhere, trusted=false to force the DOM path (which needs a ref).",
+    "Type text into the element with the given ref (replaces its value) — or, with NO ref, as real keystrokes at whatever is focused. Canvas document editors (Google Docs/Slides, Office on the web) are typed WITHOUT a ref: one call finds the editor's hidden typing sink and inserts the WHOLE string at the caret (real keystrokes — the only thing such editors respond to). Never type into them character by character. select:'all' does Ctrl+A inside the same trusted sequence (atomic replace — the selection cannot be lost between calls). Set submit:true to submit the enclosing form afterwards. Pass trusted=true to force real keystrokes anywhere, trusted=false to force the DOM path (which needs a ref).",
   parameters: {
     type: "object",
     properties: {
       ...REF_PROP,
       text: { type: "string", description: "Text to enter (newlines become paragraph breaks)" },
+      select: {
+        type: "string",
+        description: "'all' = select all (Ctrl+A) atomically right before typing — replaces the editor's content",
+        enum: ["all"],
+      },
       submit: { type: "boolean", description: "Submit the form after typing" },
       trusted: {
         type: "boolean",
@@ -79,6 +84,7 @@ registerTool({
     const ref = typeof args.ref === "string" && args.ref.trim() ? args.ref : undefined;
     const text = String(args.text ?? "");
     const submit = Boolean(args.submit);
+    const selectAll = args.select === "all";
     const explicit = typeof args.trusted === "boolean" ? args.trusted : undefined;
     if (!ref) {
       // No ref = the canvas-editor route: real keystrokes at the focused
@@ -94,7 +100,11 @@ registerTool({
         adapter: ctx.adapter,
         text,
         submit,
-        reason: explicit === true ? "requested (trusted: true)" : "no ref: real keystrokes at the focused target / editor sink",
+        selectAll,
+        reason:
+          explicit === true
+            ? "requested (trusted: true)"
+            : "no ref: real keystrokes at the focused target / editor sink",
       });
     }
     const route = await decideInputRoute(ctx, ref, explicit);
@@ -105,6 +115,7 @@ registerTool({
         ref,
         text,
         submit,
+        selectAll,
         reason: route.reason,
       });
     }

@@ -11,6 +11,7 @@ import {
   type FrameSnapshotLike,
 } from "../../shared/frames";
 import { safeFilename, screenshotFilename } from "../../shared/filenames";
+import { screenshotToViewportPoint, type ShotMapping } from "../../shared/coords";
 import { failureTag } from "../../shared/tool-failure";
 import {
   evalWaitCondition,
@@ -332,15 +333,19 @@ export async function downscaleJpeg(
 
 /**
  * What the latest viewport capture of a tab looks like: image dimensions
- * (after downscaling) plus the viewport's CSS dimensions at capture time.
- * The coordinate tools use it to convert `space:"screenshot"` points — the
- * model points at the image it is looking at, the tool does the scaling.
+ * (after downscaling) plus, for FULL captures, the viewport's CSS dimensions
+ * at capture time, and for REGION captures the exact CSS rect the crop
+ * covers. The coordinate tools use it to convert `space:"screenshot"` points —
+ * the model points at the image it is looking at (full or zoomed crop), the
+ * tool does the scaling.
  */
 export interface ViewportShotInfo {
   imageW: number;
   imageH: number;
   viewportCssW?: number;
   viewportCssH?: number;
+  /** Region shots: the viewport CSS rect this crop covers. Absent = full viewport. */
+  crop?: { x: number; y: number; w: number; h: number };
   at: number;
 }
 
@@ -348,6 +353,42 @@ const viewportShots = new Map<number, ViewportShotInfo>();
 
 export function viewportShotInfo(tabId: number): ViewportShotInfo | undefined {
   return viewportShots.get(tabId);
+}
+
+/**
+ * The mapping of the LATEST capture of a tab — what `space:"screenshot"`
+ * coordinates resolve against. Region shots carry their own absolute rect
+ * (no live viewport needed); full shots resolve against the freshest CDP
+ * layout metrics with the capture-time dims as fallback.
+ */
+export async function viewportShotMapping(
+  tabId: number,
+  adapter: ToolContext["adapter"],
+): Promise<ShotMapping | undefined> {
+  const shot = viewportShotInfo(tabId);
+  if (!shot) return undefined;
+  if (shot.crop) {
+    return {
+      imageW: shot.imageW,
+      imageH: shot.imageH,
+      rectX: shot.crop.x,
+      rectY: shot.crop.y,
+      rectW: shot.crop.w,
+      rectH: shot.crop.h,
+    };
+  }
+  const fresh = await layoutViewportCss(tabId, adapter).catch(() => undefined);
+  const width = fresh?.width ?? shot.viewportCssW;
+  const height = fresh?.height ?? shot.viewportCssH;
+  if (typeof width !== "number" || typeof height !== "number") return undefined;
+  return {
+    imageW: shot.imageW,
+    imageH: shot.imageH,
+    rectX: 0,
+    rectY: 0,
+    rectW: width,
+    rectH: height,
+  };
 }
 
 /** The visible viewport's CSS dimensions via CDP layout metrics — works
@@ -378,23 +419,75 @@ export async function layoutViewportCss(
 
 /** Downscale a viewport capture and record its mapping info for the
  *  coordinate tools. Every viewport capture (screenshot, blind shot) goes
- *  through here so `space:"screenshot"` always has fresh dims. */
+ *  through here so `space:"screenshot"` always has fresh dims. A `crop` says
+ *  the capture covers only that viewport CSS rect (a zoom/region shot). */
 async function recordViewportShot(
   tabId: number,
   adapter: ToolContext["adapter"],
   dataUrl: string,
+  crop?: { x: number; y: number; w: number; h: number },
 ): Promise<{ dataUrl: string; shot: ViewportShotInfo }> {
-  const { dataUrl: jpeg, width, height } = await downscaleJpegInfo(dataUrl);
   const vp = await layoutViewportCss(tabId, adapter);
+  const maxWidth = crop ? 1_600 : 1_280;
+  const quality = crop ? 0.8 : 0.7;
+  const { dataUrl: jpeg, width, height } = await downscaleJpegInfo(dataUrl, maxWidth, quality);
   const shot: ViewportShotInfo = {
     imageW: width,
     imageH: height,
     viewportCssW: vp?.width,
     viewportCssH: vp?.height,
+    ...(crop ? { crop } : {}),
     at: Date.now(),
   };
   if (width > 0 && height > 0) viewportShots.set(tabId, shot);
   return { dataUrl: jpeg, shot };
+}
+
+/**
+ * Crop a region (viewport CSS rect) out of a full capture at NATIVE
+ * resolution — a zoom shot. Small regions arrive effectively 2× sharper than
+ * the same area inside a downscaled full-page shot, which is exactly the
+ * precision `type_at` needs on text (rows ~19px apart). Falls back to the
+ * original image on any failure.
+ */
+async function cropJpeg(
+  dataUrl: string,
+  crop: { x: number; y: number; w: number; h: number },
+  vpW: number,
+  vpH: number,
+  maxWidth = 1_600,
+  quality = 0.8,
+): Promise<{ dataUrl: string; width: number; height: number }> {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const bmp = await createImageBitmap(blob);
+    const scale = bmp.width / vpW; // image px per CSS px (device pixel ratio)
+    const sx = Math.max(0, Math.round(crop.x * scale));
+    const sy = Math.max(0, Math.round(crop.y * scale));
+    const sw = Math.max(1, Math.min(Math.round(bmp.width - sx), Math.round(crop.w * scale)));
+    const sh = Math.max(1, Math.min(Math.round(bmp.height - sy), Math.round(crop.h * scale)));
+    let w = sw;
+    let h = sh;
+    if (w > maxWidth) {
+      h = Math.max(1, Math.round((h * maxWidth) / w));
+      w = maxWidth;
+    }
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return { dataUrl, width: 0, height: 0 };
+    ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, w, h);
+    bmp.close();
+    const out = await canvas.convertToBlob({ type: "image/jpeg", quality });
+    const bytes = new Uint8Array(await out.arrayBuffer());
+    let binary = "";
+    const chunk = 0x8_000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return { dataUrl: `data:image/jpeg;base64,${btoa(binary)}`, width: w, height: h };
+  } catch {
+    return { dataUrl, width: 0, height: 0 };
+  }
 }
 
 /**
@@ -704,13 +797,93 @@ registerTool({
   },
 });
 
+/**
+ * Resolve the screenshot tool's optional region/zoom args to a clamped
+ * viewport-CSS rect. `zoom:N` crops the center of the viewport at 1/N — the
+ * "Zoomed in" step precision clicking needs (text rows ~19px apart deserve a
+ * sharper look than a downscaled full-page JPEG). An explicit region is x/y
+ * + w/h in any coordinate space (viewport CSS px, page px, or 'screenshot'
+ * pixels of the PREVIOUS capture — crop a crop). Returns undefined for a
+ * full capture, or a tool-error string when the values are unusable.
+ */
+async function resolveCropRect(
+  ctx: ToolContext,
+  args: Record<string, unknown>,
+): Promise<{ x: number; y: number; w: number; h: number } | undefined | string> {
+  const hasRegion =
+    typeof args.x === "number" &&
+    typeof args.y === "number" &&
+    typeof args.w === "number" &&
+    typeof args.h === "number";
+  const zoom = typeof args.zoom === "number" ? args.zoom : undefined;
+  if (!hasRegion && zoom === undefined) return undefined;
+  const vp = await layoutViewportCss(ctx.tabId, ctx.adapter).catch(() => undefined);
+  if (!vp) {
+    return `${failureTag("input")}: could not measure the viewport for the crop — retry without region/zoom`;
+  }
+  if (zoom !== undefined && (!Number.isFinite(zoom) || zoom < 1 || zoom > 8)) {
+    return `${failureTag("input")}: zoom must be a number between 1 and 8`;
+  }
+  if (zoom !== undefined && !hasRegion) {
+    const w = vp.width / zoom;
+    const h = vp.height / zoom;
+    return { x: (vp.width - w) / 2, y: (vp.height - h) / 2, w, h };
+  }
+  let x = args.x as number;
+  let y = args.y as number;
+  let w = args.w as number;
+  let h = args.h as number;
+  if (![x, y, w, h].every(Number.isFinite) || w < 8 || h < 8) {
+    return `${failureTag("input")}: region needs finite x/y and w/h of at least 8 px`;
+  }
+  const space =
+    args.space === "page" ? "page" : args.space === "screenshot" ? "screenshot" : "viewport";
+  if (space === "page") {
+    x -= vp.scrollX;
+    y -= vp.scrollY;
+  } else if (space === "screenshot") {
+    const mapping = await viewportShotMapping(ctx.tabId, ctx.adapter);
+    if (!mapping) {
+      return `${failureTag("input")}: space:'screenshot' for a region needs an existing capture of this tab — take one first`;
+    }
+    const pt = screenshotToViewportPoint({ x, y }, mapping);
+    w = (w * mapping.rectW) / mapping.imageW;
+    h = (h * mapping.rectH) / mapping.imageH;
+    x = pt.x;
+    y = pt.y;
+  }
+  // Clamp to the viewport.
+  x = Math.min(Math.max(0, x), Math.max(0, vp.width - 8));
+  y = Math.min(Math.max(0, y), Math.max(0, vp.height - 8));
+  w = Math.min(w, vp.width - x);
+  h = Math.min(h, vp.height - y);
+  if (w < 8 || h < 8) {
+    return `${failureTag("input")}: region is smaller than 8×8 px after clamping to the viewport`;
+  }
+  return { x, y, w, h };
+}
+
 registerTool({
   name: "screenshot",
   description:
-    "Capture a JPEG screenshot of the visible viewport. The image is ATTACHED to this result and you WILL see it — looking at it is the fastest way to resolve any confusion about what the page shows. Take one whenever you are confused, uncertain, or concerned — before guessing, before retrying a failing approach, and before reporting a blocker. The result reports the image's pixel dimensions: point at anything you see with click_at/hover_at/drag_at using space:'screenshot' and x/y in image pixels — the tool converts to viewport coordinates for you. Every capture also STAGES itself on the image shelf (shot_N): `paste_image` can then deliver those exact bytes into another page (chat composer, upload form, dropzone) with no disk and no paths. save_to_disk:true additionally writes the JPEG into the Downloads folder and reports its absolute path (SENSITIVE — confirmation required).",
+    "Capture a JPEG screenshot of the visible viewport. The image is ATTACHED to this result and you WILL see it — looking at it is the fastest way to resolve any confusion about what the page shows. Take one whenever you are confused, uncertain, or concerned — before guessing, before retrying a failing approach, and before reporting a blocker. PRECISION: pass zoom:2..4 for a sharper centered crop before exact coordinate work (placing a caret on a text line, table grids, resize handles), or x/y/w/h (+ space) for any region — crops arrive at native resolution and space:'screenshot' coordinates then resolve against the crop. The result reports the image's pixel dimensions: point at anything you see with type_at/click_at/hover_at/drag_at using space:'screenshot' and x/y in image pixels — the tool converts to viewport coordinates for you. Every capture also STAGES itself on the image shelf (shot_N): `paste_image` can then deliver those exact bytes into another page (chat composer, upload form, dropzone) with no disk and no paths. save_to_disk:true additionally writes the JPEG into the Downloads folder and reports its absolute path (SENSITIVE — confirmation required).",
   parameters: {
     type: "object",
     properties: {
+      zoom: {
+        type: "number",
+        description:
+          "Zoom factor 1..8: capture only the center of the viewport at 1/zoom, at native (sharper) resolution — the 'zoom in before precise clicks' step",
+      },
+      x: { type: "number", description: "Region left edge (see `space`; with w/h, captures that rect)" },
+      y: { type: "number", description: "Region top edge (see `space`)" },
+      w: { type: "number", description: "Region width in the same space as x/y (min 8)" },
+      h: { type: "number", description: "Region height in the same space as x/y (min 8)" },
+      space: {
+        type: "string",
+        description:
+          "Region coordinate space: 'viewport' (default, CSS px), 'page', or 'screenshot' (pixels of the PREVIOUS capture — crop a crop)",
+      },
       save_to_disk: {
         type: "boolean",
         description: "Also write the JPEG to the Downloads folder (confirmation required)",
@@ -723,11 +896,35 @@ registerTool({
   },
   async run(args, ctx) {
     const { dataUrl } = await ctx.adapter.screenshot(ctx.tabId);
-    const { dataUrl: jpeg, shot: shotInfo } = await recordViewportShot(
-      ctx.tabId,
-      ctx.adapter,
-      dataUrl,
-    );
+    const crop = await resolveCropRect(ctx, args);
+    if (typeof crop === "string") return { ok: false, error: crop };
+    let jpeg: string;
+    let shotInfo: ViewportShotInfo;
+    if (crop) {
+      const vp = await layoutViewportCss(ctx.tabId, ctx.adapter).catch(() => undefined);
+      const out = await cropJpeg(dataUrl, crop, vp?.width ?? 0, vp?.height ?? 0);
+      if (out.width === 0) {
+        // A failed crop is a full capture, never a failed screenshot.
+        const rec = await recordViewportShot(ctx.tabId, ctx.adapter, dataUrl);
+        jpeg = rec.dataUrl;
+        shotInfo = rec.shot;
+      } else {
+        shotInfo = {
+          imageW: out.width,
+          imageH: out.height,
+          viewportCssW: vp?.width,
+          viewportCssH: vp?.height,
+          crop,
+          at: Date.now(),
+        };
+        viewportShots.set(ctx.tabId, shotInfo);
+        jpeg = out.dataUrl;
+      }
+    } else {
+      const rec = await recordViewportShot(ctx.tabId, ctx.adapter, dataUrl);
+      jpeg = rec.dataUrl;
+      shotInfo = rec.shot;
+    }
     // Stamp which tab/URL this image came from. A screenshot with no identity
     // is how a real run convinced itself the tool was returning stale caches
     // when it was actually capturing a different window's tab.
@@ -746,16 +943,17 @@ registerTool({
     });
     const shot = staged.id ? { id: staged.id, name: filename } : undefined;
     // The image→viewport mapping, so the model can point at what it sees:
-    // click_at space:'screenshot' takes x/y in THIS image's pixels.
+    // type_at/click_at space:'screenshot' takes x/y in THIS image's pixels.
     const coords =
       shotInfo.imageW > 0
-        ? {
-            image: { width: shotInfo.imageW, height: shotInfo.imageH },
-            viewport_css:
-              typeof shotInfo.viewportCssW === "number"
-                ? { width: shotInfo.viewportCssW, height: shotInfo.viewportCssH }
-                : undefined,
-          }
+        ? shotInfo.crop
+          ? { image: { width: shotInfo.imageW, height: shotInfo.imageH }, crop: shotInfo.crop }
+          : {
+              image: { width: shotInfo.imageW, height: shotInfo.imageH },
+              ...(typeof shotInfo.viewportCssW === "number"
+                ? { viewport_css: { width: shotInfo.viewportCssW, height: shotInfo.viewportCssH } }
+                : {}),
+            }
         : undefined;
     if (args.save_to_disk !== true) return { dataUrl: jpeg, ident, shot, coords };
     const downloadId = await chrome.downloads.download({
@@ -772,7 +970,10 @@ registerTool({
       saved?: { downloadId: number; filename: string; path?: string };
       ident?: string;
       shot?: { id: string; name: string };
-      coords?: { image: { width: number; height: number } };
+      coords?: {
+        image: { width: number; height: number };
+        crop?: { x: number; y: number; w: number; h: number };
+      };
     };
     const where = p.ident ? ` of ${p.ident}` : "";
     const saved = p.saved
@@ -782,7 +983,9 @@ registerTool({
       ? ` — staged as ${p.shot.id}: paste_image can deliver these exact bytes into another page (no disk, no paths)`
       : "";
     const dims = p.coords
-      ? ` — the image is ${p.coords.image.width}×${p.coords.image.height} px; click_at/hover_at/drag_at with space:'screenshot' take x/y in these image pixels and convert for you`
+      ? p.coords.crop
+        ? ` — CROP of viewport CSS rect (${Math.round(p.coords.crop.x)},${Math.round(p.coords.crop.y)} ${Math.round(p.coords.crop.w)}×${Math.round(p.coords.crop.h)}), native-resolution image ${p.coords.image.width}×${p.coords.image.height} px: type_at/click_at with space:'screenshot' now point into THIS crop`
+        : ` — the image is ${p.coords.image.width}×${p.coords.image.height} px; type_at/click_at/hover_at/drag_at with space:'screenshot' take x/y in these image pixels and convert for you`
       : "";
     return {
       text: `[screenshot captured${where}${saved}${staged}${dims} — the image is attached below; look at it]`,

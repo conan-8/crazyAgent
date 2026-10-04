@@ -145,6 +145,32 @@ export function assess(
       }
       return { level: "allow" };
     }
+    // `type_at` = a coordinate click plus typing in ONE call: the union of
+    // the click and type rules, fed by the probe of the click point.
+    case "type_at": {
+      if (probe?.type === "password") {
+        return {
+          level: "confirm",
+          rule: "password",
+          summary: `Type into a password field at a clicked point (${probe.tag}#${probe.text.slice(0, 30)})`,
+        };
+      }
+      if (probe && PURCHASE_RE.test(probe.text)) {
+        return {
+          level: "confirm",
+          rule: "purchase",
+          summary: `Click a purchase/checkout control: "${probe.text.slice(0, 60)}"`,
+        };
+      }
+      if (probe?.inForm && probe.type === "submit") {
+        return {
+          level: "confirm",
+          rule: "form_submit",
+          summary: `Submit a form (click "${probe.text.slice(0, 40) || "submit"}")`,
+        };
+      }
+      return { level: "allow" };
+    }
     case "key": {
       const isEnter = String(args.key ?? "").endsWith("Enter");
       if (isEnter && probe?.inForm) {

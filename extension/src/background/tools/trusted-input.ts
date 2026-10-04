@@ -188,9 +188,11 @@ async function editorSink(
 /**
  * Where ref-less input should land: leave a real editable alone, otherwise
  * claim a canvas editor's sink if the page has one, otherwise accept the
- * browser's current focus (often the sink iframe itself).
+ * browser's current focus (often the sink iframe itself). Exported for
+ * type_at, which must verify focus AFTER its click and before its text —
+ * the one-place-where-focus-is-known rule that keeps click→type atomic.
  */
-async function resolveNoRefFocus(
+export async function resolveNoRefFocus(
   tabId: number,
   adapter: BrowserAdapter,
 ): Promise<"focused" | "sink" | "none"> {
@@ -212,6 +214,13 @@ export interface TrustedInputRequest {
   text?: string;
   key?: string;
   submit?: boolean;
+  /**
+   * Select-all (Ctrl+A) inside THIS trusted sequence, immediately before the
+   * text/key — atomic on purpose: a separate select call lets focus shift
+   * between the two, which is exactly how a run ended up with the document
+   * duplicated instead of replaced.
+   */
+  selectAll?: boolean;
   /** Why the trusted route was chosen — echoed into the result for run logs. */
   reason: string;
 }
@@ -279,9 +288,15 @@ export async function runTrustedInput(
     }
   }
 
-  const steps = req.key !== undefined
-    ? [{ kind: "key" as const, key: req.key }]
-    : planTyping(req.text ?? "", { submit: req.submit });
+  const base =
+    req.key !== undefined
+      ? [{ kind: "key" as const, key: req.key }]
+      : planTyping(req.text ?? "", { submit: req.submit });
+  // select:"all" rides the SAME trusted sequence as the text — the selection
+  // and the insert cannot be separated by a focus shift between calls.
+  const steps: { kind: "key"; key: string }[] | ReturnType<typeof planTyping> = req.selectAll
+    ? [{ kind: "key" as const, key: "Control+a" }, ...base]
+    : base;
 
   let inserted = 0;
   let keysSent = 0;
