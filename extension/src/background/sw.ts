@@ -674,6 +674,11 @@ async function runFrom(cp: Checkpoint): Promise<void> {
  * Page-affecting actions whose result gets an automatic settle + fresh
  * snapshot appended — "action + observation" in one round-trip, so the model
  * no longer has to call wait_for_settle + snapshot after every step.
+ *
+ * The coordinate/trusted tools belong here too: their results are hit
+ * reports, not page views. Without an observation the model spends its NEXT
+ * turn screenshotting after every stroke — a 603-turn Docs run took 170
+ * screenshots, 147 of them the turn immediately after an action.
  */
 const AUTO_OBSERVE_TOOLS = new Set([
   "click",
@@ -688,6 +693,11 @@ const AUTO_OBSERVE_TOOLS = new Set([
   "forward",
   "tabs_create",
   "tabs_switch",
+  "click_at",
+  "type_at",
+  "input_sequence",
+  "drag_at",
+  "hover_at",
 ]);
 
 /**
@@ -768,11 +778,14 @@ function collapseRepeatObservation(
   };
 }
 
-/** Best-effort settle + compact snapshot after an action; null on failure. */
+/** Best-effort settle + compact snapshot after an action; null on failure.
+ *  Reports whether the page paints into a <canvas>: the digest then shows
+ *  the chrome (refs, menus) but never the content, and the caller attaches
+ *  the screenshot the model would otherwise spend its next turn taking. */
 async function observeAfterAction(
   tabId: number,
   settleMs = 10_000,
-): Promise<string | null> {
+): Promise<{ text: string | null; canvas: boolean } | null> {
   try {
     // Shorter reachability budget than the manual tool: fail fast on pages
     // where the content script can never run (chrome://, PDF viewer, …).
@@ -780,14 +793,19 @@ async function observeAfterAction(
     const snap = await collectSnapshot(tabId);
     if (!snap.frames.length) return null;
     const text = formatSnapshot(snap);
+    const canvas = snap.frames.some((f) => (f.canvases ?? 0) > 0);
     const prev = lastObservations.get(tabId);
     lastObservations.set(tabId, text);
     if (prev && sameObservation(prev, text)) {
-      return "[page unchanged since the previous observation]";
+      return { text: "[page unchanged since the previous observation]", canvas };
     }
-    return text.length > OBSERVATION_MAX_CHARS
-      ? `${text.slice(0, OBSERVATION_MAX_CHARS)}…[truncated]`
-      : text;
+    return {
+      text:
+        text.length > OBSERVATION_MAX_CHARS
+          ? `${text.slice(0, OBSERVATION_MAX_CHARS)}…[truncated]`
+          : text,
+      canvas,
+    };
   } catch {
     return null; // observation is an optimization — never fail the action
   }
@@ -938,14 +956,24 @@ async function executeToolGated(
   // Keystroke-level edits on canvas editors never go "quiet" (the editor keeps
   // painting and saving), so a full settle budget there is pure dead time —
   // ~10 s per key/type call in a live run. Submit-ish actions keep the budget.
+  // The coordinate/sequence tools get the same fast path (menus and dialogs
+  // render well inside it); a sequence that presses Enter anywhere keeps the
+  // long budget, since it may navigate.
+  const enterish =
+    /enter/i.test(String(args.key ?? "")) ||
+    (name === "input_sequence" && /enter/i.test(JSON.stringify(args)));
+  const coordinateTool =
+    name === "click_at" || name === "type_at" || name === "hover_at" || name === "drag_at";
   const settles =
-    (name === "type" && args.submit !== true) ||
-    (name === "key" && !/enter/i.test(String(args.key ?? "")))
-      ? 3_500
-      : 10_000;
-  const observation = await observeAfterAction(obsTabId, settles);
+    coordinateTool || (name === "input_sequence" && !enterish)
+      ? 2_500
+      : (name === "type" && args.submit !== true) || (name === "key" && !enterish)
+        ? 3_500
+        : 10_000;
+  const observed = await observeAfterAction(obsTabId, settles);
   if (stopRequested) return res;
   const base = res.text ?? JSON.stringify(res.payload ?? null);
+  const observation = observed?.text ?? null;
   if (!observation || observation.trim().length < 32) {
     // The action landed but the text tools see nothing: attach a screenshot so
     // the model verifies with its eyes instead of assuming nothing happened.
@@ -958,6 +986,21 @@ async function executeToolGated(
           image: shot,
         }
       : res;
+  }
+  // A canvas surface paints its CONTENT into pixels: the digest above shows
+  // the chrome (refs, menus) but never what the action did to the document.
+  // Attach the shot the model would otherwise spend its NEXT turn taking —
+  // and make it the latest capture, so space:'screenshot' clicks resolve
+  // against exactly what the model is looking at.
+  if (observed?.canvas) {
+    const shot = await captureBlindShot(await adapterForMode(), obsTabId);
+    if (shot) {
+      return {
+        ...res,
+        text: `${base}\n\n--- page after action (auto-settled, fresh snapshot) ---\n${observation}\n[The document body is canvas-painted — a screenshot is attached; its pixels are the only read of what the action did. No separate screenshot needed.]`,
+        image: shot,
+      };
+    }
   }
   return {
     ...res,
