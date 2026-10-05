@@ -84,13 +84,17 @@ import {
 } from "../shared/lessons";
 import { learnFromRun } from "./agent/coach";
 import {
+  JEV_GATE_QUESTIONS,
   JEV_RISK_QUESTIONS,
   assess,
   assessWithJev,
   buildRiskState,
+  toEffortHint,
+  toProgressVerdict,
   toRiskAnswers,
   ConfirmGate,
   type ElementProbe,
+  type GateHistory,
 } from "./policy";
 import {
   createJevClient,
@@ -135,6 +139,73 @@ const ALWAYS_KEY = "baPolicyAlways";
 let currentJev: JevClient | null = null;
 let jevFallbackNoted = false;
 const JEV_GATE_TIMEOUT_MS = 2_000;
+
+/**
+ * Per-step effort routing (Jev Tier 1) is gated on the SAME setting as the
+ * run-start routing: `autoThinking` means "Jev effort routing: run-level AND
+ * per-step". No new switch, no migration.
+ */
+let currentAutoThinking = false;
+
+/**
+ * Per-run gate history for the routing questions: the last few calls as
+ * one-liners plus per-signature repeat/fail counts. This is the
+ * outcome-awareness that makes effort_next/progress verdicts real instead of
+ * intent-guesses ("called 3× (2 failed)" is the difference between grading a
+ * retry routine and grading it stuck). Kept tiny — 3 recent one-liners ride
+ * the gate state, well under the jaggedness caps. Reset at run start.
+ */
+interface GateHistoryState {
+  recent: string[];
+  runs: Map<string, number>;
+  fails: Map<string, number>;
+}
+let gateHistory: GateHistoryState = { recent: [], runs: new Map(), fails: new Map() };
+
+function resetGateHistory(): void {
+  gateHistory = { recent: [], runs: new Map(), fails: new Map() };
+}
+
+function gateSignature(name: string, args: Record<string, unknown>): string {
+  try {
+    return `${name}:${JSON.stringify(args ?? {})}`;
+  } catch {
+    return `${name}:(unserializable)`;
+  }
+}
+
+function buildGateHistory(name: string, args: Record<string, unknown>): GateHistory {
+  const sig = gateSignature(name, args);
+  return {
+    recent: gateHistory.recent.slice(-3),
+    repeats: gateHistory.runs.get(sig) ?? 0,
+    repeatFails: gateHistory.fails.get(sig) ?? 0,
+  };
+}
+
+function recordGateHistory(
+  name: string,
+  args: Record<string, unknown>,
+  res: { ok: boolean; text?: string; error?: string },
+): void {
+  const sig = gateSignature(name, args);
+  gateHistory.runs.set(sig, (gateHistory.runs.get(sig) ?? 0) + 1);
+  if (!res.ok) gateHistory.fails.set(sig, (gateHistory.fails.get(sig) ?? 0) + 1);
+  let argsDigest = "";
+  try {
+    argsDigest = JSON.stringify(args ?? {});
+  } catch {
+    argsDigest = "(unserializable)";
+  }
+  if (argsDigest.length > 80) argsDigest = `${argsDigest.slice(0, 80)}…`;
+  const resultDigest = String(res.ok ? (res.text ?? "") : (res.error ?? ""))
+    .replace(/\s+/g, " ")
+    .slice(0, 60);
+  gateHistory.recent.push(
+    `${name} ${argsDigest} → ${res.ok ? "ok" : "FAILED"}: ${resultDigest}`,
+  );
+  if (gateHistory.recent.length > 6) gateHistory.recent.shift();
+}
 
 const gate = new ConfirmGate({
   emit,
@@ -583,6 +654,10 @@ async function runFrom(cp: Checkpoint): Promise<void> {
       const settings = await loadSettings();
       // Unattended runs make the confirm gate fail fast (see currentUnattended).
       currentUnattended = settings.unattended === true;
+      // Per-step effort routing rides the SAME setting as the run-start
+      // routing: autoThinking = "Jev effort routing: run-level + per-step".
+      currentAutoThinking = settings.autoThinking === true;
+      resetGateHistory();
       // Jev sidecar: built per run from settings; null when off/unconfigured.
       currentJev = createJevClient(settings.jev);
       setActiveJevClient(currentJev);
@@ -634,6 +709,9 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         maxTokens: settings.maxTokens,
         contextWindow: settings.contextWindow,
         thinking,
+        // The user's own level, before any routing lowered it — the ceiling
+        // a per-step `deep` verdict may raise back to (never beyond).
+        thinkingCeiling: settings.thinking,
         madman: settings.madman,
         batchActions: settings.batchActions === true,
         adaptiveThinking: settings.adaptiveThinking === true,
@@ -875,15 +953,31 @@ async function executeToolGated(
   // completed check is stamped on the result (`jevGate`) so the panel can
   // mark the card pink — the check itself is otherwise invisible.
   let jevChecked = false;
+  let jevEffort: { choice: string; confidence: number } | null = null;
+  let jevProgress: { choice: string; confidence: number } | null = null;
   if (risk.level === "allow" && isMutating(name) && currentJev && !stopRequested) {
     try {
+      // With per-step routing on, the effort/progress questions ride the SAME
+      // POST (all questions in one Jev request are evaluated together — zero
+      // extra round trips), and the gate state carries the recent-call
+      // history that makes those verdicts outcome-aware.
       const result = await currentJev.decide(
-        buildRiskState(currentTask, name, args, probe),
-        JEV_RISK_QUESTIONS,
+        buildRiskState(
+          currentTask,
+          name,
+          args,
+          probe,
+          currentAutoThinking ? buildGateHistory(name, args) : null,
+        ),
+        currentAutoThinking ? JEV_GATE_QUESTIONS : JEV_RISK_QUESTIONS,
         { timeoutMs: JEV_GATE_TIMEOUT_MS },
       );
       jevChecked = true;
       risk = assessWithJev(risk, toRiskAnswers(result.answers), probe?.text ?? undefined);
+      if (currentAutoThinking) {
+        jevEffort = toEffortHint(result.answers);
+        jevProgress = toProgressVerdict(result.answers);
+      }
     } catch (err) {
       if (!jevFallbackNoted) {
         jevFallbackNoted = true;
@@ -921,6 +1015,11 @@ async function executeToolGated(
   }
   const res = await executeTool(name, args);
   if (jevChecked) res.jevGate = true;
+  if (jevEffort) res.jevEffort = jevEffort;
+  if (jevProgress) res.jevProgress = jevProgress;
+  // Feed the routing history with EVERY call (not just gated ones) — the
+  // verdicts judge trajectories, and read-only calls are part of the trail.
+  recordGateHistory(name, args, res);
   // A failure is exactly the "concerned" moment: show the page, don't guess.
   if (!res.ok) return withFailureShot(name, res, tabId);
   // Tab moves redefine which tab the agent works on for every later call —

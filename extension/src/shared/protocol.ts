@@ -97,6 +97,14 @@ export type StepEvent =
        * are visible; set by the executor, not by the model.
        */
       jevGate?: boolean;
+      /**
+       * Per-step effort routing (Jev Tier 1): the gate's verdict on how much
+       * deliberation the NEXT decision needs, and on whether this action is
+       * making progress. Rode the risk POST — zero extra round trips. The
+       * loop consumes both once (next step) and drops them on any surprise.
+       */
+      jevEffort?: { choice: string; confidence: number };
+      jevProgress?: { choice: string; confidence: number };
     }
   /** Live run statistics for the composer's stats bar. */
   | {
@@ -138,6 +146,13 @@ export type StepEvent =
       ttftMs?: number;
       decodeMs?: number;
       reasoningChars: number;
+      /**
+       * The EFFECTIVE thinking level this step was sent with (after adaptive
+       * lowering / Jev effort routing). The verification rig for routing:
+       * reasoning chars per step vs this field is how the payoff is measured
+       * — and how a gateway that silently ignores the knob is exposed.
+       */
+      thinking?: string;
     }
   /**
    * Checkpoint health pulse, emitted after each per-step checkpoint save:
@@ -178,6 +193,15 @@ export interface RunStats {
   elapsedMs: number;
   /** Reasoning tokens/text reported by the provider, when thinking was on. */
   reasoningChars?: number;
+  /**
+   * Jev per-step effort routing observability: how many steps a hint was
+   * APPLIED to (lowered), how many it RAISED back toward the ceiling, and
+   * how many were DROPPED by a surprise before use. The numbers that show
+   * whether Tier 1 is paying or flapping.
+   */
+  effortApplied?: number;
+  effortRaised?: number;
+  effortDropped?: number;
   /**
    * The slice of `inputTokens` the provider served from its prompt cache.
    * This is the number that explains per-step latency: a cached prefix costs

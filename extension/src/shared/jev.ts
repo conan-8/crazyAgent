@@ -731,3 +731,50 @@ export function thinkingForComplexity(
   if (cap <= 0 || idx < 0) return userLevel; // "off" (or unknown) — nothing to lower
   return LEVEL_ORDER[Math.min(idx, cap)]!;
 }
+
+// ---------------- per-step effort routing (pure mapping) ----------------
+
+/**
+ * Choice criteria for grading how much deliberation the NEXT decision needs,
+ * in the literal boundary-spelled-out style of JEV_RISK_QUESTIONS. Judged
+ * from the same small gate state (task + action + element probe + recent
+ * call history) — no extra round trip; it rides the risk-gate POST.
+ */
+export const JEV_EFFORT_CRITERIA: Record<string, string> = {
+  routine:
+    "The next decision is obvious from the resulting page: one clear continuation (click the visible target, read the result, continue a sequence)",
+  careful:
+    "Several plausible continuations, a form or validation outcome to interpret, or a page the agent has not seen yet",
+  deep: "An error or unexpected state to diagnose, cross-page planning, or recovery from a failure",
+};
+
+/** Confidence floor for acting on an effort/progress verdict at all. */
+export const JEV_EFFORT_CONFIDENCE = 0.6;
+
+/**
+ * Map one effort verdict onto this step's thinking level.
+ *
+ * The user's level is a CEILING, never a floor: routing moves within
+ * [off, ceiling]. The single sanctioned raise is `deep` — a run graded
+ * "simple" at start can still hit a hard step, and the restore target is the
+ * user's own configured level, never beyond. Everything uncertain,
+ * low-confidence, malformed or unknown falls back to the run baseline, so a
+ * wrong verdict costs at most one cheap step (the loop also drops the hint
+ * on any surprise: failure, empty reply, overrun, navigation, steering).
+ */
+export function thinkingForEffort(
+  verdict: { choice: string; confidence: number } | null | undefined,
+  baseline: ThinkingLevel | undefined,
+  ceiling: ThinkingLevel | undefined,
+): ThinkingLevel | undefined {
+  if (!verdict) return baseline;
+  const cap = ceiling ?? baseline;
+  const capIdx = cap ? LEVEL_ORDER.indexOf(cap) : -1;
+  const confident = verdict.confidence >= JEV_EFFORT_CONFIDENCE;
+  if (verdict.choice === "routine" && confident) return "off";
+  if (verdict.choice === "deep" && confident && capIdx > 0) {
+    // The one raise: back to the user's ceiling, never past it.
+    return cap;
+  }
+  return baseline;
+}

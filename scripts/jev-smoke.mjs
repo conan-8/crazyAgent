@@ -6,6 +6,10 @@
 //    by Jev (purchase=0.95) and gated; deny → cancellation the model sees.
 // C: auto effort routing — Jev grades the task 'simple', thinking drops from
 //    the user's 'high' to 'low' and the provider request carries it.
+// C2/C3: per-step effort routing — the effort_next verdict rides the risk
+//    gate's POST (zero extra round trips): a routine verdict sends the NEXT
+//    step with thinking off (C2), and a failed step drops the hint so the
+//    run level returns (C3).
 // D: fail-open — Jev endpoint unreachable: one info event, run proceeds on
 //    the rule-based policy, no confirm, no error.
 // E: OpenRouter transport — the same judge round-trip over the OpenAI-compatible
@@ -69,6 +73,20 @@ const S_GATE = [
 ];
 
 const S_ROUTE = [{ text: "ROUTED_DONE" }];
+
+// Per-step effort routing: a gated click whose effort_next verdict lowers the
+// NEXT step (C2), and a failing click whose pending hint must be dropped so
+// the run level returns (C3).
+const S_STEP_ROUTE = [
+  { text: "Looking.", toolCalls: [{ name: "snapshot", args: {} }] },
+  { text: "Clicking upgrade.", toolCalls: [{ name: "click", args: { ref: "4" } }] },
+  { text: "STEP_ROUTED_DONE" },
+];
+const S_STEP_RESTORE = [
+  { text: "Clicking upgrade.", toolCalls: [{ name: "click", args: { ref: "4" } }] },
+  { text: "Clicking into the void.", toolCalls: [{ name: "click", args: { ref: "999" } }] },
+  { text: "STEP_RESTORED_DONE" },
+];
 
 // Navigate is NOT mutating per shared/modes (plan mode allows it for
 // research), so the fail-open scenario uses a click — a mutating action the
@@ -418,11 +436,15 @@ async function main() {
       (e) => e.kind === "info" && e.message === "Jev is active",
     );
     const chatReqC = mock.lastRequest();
+    // "mock-model" is budget-style (not o-series/gpt-5/gpt-oss/grok/kimi):
+    // the ONE thinking knob it gets is thinking_budget — 1024 tokens for
+    // "low" — and never both knobs (a strict gateway 400s on the pair).
     check(
       "J8 simple task routes thinking high → low",
       infoC !== undefined &&
-        chatReqC?.reasoning_effort === "low",
-      `${infoC?.message ?? "(no Jev note)"} | reasoning_effort=${chatReqC?.reasoning_effort}`,
+        chatReqC?.thinking_budget === 1024 &&
+        chatReqC?.reasoning_effort === undefined,
+      `${infoC?.message ?? "(no Jev note)"} | thinking_budget=${chatReqC?.thinking_budget} reasoning_effort=${chatReqC?.reasoning_effort}`,
     );
     // J8b/J8c: the run-start note is a Jev note — flagged on the event, and
     // rendered as a pink line with a `Jev` pill (never colour alone).
@@ -438,6 +460,66 @@ async function main() {
       noteC.lines.some((l) => l.includes("Jev is active")) &&
         noteC.pills.some((p) => p.includes("Jev")),
       JSON.stringify(noteC).slice(0, 200),
+    );
+
+    // ============ C2: per-step effort routing (effort_next rides the gate POST) ============
+    mock.setScript(S_STEP_ROUTE);
+    mock.setJevScript({ effort_next: { choice: "routine", confidence: 0.9 } });
+    await configure(panel, { autoThinking: true });
+    const beforeC2 = mock.requests().length;
+    await panel.eval(`__ba.runTask("Click the upgrade button"); "started"`);
+    const evsC2 = await waitDone(panel);
+    // Run-level routing (default complexity answer: "simple") drops high → low;
+    // the gate's routine verdict then drops the step AFTER the gated click to
+    // thinking-off. Three chat requests: low, low, off.
+    const chatC2 = mock
+      .requests()
+      .slice(beforeC2)
+      .filter((b) => b?.model === "mock-model");
+    const noteC2 = evsC2.find(
+      (e) => e.kind === "info" && /Jev effort routing/.test(e.message ?? ""),
+    );
+    const lastC2 = chatC2[chatC2.length - 1];
+    check(
+      "J8d per-step routine hint sends the next step with thinking off",
+      noteC2?.jev === true &&
+        chatC2.length >= 3 &&
+        chatC2[0]?.thinking_budget === 1024 &&
+        lastC2?.enable_thinking === false &&
+        lastC2?.thinking_budget === undefined,
+      `chats=${chatC2.length} knobs=${chatC2.map((b) => b.thinking_budget ?? (b.enable_thinking === false ? "off" : "?")).join(",")} note=${noteC2?.message ?? "(none)"}`,
+    );
+    const clickC2 = evsC2.find((e) => e.kind === "tool_result" && e.name === "click");
+    check(
+      "J8e the gated click still stamps jevGate and carries the effort verdict",
+      clickC2?.jevGate === true && clickC2?.jevEffort?.choice === "routine",
+      `jevGate=${clickC2?.jevGate} jevEffort=${JSON.stringify(clickC2?.jevEffort)}`,
+    );
+
+    // ============ C3: a failed step drops the hint (level restored) ============
+    mock.setScript(S_STEP_RESTORE);
+    mock.setJevScript({ effort_next: { choice: "routine", confidence: 0.9 } });
+    const beforeC3 = mock.requests().length;
+    await panel.eval(`__ba.runTask("Click twice"); "started"`);
+    const evsC3 = await waitDone(panel);
+    const chatC3 = mock
+      .requests()
+      .slice(beforeC3)
+      .filter((b) => b?.model === "mock-model");
+    // step0 (click ok, hint armed) low → step1 (lowered to off; click FAILS →
+    // hint dropped) off → step2 restored to the run level low.
+    check(
+      "J8f a failed step drops the pending hint and restores the run level",
+      chatC3.length >= 3 &&
+        chatC3[0]?.thinking_budget === 1024 &&
+        chatC3[1]?.enable_thinking === false &&
+        chatC3[2]?.thinking_budget === 1024,
+      `chats=${chatC3.length} knobs=${chatC3.map((b) => b.thinking_budget ?? (b.enable_thinking === false ? "off" : "?")).join(",")}`,
+    );
+    check(
+      "J8g the bogus-ref click actually failed (the restore was earned)",
+      evsC3.some((e) => e.kind === "tool_result" && e.ok === false),
+      `failures=${evsC3.filter((e) => e.kind === "tool_result" && e.ok === false).length}`,
     );
 
     // ============ D: fail-open when Jev is unreachable ============

@@ -11,7 +11,8 @@ import type {
   ThinkingLevel,
   ToolCall,
 } from "../../shared/llm";
-import { thinkingBudgetFor } from "../../shared/llm";
+import { THINKING_LEVELS, thinkingBudgetFor } from "../../shared/llm";
+import { thinkingForEffort } from "../../shared/jev";
 import type { Checkpoint, RunStats, StepEvent } from "../../shared/protocol";
 import { validateToolArgs } from "../tools/types";
 import { estimateTokens } from "../../shared/modes";
@@ -33,6 +34,14 @@ export interface ExecuteResult {
    * through to the tool_result event so the panel can mark the card.
    */
   jevGate?: boolean;
+  /**
+   * Jev per-step routing verdicts from this call's risk-gate POST (they ride
+   * the same request — zero extra round trips). The loop consumes each once:
+   * the effort hint shapes the NEXT step's thinking level, the progress
+   * verdict may arm one coaching line. Both are dropped on any surprise.
+   */
+  jevEffort?: { choice: string; confidence: number };
+  jevProgress?: { choice: string; confidence: number };
 }
 
 /**
@@ -71,6 +80,12 @@ export interface LoopDeps {
   contextWindow?: number;
   /** Reasoning effort level forwarded to the provider ("off" disables). */
   thinking?: ThinkingLevel;
+  /**
+   * The user's configured thinking level BEFORE any routing lowered it — the
+   * ceiling per-step effort routing may raise back to (a "simple"-graded run
+   * can hit a hard step). Omitted = `thinking` is already the ceiling.
+   */
+  thinkingCeiling?: ThinkingLevel;
   /** Madman mode: profane voice in the prompt + a cuss on every tool label. */
   madman?: boolean;
   /**
@@ -244,6 +259,19 @@ const PAGE_CHANGING_TOOLS = new Set([
   "tabs_close",
 ]);
 
+/**
+ * Confidence floor for acting on a Jev `progress` verdict. Higher than the
+ * effort floor on purpose: the consequence here is a coaching line the model
+ * reads mid-run, and a false "stuck" accusation on a working sequence is
+ * more disruptive than a missed lowering.
+ */
+export const JEV_PROGRESS_CONFIDENCE = 0.7;
+
+/** Rank of a thinking level in [off..high] — raise/lower bookkeeping. */
+function levelRank(level: ThinkingLevel): number {
+  return THINKING_LEVELS.findIndex((l) => l.value === level);
+}
+
 /** What the loop observed about one finished step, for the routine test. */
 export interface StepOutcomeState {
   /** Tool calls the step made (0 = answer-only or empty reply). */
@@ -406,6 +434,13 @@ const PARALLEL_SAFE = new Set([
  */
 export interface StuckGuard {
   note(name: string, args: Record<string, unknown>, failed: boolean): string;
+  /**
+   * Arm a ONE-SHOT coaching line (the Jev progress verdict) that rides the
+   * next tool result — whatever else that result says — and is then cleared.
+   * Same in-band channel as the repeat warnings: the model sees it at the
+   * exact moment it matters, and no prompt prefix mutates.
+   */
+  coach(message: string): void;
 }
 
 const WAIT_LIKE_TOOLS = new Set(["wait_for", "wait_for_settle"]);
@@ -413,8 +448,15 @@ const WAIT_LIKE_TOOLS = new Set(["wait_for", "wait_for_settle"]);
 export function createStuckGuard(): StuckGuard {
   const streak = new Map<string, number>();
   const calls = new Map<string, number>();
+  let coachNote = "";
   return {
+    coach(message) {
+      coachNote = `\n\n[Jev progress check — ${message}]`;
+    },
     note(name, args, failed) {
+      // The armed coaching line rides this result and is consumed once.
+      const coach = coachNote;
+      coachNote = "";
       let key: string;
       try {
         key = `${name}:${JSON.stringify(args ?? {})}`;
@@ -426,15 +468,15 @@ export function createStuckGuard(): StuckGuard {
       const n = failed ? (streak.get(name) ?? 0) + 1 : 0;
       streak.set(name, n);
       if (failed && repeats > 1) {
-        return `\n\n[RETRY WARNING: this exact call has already failed in this run — repeating it will fail again. Do NOT run it again. Change the approach; if you are unsure what the page shows, take a screenshot and look at it.]`;
+        return `${coach}\n\n[RETRY WARNING: this exact call has already failed in this run — repeating it will fail again. Do NOT run it again. Change the approach; if you are unsure what the page shows, take a screenshot and look at it.]`;
       }
       if (failed && n >= 3) {
-        return `\n\n[STUCK: ${name} has now failed ${n} times in a row. Do not retry it. Take a screenshot to SEE what the page actually shows, switch to read_page / snapshot / ref-based tools, or report the blocker and stop.]`;
+        return `${coach}\n\n[STUCK: ${name} has now failed ${n} times in a row. Do not retry it. Take a screenshot to SEE what the page actually shows, switch to read_page / snapshot / ref-based tools, or report the blocker and stop.]`;
       }
       if (repeats >= 3 && !WAIT_LIKE_TOOLS.has(name)) {
-        return `\n\n[This exact call has now run ${repeats} times and returns the same thing — vary the approach instead of polling it again. If you are unsure what you are seeing, take a screenshot.]`;
+        return `${coach}\n\n[This exact call has now run ${repeats} times and returns the same thing — vary the approach instead of polling it again. If you are unsure what you are seeing, take a screenshot.]`;
       }
-      return "";
+      return coach;
     },
   };
 }
@@ -610,6 +652,22 @@ export async function runAgentTask(
   let routineStreak = 0;
   let adaptiveRoutine = false;
   let adaptiveNoted = false;
+  // Jev per-step effort routing (Tier 1): the freshest effort verdict from
+  // the risk-gate POST, held for exactly ONE step (consumed at the top of the
+  // next step, dropped on any surprise), plus the once-per-run announcement
+  // flag and the counters that make the payoff measurable in run stats.
+  let pendingEffort: { choice: string; confidence: number } | null = null;
+  let jevEffortNoted = false;
+  let effortApplied = 0;
+  let effortRaised = 0;
+  let effortDropped = 0;
+  const thinkingCeiling = deps.thinkingCeiling ?? deps.thinking;
+  const dropEffortHint = (): void => {
+    if (pendingEffort) {
+      pendingEffort = null;
+      effortDropped += 1;
+    }
+  };
   // The stable system prompt (rules + task) is byte-identical for the whole
   // run — built once. Only the clock is per-step, and it rides in
   // systemVolatile at the END of the request so provider prompt caching hits
@@ -630,9 +688,13 @@ export async function runAgentTask(
     deps.emit({ kind: "step_started", stepIndex: step });
 
     // Mid-run steering: whatever the user typed since the last step lands as
-    // normal user messages this call will see.
+    // normal user messages this call will see. Steering is a surprise: any
+    // pending effort hint dies with it.
     for (const text of deps.takeUserInput?.() ?? []) {
-      if (text.trim()) cp.messages.push({ role: "user", content: text });
+      if (text.trim()) {
+        cp.messages.push({ role: "user", content: text });
+        dropEffortHint();
+      }
     }
 
     const now = new Date();
@@ -649,13 +711,35 @@ export async function runAgentTask(
     // checkpoint (every screenshot ever taken, base64 counted as chars/4) and
     // reported absurdities like "context 1215933/128000".
     const history = truncateHistory(cp.messages, HISTORY_BUDGET_CHARS, historyTokenBudget);
-    // Effective thinking for THIS step: the run level, lowered to "off" while
-    // the adaptive streak says the work is routine (see isRoutineStep). The
-    // overrun machinery and the reasoning cap keep operating on the run level.
-    const effectiveThinking: ThinkingLevel | undefined =
-      deps.adaptiveThinking === true && adaptiveRoutine && thinking !== "off"
-        ? "off"
-        : thinking;
+    // Effective thinking for THIS step, cheapest certain signal first:
+    // Tier 0 — the adaptive streak says routine → off (locally certain).
+    // Tier 1 — the Jev effort hint from the last gate POST, consumed once
+    // here (whether or not it changes the level) and clamped to the ceiling.
+    // Baseline — the run level. The overrun machinery and the reasoning cap
+    // keep operating on the RUN level; a hinted-down step just generates less.
+    let effectiveThinking: ThinkingLevel | undefined = thinking;
+    if (deps.adaptiveThinking === true && adaptiveRoutine && thinking !== "off") {
+      effectiveThinking = "off";
+    } else if (pendingEffort) {
+      const hint = pendingEffort;
+      pendingEffort = null;
+      const routed = thinkingForEffort(hint, thinking, thinkingCeiling);
+      if (routed !== undefined && routed !== thinking) {
+        if (levelRank(routed) > levelRank(thinking ?? "off")) effortRaised += 1;
+        else effortApplied += 1;
+        if (!jevEffortNoted) {
+          jevEffortNoted = true;
+          deps.emit({
+            kind: "info",
+            jev: true,
+            message:
+              `Jev effort routing: this step runs at '${routed}' (run level '${thinking ?? "off"}')` +
+              " — routine steps skip thinking, the configured ceiling returns on any surprise",
+          });
+        }
+        effectiveThinking = routed;
+      }
+    }
     const request: LlmRequest = {
       system: systemPrompt,
       systemSuffix: deps.lessonsBlock || undefined,
@@ -703,9 +787,11 @@ export async function runAgentTask(
         // one cheap round trip costs less than the rest of the soliloquy.
         overruns += 1;
         // A reasoning overrun is the opposite of routine — adaptive lowering
-        // (if any) lifts immediately.
+        // (if any) lifts immediately, and any pending effort hint dies: the
+        // next step must think at the full run level.
         routineStreak = 0;
         adaptiveRoutine = false;
+        dropEffortHint();
         deps.emit({
           kind: "info",
           message:
@@ -754,12 +840,17 @@ export async function runAgentTask(
     }
 
     // Per-step timing split, once per turn: TTFT (prefill/queue) vs decode.
+    // The effective thinking level rides along — the verification rig for
+    // effort routing: reasoning chars per step vs THIS field is how the
+    // payoff is measured, and how a gateway that silently ignores the knob
+    // is exposed (level off + reasoning chars > 0 = knob not honored).
     deps.emit({
       kind: "turn_timing",
       stepIndex: step,
       ttftMs,
       decodeMs,
       reasoningChars: result.reasoning?.length ?? 0,
+      thinking: effectiveThinking,
     });
 
     // Live usage for the stats bar: provider numbers when reported, else an
@@ -818,6 +909,9 @@ export async function runAgentTask(
         cachedEverReported && cachedAlwaysReported ? totalCached : undefined,
       prefixTokens,
       usageEstimated: usageEverEstimated || undefined,
+      effortApplied: effortApplied || undefined,
+      effortRaised: effortRaised || undefined,
+      effortDropped: effortDropped || undefined,
     };
     lastStats = stats;
     deps.emit({ kind: "usage", ...stats });
@@ -859,9 +953,11 @@ export async function runAgentTask(
       }
       cp.messages.push({ role: "user", content: emptyReplyNudge(truncated) });
       // An empty reply is a surprise by definition: the routine streak (and
-      // any adaptive lowering) resets so the next step thinks at full level.
+      // any adaptive lowering) resets so the next step thinks at full level,
+      // and any pending effort hint dies with it.
       routineStreak = 0;
       adaptiveRoutine = false;
+      dropEffortHint();
       cp.stepIndex = step + 1;
       cp.updatedAt = Date.now();
       capCheckpointImages(cp.messages);
@@ -918,6 +1014,13 @@ export async function runAgentTask(
     let aborted = false;
     // Per-step outcome flags for the adaptive-thinking routine test.
     let stepFailed = false;
+    // Freshest Jev routing verdicts from this step's gate calls (the LAST
+    // stamped result wins — it saw the most recent page state). Cast
+    // initializers: the assignments happen inside the record() closure, which
+    // control-flow analysis cannot see — without the cast every read here
+    // would narrow to null.
+    let lastJevEffort = null as { choice: string; confidence: number } | null;
+    let lastJevProgress = null as { choice: string; confidence: number } | null;
     const record = (outcome: {
       message: LlmMessage;
       event: StepEvent;
@@ -925,6 +1028,10 @@ export async function runAgentTask(
     }): void => {
       cp.messages.push(outcome.message);
       deps.emit(outcome.event);
+      if (outcome.event.kind === "tool_result") {
+        if (outcome.event.jevEffort) lastJevEffort = outcome.event.jevEffort;
+        if (outcome.event.jevProgress) lastJevProgress = outcome.event.jevProgress;
+      }
       if (outcome.invalid || outcome.event.kind === "tool_result" && outcome.event.ok === false) {
         stepFailed = true;
       }
@@ -1024,6 +1131,36 @@ export async function runAgentTask(
       }
     }
 
+    // Jev Tier-1 consumption: the freshest effort verdict becomes the NEXT
+    // step's one-shot hint — unless this step held a surprise (a failure or a
+    // page-changing call), which drops any pending hint instead. These are
+    // the same events that reset the adaptive streak: a hint never survives
+    // one, so a wrong "routine" costs at most a single cheap step.
+    // (Typed locals: the verdicts are assigned inside the record() closure,
+    // which control-flow analysis cannot see.)
+    const effortVerdict: { choice: string; confidence: number } | null = lastJevEffort;
+    const progressVerdict: { choice: string; confidence: number } | null = lastJevProgress;
+    if (stepFailed || calls.some((c) => PAGE_CHANGING_TOOLS.has(c.name))) {
+      dropEffortHint();
+    } else if (effortVerdict) {
+      pendingEffort = effortVerdict;
+    }
+    // Progress verdict → one coaching line riding the next tool result. Only
+    // confident negatives act; "advancing" does nothing (praise is noise).
+    // The guard's repeat warnings are string-equality based — this catches
+    // the SEMANTIC loop they miss: same intent, varied coordinates.
+    if (
+      progressVerdict &&
+      progressVerdict.confidence >= JEV_PROGRESS_CONFIDENCE &&
+      (progressVerdict.choice === "stuck" || progressVerdict.choice === "treading_water")
+    ) {
+      guard.coach(
+        progressVerdict.choice === "stuck"
+          ? "the recent approach is not working — stop repeating it; look at the current page state, change strategy, or report the blocker"
+          : "recent attempts are not changing the page state — vary the approach before trying again",
+      );
+    }
+
     cp.stepIndex = step + 1;
     cp.updatedAt = Date.now();
     capCheckpointImages(cp.messages);
@@ -1087,6 +1224,8 @@ async function runOne(
           result: content,
           ok: false,
           jevGate: res.jevGate === true ? true : undefined,
+          jevEffort: res.jevEffort,
+          jevProgress: res.jevProgress,
         },
       };
     }
@@ -1114,6 +1253,8 @@ async function runOne(
         ok: true,
         image,
         jevGate: res.jevGate === true ? true : undefined,
+        jevEffort: res.jevEffort,
+        jevProgress: res.jevProgress,
       },
     };
   } catch (err) {

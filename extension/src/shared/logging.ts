@@ -117,6 +117,13 @@ export interface LogTurn {
    */
   ttftMs?: number;
   decodeMs?: number;
+  /**
+   * The EFFECTIVE thinking level this turn was sent with (after adaptive
+   * lowering / Jev effort routing). The verification rig for routing:
+   * reasoning chars vs this field proves the payoff — and exposes a gateway
+   * that silently ignores the knob (level "off" + reasoning chars > 0).
+   */
+  thinking?: string;
 }
 
 /** One logged user message: the task plus metadata, and the turns it spawned. */
@@ -271,6 +278,7 @@ export function foldLogEvent(
       const turn = currentTurn(rec, at);
       if (e.ttftMs !== undefined) turn.ttftMs = e.ttftMs;
       if (e.decodeMs !== undefined) turn.decodeMs = e.decodeMs;
+      if (e.thinking !== undefined) turn.thinking = e.thinking;
       break;
     }
     case "llm_request_sent":
@@ -518,10 +526,11 @@ export function toMarkdown(records: LogTurnRecord[]): string {
       );
       out.push("");
       // The timing split explains the duration: TTFT is what the caller waited
-      // before anything streamed (prefill/queue), decode is generation.
-      if (turn.ttftMs !== undefined || turn.decodeMs !== undefined) {
+      // before anything streamed (prefill/queue), decode is generation. The
+      // thinking level is the effort-routing verification rig.
+      if (turn.ttftMs !== undefined || turn.decodeMs !== undefined || turn.thinking) {
         out.push(
-          `_timing: ttft ${fmtDuration(turn.ttftMs)} · decode ${fmtDuration(turn.decodeMs)}_`,
+          `_timing: ttft ${fmtDuration(turn.ttftMs)} · decode ${fmtDuration(turn.decodeMs)}${turn.thinking ? ` · thinking ${turn.thinking}` : ""}_`,
         );
       }
       if (turn.usage) {
@@ -626,6 +635,11 @@ export function toMarkdown(records: LogTurnRecord[]): string {
           const floor = turn.stats.prefixTokens * turn.stats.steps;
           out.push(
             `_prefix: ${turn.stats.prefixTokens} tokens re-sent per step × ${turn.stats.steps} steps = ${floor} tokens of fixed cost_`,
+          );
+        }
+        if (turn.stats.effortApplied || turn.stats.effortRaised || turn.stats.effortDropped) {
+          out.push(
+            `_effort routing: ${turn.stats.effortApplied ?? 0} step(s) lowered · ${turn.stats.effortRaised ?? 0} raised · ${turn.stats.effortDropped ?? 0} hint(s) dropped by a surprise_`,
           );
         }
       }

@@ -362,10 +362,29 @@ Layers, all fail-open (a Jev outage degrades to the pre-Jev behavior):
   `prompts.ts` adds the usage rule only when the tool is present, keeping the
   prompt byte-stable per run (provider prompt caching). In `PARALLEL_SAFE`.
   Per jaggedness guidance the description forbids arithmetic/counting/dates.
-- **Auto effort routing** (`AgentSettings.autoThinking`) — at run start one
-  choice question grades task complexity (`JEV_COMPLEXITY_CRITERIA`) and may
-  LOWER `thinking` (simple→low, moderate→medium), clamped to never exceed the
-  user's level; failure keeps it.
+- **Auto effort routing** (`AgentSettings.autoThinking`) — two tiers under one
+  setting. At run start one choice question grades task complexity
+  (`JEV_COMPLEXITY_CRITERIA`) and may LOWER `thinking` (simple→low,
+  moderate→medium), clamped to never exceed the user's level; failure keeps it.
+  **Per step**, the risk gate's existing POST carries two extra choice
+  questions (`JEV_GATE_QUESTIONS` = risk four + `effort_next` + `progress`) —
+  zero extra round trips. `effort_next` (`JEV_EFFORT_CRITERIA`: routine /
+  careful / deep) grades how much deliberation the NEXT decision needs;
+  `thinkingForEffort` maps a confident "routine" to thinking-off and a
+  confident "deep" back UP to the user's ceiling (the one sanctioned raise —
+  a "simple"-graded run can hit a hard step), everything else stays at the
+  run baseline. The hint is one-shot (consumed by the very next step) and
+  dropped on any surprise — failure, navigation, empty reply, overrun, user
+  steering — so a wrong "routine" costs at most one cheap step. Gate state
+  carries a tiny recent-call history (`buildRiskState`: 3 one-liners + this
+  signature's repeat/fail counts) so verdicts are outcome-aware, not
+  intent-guesses. `progress` (advancing / treading_water / stuck, floor 0.7)
+  arms a one-shot coaching line that rides the next tool result via
+  `StuckGuard.coach` — the semantic-loop catcher the string-equality repeat
+  guard can't see (same intent, varied coordinates). The effective level per
+  step lands on `turn_timing.thinking` (run-log `_timing:` lines) and
+  applied/raised/dropped counters land in run stats — the rig that proves the
+  payoff and exposes a gateway that ignores the knob.
 
 `scripts/jev-smoke.mjs` (in `npm run verify`) proves all paths against headless
 Edge: the mock server also speaks `/systemone` and the chat-completions

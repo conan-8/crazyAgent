@@ -1389,7 +1389,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                     checked={s.autoThinking}
                     onChange={(v) => set("autoThinking", v)}
                     title="Auto effort"
-                    hint="Let Jev grade each task and lower reasoning effort on trivial ones (never raises it; on by default)"
+                    hint="Let Jev grade each task AND each step (from the risk-check it already runs) and lower reasoning effort on routine work — never above your configured level, restored on any surprise (on by default)"
                   />
                   <div class="field-grid">
                     <label class="field">

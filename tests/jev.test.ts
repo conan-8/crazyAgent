@@ -18,6 +18,8 @@ import {
   parseSystemOneResponse,
   serializeJevState,
   thinkingForComplexity,
+  thinkingForEffort,
+  JEV_EFFORT_CONFIDENCE,
 } from "../extension/src/shared/jev";
 import {
   JEV_RISK_QUESTIONS,
@@ -481,6 +483,48 @@ describe("thinkingForComplexity", () => {
   it("falls back to the user level on unknown/missing grades", () => {
     expect(thinkingForComplexity(undefined, "high")).toBe("high");
     expect(thinkingForComplexity("wat", "medium")).toBe("medium");
+  });
+});
+
+describe("thinkingForEffort (per-step routing)", () => {
+  const v = (choice: string, confidence: number) => ({ choice, confidence });
+
+  it("drops a confident 'routine' step to off", () => {
+    expect(thinkingForEffort(v("routine", 0.9), "medium", "high")).toBe("off");
+    expect(thinkingForEffort(v("routine", JEV_EFFORT_CONFIDENCE), "high", "high")).toBe("off");
+  });
+
+  it("ignores a low-confidence 'routine' (below the floor)", () => {
+    expect(thinkingForEffort(v("routine", JEV_EFFORT_CONFIDENCE - 0.01), "medium", "high")).toBe("medium");
+  });
+
+  it("raises a confident 'deep' step back to the ceiling, never past it", () => {
+    // A run routed down to low at start hits a hard step: deep restores the
+    // user's own configured ceiling.
+    expect(thinkingForEffort(v("deep", 0.8), "low", "high")).toBe("high");
+    // The ceiling is a hard cap — deep can never exceed the user's level.
+    expect(thinkingForEffort(v("deep", 0.99), "low", "medium")).toBe("medium");
+  });
+
+  it("leaves 'careful' at the baseline (only the extremes act)", () => {
+    expect(thinkingForEffort(v("careful", 0.95), "medium", "high")).toBe("medium");
+  });
+
+  it("is a no-op when the baseline is already off", () => {
+    expect(thinkingForEffort(v("deep", 0.9), "off", "off")).toBe("off");
+    expect(thinkingForEffort(v("routine", 0.9), "off", "off")).toBe("off");
+  });
+
+  it("falls back to baseline on null/malformed/unknown verdicts", () => {
+    expect(thinkingForEffort(null, "medium", "high")).toBe("medium");
+    expect(thinkingForEffort(undefined, "high", "high")).toBe("high");
+    expect(thinkingForEffort(v("wat", 0.9), "medium", "high")).toBe("medium");
+    // A deep verdict with no ceiling to raise to stays at baseline.
+    expect(thinkingForEffort(v("deep", 0.9), "medium", undefined)).toBe("medium");
+  });
+
+  it("treats an 'off' ceiling as no-raise (deep cannot exceed it)", () => {
+    expect(thinkingForEffort(v("deep", 0.9), "off", "off")).toBe("off");
   });
 });
 

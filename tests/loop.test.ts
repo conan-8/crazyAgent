@@ -4,6 +4,7 @@ import {
   createStuckGuard,
   estimateMessages,
   isRoutineStep,
+  JEV_PROGRESS_CONFIDENCE,
   reasoningCapChars,
   runAgentTask,
   truncateHistory,
@@ -1307,5 +1308,180 @@ describe("reasoning cap", () => {
     await runAgentTask(cp, deps);
     expect(llm.seen).toHaveLength(1);
     expect(llm.seen[0]!.thinking).toBe("low");
+  });
+});
+
+describe("Jev per-step effort routing", () => {
+  const toolStep = (id: string, name = "snapshot") => ({
+    text: "",
+    toolCalls: [{ id, name, args: name === "navigate" ? { url: "x" } : {} }],
+    stopReason: "tool_use" as const,
+    reasoning: "ok",
+  });
+  const end = { text: "done", toolCalls: [], stopReason: "end_turn" as const };
+
+  /** An executor returning scripted per-call verdicts (in call order). */
+  function verdictExecute(verdicts: Partial<ExecuteResult>[]) {
+    let i = 0;
+    return async (): Promise<ExecuteResult> => ({
+      ok: true,
+      payload: { fine: true },
+      ...(verdicts[i++] ?? {}),
+    });
+  }
+  const levels = (deps: LoopDeps): (string | undefined)[] =>
+    (deps.llm as FakeLlm).seen.map((r) => r.thinking);
+
+  it("applies a routine hint to the NEXT step only (one-shot), then restores baseline", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness([toolStep("a"), toolStep("b"), end], {
+      thinking: "medium",
+      thinkingCeiling: "high",
+      stepCap: 8,
+      execute: verdictExecute([{ jevEffort: { choice: "routine", confidence: 0.9 } }, {}]),
+    });
+    await runAgentTask(cp, deps);
+    expect(levels(deps)).toEqual(["medium", "off", "medium"]);
+  });
+
+  it("raises a confident deep step back to the ceiling (never past it)", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness([toolStep("a"), toolStep("b"), end], {
+      thinking: "low",
+      thinkingCeiling: "high",
+      stepCap: 8,
+      execute: verdictExecute([{ jevEffort: { choice: "deep", confidence: 0.85 } }, {}]),
+    });
+    await runAgentTask(cp, deps);
+    expect(levels(deps)).toEqual(["low", "high", "low"]);
+  });
+
+  it("drops the hint when the producing step fails — it never propagates", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness([toolStep("a"), toolStep("b"), toolStep("c"), end], {
+      thinking: "medium",
+      thinkingCeiling: "high",
+      stepCap: 8,
+      execute: verdictExecute([
+        { jevEffort: { choice: "routine", confidence: 0.9 } }, // step0 ok → step1 off
+        { ok: false, error: "boom", jevEffort: { choice: "routine", confidence: 0.9 } }, // step1 fails → verdict dropped
+        {}, // step2 baseline (the failed step's hint did NOT carry)
+      ]),
+    });
+    await runAgentTask(cp, deps);
+    expect(levels(deps)).toEqual(["medium", "off", "medium", "medium"]);
+  });
+
+  it("drops the hint when the producing step navigates", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness([toolStep("a", "navigate"), toolStep("b"), end], {
+      thinking: "medium",
+      thinkingCeiling: "high",
+      stepCap: 8,
+      execute: verdictExecute([{ jevEffort: { choice: "routine", confidence: 0.9 } }, {}]),
+    });
+    await runAgentTask(cp, deps);
+    // The navigate step's routine verdict is dropped → step1 stays baseline.
+    expect(levels(deps)).toEqual(["medium", "medium", "medium"]);
+  });
+
+  it("is a no-op when the baseline is already off (deep cannot raise past an off ceiling)", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness([toolStep("a"), toolStep("b"), end], {
+      thinking: "off",
+      thinkingCeiling: "off",
+      stepCap: 8,
+      execute: verdictExecute([{ jevEffort: { choice: "deep", confidence: 0.9 } }, {}]),
+    });
+    await runAgentTask(cp, deps);
+    expect(levels(deps)).toEqual(["off", "off", "off"]);
+  });
+
+  it("ignores a low-confidence routine verdict (below the floor)", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness([toolStep("a"), toolStep("b"), end], {
+      thinking: "medium",
+      thinkingCeiling: "high",
+      stepCap: 8,
+      execute: verdictExecute([{ jevEffort: { choice: "routine", confidence: 0.3 } }, {}]),
+    });
+    await runAgentTask(cp, deps);
+    expect(levels(deps)).toEqual(["medium", "medium", "medium"]);
+  });
+
+  it("records the effective thinking level on turn_timing (the verification rig)", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([toolStep("a"), toolStep("b"), end], {
+      thinking: "medium",
+      thinkingCeiling: "high",
+      stepCap: 8,
+      execute: verdictExecute([{ jevEffort: { choice: "routine", confidence: 0.9 } }, {}]),
+    });
+    await runAgentTask(cp, deps);
+    const timings = events.filter((e) => e.kind === "turn_timing");
+    expect(timings.some((e) => e.kind === "turn_timing" && e.thinking === "off")).toBe(true);
+  });
+
+  it("announces Jev effort routing exactly once, on the first level change", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness(
+      [toolStep("a"), toolStep("b"), toolStep("c"), toolStep("d"), end],
+      {
+        thinking: "medium",
+        thinkingCeiling: "high",
+        stepCap: 8,
+        // Routine hints on every gated call → multiple lowered steps, one note.
+        execute: verdictExecute([
+          { jevEffort: { choice: "routine", confidence: 0.9 } },
+          { jevEffort: { choice: "routine", confidence: 0.9 } },
+          { jevEffort: { choice: "routine", confidence: 0.9 } },
+          { jevEffort: { choice: "routine", confidence: 0.9 } },
+        ]),
+      },
+    );
+    await runAgentTask(cp, deps);
+    const notes = events.filter(
+      (e) => e.kind === "info" && e.message.includes("Jev effort routing"),
+    );
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ jev: true });
+  });
+
+  it("arms a one-shot coaching line on the next tool result when progress is 'stuck'", async () => {
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([toolStep("a"), toolStep("b"), end], {
+      thinking: "medium",
+      thinkingCeiling: "high",
+      stepCap: 8,
+      execute: verdictExecute([
+        { jevProgress: { choice: "stuck", confidence: JEV_PROGRESS_CONFIDENCE } },
+        {},
+      ]),
+    });
+    await runAgentTask(cp, deps);
+    // The note rides the NEXT step's tool result (armed after step0, consumed in step1).
+    const coached = events.filter(
+      (e) => e.kind === "tool_result" && e.result.includes("Jev progress check"),
+    );
+    expect(coached).toHaveLength(1);
+  });
+
+  it("does not coach on 'advancing' or a low-confidence progress verdict", async () => {
+    for (const verdict of [
+      { choice: "advancing", confidence: 0.95 },
+      { choice: "stuck", confidence: JEV_PROGRESS_CONFIDENCE - 0.01 },
+    ]) {
+      const cp = makeCheckpoint();
+      const { events, deps } = harness([toolStep("a"), toolStep("b"), end], {
+        thinking: "medium",
+        thinkingCeiling: "high",
+        stepCap: 8,
+        execute: verdictExecute([{ jevProgress: verdict }, {}]),
+      });
+      await runAgentTask(cp, deps);
+      expect(
+        events.some((e) => e.kind === "tool_result" && e.result.includes("Jev progress check")),
+      ).toBe(false);
+    }
   });
 });

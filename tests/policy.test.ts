@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   assess,
+  buildRiskState,
+  JEV_GATE_QUESTIONS,
+  JEV_RISK_QUESTIONS,
+  toEffortHint,
+  toProgressVerdict,
+  toRiskAnswers,
   ConfirmGate,
   type ElementProbe,
   type GateDeps,
@@ -289,5 +295,74 @@ describe("assess — new capability tools (coords, upload, screenshot-to-disk)",
 describe("vi sanity", () => {
   it("keeps vi imported for future spies", () => {
     expect(typeof vi.fn).toBe("function");
+  });
+});
+
+describe("Jev per-step routing layer", () => {
+  const choice = (choice: string, confidence: number) => ({
+    type: "choice" as const,
+    choice,
+    probabilities: { [choice]: confidence },
+    confidence,
+  });
+
+  it("extends the risk batch with effort_next + progress, keeping the risk four", () => {
+    for (const id of Object.keys(JEV_RISK_QUESTIONS)) {
+      expect(JEV_GATE_QUESTIONS[id]).toBeDefined();
+    }
+    expect(JEV_GATE_QUESTIONS.effort_next).toMatchObject({ type: "choice" });
+    expect(JEV_GATE_QUESTIONS.progress).toMatchObject({ type: "choice" });
+    // The risk questions are untouched — the gate batch is a superset.
+    expect(JEV_RISK_QUESTIONS.effort_next).toBeUndefined();
+  });
+
+  it("extracts effort/progress verdicts and ignores the wrong answer type", () => {
+    expect(toEffortHint({ effort_next: choice("routine", 0.8) })).toEqual({
+      choice: "routine",
+      confidence: 0.8,
+    });
+    expect(toProgressVerdict({ progress: choice("stuck", 0.9) })).toEqual({
+      choice: "stuck",
+      confidence: 0.9,
+    });
+    // A noul answer where a choice was expected → no verdict, never a crash.
+    expect(toEffortHint({ effort_next: { type: "noul", noul: 0.5 } })).toBeNull();
+    expect(toEffortHint(null)).toBeNull();
+    expect(toProgressVerdict({})).toBeNull();
+  });
+
+  it("risk merge never reads the routing questions (union-only is intact)", () => {
+    // A full gate answer set: the risk noul fires a confirm; the routing
+    // choices ride along and must not alter the risk verdict.
+    const answers = {
+      purchase: { type: "noul" as const, noul: 0.9 },
+      effort_next: choice("deep", 0.9),
+      progress: choice("stuck", 0.9),
+    };
+    const risk = toRiskAnswers(answers);
+    expect(risk?.purchase).toBe(0.9);
+    // toRiskAnswers only maps the four noul ids — the choices are invisible.
+    expect(Object.keys(risk ?? {})).toEqual([
+      "purchase",
+      "credential",
+      "irreversible",
+      "beyondTask",
+    ]);
+  });
+
+  it("buildRiskState carries recent-call history only when given one", () => {
+    const bare = buildRiskState("task", "click", { ref: "1" }, null);
+    expect(bare.history).toBeUndefined();
+    const withHistory = buildRiskState("task", "click", { ref: "1" }, null, {
+      recent: ["a", "b", "c", "d"],
+      repeats: 2,
+      repeatFails: 1,
+    });
+    expect(withHistory.history).toEqual({
+      // Only the last three ride along — the state stays tiny.
+      recent_calls: ["b", "c", "d"],
+      this_call_previously_run: 2,
+      this_call_previous_failures: 1,
+    });
   });
 });

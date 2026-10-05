@@ -4,7 +4,7 @@
 // The Jev layer (`assessWithJev`) can ADD confirms the regex rules miss —
 // it never removes one, so the deterministic rules remain the floor.
 import type { StepEvent } from "../shared/protocol";
-import type { JevAnswer, JevQuestion } from "../shared/jev";
+import { JEV_EFFORT_CRITERIA, type JevAnswer, type JevQuestion } from "../shared/jev";
 
 export type Risk =
   | { level: "allow" }
@@ -241,6 +241,55 @@ export const JEV_RISK_QUESTIONS: Record<string, JevQuestion> = {
   },
 };
 
+/**
+ * The full gate batch: the risk questions PLUS the two routing questions
+ * that ride the same POST for free (all questions in one Jev request are
+ * evaluated together — a 5th and 6th question cost zero round trips).
+ * `assessWithJev` consumes ONLY the risk noul answers; the routing choices
+ * are extracted separately and can never weaken a risk verdict.
+ */
+export const JEV_GATE_QUESTIONS: Record<string, JevQuestion> = {
+  ...JEV_RISK_QUESTIONS,
+  effort_next: {
+    type: "choice",
+    instructions:
+      "After this action executes, how much deliberation will the agent's NEXT decision need? Judge from the task, the action, the element, and the recent call history (repeated or failing calls mean the agent is already struggling — that is NOT routine).",
+    criteria: JEV_EFFORT_CRITERIA,
+  },
+  progress: {
+    type: "choice",
+    instructions:
+      "Given the recent call history, is this action making real progress toward the task, or repeating an approach that is not working? 'treading_water' = variations of the same attempt with no state change; 'stuck' = the same intent has now failed or spun several times and a different strategy is needed.",
+    criteria: {
+      advancing: "The action moves the task forward — new state, new information, or the next step of a working sequence",
+      treading_water: "Minor variations of a recent attempt; the page state is not meaningfully changing",
+      stuck: "The same intent has failed or spun repeatedly — continuing this approach will not work",
+    },
+  },
+};
+
+/** One routing verdict: the picked option plus Jev's confidence in it. */
+export interface JevRoutingVerdict {
+  choice: string;
+  confidence: number;
+}
+
+/** Extract the effort_next verdict, or null when absent/not a choice. */
+export function toEffortHint(
+  answers: Record<string, JevAnswer> | null | undefined,
+): JevRoutingVerdict | null {
+  const a = answers?.effort_next;
+  return a && a.type === "choice" ? { choice: a.choice, confidence: a.confidence } : null;
+}
+
+/** Extract the progress verdict, or null when absent/not a choice. */
+export function toProgressVerdict(
+  answers: Record<string, JevAnswer> | null | undefined,
+): JevRoutingVerdict | null {
+  const a = answers?.progress;
+  return a && a.type === "choice" ? { choice: a.choice, confidence: a.confidence } : null;
+}
+
 /** Clip arg values: enough to judge, never a data dump. */
 function digestRiskArgs(args: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -266,12 +315,29 @@ function digestRiskArgs(args: Record<string, unknown>): Record<string, unknown> 
   return out;
 }
 
-/** Small, literal state for the risk questions: what the agent is about to do. */
+/**
+ * Small, literal state for the gate questions: what the agent is about to do,
+ * plus — for the routing questions — what it has JUST done. The history lines
+ * are the outcome-awareness that makes effort_next/progress judgments real
+ * instead of intent-guesses: "called 3× (2 failed)" is the difference between
+ * grading a retry routine and grading it stuck. Kept tiny (3 one-line
+ * digests + one repeat count) — well under the jaggedness caps.
+ */
+export interface GateHistory {
+  /** Last few calls as one-liners: "click_at {x:470,y:81} → ok: clicked (470,81)". */
+  recent: string[];
+  /** How many times THIS exact call signature has already run (0 = first). */
+  repeats: number;
+  /** How many of those repeats failed. */
+  repeatFails: number;
+}
+
 export function buildRiskState(
   task: string,
   tool: string,
   args: Record<string, unknown>,
   probe?: ElementProbe | null,
+  history?: GateHistory | null,
 ): Record<string, unknown> {
   return {
     task: task.slice(0, 2_000),
@@ -284,6 +350,15 @@ export function buildRiskState(
           inForm: probe.inForm,
         }
       : null,
+    ...(history
+      ? {
+          history: {
+            recent_calls: history.recent.slice(-3),
+            this_call_previously_run: history.repeats,
+            this_call_previous_failures: history.repeatFails,
+          },
+        }
+      : {}),
   };
 }
 
