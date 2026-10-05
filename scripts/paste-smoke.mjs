@@ -166,6 +166,8 @@ async function main() {
       );
       await panel.eval(`chrome.tabs.update(${tabId}, { active: true })`);
       await sleep(400);
+      // Window isolation: switch the agent's tracked tab to this fixture.
+      await call("tabs_switch", { tabId });
       await call("snapshot");
       return page;
     };

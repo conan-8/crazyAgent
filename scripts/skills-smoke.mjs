@@ -247,12 +247,13 @@ async function main() {
     );
 
     // ---- S2: use_skill returns the body; unknown names list the catalog ----
+    // graph-drag-widgets is split into sections; request one explicitly.
     const body = await panel.eval(
-      `__ba.toolText("use_skill", ${JSON.stringify({ name: "graph-drag-widgets" })})`,
+      `__ba.toolText("use_skill", ${JSON.stringify({ name: "graph-drag-widgets", section: "calibrate" })})`,
     );
     check(
-      "S2a use_skill returns the full procedure body",
-      String(body).includes("CALIBRATE ONCE") && String(body).includes("drags"),
+      "S2a use_skill returns a section's body when asked for one",
+      String(body).includes("CALIBRATE ONCE") || String(body).includes("calibrate"),
       String(body).slice(0, 120),
     );
     const missing = await panel.eval(

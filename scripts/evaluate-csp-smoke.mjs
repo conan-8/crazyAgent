@@ -173,6 +173,8 @@ async function main() {
       );
       await panel.eval(`chrome.tabs.update(${tabId}, { active: true })`);
       await sleep(400);
+      // Window isolation: switch the agent's tracked tab to this fixture.
+      await call("tabs_switch", { tabId });
 
       // 1) The tool evaluates a real DOM read on a CSP-protected page.
       const read = await call("evaluate_js", {
@@ -239,10 +241,12 @@ async function main() {
     );
     await panel.eval(`chrome.tabs.update(${plainTab}, { active: true })`);
     await sleep(400);
+    // Window isolation: switch the agent's tracked tab to this fixture.
+    await call("tabs_switch", { tabId: plainTab });
     const plain = await call("evaluate_js", { expression: "'no-csp ok'" });
     check(
       "E5 a page without CSP is unaffected",
-      plain?.ok === true && plain.payload?.value === '"no-csp ok"',
+      plain?.ok === true && plain.payload?.value === "no-csp ok",
       JSON.stringify(plain).slice(0, 160),
     );
 

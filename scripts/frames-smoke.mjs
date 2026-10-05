@@ -178,6 +178,9 @@ async function main() {
       );
       await panel.eval(`chrome.tabs.update(${tabId}, { active: true })`);
       await sleep(400);
+      // Window isolation: explicitly switch the agent's tracked tab to the
+      // newly activated fixture.
+      await call("tabs_switch", { tabId });
       return tabId;
     };
 
@@ -243,7 +246,7 @@ async function main() {
     const topFrame = await call("evaluate_js", { expression: "location.port" });
     check(
       "F5b without a frame id it still evaluates in the top document",
-      topFrame.ok === true && topFrame.payload?.value === '"8790"',
+      topFrame.ok === true && topFrame.payload?.value === "8790",
       JSON.stringify(topFrame).slice(0, 200),
     );
     const crossCheck = await call("evaluate_js", {

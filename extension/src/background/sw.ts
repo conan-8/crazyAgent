@@ -1219,6 +1219,18 @@ async function executeTool(
       };
     }
     const presented = tool.present?.(payload);
+    // Tab-move bookkeeping: the dev channel (run_tool) must track tab changes
+    // just like the gated path does, otherwise subsequent implicit calls keep
+    // using a stale cached tab. This is what makes driver scripts that call
+    // tabs_switch + snapshot work correctly.
+    if (name === "tabs_create") {
+      const created = (payload as { tabId?: number } | undefined)?.tabId;
+      if (typeof created === "number") noteAgentTab(created);
+    } else if (name === "tabs_switch" && Number.isFinite(Number(args.tabId))) {
+      noteAgentTab(Number(args.tabId));
+    } else if (name === "tabs_close" && Number(args.tabId) === agentTabId) {
+      noteAgentTab(undefined);
+    }
     return {
       ok: true,
       payload,

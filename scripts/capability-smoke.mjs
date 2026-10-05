@@ -173,6 +173,11 @@ async function main() {
       );
       await panel.eval(`chrome.tabs.update(${tabId}, { active: true })`);
       await sleep(400);
+      // Window isolation: the agent tracks its own tab, so explicitly switch
+      // to the newly activated fixture — otherwise tools would keep acting on
+      // whatever tab was tracked before.
+      const switchResult = await call("tabs_switch", { tabId });
+      if (!switchResult.ok) log("WARN: tabs_switch failed:", JSON.stringify(switchResult).slice(0, 200));
       // Refs only exist once a snapshot populated the registry — the same
       // look-then-act rule the agent follows.
       await call("snapshot");

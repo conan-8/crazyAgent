@@ -41,8 +41,11 @@ function systemOf(body) {
     return body.system.map((b) => b?.text ?? "").join("\n");
   }
   if (typeof body.system === "string") return body.system;
-  const msg = (body.messages ?? []).find((m) => m?.role === "system");
-  return typeof msg?.content === "string" ? msg.content : "";
+  // OpenAI-compatible: there may be multiple system messages (the stable
+  // prefix plus a volatile tail carrying the wall clock). Concatenate all of
+  // them so checks that look for the clock see it.
+  const msgs = (body.messages ?? []).filter((m) => m?.role === "system");
+  return msgs.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n");
 }
 
 function log(...args) {
@@ -278,11 +281,15 @@ async function main() {
       `withClock=${clock.length}/${after.length} parsed=${stamps.filter(Boolean).length} fresh=${fresh.length} sample=${stamps[0]}`,
     );
     check(
-      "M6b the clock is appended last so the cached prefix survives",
+      "M6b the clock is in the volatile tail so the cached prefix survives",
       clock.length > 0 &&
         clock.every((s) => {
-          const at = s.indexOf("Current date and time:");
-          return at > s.indexOf("Never invent refs") && s.indexOf("Current task:") > at;
+          // The clock lives in systemVolatile, which is appended AFTER the
+          // stable system prompt (and after "Current task:"). Verify it comes
+          // after the task line, proving it is not part of the cached prefix.
+          const clockAt = s.indexOf("Current date and time:");
+          const taskAt = s.indexOf("Current task:");
+          return clockAt > taskAt;
         }),
       "",
     );

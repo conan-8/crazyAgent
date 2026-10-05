@@ -184,6 +184,8 @@ async function main() {
     );
     await panel.eval(`chrome.tabs.update(${tabId}, { active: true })`);
     await sleep(500);
+    // Window isolation: switch the agent's tracked tab to this fixture.
+    await call("tabs_switch", { tabId });
 
     // ---- D1: the canvas surface is declared unreadable, not silently empty ----
     const snapText = await textOf("snapshot");
