@@ -9,7 +9,7 @@
 // Records are keyed per *turn* (one user message → one assistant run), so a
 // thread reads as an ordered list of turns, each with its own start/end time,
 // duration, tool calls with args+results, token usage and final answer.
-import type { RunStats, StepEvent } from "./protocol";
+import type { RunStats, StepEvent, TodoItem } from "./protocol";
 
 export const LOG_KEY = "baRunLogs";
 /** Ring size for the persisted log store (oldest runs evicted first). */
@@ -182,6 +182,12 @@ export interface LogTurnRecord {
     images: number;
     imageBytes: number;
   }[];
+  /**
+   * The agent's live plan — the LATEST `todo_update` snapshot (whole-list
+   * replacement semantics, so last write wins). Optional: records archived
+   * before the plan dropdown existed have none.
+   */
+  todos?: TodoItem[];
 }
 
 let seq = 0;
@@ -399,6 +405,10 @@ export function foldLogEvent(
       });
       break;
     }
+    case "todo_update":
+      // Whole-list replacement: the newest snapshot IS the plan's final state.
+      rec.todos = e.items;
+      break;
   }
 }
 
@@ -518,6 +528,18 @@ export function toMarkdown(records: LogTurnRecord[]): string {
       out.push(
         `- **attachments:** ${rec.attachments.map((a) => `${a.name} (${a.kind})`).join(", ")}`,
       );
+    }
+    // The plan's final state (last todo_write snapshot) — what the run ended
+    // up doing, at a glance, without reading every turn.
+    if (rec.todos?.length) {
+      out.push("");
+      out.push("**Plan (final state):**");
+      out.push("");
+      for (const t of rec.todos) {
+        const mark =
+          t.status === "completed" ? "[x]" : t.status === "in_progress" ? "[~]" : "[ ]";
+        out.push(`- ${mark} ${t.content}`);
+      }
     }
     out.push("");
     for (const turn of rec.turns) {

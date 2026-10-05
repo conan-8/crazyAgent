@@ -535,6 +535,178 @@ kbd {
   gap: 2px;
 }
 
+/* ---------------- plan dropdown (todo_write) ----------------
+   The agent's live plan, anchored under the topbar as its glass extension:
+   a one-line strip (progress + the item in flight) that expands into the
+   full list. It overlays the transcript rather than shifting it — same
+   floating-glass language as the topbar itself. */
+
+.todo-bar {
+  position: absolute;
+  top: var(--topbar-h);
+  left: 0;
+  right: 0;
+  z-index: 9;
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  animation: rise 0.35s var(--ease-out);
+}
+
+.todo-strip {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--text-soft);
+  cursor: pointer;
+  transition: background 0.15s var(--ease-out);
+}
+
+.todo-strip:hover {
+  background: var(--surface);
+}
+
+.todo-ic {
+  display: inline-flex;
+  color: var(--accent);
+  flex: none;
+}
+
+.todo-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: var(--text);
+  flex: none;
+  animation: rise 0.4s var(--ease-out);
+}
+
+.todo-meter {
+  position: relative;
+  width: 34px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+  flex: none;
+}
+
+.todo-meter > span {
+  position: absolute;
+  inset: 0;
+  background: var(--grad);
+  transform-origin: left;
+  transition: transform 0.45s var(--ease-out);
+}
+
+.todo-current {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.todo-bar.is-idle .todo-ic,
+.todo-bar.is-idle .todo-current {
+  color: var(--text-faint);
+}
+
+.todo-chev {
+  display: inline-flex;
+  color: var(--text-faint);
+  flex: none;
+  transition: transform 0.3s var(--ease-out);
+}
+
+.todo-chev.is-open {
+  transform: rotate(180deg);
+}
+
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 8px 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.todo-item {
+  display: flex;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  animation: rise 0.3s var(--ease-out);
+}
+
+.todo-mark {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.todo-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.todo-item.is-completed .todo-mark {
+  color: var(--ok);
+}
+
+.todo-item.is-completed .todo-text {
+  color: var(--text-faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--border-strong);
+}
+
+.todo-item.is-in_progress .todo-text {
+  color: var(--text);
+  font-weight: 550;
+}
+
+.todo-item.is-pending .todo-text {
+  color: var(--text-soft);
+}
+
+.todo-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: todo-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes todo-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(255, 107, 44, 0.05);
+  }
+}
+
+.todo-ring {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border-strong);
+}
+
 .stage {
   position: relative;
   flex: 1;

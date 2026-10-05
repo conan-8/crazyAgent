@@ -424,6 +424,7 @@ const PARALLEL_SAFE = new Set([
   "network_observe",
   "use_skill", // read-only storage lookup — never touches page state
   "judge", // read-only external decision call — never touches page state
+  "todo_write", // pure plan state (panel dropdown) — never touches page state
 ]);
 
 /**

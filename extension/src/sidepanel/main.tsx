@@ -23,6 +23,7 @@ import {
   type Skill,
   type StepEvent,
   type SwToPanel,
+  type TodoItem,
 } from "../shared/protocol";
 import {
   foldEvent,
@@ -2372,6 +2373,82 @@ function ImageViewer({ src, onClose }: { src: string | null; onClose: () => void
   );
 }
 
+// ------------------------------ plan dropdown ------------------------------
+
+/**
+ * The agent's live todo list (`todo_write`), rendered as a dropdown anchored
+ * under the topbar. Updates arrive mid-run as whole-list replacements; the
+ * collapsed strip always shows progress + the item in flight, expanding
+ * reveals every row. `pulse` remounts the count on each update so the arrival
+ * animation replays — a mid-run change is visible without stealing a click.
+ */
+function TodoBar({
+  items,
+  open,
+  pulse,
+  running,
+  onToggle,
+}: {
+  items: TodoItem[];
+  open: boolean;
+  pulse: number;
+  running: boolean;
+  onToggle: () => void;
+}) {
+  if (!items.length) return null;
+  const done = items.filter((t) => t.status === "completed").length;
+  const current = items.find((t) => t.status === "in_progress");
+  const ratio = done / items.length;
+  const headline = current
+    ? current.content
+    : done === items.length
+      ? "All done"
+      : `${items.length - done} left`;
+  return (
+    <div class={`todo-bar${open ? " is-open" : ""}${running ? "" : " is-idle"}`}>
+      <button
+        class="todo-strip"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-label="Agent plan"
+        title="The agent's live plan — it updates this itself while it works"
+      >
+        <span class="todo-ic">
+          <Icon d={ICONS.list} size={13} />
+        </span>
+        <span class="todo-count" key={pulse}>
+          {done}/{items.length}
+        </span>
+        <span class="todo-meter" aria-hidden="true">
+          <span style={`transform:scaleX(${ratio})`} />
+        </span>
+        <span class="todo-current">{headline}</span>
+        <span class={`todo-chev${open ? " is-open" : ""}`}>
+          <Icon d={ICONS.chevron} size={13} />
+        </span>
+      </button>
+      <Collapse open={open}>
+        <ul class="todo-list">
+          {items.map((t, i) => (
+            <li key={`${i}-${t.content}`} class={`todo-item is-${t.status}`}>
+              <span class="todo-mark">
+                {t.status === "completed" ? (
+                  <Icon d={ICONS.check} size={11} stroke={2.6} />
+                ) : t.status === "in_progress" ? (
+                  <span class="todo-dot" />
+                ) : (
+                  <span class="todo-ring" />
+                )}
+              </span>
+              <span class="todo-text">{t.content}</span>
+            </li>
+          ))}
+        </ul>
+      </Collapse>
+    </div>
+  );
+}
+
 // ------------------------------ app ------------------------------
 
 /** Hover text for the "last:" summary — the details that don't fit inline. */
@@ -2457,6 +2534,17 @@ function App() {
    */
   const [agentWindow, setAgentWindow] = useState<AgentWindowStatus | null>(null);
   const [allowOutside, setAllowOutside] = useState(false);
+  /**
+   * The agent's live plan (`todo_write` → `todo_update` events). Whole-list
+   * replacements; the dropdown under the topbar renders it. `todoPulse`
+   * replays the count's arrival animation on every mid-run change, and the
+   * auto-open ref makes only the FIRST update of a run open the dropdown —
+   * later ones never steal it back from a user who collapsed it.
+   */
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [todoOpen, setTodoOpen] = useState(false);
+  const [todoPulse, setTodoPulse] = useState(0);
+  const todoAutoOpened = useRef(false);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [modelList, setModelList] = useState<string[]>([]);
@@ -2575,6 +2663,15 @@ function App() {
           ) {
             awaitingModelRef.current = null;
             setAwaitingModel(null);
+          } else if (msg.event.kind === "todo_update") {
+            // The plan is UI state, not chat content — foldEvent never sees
+            // it (the todo_write tool card already rides the transcript).
+            setTodos(msg.event.items);
+            setTodoPulse((p) => p + 1);
+            if (msg.event.items.length && !todoAutoOpened.current) {
+              todoAutoOpened.current = true;
+              setTodoOpen(true);
+            }
           } else if (currentConv) {
             foldEvent(currentConv, msg.event);
             trimCardImages(currentConv, 6);
@@ -2597,6 +2694,12 @@ function App() {
         } else if (msg.type === "agent.state") {
           setRunning(msg.running);
           setCheckpoint(msg.checkpoint);
+          // A panel (re)connecting mid-run restores the live plan from the
+          // checkpoint. An idle worker's finished run does NOT resurrect its
+          // plan bar — the panel that watched the run keeps its own copy.
+          if (msg.running || (msg.checkpoint && !msg.checkpoint.done)) {
+            setTodos(msg.checkpoint?.todos ?? []);
+          }
         } else if (msg.type === "window.status") {
           // Where the agent may work. Broadcast by the worker on connect, after
           // every change (bind / reset / handover / window closed) and at run
@@ -2849,6 +2952,11 @@ function App() {
   ) => {
     const isDemo = typeof taskOrDemo !== "string";
     eventBuffer.length = 0;
+    // A fresh run starts with no plan: clear the previous run's list and let
+    // the first todo_update open the dropdown again.
+    setTodos([]);
+    setTodoOpen(false);
+    todoAutoOpened.current = false;
     // Grab the hero orb before the welcome unmounts: a ghost clone flies from
     // this rect into the first assistant badge once it mounts (orbFly effect).
     // Skipped under reduced motion — the badge simply appears.
@@ -3004,6 +3112,9 @@ function App() {
     setConv(null);
     setTaskText("");
     setShowHistory(false);
+    setTodos([]);
+    setTodoOpen(false);
+    todoAutoOpened.current = false;
     inputRef.current?.focus();
   };
 
@@ -3450,6 +3561,14 @@ function App() {
           />
         </nav>
       </header>
+
+      <TodoBar
+        items={todos}
+        open={todoOpen}
+        pulse={todoPulse}
+        running={running}
+        onToggle={() => setTodoOpen((o) => !o)}
+      />
 
       <div class="stage">
         <main class="transcript" ref={scrollRef} onClick={onTranscriptClick}>

@@ -104,6 +104,37 @@ wraps away, and need no extra browser download.
 3. Add a unit test in `tests/` and, if it touches the page, a scripted turn in
    a phase smoke.
 
+## The live plan (todo_write)
+
+The agent's user-visible checklist, updated mid-run. One tool, one event, one
+dropdown — and every layer folds the SAME whole-list replacement:
+
+- `background/tools/todo.ts` registers `todo_write` (pure state, never touches
+  the page: `PARALLEL_SAFE`, no policy gate). Every call carries the COMPLETE
+  list of `{content, status: pending|in_progress|completed}`; `run()`
+  validates/normalises (`normalizeTodos`, capped at 40 items × 160 chars) and
+  emits a `todo_update` StepEvent. The model-facing result is a one-line
+  `summarizeTodos()` confirmation — never the echoed list.
+- `sw.ts#emitNow` folds `todo_update` onto `currentCp.todos`, so the next
+  per-step checkpoint save persists the plan: a resumed run — or a panel
+  reconnecting mid-run (`agent.state`) — restores the dropdown without waiting
+  for the model's next write. `logging.ts` keeps the LAST snapshot on the
+  record (`rec.todos`, whole-list semantics make last-write-wins correct) and
+  the Markdown export renders it as a `[x]/[~]/[ ]` checklist.
+- The panel renders `TodoBar` (in `main.tsx`) anchored under the topbar: a
+  collapsed strip (done/total + meter + the item in flight) that expands into
+  the full list. The first `todo_update` of a run auto-opens it
+  (`todoAutoOpened` ref); later updates only pulse the count — a user's
+  collapse is never stolen back. `startRun`/`newChat` clear it; a finished run
+  keeps its final plan visible.
+- The prompt rule lives in `prompts.ts` (`BASE_RULES`): plan before working a
+  multi-step task, exactly one item `in_progress`, rewrite on plan change,
+  skip for trivial tasks.
+
+`tests/todo.test.ts` covers validation/summary/tool/log/prompt;
+`scripts/todo-smoke.mjs` (in `npm run verify`) proves the whole path against
+headless Edge + the scripted mock LLM, asserting the real panel DOM mid-run.
+
 ## Adding a provider
 
 Implement `LlmClient` in `background/agent/llm.ts` (or reuse the

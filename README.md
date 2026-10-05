@@ -115,6 +115,17 @@ ripple ring pulses where it presses/releases — so watching a run, you can
 always see what it's doing. Pure overlay: `pointer-events:none`, never
 awaited, and a page that rejects it just shows nothing.
 
+A **live plan** rides at the top of the panel: for any multi-step task the
+agent writes itself a todo list (`todo_write`) and works it in the open — a
+dropdown under the topbar with a progress count, a meter, and the item in
+flight on the collapsed strip, expanding to the full checklist (pending /
+in-progress / done). It updates in real time mid-run: items tick over as work
+lands, and when the agent discovers a new step or drops a dead end it rewrites
+the list on the spot. The first update opens the dropdown; collapsing it is
+yours — later updates pulse the strip but never steal it back. The plan rides
+the checkpoint (a panel reopened mid-run restores it) and the run log keeps
+its final state.
+
 Every build is stamped with the commit it came from: the bottom of **⚙
 Settings** shows `Version 0.1.0 · build <sha>` (with `-dirty` when it was built
 from modified sources), and the same string appears in `chrome://extensions`,
@@ -353,6 +364,9 @@ model, and ordinary inputs still taking the DOM path — plus layered failure
 reporting by `scripts/docs-smoke.mjs`; and window isolation — the agent's own
 window, the wall that keeps `tabs_list`/`tabs_switch`/`tabs_close` inside it,
 the read-only "look outside" grant, and a raise counter that stays 0 across a
-full trusted-stroke sequence — by `scripts/window-smoke.mjs`. A
+full trusted-stroke sequence — by `scripts/window-smoke.mjs`. The live plan —
+`todo_write` whole-list updates rendering as the topbar dropdown mid-run, the
+user's collapse never stolen back, the checkpoint carrying the plan and the
+run log keeping its final state — is proven by `scripts/todo-smoke.mjs`. A
 live-LLM run ("search Hacker News for X and summarize") needs your API key in
 Settings — the machinery is covered by the mock-LLM suite.

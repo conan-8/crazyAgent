@@ -140,6 +140,7 @@ import "./tools/diagnostics"; // registers console_read / network_read
 import { startNetlogCapture } from "./tools/diagnostics";
 import "./tools/network"; // registers network_* (Unlimited mode)
 import "./tools/jev"; // registers judge (Jev sidecar; offered only when configured)
+import "./tools/todo"; // registers todo_write (the live plan dropdown)
 
 const ALWAYS_KEY = "baPolicyAlways";
 
@@ -420,6 +421,12 @@ function flushDeltas(): void {
 
 function emitNow(event: StepEvent): void {
   broadcast({ type: "agent.event", event });
+  // The live plan rides the checkpoint: the next per-step save persists it, so
+  // a resumed run — or a panel reopened mid-run — restores the dropdown from
+  // `agent.state` without waiting for the model's next todo_write.
+  if (event.kind === "todo_update" && currentCp) {
+    currentCp.todos = event.items;
+  }
   if (currentConv) {
     foldEvent(currentConv, event);
     // The folded conversation is the worker's persistence copy — cap the

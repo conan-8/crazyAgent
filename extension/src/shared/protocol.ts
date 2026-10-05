@@ -63,10 +63,24 @@ export interface Checkpoint {
   messages: LlmMessage[];
   /** LLM tool specs frozen at run start (kept for faithful resume). */
   toolSpecs?: LlmToolSpec[];
+  /**
+   * The run's live todo list (last `todo_write` snapshot). Persisted so a
+   * resumed run — or a panel reopened mid-run — restores the plan dropdown
+   * without waiting for the model's next update.
+   */
+  todos?: TodoItem[];
   startedAt: number;
   updatedAt: number;
   done: boolean;
 }
+
+/** One entry of the agent's live plan (see the `todo_write` tool). */
+export interface TodoItem {
+  content: string;
+  status: TodoStatus;
+}
+
+export type TodoStatus = "pending" | "in_progress" | "completed";
 
 export type StepEvent =
   | {
@@ -96,6 +110,12 @@ export type StepEvent =
     }
   /** Madman mode: a mid-run exclamation shown between tool cards. */
   | { kind: "madman"; message: string }
+  /**
+   * The agent's live plan changed (whole-list replacement from `todo_write`).
+   * The panel renders it as the dropdown at the top of the sidebar; the list
+   * is always the COMPLETE current plan, never a delta.
+   */
+  | { kind: "todo_update"; items: TodoItem[] }
   | {
       kind: "tool_result";
       stepIndex: number;
