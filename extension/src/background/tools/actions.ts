@@ -279,14 +279,126 @@ async function uploadPaths(
   };
 }
 
+/**
+ * The chooser-button flow. Some pages (Google Docs' "Upload from computer",
+ * most styled uploaders) only create/reveal their file input when a button
+ * opens the OS file picker — a native modal no tool can drive, and clicking
+ * the button without help traps the run behind it. CDP can suppress the
+ * dialog (Page.setInterceptFileChooserDialog), so: intercept → click the
+ * trigger → the input now exists but no dialog does → set the files →
+ * verify the attach took → ALWAYS disarm the interception, even on failure,
+ * so the user's own future picker clicks are never silently swallowed.
+ */
+async function uploadViaTrigger(
+  ctx: ToolContext,
+  triggerRef: string,
+  paths: string[],
+): Promise<ActionResult> {
+  const { adapter, tabId } = ctx;
+  let intercepted = false;
+  try {
+    try {
+      await adapter.send(tabId, "Page.setInterceptFileChooserDialog", { enabled: true });
+      intercepted = true;
+    } catch (err) {
+      return {
+        ok: false,
+        error:
+          `${failureTag("transport")}: this transport cannot suppress the OS file chooser ` +
+          `(${String((err as Error)?.message ?? err)}) — the picker would open with no way to drive it. ` +
+          `Attach to the file input's ref directly (hidden file inputs now have refs), or use paste_image via:'clipboard'.`,
+      };
+    }
+    const clicked = await runContentAction(tabId, { action: "click", ref: triggerRef });
+    if (!clicked.ok) return clicked;
+    // A beat for the page to create/reveal its input in response to the click.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const doc = await adapter.send<{ root: { nodeId: number } }>(
+      tabId,
+      "DOM.getDocument",
+      { depth: -1 },
+    );
+    const all = await adapter.send<{ nodeIds: number[] }>(tabId, "DOM.querySelectorAll", {
+      nodeId: doc.root.nodeId,
+      selector: "input[type=file]",
+    });
+    // Last in DOM order: the input a chooser click just created is appended
+    // after any pre-existing ones.
+    const nodeId = all.nodeIds?.[all.nodeIds.length - 1];
+    if (!nodeId) {
+      return {
+        ok: false,
+        error:
+          `${failureTag("input")}: the chooser click produced no <input type="file"> in the top document — ` +
+          `it may live in an iframe (snapshot the page and use that input's ref with upload), ` +
+          `or the page uses a dropzone (use paste_image via:'clipboard').`,
+      };
+    }
+    await adapter.send(tabId, "DOM.setFileInputFiles", { files: paths, nodeId });
+    // Readback: CDP reports success even for paths the browser could not
+    // read — verify the input's FileList, exactly like uploadPaths.
+    const resolved = await adapter.send<{ object: { objectId: string } }>(
+      tabId,
+      "DOM.resolveNode",
+      { nodeId },
+    );
+    const readback = await adapter.send<{ result: { value: unknown } }>(
+      tabId,
+      "Runtime.callFunctionOn",
+      {
+        objectId: resolved.object.objectId,
+        functionDeclaration:
+          "function(){ return Array.from(this.files ?? []).map((f) => ({ name: f.name, size: f.size })); }",
+        returnByValue: true,
+      },
+    );
+    const got = (readback?.result?.value ?? []) as { name: string; size: number }[];
+    const empty = got.find((f) => f.size === 0);
+    if (got.length !== paths.length || empty) {
+      const what = empty
+        ? `${got.length} file(s), but ${empty.name} reads as 0 bytes`
+        : `${got.length} of ${paths.length} file(s)`;
+      return {
+        ok: false,
+        error:
+          `${failureTag("input")}: the browser attached ${what} — it reads these paths itself, so they ` +
+          `must exist on this machine exactly as written (a wrong Downloads directory is the usual culprit).`,
+      };
+    }
+    return {
+      ok: true,
+      data: {
+        attached: got.map((f) => ({ path: f.name })),
+        via: "intercepted file chooser + DOM.setFileInputFiles",
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: `${failureTag("transport")}: the chooser-interception attach failed: ${String((err as Error)?.message ?? err)}`,
+    };
+  } finally {
+    if (intercepted) {
+      await adapter
+        .send(tabId, "Page.setInterceptFileChooserDialog", { enabled: false })
+        .catch(() => undefined);
+    }
+  }
+}
+
 registerTool({
   name: "upload",
   description:
-    "Attach file(s) to the page's file input (`<input type=\"file\">`) — for upload forms and import dialogs. Give `files` for content you hold as text or base64 (works in any frame), or `paths` for absolute file paths on this machine that the browser can read (they are verified — a path the browser cannot read fails loudly). To send a SCREENSHOT or viewed image, use `paste_image` instead: staged bytes, no paths, no disk. The page sees the files with the usual input/change events (SENSITIVE — confirmation required).",
+    "Attach file(s) from this device (or inline content) to the page. THREE targets: (1) `ref` of the file input — hidden file inputs now HAVE refs, so styled upload buttons' inputs are directly attachable; (2) `trigger_ref` of the button that opens the OS file picker (\"Upload from computer\") — the picker is suppressed via CDP and `paths` attach to the input the chooser targeted; (3) `files` for inline content you hold as text/base64 (needs `ref`, works in any frame). `paths` are absolute paths on this machine — the BROWSER reads them from disk (verified: a path it cannot read fails loudly). For SCREENSHOTS or viewed images use `paste_image` instead — staged bytes, no paths, no disk. SENSITIVE — confirmation required.",
   parameters: {
     type: "object",
     properties: {
       ...REF_PROP,
+      trigger_ref: {
+        type: "string",
+        description:
+          "Ref of the control that OPENS the file chooser (a styled Upload button). The click is intercepted — no OS dialog appears — and `paths` attach to the resulting input. Use with paths only.",
+      },
       paths: {
         type: "array",
         description: "Absolute file paths to attach; the browser reads them from disk",
@@ -299,11 +411,14 @@ registerTool({
         items: { type: "object" },
       },
     },
-    required: ["ref"],
   },
   sensitive: true,
   async run(args, ctx) {
-    const ref = String(args.ref ?? "");
+    const ref = typeof args.ref === "string" && args.ref.trim() ? args.ref.trim() : "";
+    const triggerRef =
+      typeof args.trigger_ref === "string" && args.trigger_ref.trim()
+        ? args.trigger_ref.trim()
+        : "";
     const paths = Array.isArray(args.paths) ? args.paths.map((p) => String(p)) : [];
     const files = Array.isArray(args.files)
       ? (args.files as { name: string; mime?: string; text?: string; base64?: string }[])
@@ -313,6 +428,21 @@ registerTool({
         ok: false,
         error: "nothing to attach — pass `files` (inline content) or `paths` (absolute paths)",
       };
+    }
+    if (!ref && !triggerRef) {
+      return {
+        ok: false,
+        error: `${failureTag("input")}: upload needs a target — the file input's ref (hidden file inputs now have refs), or trigger_ref (the button that opens the OS chooser) together with paths`,
+      };
+    }
+    if (triggerRef) {
+      if (files.length) {
+        return {
+          ok: false,
+          error: `${failureTag("input")}: trigger_ref attaches PATHS (the browser reads them from disk) — inline files need the file input's ref`,
+        };
+      }
+      return uploadViaTrigger(ctx, triggerRef, paths);
     }
     const results: unknown[] = [];
     if (files.length) {

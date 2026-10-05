@@ -68,6 +68,20 @@ describe("ElementRegistry", () => {
     expect(snap.elements.map((e) => e.name)).toEqual(["Shown"]);
   });
 
+  it("collects hidden file inputs — the styled-upload pattern is the one exemption", () => {
+    setBody(`
+      <label for="picker">Upload</label>
+      <input id="picker" type="file" style="display:none" />
+      <button id="hidden-btn" style="display:none">Nope</button>
+    `);
+    const snap = registry.collect();
+    const fileEl = snap.elements.find((e) => e.tag === "input" && e.type === "file");
+    expect(fileEl).toBeDefined();
+    expect(registry.resolve(fileEl!.ref)).toBe(document.getElementById("picker"));
+    // Other hidden elements stay excluded.
+    expect(snap.elements.map((e) => e.name)).not.toContain("Nope");
+  });
+
   it("resolves refs to the same element", () => {
     setBody(`<button id="b1">One</button><button id="b2">Two</button>`);
     const snap = registry.collect();

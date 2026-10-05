@@ -35,6 +35,19 @@ describe("Actions", () => {
     expect(order).toEqual(["mousedown", "mouseup", "click"]);
   });
 
+  it("refuses a bare file-input click (undrivable OS picker) and redirects to upload", () => {
+    setBody(`<input id="f" type="file" aria-label="Attach" />`);
+    let clicked = false;
+    document.getElementById("f")!.addEventListener("click", () => (clicked = true));
+    const res = actions.run({ action: "click", ref: refOf("Attach") });
+    expect(res.ok).toBe(false);
+    const err = String((res as { error?: string }).error ?? "");
+    expect(err).toContain("file input");
+    expect(err).toContain("upload");
+    // The native picker must never open: no click event was dispatched.
+    expect(clicked).toBe(false);
+  });
+
   it("type sets the value and fires input/change events", () => {
     setBody(`<input id="i" placeholder="name" />`);
     const events: string[] = [];

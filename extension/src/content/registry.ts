@@ -139,6 +139,16 @@ function isVisible(el: Element): boolean {
   return style.display !== "none" && style.visibility !== "hidden";
 }
 
+/**
+ * The ONE visibility exemption: `<input type="file">` is routinely hidden
+ * behind a styled button/label (Google Docs, most modern upload forms), and
+ * the `upload` tool targets it BY REF — an invisible input with no ref is an
+ * unuploadable form. Collected with a null box like any off-screen element.
+ */
+function isFileInput(el: Element): boolean {
+  return el instanceof HTMLInputElement && el.type === "file";
+}
+
 function textOf(el: Element): string {
   const ht = el as HTMLElement;
   return (ht.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -213,7 +223,9 @@ export class ElementRegistry {
     const elements: ElementInfo[] = [];
     let n = 0;
     for (const el of collectCandidates(document)) {
-      if (!isVisible(el)) continue;
+      // Hidden file inputs are the standard styled-upload pattern and the
+      // `upload` tool needs their ref — the single exemption to visibility.
+      if (!isVisible(el) && !isFileInput(el)) continue;
       n++;
       const ref = String(n);
       const selector = cssPath(el);

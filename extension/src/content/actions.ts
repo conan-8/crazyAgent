@@ -458,6 +458,17 @@ export class Actions {
   }
 
   #click(el: HTMLElement): ActionResult {
+    // Clicking a file input opens the OS file picker — a modal no tool can
+    // drive, left sitting over the page. The `upload` tool (paths/files, or
+    // trigger_ref for chooser buttons) is the only sane route; refuse with
+    // the redirect instead of trapping the run behind a native dialog.
+    if (el instanceof HTMLInputElement && el.type === "file") {
+      return {
+        ok: false,
+        error:
+          "INPUT-FAILED: this is a file input — clicking it opens the OS file picker, which no tool can drive. Use `upload` with this ref (paths or files), or upload's trigger_ref on the button that opens the chooser.",
+      };
+    }
     el.scrollIntoView?.({ block: "center", inline: "center" });
     el.focus?.();
     this.#mouse(el, DOWN_SEQUENCE);
