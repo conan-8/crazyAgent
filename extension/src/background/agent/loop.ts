@@ -325,6 +325,34 @@ export function capCheckpointImages(messages: LlmMessage[]): void {
 }
 
 /**
+ * Checkpoint health pulse for the run log: how much state the worker carries
+ * (history text, live images and their bytes) at every per-step save. When a
+ * service worker dies silently — the record stays `running`, no error is
+ * ever written — the tail of this trace is the crash evidence: climbing
+ * numbers point at memory, flat ones point elsewhere. String-length sums
+ * only; measuring must not re-create the serialization churn it diagnoses.
+ */
+function emitHeartbeat(deps: LoopDeps, cp: Checkpoint): void {
+  let historyChars = 0;
+  let images = 0;
+  let imageBytes = 0;
+  for (const m of cp.messages) {
+    historyChars += m.content?.length ?? 0;
+    for (const img of m.images ?? []) {
+      images += 1;
+      imageBytes += img.length;
+    }
+  }
+  deps.emit({
+    kind: "heartbeat",
+    stepIndex: cp.stepIndex,
+    historyChars,
+    images,
+    imageBytes,
+  });
+}
+
+/**
  * Estimate the tokens of a REQUEST VIEW of the history (what the provider is
  * actually sent), not the raw checkpoint: message text + tool-call args at
  * chars/4, attached images at a flat per-image estimate.
@@ -838,6 +866,7 @@ export async function runAgentTask(
       cp.updatedAt = Date.now();
       capCheckpointImages(cp.messages);
       await deps.save(cp);
+      emitHeartbeat(deps, cp);
       continue;
     }
     emptyReplies = 0;
@@ -874,6 +903,7 @@ export async function runAgentTask(
       cp.updatedAt = Date.now();
       capCheckpointImages(cp.messages);
       await deps.save(cp);
+      emitHeartbeat(deps, cp);
       deps.emit({
         kind: "done",
         summary: result.text.trim() || "task finished (no summary)",
@@ -998,6 +1028,7 @@ export async function runAgentTask(
     cp.updatedAt = Date.now();
     capCheckpointImages(cp.messages);
     await deps.save(cp);
+    emitHeartbeat(deps, cp);
   }
   return finish(cp, deps, "capped", lastStats, stepCap);
 }

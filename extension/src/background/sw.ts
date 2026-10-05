@@ -372,12 +372,19 @@ async function flushLog(): Promise<void> {
  * endpoint, so "why was this run slow?" is unanswerable after the fact. Failing
  * to read settings must never block the record — an unstamped run still logs.
  */
-async function connectionStamp(): Promise<{ provider?: string; model?: string }> {
+async function connectionStamp(): Promise<{
+  provider?: string;
+  model?: string;
+  build?: string;
+}> {
+  // The build stamp answers "did this run have feature X?" — an exported log
+  // was previously unattributable to a build.
+  const build = chrome.runtime.getManifest().version_name || undefined;
   try {
     const s = await loadSettings();
-    return { provider: s.provider || undefined, model: s.model || undefined };
+    return { provider: s.provider || undefined, model: s.model || undefined, build };
   } catch {
-    return {};
+    return { build };
   }
 }
 

@@ -139,6 +139,23 @@ export type StepEvent =
       decodeMs?: number;
       reasoningChars: number;
     }
+  /**
+   * Checkpoint health pulse, emitted after each per-step checkpoint save:
+   * how much state the worker is carrying (history text chars, live image
+   * count and bytes). The run log keeps these as a growth trace — when a
+   * service worker dies silently (the record stays `running`, no error is
+   * ever written), the last heartbeats are the only evidence of whether
+   * memory was the cause. Sizes are deliberately approximate (string-length
+   * sums, no re-serialization: measuring must not recreate the churn it
+   * diagnoses).
+   */
+  | {
+      kind: "heartbeat";
+      stepIndex: number;
+      historyChars: number;
+      images: number;
+      imageBytes: number;
+    }
   | { kind: "need_confirm"; id: string; tool: string; summary: string; jev?: boolean }
   /**
    * Human handoff: a sign-in or CAPTCHA wall the agent must not fake its way

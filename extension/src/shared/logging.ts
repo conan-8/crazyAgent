@@ -34,6 +34,9 @@ export interface LogToolCall {
   durationMs?: number;
   /** Screenshot bytes are recorded as a marker, never inline (log size). */
   image?: boolean;
+  /** Size of the attached image data URL in chars (~bytes) — the memory
+   *  math a crash post-mortem needs; the bytes themselves never ride along. */
+  imageBytes?: number;
   truncated?: boolean;
   /** This call went through the Jev sidecar (the `judge` tool). */
   jev?: boolean;
@@ -80,9 +83,28 @@ export interface LogTurn {
   }[];
   errors: { at: number; message: string }[];
   /**
-   * Jev sidecar notes (effort routing grade, fallback) — the only `info`
-   * events the log keeps. Optional: records archived before this field
-   * existed have none.
+   * Every `info` event of this turn, timestamped: LLM retries ("LLM call
+   * failed — retrying…"), checkpoint resumes, reasoning-cap cuts, the
+   * usage-silence note. These used to be dropped as telemetry noise — which
+   * is why "the panel said API failed a few times, why?" was unanswerable
+   * from the export. Jev notes keep their flag for the pink rendering.
+   */
+  notes?: { at: number; message: string; jev?: boolean }[];
+  /**
+   * Per-turn token usage (last `usage` event of the turn). The context
+   * number is the growth curve that explains a run getting slower — and the
+   * pressure that precedes an OOM death.
+   */
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    contextTokens: number;
+    contextWindow: number;
+    cachedInputTokens?: number;
+  };
+  /**
+   * Jev sidecar notes (effort routing grade, fallback) — kept for records
+   * archived before `notes` existed; new records fold Jev info into `notes`.
    */
   jevNotes?: { at: number; message: string }[];
   /** Final summary from the `done` event. */
@@ -115,6 +137,12 @@ export interface LogTurnRecord {
    */
   provider?: string;
   model?: string;
+  /**
+   * The extension build that produced this record (manifest `version_name`,
+   * e.g. "0.1.0 (c4e25b7)"). An exported log used to be unattributable to a
+   * build — "did this run have the auto-screenshot fix?" was unanswerable.
+   */
+  build?: string;
   startedAt: number;
   updatedAt: number;
   /** `running` until a done/error event closes it, then `done`/`stopped`. */
@@ -133,6 +161,20 @@ export interface LogTurnRecord {
   tokensEstimated?: boolean;
   /** True when this record was reopened after a service-worker resume. */
   resumed?: boolean;
+  /**
+   * Checkpoint health pulses (one per step save): the worker's carried
+   * state over time. On a silent service-worker death — the record stays
+   * `running` with a half-written last turn and no error — the tail of this
+   * trace is the crash evidence: flat sizes point elsewhere, climbing
+   * imageBytes/historyChars point at memory.
+   */
+  heartbeats?: {
+    at: number;
+    step: number;
+    historyChars: number;
+    images: number;
+    imageBytes: number;
+  }[];
 }
 
 let seq = 0;
@@ -150,6 +192,7 @@ export function newTurnRecord(
     mode?: string;
     provider?: string;
     model?: string;
+    build?: string;
     attachments?: { name: string; kind: "image" | "text" }[];
     at?: number;
   } = {},
@@ -164,6 +207,7 @@ export function newTurnRecord(
     mode: opts.mode,
     provider: opts.provider,
     model: opts.model,
+    build: opts.build,
     startedAt: at,
     updatedAt: at,
     status: "running",
@@ -258,7 +302,10 @@ export function foldLogEvent(
         call.ok = e.ok;
         call.finishedAt = at;
         call.durationMs = Math.max(0, at - call.at);
-        if (e.image) call.image = true;
+        if (e.image) {
+          call.image = true;
+          call.imageBytes = e.image.length;
+        }
         call.jevGate = e.jevGate === true ? true : undefined;
       }
       break;
@@ -304,19 +351,46 @@ export function foldLogEvent(
       rec.durationMs = Math.max(0, at - rec.startedAt);
       break;
     }
-    case "info":
-      // Jev sidecar notes are kept (they answer "was Jev used, and what did
-      // it decide?"); generic info stays telemetry noise.
+    case "info": {
+      // EVERY info event is kept: LLM retries, checkpoint resumes,
+      // reasoning-cap cuts, usage-silence notes. They used to be dropped
+      // unless Jev-flagged — which is why "the panel showed API failures,
+      // why?" was unanswerable from the export. Jev keeps its flag (and its
+      // legacy field) for the pink rendering.
+      const turn = currentTurn(rec, at);
+      turn.notes = turn.notes ?? [];
+      turn.notes.push({ at, message: e.message, jev: e.jev === true ? true : undefined });
       if (e.jev === true) {
-        const turn = currentTurn(rec, at);
         turn.jevNotes = turn.jevNotes ?? [];
         turn.jevNotes.push({ at, message: e.message });
       }
       break;
-    case "usage":
-      // Activity/telemetry noise: the panel shows it live, the log skips it
-      // (token totals already arrive on `done`).
+    }
+    case "usage": {
+      // The per-turn context number is the growth curve that explains a run
+      // slowing down — and the pressure that precedes an OOM death. Cheap to
+      // keep (five numbers per turn); the totals still arrive on `done`.
+      const turn = currentTurn(rec, at);
+      turn.usage = {
+        inputTokens: e.inputTokens,
+        outputTokens: e.outputTokens,
+        contextTokens: e.contextTokens,
+        contextWindow: e.contextWindow,
+        ...(e.cachedInputTokens !== undefined ? { cachedInputTokens: e.cachedInputTokens } : {}),
+      };
       break;
+    }
+    case "heartbeat": {
+      rec.heartbeats = rec.heartbeats ?? [];
+      rec.heartbeats.push({
+        at,
+        step: e.stepIndex,
+        historyChars: e.historyChars,
+        images: e.images,
+        imageBytes: e.imageBytes,
+      });
+      break;
+    }
   }
 }
 
@@ -401,6 +475,13 @@ function fmtDuration(ms: number | undefined): string {
   return `${m}m${Math.round(s - m * 60)}s`;
 }
 
+/** Compact byte size for the heartbeat trace. */
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)}KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 /** Human-readable transcript: turns in order, tools nested with timings. */
 export function toMarkdown(records: LogTurnRecord[]): string {
   const out: string[] = [];
@@ -412,7 +493,10 @@ export function toMarkdown(records: LogTurnRecord[]): string {
     if (rec.mode) out.push(`- **mode:** ${rec.mode}`);
     if (rec.provider) out.push(`- **provider:** ${rec.provider}`);
     if (rec.model) out.push(`- **model:** ${rec.model}`);
-    out.push(`- **status:** ${rec.status}`);
+    if (rec.build) out.push(`- **build:** ${rec.build}`);
+    out.push(
+      `- **status:** ${rec.status}${rec.resumed ? " (resumed after a service-worker restart)" : ""}${rec.status === "running" ? " — never closed: the worker died mid-run or the export caught it live" : ""}`,
+    );
     out.push(`- **started:** ${iso(rec.startedAt)}`);
     out.push(`- **updated:** ${iso(rec.updatedAt)}`);
     out.push(`- **duration:** ${fmtDuration(rec.durationMs)}`);
@@ -438,6 +522,16 @@ export function toMarkdown(records: LogTurnRecord[]): string {
       if (turn.ttftMs !== undefined || turn.decodeMs !== undefined) {
         out.push(
           `_timing: ttft ${fmtDuration(turn.ttftMs)} · decode ${fmtDuration(turn.decodeMs)}_`,
+        );
+      }
+      if (turn.usage) {
+        const u = turn.usage;
+        const cached =
+          u.cachedInputTokens !== undefined
+            ? ` · cached ${u.cachedInputTokens.toLocaleString()}`
+            : "";
+        out.push(
+          `_usage: context ${u.contextTokens.toLocaleString()}/${u.contextWindow.toLocaleString()} · in ${u.inputTokens.toLocaleString()} · out ${u.outputTokens.toLocaleString()}${cached}_`,
         );
       }
       if (turn.reasoning.trim()) {
@@ -469,7 +563,10 @@ export function toMarkdown(records: LogTurnRecord[]): string {
           for (const line of call.result.split("\n")) out.push(`    ${line}`);
           out.push("    ```");
         }
-        if (call.image) out.push("  - image: [screenshot captured]");
+        if (call.image) {
+          const kb = call.imageBytes ? `, ${(call.imageBytes / 1024).toFixed(0)}KB base64` : "";
+          out.push(`  - image: [screenshot attached${kb}]`);
+        }
         out.push("");
       }
       for (const c of turn.confirmations) {
@@ -478,8 +575,18 @@ export function toMarkdown(records: LogTurnRecord[]): string {
           `- ⚠ confirmation requested at ${iso(c.at)} (${via}): ${c.tool} — ${c.summary}`,
         );
       }
-      for (const n of turn.jevNotes ?? []) {
-        out.push(`- 🧠 **Jev** at ${iso(n.at)}: ${n.message}`);
+      // New records keep every info event in `notes`; `jevNotes` renders only
+      // for archives from before notes existed.
+      if (turn.notes) {
+        for (const n of turn.notes) {
+          out.push(
+            `- ${n.jev ? "🧠 **Jev**" : "ℹ️ note"} at ${iso(n.at)}: ${n.message}`,
+          );
+        }
+      } else {
+        for (const n of turn.jevNotes ?? []) {
+          out.push(`- 🧠 **Jev** at ${iso(n.at)}: ${n.message}`);
+        }
       }
       for (const h of turn.handoffs ?? []) {
         out.push(
@@ -519,6 +626,29 @@ export function toMarkdown(records: LogTurnRecord[]): string {
           const floor = turn.stats.prefixTokens * turn.stats.steps;
           out.push(
             `_prefix: ${turn.stats.prefixTokens} tokens re-sent per step × ${turn.stats.steps} steps = ${floor} tokens of fixed cost_`,
+          );
+        }
+      }
+      out.push("");
+    }
+    // The checkpoint growth trace: one line of totals, and on a run that
+    // never closed (silent worker death) the last few pulses verbatim — the
+    // only evidence of what the worker was carrying when it died.
+    const hbs = rec.heartbeats ?? [];
+    if (hbs.length) {
+      const first = hbs[0]!;
+      const last = hbs[hbs.length - 1]!;
+      const maxImg = hbs.reduce((m, h) => Math.max(m, h.imageBytes), 0);
+      const maxHist = hbs.reduce((m, h) => Math.max(m, h.historyChars), 0);
+      out.push(
+        `_heartbeats: ${hbs.length} checkpoint saves · history ${fmtBytes(first.historyChars)}→${fmtBytes(last.historyChars)} (max ${fmtBytes(maxHist)}) · images ${first.images}→${last.images} (max ${fmtBytes(maxImg)})_`,
+      );
+      if (rec.status === "running") {
+        out.push("");
+        out.push("_last pulses before the worker died:_");
+        for (const h of hbs.slice(-5)) {
+          out.push(
+            `- step ${h.step} at ${iso(h.at)}: history ${fmtBytes(h.historyChars)}, ${h.images} image(s) ${fmtBytes(h.imageBytes)}`,
           );
         }
       }

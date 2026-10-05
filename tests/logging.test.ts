@@ -371,7 +371,7 @@ describe("run log export", () => {
     expect(md).not.toContain("via Jev");
   });
 
-  it("records Jev gate checks and keeps Jev notes", () => {
+  it("records Jev gate checks and keeps EVERY info event as a note", () => {
     const rec = newTurnRecord("Act", { mode: "standard", at: 0 });
     foldLogEvent(rec, { kind: "tool_call", stepIndex: 0, name: "click", args: { ref: "1" } }, 10);
     foldLogEvent(
@@ -379,23 +379,101 @@ describe("run log export", () => {
       { kind: "tool_result", stepIndex: 0, name: "click", result: "ok", ok: true, jevGate: true },
       20,
     );
-    foldLogEvent(rec, { kind: "info", message: "resumed" }, 21);
+    foldLogEvent(rec, { kind: "info", message: "resumed from checkpoint (step 3)" }, 21);
     foldLogEvent(rec, { kind: "info", message: "Jev is active", jev: true }, 22);
     foldLogEvent(rec, { kind: "done", summary: "ok" }, 30);
 
     // JSONL keeps the structured flags...
     const parsed = JSON.parse(toJsonl([rec]).trim());
     expect(parsed.turns[0].tools[0].jevGate).toBe(true);
-    expect(parsed.turns[0].jevNotes).toEqual([
-      { at: 22, message: "Jev is active" },
+    // Jev notes keep their legacy field AND land in the unified notes list.
+    expect(parsed.turns[0].jevNotes).toEqual([{ at: 22, message: "Jev is active" }]);
+    expect(parsed.turns[0].notes).toEqual([
+      { at: 21, message: "resumed from checkpoint (step 3)" },
+      { at: 22, message: "Jev is active", jev: true },
     ]);
 
-    // ...and the Markdown export states them in words.
+    // ...and the Markdown export states them in words. Generic info is
+    // diagnostic signal (LLM retries, resumes, cap cuts) — never dropped.
     const md = toMarkdown([rec]);
     expect(md).toContain("jev checked");
     expect(md).toContain("🧠 **Jev**");
     expect(md).toContain("Jev is active");
-    // Generic info stays telemetry noise.
-    expect(md).not.toContain("resumed");
+    expect(md).toContain("ℹ️ note");
+    expect(md).toContain("resumed from checkpoint (step 3)");
+  });
+
+  it("keeps per-turn usage, image sizes and the build stamp", () => {
+    const rec = newTurnRecord("Act", { mode: "standard", at: 0, build: "0.1.0 (abc1234)" });
+    foldLogEvent(rec, { kind: "tool_call", stepIndex: 0, name: "screenshot", args: {} }, 10);
+    foldLogEvent(
+      rec,
+      {
+        kind: "tool_result",
+        stepIndex: 0,
+        name: "screenshot",
+        result: "[shot]",
+        ok: true,
+        image: "x".repeat(5_000),
+      },
+      20,
+    );
+    foldLogEvent(
+      rec,
+      {
+        kind: "usage",
+        totalTokens: 100,
+        outputTokens: 30,
+        inputTokens: 70,
+        tokensPerSec: 5,
+        contextTokens: 70,
+        contextWindow: 128_000,
+        elapsedMs: 1_000,
+        cachedInputTokens: 40,
+      },
+      25,
+    );
+    foldLogEvent(rec, { kind: "done", summary: "ok" }, 30);
+
+    const t = rec.turns[0]!;
+    expect(t.tools[0]!.image).toBe(true);
+    expect(t.tools[0]!.imageBytes).toBe(5_000);
+    expect(t.usage).toEqual({
+      inputTokens: 70,
+      outputTokens: 30,
+      contextTokens: 70,
+      contextWindow: 128_000,
+      cachedInputTokens: 40,
+    });
+
+    const md = toMarkdown([rec]);
+    expect(md).toContain("**build:** 0.1.0 (abc1234)");
+    expect(md).toContain("5KB base64");
+    expect(md).toContain("context 70/128,000");
+    expect(md).toContain("cached 40");
+  });
+
+  it("keeps the heartbeat growth trace and shows the tail on a run that never closed", () => {
+    const rec = newTurnRecord("Act", { mode: "standard", at: 0 });
+    foldLogEvent(
+      rec,
+      { kind: "heartbeat", stepIndex: 0, historyChars: 1_000, images: 1, imageBytes: 200_000 },
+      10,
+    );
+    foldLogEvent(
+      rec,
+      { kind: "heartbeat", stepIndex: 1, historyChars: 50_000, images: 4, imageBytes: 1_500_000 },
+      20,
+    );
+    // No done/error: the worker died — exactly the run-6 shape.
+
+    expect(rec.heartbeats).toHaveLength(2);
+    expect(rec.status).toBe("running");
+    const md = toMarkdown([rec]);
+    expect(md).toContain("never closed");
+    expect(md).toContain("2 checkpoint saves");
+    expect(md).toContain("last pulses before the worker died");
+    expect(md).toContain("1.4MB"); // the final image payload, human-readable
+    expect(md).toContain("49KB"); // the final history size
   });
 });
