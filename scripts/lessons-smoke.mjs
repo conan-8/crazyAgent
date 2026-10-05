@@ -130,7 +130,16 @@ async function openPage(url) {
 async function openPanel() {
   const page = await openPage(`chrome-extension://${extId}/sidepanel/index.html`);
   for (let i = 0; i < 40; i++) {
-    if ((await page.eval("typeof window.__ba")) === "object") return page;
+    if ((await page.eval("typeof window.__ba")) === "object") {
+      // Window isolation: these smokes drive tools against fixture tabs that
+      // live in the browser's only window, so that window IS the agent's
+      // window. Without this the agent would create its own second window and
+      // work there, leaving every fixture assertion staring at about:blank.
+      await page.eval(
+        "chrome.windows.getCurrent().then((w) => __ba.bindWindow(w.id))",
+      );
+      return page;
+    }
     await sleep(250);
     if (i === 39) throw new Error("panel page never became interactive");
   }

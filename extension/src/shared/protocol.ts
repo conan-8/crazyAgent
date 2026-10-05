@@ -46,6 +46,19 @@ export interface Checkpoint {
    * up on the same page instead of an unrelated active tab.
    */
   tabId?: number;
+  /**
+   * The agent's own window. Window ids only mean anything inside one browser
+   * session — which is exactly the lifetime of a checkpoint (session storage)
+   * — and it lets a resume re-open the window when the user closed it. Absent
+   * on checkpoints written before agent windows existed.
+   */
+  windowId?: number;
+  /**
+   * Per-run "look outside" grant: the user allowed READ-ONLY access to their
+   * other windows' tabs for this task. Acting outside the agent window stays
+   * impossible either way.
+   */
+  allowOutside?: boolean;
   stepIndex: number;
   messages: LlmMessage[];
   /** LLM tool specs frozen at run start (kept for faithful resume). */
@@ -235,9 +248,33 @@ export type PortRequest =
       conversationId?: string;
       /** File attachments (text inlined into the task, images to the model). */
       attachments?: RunAttachment[];
+      /**
+       * Per-run "look outside" grant, chosen by the USER in the composer. The
+       * model can never set this: it widens READ-ONLY tab listing to the
+       * user's other windows, and nothing else.
+       */
+      allowOutsideWindows?: boolean;
+      /**
+       * The window hosting the panel. Used only in "adopt" mode, where that
+       * window IS the agent's window — the SW never has to guess which window
+       * the user meant (chrome.tabs.query({currentWindow}) in a service worker
+       * resolves to the last-focused window, which is exactly the ambiguity
+       * that let a run observe the user's window in the first place).
+       */
+      panelWindowId?: number;
     }
   | { kind: "stop" }
   | { kind: "state" }
+  /** Where the agent is allowed to work (see AgentWindowStatus). */
+  | { kind: "window.status" }
+  /** Adopt a window the user picked as the agent's own. */
+  | { kind: "window.bind"; windowId: number }
+  /** Forget the adopted window: the agent gets its own again. */
+  | { kind: "window.reset" }
+  /** User gesture: raise the agent's window (the ONLY path that focuses one). */
+  | { kind: "window.reveal" }
+  /** Move one of the user's tabs into the agent's window. */
+  | { kind: "window.handover"; tabId: number }
   /**
    * Mid-run steering: a user message queued for the running agent. It lands
    * as a normal user turn the model sees on its next step — corrections,
@@ -317,15 +354,45 @@ export type PortRequest =
    * Dev/test hook (scripts + e2e): simulate a browser that lets the worker
    * die — suppresses all keepalive wakeups so checkpoint/resume is testable.
    */
-  | { kind: "test_suspend" };
+  | { kind: "test_suspend" }
+  /**
+   * Dev/test hook: stand in for the user's per-run "look outside" toggle when
+   * a driver script calls tools directly (no run is active, so there is no
+   * checkpoint to carry the grant). Never reachable by the model.
+   */
+  | { kind: "test_scope"; allowOutside: boolean };
 
 export type PanelToSw = PortRequest | { type: "ping" };
+
+/**
+ * Where the agent is allowed to work, as the panel renders it. The agent gets
+ * ONE window: everything it lists, reads, clicks or types lives there.
+ */
+export interface AgentWindowStatus {
+  /** `own` = a window the agent created; `adopt` = a window the user picked. */
+  mode: "own" | "adopt";
+  /** The bound window, when one exists right now (window ids are per session). */
+  windowId?: number;
+  /** False when the bound window is gone — a run would create a fresh one. */
+  alive: boolean;
+  /** Tabs currently in the agent's window. */
+  tabs: number;
+  /** The tab a run would start on (the window's active tab). */
+  activeTabId?: number;
+  /**
+   * How many times this session raised a browser window. Quiet mode (the
+   * default) must keep this at 0 — it is what tests assert instead of trying
+   * to observe OS focus.
+   */
+  raiseAttempts: number;
+}
 
 /** Service worker → panel. */
 export type SwToPanel =
   | { type: "agent.event"; event: StepEvent }
   | { type: "agent.state"; running: boolean; checkpoint: Checkpoint | null }
   | { type: "pong"; from: "sw"; startedAt: number; ts: number }
+  | { type: "window.status"; status: AgentWindowStatus }
   | {
       type: "tool_result";
       id: string;

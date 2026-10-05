@@ -104,6 +104,12 @@ export interface LoopDeps {
   /** Jev sidecar configured: the `judge` tool is in the spec list. */
   judgeAvailable?: boolean;
   /**
+   * Window isolation: the user granted THIS run read-only access to their
+   * other windows' tabs ("look outside"), so the prompt says so while still
+   * forbidding any action outside the agent window. See prompts.windowRules.
+   */
+  windowPeek?: boolean;
+  /**
    * Per-run appendix for the system prompt (lessons learned from previous
    * runs). Sent as a separate, uncached system block — see LlmRequest.
    */
@@ -677,6 +683,7 @@ export async function runAgentTask(
     deps.madman === true,
     deps.judgeAvailable === true,
     deps.batchActions === true,
+    deps.windowPeek === true,
   );
   const prefixTokens =
     estimateTokens(systemPrompt) +

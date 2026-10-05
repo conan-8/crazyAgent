@@ -81,4 +81,15 @@ describe("checkpoint", () => {
     expect(kept.at(-1)?.images?.[0]).toContain("IMG5");
     expect(withImages.messages.filter((m) => m.images?.length).length).toBe(6);
   });
+
+  it("keeps the run's window and its look-outside grant across a resume", async () => {
+    // Window isolation: a resumed run must continue in the SAME window (it is
+    // the agent's whole world) and keep the grant the user gave it — window
+    // ids only live for a browser session, which is this storage's lifetime.
+    await saveCheckpoint({ ...cp, tabId: 42, windowId: 7, allowOutside: true });
+    const back = await loadCheckpoint();
+    expect(back?.tabId).toBe(42);
+    expect(back?.windowId).toBe(7);
+    expect(back?.allowOutside).toBe(true);
+  });
 });

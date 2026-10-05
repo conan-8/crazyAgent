@@ -9,6 +9,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import {
   PORT_NAME,
+  type AgentWindowStatus,
   type Checkpoint,
   type Conversation,
   type ConversationSummary,
@@ -1169,6 +1170,82 @@ function switchJevTransport(jev: JevSettings, transport: JevTransport): JevSetti
   };
 }
 
+/**
+ * One window gesture, sent to the worker that owns the binding. Exported to
+ * the settings body too: the mode dropdown and these buttons are two views of
+ * the SAME state, so choosing "A window I pick" must bind this window (and
+ * choosing "Its own window" must release it) or the pair would drift apart.
+ */
+async function windowAction(
+  type: "window.bind" | "window.reset" | "window.reveal",
+): Promise<AgentWindowStatus | null> {
+  const payload: Record<string, unknown> = { type };
+  if (type === "window.bind") {
+    // THIS window: the one hosting the panel. The worker never guesses.
+    const win = await chrome.windows.getCurrent().catch(() => null);
+    if (win?.id === undefined) return null;
+    payload.windowId = win.id;
+  }
+  const res = await chrome.runtime.sendMessage(payload).catch(() => undefined);
+  return (res as { status?: AgentWindowStatus } | undefined)?.status ?? null;
+}
+
+/**
+ * Window-isolation controls: which window the agent works in, plus the three
+ * user gestures around it. The service worker owns the binding, so every
+ * button here is a message + a re-read — the panel never keeps its own idea of
+ * "the agent window" that could drift from the worker's.
+ */
+function AgentWindowControls({ onMode }: { onMode?: (mode: "own" | "adopt") => void }) {
+  const [status, setStatus] = useState<AgentWindowStatus | null>(null);
+  const read = () =>
+    void chrome.runtime
+      .sendMessage({ type: "window.status" })
+      .then((r) => {
+        const s = (r as { status?: AgentWindowStatus } | undefined)?.status;
+        if (s) setStatus(s);
+      })
+      .catch(() => undefined);
+  useEffect(read, []);
+  // Every gesture keeps the SETTING and the BINDING in step (the mode dropdown
+  // is the third view of the same state) — otherwise the next run could start
+  // in a window the user no longer chose.
+  const act = (type: "window.bind" | "window.reset" | "window.reveal") => {
+    void windowAction(type).then((s) => {
+      if (s) setStatus(s);
+    });
+    if (type === "window.bind") onMode?.("adopt");
+    if (type === "window.reset") onMode?.("own");
+  };
+  return (
+    <div class="window-controls">
+      <p class="window-state">
+        {status?.alive
+          ? `Working in window #${status.windowId} · ${status.tabs} tab${status.tabs === 1 ? "" : "s"}`
+          : "No agent window yet — it opens on the next run"}
+        {status && status.raiseAttempts > 0
+          ? ` · brought forward ${status.raiseAttempts}× by you`
+          : ""}
+      </p>
+      <div class="window-buttons">
+        <button class="btn-ghost" onClick={() => act("window.bind")}>
+          Use this window for the agent
+        </button>
+        <button class="btn-ghost" onClick={() => act("window.reset")}>
+          Give it its own window
+        </button>
+        <button
+          class="btn-ghost"
+          disabled={!status?.alive}
+          onClick={() => act("window.reveal")}
+        >
+          Bring it forward
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SettingsBody({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<AgentSettings | null>(null);
   const [saved, setSaved] = useState(false);
@@ -1438,6 +1515,48 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 onChange={(v) => set("learn", { ...s.learn, auto: v })}
                 title="Review failed runs automatically"
                 hint="Runs that errored, were stopped, or looped on a failing call get reviewed without asking; clean runs are reviewed only from the Lessons drawer"
+              />
+            </section>
+
+            <section class="set-group" style="--i:7">
+              <h3 class="set-title">
+                <Icon d={ICONS.window} size={12} /> Agent window
+              </h3>
+              <SelectRow
+                title="Where the agent works"
+                hint="Its own window, created once and reused, or one you pick. Either way it can only see and act inside that window — your other windows are out of reach, and it never takes your focus."
+                value={s.agentWindow.mode}
+                options={[
+                  { value: "own", label: "Its own window" },
+                  { value: "adopt", label: "A window I pick" },
+                ]}
+                onChange={(v) => {
+                  set("agentWindow", { ...s.agentWindow, mode: v });
+                  // The setting and the binding are one state: picking a mode
+                  // also performs it, so the next run cannot start in a window
+                  // the user no longer chose.
+                  void windowAction(v === "adopt" ? "window.bind" : "window.reset");
+                }}
+              />
+              <Switch
+                checked={s.agentWindow.quietFocus}
+                onChange={(v) => set("agentWindow", { ...s.agentWindow, quietFocus: v })}
+                title="Never take focus"
+                hint="Keystrokes reach the page through CDP focus emulation, so the agent's window never jumps in front of yours while you work. Turn this off only if a site refuses input while its window is in the background: the agent will then raise its OWN window before typing, never yours."
+              />
+              <AgentWindowControls
+                onMode={(mode) => {
+                  // The binding changes the moment the button is pressed, so the
+                  // setting is persisted right away too: leaving it unsaved
+                  // until the Save button would let the next run resolve the
+                  // mismatch by opening a window the user did not pick.
+                  const next = { ...s, agentWindow: { ...s.agentWindow, mode } };
+                  setS(next);
+                  setSaved(false);
+                  void saveSettings({ ...next, apiKey: activeApiKey(next) }).then(() =>
+                    setSaved(true),
+                  );
+                }}
               />
             </section>
           </div>
@@ -2330,6 +2449,14 @@ function App() {
   const [slashIdx, setSlashIdx] = useState(0);
   const [settings, setSettingsState] = useState<AgentSettings | null>(null);
   const [attachments, setAttachments] = useState<RunAttachment[]>([]);
+  /**
+   * Window isolation: which window the agent may work in, and the per-run
+   * "look outside" grant the user can flip before pressing Run. The status
+   * comes from the service worker (it owns the binding); this panel only
+   * renders it and sends the two user gestures (bind / hand over a tab).
+   */
+  const [agentWindow, setAgentWindow] = useState<AgentWindowStatus | null>(null);
+  const [allowOutside, setAllowOutside] = useState(false);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [modelList, setModelList] = useState<string[]>([]);
@@ -2347,6 +2474,8 @@ function App() {
   const orbFlyRef = useRef<HTMLSpanElement | null>(null);
   const modelCacheRef = useRef<{ signature: string; models: string[] } | null>(null);
   const portRef = useRef<chrome.runtime.Port | null>(null);
+  /** The window hosting this panel — "adopt this window" mode names it. */
+  const panelWindowRef = useRef<number | undefined>(undefined);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const runStartRef = useRef(0);
   const dragDepth = useRef(0);
@@ -2468,6 +2597,11 @@ function App() {
         } else if (msg.type === "agent.state") {
           setRunning(msg.running);
           setCheckpoint(msg.checkpoint);
+        } else if (msg.type === "window.status") {
+          // Where the agent may work. Broadcast by the worker on connect, after
+          // every change (bind / reset / handover / window closed) and at run
+          // start, so this line can never show a window that is gone.
+          setAgentWindow(msg.status);
         } else if (msg.type === "history.list") {
           setHistoryList(msg.conversations);
         } else if (msg.type === "history.get" && msg.conversation) {
@@ -2515,6 +2649,7 @@ function App() {
       });
       postPort({ kind: "state" });
       postPort({ kind: "ping" });
+      postPort({ kind: "window.status" });
     };
     connectPort();
     return () => {
@@ -2523,6 +2658,19 @@ function App() {
       postPort = null;
       portRef.current?.disconnect();
     };
+  }, []);
+
+  // The window this panel lives in. "Adopt this window" mode names it
+  // explicitly, so the worker never has to guess (chrome.tabs.query with
+  // currentWindow inside a service worker means "last-focused window", which
+  // is exactly how a run ends up observing the user's window).
+  useEffect(() => {
+    void chrome.windows
+      .getCurrent()
+      .then((w) => {
+        panelWindowRef.current = w.id;
+      })
+      .catch(() => undefined);
   }, []);
 
   // Keepalive ping + run timer.
@@ -2741,7 +2889,23 @@ function App() {
       mode: "standard",
       conversationId,
       attachments: attach.length ? attach : undefined,
+      // Window isolation: the per-run read-only grant, and which window this
+      // panel is in (used only when the settings say the agent works in the
+      // user's window rather than its own).
+      allowOutsideWindows: allowOutside || undefined,
+      panelWindowId: panelWindowRef.current,
     });
+  };
+
+  /** Move the tab the user is looking at into the agent's window. */
+  const handOverCurrentTab = () => {
+    void chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .then(([tab]) => {
+        if (tab?.id === undefined) return;
+        postPort?.({ kind: "window.handover", tabId: tab.id });
+      })
+      .catch(() => undefined);
   };
 
   const stop = () => postPort?.({ kind: "stop" });
@@ -2948,6 +3112,37 @@ function App() {
     events: () => [...eventBuffer],
     swPing: () => chrome.runtime.sendMessage({ type: "ping" }),
     queryState: () => chrome.runtime.sendMessage({ type: "state" }),
+    /**
+     * Window isolation (driver scripts): where the agent is allowed to work,
+     * bind a window the fixture lives in, hand a tab over, and the raise
+     * counter a quiet-mode run must leave at 0.
+     */
+    window: () =>
+      chrome.runtime
+        .sendMessage({ type: "window.status" })
+        .then((r) => (r as { status?: AgentWindowStatus } | undefined)?.status ?? null),
+    bindWindow: async (windowId: number) => {
+      const status = await chrome.runtime
+        .sendMessage({ type: "window.bind", windowId })
+        .then((r) => (r as { status?: AgentWindowStatus } | undefined)?.status ?? null);
+      // Same semantics as the user's "Use this window for the agent" button:
+      // adopting a window IS choosing the adopt mode, so the setting and the
+      // binding cannot drift apart.
+      const s = await loadSettings();
+      await saveSettings({ ...s, agentWindow: { ...s.agentWindow, mode: "adopt" } });
+      return status;
+    },
+    resetWindow: () =>
+      chrome.runtime
+        .sendMessage({ type: "window.reset" })
+        .then((r) => (r as { status?: AgentWindowStatus } | undefined)?.status ?? null),
+    raiseCount: () =>
+      chrome.runtime
+        .sendMessage({ type: "window.status" })
+        .then((r) => (r as { status?: AgentWindowStatus } | undefined)?.status?.raiseAttempts ?? 0),
+    handover: (tabId: number) => postPort?.({ kind: "window.handover", tabId }),
+    /** Driver-script twin of the composer's per-run "look outside" toggle. */
+    setScope: (allowOutside: boolean) => postPort?.({ kind: "test_scope", allowOutside }),
     onEvent: (cb: (e: StepEvent) => void) => listeners.add(cb),
     suspendKeepalive: () => postPort?.({ kind: "test_suspend" }),
     resolveConfirm,
@@ -3294,6 +3489,48 @@ function App() {
       </div>
 
       <footer class="composer-wrap">
+        {/* Window isolation, visible where runs start: which window the agent
+            works in, a hand-over for the page you are looking at, and the
+            per-run read-only grant. The agent itself can never widen its own
+            scope — only these controls can. */}
+        <div class="window-bar">
+          <span
+            class={`window-chip${agentWindow?.alive ? " is-live" : ""}`}
+            title={
+              agentWindow?.alive
+                ? `The agent works only inside this window (${agentWindow.tabs} tab${agentWindow.tabs === 1 ? "" : "s"}). Your other windows are invisible to it.`
+                : "The agent gets its own window the moment a run starts. Yours stays untouched."
+            }
+          >
+            <Icon d={ICONS.window} size={11} />
+            <span class="window-chip-text">
+              {agentWindow?.alive
+                ? `${agentWindow.mode === "adopt" ? "this window" : "own window"} #${agentWindow.windowId} · ${agentWindow.tabs} tab${agentWindow.tabs === 1 ? "" : "s"}`
+                : "own window · opens on Run"}
+            </span>
+          </span>
+          {agentWindow?.alive && agentWindow.mode === "own" ? (
+            <button
+              class="window-btn"
+              title="Move this tab into the agent's window so the agent can work on it — the page keeps its state (scroll, form, logins)"
+              onClick={handOverCurrentTab}
+            >
+              Hand this tab to the agent
+            </button>
+          ) : null}
+          <label
+            class={`window-toggle${allowOutside ? " is-on" : ""}`}
+            title="For THIS run only: let the agent LIST your other windows' tabs (titles and URLs) when a task needs them. It still cannot click, type or read page content outside its own window."
+          >
+            <input
+              type="checkbox"
+              checked={allowOutside}
+              onChange={(e) => setAllowOutside((e.target as HTMLInputElement).checked)}
+            />
+            <Icon d={ICONS.eye} size={11} />
+            <span>Look outside</span>
+          </label>
+        </div>
         {attachments.length ? (
           <div class="draft-strip">
             {attachments.map((a, i) => (

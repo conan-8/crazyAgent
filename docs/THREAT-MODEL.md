@@ -33,6 +33,16 @@ that risk.
   never remove one — and fails open: if Jev is unreachable or slow (2 s cap),
   the rule-based verdict stands. This narrows the "checkout button labeled
   'Continue'" gap below, but a probability is not a guarantee.
+- **Window isolation.** The agent works inside ONE window — its own, created on
+  first use, or a window you bind to it. `tabs_list` can only return that
+  window's tabs, `tabs_switch`/`tabs_close` refuse anything else with an
+  explicit, non-retryable error, and every new tab it opens lands there. Your
+  other windows' pages are neither observed nor acted on. The one exception is
+  opt-in and narrow: the per-run **"Look outside"** toggle lets `tabs_list`
+  *list* your other windows' tabs (titles and URLs, marked `window:"user"`); it
+  still cannot click, type, read page content, switch to or close them. Handing
+  one tab over ("Hand this tab to the agent") moves that tab into the agent's
+  window, which is a deliberate, visible user action.
 - **Cooperative stop** between tool calls (interruptible step waits).
 - **Step cap** (default 40) bounds runaway loops; malformed tool calls abort
   after 3 consecutive failures.
@@ -51,9 +61,15 @@ that risk.
 - Two honest side effects. Events produced this way are `isTrusted: true`, so a
   page that gates on "was this a real user?" cannot tell the difference — that is
   the point of the route, and it means anti-automation checks on such editors are
-  not a barrier. And because input only reaches the **active** tab, a run may
-  switch focus to the tab it is driving (`chrome.tabs.update({active:true})` plus
-  window focus), which you will see happen.
+  not a barrier. And because input only reaches the **active** tab, a run makes
+  the tab it is driving active *inside the agent's own window*
+  (`chrome.tabs.update({active:true})`), which you will see in that window's tab
+  strip. It does **not** raise the window or take your keyboard focus: the
+  renderer's focus state comes from CDP focus emulation
+  (`Emulation.setFocusEmulationEnabled`), so you can keep typing in another
+  window while a run proceeds. The opt-out (Settings → Agent window → "Never
+  take focus" OFF) makes the agent raise its OWN window before a stroke, for the
+  rare site that refuses input in a background window.
 - The driver verifies focus before and after sending. Focus lost mid-type is
   reported as a warning on a successful result rather than as a failure,
   deliberately: a failure invites a retry, and retrying would duplicate whatever
@@ -171,3 +187,9 @@ that risk.
 - Multi-user isolation, enterprise policy compliance (Chrome 155+ managed
   browsers may reject `chrome.debugger.attach` outright — handled gracefully),
   anti-stealth/anti-bot bypassing, sandboxing the LLM from the page.
+- Window isolation is a SCOPE wall, not a sandbox: it decides which pages the
+  agent may touch, and it is enforced by the extension's own tool layer (plus
+  the prompt). It does not stop a page the agent is working on from being
+  another origin, from containing your logged-in session, or from talking to
+  the network — every guarantee above about what the agent can do to a page
+  still applies to the pages inside its own window.

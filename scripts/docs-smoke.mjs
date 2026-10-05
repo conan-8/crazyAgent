@@ -160,6 +160,11 @@ async function main() {
       if ((await panel.eval("typeof window.__ba")) === "object") break;
       await sleep(250);
     }
+    // Window isolation: these smokes drive tools against fixture tabs that live
+    // in the browser's only window, so that window IS the agent's window.
+    // Without this the agent would create its own second window and work there,
+    // leaving every fixture assertion staring at about:blank.
+    await panel.eval("chrome.windows.getCurrent().then((w) => __ba.bindWindow(w.id))");
     const call = async (name, args = {}) => {
       const raw = await panel.eval(
         `__ba.tool(${JSON.stringify(name)}, ${JSON.stringify(args)}).then((r) => JSON.stringify(r))`,

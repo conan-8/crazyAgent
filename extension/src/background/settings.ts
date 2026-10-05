@@ -45,6 +45,20 @@ export interface LearnSettings {
   auto: boolean;
 }
 
+/**
+ * The agent's own window. `mode:"own"` gives it a dedicated window it creates
+ * and reuses; `mode:"adopt"` confines a window the user picked instead.
+ * `quietFocus:true` (the default) forbids raising any window — a stroke that
+ * cannot land while the user's window is in front is reported instead of
+ * grabbing focus.
+ */
+export type AgentWindowMode = "own" | "adopt";
+
+export interface AgentWindowSettings {
+  mode: AgentWindowMode;
+  quietFocus: boolean;
+}
+
 export interface AgentSettings {
   /** Every saved connection; the active one is chosen by `activeKeyId`. */
   apiKeys: ApiKeyEntry[];
@@ -136,6 +150,12 @@ export interface AgentSettings {
    * On by default — auto-review only fires on runs that failed.
    */
   learn: LearnSettings;
+  /**
+   * Window isolation: the agent works inside ONE window (its own by default)
+   * and can neither see nor act on the user's other windows. See
+   * background/window-scope.ts.
+   */
+  agentWindow: AgentWindowSettings;
 }
 
 /** Defaults for a brand-new connection. */
@@ -186,6 +206,9 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   // Self-improvement on by default: lessons already learned are applied to
   // later runs, and runs that failed are reviewed automatically.
   learn: { enabled: true, auto: true },
+  // Its own window, and never steals focus: the whole point is that the user
+  // can keep working elsewhere during a run.
+  agentWindow: { mode: "own", quietFocus: true },
 };
 
 const THINKING_VALUES: ThinkingLevel[] = ["off", "low", "medium", "high"];
@@ -251,6 +274,22 @@ export function normalizeJev(stored: unknown): JevSettings {
 export function normalizeLearn(stored: unknown): LearnSettings {
   const raw = (stored && typeof stored === "object" ? stored : {}) as Partial<LearnSettings>;
   return { enabled: raw.enabled !== false, auto: raw.auto !== false };
+}
+
+/** The two window modes; anything else in storage falls back to "own". */
+const AGENT_WINDOW_MODES: AgentWindowMode[] = ["own", "adopt"];
+
+/**
+ * Backfill/coerce the window-isolation block. Isolation ships ON (a profile
+ * with no block gets `own` + quiet focus), so only an explicit `false` turns
+ * quiet focus off, and an unknown mode is never trusted.
+ */
+export function normalizeAgentWindow(stored: unknown): AgentWindowSettings {
+  const raw = (stored && typeof stored === "object" ? stored : {}) as Partial<AgentWindowSettings>;
+  const mode = AGENT_WINDOW_MODES.includes(raw.mode as AgentWindowMode)
+    ? (raw.mode as AgentWindowMode)
+    : "own";
+  return { mode, quietFocus: raw.quietFocus !== false };
 }
 
 /** Stable-enough id for a new entry (crypto.randomUUID needs a secure ctx). */
@@ -372,6 +411,8 @@ export function normalizeSettings(
     rev: SETTINGS_REV,
     // Coach: on unless explicitly disabled (see normalizeLearn).
     learn: normalizeLearn(merged.learn),
+    // Window isolation: backfill + coerce (see normalizeAgentWindow).
+    agentWindow: normalizeAgentWindow(merged.agentWindow),
   };
 }
 

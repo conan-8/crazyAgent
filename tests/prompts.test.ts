@@ -239,6 +239,39 @@ describe("canvas document editor procedure", () => {
   });
 });
 
+describe("window isolation rules", () => {
+  // The wall is enforced by the tools (background/window-scope.ts); the prompt
+  // is how the model knows it exists, so it never wastes steps reaching for
+  // the user's tabs — and never claims it saw them.
+  const isolated = buildSystemPrompt("t");
+  const peek = buildSystemPrompt("t", false, false, false, true);
+
+  it("states that the agent lives in one window and cannot reach the user's", () => {
+    expect(isolated).toContain("Where you work — ONE window:");
+    expect(isolated).toContain("You live in a single browser window of your own");
+    expect(isolated).toContain("The user's other windows are OUT OF REACH");
+    expect(isolated).toContain("Hand this tab to the agent");
+  });
+
+  it("points at the 'look outside' switch instead of listing the user's tabs", () => {
+    expect(isolated).toContain("you cannot list them yourself");
+    expect(isolated).not.toContain('marked with window "user"');
+  });
+
+  it("keeps looking and acting separate when the run was granted a peek", () => {
+    expect(peek).toContain('marked with window "user"');
+    expect(peek).toContain("Looking is ALL you may do with them");
+    expect(peek).toContain("every click, type, switch, close and page read stays inside your own window");
+  });
+
+  it("never tells the model it may take the user's focus", () => {
+    for (const p of [isolated, peek]) {
+      expect(p).toContain("your work never takes their focus");
+      expect(p).not.toContain("focus the window");
+    }
+  });
+});
+
 describe("the model's clock", () => {
   // The clock moved OUT of the cached system prompt into a volatile tail so a
   // ticking clock no longer defeats provider prompt caching every step.

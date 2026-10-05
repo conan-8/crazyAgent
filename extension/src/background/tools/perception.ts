@@ -20,6 +20,7 @@ import {
   type WaitObservation,
 } from "../../shared/wait";
 import { stageShelfImage } from "../shelf";
+import { ensureAgentWindow, resolveAgentWindow } from "../window-scope";
 import { registerTool, type ToolContext } from "./types";
 
 export type { AggregatedSnapshot };
@@ -567,7 +568,11 @@ async function shotOfUrl(
 ): Promise<string | undefined> {
   let tabId: number | undefined;
   try {
-    tabId = (await chrome.tabs.create({ url, active: false })).id;
+    // Inside the agent's own window: a bare create lands in whatever window is
+    // focused (the USER's), which both breaks the isolation promise and leaves
+    // the capture invisible to the run's own screenshots.
+    const windowId = (await resolveAgentWindow()) ?? (await ensureAgentWindow());
+    tabId = (await chrome.tabs.create({ url, active: false, windowId })).id;
     if (tabId === undefined) return undefined;
     for (let i = 0; i < 20; i++) {
       const tab = await chrome.tabs.get(tabId).catch(() => null);

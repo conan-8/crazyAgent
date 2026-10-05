@@ -18,6 +18,7 @@ const steps = [
   ["iframes (perception + frame eval)", "node", ["scripts/frames-smoke.mjs"]],
   ["canvas editors (Docs playbook)", "node", ["scripts/docs-smoke.mjs"]],
   ["capability parity (coords/upload/netlog/handoff)", "node", ["scripts/capability-smoke.mjs"]],
+  ["window isolation (own window, wall, quiet focus)", "node", ["scripts/window-smoke.mjs"]],
   ["image shelf & paste_image", "node", ["scripts/paste-smoke.mjs"]],
   ["jev fast decisions (sidecar)", "node", ["scripts/jev-smoke.mjs"]],
   ["self-improvement (coach lessons)", "node", ["scripts/lessons-smoke.mjs"]],

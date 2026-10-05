@@ -17,6 +17,12 @@
 //     command resolves successfully and does NOTHING — so the tab is activated
 //     first and focus is verified, because a silent no-op is exactly the kind of
 //     failure that sends a run into a retry loop.
+//   - The tab is activated INSIDE its own window and the WINDOW is never
+//     focused: a run works in the agent's window while the user works in
+//     theirs (see background/window-scope.ts), so stealing focus on every
+//     stroke would make the browser unusable next to a running agent. The
+//     renderer's focus state instead comes from CDP focus emulation
+//     (Emulation.setFocusEmulationEnabled) — see emulateFocus.
 import type { ActionResult } from "../../content/actions";
 import {
   keyEventParams,
@@ -26,6 +32,7 @@ import {
   type InputHints,
 } from "../../shared/trusted-input";
 import type { BrowserAdapter } from "../adapters/types";
+import { ensureWindowForInput } from "../window-scope";
 import { runContentAction } from "./content-action";
 import { cursorPing } from "./cursor-overlay";
 
@@ -49,9 +56,54 @@ let frontTab: { tabId: number; windowId: number; at: number } | null = null;
 const FRONT_CACHE_MS = 2_000;
 
 /**
- * Make this tab the one the browser will deliver input to. Cheap when the
- * tab is already front: no re-activation, no settle — the previous stroke
- * already proved where input lands.
+ * Tabs already told to emulate focus. One command per tab, best effort: the
+ * flag then lives for the target's lifetime.
+ */
+const focusEmulated = new Set<number>();
+
+/**
+ * Make the renderer believe its page is focused WITHOUT raising the window.
+ *
+ * A run works in its own window while the user works in another, so the agent
+ * window is usually not the frontmost one. Chromium still delivers CDP input
+ * to a tab that is active in its own (background) window, but the RENDERER's
+ * own focus state is what editors, `beforeinput` consumers and anything
+ * calling `document.hasFocus()` consult — and that state follows the OS
+ * window. Focus emulation is DevTools' own answer to exactly this: the page
+ * behaves as focused while the real window keeps whatever focus the user gave
+ * it. Best-effort by design: a transport that refuses it still gets the
+ * strokes, and the caller reports the real outcome.
+ */
+export async function emulateFocus(
+  tabId: number,
+  adapter: BrowserAdapter,
+): Promise<void> {
+  if (focusEmulated.has(tabId)) return;
+  try {
+    await adapter.send(tabId, "Emulation.setFocusEmulationEnabled", { enabled: true });
+    focusEmulated.add(tabId);
+  } catch {
+    // No emulation on this transport/page: the strokes below still run.
+  }
+}
+
+/** Test seam: forget the activation + focus-emulation caches. */
+export function resetInputCachesForTests(): void {
+  frontTab = null;
+  focusEmulated.clear();
+}
+
+/**
+ * Make this tab the one the browser will deliver input to — WITHOUT touching
+ * the user's focus.
+ *
+ * Input only reaches the ACTIVE tab's render widget, so the tab is activated
+ * inside its own window (activating a tab does not raise the window). What is
+ * deliberately NOT done anymore: `chrome.windows.update(…, {focused:true})`.
+ * That call is what made a run unusable next to the user — every stroke
+ * yanked focus back to the agent's window — and window isolation removed the
+ * reason for it: the agent's tab lives in the agent's own window, where
+ * activation plus focus emulation is what the renderer needs.
  */
 export async function ensureTabActive(
   tabId: number,
@@ -73,24 +125,17 @@ export async function ensureTabActive(
       await chrome.tabs.update(tabId, { active: true });
       changed = true;
     }
-    if (windowId >= 0) {
-      const win = await chrome.windows.get(windowId).catch(() => undefined);
-      if (win && !win.focused) {
-        await chrome.windows.update(windowId, { focused: true }).catch(() => undefined);
-        changed = true;
-      }
-    }
     frontTab = { tabId, windowId, at: Date.now() };
   } catch {
     // tab closed or the API is unavailable — the next call will say so
     frontTab = null;
   }
-  // bringToFront is the full-CDP equivalent; harmless when already frontmost.
-  try {
-    await adapter.send(tabId, "Page.bringToFront", {});
-  } catch {
-    // Page may be unavailable on this transport; Input still works without it
-  }
+  await emulateFocus(tabId, adapter);
+  // Quiet focus (the default) stops here — the window is never raised. When
+  // the user turned it off, raise the agent's own window: a site that refuses
+  // input while its window is in the background gets what it wants, and the
+  // user's window is still never touched.
+  if (windowId >= 0) await ensureWindowForInput(windowId);
   // The settle exists for ownership CHANGES; a tab that was already front
   // needs no beat before input.
   if (changed) await sleep(ACTIVATE_SETTLE_MS);

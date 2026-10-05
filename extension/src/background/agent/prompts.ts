@@ -26,6 +26,34 @@ const BASE_RULES = [
 ];
 
 /**
+ * Window isolation: the agent works inside ONE window — its own. This is a
+ * fact about its world (the tool wall in background/window-scope.ts enforces
+ * it), not a preference, so it rides the byte-stable prefix. `peek` is the
+ * user's per-run grant to LOOK at their other windows' tabs; acting outside
+ * the agent window stays impossible either way, which is why the peek wording
+ * still forbids it explicitly (a model told "look outside" will otherwise try
+ * to click there).
+ */
+function windowRules(peek: boolean): string[] {
+  const rules = [
+    "Where you work — ONE window:",
+    "- You live in a single browser window of your own (the agent window). Every tab you open lands there, and `tabs_list` shows only that window's tabs.",
+    "- The user's other windows are OUT OF REACH: you cannot see, read, click, type into, switch to or close their tabs, and you must never claim you did. If a page you need is open in one of them, ask the user to hand it over (the panel has a \"Hand this tab to the agent\" button) or open its URL yourself with `tabs_create` — it opens in your own window.",
+    "- The user is working in their own window while you work in yours, and your work never takes their focus: never assume the user is watching your window, and never wait for them to look at it.",
+  ];
+  if (peek) {
+    rules.push(
+      "- For THIS run the user allowed you to LOOK at their other windows: `tabs_list` includes those tabs, marked with window \"user\". Looking is ALL you may do with them — every click, type, switch, close and page read stays inside your own window. To work on one of those pages, open its URL with `tabs_create`.",
+    );
+  } else {
+    rules.push(
+      "- If a task seems to need the user's other tabs (\"summarize my open tabs\"), say so and ask the user to switch on \"Look outside\" for the run — you cannot list them yourself.",
+    );
+  }
+  return rules;
+}
+
+/**
  * Step-shaping rules — the one part of the prompt that is a speed/reliability
  * tradeoff rather than a fact about the world, so it is the one part that is
  * switchable (Settings → Speed).
@@ -157,11 +185,14 @@ export function buildSystemPrompt(
   madman: boolean = false,
   hasJudge: boolean = false,
   batchActions: boolean = false,
+  windowPeek: boolean = false,
 ): string {
   return [
     "You are crazyAgent, an AI that operates the user's real browser to complete web tasks.",
     "",
     ...MANDATE,
+    "",
+    ...windowRules(windowPeek),
     "",
     ...BASE_RULES,
     ...(batchActions ? STEP_RULES_BATCHED : STEP_RULES_SEQUENTIAL),

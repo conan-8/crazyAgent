@@ -18,6 +18,19 @@ import {
   saveCheckpoint,
 } from "./checkpoint";
 import { Keepalive } from "./keepalive";
+import {
+  agentWindowBinding,
+  bindAgentWindow,
+  ensureAgentTab,
+  ensureAgentWindow,
+  initWindowScope,
+  moveTabIntoAgentWindow,
+  raiseWindow,
+  releaseAgentWindow,
+  resolveAgentWindow,
+  tabInAgentWindow,
+  windowStatus,
+} from "./window-scope";
 import { sameObservation } from "../shared/observation";
 import { runEchoTask } from "./tasks/echo";
 import { DebuggerAdapter } from "./adapters/debugger";
@@ -269,24 +282,46 @@ let currentUnattended = false;
 const UNATTENDED_CONFIRM_TIMEOUT_MS = 15_000;
 
 /**
+ * Driver-script twin of the per-run "look outside" grant (see the
+ * `test_scope` port message). Real runs carry the grant on the checkpoint;
+ * scripts that call tools with no run active have no checkpoint to carry it.
+ */
+let devAllowOutside = false;
+
+/**
  * The tab the agent is working on, tracked explicitly instead of resolved
  * per call as "active tab of the focused window". With several windows open
  * that query silently followed the USER's focus, so tools and screenshots
  * could observe a different page than the one the agent was acting on — a
  * live run lost ~10 minutes to screenshots of a tab it had left behind.
- * Updated by tabs_create / tabs_switch / tabs_close; falls back to the
- * active tab when unset or closed.
+ * Updated by tabs_create / tabs_switch / tabs_close; falls back to a tab in
+ * the agent's OWN window (background/window-scope.ts) when unset or closed —
+ * the user's windows are not a fallback, ever.
  */
 let agentTabId: number | undefined;
 
 /** The tab tools should act on right now. */
 async function agentTab(): Promise<number | undefined> {
   if (agentTabId !== undefined) {
-    const alive = await chrome.tabs.get(agentTabId).catch(() => null);
-    if (alive) return agentTabId;
+    const windowId = await resolveAgentWindow();
+    // No window means no world: re-resolve (which opens a fresh window)
+    // instead of trusting a tab that nothing vouches for.
+    const alive =
+      windowId === undefined
+        ? null
+        : await chrome.tabs.get(agentTabId).catch(() => null);
+    // A tab the user dragged OUT of the agent's window is out of scope too:
+    // the wall applies to the tracked tab exactly like any other tab.
+    if (alive && alive.windowId === windowId) return agentTabId;
+    if (alive) {
+      emit({
+        kind: "info",
+        message: `the tab I was working on (${agentTabId}) left the agent window — picking up the window's active tab instead`,
+      });
+    }
     agentTabId = undefined;
   }
-  agentTabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  agentTabId = await ensureAgentTab().catch(() => undefined);
   return agentTabId;
 }
 
@@ -336,6 +371,15 @@ function broadcast(msg: SwToPanel): void {
       ports.delete(port);
     }
   }
+}
+
+/**
+ * Tell every panel where the agent is allowed to work. Sent on connect, after
+ * any window change (bind / reset / handover / the window closing) and at run
+ * start, so the status line can never show a window that no longer exists.
+ */
+async function broadcastWindowStatus(): Promise<void> {
+  broadcast({ type: "window.status", status: await windowStatus() });
 }
 
 /**
@@ -717,6 +761,9 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         adaptiveThinking: settings.adaptiveThinking === true,
         judgeAvailable:
           jevEnabled && (cp.toolSpecs?.some((t) => t.name === "judge") ?? false),
+        // Window isolation: the prompt states the wall, and whether THIS run
+        // was granted a look at the user's other windows (read-only).
+        windowPeek: cp.allowOutside === true,
         lessonsBlock: appendix || undefined,
         takeUserInput: () => {
           const inputs = pendingUserInputs.splice(0);
@@ -1145,6 +1192,13 @@ async function executeTool(
       emit,
       // Blocking tools (waits) check this between polls so Stop lands fast.
       stopping: () => stopRequested,
+      // Window isolation: the run's window + the user's per-run "look outside"
+      // grant. Only tabs_list reads this; every write tool enforces the wall
+      // on its own (see tools/tabs.ts).
+      scope: {
+        agentWindowId: await resolveAgentWindow(),
+        allowOutside: currentCp?.allowOutside === true || devAllowOutside,
+      },
     });
     // Action-style tools resolve with { ok: false, error } instead of throwing.
     if (
@@ -1177,6 +1231,7 @@ async function startRun(
   demo?: DemoConfig,
   conversationId?: string,
   attachments?: RunAttachment[],
+  scope?: { allowOutside?: boolean; panelWindowId?: number },
 ): Promise<void> {
   if (loopRunning) {
     emit({ kind: "info", message: "a task is already running" });
@@ -1190,10 +1245,49 @@ async function startRun(
   // the next one.
   pendingUserInputs.length = 0;
   humanGate.reset();
-  // The agent starts on the tab the user is looking at; from here on every
-  // tool call targets THIS tracked tab (see agentTab), not "whatever window
-  // happens to be focused later".
-  agentTabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  // Window isolation: the whole run happens inside ONE window — the agent's
+  // own, created on first use and reused afterwards. In "adopt" mode the
+  // window hosting the panel is the agent's window, and the panel names it
+  // explicitly: a service worker's `currentWindow` is the last-FOCUSED window,
+  // which is exactly how a run used to end up observing the user's window.
+  const settings = await loadSettings();
+  let agentWindowId: number;
+  try {
+    if (
+      settings.agentWindow.mode === "adopt" &&
+      typeof scope?.panelWindowId === "number"
+    ) {
+      await bindAgentWindow(scope.panelWindowId);
+    } else if (settings.agentWindow.mode === "own") {
+      // "Its own window" must not inherit a window the user adopted earlier:
+      // the setting and the binding are two views of one state, so an
+      // inconsistent pair (a stale adopted binding) is resolved in favour of
+      // the setting. Only at run start — a MID-RUN resume keeps its window,
+      // which is why maybeResume does not go through here.
+      const binding = await agentWindowBinding();
+      if (binding?.kind === "adopted") await releaseAgentWindow();
+    }
+    agentWindowId = await ensureAgentWindow();
+    agentTabId = await ensureAgentTab();
+  } catch (err) {
+    // No window means no world to work in. Fail the run LOUDLY (and close it,
+    // so the panel does not sit on a spinner forever) instead of running
+    // windowless, which would put the agent back on whatever is focused.
+    const message = `could not open the agent's window: ${describeToolFailure(err)}`;
+    emit({ kind: "error", message });
+    emit({ kind: "done", summary: message });
+    return;
+  }
+  const allowOutside = scope?.allowOutside === true;
+  emit({
+    kind: "info",
+    message:
+      `agent window ${agentWindowId} — working in tab ${agentTabId ?? "?"}` +
+      (allowOutside
+        ? " (this run may LOOK at your other windows' tabs; it still cannot act outside its own window)"
+        : ""),
+  });
+  void broadcastWindowStatus();
   // Console/network capture starts with the run, so the read tools see this
   // run's traffic instead of an empty buffer. Observability extra: best
   // effort, never able to fail or slow a run.
@@ -1248,6 +1342,8 @@ async function startRun(
     demo,
     conversationId: currentConv?.id,
     tabId: agentTabId,
+    windowId: agentWindowId,
+    allowOutside,
     stepIndex: 0,
     messages: seedMessages,
     startedAt: Date.now(),
@@ -1270,9 +1366,32 @@ async function maybeResume(trigger: string): Promise<void> {
     // Restore the task text too: history recording and Jev's risk state both
     // read it, and a resumed run never went through startRun.
     currentTask = cp.task;
-    // Restore the tab the run was driving so the resume continues on the same
-    // page instead of latching onto whatever tab is focused now.
-    agentTabId = cp.tabId;
+    // Restore the run's WINDOW first (a run's world is one window), then the
+    // tab it was driving — so a resume continues on the same page instead of
+    // latching onto whatever tab is focused now. A window that no longer
+    // exists (browser restart, user closed it) is replaced by a fresh one on
+    // the next step rather than failing the run.
+    try {
+      if (cp.windowId !== undefined) {
+        const alive = await chrome.windows.get(cp.windowId).catch(() => null);
+        if (alive) await bindAgentWindow(cp.windowId);
+      }
+      agentTabId =
+        cp.tabId !== undefined && (await tabInAgentWindow(cp.tabId))
+          ? cp.tabId
+          : await ensureAgentTab();
+    } catch (err) {
+      // The browser refused a window right now: keep the run alive and let the
+      // per-step agentTab() retry — a tool call then reports the real failure
+      // instead of the whole resume dying here.
+      agentTabId = undefined;
+      emit({
+        kind: "info",
+        message: `could not reopen the agent's window yet (${
+          (err as Error)?.message ?? String(err)
+        }) — the next step will try again`,
+      });
+    }
     stopRequested = false;
     if (cp.conversationId && !cp.demo) {
       currentConv =
@@ -1320,8 +1439,66 @@ async function handleRequest(
       void maybeResume("panel-ping");
       break;
     case "run":
-      void startRun(msg.task, msg.mode, msg.demo, msg.conversationId, msg.attachments);
+      void startRun(msg.task, msg.mode, msg.demo, msg.conversationId, msg.attachments, {
+        allowOutside: msg.allowOutsideWindows === true,
+        panelWindowId: msg.panelWindowId,
+      });
       break;
+    case "window.status":
+      port.postMessage({
+        type: "window.status",
+        status: await windowStatus(),
+      } satisfies SwToPanel);
+      break;
+    case "window.bind": {
+      const bound = await bindAgentWindow(Number(msg.windowId));
+      if (!bound.ok) {
+        emit({ kind: "info", message: `could not use that window: ${bound.error}` });
+      } else {
+        emit({
+          kind: "info",
+          message: `agent window set to window ${msg.windowId} — the agent now works only inside it`,
+        });
+      }
+      await broadcastWindowStatus();
+      break;
+    }
+    case "window.reset": {
+      await releaseAgentWindow();
+      emit({
+        kind: "info",
+        message: "the agent will open its own window again on the next run",
+      });
+      await broadcastWindowStatus();
+      break;
+    }
+    case "window.reveal": {
+      // A user gesture, never the agent: this is the ONE path that focuses a
+      // window, and it focuses the agent's own.
+      const windowId = await resolveAgentWindow();
+      if (windowId !== undefined) {
+        await raiseWindow(windowId, "panel: bring the agent window forward");
+        await broadcastWindowStatus();
+      }
+      break;
+    }
+    case "window.handover": {
+      const moved = await moveTabIntoAgentWindow(Number(msg.tabId));
+      if (!moved.ok) {
+        emit({ kind: "info", message: `could not hand that tab over: ${moved.error}` });
+      } else {
+        // The handed-over tab becomes the page the run works on — that is the
+        // whole point of the button.
+        noteAgentTab(moved.tabId);
+        if (currentCp) currentCp.windowId = moved.windowId;
+        emit({
+          kind: "info",
+          message: `tab ${moved.tabId} handed to the agent window ${moved.windowId}`,
+        });
+      }
+      await broadcastWindowStatus();
+      break;
+    }
     case "history.list": {
       // Summaries straight from the index — listing history must never
       // deserialize every stored thread.
@@ -1488,6 +1665,11 @@ async function handleRequest(
       keepalive.suspend();
       emit({ kind: "info", message: "keepalive suspended (test hook)" });
       break;
+    case "test_scope":
+      // Driver scripts only: a real run carries this on its checkpoint, set
+      // from the user's composer toggle.
+      devAllowOutside = msg.allowOutside === true;
+      break;
     case "confirm.resolve":
       gate.resolve(msg.id, msg.allow, msg.always ?? false);
       break;
@@ -1523,12 +1705,28 @@ chrome.runtime.onConnect.addListener((port) => {
     void handleRequest(port, msg);
   });
   port.onDisconnect.addListener(() => ports.delete(port));
+  // A fresh panel needs the window status before anything else: it renders
+  // "where is the agent allowed to work" on its first paint.
+  void broadcastWindowStatus();
   void maybeResume("panel-connect");
+});
+
+/**
+ * The agent window is the agent's whole world: if the user closes it, the
+ * binding must die with it (the id would otherwise point at nothing, or at a
+ * window the browser later reuses), and the panel should say so.
+ */
+initWindowScope((windowId) => {
+  emit({
+    kind: "info",
+    message: `the agent window (${windowId}) was closed — the next step opens a new one`,
+  });
+  void broadcastWindowStatus();
 });
 
 // Smoke/compat endpoint (also used by the phase verification scripts).
 chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
-  const m = msg as { type?: string } | null;
+  const m = msg as { type?: string; windowId?: number } | null;
   if (m?.type === "ping") {
     sendResponse({ type: "pong", from: "sw", startedAt, ts: Date.now() });
     void maybeResume("send-message-ping");
@@ -1537,6 +1735,41 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
       sendResponse({ type: "agent.state", running: loopRunning, checkpoint });
     });
     return true; // async response
+  } else if (m?.type === "window.status") {
+    // One-shot twin of the port message: the Settings drawer asks directly,
+    // without needing a port of its own.
+    void windowStatus().then((status) => sendResponse({ type: "window.status", status }));
+    return true;
+  } else if (m?.type === "window.bind" && typeof m.windowId === "number") {
+    void bindAgentWindow(m.windowId)
+      .then(() => windowStatus())
+      .then((status) => {
+        sendResponse({ type: "window.status", status });
+        // The settings drawer and the composer chip are two views of this
+        // state, so a bind from either one must reach every panel — otherwise
+        // the chip keeps showing a window the agent no longer uses.
+        broadcast({ type: "window.status", status });
+      });
+    return true;
+  } else if (m?.type === "window.reset") {
+    void releaseAgentWindow()
+      .then(() => windowStatus())
+      .then((status) => {
+        sendResponse({ type: "window.status", status });
+        broadcast({ type: "window.status", status });
+      });
+    return true;
+  } else if (m?.type === "window.reveal") {
+    void resolveAgentWindow()
+      .then(async (windowId) => {
+        if (windowId !== undefined) await raiseWindow(windowId, "panel: bring the agent window forward");
+        return windowStatus();
+      })
+      .then((status) => {
+        sendResponse({ type: "window.status", status });
+        broadcast({ type: "window.status", status });
+      });
+    return true;
   }
   return false;
 });

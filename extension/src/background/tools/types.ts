@@ -14,6 +14,14 @@ export interface ToolContext {
    * seconds, not after the tool's own timeout.
    */
   stopping?: () => boolean;
+  /**
+   * Window isolation (background/window-scope.ts). `agentWindowId` is the ONE
+   * window the agent may act in, and `allowOutside` is the user's per-run
+   * grant to LIST (never touch) their other windows' tabs. Tools that can see
+   * more than one tab consult this; the write wall resolves the window itself
+   * (assertInAgentWindow), so a stale id can never widen it.
+   */
+  scope?: { agentWindowId?: number; allowOutside?: boolean };
 }
 
 export interface Tool {

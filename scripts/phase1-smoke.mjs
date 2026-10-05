@@ -109,11 +109,36 @@ async function openPanelPage(extId) {
     await sleep(250);
     if (i === 39) throw new Error("panel page never became interactive");
   }
+  // Window isolation: this smoke drives tools against fixture tabs in the
+  // browser's only window, so that window IS the agent's window. Without this
+  // the agent would create its own second window and work there.
+  await page.eval("chrome.windows.getCurrent().then((w) => __ba.bindWindow(w.id))");
   return { page, targetId: created.id };
 }
 
 async function closeTarget(targetId) {
   await fetch(`http://127.0.0.1:${PORT}/json/close/${targetId}`).catch(() => {});
+}
+
+/**
+ * Terminate the extension's service worker by closing its CDP target — a
+ * deterministic "the worker died" that works even while a debugger session is
+ * attached (which, by itself, keeps the worker alive). Returns false when no
+ * such target is listed, so the caller can fall back to idle teardown.
+ */
+async function killServiceWorker(extId) {
+  const list = await fetch(`http://127.0.0.1:${PORT}/json/list`)
+    .then((r) => r.json())
+    .catch(() => []);
+  const sw = (Array.isArray(list) ? list : []).find(
+    (t) =>
+      t.type === "service_worker" &&
+      typeof t.url === "string" &&
+      t.url.startsWith(`chrome-extension://${extId}/`),
+  );
+  if (!sw?.id) return false;
+  await fetch(`http://127.0.0.1:${PORT}/json/close/${sw.id}`).catch(() => {});
+  return true;
 }
 
 /** Stop the task and wait until the worker confirms the run has ended. */
@@ -185,6 +210,14 @@ async function main() {
       (freshA.checkpoint?.stepIndex ?? 0) >= 1,
       `stepIndex=${freshA.checkpoint?.stepIndex}`,
     );
+    // Window isolation: a run's world is ONE window, recorded on the
+    // checkpoint so a resume (scenario B) continues in the same one.
+    const windowIdA = freshA.checkpoint?.windowId;
+    check(
+      "A4 the checkpoint carries the agent's window",
+      typeof windowIdA === "number" && windowIdA > 0,
+      `windowId=${windowIdA}`,
+    );
     await sleep(A.watchMs - A.sampleMs);
     const ping = await page.eval("__ba.swPing().then(r => r.startedAt)");
     const pings = await page.eval("__ba.state().pings");
@@ -212,9 +245,20 @@ async function main() {
     await sleep(3_000);
     await page.eval(`__ba.suspendKeepalive(); "suspended"`);
     page.close();
-    await closeTarget(targetId); // no pings, no alarms → SW dies ~30s idle
-    log("panel closed; waiting for worker teardown…");
-    await sleep(45_000);
+    await closeTarget(targetId); // no pings, no alarms, no port: the worker is on its own
+    // Kill the worker OUTRIGHT rather than waiting out its idle timer. Idle
+    // teardown is not the only way a run loses its worker (extension reload,
+    // browser crash, Chrome's own limits all do it), and since the console/
+    // network capture attaches chrome.debugger at run start — and an attached
+    // debugger session keeps the worker alive — waiting for idle would test
+    // nothing at all. Closing the service-worker target is the honest crash.
+    const killed = await killServiceWorker(extId);
+    log(
+      killed
+        ? "panel closed; service worker target closed"
+        : "panel closed; no service-worker target found, waiting for idle teardown…",
+    );
+    await sleep(killed ? 2_000 : 45_000);
 
     log("B: reopening panel page…");
     ({ page, targetId } = await openPanelPage(extId));
@@ -238,6 +282,14 @@ async function main() {
       "B2 task resumed from its checkpoint",
       parsedB.some((e) => e.kind === "info" && e.message.includes("resumed from checkpoint")),
       JSON.stringify(parsedB.slice(0, 3)),
+    );
+    // Window isolation: the resumed run must stay in the SAME window — the
+    // window is the run's whole world, and a resume that silently moved to
+    // another one would act on pages the original run never saw.
+    check(
+      "B4 the resumed run stays in the same agent window",
+      stateB.checkpoint?.windowId === windowIdA,
+      `windowId ${windowIdA} → ${stateB.checkpoint?.windowId}`,
     );
     const idxAfterResume = stateB.checkpoint?.stepIndex ?? 0;
     await sleep(50_000);

@@ -1015,6 +1015,126 @@ input[type="number"]::-webkit-inner-spin-button {
   margin: 0 4px 8px;
 }
 
+/* Window isolation bar: which window the agent works in, the hand-over for
+   the page you are looking at, and the per-run "look outside" grant. Sits
+   directly above the composer because that is where a run starts — the scope
+   is a run-level decision, not a buried preference. */
+.window-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0 4px 7px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+.window-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-variant-numeric: tabular-nums;
+}
+
+.window-chip.is-live {
+  color: var(--text-soft);
+  border-color: var(--border-strong);
+}
+
+.window-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.window-btn {
+  padding: 3px 9px;
+  font-size: 10.5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-soft);
+}
+
+.window-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.window-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s var(--ease-out), border-color 0.2s var(--ease-out),
+    background-color 0.2s var(--ease-out);
+}
+
+.window-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text-soft);
+}
+
+.window-toggle.is-on {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.window-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* Settings → Agent window: what the worker currently believes + the gestures
+   that change it (bind this window / go back to its own / bring it forward). */
+.window-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.window-state {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.window-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.window-buttons .btn-ghost {
+  font-size: 11px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-soft);
+}
+
+.window-buttons .btn-ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.window-buttons .btn-ghost:disabled {
+  opacity: 0.45;
+}
+
 .attach-chip {
   display: inline-flex;
   align-items: center;

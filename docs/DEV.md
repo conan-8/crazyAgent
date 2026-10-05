@@ -7,8 +7,9 @@ Everything hangs off two type files in `extension/src/shared/`:
 - `protocol.ts` — panel ↔ service worker bus (`PortRequest`/`SwToPanel`,
   `Checkpoint`, `StepEvent`). Long-lived port with a 20s ping while tasks run
   (keeps the MV3 worker alive); `checkpoint.ts` persists `{task, messages,
-  stepIndex}` to `chrome.storage.session` after every step so worker teardown
-  mid-task resumes instead of losing the run (`maybeResume`).
+  stepIndex, tabId, windowId}` to `chrome.storage.session` after every step so
+  worker teardown mid-task resumes instead of losing the run (`maybeResume`) —
+  including the window the run is confined to (see "Window isolation").
 - `llm.ts` — provider-neutral messages/tool specs. `background/agent/llm.ts`
   translates to Anthropic Messages or OpenAI-compatible `/chat/completions`
   (both streamed SSE with tool calls; request shaping is pure and unit-tested).
@@ -854,9 +855,114 @@ writes `NativeMessagingHosts/*.json` for Chrome/Chromium/Edge/Brave;
 `helper/profile-setup.sh` clones the default profile (Chrome 136+ refuses
 `--remote-debugging-port` on the default user-data-dir).
 
+## Window isolation (the agent's own window)
+
+The agent works inside ONE window and the wall is enforced by code, not by the
+prompt: the user can browse and type in another window during a run, and the
+agent can neither see nor touch anything outside its own.
+
+**The binding** lives in `background/window-scope.ts` and nowhere else. It is
+one `{windowId, kind}` record in `chrome.storage.session` — window ids only
+mean something inside a browser session, which is exactly that storage's
+lifetime (it survives worker teardown so a resume finds the same window, and
+it is cleared on browser restart when the id would be a lie). An in-memory
+mirror keeps the per-tool-call path free of extra round trips;
+`chrome.windows.onRemoved` invalidates it, announces the loss to the panel,
+and the next call creates a fresh window (`focused: false` — a new agent
+window must never yank the user's focus).
+
+- **Run start** (`sw.ts startRun`): `ensureAgentWindow()` + `ensureAgentTab()`,
+  and both ids are recorded on the checkpoint (`windowId`, `tabId`). The old
+  `chrome.tabs.query({active: true, currentWindow: true})` is gone: inside a
+  service worker "currentWindow" is the last-FOCUSED window, which is precisely
+  how a run used to end up observing the user's window.
+- **Resume** (`maybeResume`): restores the window (validated), then the tab —
+  but only if it is still inside that window; otherwise a tab in the same
+  window takes over. The resumed run never moves to another window.
+- **The wall** (`tools/tabs.ts`): `tabs_list` queries `{windowId}` only;
+  `tabs_switch`/`tabs_close` call `assertInAgentWindow` first and refuse with a
+  `TOOL-FAILED:` message naming the three real ways forward (hand the tab over,
+  `tabs_create` the URL, or ask the user to switch on "look outside").
+  `tabs_create` forces the agent window instead of inheriting one from a
+  focused window. `tools/perception.ts shotOfUrl` passes the window too — the
+  hidden image tab used to land in whatever window was focused.
+- **"Look outside"** is a per-run grant the USER toggles in the composer (it
+  rides the checkpoint as `allowOutside` and the prompt's `windowPeek`). It
+  widens `tabs_list` to the user's tabs, marked `window:"user"`. It never
+  widens a write: the refusals above are unchanged with the grant on. Driver
+  scripts set it with the `test_scope` port message.
+- **The prompt** (`prompts.ts windowRules`) states the wall so the model does
+  not waste steps reaching for tabs it cannot have, and says explicitly that
+  looking and acting are different when a peek was granted.
+
+**Quiet focus.** Trusted input needed the tab to be the active one — but the
+old code also raised the tab's WINDOW (`chrome.windows.update(…,{focused:true})`
+in `ensureTabActive`, and again in `tabs_switch`), which made a run unusable
+next to the user: every stroke pulled focus back to the agent's window. Both
+calls are gone. What replaced them:
+
+1. `chrome.tabs.update(tabId, {active: true})` — activates the tab inside its
+   own window (activating a tab does not raise the window).
+2. `Emulation.setFocusEmulationEnabled({enabled:true})` once per tab, best
+   effort (`emulateFocus`) — DevTools' own mechanism for "the page behaves as
+   focused while the window is not frontmost", so `document.hasFocus()`, focus
+   events, `beforeinput` and editors behave normally.
+3. `raiseWindow()` in `window-scope.ts` is now the ONLY place that focuses a
+   window, its callers are user gestures (the panel's "Bring it forward"), and
+   it bumps a counter. `window-smoke.mjs` asserts that counter is 0 across a
+   full trusted-stroke sequence, and `tests/tab-activation.test.ts` asserts no
+   `chrome.windows.update` happens on the input path. The escape hatch for a
+   site that refuses input in a background window is Settings → Agent window →
+   "Never take focus" OFF: `ensureWindowForInput` then raises the AGENT's
+   window before a stroke, never the user's.
+
+Manual acceptance (not automatable in headless): with a run going in its own
+window, type continuously in another window — nothing should steal the caret,
+and the agent's clicks/keystrokes should still land. If a site ignores input
+while its window is in the background, flip the focus switch above; the failure
+surfaces as the existing `TRANSPORT-FAILED` focus report, not a silent no-op.
+
+**Things that are deliberate:** the side panel stays in whatever window the
+user opened it in (`chrome.sidePanel.open()` needs a user gesture, so it cannot
+be relocated automatically); the panel's markdown-link clicks still open in the
+user's window (a user gesture, not agent work); the dev channel
+(`run_tool` with an explicit `tabId`) is intentionally unwalled — it is a
+driver hook the model cannot reach, and every smoke uses it to address fixture
+tabs; tools that only read the AGENT's tab were already per-tab and unchanged
+(all screenshots/snapshots are CDP on an explicit `ctx.tabId` — there is no
+`captureVisibleTab` anywhere).
+
+**A run now starts on a real page, and that has a measurable side effect.**
+`ensureAgentTab` skips pages the agent can never act on (`chrome://…`,
+`chrome-extension://…`, the panel itself), which matters in "adopt" mode where
+the window's active tab is easily the panel. Because the run then binds a
+normal http(s)/about:blank tab, the console/network capture at run start can
+actually attach `chrome.debugger` — and **an attached debugger session keeps
+the MV3 worker alive**, so a running task no longer idles out mid-flight (the
+keepalive alarms become a backstop rather than the only thing holding it up).
+Measured while validating this change: with the capture enabled the worker
+survived 45 s of total silence after its panel closed; with the capture
+disabled it died on the 30 s idle timer. That is why `scripts/phase1-smoke.mjs`
+no longer waits out the idle timer to test checkpoint/resume: it closes the
+service-worker CDP target outright, which is a deterministic worker death and
+closer to the failures that actually happen (extension reload, browser crash,
+Chrome's own limits).
+
 ## Known v1 limits
 
-- CdpAdapter tab→target matching is by URL (same-URL tabs may alias).
+- CdpAdapter tab→target matching is by URL, because a CDP page target carries
+  no tab or window id: an exact single match wins, several same-URL pages are
+  narrowed by title, and identical URL *and* title (typically several
+  `about:blank` tabs) fall back to the first same-URL page. When NO target has
+  the tab's URL the call now fails loudly (`no CDP target for tab …`) instead
+  of grabbing "any page target" — with several windows open that old fallback
+  could bind a tab id to a page in the user's window and drive it there.
+- The agent window is not nameable: Chrome has no window-title API, so the
+  panel shows its id and tab count instead.
+- Chrome's occlusion tracking (Windows/macOS only) can background a fully
+  covered agent window; Linux has no occlusion tracking, so this does not
+  apply there. If it ever shows up as a stalled render, keep the window visible
+  or turn quiet focus off.
 - Intercept state is per page target: a cross-process navigation can drop
   mocks (same-origin navigations keep them).
 - Packaging the daemon as a single binary (bun/pkg) is optional; node + the

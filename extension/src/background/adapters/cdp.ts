@@ -181,11 +181,35 @@ export class CdpAdapter implements BrowserAdapter {
       targetId: string;
       type: string;
       url: string;
+      title?: string;
     }[];
-    const match =
-      targets.find((t) => t.type === "page" && t.url === tab.url) ??
-      targets.find((t) => t.type === "page");
-    if (!match) throw new Error(`no CDP target for tab ${tabId} (${tab.url})`);
+    // A CDP page target carries no tab or window id, so the join is by URL.
+    // Same-URL tabs are common (several about:blank tabs, one site open in two
+    // windows), and the fallback this used to have — "any page target" — can
+    // bind this tab's id to a page in the USER's window and drive it there.
+    // So: exact single URL match first, then the title as a tie-breaker, and
+    // only then the first same-URL page (identical URL AND title are genuinely
+    // indistinguishable — documented v1 limit). When NO target has this URL the
+    // call fails loudly rather than grabbing an arbitrary page: a wrong page is
+    // worse than a retry.
+    const pages = targets.filter((t) => t.type === "page");
+    const sameUrl = pages.filter((t) => t.url === tab.url);
+    let match: { targetId: string } | undefined;
+    if (sameUrl.length === 1) {
+      match = sameUrl[0];
+    } else if (sameUrl.length > 1) {
+      match =
+        sameUrl.find((t) => (t.title ?? "") === (tab.title ?? "")) ?? sameUrl[0];
+    } else if (pages.length === 1) {
+      match = pages[0];
+    }
+    if (!match) {
+      throw new Error(
+        `no CDP target for tab ${tabId} (${tab.url ?? ""}) — the daemon listed ${
+          pages.length
+        } page target(s) and none matched this tab's URL, so the target cannot be identified safely; wait for the page to settle or reload the tab`,
+      );
+    }
     this.#targets.set(tabId, match.targetId);
     return match.targetId;
   }

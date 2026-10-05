@@ -2,7 +2,8 @@
 
 A Chromium (Manifest V3) extension whose **side panel** hosts an AI agent that
 operates your real browser to complete web tasks ("find the cheapest X and add
-it to cart", "fill this form", "summarize my open tabs"). It runs in two
+it to cart", "fill this form", "summarize my open tabs" — the last one with
+**Look outside** switched on for that run). It runs in two
 control modes behind one adapter interface:
 
 | Mode | Transport | Powers | Cost |
@@ -89,6 +90,24 @@ Sensitive actions (typing passwords, form submission, purchases/checkout,
 downloads, `evaluate_js`, network modification) pause with **Allow once /
 Always allow / Deny** cards; denies return a cancellation the model works
 around. **Stop** aborts between steps.
+
+**The agent works in its own window — you keep yours.** It creates a dedicated
+window on the first run, reuses it afterwards, and everything it does happens
+there: `tabs_list` shows only that window's tabs, new tabs it opens land there,
+and it cannot see, click or type into anything in your other windows. So you
+can keep browsing and typing while it works — the agent's window never jumps in
+front of yours (keystrokes reach the page through CDP focus emulation instead
+of stealing focus), and in Standard mode even the yellow "debugging this
+browser" bar appears in the agent's window, not yours. The bar above the
+composer shows which window it is using, with **Hand this tab to the agent**
+to move the page you are looking at into the agent's window (a move, so form
+state and scroll survive), and **Look outside** for the rare task that needs to
+*know* what else you have open: for that run it may list your other windows'
+tabs, clearly marked, and still cannot act on them. Settings → **Agent window**
+lets you bind a window of your own as the agent's, give it its own again, or
+turn the focus rule off for a site that refuses input while its window is in
+the background. Closing the agent's window mid-run is fine: the next step opens
+a new one.
 
 A **glowing cursor** rides along on the page: a little arrow glides to every
 point the agent touches (ref clicks and coordinate strokes alike), and a
@@ -331,6 +350,9 @@ frame listing and in-frame `evaluate_js` are covered by `scripts/frames-smoke.mj
 the canvas-editor playbook — real keystrokes into a strict sink that rejects
 anything synthesised, paragraphs from Enter, `Control+b` reaching the document
 model, and ordinary inputs still taking the DOM path — plus layered failure
-reporting by `scripts/docs-smoke.mjs`. A
+reporting by `scripts/docs-smoke.mjs`; and window isolation — the agent's own
+window, the wall that keeps `tabs_list`/`tabs_switch`/`tabs_close` inside it,
+the read-only "look outside" grant, and a raise counter that stays 0 across a
+full trusted-stroke sequence — by `scripts/window-smoke.mjs`. A
 live-LLM run ("search Hacker News for X and summarize") needs your API key in
 Settings — the machinery is covered by the mock-LLM suite.

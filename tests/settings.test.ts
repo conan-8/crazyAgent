@@ -333,6 +333,50 @@ describe("learn (self-improvement) settings", () => {
   });
 });
 
+describe("agent window (isolation) settings", () => {
+  const stored = (o: Record<string, unknown>) =>
+    normalizeSettings(o as never).agentWindow;
+
+  it("ships as its own window with quiet focus — including for old profiles", () => {
+    expect(DEFAULT_SETTINGS.agentWindow).toEqual({ mode: "own", quietFocus: true });
+    expect(normalizeSettings(undefined).agentWindow).toEqual({
+      mode: "own",
+      quietFocus: true,
+    });
+    // A profile saved before window isolation existed has no block at all.
+    expect(stored({ rev: 2, madman: true })).toEqual({ mode: "own", quietFocus: true });
+  });
+
+  it("keeps a partial block's other field at its default", () => {
+    expect(stored({ agentWindow: { mode: "adopt" } })).toEqual({
+      mode: "adopt",
+      quietFocus: true,
+    });
+    expect(stored({ agentWindow: { quietFocus: false } })).toEqual({
+      mode: "own",
+      quietFocus: false,
+    });
+  });
+
+  it("never trusts an unknown mode, and only an explicit false drops quiet focus", () => {
+    expect(stored({ agentWindow: { mode: "host" } }).mode).toBe("own");
+    expect(stored({ agentWindow: "adopt" }).mode).toBe("own");
+    expect(stored({ agentWindow: null }).mode).toBe("own");
+    expect(stored({ agentWindow: { quietFocus: 0 } }).quietFocus).toBe(true);
+    expect(stored({ agentWindow: { quietFocus: "no" } }).quietFocus).toBe(true);
+  });
+
+  it("survives a save/load round trip", () => {
+    const once = normalizeSettings({
+      agentWindow: { mode: "adopt", quietFocus: false },
+    });
+    expect(normalizeSettings(once).agentWindow).toEqual({
+      mode: "adopt",
+      quietFocus: false,
+    });
+  });
+});
+
 describe("makeEntry", () => {
   it("fills every field from the defaults", () => {
     const e = makeEntry();
