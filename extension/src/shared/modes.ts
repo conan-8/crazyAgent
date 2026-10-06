@@ -17,6 +17,10 @@ export const MUTATING_TOOLS = new Set([
   "evaluate_js",
   "network_mock",
   "network_rewrite",
+  // Label-walked menu paths and the deterministic Docs operations click real
+  // controls, so they gate exactly like any other action.
+  "menu_path",
+  "docs_op",
 ]);
 
 export function isMutating(tool: string): boolean {

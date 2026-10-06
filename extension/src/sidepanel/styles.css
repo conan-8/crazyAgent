@@ -3900,6 +3900,33 @@ input[type="number"]::-webkit-inner-spin-button {
   margin-right: 6px;
 }
 
+/* The model's own progress reports (progress_note): user-facing narration,
+   not telemetry — a soft green bubble with a `Progress` pill so a run reads
+   as "work … report … work … report" (meaning never rides colour alone). */
+.info-line.is-progress {
+  margin: 6px 0 8px;
+  padding: 6px 9px;
+  color: var(--text);
+  background: var(--ok-soft);
+  border-left: 2px solid var(--ok);
+  border-radius: 6px;
+}
+
+.progress-pill {
+  display: inline-block;
+  margin-right: 6px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--ok-soft);
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  vertical-align: 1px;
+}
+
 /* Actions the Jev risk layer CHECKED and allowed: a quiet pink rail + dot.
    Deliberately below the full Jev card tint — a passed check is routine, so
    the mark only needs to whisper, while the `Jev` tooltip names it. */

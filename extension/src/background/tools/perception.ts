@@ -347,6 +347,15 @@ export interface ViewportShotInfo {
   viewportCssH?: number;
   /** Region shots: the viewport CSS rect this crop covers. Absent = full viewport. */
   crop?: { x: number; y: number; w: number; h: number };
+  /**
+   * The page scroll at capture time. `space:"screenshot"` points are converted
+   * against the viewport AS IT WAS in the image; if the page scrolled since,
+   * the coordinate tools shift the point by (scrollAtCapture − scrollNow) so
+   * the click follows the content the model actually saw (see
+   * compensateShotScroll). Absent on older records — compensation then no-ops.
+   */
+  scrollX?: number;
+  scrollY?: number;
   at: number;
 }
 
@@ -437,6 +446,8 @@ async function recordViewportShot(
     imageH: height,
     viewportCssW: vp?.width,
     viewportCssH: vp?.height,
+    scrollX: vp?.scrollX,
+    scrollY: vp?.scrollY,
     ...(crop ? { crop } : {}),
     at: Date.now(),
   };

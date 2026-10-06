@@ -1,20 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
   boundsError,
+  compensateShotScroll,
   countRefDrags,
   describeHit,
+  looksLikeShotPixels,
   MAX_BATCH_DRAGS,
   MAX_SEQUENCE_STEPS,
   planClick,
   planDrag,
   planHover,
+  rectDistance,
   screenshotToViewportPoint,
   shapeCoordArgs,
   shapeDragList,
   shapeModifiers,
   shapeSequenceSteps,
+  snapOrPromote,
   toViewportPoint,
   type HitInfo,
+  type SnapCandidate,
 } from "../extension/src/shared/coords";
 
 describe("shapeCoordArgs", () => {
@@ -332,5 +337,145 @@ describe("shapeSequenceSteps (input_sequence)", () => {
     const out = shapeSequenceSteps({ actions: [{ key: "Return" }] });
     expect(out.ok && out.steps[0]!.kind).toBe("key");
     expect(shapeSequenceSteps({ nope: 1 }).ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The click sanitizers ("never misclick" pipeline — see HUMAN-FLOW-PLAN.md).
+// ---------------------------------------------------------------------------
+
+const menuRowHit = (over: Partial<HitInfo> = {}): HitInfo => ({
+  tag: "div",
+  role: "menuitem",
+  text: "Page setup",
+  inForm: false,
+  ref: "17",
+  canvas: false,
+  overIframe: false,
+  rect: { x: 480, y: 300, w: 260, h: 32 },
+  ...over,
+});
+
+describe("snapOrPromote — the click magnet", () => {
+  it("promotes a point on a small control to the control's CENTRE", () => {
+    const d = snapOrPromote({ x: 482, y: 302 }, menuRowHit(), null);
+    expect(d.kind).toBe("promote");
+    if (d.kind === "promote") {
+      expect(d.point).toEqual({ x: 610, y: 316 });
+      expect(d.label).toContain("Page setup");
+      expect(d.label).toContain("ref 17");
+    }
+  });
+
+  it("keeps a point that is already the centre (no churn)", () => {
+    expect(snapOrPromote({ x: 610, y: 316 }, menuRowHit(), null).kind).toBe("keep");
+  });
+
+  it("never re-aims canvas pixels, iframes, editable hosts or ref-less hits", () => {
+    expect(snapOrPromote({ x: 5, y: 5 }, menuRowHit({ canvas: true }), null).kind).toBe("keep");
+    expect(snapOrPromote({ x: 5, y: 5 }, menuRowHit({ overIframe: true }), null).kind).toBe("keep");
+    expect(snapOrPromote({ x: 5, y: 5 }, menuRowHit({ editable: true }), null).kind).toBe("keep");
+    expect(snapOrPromote({ x: 5, y: 5 }, menuRowHit({ ref: undefined }), null).kind).toBe("keep");
+    expect(snapOrPromote({ x: 5, y: 5 }, null, null).kind).toBe("keep");
+  });
+
+  it("respects exact points inside BIG wrappers (several aim points inside)", () => {
+    const big = menuRowHit({ rect: { x: 0, y: 0, w: 1000, h: 400 } });
+    expect(snapOrPromote({ x: 500, y: 200 }, big, null).kind).toBe("keep");
+    const tall = menuRowHit({ rect: { x: 0, y: 0, w: 100, h: 900 } });
+    expect(snapOrPromote({ x: 50, y: 450 }, tall, null).kind).toBe("keep");
+  });
+
+  it("snaps a near miss to the nearby control and says so", () => {
+    const snap: SnapCandidate = {
+      ref: "22",
+      tag: "div",
+      role: "button",
+      text: "Comment",
+      rect: { x: 970, y: 380, w: 28, h: 28 },
+      distance: 14,
+    };
+    // The point hit nothing interactive (a card body / padding).
+    const plain: HitInfo = { tag: "div", text: "", inForm: false, canvas: false, overIframe: false };
+    const d = snapOrPromote({ x: 980, y: 412 }, plain, snap);
+    expect(d.kind).toBe("snap");
+    if (d.kind === "snap") {
+      expect(d.point).toEqual({ x: 984, y: 394 });
+      expect(d.label).toContain("snapped 14px");
+      expect(d.label).toContain("Comment");
+    }
+  });
+
+  it("never snaps to editable neighbours or out-of-radius candidates", () => {
+    const plain: HitInfo = { tag: "div", text: "", inForm: false, canvas: false, overIframe: false };
+    const editable: SnapCandidate = {
+      tag: "input",
+      text: "",
+      editable: true,
+      rect: { x: 100, y: 100, w: 80, h: 24 },
+      distance: 5,
+    };
+    expect(snapOrPromote({ x: 105, y: 130 }, plain, editable).kind).toBe("keep");
+    const far: SnapCandidate = { ...editable, editable: false, distance: 40 };
+    expect(snapOrPromote({ x: 105, y: 130 }, plain, far).kind).toBe("keep");
+  });
+
+  it("prefers promotion (the hit itself) over a snap candidate", () => {
+    const snap: SnapCandidate = {
+      tag: "button",
+      text: "Other",
+      rect: { x: 0, y: 0, w: 10, h: 10 },
+      distance: 3,
+    };
+    expect(snapOrPromote({ x: 482, y: 302 }, menuRowHit(), snap).kind).toBe("promote");
+  });
+});
+
+describe("rectDistance", () => {
+  it("is 0 inside the rect and grows outside", () => {
+    const r = { x: 100, y: 100, w: 50, h: 20 };
+    expect(rectDistance({ x: 120, y: 110 }, r)).toBe(0);
+    expect(rectDistance({ x: 153, y: 104 }, r)).toBe(3); // 3px right of the edge
+    expect(rectDistance({ x: 153, y: 124 }, r)).toBe(5); // corner: 3-4-5
+  });
+});
+
+describe("looksLikeShotPixels — the forgotten space:'screenshot'", () => {
+  const vp = { width: 1046, height: 693 };
+  const shot = { imageW: 1280, imageH: 848 };
+
+  it("flags an out-of-viewport point that fits the image", () => {
+    expect(looksLikeShotPixels({ x: 1164, y: 83 }, vp, shot)).toBe(true);
+  });
+
+  it("leaves in-bounds points alone", () => {
+    expect(looksLikeShotPixels({ x: 500, y: 300 }, vp, shot)).toBe(false);
+  });
+
+  it("leaves points beyond the image alone (a genuine misclick, not a space mixup)", () => {
+    expect(looksLikeShotPixels({ x: 3000, y: 83 }, vp, shot)).toBe(false);
+  });
+
+  it("says nothing without a capture, or when image == viewport dims", () => {
+    expect(looksLikeShotPixels({ x: 1164, y: 83 }, vp, undefined)).toBe(false);
+    expect(looksLikeShotPixels({ x: 1164, y: 83 }, vp, { imageW: 1046, imageH: 693 })).toBe(false);
+  });
+});
+
+describe("compensateShotScroll", () => {
+  it("shifts the point to follow content the page scrolled away", () => {
+    // Captured at scrollY 100; the page has since scrolled down to 300:
+    // content moved UP 200px, so the point must move up with it.
+    const out = compensateShotScroll({ x: 50, y: 400 }, { scrollX: 0, scrollY: 100 }, { scrollX: 0, scrollY: 300 });
+    expect(out.point).toEqual({ x: 50, y: 200 });
+    expect(out.dy).toBe(-200);
+  });
+
+  it("is a no-op when nothing moved or the capture's scroll is unknown", () => {
+    const still = compensateShotScroll({ x: 5, y: 5 }, { scrollX: 0, scrollY: 0 }, { scrollX: 0, scrollY: 0 });
+    expect(still.point).toEqual({ x: 5, y: 5 });
+    expect(still.dy).toBe(0);
+    const unknown = compensateShotScroll({ x: 5, y: 5 }, undefined, { scrollX: 0, scrollY: 900 });
+    expect(unknown.point).toEqual({ x: 5, y: 5 });
   });
 });

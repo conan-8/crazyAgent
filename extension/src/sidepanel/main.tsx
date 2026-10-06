@@ -687,9 +687,16 @@ function TurnView({
         }
         if (block.kind === "note") {
           // Jev sidecar notes: pink line with a `Jev` pill (never colour alone).
+          // Progress notes: the model's own narration between sequences — its
+          // own accented bubble with a `Progress` pill, so a run reads as
+          // "work … report … work … report" at a glance.
           return (
-            <p key={i} class={`info-line${block.jev ? " is-jev" : ""}`}>
+            <p
+              key={i}
+              class={`info-line${block.jev ? " is-jev" : ""}${block.progress ? " is-progress" : ""}`}
+            >
               {block.jev ? <span class="jev-pill">Jev</span> : null}
+              {block.progress ? <span class="progress-pill">Progress</span> : null}
               {block.text}
             </p>
           );

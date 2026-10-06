@@ -197,24 +197,35 @@ describe("canvas document editor procedure", () => {
     expect(skill.body).toContain("cannot be lost between calls");
   });
 
-  it("gives the one cheap verification: the export fetch (html for formatting)", () => {
+  it("gives the one cheap verification: docs_read (html for formatting)", () => {
     expect(skill.body).toContain("VERIFY ONCE PER BLOCK, CHEAPLY");
-    expect(skill.body).toContain("/export?format=html");
-    expect(skill.body).toContain("/export?format=txt");
+    expect(skill.body).toContain("`docs_read`");
     expect(skill.body).toContain("font-weight:700");
-    expect(skill.body).toContain("One export per block");
+    expect(skill.body).toContain("One docs_read per block");
+    // The in-page export-fetch ritual is explicitly forbidden now: Trusted
+    // Types blocks the parse and the debugger transport flaps (both measured
+    // in the 2026-10-06 runs).
+    expect(skill.body).toContain("NEVER verify with `evaluate_js`");
+    expect(skill.body).not.toContain("fetch('<doc-url>/export?format=html')` shows");
   });
 
-  it("gives the readable URL route for Docs and Slides", () => {
-    expect(skill.body).toContain("/document/d/<id>/preview");
-    expect(skill.body).toContain("/mobilebasic");
-    expect(skill.body).toContain("/presentation/d/<id>/preview");
+  it("reads in place — the mobilebasic/preview detour is forbidden", () => {
+    expect(skill.body).toContain("NEVER navigate to /preview or /mobilebasic");
+    expect(skill.body).toContain("find bar");
+    // The old readable-URL route is gone from the procedure…
+    expect(skill.body).not.toContain("/document/d/<id>/preview");
+    expect(skill.body).not.toContain("change the URL first");
+    // …and Sheets/Slides coverage is stated.
+    expect(skill.body).toContain("Sheets read as CSV");
+    expect(skill.body).toContain("no text export");
   });
 
   it("triages a dead debugger channel once instead of retrying dead tools", () => {
     expect(skill.body).toContain("page_health` ONCE");
-    expect(skill.body).toContain("trusted keystrokes AND coordinate clicks AND JS evaluation are ALL dead");
-    expect(skill.body).toContain("Reload the tab once and re-check once");
+    // The harness performs the reload+retry itself now; the skill says so.
+    expect(skill.body).toContain("ALREADY run the sanctioned recovery");
+    expect(skill.body).toContain("STOP retrying debugger-dependent tools");
+    expect(skill.body).toContain("`docs_read` never touches the debugger");
   });
 
   it("spells out trusted:false for ordinary inputs on editor URLs", () => {

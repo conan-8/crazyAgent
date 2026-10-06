@@ -116,7 +116,7 @@ import {
   type JevClient,
 } from "./agent/jev";
 import { isMutating } from "../shared/modes";
-import { describeToolFailure } from "../shared/tool-failure";
+import { describeToolFailure, failureTag } from "../shared/tool-failure";
 import { handoffMessage } from "../shared/handoff";
 import { detectAuthWall, HumanGate } from "./handoff";
 import { probeElement } from "./tools/actions";
@@ -141,6 +141,8 @@ import { startNetlogCapture } from "./tools/diagnostics";
 import "./tools/network"; // registers network_* (Unlimited mode)
 import "./tools/jev"; // registers judge (Jev sidecar; offered only when configured)
 import "./tools/todo"; // registers todo_write (the live plan dropdown)
+import "./tools/docs"; // registers docs_read (Workspace export without navigation)
+import "./tools/docs-op"; // registers menu_path + docs_op (deterministic Docs procedures)
 
 const ALWAYS_KEY = "baPolicyAlways";
 
@@ -153,6 +155,21 @@ const ALWAYS_KEY = "baPolicyAlways";
 let currentJev: JevClient | null = null;
 let jevFallbackNoted = false;
 const JEV_GATE_TIMEOUT_MS = 2_000;
+
+/**
+ * Debugger-transport auto-recovery budget (per run). A TRANSPORT-FAILED result
+ * means the CDP channel to the tab died — trusted keystrokes, coordinate
+ * clicks and JS evaluation are ALL down until the tab reloads, and the
+ * sanctioned recovery (the canvas-editors skill's fallback section, and the
+ * failure advice itself) is: reload the tab ONCE, retry the call ONCE. A real
+ * run paid ~8 model turns re-deciding that manually as the debugger flapped
+ * ("The debugger link dropped. Reloading the tab, then one sanctioned
+ * retry."). The harness now does it itself, within this budget; past it the
+ * error returns with its normal advice and the loop's identical-call ban
+ * stops any grind.
+ */
+let transportRecoveries = 0;
+const TRANSPORT_RECOVERY_MAX = 2;
 
 /**
  * Per-step effort routing (Jev Tier 1) is gated on the SAME setting as the
@@ -713,6 +730,7 @@ async function runFrom(cp: Checkpoint): Promise<void> {
       currentJev = createJevClient(settings.jev);
       setActiveJevClient(currentJev);
       jevFallbackNoted = false;
+      transportRecoveries = 0;
       const jevEnabled = currentJev !== null;
       // One quiet line when the sidecar rides along; wire/transport details
       // stay in Settings rather than itemised in the transcript.
@@ -837,6 +855,10 @@ const AUTO_OBSERVE_TOOLS = new Set([
   "input_sequence",
   "drag_at",
   "hover_at",
+  // Deterministic Docs procedures end in a page change (dialog, table, style)
+  // — the model reads the outcome from the observation like any action's.
+  "menu_path",
+  "docs_op",
 ]);
 
 /**
@@ -975,6 +997,58 @@ async function withFailureShot(
   };
 }
 
+/**
+ * Debugger-transport auto-recovery. A TRANSPORT-FAILED result means the CDP
+ * channel to the tab died — trusted keystrokes, coordinate clicks and JS
+ * evaluation are ALL down until the tab reloads, and the sanctioned recovery
+ * (the failure advice itself, and the canvas-editors skill's fallback
+ * section) is: reload the tab ONCE, then retry the failed call ONCE. A real
+ * run paid ~8 model turns re-deciding that manually while the debugger
+ * flapped ("The debugger link dropped. Reloading the tab, then one sanctioned
+ * retry."). The harness now performs the sanctioned recovery itself, inside a
+ * per-run budget; past the budget the original error and its advice go back
+ * unchanged, and the loop's identical-call ban stops any grind.
+ */
+async function withTransportRecovery(
+  name: string,
+  args: Record<string, unknown>,
+  res: ExecuteResult,
+  tabId: number | undefined,
+): Promise<ExecuteResult> {
+  if (res.ok || tabId === undefined || stopRequested) return res;
+  if (!res.error?.includes(failureTag("transport"))) return res;
+  // docs_read's transport is the SW's own network, not the tab's debugger:
+  // reloading the tab cannot help and would destroy the editor's live state.
+  if (name === "docs_read") return res;
+  if (transportRecoveries >= TRANSPORT_RECOVERY_MAX) return res;
+  transportRecoveries += 1;
+  emit({
+    kind: "info",
+    message:
+      `the debugger transport to the tab dropped — auto-recovering (reload + one retry of ${name}); ` +
+      `recovery ${transportRecoveries}/${TRANSPORT_RECOVERY_MAX} this run`,
+  });
+  try {
+    await chrome.tabs.reload(tabId);
+    await settleTab(tabId, 10_000, 8).catch(() => null);
+  } catch {
+    return res; // could not even reload — the original error stands, advice and all
+  }
+  if (stopRequested) return res;
+  const retried = await executeTool(name, args, tabId);
+  if (retried.ok) {
+    const base = retried.text ?? JSON.stringify(retried.payload ?? null);
+    return {
+      ...retried,
+      text: `${base}\n\n[the first attempt failed on a dropped debugger transport — the harness reloaded the tab and retried once; this is the retry's result]`,
+    };
+  }
+  return {
+    ...res,
+    error: `${res.error}\n[auto-recovery ran: the tab was reloaded and the call retried once — the retry failed too. Do NOT keep retrying it; the debugger channel is flaky on this page. read_page / snapshot / ref-based click and type do NOT need it — switch to those, or report the blocker.]`,
+  };
+}
+
 /** Policy-gated executor used by the agent loop (Phase 6). */
 async function executeToolGated(
   name: string,
@@ -998,7 +1072,9 @@ async function executeToolGated(
     probe =
       typeof args.ref === "string"
         ? await probeElement(tabId, args.ref).catch(() => null)
-        : await probeElementAt(tabId, args).catch(() => null);
+        : // The tool name lets the probe mirror the executor's click magnet, so
+          // the gate assesses the element the CORRECTED click lands on.
+          await probeElementAt(tabId, args, name).catch(() => null);
   }
   let risk = assess(name, args, probe);
   // Jev risk gate: mutating actions the regex rules allowed get one batched,
@@ -1067,7 +1143,10 @@ async function executeToolGated(
       return { ok: true, text: handoffMessage(wall.reason, handled) };
     }
   }
-  const res = await executeTool(name, args);
+  let res = await executeTool(name, args);
+  // Transport flake → the harness performs the sanctioned reload+retry itself
+  // (budgeted per run) instead of spending model turns on it.
+  res = await withTransportRecovery(name, args, res, tabId);
   if (jevChecked) res.jevGate = true;
   if (jevEffort) res.jevEffort = jevEffort;
   if (jevProgress) res.jevProgress = jevProgress;
@@ -1124,8 +1203,12 @@ async function executeToolGated(
     (name === "input_sequence" && /enter/i.test(JSON.stringify(args)));
   const coordinateTool =
     name === "click_at" || name === "type_at" || name === "hover_at" || name === "drag_at";
+  // Menu walks and Docs ops end in DOM dialogs/menus that render in well under
+  // a second — and on a canvas editor (which never goes "quiet") the long
+  // budget would be paid in full on every op for nothing.
+  const docsTool = name === "menu_path" || name === "docs_op";
   const settles =
-    coordinateTool || (name === "input_sequence" && !enterish)
+    coordinateTool || docsTool || (name === "input_sequence" && !enterish)
       ? 2_500
       : (name === "type" && args.submit !== true) || (name === "key" && !enterish)
         ? 3_500

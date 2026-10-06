@@ -954,6 +954,66 @@ describe("createStuckGuard", () => {
     expect(guard.note("wait_for", { text: "x" }, true)).toBe("");
     expect(guard.note("wait_for", { text: "x" }, true)).toContain("RETRY WARNING");
   });
+
+  it("bans an exact call after two identical failures — enforced, not advisory", () => {
+    const guard = createStuckGuard();
+    // Before any failure: nothing is blocked.
+    expect(guard.blocked("click_at", { x: 5, y: 5 })).toBeNull();
+    // First identical failure: ordinary warning, still not blocked.
+    guard.note("click_at", { x: 5, y: 5 }, true);
+    expect(guard.blocked("click_at", { x: 5, y: 5 })).toBeNull();
+    // Second identical failure: the note announces the ban, and it is real.
+    const second = guard.note("click_at", { x: 5, y: 5 }, true);
+    expect(second).toContain("RETRY WARNING");
+    expect(second).toContain("will NOT be executed");
+    const refusal = guard.blocked("click_at", { x: 5, y: 5 });
+    expect(refusal).toContain("BLOCKED — NOT EXECUTED");
+    expect(refusal).toContain("MOVE ON");
+    // A DIFFERENT call (even the same tool) is untouched by the ban.
+    expect(guard.blocked("click_at", { x: 6, y: 5 })).toBeNull();
+    // The ban applies to wait tools too — a timeout repeated on identical
+    // arguments will time out again — but a LONGER timeout is a different
+    // call and stays allowed.
+    guard.note("wait_for", { text: "x", timeout_ms: 5000 }, true);
+    guard.note("wait_for", { text: "x", timeout_ms: 5000 }, true);
+    expect(guard.blocked("wait_for", { text: "x", timeout_ms: 5000 })).toContain("BLOCKED");
+    expect(guard.blocked("wait_for", { text: "x", timeout_ms: 30000 })).toBeNull();
+  });
+
+  it("refuses the third identical failing call WITHOUT executing it", async () => {
+    const cp = makeCheckpoint();
+    const executed: string[] = [];
+    const { events, deps } = harness(
+      [
+        toolCall("click", { ref: "12" }, "c1"),
+        toolCall("click", { ref: "12" }, "c2"),
+        toolCall("click", { ref: "12" }, "c3"),
+        { text: "giving up on that", toolCalls: [], stopReason: "end_turn" },
+      ],
+      {
+        execute: async (name) => {
+          executed.push(name);
+          return { ok: false, error: "boom" };
+        },
+      },
+    );
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    // The third identical call was refused by the guard: the executor saw two
+    // calls, not three.
+    expect(executed).toEqual(["click", "click"]);
+    const results = events.filter((e) => e.kind === "tool_result");
+    expect(results).toHaveLength(3);
+    const third = results[2] as { ok: boolean; result: string };
+    expect(third.ok).toBe(false);
+    expect(third.result).toContain("BLOCKED — NOT EXECUTED");
+    // The refusal reaches the model as the tool message, so it can change plan.
+    const toolMsgs = cp.messages.filter((m) => m.role === "tool");
+    expect(toolMsgs[2]?.content).toContain("BLOCKED — NOT EXECUTED");
+    // A refusal is a failed step, not an invalid tool call: three of them in
+    // a row must NOT trip the invalid-call abort.
+    expect(outcome).not.toBe("stopped");
+  });
 });
 
 describe("adaptive per-step thinking", () => {

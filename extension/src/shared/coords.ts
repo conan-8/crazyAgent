@@ -27,6 +27,14 @@ export interface ViewportInfo {
   scrollY: number;
 }
 
+/** An element's box in viewport CSS px (what getBoundingClientRect reports). */
+export interface ElementRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** What sits under a point, as far as the DOM can tell. */
 export interface HitInfo {
   tag: string;
@@ -40,6 +48,28 @@ export interface HitInfo {
   canvas: boolean;
   /** The point is over an iframe; the real target is inside it. */
   overIframe: boolean;
+  /** The hit accepts text input (input/textarea/contenteditable) — clicking
+   *  it is caret placement, so the magnet must never re-aim it. */
+  editable?: boolean;
+  /** The hit element's box, for the centre-promotion decision. */
+  rect?: ElementRect;
+}
+
+/**
+ * A NEARBY interactive element the content probe found around a point that
+ * did not land on one — the magnet's candidate. A click 3px off a menu row's
+ * edge hits the menu's padding and closes it silently; this is how the harness
+ * knows what the model actually meant.
+ */
+export interface SnapCandidate {
+  ref?: string;
+  tag: string;
+  role?: string;
+  text: string;
+  editable?: boolean;
+  rect: ElementRect;
+  /** CSS-px distance from the requested point to the element's box. */
+  distance: number;
 }
 
 const BUTTONS: MouseButton[] = ["left", "right", "middle"];
@@ -194,6 +224,150 @@ export function boundsError(point: Point, viewport: ViewportInfo): string | null
     `(${viewport.width}x${viewport.height} at scroll ${viewport.scrollX},${viewport.scrollY}) — ` +
     `scroll first (the scroll tool) or use a point inside the viewport`
   );
+}
+
+// ---------------------------------------------------------------------------
+// Click sanitizers — the "never misclick" pipeline's pure decisions. Measured
+// failure modes these kill (2026-10-06 run logs):
+//   - a click 3px off a menu row's edge hits padding and silently closes the
+//     menu ("the menu shifted", "off by ~20px")        → snap/promote below;
+//   - screenshot image pixels passed without space:'screenshot' land outside
+//     the viewport and burn a turn on a bounds error    → reinterpret;
+//   - the page scrolled between capture and click, so image-derived points
+//     land on whatever moved into place                 → scroll compensation.
+// All three are decisions over data the probes already return, so they are
+// unit-testable here without a browser.
+// ---------------------------------------------------------------------------
+
+/** How far from the requested point the magnet looks for a control. */
+export const SNAP_RADIUS_PX = 24;
+/** Centre-promotion size caps: menu rows, buttons, icons — not page-wrappers.
+ *  A control bigger than this may hold several distinct aim points (a card
+ *  with its own buttons), so the model's exact point is respected. */
+export const PROMOTE_MAX_W = 600;
+export const PROMOTE_MAX_H = 140;
+
+export function rectCenter(r: ElementRect): Point {
+  return { x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2) };
+}
+
+/** CSS-px distance from a point to a rect (0 when inside). */
+export function rectDistance(point: Point, r: ElementRect): number {
+  const dx = Math.max(r.x - point.x, point.x - (r.x + r.w), 0);
+  const dy = Math.max(r.y - point.y, point.y - (r.y + r.h), 0);
+  return Math.round(Math.hypot(dx, dy));
+}
+
+export type SnapDecision =
+  | { kind: "keep" }
+  | { kind: "promote"; point: Point; label: string }
+  | { kind: "snap"; point: Point; label: string };
+
+function controlLabel(tag: string, text: string, ref?: string): string {
+  const name = text ? ` "${text.slice(0, 40)}"` : "";
+  return `<${tag}>${name}${ref ? ` ref ${ref}` : ""}`;
+}
+
+/**
+ * The magnet decision for a CLICK-ish call (never type_at/drag_at — caret and
+ * plot positions are exact by intent):
+ *
+ *   PROMOTE — the point already lands on a small interactive control (a menu
+ *   row, a button): click its CENTRE instead. An edge pixel and a centre pixel
+ *   fire the same control, but the centre cannot slip off a rounded corner,
+ *   a 2px border or an anti-aliased edge — and the hit report names what was
+ *   really clicked. Text inputs are exempt (a click there is caret placement)
+ *   and so are canvas/iframe surfaces (no DOM to centre on).
+ *
+ *   SNAP — the point missed every control but one sits within SNAP_RADIUS_PX
+ *   (probed on a ring around it): the near-miss case the logs kept showing.
+ *   Re-aim at that control's centre and SAY SO in the result, so the model
+ *   sees the correction instead of a silently closed menu.
+ *
+ *   KEEP — canvas pixels, editable hosts, big wrappers, empty space: the
+ *   model's exact point is respected.
+ */
+export function snapOrPromote(
+  point: Point,
+  hit: HitInfo | null,
+  snap?: SnapCandidate | null,
+): SnapDecision {
+  if (hit && !hit.canvas && !hit.overIframe && !hit.editable && hit.ref && hit.rect) {
+    const r = hit.rect;
+    if (r.w > 0 && r.h > 0 && r.w <= PROMOTE_MAX_W && r.h <= PROMOTE_MAX_H) {
+      const c = rectCenter(r);
+      if (c.x !== point.x || c.y !== point.y) {
+        return {
+          kind: "promote",
+          point: c,
+          label: `aimed at the centre of ${controlLabel(hit.tag, hit.text, hit.ref)} — the control under the point (was ${point.x},${point.y})`,
+        };
+      }
+      return { kind: "keep" };
+    }
+  }
+  if (
+    snap &&
+    !snap.editable &&
+    snap.distance <= SNAP_RADIUS_PX &&
+    snap.rect.w > 0 &&
+    snap.rect.h > 0 &&
+    snap.rect.w <= PROMOTE_MAX_W &&
+    snap.rect.h <= PROMOTE_MAX_H
+  ) {
+    const c = rectCenter(snap.rect);
+    return {
+      kind: "snap",
+      point: c,
+      label: `snapped ${snap.distance}px to the nearest control ${controlLabel(snap.tag, snap.text, snap.ref)} — the point (${point.x},${point.y}) was not on one`,
+    };
+  }
+  return { kind: "keep" };
+}
+
+/**
+ * An out-of-viewport point that fits inside the latest screenshot's IMAGE
+ * dimensions is almost certainly image pixels passed without
+ * space:'screenshot' (the exact mistake that burned two turns in one run:
+ * "(1164, 83) outside the visible viewport (1046x693)" — 1164 is inside the
+ * 1280-wide downscaled capture). True ⇒ the caller re-runs the point through
+ * the screenshot mapping instead of returning a bounds error. Deliberately
+ * conservative: the image must differ in size from the viewport (a 1:1
+ * capture proves nothing) and the point must fit the image.
+ */
+export function looksLikeShotPixels(
+  point: Point,
+  viewport: { width: number; height: number },
+  shot: { imageW: number; imageH: number } | undefined,
+): boolean {
+  if (!shot) return false;
+  const outside =
+    point.x < 0 ||
+    point.y < 0 ||
+    point.x > viewport.width ||
+    point.y > viewport.height;
+  if (!outside) return false;
+  if (point.x > shot.imageW || point.y > shot.imageH) return false;
+  return shot.imageW !== viewport.width || shot.imageH !== viewport.height;
+}
+
+/**
+ * Scroll compensation for `space:'screenshot'` points: the mapping converts
+ * image pixels to where the content sat AT CAPTURE TIME. If the page scrolled
+ * since, every point must shift by (scrollAtCapture − scrollNow) to follow the
+ * content — positive when the page scrolled up since the shot, negative when
+ * it scrolled down. No-op when the capture's scroll is unknown (older shot
+ * records) or unchanged.
+ */
+export function compensateShotScroll(
+  point: Point,
+  atCapture: { scrollX?: number; scrollY?: number } | undefined,
+  now: { scrollX: number; scrollY: number },
+): { point: Point; dx: number; dy: number } {
+  const dx = atCapture?.scrollX !== undefined ? atCapture.scrollX - now.scrollX : 0;
+  const dy = atCapture?.scrollY !== undefined ? atCapture.scrollY - now.scrollY : 0;
+  if (!dx && !dy) return { point, dx: 0, dy: 0 };
+  return { point: { x: point.x + dx, y: point.y + dy }, dx, dy };
 }
 
 export type StrokeStep = {

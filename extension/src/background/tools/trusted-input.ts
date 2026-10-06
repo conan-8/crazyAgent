@@ -141,6 +141,40 @@ export async function ensureTabActive(
   if (changed) await sleep(ACTIVATE_SETTLE_MS);
 }
 
+/**
+ * Send ONE real (CDP) key combo to the tab — the shared primitive behind the
+ * keyboard-driven Docs tools (docs_op's shortcuts and grid-picker arrows,
+ * docs_locate's Ctrl+F). The caller owns activation/focus (ensureTabActive);
+ * events arrive in the page as isTrusted, which is what app-level key
+ * handlers (and the browser's own editing engine) require.
+ */
+export async function sendTrustedKey(
+  tabId: number,
+  adapter: BrowserAdapter,
+  combo: string,
+): Promise<void> {
+  const parsed = parseKeyCombo(combo);
+  if (!parsed.ok) throw new Error(parsed.error);
+  await adapter.send(tabId, "Input.dispatchKeyEvent", keyEventParams(parsed.parsed, "down"));
+  await adapter.send(tabId, "Input.dispatchKeyEvent", keyEventParams(parsed.parsed, "up"));
+  await sleep(BETWEEN_STEPS_MS);
+}
+
+/**
+ * Send text through the IME path (`Input.insertText`) — one trusted chunk,
+ * not per-key strokes. What a focused find bar or plain input receives as
+ * typed text; callers that need per-key effects (shortcuts, Enter) use
+ * sendTrustedKey instead.
+ */
+export async function sendTrustedText(
+  tabId: number,
+  adapter: BrowserAdapter,
+  text: string,
+): Promise<void> {
+  await adapter.send(tabId, "Input.insertText", { text });
+  await sleep(BETWEEN_STEPS_MS);
+}
+
 export interface FocusState {
   focused: boolean;
   hints: InputHints;

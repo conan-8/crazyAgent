@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   describeEvalFailure,
   isCspBlocked,
+  isTrustedTypesBlocked,
   shapeEvalResult,
+  trustedTypesRefusal,
 } from "../extension/src/background/tools/misc";
 import { toolRegistry, type ToolContext } from "../extension/src/background/tools/types";
 
@@ -87,6 +89,57 @@ describe("isCspBlocked / describeEvalFailure", () => {
     expect(hint).toContain("read_page");
     expect(hint).toContain("snapshot");
     expect(hint).toContain("unaffected by CSP");
+  });
+});
+
+describe("Trusted Types guard", () => {
+  /** The exact TypeErrors the 2026-10-06 Docs run hit four times. */
+  const TT_INNERHTML =
+    "TypeError: Failed to set the 'innerHTML' property on 'Element': This document requires 'TrustedHTML' assignment.";
+  const TT_PARSER =
+    "TypeError: Failed to execute 'parseFromString' on 'DOMParser': This document requires 'TrustedHTML' assignment.";
+
+  it("detects Trusted-Types refusals and rewrites them with the working routes", () => {
+    expect(isTrustedTypesBlocked(TT_INNERHTML)).toBe(true);
+    expect(isTrustedTypesBlocked(TT_PARSER)).toBe(true);
+    const hint = describeEvalFailure(TT_PARSER);
+    expect(hint).toContain("TRUSTED-TYPES-BLOCKED");
+    expect(hint).toContain(TT_PARSER); // evidence is never swallowed
+    expect(hint).toContain("docs_read");
+    expect(hint).toContain("Do NOT retry");
+    // A plain TypeError is untouched.
+    const plain = "TypeError: x is not a function";
+    expect(isTrustedTypesBlocked(plain)).toBe(false);
+    expect(describeEvalFailure(plain)).toBe(plain);
+  });
+
+  it("pre-screens blocked sinks on Workspace hosts — and only ASSIGNMENTS", async () => {
+    const tabGet = vi.fn().mockResolvedValue({ url: "https://docs.google.com/document/d/1/edit" });
+    vi.stubGlobal("chrome", { tabs: { get: tabGet } });
+    try {
+      const refuse = await trustedTypesRefusal(7, "el.innerHTML = '<b>x</b>'");
+      expect(refuse).toContain("Trusted Types");
+      expect(refuse).toContain("docs_read");
+      expect(await trustedTypesRefusal(7, "new DOMParser().parseFromString(html, 'text/html')")).toBeTruthy();
+      expect(await trustedTypesRefusal(7, "d.insertAdjacentHTML('beforeend', row)")).toBeTruthy();
+      // READS of innerHTML are legal on Trusted-Types pages — never screened.
+      expect(await trustedTypesRefusal(7, "JSON.stringify(el.innerHTML.slice(0,99))")).toBeNull();
+      expect(await trustedTypesRefusal(7, "el.textContent")).toBeNull();
+      // A non-Workspace host runs the expression (post-hoc rewrite is the net).
+      tabGet.mockResolvedValue({ url: "https://example.com/app" });
+      expect(await trustedTypesRefusal(7, "el.innerHTML = '<b>x</b>'")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("fails safe when chrome.tabs is unavailable", async () => {
+    vi.stubGlobal("chrome", undefined);
+    try {
+      expect(await trustedTypesRefusal(7, "el.innerHTML = 'x'")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

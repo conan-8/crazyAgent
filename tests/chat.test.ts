@@ -367,4 +367,22 @@ describe("Jev gate marks and Jev notes", () => {
       { kind: "text", text: "fin" },
     ]);
   });
+
+  it("folds a progress_note into its own flagged note block (the panel bubble)", () => {
+    const conv = newConversation("c-prog1", "t");
+    foldUser(conv, "t");
+    foldEvent(conv, {
+      kind: "progress_note",
+      text: "Progress: title and intro are in. Next: the table.",
+    });
+    foldEvent(conv, { kind: "done", summary: "fin" });
+    expect(conv.turns[1]!.blocks).toEqual([
+      {
+        kind: "note",
+        text: "Progress: title and intro are in. Next: the table.",
+        progress: true,
+      },
+      { kind: "text", text: "fin" },
+    ]);
+  });
 });

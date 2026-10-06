@@ -1,5 +1,5 @@
 // Sensitive tools, gated behind confirmation by the policy layer.
-import { CSP_BLOCKED_MARKER } from "../../shared/tool-failure";
+import { CSP_BLOCKED_MARKER, failureTag } from "../../shared/tool-failure";
 import type { ToolContext } from "./types";
 import { registerTool } from "./types";
 
@@ -33,18 +33,76 @@ export function isCspBlocked(error: string): boolean {
 }
 
 /**
+ * True when the failure is a Trusted-Types refusal: the page (Google
+ * Docs/Sheets/Slides, other modern Google apps) enforces `require-trusted-
+ * types-for 'script'`, so every HTML-string sink throws — "This document
+ * requires 'TrustedHTML' assignment". A real run hit this four times with
+ * DOMParser/innerHTML variants, each a full round trip, because the raw
+ * TypeError reads like a coding mistake to fix rather than a policy that
+ * never bends. The advice names the routes that DO work.
+ */
+export function isTrustedTypesBlocked(error: string): boolean {
+  return (
+    /requires 'Trusted/i.test(error) ||
+    /TrustedHTML|TrustedScript|TrustedScriptURL/i.test(error) ||
+    /Trusted Types/i.test(error)
+  );
+}
+
+export const TRUSTED_TYPES_ADVICE = [
+  "This page enforces Trusted Types: assigning or parsing HTML strings (innerHTML =, outerHTML =, DOMParser.parseFromString, insertAdjacentHTML, document.write) THROWS here — it is the page's security policy, not a mistake in the expression, and every variant of the same assignment fails identically. Do NOT retry it.",
+  "To READ the document: use `docs_read` — it fetches the document's text/HTML outside the page (no in-page JS, immune to this policy). For one element's content: textContent / innerText / querySelector + JSON.stringify are unaffected. For structure checks on Google Docs, `docs_state` reports the applied formatting directly.",
+].join("\n");
+
+/**
  * Turn a raw CDP failure into something the model can act on. The bare CDP
  * message ("Evaluating a string as JavaScript violates…") reads like a dead
  * end — which is exactly how runs ended up looping on it — so the CSP case
- * gets the one retry that actually works spelled out.
+ * gets the one retry that actually works spelled out, and the Trusted-Types
+ * case gets the routes that bypass the policy entirely.
  */
 export function describeEvalFailure(error: string): string {
+  if (isTrustedTypesBlocked(error)) {
+    return [`TRUSTED-TYPES-BLOCKED: ${error}`, TRUSTED_TYPES_ADVICE].join("\n");
+  }
   if (!isCspBlocked(error)) return error;
   return [
     `${CSP_BLOCKED_MARKER}: this page's Content-Security-Policy forbids evaluating JavaScript (no 'unsafe-eval'), so this expression could not run.`,
     error,
     "Do NOT retry the same expression. Options, in order: (1) retry once with bypass_csp:true — that lifts this site's CSP for the tab; (2) use read_page / snapshot / click / type with element refs instead of JavaScript, which is unaffected by CSP; (3) if neither works, report the page as unreadable by script and stop.",
   ].join("\n");
+}
+
+/**
+ * HTML-string sinks Trusted Types blocks — ASSIGNMENTS and parsers only.
+ * Reading `.innerHTML` is legal on those pages and must not be screened out.
+ */
+const TRUSTED_TYPES_SINK_RE =
+  /\b(?:innerHTML|outerHTML)\s*=[^=]|\bDOMParser\b|insertAdjacentHTML\s*\(|document\.write\s*\(|createContextualFragment/;
+
+/** Hosts known to enforce Trusted Types (the Workspace editors). */
+const TRUSTED_TYPES_HOST_RE = /^https:\/\/(?:docs|sheets|slides)\.google\.com\//;
+
+/**
+ * Pre-screen for the certain-refusal case: a blocked sink in the expression
+ * AND a known Trusted-Types host. Saves the debugger round trip and lands the
+ * advice BEFORE the model has seen a raw TypeError; the post-hoc rewrite in
+ * describeEvalFailure still catches every other host and any pattern this
+ * regex misses. Best-effort: an unreadable tab URL never blocks the call.
+ */
+export async function trustedTypesRefusal(
+  tabId: number,
+  expression: string,
+): Promise<string | null> {
+  if (!TRUSTED_TYPES_SINK_RE.test(expression)) return null;
+  let url = "";
+  try {
+    url = (await chrome.tabs.get(tabId)).url ?? "";
+  } catch {
+    return null;
+  }
+  if (!TRUSTED_TYPES_HOST_RE.test(url)) return null;
+  return `${failureTag("input")}: this expression assigns/parses HTML on a Trusted-Types page — it cannot run here.\n${TRUSTED_TYPES_ADVICE}`;
 }
 
 /** Shape a CDP `Runtime.evaluate` response into the tool's JSON result. */
@@ -139,6 +197,12 @@ registerTool({
   },
   sensitive: true,
   async run(args, ctx) {
+    const expression = String(args.expression);
+    // Trusted-Types pre-screen: a blocked sink on a known enforcing host is a
+    // certain refusal — answer with the working routes instead of spending a
+    // debugger round trip on a guaranteed TypeError (see trustedTypesRefusal).
+    const refusal = await trustedTypesRefusal(ctx.tabId, expression);
+    if (refusal) return { ok: false, error: refusal };
     let cspBypass: string | undefined;
     if (args.bypass_csp === true) {
       await ctx.adapter.send(ctx.tabId, "Page.setBypassCSP", { enabled: true });
@@ -150,7 +214,7 @@ registerTool({
         ctx.adapter,
         ctx.tabId,
         {
-          expression: String(args.expression),
+          expression,
           awaitPromise: true,
           returnByValue: true,
           allowUnsafeEvalBlockedByCSP: true,

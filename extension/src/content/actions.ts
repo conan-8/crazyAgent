@@ -6,8 +6,15 @@
 import type { ElementRegistry } from "./registry";
 import { isEditableHost, nearestInteractive } from "./registry";
 import { SINK_SIGNATURE_RE, type InputHints } from "../shared/trusted-input";
-import type { HitInfo, ViewportInfo, CoordSpace, Point } from "../shared/coords";
-import { toViewportPoint } from "../shared/coords";
+import type {
+  ElementRect,
+  HitInfo,
+  SnapCandidate,
+  ViewportInfo,
+  CoordSpace,
+  Point,
+} from "../shared/coords";
+import { rectDistance, SNAP_RADIUS_PX, toViewportPoint } from "../shared/coords";
 import type { AuthSignals } from "../shared/handoff";
 
 /** One file an `upload` attaches: inline text or base64 bytes. */
@@ -55,7 +62,19 @@ export type ActionRequest =
     }
   | { action: "filesOf"; ref: string }
   | { action: "readEl"; ref: string; depth?: number }
-  | { action: "authSignals" };
+  | { action: "authSignals" }
+  /** Click the visible element whose text/aria-label matches — candidates in
+   *  preference order. The label-walk primitive behind menu_path/docs_op. */
+  | { action: "clickByText"; labels: string[] }
+  /** Fill a form field located by its label (aria-label/placeholder/<label>). */
+  | {
+      action: "fillField";
+      labels: string[];
+      value?: string;
+      kind?: "auto" | "text" | "select" | "radio";
+    }
+  /** Read an element's current text/value — by label candidates or CSS selector. */
+  | { action: "queryText"; labels?: string[]; selector?: string };
 
 export interface ActionResult {
   ok: boolean;
@@ -140,6 +159,12 @@ export class Actions {
         return this.#probeAt(req.x, req.y, req.space);
       case "resolvePoint":
         return this.#resolvePoint(req);
+      case "clickByText":
+        return this.#clickByText(req.labels ?? []);
+      case "fillField":
+        return this.#fillField(req.labels ?? [], req.value, req.kind ?? "auto");
+      case "queryText":
+        return this.#queryText(req.labels, req.selector);
       case "authSignals":
         return { ok: true, data: authSignalsOf() };
       case "readEl": {
@@ -204,6 +229,12 @@ export class Actions {
    * and reports canvas/iframe hits honestly: a canvas has no DOM to act on, and
    * an iframe means the real target is out of this frame's reach. Page-space
    * points are converted here (this is the frame that owns the scroll).
+   *
+   * Also carries the click magnet's inputs (shared/coords.ts snapOrPromote):
+   * the hit element's rect + editable flag, and — when the point did NOT land
+   * on a ref'd control — the nearest interactive element within a small ring
+   * around it, so a click 3px off a menu row's edge can be re-aimed at the
+   * row instead of silently hitting the menu's padding and closing it.
    */
   #probeAt(x: number, y: number, space?: CoordSpace): ActionResult {
     const point = toViewportPoint(
@@ -227,15 +258,203 @@ export class Actions {
             ref: this.registry.refFor(el) ?? undefined,
             canvas: raw?.tagName === "CANVAS",
             overIframe: raw?.tagName === "IFRAME" || raw?.tagName === "FRAME",
+            editable: isEditableHost(el) || undefined,
+            rect: rectOf(el),
           }
         : null;
+    // The ring search only matters when the point is NOT already on a ref'd
+    // control — that is the near-miss case the magnet exists for. Skipped
+    // otherwise, so the common hit pays no extra elementFromPoint calls.
+    const snap = hit?.ref ? null : this.#snapNear(point, el);
     const viewport: ViewportInfo = {
       width: window.innerWidth,
       height: window.innerHeight,
       scrollX: window.scrollX,
       scrollY: window.scrollY,
     };
-    return { ok: true, data: { hit, viewport, point } };
+    return { ok: true, data: { hit, viewport, point, snap } };
+  }
+
+  /**
+   * Ring-probe around a point for the nearest interactive element — the
+   * magnet's candidate when the point itself missed every control. Two rings
+   * × 8 directions of `document.elementFromPoint` (each O(1) hit-testing),
+   * deduped, bounded by SNAP_RADIUS_PX. Overlays and popups are found
+   * wherever they live in the tree (no ancestor walk), which is exactly the
+   * floating-menu case the logged near-misses came from.
+   */
+  #snapNear(point: Point, exclude: Element | null): SnapCandidate | null {
+    let best: SnapCandidate | null = null;
+    const seen = new Set<Element>();
+    if (exclude) seen.add(exclude);
+    for (const r of [12, SNAP_RADIUS_PX]) {
+      for (let i = 0; i < 8; i++) {
+        const a = (Math.PI * 2 * i) / 8;
+        const px = point.x + Math.round(r * Math.cos(a));
+        const py = point.y + Math.round(r * Math.sin(a));
+        let cand: Element | null = null;
+        try {
+          cand = document.elementFromPoint(px, py);
+        } catch {
+          return best; // hit-testing unavailable — no magnet, honest miss
+        }
+        if (!cand) continue;
+        const inter = nearestInteractive(cand);
+        if (!inter || seen.has(inter)) continue;
+        seen.add(inter);
+        const rect = rectOf(inter);
+        if (rect.w <= 0 || rect.h <= 0) continue;
+        const distance = rectDistance(point, rect);
+        if (distance > SNAP_RADIUS_PX) continue;
+        if (best && best.distance <= distance) continue;
+        const p = probeOf(inter);
+        best = {
+          ref: this.registry.refFor(inter) ?? undefined,
+          tag: p.tag,
+          role: p.role,
+          text: p.text,
+          editable: isEditableHost(inter) || undefined,
+          rect,
+          distance,
+        };
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Click the visible element whose text/aria-label matches one of `labels`
+   * (candidates in preference order). The label-walk primitive behind
+   * `menu_path` and `docs_op`: menus, dialogs and toolbars are DOM, so a
+   * control is found by what it SAYS — never by a coordinate that can drift.
+   * Reports exactly what was clicked so the caller (and the run log) can see
+   * the route taken.
+   */
+  #clickByText(labels: string[]): ActionResult {
+    if (!labels.length) return { ok: false, error: "clickByText needs at least one label" };
+    const found = findByText(labels);
+    if (!found) {
+      return {
+        ok: false,
+        error: `no visible clickable element matches ${JSON.stringify(labels)}`,
+      };
+    }
+    if (isDisabledEl(found.el)) {
+      return {
+        ok: false,
+        error: `"${found.matched}" was found but is DISABLED (greyed out / aria-disabled) — it cannot be clicked in the current state`,
+      };
+    }
+    const res = this.#click(found.el);
+    if (!res.ok) return res;
+    return { ok: true, data: { clicked: describeFound(found), matched: found.matched } };
+  }
+
+  /**
+   * Fill a form field located by its label — aria-label, placeholder, an
+   * associated/wrapping <label>, or title. `kind` selects the strategy
+   * (auto-detect by default): text via the framework-friendly #type path,
+   * select by OPTION TEXT (not internal value), radio/checkbox by click.
+   */
+  #fillField(
+    labels: string[],
+    value: string | undefined,
+    kind: "auto" | "text" | "select" | "radio",
+  ): ActionResult {
+    if (!labels.length) return { ok: false, error: "fillField needs at least one label" };
+    const found = findField(labels);
+    if (!found) {
+      return { ok: false, error: `no visible form field matches ${JSON.stringify(labels)}` };
+    }
+    const el = found.el;
+    const effective =
+      kind === "auto"
+        ? el instanceof HTMLSelectElement
+          ? "select"
+          : el instanceof HTMLInputElement && (el.type === "radio" || el.type === "checkbox")
+            ? "radio"
+            : "text"
+        : kind;
+    if (effective === "select") {
+      if (!(el instanceof HTMLSelectElement)) {
+        return { ok: false, error: `"${found.matched}" is not a <select> — cannot pick an option` };
+      }
+      const want = collapse(value ?? "").toLowerCase();
+      const opt = Array.from(el.options).find(
+        (o) =>
+          collapse(o.textContent).toLowerCase() === want ||
+          collapse(o.textContent).toLowerCase().startsWith(want) ||
+          o.value === value,
+      );
+      if (!opt) {
+        const have = Array.from(el.options)
+          .map((o) => collapse(o.textContent))
+          .filter(Boolean)
+          .join(" | ")
+          .slice(0, 300);
+        return {
+          ok: false,
+          error: `select "${found.matched}" has no option "${value}" — its options are: ${have || "(none)"}`,
+        };
+      }
+      const res = this.#select(el, opt.value);
+      return res.ok
+        ? { ok: true, data: { filled: describeFound(found), option: collapse(opt.textContent) } }
+        : res;
+    }
+    if (effective === "radio") {
+      const res = this.#click(el);
+      if (!res.ok) return res;
+      return {
+        ok: true,
+        data: {
+          filled: describeFound(found),
+          checked: el instanceof HTMLInputElement ? el.checked : undefined,
+        },
+      };
+    }
+    const res = this.#type(el, String(value ?? ""), false);
+    if (!res.ok) return res;
+    return { ok: true, data: { filled: describeFound(found), value: readValue(el) } };
+  }
+
+  /**
+   * Read the current text/value of an element — by label candidates or CSS
+   * selector. The verification read for docs_op (toolbar style box, dialog
+   * fields) and any "what does this control say now" question, without a
+   * snapshot round trip.
+   */
+  #queryText(labels: string[] | undefined, selector: string | undefined): ActionResult {
+    let el: Element | null = null;
+    let matched = "";
+    if (labels?.length) {
+      const found = findByText(labels);
+      el = found?.el ?? null;
+      matched = found?.matched ?? "";
+    }
+    if (!el && selector) {
+      try {
+        el = document.querySelector(selector);
+      } catch {
+        return { ok: false, error: `invalid selector: ${selector}` };
+      }
+      matched = selector;
+    }
+    if (!el) {
+      return { ok: false, error: "queryText found no matching element" };
+    }
+    return {
+      ok: true,
+      data: {
+        matched,
+        text: collapse((el as HTMLElement).innerText ?? el.textContent ?? "").slice(0, 500),
+        value: readValue(el as HTMLElement),
+        // Toolbar toggles (bold/italic/…) announce state via aria-pressed or
+        // aria-checked — docs_state reads them instead of guessing from pixels.
+        pressed: el.getAttribute("aria-pressed") ?? el.getAttribute("aria-checked") ?? undefined,
+        tag: el.tagName.toLowerCase(),
+      },
+    };
   }
 
   /**
@@ -849,6 +1068,192 @@ function probeOf(el: Element): {
     text: (ht.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
     inForm: Boolean(el.closest("form")),
   };
+}
+
+/** An element's viewport box, rounded — the magnet/promotion input. */
+function rectOf(el: Element): ElementRect {
+  const r = el.getBoundingClientRect();
+  return {
+    x: Math.round(r.left),
+    y: Math.round(r.top),
+    w: Math.round(r.width),
+    h: Math.round(r.height),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Label matching — the "menus are DOM" primitives behind clickByText /
+// fillField / queryText. A control is found by what it SAYS (aria-label,
+// visible text, placeholder, associated <label>), never by a coordinate, so
+// a menu walk cannot drift when the layout shifts.
+// ---------------------------------------------------------------------------
+
+/** Whitespace-collapsed text for label comparisons. */
+function collapse(s: string | null | undefined): string {
+  return (s ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** The document lays elements out (real browser) vs every box is zero (jsdom). */
+function documentHasLayout(): boolean {
+  const b = document.body?.getBoundingClientRect();
+  return Boolean(b && (b.height > 0 || b.width > 0));
+}
+
+/**
+ * Visibility for label matching. Style/hidden checks always apply; a zero box
+ * only counts as invisible when the document actually has layout — in jsdom
+ * every box is zero and requiring a non-zero rect would hide the world.
+ */
+function isVisibleLoose(el: Element): boolean {
+  const ht = el as HTMLElement;
+  if (ht.hidden) return false;
+  try {
+    const style = getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+  } catch {
+    // no computed style available — fall through to the box check
+  }
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 && r.height === 0) return !documentHasLayout();
+  return true;
+}
+
+function isDisabledEl(el: Element): boolean {
+  if (el.getAttribute("aria-disabled") === "true") return true;
+  return (el as HTMLButtonElement).disabled === true;
+}
+
+/** What the label scan considers for clicking. */
+const CLICKABLE_CANDIDATES = [
+  "button",
+  "a[href]",
+  "label",
+  "summary",
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+  '[role="button"]',
+  '[role="tab"]',
+  '[role="option"]',
+  '[role="radio"]',
+  '[role="checkbox"]',
+  '[role="combobox"]',
+  "[aria-label]",
+  ".goog-menuitem",
+].join(", ");
+
+/** What the label scan considers for filling. */
+const FIELD_CANDIDATES =
+  'input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"], [role="combobox"], [role="radio"], [role="checkbox"]';
+
+interface FoundByLabel {
+  el: HTMLElement;
+  /** What the element shows/announces — the click report's identity. */
+  matched: string;
+  score: number;
+}
+
+/** 0 = exact label match, 1 = label starts with the want (accelerator suffix,
+ *  "Styles: Normal text"), null = no match. */
+function matchScoreOf(el: Element, want: string): number | null {
+  const aria = collapse(el.getAttribute("aria-label")).toLowerCase();
+  const title = collapse(el.getAttribute("title")).toLowerCase();
+  const txt = collapse((el as HTMLElement).innerText ?? el.textContent ?? "").toLowerCase();
+  const ph =
+    el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+      ? collapse(el.placeholder).toLowerCase()
+      : "";
+  if (aria === want || title === want || txt === want || ph === want) return 0;
+  if (
+    aria.startsWith(want) ||
+    title.startsWith(want) ||
+    ph.startsWith(want) ||
+    txt.startsWith(want + " ")
+  ) {
+    return 1;
+  }
+  return null;
+}
+
+function labelOf(el: Element): string {
+  return (
+    collapse(el.getAttribute("aria-label")) ||
+    collapse(el.getAttribute("title")) ||
+    collapse((el as HTMLElement).innerText ?? el.textContent ?? "")
+  ).slice(0, 60);
+}
+
+function escapeForSelector(id: string): string {
+  try {
+    return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\\"');
+  } catch {
+    return id.replace(/"/g, '\\"');
+  }
+}
+
+/**
+ * Find the best clickable element for the first label that matches anything
+ * (labels are preference-ordered candidates). Within one label: exact beats
+ * prefix; shortest own text wins ties — the innermost control, not its
+ * wrapper.
+ */
+function findByText(labels: string[]): FoundByLabel | null {
+  const wants = labels.map((l) => collapse(l).toLowerCase()).filter(Boolean);
+  if (!wants.length) return null;
+  const nodes = Array.from(document.querySelectorAll<HTMLElement>(CLICKABLE_CANDIDATES));
+  for (const want of wants) {
+    let best: (FoundByLabel & { len: number }) | null = null;
+    for (const el of nodes) {
+      if (!isVisibleLoose(el)) continue;
+      const score = matchScoreOf(el, want);
+      if (score === null) continue;
+      const len = collapse(el.innerText ?? el.textContent ?? "").length;
+      if (!best || score < best.score || (score === best.score && len < best.len)) {
+        best = { el, matched: labelOf(el) || want, score, len };
+        if (score === 0 && len <= want.length + 2) break; // cannot do better
+      }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+/** Like findByText, over form fields, also honouring associated <label>s. */
+function findField(labels: string[]): FoundByLabel | null {
+  const wants = labels.map((l) => collapse(l).toLowerCase()).filter(Boolean);
+  if (!wants.length) return null;
+  const nodes = Array.from(document.querySelectorAll<HTMLElement>(FIELD_CANDIDATES));
+  for (const want of wants) {
+    let best: (FoundByLabel & { len: number }) | null = null;
+    for (const el of nodes) {
+      if (!isVisibleLoose(el)) continue;
+      let score = matchScoreOf(el, want);
+      if (score === null) {
+        // Associated <label>: label[for=id] or a wrapping <label>.
+        const lab = el.id
+          ? document.querySelector(`label[for="${escapeForSelector(el.id)}"]`)
+          : null;
+        const wrap = el.closest("label");
+        const labText = collapse(lab?.textContent ?? wrap?.textContent ?? "").toLowerCase();
+        if (labText === want) score = 0;
+        else if (labText && labText.startsWith(want)) score = 1;
+      }
+      if (score === null) continue;
+      const len = collapse(el.innerText ?? el.textContent ?? "").length;
+      if (!best || score < best.score || (score === best.score && len < best.len)) {
+        best = { el, matched: labelOf(el) || want, score, len };
+        if (score === 0) break;
+      }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+function describeFound(f: FoundByLabel): string {
+  const role = f.el.getAttribute("role");
+  const txt = collapse(f.el.innerText ?? f.el.textContent ?? "").slice(0, 60);
+  return `<${f.el.tagName.toLowerCase()}${role ? ` role=${role}` : ""}> "${txt || f.matched}"`;
 }
 
 function base64ToArrayBuffer(b64: string): ArrayBuffer {

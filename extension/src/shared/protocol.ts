@@ -116,6 +116,13 @@ export type StepEvent =
    * is always the COMPLETE current plan, never a delta.
    */
   | { kind: "todo_update"; items: TodoItem[] }
+  /**
+   * A concise progress report from the model between action sequences
+   * (`progress_note`): what just landed, what comes next. The panel renders
+   * it as a distinct bubble — the run's narration channel, replacing
+   * per-action prose turns.
+   */
+  | { kind: "progress_note"; text: string }
   | {
       kind: "tool_result";
       stepIndex: number;

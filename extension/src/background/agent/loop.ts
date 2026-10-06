@@ -423,24 +423,49 @@ const PARALLEL_SAFE = new Set([
   "topsites_list",
   "network_observe",
   "use_skill", // read-only storage lookup — never touches page state
+  "docs_read", // SW-side export fetch — never touches the page at all
+  "docs_state", // read-only DOM chrome queries — never touches page state
   "judge", // read-only external decision call — never touches page state
   "todo_write", // pure plan state (panel dropdown) — never touches page state
+  "progress_note", // pure narration state (panel bubble) — never touches page state
 ]);
 
 /**
- * Stuck-loop detection. A live run spent 15 turns re-running a frame probe
- * that failed identically every time, then 9 more on a doomed workaround —
- * nothing told the model it was grinding. Three failures of the same tool in a
- * row (or a literal re-run of a call that already failed) now land a note IN
- * the tool result, with the one move that breaks the loop: look at the page.
+ * Stuck-loop detection — ENFORCED, not advisory. A live run spent 15 turns
+ * re-running a frame probe that failed identically every time, then 9 more on
+ * a doomed workaround; another retried a failing clipboard paste "one more
+ * time" twice, because a warning in a tool result is ignorable and the model
+ * ignored it. Advice alone does not stop a grind, so the ladder has teeth:
+ *
+ *   1st failure of an exact call → ordinary error (+ the RETRY WARNING note
+ *                                  when the same call had already run).
+ *   2nd failure of the SAME call → the note announces that a third identical
+ *                                  attempt will not be executed at all.
+ *   3rd identical attempt        → `blocked` REFUSES it: the call never
+ *                                  reaches the executor, and the refusal text
+ *                                  carries the moves that break the loop
+ *                                  (look at the page, change target/tool, or
+ *                                  mark the item blocked and move on).
+ *
+ * Three failures of the same tool in a row (fresh args each time) still land
+ * the STUCK note — a different symptom (the tool itself is dying) with a
+ * different remedy (look at the page instead of re-aiming).
  *
  * Wait tools are exempt from the SUCCESS-repeat note only: re-issuing a wait
  * with the same arguments is legitimate (waiting on the next reply of the
- * same page), while their FAILURES still count toward the streak like any
- * other tool's.
+ * same page), while their FAILURES still count toward the streak AND the
+ * identical-call ban like any other tool's — a wait that timed out twice on
+ * the same arguments times out a third time; a LONGER `timeout_ms` is a
+ * different call and stays allowed.
  */
 export interface StuckGuard {
   note(name: string, args: Record<string, unknown>, failed: boolean): string;
+  /**
+   * Pre-execution check: a refusal message when this EXACT call has already
+   * failed twice in this run (the third identical attempt is not executed —
+   * see the ladder above), or null when the call may proceed.
+   */
+  blocked(name: string, args: Record<string, unknown>): string | null;
   /**
    * Arm a ONE-SHOT coaching line (the Jev progress verdict) that rides the
    * next tool result — whatever else that result says — and is then cleared.
@@ -452,33 +477,63 @@ export interface StuckGuard {
 
 const WAIT_LIKE_TOOLS = new Set(["wait_for", "wait_for_settle"]);
 
+/** Failures of one exact call before the identical-call ban kicks in. */
+export const IDENTICAL_FAIL_BAN = 2;
+
+/** Stable identity of an exact call — the ban and the repeat notes key on it. */
+function callKey(name: string, args: Record<string, unknown>): string {
+  try {
+    return `${name}:${JSON.stringify(args ?? {})}`;
+  } catch {
+    return `${name}:(unserializable)`;
+  }
+}
+
 export function createStuckGuard(): StuckGuard {
   const streak = new Map<string, number>();
   const calls = new Map<string, number>();
+  /** Failures per EXACT call — the identical-call ban's counter. */
+  const fails = new Map<string, number>();
   let coachNote = "";
   return {
     coach(message) {
       coachNote = `\n\n[Jev progress check — ${message}]`;
     },
+    blocked(name, args) {
+      const n = fails.get(callKey(name, args)) ?? 0;
+      if (n < IDENTICAL_FAIL_BAN) return null;
+      return (
+        `[BLOCKED — NOT EXECUTED: this exact ${name} call has already failed ${n} times in this run, ` +
+        "so the harness refuses to run it again — a third identical attempt produces the identical " +
+        "failure and only burns a step. Break the loop with a DIFFERENT move: take a screenshot or " +
+        "snapshot to see what the page actually shows now; attack the same goal by another route " +
+        "(a ref instead of coordinates or vice versa, the keyboard instead of the mouse, another " +
+        "tool entirely); or — if this step is genuinely impossible — mark its todo item blocked, " +
+        "note why in one line, and MOVE ON to the next item instead of sinking the run here.]"
+      );
+    },
     note(name, args, failed) {
       // The armed coaching line rides this result and is consumed once.
       const coach = coachNote;
       coachNote = "";
-      let key: string;
-      try {
-        key = `${name}:${JSON.stringify(args ?? {})}`;
-      } catch {
-        key = `${name}:(unserializable)`;
-      }
+      const key = callKey(name, args);
       const repeats = (calls.get(key) ?? 0) + 1;
       calls.set(key, repeats);
+      const failedTimes = failed ? (fails.get(key) ?? 0) + 1 : (fails.get(key) ?? 0);
+      if (failed) fails.set(key, failedTimes);
       const n = failed ? (streak.get(name) ?? 0) + 1 : 0;
       streak.set(name, n);
+      // The ban announcement rides the SECOND identical failure, so the model
+      // learns one step early that the next repeat is dead.
+      const banLine =
+        failed && failedTimes >= IDENTICAL_FAIL_BAN
+          ? ` This exact call has now failed ${failedTimes} times — a THIRD identical attempt will NOT be executed at all. Change something real: the target, the tool, or the plan.`
+          : "";
       if (failed && repeats > 1) {
-        return `${coach}\n\n[RETRY WARNING: this exact call has already failed in this run — repeating it will fail again. Do NOT run it again. Change the approach; if you are unsure what the page shows, take a screenshot and look at it.]`;
+        return `${coach}\n\n[RETRY WARNING: this exact call has already failed in this run — repeating it will fail again. Do NOT run it again. Change the approach; if you are unsure what the page shows, take a screenshot and look at it.${banLine}]`;
       }
       if (failed && n >= 3) {
-        return `${coach}\n\n[STUCK: ${name} has now failed ${n} times in a row. Do not retry it. Take a screenshot to SEE what the page actually shows, switch to read_page / snapshot / ref-based tools, or report the blocker and stop.]`;
+        return `${coach}\n\n[STUCK: ${name} has now failed ${n} times in a row. Do not retry it. Take a screenshot to SEE what the page actually shows, switch to read_page / snapshot / ref-based tools, or report the blocker and stop.${banLine}]`;
       }
       if (repeats >= 3 && !WAIT_LIKE_TOOLS.has(name)) {
         return `${coach}\n\n[This exact call has now run ${repeats} times and returns the same thing — vary the approach instead of polling it again. If you are unsure what you are seeing, take a screenshot.]`;
@@ -1196,6 +1251,27 @@ async function runOne(
         stepIndex,
         name: call.name,
         result: error,
+        ok: false,
+      },
+    };
+  }
+  // Identical-call ban (see createStuckGuard): an exact call that already
+  // failed twice is REFUSED without touching the executor — the third
+  // identical attempt would produce the identical failure and burn a full
+  // round trip doing it. Not flagged `invalid` (the arguments are fine; the
+  // plan behind them is what must change), so it never feeds the
+  // three-invalid-abort path — a blocked model should switch approaches, not
+  // lose the run.
+  const refusal = guard.blocked(call.name, call.args);
+  if (refusal !== null) {
+    return {
+      invalid: false,
+      message: { role: "tool", toolCallId: call.id, content: refusal },
+      event: {
+        kind: "tool_result",
+        stepIndex,
+        name: call.name,
+        result: refusal,
         ok: false,
       },
     };

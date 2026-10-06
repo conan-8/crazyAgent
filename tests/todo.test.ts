@@ -2,8 +2,10 @@
 // the run-log fold and the prompt rule that makes the model use it.
 import { describe, expect, it } from "vitest";
 import {
+  PROGRESS_NOTE_MAX_CHARS,
   TODO_MAX_CONTENT_CHARS,
   TODO_MAX_ITEMS,
+  normalizeProgressNote,
   normalizeTodos,
   summarizeTodos,
 } from "../extension/src/background/tools/todo";
@@ -183,5 +185,72 @@ describe("system prompt", () => {
     expect(p).toContain("Visible plan (`todo_write`)");
     expect(p).toContain("exactly ONE item `in_progress`");
     expect(p).toContain("whole list");
+  });
+
+  it("teaches the progress-note contract: batch the work, then report", () => {
+    const p = buildSystemPrompt("Do a multi-step thing");
+    expect(p).toContain("Progress reports (`progress_note`)");
+    expect(p).toContain("Progress: <what just landed");
+    expect(p).toContain("never two notes in a row without real work between");
+  });
+});
+
+describe("normalizeProgressNote", () => {
+  it("trims and caps the note", () => {
+    const long = "x".repeat(PROGRESS_NOTE_MAX_CHARS + 100);
+    const { text } = normalizeProgressNote(`  ${long}  `);
+    expect(text?.length).toBe(PROGRESS_NOTE_MAX_CHARS);
+  });
+
+  it("rejects empty and non-string notes with tool-error text", () => {
+    expect(normalizeProgressNote("").error).toContain("INPUT-FAILED");
+    expect(normalizeProgressNote("   ").error).toContain("INPUT-FAILED");
+    expect(normalizeProgressNote(42).error).toContain("INPUT-FAILED");
+  });
+});
+
+describe("progress_note tool", () => {
+  it("is registered and not sensitive (pure narration, no gate)", () => {
+    const tool = toolRegistry.get("progress_note");
+    expect(tool).toBeDefined();
+    expect(tool?.sensitive).toBeFalsy();
+  });
+
+  it("emits the progress_note event and confirms compactly", async () => {
+    const tool = toolRegistry.get("progress_note")!;
+    const { ctx, events } = stubContext();
+    const note = "Progress: title and intro are in. Next: the table.";
+    const payload = (await tool.run({ text: note }, ctx)) as { ok: boolean; noted: string };
+    expect(payload.ok).toBe(true);
+    expect(payload.noted).toBe(note);
+    expect(events).toEqual([{ kind: "progress_note", text: note }]);
+    // The model-facing result stays small — the text rides the event, not history.
+    expect(tool.present?.({ ok: true, noted: note })?.text).toBe("progress noted");
+  });
+
+  it("rejects an empty note without emitting", async () => {
+    const tool = toolRegistry.get("progress_note")!;
+    const { ctx, events } = stubContext();
+    const payload = (await tool.run({ text: "  " }, ctx)) as { ok: boolean; error: string };
+    expect(payload.ok).toBe(false);
+    expect(payload.error).toContain("INPUT-FAILED");
+    expect(events).toHaveLength(0);
+  });
+});
+
+describe("progress notes in the run log", () => {
+  it("folds into the turn's notes, flagged, and renders in the export", () => {
+    const rec = newTurnRecord("task", { mode: "standard", at: 1_000 });
+    foldLogEvent(
+      rec,
+      { kind: "progress_note", text: "Progress: title is in. Next: the table." },
+      1_100,
+    );
+    expect(rec.turns[0]?.notes).toEqual([
+      { at: 1_100, message: "Progress: title is in. Next: the table.", progress: true },
+    ]);
+    const md = toMarkdown([rec]);
+    expect(md).toContain("📣 **Progress**");
+    expect(md).toContain("Next: the table.");
   });
 });

@@ -648,12 +648,17 @@ is not repeated twice.
 Slides and Office-on-the-web is painted into a `<canvas>`: there is no DOM text
 and no expression can extract it. But typing *does* work — into a **separate
 hidden editable element** (Docs' `docs-texteventtarget-iframe`) that appears in
-the snapshot as an editable frame-scoped ref. `buildSystemPrompt` now carries
-that procedure as `DOCUMENT_EDITOR_RULES`: the body is unreadable and must not
-be retried; type into the sink ref, do not click the canvas; format via toolbar
-refs or the editor's own shortcuts; and to *read* a document change the URL
-first (`/document/d/<id>/preview`, `/mobilebasic`,
-`/presentation/d/<id>/preview`).
+the snapshot as an editable frame-scoped ref. The procedure lives in the
+bundled `canvas-doc-editors` skill (the prompt keeps only a pointer): the body
+is unreadable and must not be retried; type into the sink ref, do not click the
+canvas; format via toolbar refs or the editor's own shortcuts. To *read* a
+document, use `docs_read` — the SW-side export fetch added by the human-flow
+pass; the old routes (navigate to `/document/d/<id>/preview` or `/mobilebasic`,
+or `evaluate_js fetch(…/export?format=html)` from page context) are explicitly
+FORBIDDEN now: navigation throws away the editor's live state, the page-context
+fetch dies with the debugger transport (eight TRANSPORT-FAILED turns in one
+archived run) and Trusted Types blocks the DOMParser the HTML needs (four more).
+See "The human-flow layer" below.
 
 **3. Synthesised DOM events cannot edit a canvas document.** The sink is a
 scratch buffer for the browser's editing/IME machinery — the document model is
@@ -732,6 +737,156 @@ route must not hijack normal form filling).
 reports tab access, content-script injection and the debugger channel
 separately, and says explicitly whether the page is unreachable or the failure
 was tool-specific — so the model stops retrying and reports.
+
+## The human-flow layer (never misclick, deterministic Docs ops, progress notes)
+
+Design doc: `docs/HUMAN-FLOW-PLAN.md` (error taxonomy E1–E6 with log quotes,
+four-layer plan, build order, and a shipped-status section). The evidence base
+is the three 2026-10-06 runs of the 32-item Docs task: ~11 % of turns were
+demonstrable rework; the classes were pixel misses on shifted menus, silent
+no-ops discovered turns later, the same tool-schema error repeated 4× in one
+run, eight TRANSPORT-FAILED turns re-diagnosing a flapping debugger, four
+Trusted-Types dead ends, and mobilebasic/export detours to read what the
+toolbar already showed. The principle across all of it: **prose knowledge
+cannot prevent pixel-level mistakes — code can.** Advice in tool results is
+ignorable (a run retried a failing paste twice *after* a RETRY WARNING), so
+the harness enforces; interface knowledge stops being re-derived per turn and
+becomes executed, verified procedures.
+
+**Enforced failure ladder** (`agent/loop.ts`, `createStuckGuard`). The guard
+grew `blocked(name, args)`: an exact call that already failed twice
+(`IDENTICAL_FAIL_BAN = 2`) is REFUSED on the third attempt — `runOne` returns
+the refusal as `ok:false` without touching the executor, and the text carries
+the loop-breaking moves (look at the page, change target/tool, or mark the
+todo item blocked and MOVE ON). The second identical failure's note announces
+the ban one step early. A refusal is deliberately NOT `invalid` — three
+refusals in a row must not trip the invalid-call abort; the model should
+switch approaches, not lose the run. Wait tools are banned identically: the
+same `wait_for` that timed out twice times out a third time, and a LONGER
+`timeout_ms` is a different call and stays allowed. Pinned by
+`tests/loop.test.ts` ("bans an exact call…", "refuses the third identical
+failing call WITHOUT executing it" — asserts the executor saw two calls, not
+three).
+
+**Coordinate sanitizers — the click magnet** (`shared/coords.ts` pure,
+`content/actions.ts` probe, `tools/coords.ts` wiring). The model names a
+point; the harness resolves it against the LIVE page and reports every
+correction in the result's `[brackets]`:
+- `#probeAt` now returns the hit element's `rect` + `editable` flag, and —
+  when the point is not on a ref'd control — a `snap` candidate from a ring
+  probe (`#snapNear`: radii 12/24px × 8 directions of `elementFromPoint`,
+  deduped, bounded by `SNAP_RADIUS_PX`). Overlays are found wherever they
+  live in the tree — no ancestor walk — which is the floating-menu case the
+  logged near-misses came from.
+- `snapOrPromote` (pure, unit-tested): a point ON a small ref'd control
+  (`≤ 600×140`, not editable/canvas/iframe) clicks its CENTRE (an edge pixel
+  cannot slip off a rounded corner); a point within ~24px of a control SNAPS
+  to its centre; canvas pixels, editable hosts and big wrappers keep the
+  model's exact point. Applied to click-ish calls only — `ResolveOpts.magnet`
+  is set for `click_at`, `hover_at` and `input_sequence` click/hover steps,
+  and NEVER for `type_at` (caret placement) or `drag_at` (plot positions),
+  whose coordinates are exact by intent.
+- `looksLikeShotPixels`: an out-of-viewport `space:'viewport'` point that
+  fits the latest capture's IMAGE dims is screenshot pixels with a forgotten
+  `space:'screenshot'` (a run burned two turns on the raw bounds error) —
+  re-interpreted through the mapping instead of failing. Deliberately
+  limited to the default space: an explicit `space:'page'` point below the
+  fold is legal.
+- `compensateShotScroll`: `space:'screenshot'` points land where content sat
+  AT CAPTURE TIME; `ViewportShotInfo` now records the capture-time scroll
+  (`scrollX/scrollY` from the layout metrics it already read), and the
+  converted point shifts by (scrollAtCapture − scrollNow) so the click
+  follows the content the model actually saw.
+- **The policy gate mirrors the magnet**: `probeElementAt` takes the calling
+  tool's name (wired in `sw.ts`) and runs the same `snapOrPromote` decision
+  (`magnetHit`) for exactly the calls that apply it — otherwise the Jev risk
+  gate would assess the element under the RAW point while the click lands on
+  the corrected one. Gate and stroke can never disagree about what is being
+  clicked.
+- `element_at` reports the magnet's view (`nearbyControl`: what a click would
+  snap to, at what distance) so the model can plan canvas-adjacent clicks.
+
+**Quirk guards** (`tools/misc.ts`, `sw.ts`). Two page-environment failure
+classes that used to cost model turns are now handled by the harness:
+- *Trusted Types*: Docs/Sheets/Slides enforce `require-trusted-types-for`,
+  so every HTML-string sink throws. `isTrustedTypesBlocked` rewrites the raw
+  TypeError post-hoc into `TRUSTED-TYPES-BLOCKED` + `TRUSTED_TYPES_ADVICE`
+  (docs_read for content, textContent/querySelector for elements, never
+  retry variants); `trustedTypesRefusal` PRE-screens the certain-refusal
+  case (a sink regex — assignments and parsers only, `.innerHTML` READS are
+  legal and pass — on a known Workspace host) before spending the debugger
+  round trip. Both fail safe when `chrome.tabs` is unavailable.
+- *Debugger transport*: `withTransportRecovery` (sw.ts) performs the
+  sanctioned recovery itself when a result carries `TRANSPORT-FAILED` —
+  reload the tab, settle, retry the call ONCE — inside a per-run budget
+  (`TRANSPORT_RECOVERY_MAX = 2`), announced via an info event. A retry that
+  succeeds says so in the result; a retry that fails returns the original
+  error plus "the channel is flaky, switch to the content-script tools".
+  `docs_read` is exempt: its transport is the SW's own network, and a tab
+  reload cannot help but WOULD destroy editor state.
+
+**Deterministic Docs tools** — interface knowledge as executed code:
+- `tools/docs.ts`: **`docs_read`** (text/html export fetched from the
+  SERVICE WORKER — host permissions attach session cookies — with no page
+  context, no debugger and no navigation; Slides refuse with the visual
+  routes; PARALLEL_SAFE), **`docs_state`** (one call reads title, paragraph
+  style, font, size, bold/italic/underline via `aria-pressed`, editing mode
+  and open dialogs from the toolbar DOM, honestly listing unreadable fields;
+  PARALLEL_SAFE), **`docs_locate`** (trusted Ctrl+F → `Input.insertText`
+  phrase → Enter×(k−1) → screenshot of the highlighted match, which becomes
+  the LATEST capture so `space:'screenshot'` resolves against it → Escape;
+  the app's own text engine does the localization). `fetchWorkspaceExport`
+  is shared by docs_read and docs_op's verification. `parseWorkspaceUrl` /
+  `exportUrl` are pure and unit-tested (`tests/docs-read.test.ts`).
+- `shared/docs-ops.ts` (pure planner, `tests/docs-ops.test.ts`) +
+  `tools/docs-op.ts` (executor): **`docs_op`** runs one semantic operation —
+  `apply_style` (Heading 1–6 → trusted Ctrl+Alt+N; Title/Subtitle/Normal →
+  Format ▸ Paragraph styles walk), `page_numbers` (Insert ▸ Page numbers ▸
+  "Bottom of page"/"Top of page", alternates hedged — the header/footer
+  mistake is what it prevents), `page_setup` (dialog walk: paper-size
+  SELECT by option text, orientation RADIO by label, four margin fields BY
+  LABEL, OK), `insert_table` (Insert ▸ Table + trusted ArrowRight/Down into
+  the grid picker + Enter — no pixel hunting) — and every op carries a
+  `VerifyPlan` (export-HTML needle / toolbar style box / dialog-closed) so
+  the result says `verified:` or `NOT VERIFIED:` honestly. **`menu_path`**
+  is the generic label walk for everything else (`['File','Page setup']`,
+  2–6 labels, per-step poll budget ~2.4 s, disabled rows fail fast, stops at
+  the first miss and reports how far it got). Both are MUTATING (Jev-gated),
+  AUTO_OBSERVE with the 2.5 s settle budget, and their steps/corrections
+  ride the result text.
+- Content primitives (`content/actions.ts`): `clickByText`, `fillField`,
+  `queryText` + the `findByText`/`findField` label matcher — aria-label,
+  title, placeholder, associated/wrapping `<label>`; exact beats prefix
+  (accelerator suffixes like "Find and replace Ctrl+H" match by prefix);
+  shortest own text wins ties (innermost control, not its wrapper);
+  candidate labels are preference-ordered; visibility degrades gracefully
+  under jsdom (zero boxes count as "no layout info" only when the document
+  has no layout at all). `#click`'s file-input refusal means a menu walk can
+  never trap the run behind an OS picker. Pinned in `tests/actions.test.ts`.
+- The skill's `read`/`verify`/`fallback` sections were rewritten around
+  these tools (mobilebasic/preview navigation and the page-context export
+  fetch are explicitly forbidden), and `BASE_RULES_TAIL` carries the global
+  rule: NEVER leave the working URL just to read or verify it.
+
+**Progress notes** — the Claude-in-Chrome output shape ("41 actions · 1
+note"): `progress_note {text}` (in `tools/todo.ts`, pure narration,
+PARALLEL_SAFE, ≤ 400 chars, `normalizeProgressNote` unit-tested) emits a
+`progress_note` StepEvent (protocol.ts) that folds into chat as a
+`progress:true` note block (chat.ts), into runlog turn `notes` with the flag
+(logging.ts — markdown renders `📣 **Progress**`), and into the panel as a
+soft-green bubble with a `Progress` pill (`.info-line.is-progress` /
+`.progress-pill`; meaning never rides colour alone). BASE_RULES teaches the
+contract: batch the work first (whole sequences per step), then report
+"Progress: <what landed>. Next: <what's now>" — never two notes in a row
+without real work between. The full `run_program` executor (open-loop
+programs with per-step checkpoints) is the tracked next piece; docs_op,
+menu_path and input_sequence already provide most of its execute-many body.
+
+Tracked follow-ups (HUMAN-FLOW-PLAN §7): `run_program` + panel sequence
+grouping, the OCR offscreen indexer / text-anchored canvas clicks,
+`docs_op insert_image` + `set_font`, auto-undo on failed verification,
+per-item turn budgets and the two-blocked-items pause, and the C16 graded
+benchmark (items-correct-first-pass on the 32-item task).
 
 ## Capability tools (coordinate input, upload, netlog, handoff)
 

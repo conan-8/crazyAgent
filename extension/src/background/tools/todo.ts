@@ -103,3 +103,52 @@ registerTool({
     return { text: p.summary ?? "todos updated" };
   },
 });
+
+/** Cap on one progress note — a couple of sentences, not a report. */
+export const PROGRESS_NOTE_MAX_CHARS = 400;
+
+/**
+ * Validate/normalize one progress note. Pure so tests and the tool share one
+ * definition: non-empty, capped, whitespace-collapsed at the edges.
+ */
+export function normalizeProgressNote(raw: unknown): { text?: string; error?: string } {
+  if (typeof raw !== "string" || !raw.trim()) {
+    return {
+      error: `${failureTag("input")}: progress_note needs a non-empty text string — one or two sentences: what just landed, what comes next`,
+    };
+  }
+  const text = raw.trim().slice(0, PROGRESS_NOTE_MAX_CHARS);
+  return { text };
+}
+
+registerTool({
+  name: "progress_note",
+  description:
+    "Report progress to the user in ONE or two sentences — rendered as a distinct bubble in the panel (the run's narration channel). Send one when a logical sequence or todo item COMPLETES: 'Progress: <what just landed, with its key results>. Next: <what you are doing now>.' This REPLACES prose narration between actions — batch the work (input_sequence / menu_path / docs_op / multi-call steps), then note; never note twice in a row without real work between, and never for trivial single steps.",
+  parameters: {
+    type: "object",
+    properties: {
+      text: {
+        type: "string",
+        description:
+          "One or two sentences: 'Progress: title and intro are in with formatting. Next: the table, then the image.' (≤400 chars)",
+      },
+    },
+    required: ["text"],
+  },
+  async run(args, ctx: ToolContext) {
+    const { text, error } = normalizeProgressNote(args.text);
+    if (error || text === undefined) return { ok: false, error };
+    // The panel bubble, the chat transcript and the run log all fold this
+    // event; nothing touches the page.
+    ctx.emit({ kind: "progress_note", text });
+    return { ok: true, noted: text };
+  },
+  present(payload) {
+    // Echo nothing beyond the confirmation: the note text already rides the
+    // event to the panel, and the tool result stays small in history.
+    const p = (payload ?? {}) as { ok?: boolean; error?: string };
+    if (p.ok === false) return { text: p.error ?? "progress_note failed" };
+    return { text: "progress noted" };
+  },
+});

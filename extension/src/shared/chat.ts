@@ -58,6 +58,9 @@ export type ChatBlock =
       text: string;
       /** Note is about the Jev sidecar — rendered pink with a `Jev` pill. */
       jev?: boolean;
+      /** A model progress report — rendered as its own bubble with a
+       *  `Progress` pill (the run's narration channel). */
+      progress?: boolean;
     };
 
 export interface ChatTurn {
@@ -216,6 +219,11 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
       if (e.jev === true) {
         assistantTurn().blocks.push({ kind: "note", text: e.message, jev: true });
       }
+      break;
+    case "progress_note":
+      // The model's own narration channel: a distinct bubble between the tool
+      // cards, exactly where the work it summarizes happened.
+      assistantTurn().blocks.push({ kind: "note", text: e.text, progress: true });
       break;
     default:
       // step_started: activity noise, not chat content

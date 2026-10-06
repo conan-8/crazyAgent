@@ -25,7 +25,9 @@
 // confirmation card as clicking it by ref.
 import {
   boundsError,
+  compensateShotScroll,
   describeHit,
+  looksLikeShotPixels,
   planClick,
   planDrag,
   planHover,
@@ -34,9 +36,11 @@ import {
   shapeDragList,
   shapeModifiers,
   shapeSequenceSteps,
+  snapOrPromote,
   COORD_SPACE_PROP,
   type HitInfo,
   type Point,
+  type SnapCandidate,
   type StrokeStep,
   type ViewportInfo,
 } from "../../shared/coords";
@@ -45,7 +49,12 @@ import { trustedInputFailure, keyEventParams, parseKeyCombo, planTyping } from "
 import type { ElementProbe } from "../policy";
 import { runContentAction } from "./content-action";
 import { cursorPing } from "./cursor-overlay";
-import { layoutViewportCss, viewportShotInfo, viewportShotMapping } from "./perception";
+import {
+  layoutViewportCss,
+  viewportShotInfo,
+  viewportShotMapping,
+  type ViewportShotInfo,
+} from "./perception";
 import { ensureTabActive, resolveNoRefFocus } from "./trusted-input";
 import { registerTool, type ToolContext } from "./types";
 
@@ -60,6 +69,8 @@ interface PointProbe {
   hit: HitInfo | null;
   viewport: ViewportInfo;
   point: Point;
+  /** Near-miss magnet candidate from the content ring probe (see #snapNear). */
+  snap?: SnapCandidate | null;
 }
 
 async function probePoint(
@@ -84,14 +95,37 @@ interface ResolvedPoint {
 }
 
 type ResolveOutcome =
-  | { ok: true; source: "ref" | "frame" | "coords"; from: Point; hit: HitInfo | null; viewport: ViewportInfo | null; probed: boolean; resolved?: ResolvedPoint }
+  | {
+      ok: true;
+      source: "ref" | "frame" | "coords";
+      from: Point;
+      hit: HitInfo | null;
+      viewport: ViewportInfo | null;
+      probed: boolean;
+      resolved?: ResolvedPoint;
+      /** Sanitizer trail — what the harness corrected and why (rides the result). */
+      correction?: string;
+      /** The magnet candidate the probe saw, for element_at's report. */
+      snap?: SnapCandidate | null;
+    }
   | { ok: false; error: string };
 
 /** Distinguishes an ACTING resolve (click/drag/hover — allowed to scroll a
  *  ref into view) from a LOOKING one (element_at, the policy probe — no
- *  page-state changes). */
+ *  page-state changes). `magnet` enables the click snap/promote sanitizer —
+ *  CLICK-ish calls only: type_at (caret placement) and drag_at (plot
+ *  positions) coordinates are exact by intent and must never be re-aimed. */
 interface ResolveOpts {
   scrollRef?: boolean;
+  magnet?: boolean;
+}
+
+/** Bounds-error suffix that names the escape hatch the logs kept missing:
+ *  the coordinates were screenshot pixels without space:'screenshot'. */
+function shotHint(shot: ViewportShotInfo | undefined): string {
+  return shot
+    ? ` (the latest screenshot of this tab is ${shot.imageW}x${shot.imageH} image px — if your coordinates came from that image, pass space:'screenshot' and the tool converts them for you)`
+    : "";
 }
 
 /**
@@ -200,11 +234,52 @@ async function resolveTarget(
   const shaped = shapeCoordArgs(args);
   if (!shaped.ok) return { ok: false, error: shaped.error };
   let from = shaped.from;
+  const corrections: string[] = [];
+  const shot = viewportShotInfo(ctx.tabId);
   if (shaped.space === "screenshot") {
     const converted = await fromScreenshotSpace(ctx, from);
     if (!converted.ok) return { ok: false, error: converted.error };
     from = converted.point;
+    // Scroll compensation: the mapping places the point where the content sat
+    // AT CAPTURE TIME. If the page scrolled since, shift by the delta so the
+    // click follows the content the model actually saw.
+    if (shot && (shot.scrollX !== undefined || shot.scrollY !== undefined)) {
+      const cur = await layoutViewportCss(ctx.tabId, ctx.adapter).catch(() => undefined);
+      if (cur) {
+        const comp = compensateShotScroll(from, shot, cur);
+        if (comp.dx !== 0 || comp.dy !== 0) {
+          from = comp.point;
+          corrections.push(
+            `the page scrolled since that screenshot (dx ${comp.dx}, dy ${comp.dy}) — the point was shifted to follow the content`,
+          );
+        }
+      }
+    }
+  } else if (shaped.space === "viewport" && shot) {
+    // A viewport-space point that is outside the viewport but INSIDE the
+    // latest capture's image dimensions is screenshot pixels with a forgotten
+    // space:'screenshot' (a real run burned two turns on the raw bounds
+    // error). Re-interpret through the mapping instead of failing the call —
+    // deliberately limited to the default space: an explicit space:'page'
+    // point below the fold is legal and must not be re-read as image pixels.
+    const vp = await layoutViewportCss(ctx.tabId, ctx.adapter).catch(() => undefined);
+    if (vp && looksLikeShotPixels(from, vp, shot)) {
+      const mapping = await viewportShotMapping(ctx.tabId, ctx.adapter);
+      if (mapping) {
+        corrections.push(
+          `(${from.x}, ${from.y}) is outside the ${vp.width}x${vp.height} viewport but inside the latest ${shot.imageW}x${shot.imageH} screenshot — treated as space:'screenshot' pixels and converted (pass space:'screenshot' explicitly next time)`,
+        );
+        from = screenshotToViewportPoint(from, mapping);
+        const comp = compensateShotScroll(from, shot, vp);
+        if (comp.dx !== 0 || comp.dy !== 0) {
+          from = comp.point;
+          corrections.push(`shifted ${comp.dx},${comp.dy}px for scroll since the capture`);
+        }
+      }
+    }
   }
+  const correction = (): string | undefined =>
+    corrections.length ? corrections.join("; ") : undefined;
   const probed = await probePoint(ctx.tabId, from.x, from.y, "viewport");
   if (!probed) {
     // No content script at the point — the stroke still works. Bounds-check
@@ -212,13 +287,57 @@ async function resolveTarget(
     const viewport = await layoutViewportCss(ctx.tabId, ctx.adapter).catch(() => undefined);
     if (viewport) {
       const outOfBounds = boundsError(from, viewport);
-      if (outOfBounds) return { ok: false, error: `${failureTag("input")}: ${outOfBounds}` };
+      if (outOfBounds) {
+        return { ok: false, error: `${failureTag("input")}: ${outOfBounds}${shotHint(shot)}` };
+      }
     }
-    return { ok: true, source: "coords", from, hit: null, viewport: viewport ?? null, probed: false };
+    return {
+      ok: true,
+      source: "coords",
+      from,
+      hit: null,
+      viewport: viewport ?? null,
+      probed: false,
+      correction: correction(),
+    };
   }
   const outOfBounds = boundsError(probed.point, probed.viewport);
-  if (outOfBounds) return { ok: false, error: `${failureTag("input")}: ${outOfBounds}` };
-  return { ok: true, source: "coords", from: probed.point, hit: probed.hit, viewport: probed.viewport, probed: true };
+  if (outOfBounds) {
+    return { ok: false, error: `${failureTag("input")}: ${outOfBounds}${shotHint(shot)}` };
+  }
+  // Click magnet: a point that missed every control but sits within a small
+  // radius of one is re-aimed at its centre (and a point ON a small control
+  // clicks the centre, not the edge pixel). The correction is reported in the
+  // result so the model sees what actually got clicked. CLICK-ish calls only —
+  // see ResolveOpts.magnet.
+  let point = probed.point;
+  let hit = probed.hit;
+  if (opts.magnet) {
+    const decision = snapOrPromote(point, probed.hit, probed.snap);
+    if (decision.kind !== "keep") {
+      point = decision.point;
+      corrections.push(decision.label);
+      // Re-probe the corrected point so the hit report — and the element the
+      // policy gate saw (probeElementAt runs the same decision) — describe
+      // where the click really lands.
+      const reprobed = await probePoint(ctx.tabId, point.x, point.y, "viewport").catch(
+        () => null,
+      );
+      if (reprobed?.hit && !boundsError(reprobed.point, reprobed.viewport)) {
+        hit = reprobed.hit;
+      }
+    }
+  }
+  return {
+    ok: true,
+    source: "coords",
+    from: point,
+    hit,
+    viewport: probed.viewport,
+    probed: true,
+    correction: correction(),
+    snap: probed.snap ?? null,
+  };
 }
 
 /**
@@ -295,10 +414,17 @@ async function resolveEnd(
  * would act on. Used by the service worker's gate exactly like `probeElement`.
  * Understands all three input modes plus the batched drags list (probed at
  * its first start point — the list is one unit of work on one surface).
+ *
+ * `tool` names the calling tool so the probe can MIRROR the executor's click
+ * magnet (snapOrPromote) for exactly the calls that apply it — click_at and
+ * input_sequence's first click step. Without the mirror the gate would assess
+ * the element under the RAW point while the click lands on the corrected one
+ * (magnet snapped 14px onto a "Delete" button the gate never saw).
  */
 export async function probeElementAt(
   tabId: number,
   args: Record<string, unknown>,
+  tool?: string,
 ): Promise<ElementProbe | null> {
   // A drags list is probed at its first start point; an input_sequence at
   // its first CLICK step (clicks carry the risk, waits/keys do not).
@@ -314,6 +440,7 @@ export async function probeElementAt(
       ? ((seqClick.click as Record<string, unknown>) ?? {})
       : {};
   const probeArgs: Record<string, unknown> = { ...args, ...first };
+  const magnet = tool === "click_at" || (tool === "input_sequence" && seqClick !== undefined);
   if (typeof probeArgs.ref === "string") {
     const res = await runContentAction(tabId, {
       action: "resolvePoint",
@@ -363,15 +490,31 @@ export async function probeElementAt(
     if (!mapping) return null;
     const p = screenshotToViewportPoint({ x, y }, mapping);
     const probedShot = await probePoint(tabId, p.x, p.y, "viewport").catch(() => null);
-    const shotHit = probedShot?.hit;
+    if (!probedShot) return null;
+    const shotHit = magnet ? await magnetHit(tabId, probedShot) : probedShot.hit;
     if (!shotHit) return null;
     return elementProbeOf(shotHit);
   }
   const space = probeArgs.space === "page" ? "page" : "viewport";
   const probed = await probePoint(tabId, x, y, space).catch(() => null);
-  const hit = probed?.hit;
+  if (!probed) return null;
+  const hit = magnet ? await magnetHit(tabId, probed) : probed.hit;
   if (!hit) return null;
   return elementProbeOf(hit);
+}
+
+/**
+ * Apply the click magnet to a probe and return the hit of the CORRECTED
+ * point — the same decision (shared/snapOrPromote) the executor applies, so
+ * gate and stroke can never disagree about what is being clicked.
+ */
+async function magnetHit(tabId: number, probed: PointProbe): Promise<HitInfo | null> {
+  const decision = snapOrPromote(probed.point, probed.hit, probed.snap);
+  if (decision.kind === "keep") return probed.hit;
+  const reprobed = await probePoint(tabId, decision.point.x, decision.point.y, "viewport").catch(
+    () => null,
+  );
+  return reprobed?.hit ?? probed.hit;
 }
 
 function elementProbeOf(hit: HitInfo): ElementProbe {
@@ -481,7 +624,7 @@ const FRAME_PROP = {
 registerTool({
   name: "click_at",
   description:
-    "Click at screen coordinates instead of an element ref. Use ONLY when the target is drawn into a <canvas> or otherwise has no ref in the snapshot (canvas editors, maps, drawing boards, sliders) — a ref-based `click` is always safer. Accepts: x/y (CSS px from the visible viewport's top-left; space:'page' for document coordinates; space:'screenshot' for pixels of the latest screenshot image — point at exactly what you see and the tool converts), OR ref + dx/dy (element centre, scrolled into view first and translated through iframes), OR frame + frame-local x/y. The point is probed before clicking (best-effort: the click still lands when the probe cannot run, the result just says so) and the result reports what the point hit before AND after the click. The same safety rules apply as for `click`.",
+    "Click at screen coordinates instead of an element ref. Use ONLY when the target is drawn into a <canvas> or otherwise has no ref in the snapshot (canvas editors, maps, drawing boards, sliders) — a ref-based `click` is always safer. Accepts: x/y (CSS px from the visible viewport's top-left; space:'page' for document coordinates; space:'screenshot' for pixels of the latest screenshot image — point at exactly what you see and the tool converts), OR ref + dx/dy (element centre, scrolled into view first and translated through iframes), OR frame + frame-local x/y. The point is probed before clicking (best-effort: the click still lands when the probe cannot run, the result just says so) and the result reports what the point hit before AND after the click. Built-in aim correction: a point that lands ON a small control clicks its centre, a point within ~24px of one snaps to it, image pixels passed without space:'screenshot' are re-interpreted, and scroll since the capture is compensated — every correction is named in the result. The same safety rules apply as for `click`.",
   parameters: {
     type: "object",
     properties: {
@@ -501,11 +644,11 @@ registerTool({
     },
   },
   async run(args, ctx) {
-    const resolved = await resolveTarget(ctx, args, { scrollRef: true });
+    const resolved = await resolveTarget(ctx, args, { scrollRef: true, magnet: true });
     if (!resolved.ok) return { ok: false, error: resolved.error };
     const mods = shapeModifiers(args);
     if (!mods.ok) return { ok: false, error: mods.error };
-    const { from, hit, viewport, source, probed } = resolved;
+    const { from, hit, viewport, source, probed, correction } = resolved;
     await sendStrokes(ctx, planClick(from, mods.button, mods.clickCount));
     const after = probed ? await afterHit(ctx, from) : null;
     return {
@@ -513,6 +656,7 @@ registerTool({
       hit: probed ? describeHit(hit) : "unknown (no content script at that point — the click still landed; verify the effect)",
       after,
       source,
+      ...(correction ? { correction } : {}),
       viewport: viewport ? { width: viewport.width, height: viewport.height } : undefined,
     };
   },
@@ -521,10 +665,12 @@ registerTool({
       clicked?: Point;
       hit?: string;
       after?: string | null;
+      correction?: string;
     };
     const change = d.after && d.after !== d.hit ? ` → now: ${d.after}` : "";
+    const corr = d.correction ? ` [${d.correction}]` : "";
     return {
-      text: `clicked (${d.clicked?.x}, ${d.clicked?.y}) — ${d.hit ?? ""}${change}`,
+      text: `clicked (${d.clicked?.x}, ${d.clicked?.y}) — ${d.hit ?? ""}${change}${corr}`,
     };
   },
 });
@@ -661,6 +807,7 @@ registerTool({
           ? describeHit(resolved.hit)
           : "unknown (no content script at that point)",
         after,
+        ...(resolved.correction ? { correction: resolved.correction } : {}),
       };
     } catch (err) {
       return {
@@ -677,13 +824,15 @@ registerTool({
       typed?: { at: Point; selectedTo?: Point; chars: number; keys: number };
       focus?: string;
       hit?: string;
+      correction?: string;
     };
     const t = d.typed;
     if (!t) return { text: "nothing typed" };
     const sel = t.selectedTo ? ` → selected to (${t.selectedTo.x},${t.selectedTo.y})` : "";
     const keys = t.keys ? ` · ${t.keys} key(s)` : "";
+    const corr = d.correction ? ` [${d.correction}]` : "";
     return {
-      text: `typed ${t.chars} char(s) at (${t.at.x},${t.at.y})${sel}${keys} — ${d.hit ?? ""} (focus: ${d.focus ?? "?"})`,
+      text: `typed ${t.chars} char(s) at (${t.at.x},${t.at.y})${sel}${keys} — ${d.hit ?? ""} (focus: ${d.focus ?? "?"})${corr}`,
     };
   },
 });
@@ -739,7 +888,10 @@ registerTool({
           if (!mods.ok) {
             return { ok: false, error: `steps[${i}]: ${mods.error}`, completed: done, failedAt: i };
           }
-          const resolved = await resolveTarget(ctx, payload, { scrollRef: true });
+          // The click magnet applies to sequence clicks and hovers exactly as
+          // it does to the standalone tools (and the policy gate mirrors it —
+          // see probeElementAt).
+          const resolved = await resolveTarget(ctx, payload, { scrollRef: true, magnet: true });
           if (!resolved.ok) {
             return { ok: false, error: `steps[${i}]: ${resolved.error}`, completed: done, failedAt: i };
           }
@@ -753,12 +905,13 @@ registerTool({
             lastClickPoint = resolved.from;
             lastProbed = resolved.probed;
           }
+          const corr = resolved.correction ? ` [${resolved.correction}]` : "";
           done.push({
             i,
             what:
               step.kind === "hover"
-                ? `hovered (${resolved.from.x},${resolved.from.y})`
-                : `clicked (${resolved.from.x},${resolved.from.y}) — ${resolved.probed ? describeHit(resolved.hit) : "unknown hit"}`,
+                ? `hovered (${resolved.from.x},${resolved.from.y})${corr}`
+                : `clicked (${resolved.from.x},${resolved.from.y}) — ${resolved.probed ? describeHit(resolved.hit) : "unknown hit"}${corr}`,
           });
           continue;
         }
@@ -830,11 +983,15 @@ registerTool({
     properties: { ...POINT_PROPS, ...REF_PROP, ...FRAME_PROP, dx: { type: "number" }, dy: { type: "number" } },
   },
   async run(args, ctx) {
-    const resolved = await resolveTarget(ctx, args, { scrollRef: true });
+    const resolved = await resolveTarget(ctx, args, { scrollRef: true, magnet: true });
     if (!resolved.ok) return { ok: false, error: resolved.error };
-    const { from, hit, probed } = resolved;
+    const { from, hit, probed, correction } = resolved;
     await sendStrokes(ctx, planHover(from));
-    return { movedTo: from, hit: probed ? describeHit(hit) : "unknown (no content script at that point)" };
+    return {
+      movedTo: from,
+      hit: probed ? describeHit(hit) : "unknown (no content script at that point)",
+      ...(correction ? { correction } : {}),
+    };
   },
 });
 
@@ -958,12 +1115,24 @@ registerTool({
   async run(args, ctx) {
     const resolved = await resolveTarget(ctx, args);
     if (!resolved.ok) return { ok: false, error: resolved.error };
-    const { from, hit, viewport, source, probed, resolved: res } = resolved;
+    const { from, hit, viewport, source, probed, snap, resolved: res } = resolved;
     return {
       at: from,
       hit,
       described: probed ? describeHit(hit) : "unknown (no content script at that point)",
       source,
+      // What the click magnet would do with this point: the nearest control
+      // within its radius, when the point itself is not on one. Planning a
+      // canvas click next to DOM chrome? This is what a near-miss snaps to.
+      ...(snap
+        ? {
+            nearbyControl: {
+              described: `${snap.tag}${snap.text ? ` "${snap.text.slice(0, 40)}"` : ""}${snap.ref ? ` ref ${snap.ref}` : ""}`,
+              distance: snap.distance,
+              centre: { x: snap.rect.x + Math.round(snap.rect.w / 2), y: snap.rect.y + Math.round(snap.rect.h / 2) },
+            },
+          }
+        : {}),
       ...(res?.rect ? { targetRect: res.rect } : {}),
       ...(res ? { localPoint: res.localPoint, frameOffset: res.frameOffset } : {}),
       ...(viewport ? { viewport: { width: viewport.width, height: viewport.height } } : {}),
@@ -974,10 +1143,14 @@ registerTool({
       described?: string;
       viewport?: { width: number; height: number };
       localPoint?: Point;
+      nearbyControl?: { described: string; distance: number };
     };
     const local = d.localPoint ? ` (frame-local ${d.localPoint.x},${d.localPoint.y})` : "";
+    const near = d.nearbyControl
+      ? ` · nearest control within ${d.nearbyControl.distance}px: ${d.nearbyControl.described} (a click would snap to it)`
+      : "";
     return {
-      text: `${d.described ?? "nothing"} (viewport ${d.viewport?.width}x${d.viewport?.height})${local}`,
+      text: `${d.described ?? "nothing"} (viewport ${d.viewport?.width}x${d.viewport?.height})${local}${near}`,
     };
   },
 });

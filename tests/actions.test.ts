@@ -532,3 +532,173 @@ describe("resolvePoint (coordinate translation)", () => {
     expect(res.ok).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The label-based primitives behind menu_path / docs_op: controls are found by
+// what they SAY (aria-label, visible text, associated <label>), never by a
+// coordinate that can drift when the menu shifts.
+// ---------------------------------------------------------------------------
+
+describe("label-based actions (clickByText / fillField / queryText)", () => {
+  let actions: Actions;
+
+  beforeEach(() => {
+    actions = new Actions(new ElementRegistry());
+    document.body.innerHTML = "";
+  });
+
+  function setBody(html: string): void {
+    document.body.innerHTML = html;
+  }
+
+  it("clicks a menu row by exact text and reports what was clicked", () => {
+    setBody(`
+      <div role="menu">
+        <div role="menuitem" id="ps">Page setup</div>
+        <div role="menuitem" id="pr">Print</div>
+      </div>`);
+    let clicked: string | null = null;
+    document.getElementById("ps")!.addEventListener("click", () => (clicked = "ps"));
+    document.getElementById("pr")!.addEventListener("click", () => (clicked = "pr"));
+    const res = actions.run({ action: "clickByText", labels: ["Page setup"] });
+    expect(res.ok).toBe(true);
+    expect(clicked).toBe("ps");
+    const data = (res as { data?: { clicked?: string } }).data!;
+    expect(data.clicked).toContain("Page setup");
+  });
+
+  it("matches aria-labels and rows carrying accelerator suffixes (prefix match)", () => {
+    setBody(`
+      <button id="ins" aria-label="Insert table">Insert</button>
+      <div role="menuitem" id="fr">Find and replace Ctrl+H</div>`);
+    let clicked = "";
+    document.getElementById("ins")!.addEventListener("click", () => (clicked = "ins"));
+    document.getElementById("fr")!.addEventListener("click", () => (clicked = "fr"));
+    expect(actions.run({ action: "clickByText", labels: ["Insert table"] }).ok).toBe(true);
+    expect(clicked).toBe("ins");
+    expect(actions.run({ action: "clickByText", labels: ["Find and replace"] }).ok).toBe(true);
+    expect(clicked).toBe("fr");
+  });
+
+  it("prefers the exact match over a prefix match", () => {
+    setBody(`
+      <div role="button" id="wrap">Share settings</div>
+      <button id="exact">Share</button>`);
+    let clicked = "";
+    document.getElementById("wrap")!.addEventListener("click", () => (clicked = "wrap"));
+    document.getElementById("exact")!.addEventListener("click", () => (clicked = "exact"));
+    const res = actions.run({ action: "clickByText", labels: ["Share"] });
+    expect(res.ok).toBe(true);
+    expect(clicked).toBe("exact");
+  });
+
+  it("honours candidate preference order (the page-numbers alternates)", () => {
+    setBody(`
+      <div role="menuitem" id="bop">Bottom of page</div>
+      <div role="menuitem" id="foot">Footer</div>`);
+    let clicked = "";
+    document.getElementById("bop")!.addEventListener("click", () => (clicked = "bop"));
+    document.getElementById("foot")!.addEventListener("click", () => (clicked = "foot"));
+    expect(actions.run({ action: "clickByText", labels: ["Bottom of page", "Footer"] }).ok).toBe(true);
+    expect(clicked).toBe("bop");
+    // When the first candidate is absent, the alternate fires.
+    document.getElementById("bop")!.remove();
+    expect(actions.run({ action: "clickByText", labels: ["Bottom of page", "Footer"] }).ok).toBe(true);
+    expect(clicked).toBe("foot");
+  });
+
+  it("refuses a disabled row instead of clicking it", () => {
+    setBody(`<div role="menuitem" aria-disabled="true" id="t">Table</div>`);
+    let clicked = "";
+    document.getElementById("t")!.addEventListener("click", () => (clicked = "t"));
+    const res = actions.run({ action: "clickByText", labels: ["Table"] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("DISABLED");
+    expect(clicked).toBe("");
+  });
+
+  it("skips hidden rows and reports a clean miss when nothing matches", () => {
+    setBody(`
+      <div role="menuitem" style="display:none">Equation</div>
+      <div role="menuitem" id="vis">Equation</div>`);
+    let clicked = "";
+    document.getElementById("vis")!.addEventListener("click", () => (clicked = "vis"));
+    expect(actions.run({ action: "clickByText", labels: ["Equation"] }).ok).toBe(true);
+    expect(clicked).toBe("vis");
+
+    setBody(`<div>nothing here</div>`);
+    const miss = actions.run({ action: "clickByText", labels: ["Page setup"] });
+    expect(miss.ok).toBe(false);
+    if (!miss.ok) expect(miss.error).toContain("no visible clickable element");
+  });
+
+  it("never clicks a file input by text (the OS picker trap)", () => {
+    setBody(`<input type="file" aria-label="Upload from computer" />`);
+    const res = actions.run({ action: "clickByText", labels: ["Upload from computer"] });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("file input");
+  });
+
+  it("fills a text input found by aria-label, and one by its associated <label>", () => {
+    setBody(`
+      <input aria-label="Top margin" />
+      <label for="lm">Left margin</label><input id="lm" />`);
+    const a = actions.run({ action: "fillField", labels: ["Top margin"], value: "1", kind: "text" });
+    expect(a.ok).toBe(true);
+    expect((document.querySelector('input[aria-label="Top margin"]') as HTMLInputElement).value).toBe("1");
+    const b = actions.run({ action: "fillField", labels: ["Left margin"], value: "2" });
+    expect(b.ok).toBe(true);
+    expect((document.getElementById("lm") as HTMLInputElement).value).toBe("2");
+  });
+
+  it("picks a select option by its TEXT and reports the chosen option", () => {
+    setBody(`
+      <select aria-label="Paper size">
+        <option value="ltr">Letter</option>
+        <option value="a4">A4</option>
+      </select>`);
+    const res = actions.run({ action: "fillField", labels: ["Paper size"], value: "A4" });
+    expect(res.ok).toBe(true);
+    expect((document.querySelector("select") as HTMLSelectElement).value).toBe("a4");
+    expect((res as { data?: { option?: string } }).data?.option).toBe("A4");
+  });
+
+  it("names the real options when the wanted one does not exist", () => {
+    setBody(`
+      <select aria-label="Paper size"><option value="ltr">Letter</option></select>`);
+    const res = actions.run({ action: "fillField", labels: ["Paper size"], value: "Folio" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toContain("has no option");
+      expect(res.error).toContain("Letter");
+    }
+  });
+
+  it("clicks a radio found by aria-label", () => {
+    setBody(`
+      <input type="radio" name="o" aria-label="Portrait" />
+      <input type="radio" name="o" aria-label="Landscape" />`);
+    const res = actions.run({ action: "fillField", labels: ["Landscape"], kind: "radio" });
+    expect(res.ok).toBe(true);
+    const radios = document.querySelectorAll("input");
+    expect(radios[0]!.checked).toBe(false);
+    expect(radios[1]!.checked).toBe(true);
+  });
+
+  it("queryText reads text by selector and values by label, and reports absence", () => {
+    setBody(`
+      <div class="kix-paragraphstyles-combobox" role="combobox">Normal text</div>
+      <input aria-label="Document title" value="Feature Test" />`);
+    const bySelector = actions.run({
+      action: "queryText",
+      selector: ".kix-paragraphstyles-combobox",
+    });
+    expect(bySelector.ok).toBe(true);
+    expect((bySelector as { data: { text: string } }).data.text).toBe("Normal text");
+    const byLabel = actions.run({ action: "queryText", labels: ["Document title"] });
+    expect(byLabel.ok).toBe(true);
+    expect((byLabel as { data: { value: string } }).data.value).toBe("Feature Test");
+    const missing = actions.run({ action: "queryText", selector: '[role="dialog"]' });
+    expect(missing.ok).toBe(false);
+  });
+});

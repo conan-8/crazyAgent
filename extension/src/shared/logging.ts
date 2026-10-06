@@ -87,9 +87,10 @@ export interface LogTurn {
    * failed — retrying…"), checkpoint resumes, reasoning-cap cuts, the
    * usage-silence note. These used to be dropped as telemetry noise — which
    * is why "the panel said API failed a few times, why?" was unanswerable
-   * from the export. Jev notes keep their flag for the pink rendering.
+   * from the export. Jev notes keep their flag for the pink rendering;
+   * `progress_note` events fold here too (flagged) — the run's narration.
    */
-  notes?: { at: number; message: string; jev?: boolean }[];
+  notes?: { at: number; message: string; jev?: boolean; progress?: boolean }[];
   /**
    * Per-turn token usage (last `usage` event of the turn). The context
    * number is the growth curve that explains a run getting slower — and the
@@ -409,6 +410,14 @@ export function foldLogEvent(
       // Whole-list replacement: the newest snapshot IS the plan's final state.
       rec.todos = e.items;
       break;
+    case "progress_note": {
+      // The model's narration rides the same per-turn notes list as info
+      // events (flagged, so exports and the panel can render it distinctly).
+      const turn = currentTurn(rec, at);
+      turn.notes = turn.notes ?? [];
+      turn.notes.push({ at, message: e.text, progress: true });
+      break;
+    }
   }
 }
 
@@ -611,7 +620,7 @@ export function toMarkdown(records: LogTurnRecord[]): string {
       if (turn.notes) {
         for (const n of turn.notes) {
           out.push(
-            `- ${n.jev ? "🧠 **Jev**" : "ℹ️ note"} at ${iso(n.at)}: ${n.message}`,
+            `- ${n.progress ? "📣 **Progress**" : n.jev ? "🧠 **Jev**" : "ℹ️ note"} at ${iso(n.at)}: ${n.message}`,
           );
         }
       } else {
