@@ -80,6 +80,8 @@ export interface ActionResult {
   ok: boolean;
   error?: string;
   data?: unknown;
+  /** Set when the harness had to re-inject the content script before this ran. */
+  repaired?: boolean;
 }
 
 const PointerCtor: typeof MouseEvent =
@@ -334,9 +336,14 @@ export class Actions {
     if (!labels.length) return { ok: false, error: "clickByText needs at least one label" };
     const found = findByText(labels);
     if (!found) {
+      const rows = visibleLabels(
+        Array.from(document.querySelectorAll<HTMLElement>(MENU_ROW_CANDIDATES)),
+        labelOf,
+        12,
+      );
       return {
         ok: false,
-        error: `no visible clickable element matches ${JSON.stringify(labels)}`,
+        error: `no visible clickable element matches ${JSON.stringify(labels)}${missHint(rows, "menu rows")}`,
       };
     }
     if (isDisabledEl(found.el)) {
@@ -364,7 +371,15 @@ export class Actions {
     if (!labels.length) return { ok: false, error: "fillField needs at least one label" };
     const found = findField(labels);
     if (!found) {
-      return { ok: false, error: `no visible form field matches ${JSON.stringify(labels)}` };
+      const fields = visibleLabels(
+        Array.from(document.querySelectorAll<HTMLElement>(FIELD_CANDIDATES)),
+        fieldLabelOf,
+        10,
+      );
+      return {
+        ok: false,
+        error: `no visible form field matches ${JSON.stringify(labels)}${missHint(fields, "fields")}`,
+      };
     }
     const el = found.el;
     const effective =
@@ -1153,8 +1168,45 @@ interface FoundByLabel {
   score: number;
 }
 
-/** 0 = exact label match, 1 = label starts with the want (accelerator suffix,
- *  "Styles: Normal text"), null = no match. */
+/**
+ * Menu rows carry decoration that is never part of the row's NAME: a submenu
+ * arrow ("Table of contents►"), Google's accelerator suffix ("CommentCtrl+Alt+M",
+ * "Tab(F11)Shift+F11"), and status badges ("Page elementsUpdated►",
+ * "eSignaturePremium(1)"). The old matcher accepted only an exact label or
+ * "label + space", so every decorated row was invisible to clickByText: a real
+ * run was told "Table of contents" and "Page elements" did not exist while both
+ * were on screen (D t148/t12), then abandoned label walks for raw DOM clicks.
+ *
+ * The arrow is stripped outright; a remaining tail is accepted only when EVERY
+ * word in it is a known accelerator or badge — so "Insert" still never matches
+ * "Insert table", and a wrong path stays a miss instead of clicking a neighbour.
+ */
+const SUBMENU_ARROW = /[\u25b6\u25ba\u25b8\u2192\u203a\u00bb]+\s*$/;
+/** One accelerator chunk: "(Z)", "(F11)", "Ctrl+K", "Shift+F11", "F11". */
+const SHORTCUT_CHUNK =
+  "(?:\\([a-z]\\)|\\(f\\d{1,2}\\)|f\\d{1,2}|(?:ctrl|cmd|meta|alt|option|shift|fn|\u2318)(?:\\+(?:[\\w\u2318]+))*)";
+/** A row can carry several: "Tab(F11)Shift+F11", "Ctrl+Alt+O Ctrl+Alt+H". */
+const SHORTCUT_TOKEN = new RegExp(`^(?:${SHORTCUT_CHUNK})+$`, "i");
+const BADGE_TOKEN = /^(?:new|updated|beta|premium|try it|early access)(?:\(\d+\))?$|^\(\d+\)$/i;
+
+function stripMenuDecorations(text: string): string {
+  return collapse(text.replace(SUBMENU_ARROW, ""));
+}
+
+/** True when `rest` (what follows a matched label) is pure row decoration. */
+function tailIsDecoration(rest: string): boolean {
+  const cleaned = stripMenuDecorations(rest).replace(/^[\s:\u2013\u2014-]+/, "");
+  if (!cleaned) return true;
+  return cleaned.split(/\s+/).every((t) => SHORTCUT_TOKEN.test(t) || BADGE_TOKEN.test(t));
+}
+
+/** Prefix match that tolerates row decoration (see tailIsDecoration). */
+function prefixMatches(text: string, want: string): boolean {
+  return text.startsWith(want) && tailIsDecoration(text.slice(want.length));
+}
+
+/** 0 = exact label match, 1 = label + decoration (accelerator/badge/arrow) or
+ *  "Styles: Normal text", 2 = loose prefix (legacy fallback), null = no match. */
 function matchScoreOf(el: Element, want: string): number | null {
   const aria = collapse(el.getAttribute("aria-label")).toLowerCase();
   const title = collapse(el.getAttribute("title")).toLowerCase();
@@ -1164,13 +1216,20 @@ function matchScoreOf(el: Element, want: string): number | null {
       ? collapse(el.placeholder).toLowerCase()
       : "";
   if (aria === want || title === want || txt === want || ph === want) return 0;
+  if (stripMenuDecorations(txt) === want) return 0;
   if (
-    aria.startsWith(want) ||
-    title.startsWith(want) ||
-    ph.startsWith(want) ||
-    txt.startsWith(want + " ")
+    prefixMatches(aria, want) ||
+    prefixMatches(title, want) ||
+    prefixMatches(ph, want) ||
+    prefixMatches(txt, want)
   ) {
     return 1;
+  }
+  // Legacy leniency, ranked below every decorated match: an aria-label like
+  // "Styles: Normal text" still answers a "Styles" ask, and "Insert table"
+  // still answers "Insert" — but only when nothing cleaner is on screen.
+  if (aria.startsWith(want) || title.startsWith(want) || ph.startsWith(want) || txt.startsWith(want)) {
+    return 2;
   }
   return null;
 }
@@ -1254,6 +1313,56 @@ function describeFound(f: FoundByLabel): string {
   const role = f.el.getAttribute("role");
   const txt = collapse(f.el.innerText ?? f.el.textContent ?? "").slice(0, 60);
   return `<${f.el.tagName.toLowerCase()}${role ? ` role=${role}` : ""}> "${txt || f.matched}"`;
+}
+
+/** Menu-ish rows — the siblings a failed menu walk should be taught. */
+const MENU_ROW_CANDIDATES =
+  '.goog-menuitem, [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]';
+
+/** Visible, de-duplicated labels from `nodes`, capped for one result line. */
+function visibleLabels(
+  nodes: HTMLElement[],
+  label: (el: HTMLElement) => string,
+  limit: number,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const el of nodes) {
+    if (!isVisibleLoose(el)) continue;
+    const text = collapse(label(el)).slice(0, 28);
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * What a MISS teaches: the labels actually on screen. A real run burned ~40
+ * turns retrying paths against a menu whose rows it could not name; one line
+ * ("visible menu rows: … Header, Footer, Watermark") turns that into a
+ * one-turn correction — and names the real row when upstream renamed one
+ * ("Table options", not "Table properties").
+ */
+function missHint(items: string[], what: string): string {
+  return items.length ? ` — visible ${what}: ${items.join(", ")}` : "";
+}
+
+function fieldLabelOf(el: HTMLElement): string {
+  const aria = collapse(el.getAttribute("aria-label"));
+  if (aria) return aria;
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    const ph = collapse(el.placeholder);
+    if (ph) return ph;
+  }
+  const lab = el.id ? document.querySelector(`label[for="${escapeForSelector(el.id)}"]`) : null;
+  const wrap = el.closest("label");
+  return collapse(
+    lab?.textContent ?? wrap?.textContent ?? el.getAttribute("title") ?? el.getAttribute("name") ?? "",
+  );
 }
 
 function base64ToArrayBuffer(b64: string): ArrayBuffer {

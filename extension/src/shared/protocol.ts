@@ -80,7 +80,20 @@ export interface TodoItem {
   status: TodoStatus;
 }
 
-export type TodoStatus = "pending" | "in_progress" | "completed";
+/**
+ * `blocked` exists because the failure ladder already tells the model to "mark
+ * its todo item blocked" when a step is genuinely impossible — and until now
+ * there was no such status, so the only honest move was to give up on the
+ * whole run (run D quit at 12/32 with 19 items open, and the harness accepted
+ * it as `done`). A blocked item is a COMPLETED decision: the run may end with
+ * blocked items, never with silently abandoned ones.
+ */
+export type TodoStatus = "pending" | "in_progress" | "completed" | "blocked";
+
+/** Items that still owe the user something: not done, not declared impossible. */
+export function openTodos(items: TodoItem[] | undefined): TodoItem[] {
+  return (items ?? []).filter((t) => t.status === "pending" || t.status === "in_progress");
+}
 
 export type StepEvent =
   | {

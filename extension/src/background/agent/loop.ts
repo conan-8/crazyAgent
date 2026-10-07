@@ -12,8 +12,8 @@ import type {
   ToolCall,
 } from "../../shared/llm";
 import { THINKING_LEVELS, thinkingBudgetFor } from "../../shared/llm";
-import { thinkingForEffort } from "../../shared/jev";
-import type { Checkpoint, RunStats, StepEvent } from "../../shared/protocol";
+import { JEV_EFFORT_CONFIDENCE, thinkingForEffort } from "../../shared/jev";
+import { openTodos, type Checkpoint, type RunStats, type StepEvent } from "../../shared/protocol";
 import { validateToolArgs } from "../tools/types";
 import { estimateTokens } from "../../shared/modes";
 import { madmanExclamation, madmanLabel } from "../../shared/madman";
@@ -307,12 +307,81 @@ export function isRoutineStep(s: StepOutcomeState): boolean {
 }
 
 /**
- * How many capped steps in a row before thinking is switched off for the REST
- * of the run. Each cap costs a second round trip, so a model that overruns
+ * How many capped steps before thinking is switched off for the REST of the
+ * run. Each cap costs a second round trip, so a model that overruns
  * every step is paying double to keep a habit that is not paying for itself;
  * after this many, the loop stops asking for thinking at all and says so.
  */
 const MAX_REASONING_OVERRUNS = 3;
+
+/**
+ * How many times a "final" answer with unfinished plan items is bounced back
+ * before the run is allowed to end with an honest unfinished summary. Two is
+ * enough for a model that simply forgot to keep the plan current, and bounded
+ * so a model that refuses to continue cannot hold the run hostage.
+ */
+const MAX_COMPLETION_NUDGES = 2;
+
+/**
+ * Ceiling on the RAW checkpoint's message chars (see boundCheckpoint). Four
+ * times the per-step budget, so the model's visible history is untouched in
+ * the common case — this only ever bites on the long runs that used to die.
+ */
+const CHECKPOINT_MAX_CHARS = HISTORY_BUDGET_CHARS * 4;
+/** Where a bound-triggered compaction trims to (hysteresis, like the view). */
+const CHECKPOINT_COMPACT_CHARS = HISTORY_BUDGET_CHARS * 2;
+
+/**
+ * Bound the checkpoint by DROPPING its oldest messages.
+ *
+ * `truncateHistory` only elides content inside a COPY — that is the model's
+ * per-step view. `cp.messages` itself kept every message of the whole run, so
+ * each step re-mapped and re-serialized the lot, and memory grew without
+ * limit: three field runs died silently at 1.83M / 2.54M / 2.74M chars (the
+ * service worker stopped mid-turn — run E's turn 340 never ended and the run
+ * sat "running" forever with nothing in the log to say why).
+ *
+ * The cut never starts on a `tool` message, so a tool result can never be
+ * orphaned from the assistant call that produced it; a synthetic user line
+ * records the drop in-band, because a silently shortened transcript is how a
+ * model ends up "remembering" a document it can no longer see.
+ */
+export function boundCheckpoint(messages: LlmMessage[]): {
+  messages: LlmMessage[];
+  dropped: number;
+} {
+  const size = (m: LlmMessage): number =>
+    m.content.length +
+    (m.toolCalls?.reduce((sum, tc) => sum + JSON.stringify(tc.args ?? {}).length, 0) ?? 0) +
+    (m.images?.length ?? 0) * IMAGE_CHARS_EQUIV;
+  let total = 0;
+  for (const m of messages) total += size(m);
+  if (total <= CHECKPOINT_MAX_CHARS) return { messages, dropped: 0 };
+
+  const target = CHECKPOINT_COMPACT_CHARS;
+  let tail = 0;
+  let cut = messages.length;
+  while (cut > 0 && tail <= target) {
+    cut--;
+    tail += size(messages[cut]!);
+  }
+  while (cut < messages.length && messages[cut]!.role === "tool") cut++;
+  const dropped = cut;
+  if (dropped <= 0) return { messages, dropped: 0 };
+  return {
+    messages: [
+      {
+        role: "user",
+        content:
+          `[harness] ${dropped} older message(s) were compacted away to bound this run's memory. ` +
+          "The task, the live plan (todos) and everything recent are intact — re-read the page or the " +
+          "document if you need an older detail instead of assuming it.",
+      },
+      ...messages.slice(cut),
+    ],
+    dropped,
+  };
+}
 
 /**
  * The reasoning ceiling for one step, in CHARACTERS (0 = no cap). Derived from
@@ -701,11 +770,20 @@ export async function runAgentTask(
   // Replies that carried no answer and no tool call, in a row. Bounded so a
   // model that keeps coming back empty stops honestly instead of looping.
   let emptyReplies = 0;
+  // Times a final answer was bounced back because the plan still had open
+  // items (see the completion gate below).
+  let completionNudges = 0;
   // Effective thinking level. Starts at the configured one and is dropped to
   // "off" for the rest of the run once the reasoning cap has tripped
-  // MAX_REASONING_OVERRUNS times in a row (see reasoningCapChars).
+  // MAX_REASONING_OVERRUNS times (see reasoningCapChars and the counter below).
   let thinking = deps.thinking;
-  // Consecutive steps whose reasoning had to be cut short.
+  // Reasoning cuts this RUN has paid for — deliberately NOT reset by a healthy
+  // step. The old rule counted cuts in a row, so runs E and F (14 and 11 cuts,
+  // never three consecutively) kept paying a wasted round trip each time and
+  // never reached the downgrade: at `low` that was ~20 extra minutes of decode
+  // in E alone. The budget a step overruns is thrown away regardless (the step
+  // is re-asked at "off"), so three wasted cuts mean this run's ceiling is not
+  // buying anything.
   let overruns = 0;
   // Adaptive per-step thinking (deps.adaptiveThinking): consecutive routine
   // steps so far, whether subsequent steps are currently sent with thinking
@@ -718,7 +796,14 @@ export async function runAgentTask(
   // the risk-gate POST, held for exactly ONE step (consumed at the top of the
   // next step, dropped on any surprise), plus the once-per-run announcement
   // flag and the counters that make the payoff measurable in run stats.
+  // `jevRoutineSticky` is what makes a confident "routine" verdict buy a RUN
+  // of cheap steps instead of one: the local adaptive streak needs reasoning
+  // under ADAPTIVE_ROUTINE_MAX_REASONING_CHARS, which a model thinking at
+  // `low` never produces — the catch-22 that kept E and F at 3.6s decode per
+  // step for their whole lives. Same contract as the adaptive path: any
+  // surprise (failure, navigation, overrun, steering, empty reply) clears it.
   let pendingEffort: { choice: string; confidence: number } | null = null;
+  let jevRoutineSticky = false;
   let jevEffortNoted = false;
   let effortApplied = 0;
   let effortRaised = 0;
@@ -729,6 +814,10 @@ export async function runAgentTask(
       pendingEffort = null;
       effortDropped += 1;
     }
+  };
+  /** A surprise ends the cheap-mode a Jev routine verdict bought. */
+  const endStickyRoutine = (): void => {
+    jevRoutineSticky = false;
   };
   // The stable system prompt (rules + task) is byte-identical for the whole
   // run — built once. Only the clock is per-step, and it rides in
@@ -752,11 +841,12 @@ export async function runAgentTask(
 
     // Mid-run steering: whatever the user typed since the last step lands as
     // normal user messages this call will see. Steering is a surprise: any
-    // pending effort hint dies with it.
+    // pending effort hint dies with it, and so does a Jev-bought cheap mode.
     for (const text of deps.takeUserInput?.() ?? []) {
       if (text.trim()) {
         cp.messages.push({ role: "user", content: text });
         dropEffortHint();
+        endStickyRoutine();
       }
     }
 
@@ -773,23 +863,37 @@ export async function runAgentTask(
     // usage estimate below — the estimate used to run against the raw
     // checkpoint (every screenshot ever taken, base64 counted as chars/4) and
     // reported absurdities like "context 1215933/128000".
+    const bounded = boundCheckpoint(cp.messages);
+    if (bounded.dropped > 0) {
+      cp.messages = bounded.messages;
+      deps.emit({
+        kind: "info",
+        message: `run memory bounded: dropped ${bounded.dropped} old message(s) from the checkpoint (the per-step view is unchanged)`,
+      });
+    }
     const history = truncateHistory(cp.messages, HISTORY_BUDGET_CHARS, historyTokenBudget);
     // Effective thinking for THIS step, cheapest certain signal first:
-    // Tier 0 — the adaptive streak says routine → off (locally certain).
     // Tier 1 — the Jev effort hint from the last gate POST, consumed once
     // here (whether or not it changes the level) and clamped to the ceiling.
+    // Tier 0 — the adaptive streak (local) or a sticky Jev "routine" verdict.
     // Baseline — the run level. The overrun machinery and the reasoning cap
     // keep operating on the RUN level; a hinted-down step just generates less.
     let effectiveThinking: ThinkingLevel | undefined = thinking;
-    if (deps.adaptiveThinking === true && adaptiveRoutine && thinking !== "off") {
-      effectiveThinking = "off";
-    } else if (pendingEffort) {
+    if (pendingEffort) {
       const hint = pendingEffort;
       pendingEffort = null;
       const routed = thinkingForEffort(hint, thinking, thinkingCeiling);
       if (routed !== undefined && routed !== thinking) {
-        if (levelRank(routed) > levelRank(thinking ?? "off")) effortRaised += 1;
-        else effortApplied += 1;
+        if (levelRank(routed) > levelRank(thinking ?? "off")) {
+          effortRaised += 1;
+          // `deep` is the one raise: it ends any cheap-mode immediately.
+          endStickyRoutine();
+        } else {
+          effortApplied += 1;
+          if (hint.choice === "routine" && hint.confidence >= JEV_EFFORT_CONFIDENCE) {
+            jevRoutineSticky = true;
+          }
+        }
         if (!jevEffortNoted) {
           jevEffortNoted = true;
           deps.emit({
@@ -802,6 +906,13 @@ export async function runAgentTask(
         }
         effectiveThinking = routed;
       }
+    }
+    if (
+      effectiveThinking === thinking &&
+      thinking !== "off" &&
+      (jevRoutineSticky || (deps.adaptiveThinking === true && adaptiveRoutine))
+    ) {
+      effectiveThinking = "off";
     }
     const request: LlmRequest = {
       system: systemPrompt,
@@ -855,6 +966,7 @@ export async function runAgentTask(
         routineStreak = 0;
         adaptiveRoutine = false;
         dropEffortHint();
+        endStickyRoutine();
         deps.emit({
           kind: "info",
           message:
@@ -863,10 +975,9 @@ export async function runAgentTask(
         });
         if (overruns >= MAX_REASONING_OVERRUNS && thinking !== "off") {
           thinking = "off";
-          overruns = 0;
           deps.emit({
             kind: "info",
-            message: `${MAX_REASONING_OVERRUNS} steps in a row overran the reasoning budget — thinking is off for the rest of this run`,
+            message: `${MAX_REASONING_OVERRUNS} steps have now overrun the reasoning budget on this run — thinking is off for the rest of this run (each cut was re-asked at off anyway, so the ceiling was only buying wasted round trips)`,
           });
         }
         const second = await completeWithRetry(
@@ -881,7 +992,9 @@ export async function runAgentTask(
         if (!second.result) throw new Error("reasoning cap tripped with thinking already off");
         result = second.result;
       } else {
-        overruns = 0;
+        // NOTE: `overruns` deliberately survives a healthy step — see its
+        // declaration. A run that keeps paying for cuts it then throws away
+        // does not become healthy just because one step happened to fit.
         result = first.result;
       }
     } catch (err) {
@@ -1021,6 +1134,7 @@ export async function runAgentTask(
       routineStreak = 0;
       adaptiveRoutine = false;
       dropEffortHint();
+      endStickyRoutine();
       cp.stepIndex = step + 1;
       cp.updatedAt = Date.now();
       capCheckpointImages(cp.messages);
@@ -1057,6 +1171,51 @@ export async function runAgentTask(
     }
 
     if (!result.toolCalls.length) {
+      // Completion gate: a "final" answer while the live plan still owes work
+      // is not a completion. Run D announced "12 of 32 verified, I need to
+      // stop" and the run ended `done` with 19 items open — the user had to
+      // type "continue then. why are you stopping if you can do it". The plan
+      // (cp.todos, kept current by sw.ts on every todo_update) is the loop's
+      // own record of what the run promised, so it gets a say here.
+      //
+      // The escape hatch is explicit and honest: mark items blocked (a status
+      // the ladder has always told the model to use) and the run may end with
+      // them. Bounded at MAX_COMPLETION_NUDGES so a stubborn model still stops.
+      const open = openTodos(cp.todos);
+      if (open.length > 0 && completionNudges < MAX_COMPLETION_NUDGES) {
+        completionNudges += 1;
+        const listed = open
+          .slice(0, 8)
+          .map((t) => `- ${t.content}`)
+          .join("\n");
+        const more = open.length > 8 ? `\n…and ${open.length - 8} more.` : "";
+        cp.messages.push({
+          role: "user",
+          content:
+            `[harness] Not finished — your own plan still has ${open.length} item(s) neither completed nor blocked:\n` +
+            `${listed}${more}\n` +
+            "An unfinished report is NOT a completion. Do the next item now. If an item is genuinely impossible " +
+            'after real attempts, rewrite the plan with todo_write and mark that item "blocked" (one-line reason ' +
+            "in its content), then carry on with the rest. Answer again only when every item is completed or " +
+            `blocked. (Completion nudge ${completionNudges} of ${MAX_COMPLETION_NUDGES}.)`,
+        });
+        deps.emit({
+          kind: "info",
+          message: `final answer arrived with ${open.length} open plan item(s) — sending the model back to finish them or mark them blocked`,
+        });
+        cp.stepIndex = step + 1;
+        cp.updatedAt = Date.now();
+        await deps.save(cp);
+        continue;
+      }
+      if (open.length > 0) {
+        deps.emit({
+          kind: "info",
+          message:
+            `finishing with ${open.length} plan item(s) still open after ${MAX_COMPLETION_NUDGES} completion nudges — ` +
+            "the summary reports unfinished work",
+        });
+      }
       // Final answer — the task is done.
       cp.done = true;
       cp.updatedAt = Date.now();
@@ -1205,6 +1364,7 @@ export async function runAgentTask(
     const progressVerdict: { choice: string; confidence: number } | null = lastJevProgress;
     if (stepFailed || calls.some((c) => PAGE_CHANGING_TOOLS.has(c.name))) {
       dropEffortHint();
+      endStickyRoutine();
     } else if (effortVerdict) {
       pendingEffort = effortVerdict;
     }

@@ -639,6 +639,79 @@ describe("label-based actions (clickByText / fillField / queryText)", () => {
     if (!res.ok) expect(res.error).toContain("file input");
   });
 
+  it("matches live Docs rows carrying submenu arrows and status badges", () => {
+    // These five shapes come from a real in-page dump of the 2026 Insert menu.
+    // The old matcher saw none of them (no exact text, no "label + space"),
+    // which is how rows that were on screen got reported missing.
+    setBody(`
+      <div role="menu">
+        <div role="menuitem" id="toc">Table of contents►</div>
+        <div role="menuitem" id="pe">Page elementsUpdated►</div>
+        <div role="menuitem" id="cm">CommentCtrl+Alt+M</div>
+        <div role="menuitem" id="sc">Smart chips(Z)►</div>
+        <div role="menuitem" id="es">eSignaturePremium(1)</div>
+        <div role="menuitem" id="tab">Tab(F11)Shift+F11</div>
+      </div>`);
+    let clicked = "";
+    for (const id of ["toc", "pe", "cm", "sc", "es", "tab"]) {
+      document.getElementById(id)!.addEventListener("click", () => (clicked = id));
+    }
+    const want: Array<[string, string]> = [
+      ["Table of contents", "toc"],
+      ["Page elements", "pe"],
+      ["Comment", "cm"],
+      ["Smart chips", "sc"],
+      ["eSignature", "es"],
+      ["Tab", "tab"],
+    ];
+    for (const [label, id] of want) {
+      clicked = "";
+      expect(actions.run({ action: "clickByText", labels: [label] }).ok).toBe(true);
+      expect(clicked).toBe(id);
+    }
+  });
+
+  it("still prefers the exact row over a longer decorated neighbour", () => {
+    setBody(`
+      <div role="menu">
+        <div role="menuitem" id="t">Table►</div>
+        <div role="menuitem" id="toc">Table of contents►</div>
+      </div>`);
+    let clicked = "";
+    document.getElementById("t")!.addEventListener("click", () => (clicked = "t"));
+    document.getElementById("toc")!.addEventListener("click", () => (clicked = "toc"));
+    expect(actions.run({ action: "clickByText", labels: ["Table"] }).ok).toBe(true);
+    expect(clicked).toBe("t");
+  });
+
+  it("names the visible rows (and fields) when a label misses — the teaching miss", () => {
+    setBody(`
+      <div role="menu">
+        <div role="menuitem">HeaderCtrl+Alt+O Ctrl+Alt+H</div>
+        <div role="menuitem">FooterCtrl+Alt+O Ctrl+Alt+F</div>
+        <div role="menuitem">Watermark</div>
+      </div>`);
+    const miss = actions.run({ action: "clickByText", labels: ["Headers and footers"] });
+    expect(miss.ok).toBe(false);
+    if (!miss.ok) {
+      expect(miss.error).toContain("visible menu rows");
+      expect(miss.error).toContain("Header");
+      expect(miss.error).toContain("Watermark");
+    }
+
+    setBody(`
+      <div role="dialog">
+        <input aria-label="Top margin" />
+        <input placeholder="Bottom margin" />
+      </div>`);
+    const field = actions.run({ action: "fillField", labels: ["Paper size"], value: "Letter", kind: "select" });
+    expect(field.ok).toBe(false);
+    if (!field.ok) {
+      expect(field.error).toContain("visible fields");
+      expect(field.error).toContain("Top margin");
+    }
+  });
+
   it("fills a text input found by aria-label, and one by its associated <label>", () => {
     setBody(`
       <input aria-label="Top margin" />

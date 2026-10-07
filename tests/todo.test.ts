@@ -9,6 +9,7 @@ import {
   normalizeTodos,
   summarizeTodos,
 } from "../extension/src/background/tools/todo";
+import { openTodos } from "../extension/src/shared/protocol";
 import { toolRegistry } from "../extension/src/background/tools/types";
 import "../extension/src/background/tools/todo"; // registers todo_write
 import { foldLogEvent, newTurnRecord, toMarkdown } from "../extension/src/shared/logging";
@@ -66,6 +67,24 @@ describe("normalizeTodos", () => {
     }));
     expect(normalizeTodos(many).error).toContain(String(TODO_MAX_ITEMS));
     expect(normalizeTodos(many.slice(0, TODO_MAX_ITEMS)).error).toBeUndefined();
+  });
+
+  it("accepts 'blocked' and reports it in the summary", () => {
+    // The failure ladder has always told the model to mark an item blocked;
+    // until now there was no such status, so an honest stop was impossible.
+    const { items, error } = normalizeTodos([
+      { content: "Insert the image (host blocks uploads)", status: "blocked" },
+      { content: "Write the title", status: "completed" },
+      { content: "Add the table", status: "pending" },
+    ]);
+    expect(error).toBeUndefined();
+    expect(items!.map((t) => t.status)).toEqual(["blocked", "completed", "pending"]);
+    const summary = summarizeTodos(items!);
+    expect(summary).toContain("1/3 done");
+    expect(summary).toContain("1 blocked");
+    // A blocked item is a decision, not a debt: it does not hold the run open.
+    expect(openTodos(items!)).toHaveLength(1);
+    expect(openTodos(items!)[0]!.content).toBe("Add the table");
   });
 });
 

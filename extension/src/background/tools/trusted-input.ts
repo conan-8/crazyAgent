@@ -304,6 +304,50 @@ export interface TrustedInputRequest {
   reason: string;
 }
 
+/** Everything one trusted-input result reports, for the note builder. */
+export interface TrustedInputReport {
+  reason: string;
+  inserted: number;
+  keysSent: number;
+  primed: boolean;
+  noRefFocus: "focused" | "sink" | "none" | null;
+  focusHeld: boolean;
+}
+
+/**
+ * The model-facing note for one trusted input (pure, so the wording that
+ * steers the next step is pinned by tests). Two things it must never do:
+ * imply a ref-less type reached a field it did not, and teach verification by
+ * an `evaluate_js` export fetch — the ritual that died with TRANSPORT-FAILED
+ * in run F and is forbidden by the canvas-editor skill.
+ */
+export function trustedInputNote(r: TrustedInputReport): string {
+  return [
+    `sent as real keystrokes via the browser input pipeline (${r.reason})`,
+    r.inserted ? `${r.inserted} char(s) of text` : null,
+    r.keysSent ? `${r.keysSent} key press(es)` : null,
+    r.primed ? "the document surface was clicked once first to take focus" : null,
+    // Where the text actually LANDED: a ref-less type is aimed at the focused
+    // target, and when nothing editable is focused the harness wakes the
+    // editor's own sink. Right for document text, wrong for a dialog/iframe
+    // field the model believed was focused (run E typed an image-search query
+    // into the document body twice this way, then had to undo it), so the
+    // destination is stated rather than implied.
+    r.noRefFocus === "sink"
+      ? "no text field was focused, so the harness woke the DOCUMENT's own typing sink and the text landed in the document body at the caret — a dialog or iframe field (an image picker's search box, a find bar) is NOT reached this way: snapshot, then type with that field's ref"
+      : null,
+    r.noRefFocus === "none"
+      ? "WARNING: nothing editable was focused — the keystrokes may have gone nowhere"
+      : null,
+    r.focusHeld
+      ? null
+      : "WARNING: the target lost focus while typing — some text may not have landed; verify before retyping and do NOT retype blindly",
+    "a canvas editor paints its document into pixels, so this cannot be read back cheaply: verify ONCE with docs_read (text or html) or docs_state — never with an evaluate_js fetch, which the editor's CSP and this session's transport both punish",
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
 /**
  * Type text or press a key as the browser would. The caller has already decided
  * this route is needed (`shouldUseTrustedInput`); this owns the sequence:
@@ -419,20 +463,14 @@ export async function runTrustedInput(
     focusHeld = await editorSink(tabId, adapter, false);
   }
 
-  const parts = [
-    `sent as real keystrokes via the browser input pipeline (${req.reason})`,
-    inserted ? `${inserted} char(s) of text` : null,
-    keysSent ? `${keysSent} key press(es)` : null,
-    primed ? "the document surface was clicked once first to take focus" : null,
-    noRefFocus === "sink" ? "the editor's hidden typing sink was found and focused for you" : null,
-    noRefFocus === "none"
-      ? "WARNING: nothing editable was focused — the keystrokes may have gone nowhere"
-      : null,
-    focusHeld
-      ? null
-      : "WARNING: the target lost focus while typing — some text may not have landed; verify before retyping and do NOT retype blindly",
-    "a canvas editor paints its document into pixels, so this cannot be read back cheaply: verify ONCE with an evaluate_js fetch of the document's /export?format=txt (text) or ?format=html (formatting, e.g. font-weight:700 = bold), or a single screenshot",
-  ].filter(Boolean);
+  const note = trustedInputNote({
+    reason: req.reason,
+    inserted,
+    keysSent,
+    primed,
+    noRefFocus,
+    focusHeld,
+  });
 
   return {
     ok: true,
@@ -443,7 +481,7 @@ export async function runTrustedInput(
       keysSent,
       primed,
       focusHeld,
-      note: parts.join("; "),
+      note,
     },
   };
 }

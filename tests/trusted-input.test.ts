@@ -2,6 +2,7 @@
 // "must this be real keystrokes?" decision. The browser half is covered by
 // scripts/docs-smoke.mjs against the canvas-editor fixture.
 import { describe, expect, it } from "vitest";
+import { trustedInputNote } from "../extension/src/background/tools/trusted-input";
 import {
   isCanvasEditorUrl,
   keyEventParams,
@@ -291,6 +292,41 @@ describe("shouldUseTrustedInput", () => {
   it("explains itself, because the reason lands in the run log", () => {
     expect(shouldUseTrustedInput({ ...PLAIN_INPUT, explicit: true }).reason).toMatch(/requested/);
     expect(shouldUseTrustedInput(PLAIN_INPUT).reason).toMatch(/ordinary/i);
+  });
+});
+
+describe("trustedInputNote", () => {
+  const base = {
+    reason: "no ref: real keystrokes at the focused target / editor sink",
+    inserted: 18,
+    keysSent: 0,
+    primed: false,
+    noRefFocus: "sink" as const,
+    focusHeld: true,
+  };
+
+  it("says the text landed in the DOCUMENT body and how to reach a field instead", () => {
+    // Run E typed an image-search query into the document twice because the
+    // old note ("the editor's hidden typing sink was focused for you") read as
+    // if the keystrokes had gone to the picker field it meant to fill.
+    const note = trustedInputNote(base);
+    expect(note).toContain("landed in the document body");
+    expect(note).toContain("type with that field's ref");
+    expect(note).toContain("18 char(s)");
+  });
+
+  it("never teaches verification by an evaluate_js export fetch (the forbidden ritual)", () => {
+    const note = trustedInputNote(base);
+    expect(note).toContain("docs_read");
+    expect(note).not.toContain("export?format");
+  });
+
+  it("keeps the honest warnings for nowhere-to-type and lost focus", () => {
+    const nowhere = trustedInputNote({ ...base, noRefFocus: "none" });
+    expect(nowhere).toContain("nothing editable was focused");
+    const lost = trustedInputNote({ ...base, focusHeld: false, noRefFocus: "focused" });
+    expect(lost).toContain("lost focus while typing");
+    expect(lost).not.toContain("document body");
   });
 });
 

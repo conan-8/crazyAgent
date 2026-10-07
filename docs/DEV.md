@@ -888,6 +888,118 @@ grouping, the OCR offscreen indexer / text-anchored canvas clicks,
 per-item turn budgets and the two-blocked-items pause, and the C16 graded
 benchmark (items-correct-first-pass on the 32-item task).
 
+## Field-test pass (2026-10-07) — the Phase A patches
+
+Evidence: three fresh runs of the same 32-item task (D 31 min/250 turns,
+E 85 min/341 turns, F 25 min/107 turns; solo, no concurrency). They are the
+subject of `docs/LOOP-PLAN.md`, whose verdict is structural — 65–74 % of the
+wall clock was the model deciding single actions, 24–49 % of turns produced
+no document progress — but the same logs priced seven concrete defects. Each
+patch below cites the run that motivated it; all are unit-tested, and the
+smoke suite "canvas editors (Docs playbook)" passes unchanged except where a
+pinned sentence moved on purpose.
+
+**The Docs menu map was stale, and a miss taught nothing.**
+- `shared/docs-ops.ts` now carries the live 2026 Insert menu, read off the DOM
+  during run F: *Image, Table, Building blocks, Smart chips, eSignature, Link,
+  Drawing, Chart, Symbols, Tab, Horizontal line, Break, Bookmark, Page
+  elements, Comment, Table of contents, Header, Footer, Watermark…* — so
+  **Equation is a row inside Symbols**, **Header/Footer are top-level** (there
+  is no "Headers and footers"), **Page numbers lives under Page elements**,
+  and the table dialog row is **"Table options"** (was "Table properties").
+  `page_numbers` was re-routed accordingly; D burned four walks on the old
+  top-level path.
+- New ops: `page_break` (trusted Ctrl+Enter, nothing to mis-click),
+  `table_of_contents {style}`, `equation {text}` — the last needed a new
+  `menuThenType` plan kind (walk Insert ▸ Symbols ▸ Equation, then
+  `Input.insertText`). D and E each lost ~10–18 turns trying Insert ▸ Equation.
+- The label matcher (`content/actions.ts`) now tolerates row decoration:
+  submenu arrows (`Table of contents►`), Google's accelerator suffixes
+  (`CommentCtrl+Alt+M`, `Tab(F11)Shift+F11`) and status badges
+  (`Page elementsUpdated►`, `eSignaturePremium(1)`). It previously accepted
+  only an exact label or "label + space", so **rows that were on screen were
+  reported missing** (D t148/t12) and the model abandoned label walks for raw
+  DOM clicks. Ranking is exact (0) < decoration-tolerant prefix (1) < legacy
+  loose prefix (2), so "Table" still never wins over "Table of contents►"
+  when the real row exists.
+- A miss now NAMES what it saw: `— visible menu rows: … Header, Footer,
+  Watermark` (menu walks) and `— visible fields: …` (dialog fills). One line
+  of truth turns a 20-turn guessing spiral into a one-turn correction, and it
+  is how a renamed row ("Table options") announces itself.
+- `walkMenu` presses Escape and re-walks **once** when a step after the first
+  misses (`shouldRetryWalk`): a failed walk leaves its menu open, so the next
+  walk's first click closed it and every later step searched a closed menu —
+  the exact shape of D t11→t12/t14 and t148→t152. Step-1 misses and DISABLED
+  rows are excluded (wrong page / wrong state, not desync).
+
+**The content-script bridge can vanish, and `page_health` used to lie about it.**
+- An extension reload leaves already-open tabs without `content/main.js`
+  while the debugger channel keeps working: `click_at`, `screenshot`,
+  `evaluate_js` and `docs_*` stay healthy, and every content-script action
+  (click by ref, `key`, `scroll`, `menu_path`, `input_sequence`) fails with
+  `actions-not-loaded`. Run F lost ~40 turns to that.
+- `runContentAction` now self-heals: on `actions-not-loaded` it injects
+  `content/main.js` into that frame (idempotent — `main.ts` guards on
+  `__baContentLoaded`), retries once, and marks the successful result
+  `repaired: true`; if the bridge still cannot be reached the error keeps the
+  original tag and names the debugger-backed tools that do work.
+- `page_health` probes `globalThis.__baActions` (not "can anything be
+  injected" — that succeeds either way) across all frames and REPAIRS a
+  missing bridge before reporting. F's model was told "content-script
+  injection: ok (16 frames)", retried a doomed `menu_path`, hit the ban
+  warning, and then drove menus with raw `evaluate_js` for 35 calls.
+  `tests/content-action.test.ts` pins all four paths.
+
+**Long runs died silently.** `truncateHistory` only trims the per-step VIEW;
+`cp.messages` kept every message of the run, and three runs stopped mid-turn
+with nothing in the log (A 1.83 M chars, E 2.54 M, F 2.74 M — E's turn 340
+never ended and the run sat "running" forever). `boundCheckpoint` now caps the
+raw checkpoint at 4× the per-step budget and compacts to 2× when crossed: it
+never cuts on a `tool` message (no orphaned tool result), leaves a synthetic
+in-band line saying how many messages went, and emits an info event. Under
+the ceiling it returns the same array — no per-step copy, no prefix churn.
+
+**Thinking was pinned at `low` for whole runs.** Two defects:
+- The overrun breaker required three cuts IN A ROW; E (14 cuts) and F (11)
+  never tripped it, so every cut cost a wasted round trip and decode stayed at
+  ~3.6 s/step (~20 extra minutes in E). It now counts cuts across the run —
+  the step is re-asked at `off` anyway, so the ceiling was buying nothing.
+- The local adaptive streak needs reasoning under 300 chars, which a model
+  thinking at `low` never produces (the catch-22; **zero** adaptive-thinking
+  engagements in all six logged runs). A confident Jev `routine` verdict now
+  makes itself STICKY (`jevRoutineSticky`) — one verdict buys a run of cheap
+  steps, cleared by the same surprises as the adaptive path (failure,
+  navigation, overrun, steering, empty reply). E received exactly one such
+  verdict in 341 turns and spent the rest of its life at `low`.
+
+**A partial report ended the run as `done`.** Run D announced "12 of 32
+verified, I need to stop" with 19 todos open, and the harness accepted it —
+which is why the user had to type "continue then. why are you stopping".
+- The loop now has a completion gate: a final answer while `cp.todos` still
+  has `pending`/`in_progress` items is bounced back in-band with the open
+  items listed (bounded at 2 nudges, then the run ends with an honest
+  "finishing with N items still open" note).
+- `todo_write` gained the `blocked` status the failure ladder had always told
+  the model to use (`TodoStatus`, `openTodos` in protocol.ts, panel rendering
+  with a distinct mark and `N blocked` in the headline, `[!]` in the markdown
+  runlog). Blocked is a decision, not a debt: the run may end with blocked
+  items and never with silently abandoned ones.
+
+**Ref-less typing did not say where the text went.** The note now states it:
+with no text field focused the harness wakes the DOCUMENT's own sink and the
+text lands in the body — "a dialog or iframe field (an image picker's search
+box, a find bar) is NOT reached this way: snapshot, then type with that
+field's ref" (E typed an image-search query into the document twice). The
+same note used to recommend verifying with an `evaluate_js` export fetch —
+the ritual the canvas skill forbids and that died with TRANSPORT-FAILED in F;
+it now points at `docs_read`/`docs_state`. The note is a pure, tested builder
+(`trustedInputNote`).
+
+Not in this pass (Phase B–E in LOOP-PLAN.md): deterministic per-step effect
+verification, the `run_program` executor, the plan-level state machine
+(per-item budgets, park-and-move-on, watchdog/resume), file-chooser upload
+via `Page.fileChooserOpened`, and shortcut harvesting.
+
 ## Capability tools (coordinate input, upload, netlog, handoff)
 
 The functional gaps where Claude in Chrome was ahead — coordinate clicks, file

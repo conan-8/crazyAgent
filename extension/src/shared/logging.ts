@@ -546,7 +546,13 @@ export function toMarkdown(records: LogTurnRecord[]): string {
       out.push("");
       for (const t of rec.todos) {
         const mark =
-          t.status === "completed" ? "[x]" : t.status === "in_progress" ? "[~]" : "[ ]";
+          t.status === "completed"
+            ? "[x]"
+            : t.status === "blocked"
+              ? "[!]"
+              : t.status === "in_progress"
+                ? "[~]"
+                : "[ ]";
         out.push(`- ${mark} ${t.content}`);
       }
     }

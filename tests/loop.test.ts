@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  boundCheckpoint,
   capCheckpointImages,
   createStuckGuard,
   estimateMessages,
@@ -698,6 +699,71 @@ describe("runAgentTask", () => {
   });
 });
 
+describe("completion gate", () => {
+  const end = { text: "all done", toolCalls: [], stopReason: "end_turn" as const };
+  const openPlan = [
+    { content: "Set page to Letter", status: "pending" as const },
+    { content: "Insert the table", status: "in_progress" as const },
+  ];
+
+  it("bounces a final answer while the plan still owes work", async () => {
+    const cp = makeCheckpoint({ todos: openPlan });
+    const { events, deps } = harness([end, end], { stepCap: 6 });
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    const llm = deps.llm as FakeLlm;
+    // Two scripted "final" answers are both bounced (the budget is 2); the
+    // third call is the harness's default reply, which is allowed through.
+    expect(llm.seen).toHaveLength(3);
+    // The nudge is in-band (it survives checkpointing) and names the items.
+    const nudged = llm.seen[1]!.messages.at(-1)!;
+    expect(nudged.content).toContain("Not finished");
+    expect(nudged.content).toContain("Set page to Letter");
+    expect(nudged.content).toContain("blocked");
+    expect(
+      events.some(
+        (e) => e.kind === "info" && e.message.includes("2 open plan item(s)"),
+      ),
+    ).toBe(true);
+  });
+
+  it("gives up after the nudge budget and says the summary is unfinished", async () => {
+    const cp = makeCheckpoint({ todos: openPlan });
+    const { events, deps } = harness([end, end, end, end], { stepCap: 8 });
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    expect((deps.llm as FakeLlm).seen).toHaveLength(3);
+    expect(
+      events.some(
+        (e) => e.kind === "info" && e.message.includes("still open after 2 completion nudges"),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a plan whose remaining items are explicitly blocked", async () => {
+    const cp = makeCheckpoint({
+      todos: [
+        { content: "Insert the image (upload blocked by host)", status: "blocked" },
+        { content: "Set page to Letter", status: "completed" },
+      ],
+    });
+    const { events, deps } = harness([end], { stepCap: 4 });
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    expect((deps.llm as FakeLlm).seen).toHaveLength(1);
+    expect(
+      events.some((e) => e.kind === "info" && e.message.includes("open plan item")),
+    ).toBe(false);
+  });
+
+  it("does not gate a run with no plan at all", async () => {
+    const cp = makeCheckpoint();
+    const { deps } = harness([end], { stepCap: 4 });
+    await runAgentTask(cp, deps);
+    expect((deps.llm as FakeLlm).seen).toHaveLength(1);
+  });
+});
+
 describe("validateToolArgs", () => {
   const tool: Tool = {
     name: "type",
@@ -890,6 +956,52 @@ describe("truncateHistory", () => {
       const twice = truncateHistory(once, 20_000);
       expect(twice.map(ser)).toEqual(once.map(ser));
     });
+  });
+});
+
+describe("boundCheckpoint", () => {
+  const msg = (role: LlmMessage["role"], content: string): LlmMessage => ({ role, content });
+
+  it("returns the identical array when the ceiling is not crossed (no per-step copy)", () => {
+    const messages = [msg("user", "task"), msg("assistant", "hi")];
+    const out = boundCheckpoint(messages);
+    expect(out.dropped).toBe(0);
+    expect(out.messages).toBe(messages);
+  });
+
+  it("drops the oldest messages and records it in-band once the ceiling is crossed", () => {
+    const big = "x".repeat(200_000);
+    const messages = [
+      msg("user", "task"),
+      msg("assistant", big),
+      msg("tool", big),
+      msg("assistant", big),
+      msg("tool", "recent result"),
+    ];
+    const out = boundCheckpoint(messages);
+    expect(out.dropped).toBeGreaterThan(0);
+    expect(out.messages.length).toBeLessThan(messages.length);
+    expect(out.messages[0]!.content).toContain("compacted away");
+    expect(out.messages.at(-1)!.content).toBe("recent result");
+  });
+
+  it("never orphans a tool result — the cut lands on a non-tool message", () => {
+    // Sizes chosen so the naive cut lands exactly on the tool message at
+    // index 2; the guard must advance past it.
+    const messages: LlmMessage[] = [
+      msg("user", "task"),
+      msg("assistant", "y".repeat(200_000)),
+      msg("tool", "z".repeat(200_000)),
+      msg("assistant", "a".repeat(100_000)),
+      msg("tool", "b".repeat(100_000)),
+      msg("assistant", "recent"),
+      msg("tool", "recent result"),
+    ];
+    const out = boundCheckpoint(messages);
+    expect(out.dropped).toBe(3);
+    // Head of the kept transcript is the assistant call, never its tool result.
+    expect(out.messages[0]!.role).toBe("user"); // the harness note
+    expect(out.messages[1]!.role).toBe("assistant");
   });
 });
 
@@ -1357,6 +1469,75 @@ describe("reasoning cap", () => {
     ).toBe(true);
   });
 
+  it("counts cuts across the whole run — they need not be consecutive", async () => {
+    // Field shape: runs E and F paid 14 and 11 cuts but never three in a row,
+    // so the old "three in a row" rule never tripped and each cut cost a
+    // wasted round trip forever. Here cuts sit on attempts 0, 3 and 6 with
+    // healthy thinking steps in between.
+    const CpLlm = class implements LlmClient {
+      seen: LlmRequest[] = [];
+      capHits = 0;
+      private attempt = 0;
+      private reply = 0;
+      constructor(
+        private capPlan: boolean[],
+        private replies: LlmResult[],
+      ) {}
+      async complete(
+        req: LlmRequest,
+        onText?: (t: string) => void,
+        signal?: AbortSignal,
+        onReasoning?: (t: string) => void,
+      ): Promise<LlmResult> {
+        this.seen.push(req);
+        const cut = this.capPlan[this.attempt++] === true;
+        if (cut && req.thinking !== "off") {
+          for (let k = 0; k < 80; k++) {
+            onReasoning?.("x".repeat(400));
+            if (signal?.aborted) {
+              this.capHits += 1;
+              throw new Error("aborted");
+            }
+          }
+        }
+        const reply =
+          this.replies[this.reply++] ?? { text: "done", toolCalls: [], stopReason: "end" };
+        onText?.(reply.text);
+        return reply;
+      }
+    };
+    const toolStep = (id: string): LlmResult => ({
+      text: "",
+      toolCalls: [{ id, name: "snapshot", args: {} }],
+      stopReason: "tool_use",
+    });
+    const llm = new CpLlm(
+      [true, false, false, true, false, false, true, false, false, false],
+      [toolStep("a"), toolStep("b"), toolStep("c"), toolStep("d"), toolStep("e"), {
+        text: "done",
+        toolCalls: [],
+        stopReason: "end",
+      }],
+    );
+    const { events, deps } = harness([], { llm, thinking: "low", stepCap: 12 });
+    const outcome = await runAgentTask(makeCheckpoint(), deps);
+    expect(outcome).toBe("completed");
+    expect(llm.capHits).toBe(3);
+    const levels = llm.seen.map((r) => r.thinking);
+    // Attempt 5 is a healthy `low` step AFTER a cut — the counter must survive
+    // it — and everything from the third cut onward is off.
+    expect(levels[2]).toBe("low");
+    expect(levels[5]).toBe("low");
+    expect(levels.slice(7)).toEqual(["off", "off"]);
+    expect(
+      events.some(
+        (e) =>
+          e.kind === "info" &&
+          e.message.includes("thinking is off for the rest of this run"),
+      ),
+    ).toBe(true);
+  });
+
   it("leaves a step that thinks inside its budget completely alone", async () => {
     // FakeLlm streams one character of reasoning: the cap must not fire, and
     // the step must not pay a second round trip.
@@ -1392,16 +1573,23 @@ describe("Jev per-step effort routing", () => {
   const levels = (deps: LoopDeps): (string | undefined)[] =>
     (deps.llm as FakeLlm).seen.map((r) => r.thinking);
 
-  it("applies a routine hint to the NEXT step only (one-shot), then restores baseline", async () => {
+  it("a confident routine hint buys a RUN of cheap steps, not one (sticky until a surprise)", async () => {
     const cp = makeCheckpoint();
-    const { deps } = harness([toolStep("a"), toolStep("b"), end], {
+    const { deps } = harness([toolStep("a"), toolStep("b"), toolStep("c"), end], {
       thinking: "medium",
       thinkingCeiling: "high",
       stepCap: 8,
-      execute: verdictExecute([{ jevEffort: { choice: "routine", confidence: 0.9 } }, {}]),
+      // One routine verdict, then no further verdicts (Jev did not answer).
+      execute: verdictExecute([{ jevEffort: { choice: "routine", confidence: 0.9 } }, {}, {}]),
     });
     await runAgentTask(cp, deps);
-    expect(levels(deps)).toEqual(["medium", "off", "medium"]);
+    // Measured: run E got exactly ONE such verdict in 341 turns and then spent
+    // the rest of its life at `low` (3.6s decode per step, 14 wasted cap
+    // round trips). The local adaptive streak cannot cover that run either —
+    // it needs reasoning under ADAPTIVE_ROUTINE_MAX_REASONING_CHARS, which a
+    // model thinking at `low` never produces. One verdict describes a run of
+    // routine steps, so it covers one.
+    expect(levels(deps)).toEqual(["medium", "off", "off", "off"]);
   });
 
   it("raises a confident deep step back to the ceiling (never past it)", async () => {

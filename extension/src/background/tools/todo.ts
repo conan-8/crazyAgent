@@ -12,7 +12,8 @@ import { registerTool, type ToolContext } from "./types";
 export const TODO_MAX_ITEMS = 40;
 export const TODO_MAX_CONTENT_CHARS = 160;
 
-const STATUSES: TodoStatus[] = ["pending", "in_progress", "completed"];
+const STATUSES: TodoStatus[] = ["pending", "in_progress", "completed", "blocked"];
+
 
 /**
  * Validate and normalise one whole-list write. Pure so tests (and the tool)
@@ -55,8 +56,10 @@ export function normalizeTodos(
 export function summarizeTodos(items: TodoItem[]): string {
   if (!items.length) return "todo list cleared";
   const done = items.filter((t) => t.status === "completed").length;
+  const blocked = items.filter((t) => t.status === "blocked").length;
   const active = items.find((t) => t.status === "in_progress");
   const parts = [`${done}/${items.length} done`];
+  if (blocked) parts.push(`${blocked} blocked`);
   if (active) parts.push(`now: ${active.content}`);
   return `todos updated (${parts.join(", ")})`;
 }
@@ -64,22 +67,23 @@ export function summarizeTodos(items: TodoItem[]): string {
 registerTool({
   name: "todo_write",
   description:
-    "Update your live task list, shown to the user as a plan dropdown at the top of the panel WHILE the run is in progress. Sends the COMPLETE list every call (whole-list replacement): to add, remove, reorder or re-status an item, send the full new list of {content, status} with status one of pending | in_progress | completed. Use it for any multi-step task: write the plan first, keep exactly ONE item in_progress (the work the user sees you doing right now), mark items completed the moment they are done, and rewrite the list mid-run when the plan changes. Keep each item a short imperative line (<= ~60 chars). Not for trivial single-step tasks, and never two updates in a row without real work between them.",
+    "Update your live task list, shown to the user as a plan dropdown at the top of the panel WHILE the run is in progress. Sends the COMPLETE list every call (whole-list replacement): to add, remove, reorder or re-status an item, send the full new list of {content, status} with status one of pending | in_progress | completed | blocked. Use it for any multi-step task: write the plan first, keep exactly ONE item in_progress (the work the user sees you doing right now), mark items completed the moment they are done, and rewrite the list mid-run when the plan changes. Mark an item blocked (and put the one-line reason in its content) only when it is genuinely impossible after real attempts — an item left pending is NOT an acceptable way to end a run. Keep each item a short imperative line (<= ~60 chars). Not for trivial single-step tasks, and never two updates in a row without real work between them.",
   parameters: {
     type: "object",
     properties: {
       todos: {
         type: "array",
         description:
-          "The COMPLETE new list. Each entry: {content: string (short imperative line), status: 'pending' | 'in_progress' | 'completed'}.",
+          "The COMPLETE new list. Each entry: {content: string (short imperative line), status: 'pending' | 'in_progress' | 'completed' | 'blocked'}.",
         items: {
           type: "object",
           properties: {
             content: { type: "string", description: "What the task is — a short imperative line" },
             status: {
               type: "string",
-              enum: ["pending", "in_progress", "completed"],
-              description: "pending (not started) | in_progress (being worked on now) | completed (done)",
+              enum: ["pending", "in_progress", "completed", "blocked"],
+              description:
+                "pending (not started) | in_progress (being worked on now) | completed (done) | blocked (impossible after real attempts — say why in the content)",
             },
           },
           required: ["content", "status"],

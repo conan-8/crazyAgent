@@ -331,7 +331,11 @@ async function main() {
       refless.ok === true &&
         refless.payload?.data?.mode === "trusted" &&
         refless.payload?.data?.insertedChars === 8 &&
-        /typing sink was found and focused/.test(String(refless.payload?.data?.note ?? "")) &&
+        // The note must name WHERE the text landed — the document body, via
+        // the editor's own sink. Run E typed an image-search query into the
+        // document twice because the old wording ("the sink was focused for
+        // you") read as if it had reached the picker field it meant to fill.
+        /woke the DOCUMENT's own typing sink/.test(String(refless.payload?.data?.note ?? "")) &&
         Array.isArray(reflessModel.p) &&
         reflessModel.p[1] === "second line refless" &&
         reflessModel.w === "5 words",

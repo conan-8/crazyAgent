@@ -4,6 +4,7 @@ import {
   normalizeStyleName,
   planDocsOp,
   shapeMargins,
+  shouldRetryWalk,
   styleShortcut,
 } from "../extension/src/shared/docs-ops";
 
@@ -86,18 +87,22 @@ describe("planDocsOp", () => {
     if (!out.ok) expect(out.error).toContain("Title");
   });
 
-  it("plans page_numbers as Insert ▸ Page numbers ▸ position row (with alternates)", () => {
+  it("plans page_numbers through Insert ▸ Page elements ▸ Page numbers (live 2026 menu)", () => {
     const out = planDocsOp("page_numbers", { position: "footer" });
     expect(out.ok).toBe(true);
     if (out.ok && out.plan.kind === "menu") {
       expect(out.plan.labels[0]).toBe("Insert");
-      expect(out.plan.labels[1]).toBe("Page numbers");
-      expect(out.plan.labels[2]).toEqual(["Bottom of page", "Footer"]);
+      // The top-level "Page numbers" row does not exist on the live menu —
+      // D burned four walks on it; it lives under Page elements.
+      expect(out.plan.labels[1]).toBe("Page elements");
+      expect(out.plan.labels[2]).toBe("Page numbers");
+      expect(out.plan.labels[3]).toEqual(["Bottom of page", "Footer"]);
+      expect(out.plan.describe).toContain("Page elements");
     } else {
       throw new Error("expected a menu plan");
     }
     const top = planDocsOp("page_numbers", { position: "header" });
-    expect(top.ok && top.plan.kind === "menu" && top.plan.labels[2]).toEqual(["Top of page", "Header"]);
+    expect(top.ok && top.plan.kind === "menu" && top.plan.labels[3]).toEqual(["Top of page", "Header"]);
     expect(planDocsOp("page_numbers", {}).ok).toBe(false);
   });
 
@@ -157,5 +162,60 @@ describe("planDocsOp", () => {
     for (const args of [{ rows: 0, cols: 3 }, { rows: 4, cols: 21 }, { rows: "4", cols: 3 }, {}]) {
       expect(planDocsOp("insert_table", args).ok).toBe(false);
     }
+  });
+
+  it("runs page_break as the Ctrl+Enter shortcut — no menu to miss", () => {
+    const out = planDocsOp("page_break", {});
+    expect(out.ok).toBe(true);
+    if (out.ok && out.plan.kind === "keys") {
+      expect(out.plan.combos).toEqual(["Control+Enter"]);
+    } else {
+      throw new Error("expected a keys plan");
+    }
+  });
+
+  it("plans table_of_contents via Insert ▸ Table of contents, style-tagged", () => {
+    const linked = planDocsOp("table_of_contents", {});
+    expect(linked.ok).toBe(true);
+    if (linked.ok && linked.plan.kind === "menu") {
+      expect(linked.plan.labels[0]).toBe("Insert");
+      expect(linked.plan.labels[1]).toBe("Table of contents");
+      expect(linked.plan.labels[2]).toEqual(["Linked contents", "Linked", "Table of contents"]);
+      expect(linked.plan.describe).toContain("linked");
+    } else {
+      throw new Error("expected a menu plan");
+    }
+    const plain = planDocsOp("table_of_contents", { style: "plain" });
+    expect(plain.ok && plain.plan.kind === "menu" && plain.plan.labels[2]).toEqual(["Plain text"]);
+    const dotted = planDocsOp("table_of_contents", { style: "dotted" });
+    expect(dotted.ok && dotted.plan.kind === "menu" && dotted.plan.labels[2]).toEqual([
+      "Dotted lines",
+      "Dotted",
+    ]);
+  });
+
+  it("plans equation through Insert ▸ Symbols ▸ Equation and types the text", () => {
+    const out = planDocsOp("equation", { text: " E = mc^2 " });
+    expect(out.ok).toBe(true);
+    if (out.ok && out.plan.kind === "menuThenType") {
+      // Equation is a ROW INSIDE Symbols on the live menu; D and E both tried
+      // Insert ▸ Equation and lost turns to it.
+      expect(out.plan.labels).toEqual(["Insert", "Symbols", "Equation"]);
+      expect(out.plan.text).toBe("E = mc^2");
+    } else {
+      throw new Error("expected a menuThenType plan");
+    }
+    const empty = planDocsOp("equation", {});
+    expect(empty.ok).toBe(false);
+    if (!empty.ok) expect(empty.error).toContain("text");
+  });
+
+  it("retries a menu walk only for a post-first-step miss that is not DISABLED", () => {
+    expect(shouldRetryWalk(1, 'no visible clickable element matches ["Page elements"]')).toBe(true);
+    expect(shouldRetryWalk(2, "no visible clickable element matches [\"Table of contents\"]")).toBe(true);
+    // Step 1 missing = wrong page/path: a retry only burns the budget.
+    expect(shouldRetryWalk(0, "no visible clickable element matches [\"Insert\"]")).toBe(false);
+    // Disabled is a state problem; re-walking cannot enable the row.
+    expect(shouldRetryWalk(2, '"Delete column" was found but is DISABLED')).toBe(false);
   });
 });

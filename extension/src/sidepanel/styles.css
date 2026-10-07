@@ -682,6 +682,17 @@ kbd {
   color: var(--text-soft);
 }
 
+/* Blocked = a decision the user must see: the run says it tried and could not.
+   Muted danger colour, no strikethrough (the item is not done, it is parked). */
+.todo-item.is-blocked .todo-mark {
+  color: var(--danger);
+}
+
+.todo-item.is-blocked .todo-text {
+  color: var(--text-soft);
+  font-style: italic;
+}
+
 .todo-dot {
   width: 7px;
   height: 7px;

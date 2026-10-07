@@ -10,13 +10,14 @@ import { failureTag } from "../../shared/tool-failure";
 import {
   DOCS_OPS,
   planDocsOp,
+  shouldRetryWalk,
   type DialogFill,
   type MenuLabel,
   type VerifyPlan,
 } from "../../shared/docs-ops";
 import { runContentAction } from "./content-action";
 import { fetchWorkspaceExport } from "./docs";
-import { ensureTabActive, sendTrustedKey } from "./trusted-input";
+import { ensureTabActive, sendTrustedKey, sendTrustedText } from "./trusted-input";
 import { registerTool, type ToolContext } from "./types";
 
 /** Per-step budget: menus/dialog rows render in <300ms; this is generous. */
@@ -94,25 +95,66 @@ async function fillFieldStep(
   return { ok: false, error: lastErr };
 }
 
-/** Walk a whole menu path; stops at the first step that cannot be clicked. */
-async function walkMenu(
-  ctx: ToolContext,
-  labels: MenuLabel[],
-): Promise<{ ok: true; steps: string[] } | { ok: false; error: string; steps: string[] }> {
+/** One walk attempt, with the failing step kept for the retry decision. */
+interface WalkAttempt {
+  ok: boolean;
+  steps: string[];
+  /** 0-based index of the step that missed (only meaningful when !ok). */
+  failedAt: number;
+  /** The raw clickByText error, before the "step N (…)" wrapper. */
+  rawError: string;
+  /** The composed message the caller reports. */
+  error: string;
+}
+
+async function walkOnce(ctx: ToolContext, labels: MenuLabel[]): Promise<WalkAttempt> {
   const steps: string[] = [];
   for (const [i, label] of labels.entries()) {
     const out = await clickLabelStep(ctx, label);
     if (!out.ok) {
       return {
         ok: false,
-        error: `step ${i + 1} ("${labelShown(label)}"): ${out.error}`,
         steps,
+        failedAt: i,
+        rawError: out.error,
+        error: `step ${i + 1} ("${labelShown(label)}"): ${out.error}`,
       };
     }
     steps.push(out.clicked);
     await sleep(BETWEEN_STEPS_MS);
   }
-  return { ok: true, steps };
+  return { ok: true, steps, failedAt: -1, rawError: "", error: "" };
+}
+
+/**
+ * Walk a whole menu path; stops at the first step that cannot be clicked.
+ *
+ * A miss after step 1 gets ONE recovery: Escape (closing a stale open menu or
+ * a half-open submenu that made the walk see a closed one), then a fresh walk
+ * from the top. Runs D and F both lost rows that were on screen to exactly
+ * that desync; see shouldRetryWalk for why step-1 misses and DISABLED rows
+ * are excluded from the retry.
+ */
+async function walkMenu(
+  ctx: ToolContext,
+  labels: MenuLabel[],
+): Promise<{ ok: true; steps: string[] } | { ok: false; error: string; steps: string[] }> {
+  const first = await walkOnce(ctx, labels);
+  if (first.ok) return first;
+  if (!shouldRetryWalk(first.failedAt, first.rawError)) {
+    return { ok: false, error: first.error, steps: first.steps };
+  }
+  await sendTrustedKey(ctx.tabId, ctx.adapter, "Escape").catch(() => undefined);
+  await sleep(BETWEEN_STEPS_MS * 2);
+  const second = await walkOnce(ctx, labels);
+  if (second.ok) {
+    return { ok: true, steps: [...first.steps, "Escape (reset the menu)", ...second.steps] };
+  }
+  return {
+    ok: false,
+    error: `${second.error}; retried once after Escape — if the label is missing, use the visible rows named in the error`,
+    steps: second.steps,
+  };
 }
 
 /** One real (CDP) key combo — the table picker and shortcuts need trusted keys. */
@@ -172,7 +214,7 @@ async function verifyPlan(ctx: ToolContext, verify: VerifyPlan | undefined): Pro
 registerTool({
   name: "menu_path",
   description:
-    "Click through a menu path BY LABEL in one call — replaces the open-menu / look / click-row turn chain and never guesses a coordinate. path: ['File','Page setup'], ['Insert','Break','Page break'], ['Format','Paragraph styles','Heading 2']. Each step waits up to ~2.4s for its row to appear, clicks the visible element whose text/aria-label matches, and the result lists every click; the walk stops at the first label it cannot find and reports how far it got. The fresh page observation rides the result like any action. Works on any web app's DOM menus (Google Workspace, Drive, school portals) — menus are DOM, so this is always safer than coordinate clicks.",
+    "Click through a menu path BY LABEL in one call — replaces the open-menu / look / click-row turn chain and never guesses a coordinate. path: ['File','Page setup'], ['Insert','Break','Page break'], ['Format','Paragraph styles','Heading 2']. Each step waits up to ~2.4s for its row to appear, clicks the visible element whose text/aria-label matches (menu arrows, accelerator suffixes and 'Updated' badges are ignored), and the result lists every click; the walk stops at the first label it cannot find, retries once after Escape (which repairs a stale open menu), and on a miss NAMES the rows the open menu actually shows — read that list and correct the path instead of repeating it. The fresh page observation rides the result like any action. Works on any web app's DOM menus (Google Workspace, Drive, school portals) — menus are DOM, so this is always safer than coordinate clicks.",
   parameters: {
     type: "object",
     properties: {
@@ -217,7 +259,7 @@ registerTool({
 registerTool({
   name: "docs_op",
   description:
-    "Run ONE Google Docs UI operation deterministically — the interface knowledge is built in (exact menu routes, shortcuts, dialog fields), so one call replaces a multi-turn pixel hunt, and the op verifies its own effect. Ops: apply_style {style:'Title'|'Subtitle'|'Normal text'|'Heading 1'..'Heading 6'} (Heading 1-6 ride Ctrl+Alt+1..6); page_setup {size?:'Letter'|'A4'|…, margins?:inches for all four sides (e.g. 1) or {top,right,bottom,left}, orientation?:'portrait'|'landscape'} — at least one of the three; page_numbers {position:'footer'|'header'}; insert_table {rows:1..20, cols:1..20}. The caret/selection must already be where the op applies (click into the document first). The result lists the steps taken and a verification line ('verified:' / 'NOT VERIFIED:' — read it); the fresh observation rides along as with any action.",
+    "Run ONE Google Docs UI operation deterministically — the interface knowledge is built in (exact menu routes read off the live 2026 Docs menu, shortcuts, dialog fields), so one call replaces a multi-turn pixel hunt, and the op verifies its own effect. Ops: apply_style {style:'Title'|'Subtitle'|'Normal text'|'Heading 1'..'Heading 6'} (Heading 1-6 ride Ctrl+Alt+1..6); page_setup {size?:'Letter'|'A4'|…, margins?:inches for all four sides (e.g. 1) or {top,right,bottom,left}, orientation?:'portrait'|'landscape'} — at least one of the three; page_numbers {position:'footer'|'header'} (Insert ▸ Page elements ▸ Page numbers); insert_table {rows:1..20, cols:1..20}; page_break (Ctrl+Enter); table_of_contents {style?:'linked'|'plain'|'dotted'}; equation {text:'E = mc^2'} (Insert ▸ Symbols ▸ Equation, then types the text). The caret/selection must already be where the op applies (click into the document first). The result lists the steps taken and a verification line ('verified:' / 'NOT VERIFIED:' — read it); the fresh observation rides along as with any action. If an op's menu row is missing, the error names the rows the open menu actually shows — read that list instead of re-trying the same path.",
   parameters: {
     type: "object",
     properties: {
@@ -228,7 +270,12 @@ registerTool({
       },
       style: {
         type: "string",
-        description: "apply_style: 'Title', 'Subtitle', 'Normal text', 'Heading 1'..'Heading 6'",
+        description:
+          "apply_style: 'Title', 'Subtitle', 'Normal text', 'Heading 1'..'Heading 6'; table_of_contents: 'linked' (default), 'plain' or 'dotted'",
+      },
+      text: {
+        type: "string",
+        description: "equation: the equation to type into the equation box, e.g. 'E = mc^2'",
       },
       size: { type: "string", description: "page_setup: paper size, e.g. 'Letter', 'A4'" },
       margins: {
@@ -303,6 +350,15 @@ registerTool({
         await ensureTabActive(ctx.tabId, ctx.adapter);
         for (const combo of plan.combos) await sendTrustedCombo(ctx, combo);
         steps.push(`sent ${plan.combos.length} trusted key(s) to the grid picker`);
+        break;
+      }
+      case "menuThenType": {
+        const w = await walkMenu(ctx, plan.labels);
+        steps.push(...w.steps);
+        if (!w.ok) return fail(w.error);
+        await ensureTabActive(ctx.tabId, ctx.adapter);
+        await sendTrustedText(ctx.tabId, ctx.adapter, plan.text);
+        steps.push(`typed "${plan.text}" into the editor box`);
         break;
       }
     }

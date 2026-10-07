@@ -21,6 +21,7 @@ import {
 } from "../../shared/wait";
 import { stageShelfImage } from "../shelf";
 import { ensureAgentWindow, resolveAgentWindow } from "../window-scope";
+import { ensureContentBridge } from "./content-action";
 import { registerTool, type ToolContext } from "./types";
 
 export type { AggregatedSnapshot };
@@ -647,7 +648,7 @@ function imageNameFromUrl(url: string, mime: string): string {
 registerTool({
   name: "page_health",
   description:
-    "Quick check that the tools can actually reach the current tab, reporting which layer works: content script injection, tab access, and the debugger channel used by screenshot / evaluate_js. Call this when several tools in a row fail, instead of retrying them one by one — it tells you whether the problem is the page or the connection to it.",
+    "Quick check that the tools can actually reach the current tab, reporting which layer works: the content-script action bridge (reference clicks, key, scroll, menu walks), tab access, and the debugger channel used by screenshot / click_at / evaluate_js. It REPAIRS a missing bridge by injecting it and says so. Call this when several tools in a row fail, instead of retrying them one by one — it tells you whether the problem is the page or the connection to it.",
   parameters: { type: "object", properties: {} },
   async run(_args, ctx) {
     const report = {
@@ -668,12 +669,27 @@ registerTool({
       report.tabAccess = String((err as Error)?.message ?? err);
     }
     try {
+      // Probe the ACTION BRIDGE, not "can anything be injected": a generic
+      // executeScript succeeds after an extension reload even though main.js
+      // never ran in the already-open tab, so the old check reported
+      // "injection: ok" while every content-script tool failed with
+      // actions-not-loaded (run F: ~40 turns lost, then the model abandoned
+      // menu_path for raw DOM clicks on the strength of that "ok").
       const results = await chrome.scripting.executeScript({
         target: { tabId: ctx.tabId, allFrames: true },
-        func: () => location.href,
+        func: () => Boolean((globalThis as { __baActions?: unknown }).__baActions),
       });
       report.frames = results.length;
-      report.injection = results.length ? "ok" : "no frames";
+      const bridged = results.filter((r) => r.result === true).length;
+      if (bridged > 0 && bridged === results.length) {
+        report.injection = "ok";
+      } else {
+        // Repair on demand before calling the layer broken (idempotent).
+        const repaired = await ensureContentBridge(ctx.tabId, 0).catch(() => false);
+        report.injection = repaired
+          ? "repaired (the harness injected the content-script bridge — re-run the failed tool)"
+          : `MISSING (${bridged}/${results.length} frame(s) bridged) — content-script tools cannot run here`;
+      }
     } catch (err) {
       report.injection = String((err as Error)?.message ?? err).slice(0, 200);
     }
@@ -683,8 +699,13 @@ registerTool({
     } catch (err) {
       report.debuggerChannel = String((err as Error)?.message ?? err).slice(0, 200);
     }
+    const bridgeOk = report.injection === "ok" || report.injection.startsWith("repaired");
     const broken: string[] = [];
-    if (report.injection !== "ok") broken.push("content scripts cannot run in this page");
+    if (!bridgeOk) {
+      broken.push(
+        "the content-script bridge is not loaded in this page (reference clicks, key, scroll and menu walks fail; click_at, screenshot, evaluate_js and docs_* still work)",
+      );
+    }
     if (report.debuggerChannel !== "ok") broken.push("the debugger channel to the tab is down");
     report.advice = broken.length
       ? `Do NOT keep retrying tools. ${broken.join("; ")}. Reload the tab (or switch away and back) and check again; if the page is chrome://, a PDF viewer or an extension page, it cannot be automated.`

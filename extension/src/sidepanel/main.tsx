@@ -2404,13 +2404,16 @@ function TodoBar({
 }) {
   if (!items.length) return null;
   const done = items.filter((t) => t.status === "completed").length;
+  const blocked = items.filter((t) => t.status === "blocked").length;
   const current = items.find((t) => t.status === "in_progress");
   const ratio = done / items.length;
   const headline = current
     ? current.content
     : done === items.length
       ? "All done"
-      : `${items.length - done} left`;
+      : blocked
+        ? `${items.length - done - blocked} left · ${blocked} blocked`
+        : `${items.length - done} left`;
   return (
     <div class={`todo-bar${open ? " is-open" : ""}${running ? "" : " is-idle"}`}>
       <button
@@ -2441,6 +2444,8 @@ function TodoBar({
               <span class="todo-mark">
                 {t.status === "completed" ? (
                   <Icon d={ICONS.check} size={11} stroke={2.6} />
+                ) : t.status === "blocked" ? (
+                  <Icon d={ICONS.close} size={10} stroke={2.6} />
                 ) : t.status === "in_progress" ? (
                   <span class="todo-dot" />
                 ) : (
