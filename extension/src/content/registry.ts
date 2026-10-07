@@ -193,17 +193,23 @@ function collectCandidates(root: Document | ShadowRoot): Element[] {
   return out;
 }
 
-function textDigest(): string {
+/** Cap on the page-text digest a frame reports. */
+const DIGEST_MAX_CHARS = 2_000;
+
+/**
+ * The frame's body text, whitespace-collapsed. `innerText` forces a layout and
+ * the collapse walks every character of the page, so callers that need both the
+ * digest and the full length must share ONE call — this runs per frame on every
+ * observation, and a big document editor has a lot of text.
+ */
+function collapsedBodyText(): string {
   return (document.body?.innerText ?? document.body?.textContent ?? "")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 2_000);
+    .trim();
 }
 
-/** The frame's full body-text length, before the 2 KB digest cap. */
-function rawTextLength(): number {
-  return (document.body?.innerText ?? document.body?.textContent ?? "").replace(/\s+/g, " ").trim()
-    .length;
+function textDigest(): string {
+  return collapsedBodyText().slice(0, DIGEST_MAX_CHARS);
 }
 
 /** How many canvases this frame paints into (a known unreadable surface). */
@@ -278,14 +284,15 @@ export class ElementRegistry {
         text,
       });
     }
+    const body = collapsedBodyText();
     return {
       href: location.href,
       title: document.title,
-      text: textDigest(),
+      text: body.slice(0, DIGEST_MAX_CHARS),
       elements,
       timestamp: Date.now(),
       canvases: safeCanvasCount(),
-      textChars: rawTextLength(),
+      textChars: body.length,
     };
   }
 
@@ -297,12 +304,13 @@ export class ElementRegistry {
     canvases: number;
     textChars: number;
   } {
+    const body = collapsedBodyText();
     return {
       href: location.href,
       title: document.title,
-      text: textDigest(),
+      text: body.slice(0, DIGEST_MAX_CHARS),
       canvases: safeCanvasCount(),
-      textChars: rawTextLength(),
+      textChars: body.length,
     };
   }
 

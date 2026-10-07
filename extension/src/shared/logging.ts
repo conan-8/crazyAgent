@@ -16,6 +16,17 @@ export const LOG_KEY = "baRunLogs";
 export const LOG_MAX_RUNS = 200;
 /** Tool results are truncated to keep the log store small. */
 export const LOG_RESULT_MAX_CHARS = 8_000;
+/**
+ * Per-turn caps on streamed prose and reasoning. A single turn has been
+ * observed streaming ~200k chars of reasoning, and the record holds every turn
+ * of the run — so one runaway turn turned the archive into a multi-megabyte
+ * object that the worker re-serialized to storage on every flush for the rest
+ * of the run. The char COUNT still reaches the export through
+ * `turn_timing.reasoningChars` and `stats`, so nothing that measures reasoning
+ * volume loses signal; only the verbatim text is bounded.
+ */
+export const LOG_TEXT_MAX_CHARS = 8_000;
+export const LOG_REASONING_MAX_CHARS = 8_000;
 
 /** One tool invocation with its (possibly not-yet-arrived) result. */
 export interface LogToolCall {
@@ -57,6 +68,10 @@ export interface LogTurn {
   text: string;
   /** Streamed reasoning ("thinking"), concatenated. */
   reasoning: string;
+  /** Chars of `text` the LOG_TEXT_MAX_CHARS cap dropped. */
+  textDropped?: number;
+  /** Chars of `reasoning` the LOG_REASONING_MAX_CHARS cap dropped. */
+  reasoningDropped?: number;
   tools: LogToolCall[];
   /** Madman-mode exclamations, kept as their own timestamped lines. */
   exclamations: { at: number; message: string }[];
@@ -273,12 +288,20 @@ export function foldLogEvent(
       turn.generation = e.stepIndex;
       break;
     }
-    case "token_delta":
-      currentTurn(rec, at).text += e.text;
+    case "token_delta": {
+      const turn = currentTurn(rec, at);
+      const kept = appendCapped(turn.text, e.text, LOG_TEXT_MAX_CHARS);
+      turn.text = kept.text;
+      if (kept.dropped) turn.textDropped = (turn.textDropped ?? 0) + kept.dropped;
       break;
-    case "reasoning_delta":
-      currentTurn(rec, at).reasoning += e.text;
+    }
+    case "reasoning_delta": {
+      const turn = currentTurn(rec, at);
+      const kept = appendCapped(turn.reasoning, e.text, LOG_REASONING_MAX_CHARS);
+      turn.reasoning = kept.text;
+      if (kept.dropped) turn.reasoningDropped = (turn.reasoningDropped ?? 0) + kept.dropped;
       break;
+    }
     case "turn_timing": {
       // Last write wins (one event per step; the turn it lands in is the
       // current open one by construction).
@@ -427,6 +450,19 @@ function safeJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/** Append a streamed chunk, bounding the total and counting what overflowed. */
+function appendCapped(
+  current: string,
+  chunk: string,
+  max: number,
+): { text: string; dropped: number } {
+  if (current.length >= max) return { text: current, dropped: chunk.length };
+  const next = current + chunk;
+  return next.length <= max
+    ? { text: next, dropped: 0 }
+    : { text: next.slice(0, max), dropped: next.length - max };
 }
 
 /** Append a record to the ring, replacing an existing one with the same id. */
@@ -586,6 +622,12 @@ export function toMarkdown(records: LogTurnRecord[]): string {
         out.push("```text");
         out.push(turn.reasoning.trim());
         out.push("```");
+        if (turn.reasoningDropped) {
+          out.push("");
+          out.push(
+            `_${turn.reasoningDropped.toLocaleString()} further chars not archived (per-turn cap)_`,
+          );
+        }
         out.push("");
         out.push("</details>");
         out.push("");
@@ -645,6 +687,12 @@ export function toMarkdown(records: LogTurnRecord[]): string {
       if (turn.text.trim()) {
         out.push("");
         out.push(turn.text.trim());
+      }
+      if (turn.textDropped) {
+        out.push("");
+        out.push(
+          `_${turn.textDropped.toLocaleString()} further chars of the answer not archived (per-turn cap)_`,
+        );
       }
       if (turn.summary && turn.summary !== turn.text.trim()) {
         out.push("");

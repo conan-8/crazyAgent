@@ -89,6 +89,19 @@ function renderMarkdown(src: string): string {
 
 // ---- shared state for test hooks (outside React for stable identities) ----
 const eventBuffer: StepEvent[] = [];
+
+/**
+ * Events are buffered for the whole run and every smoke reads them back with
+ * `JSON.stringify(__ba.events())`. A `tool_result` carries the full base64
+ * screenshot, so buffering them verbatim pinned every capture of a vision-heavy
+ * run in the panel's heap — the trim that keeps the transcript small was undone
+ * here. Keep just the head of the data URL: enough for a caller to assert one
+ * was attached and what kind, not enough to decode.
+ */
+function bufferedEvent(e: StepEvent): StepEvent {
+  if (e.kind !== "tool_result" || !e.image) return e;
+  return { ...e, image: e.image.slice(0, 64) };
+}
 const listeners = new Set<(e: StepEvent) => void>();
 let currentConv: Conversation | null = null;
 
@@ -183,10 +196,15 @@ function IconButton({
 // ------------------------------ blocks ------------------------------
 
 function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
+  // Parse+sanitize is the expensive part of a render, and a whole run folds into
+  // ONE assistant turn — so without this every streamed token re-parsed the
+  // markdown of every block the run had produced so far. Memoizing on `text`
+  // leaves only the block currently being written to.
+  const html = useMemo(() => renderMarkdown(text), [text]);
   return (
     <div
       class={`md${streaming ? " is-streaming" : ""}`}
-      dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
+      dangerouslySetInnerHTML={{ __html: html }}
     />
   );
 }
@@ -283,6 +301,12 @@ function ToolRow({
   onZoom: (src: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // A card's detail body carries the pretty-printed args JSON and up to 8k of
+  // result text. JSX children are evaluated whether or not Collapse mounts
+  // them, so every collapsed card in the run was re-parsing and re-creating its
+  // whole body on every render of the transcript. Build it once, on first open;
+  // keep it mounted after that so collapsing still animates.
+  const [seen, setSeen] = useState(false);
   const meta = TOOL_META[card.name];
   const state: ToolState = card.filled ? (card.ok ? "ok" : "err") : active ? "run" : "idle";
   const preview = useMemo(() => argPreview(card.args), [card.args]);
@@ -290,7 +314,10 @@ function ToolRow({
   // Silent Jev risk checks get a subtle mark (rail + dot); the full pink tint
   // stays reserved for calls Jev actually answered (judge) or escalated.
   const gate = card.jevGate === true && !jev;
-  const toggle = () => setOpen(!open);
+  const toggle = () => {
+    setOpen(!open);
+    if (!open) setSeen(true);
+  };
   return (
     <div class={`card card-${state}${jev ? " card-jev" : ""}${gate ? " card-gate-jev" : ""}${open ? " is-open" : ""}`}>
       <div
@@ -347,37 +374,88 @@ function ToolRow({
         </span>
       </div>
       <Collapse open={open}>
-        <div class="card-detail">
-          {card.args && card.args !== "{}" ? (
-            <div class="card-section">
-              <span class="card-k">{card.name}</span>
-              <pre class="card-body">{prettyArgs(card.args)}</pre>
-            </div>
-          ) : null}
-          {card.result ? (
-            <div class="card-section">
-              <span class="card-k">{card.ok ? "result" : "error"}</span>
-              <pre class="card-body card-result">{card.result}</pre>
-            </div>
-          ) : null}
-          {card.image ? (
-            <img class="thumb" src={card.image} alt="Screenshot" onClick={() => onZoom(card.image!)} />
-          ) : null}
-        </div>
+        {seen ? (
+          <div class="card-detail">
+            {card.args && card.args !== "{}" ? (
+              <div class="card-section">
+                <span class="card-k">{card.name}</span>
+                <pre class="card-body">{prettyArgs(card.args)}</pre>
+              </div>
+            ) : null}
+            {card.result ? (
+              <div class="card-section">
+                <span class="card-k">{card.ok ? "result" : "error"}</span>
+                <pre class="card-body card-result">{card.result}</pre>
+              </div>
+            ) : null}
+            {card.image ? (
+              <img class="thumb" src={card.image} alt="Screenshot" onClick={() => onZoom(card.image!)} />
+            ) : null}
+          </div>
+        ) : null}
       </Collapse>
     </div>
   );
 }
 
 /**
+ * Word counts for reasoning blocks, cached on the block object. The collapsed
+ * header shows a live count, so it is recomputed on every render — a full
+ * whitespace split of the whole thought, per frame. Reasoning blocks only ever
+ * grow by appending, so count the new tail and carry the running total instead;
+ * anything else (a thread loaded from history) counts once and is then cached.
+ */
+const reasoningWordCounts = new WeakMap<
+  object,
+  { len: number; words: number; midWord: boolean }
+>();
+
+function countWords(text: string): number {
+  return text.trim() ? text.trim().split(/\s+/).length : 0;
+}
+
+function reasoningWords(block: object, text: string): number {
+  const seen = reasoningWordCounts.get(block);
+  let words: number;
+  if (seen && text.length >= seen.len) {
+    const tail = text.slice(seen.len);
+    const added = countWords(tail);
+    // A tail continuing the previous partial word adds no new word of its own.
+    words = seen.words + (added && seen.midWord && !/^\s/.test(tail) ? added - 1 : added);
+  } else {
+    words = countWords(text);
+  }
+  reasoningWordCounts.set(block, {
+    len: text.length,
+    words,
+    midWord: text.length > 0 && !/\s$/.test(text),
+  });
+  return words;
+}
+
+/**
  * Model reasoning ("thinking"). Collapsed by default and auto-opened while it
  * is still streaming, so long reasoning never pushes the answer off-screen.
  */
-function ReasoningBlock({ text, live }: { text: string; live: boolean }) {
+function ReasoningBlock({
+  block,
+  live,
+}: {
+  block: Extract<ChatBlock, { kind: "reasoning" }>;
+  live: boolean;
+}) {
+  const text = block.text;
   const [open, setOpen] = useState(false);
   const [touched, setTouched] = useState(false);
   const expanded = touched ? open : live;
-  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  // Same latch Collapse keeps: the body stays mounted through the collapse so
+  // it animates instead of snapping — but a block that was never opened never
+  // builds its (potentially huge) text node at all.
+  const [seen, setSeen] = useState(expanded);
+  useEffect(() => {
+    if (expanded && !seen) setSeen(true);
+  }, [expanded, seen]);
+  const words = reasoningWords(block, text);
   return (
     <div class={`reasoning${live ? " is-live" : ""}${expanded ? " is-open" : ""}`}>
       <button
@@ -400,7 +478,7 @@ function ReasoningBlock({ text, live }: { text: string; live: boolean }) {
         </span>
       </button>
       <Collapse open={expanded}>
-        <div class="reasoning-body">{text.trim()}</div>
+        {expanded || seen ? <div class="reasoning-body">{text.trim()}</div> : null}
       </Collapse>
     </div>
   );
@@ -621,11 +699,15 @@ function TurnView({
     );
   }
 
-  const answer = turn.blocks
-    .filter((b): b is { kind: "text"; text: string } => b.kind === "text")
-    .map((b) => b.text)
-    .join("\n\n")
-    .trim();
+  // Only a finished turn needs the copy text: the live one re-renders on every
+  // streamed token, and joining all of its blocks each time is pure waste.
+  const answer = active
+    ? ""
+    : turn.blocks
+        .filter((b): b is { kind: "text"; text: string } => b.kind === "text")
+        .map((b) => b.text)
+        .join("\n\n")
+        .trim();
   const lastIndex = turn.blocks.length - 1;
 
   return (
@@ -683,7 +765,7 @@ function TurnView({
           );
         }
         if (block.kind === "reasoning") {
-          return <ReasoningBlock key={i} text={block.text} live={active && i === lastIndex} />;
+          return <ReasoningBlock key={i} block={block} live={active && i === lastIndex} />;
         }
         if (block.kind === "note") {
           // Jev sidecar notes: pink line with a `Jev` pill (never colour alone).
@@ -2585,7 +2667,47 @@ function App() {
   >(running);
   const inputRef = useAutosize(taskText);
 
-  const bump = () => setTick((t) => t + 1);
+  /**
+   * Re-render the transcript. Streamed deltas arrive one per token (100+/s on a
+   * fast decode) and each one used to force a full re-render of the live turn —
+   * every tool card of the run re-diffed per token, which is what made a long
+   * run feel like it was crawling. Throttled: render at once when idle (so a
+   * confirm card or a finished answer appears immediately), coalesce the rest
+   * into one render per window, and always fire the trailing edge so the final
+   * state lands.
+   *
+   * `immediate` skips the throttle. Structural events (a tool card appearing, a
+   * confirm prompt, the run finishing) are low-frequency AND are what a caller
+   * or the user is waiting on, so they paint on arrival; only the per-token
+   * deltas — the ones that arrive 100+/s — are worth coalescing.
+   */
+  const RENDER_WINDOW_MS = 50;
+  const lastRenderAt = useRef(0);
+  const renderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bump = (immediate?: boolean) => {
+    const wait = immediate ? 0 : RENDER_WINDOW_MS - (Date.now() - lastRenderAt.current);
+    if (wait <= 0) {
+      if (renderTimer.current) {
+        clearTimeout(renderTimer.current);
+        renderTimer.current = null;
+      }
+      lastRenderAt.current = Date.now();
+      setTick((t) => t + 1);
+      return;
+    }
+    if (renderTimer.current) return;
+    renderTimer.current = setTimeout(() => {
+      renderTimer.current = null;
+      lastRenderAt.current = Date.now();
+      setTick((t) => t + 1);
+    }, wait);
+  };
+  useEffect(
+    () => () => {
+      if (renderTimer.current) clearTimeout(renderTimer.current);
+    },
+    [],
+  );
   const refreshSettings = () => void loadSettings().then(setSettingsState);
 
   // The settings drawer writes to the same storage key; pick those writes up so
@@ -2625,7 +2747,7 @@ function App() {
       };
       port.onMessage.addListener((msg: SwToPanel) => {
         if (msg.type === "agent.event") {
-          eventBuffer.push(msg.event);
+          eventBuffer.push(bufferedEvent(msg.event));
           if (msg.event.kind === "usage") {
             setUsage({
               totalTokens: msg.event.totalTokens,
@@ -2686,7 +2808,9 @@ function App() {
             }
           } else if (currentConv) {
             foldEvent(currentConv, msg.event);
-            trimCardImages(currentConv, 6);
+            // Only a tool_result can attach a screenshot — trimming on every
+            // event walked every block of the whole run, per streamed token.
+            if (msg.event.kind === "tool_result") trimCardImages(currentConv, 6);
           }
           for (const listener of listeners) listener(msg.event);
           if (msg.event.kind === "done") {
@@ -2694,7 +2818,11 @@ function App() {
             awaitingModelRef.current = null;
             setAwaitingModel(null);
           }
-          bump();
+          // Deltas are the only high-volume events; everything else is a state
+          // change a caller (or the user) is waiting to see, so it paints now.
+          const streaming =
+            msg.event.kind === "token_delta" || msg.event.kind === "reasoning_delta";
+          bump(!streaming);
         } else if (msg.type === "pong") {
           setSwStartedAt(msg.startedAt);
         } else if (msg.type === "tool_result") {

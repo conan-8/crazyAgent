@@ -41,6 +41,7 @@ import { runAgentTask, type ActionVerify, type ExecuteBatch, type ExecuteResult 
 import { createLlmClient } from "./agent/llm";
 import { loadSettings } from "./settings";
 import { recordHistory } from "./history";
+import { netlog } from "./netlog";
 import {
   deleteConversation,
   getConversation,
@@ -126,6 +127,7 @@ import { probeElementAt } from "./tools/coords";
 import {
   captureBlindShot,
   collectSnapshot,
+  forgetTab,
   formatSnapshot,
   settleTab,
   tabIdentity,
@@ -461,8 +463,10 @@ function emitNow(event: StepEvent): void {
     foldEvent(currentConv, event);
     // The folded conversation is the worker's persistence copy — cap the
     // screenshots it holds (the panel keeps its own, separately capped, for
-    // display). Unbounded base64 accumulation here was an OOM source.
-    trimCardImages(currentConv, 4);
+    // display). Unbounded base64 accumulation here was an OOM source. Only a
+    // tool_result can add one, so that is the only event worth the full walk
+    // over every block the run has produced so far.
+    if (event.kind === "tool_result") trimCardImages(currentConv, 4);
     scheduleConvFlush();
   }
   if (currentLog) {
@@ -495,12 +499,24 @@ let currentLog: LogTurnRecord | null = null;
 let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
+ * Debounce window for the two archive writers below (run log + conversation).
+ * Both rewrite their WHOLE payload — a long run's log record is hundreds of KB
+ * of tool results, and the conversation carries the transcript the wire sees —
+ * so at one write per second a 300-step run spent its life re-serializing
+ * megabytes it had already written. Five seconds bounds what a silent worker
+ * death can cost the archive without changing what the run itself can lose:
+ * resuming reads the checkpoint (session storage, saved every step), not these,
+ * and both flush explicitly when the run closes.
+ */
+const FLUSH_INTERVAL_MS = 5_000;
+
+/**
  * Token deltas arrive per chunk — flushing on each would hammer storage.
- * Everything is debounced to one write per second: with the per-record
- * storage layout a flush rewrites the whole RUNNING record (tool results up
- * to 8k chars each), so an immediate write on every tool event was both
- * unnecessary and, under load, a churn source. Durability is bounded by the
- * 1s window; run-end flushes explicitly (closeLogRecord / flushConv).
+ * Everything is debounced to one write per FLUSH_INTERVAL_MS: with the
+ * per-record storage layout a flush rewrites the whole RUNNING record (tool
+ * results up to 8k chars each), so an immediate write on every tool event was
+ * both unnecessary and, under load, a churn source. Run-end flushes explicitly
+ * (closeLogRecord / flushConv).
  */
 function scheduleLogFlush(): void {
   if (!currentLog) return;
@@ -508,7 +524,7 @@ function scheduleLogFlush(): void {
     logFlushTimer = setTimeout(() => {
       logFlushTimer = null;
       void flushLog();
-    }, 1_000);
+    }, FLUSH_INTERVAL_MS);
   }
 }
 
@@ -699,7 +715,7 @@ function scheduleConvFlush(): void {
     convFlushTimer = setTimeout(() => {
       convFlushTimer = null;
       void flushConv();
-    }, 1_000);
+    }, FLUSH_INTERVAL_MS);
   }
 }
 
@@ -1988,6 +2004,20 @@ initWindowScope((windowId) => {
     message: `the agent window (${windowId}) was closed — the next step opens a new one`,
   });
   void broadcastWindowStatus();
+});
+
+/**
+ * Everything the worker remembers about a tab is keyed by tab id and none of it
+ * expires on its own: the last observation digests (tens of KB of page text
+ * each), capture metadata, and the console/network rings. A closed tab kept all
+ * of it for the life of the worker, so a run that walks many tabs — or a long
+ * session of them — grew without ever giving any of it back.
+ */
+chrome.tabs.onRemoved.addListener((tabId) => {
+  lastObservations.delete(tabId);
+  lastPerceptionText.delete(tabId);
+  forgetTab(tabId);
+  netlog.clear(tabId);
 });
 
 // Smoke/compat endpoint (also used by the phase verification scripts).

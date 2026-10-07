@@ -456,6 +456,18 @@ const pendingFrameDiffs = new Map<number, { diff: FrameDiff | null; at: number }
 const PENDING_DIFF_TTL_MS = 5_000;
 
 /**
+ * Drop a tab's capture metadata, frame signature and pending comparison. All
+ * three are keyed by tab id and none expires on its own, so without this a
+ * session that walks many tabs carries every closed one for the life of the
+ * worker.
+ */
+export function forgetTab(tabId: number): void {
+  viewportShots.delete(tabId);
+  lastFrameSignatures.delete(tabId);
+  pendingFrameDiffs.delete(tabId);
+}
+
+/**
  * Mean luminance of one capture on a fixed coarse grid (32x20 cells).
  *
  * The decode uses the same OffscreenCanvas/ createImageBitmap path the
