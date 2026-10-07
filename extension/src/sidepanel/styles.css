@@ -1279,6 +1279,38 @@ input[type="number"]::-webkit-inner-spin-button {
   height: 0;
 }
 
+/* Composer quick-switch: this tab (adopt the panel's window) vs its own window.
+   Two views of the same setting the Settings dropdown edits. */
+.window-mode {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.window-mode-opt {
+  padding: 3px 9px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.2s var(--ease-out), background-color 0.2s var(--ease-out);
+}
+
+.window-mode-opt + .window-mode-opt {
+  border-left: 1px solid var(--border);
+}
+
+.window-mode-opt:hover {
+  background: var(--surface-hover);
+  color: var(--text-soft);
+}
+
+.window-mode-opt.is-on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 /* Settings → Agent window: what the worker currently believes + the gestures
    that change it (bind this window / go back to its own / bring it forward). */
 .window-controls {

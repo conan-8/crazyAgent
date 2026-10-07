@@ -268,10 +268,42 @@ export function formatSnapshot(
   );
 }
 
+/** Sentinel: the worker's own deadline beat the page's settle reply. */
+const SETTLE_DEADLINE = Symbol("settle-deadline");
+
+/**
+ * Race a promise against a service-worker-owned timer. The worker is not
+ * subject to the renderer's background-tab timer throttling, so this deadline
+ * fires on schedule even when the page's own timers have been slowed to ~1/min.
+ */
+function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(SETTLE_DEADLINE), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 /**
  * Wait for the page to settle, retrying across navigations (right after a
  * navigate the new content script may not be injected yet — "receiving end
  * does not exist"). Shared by the tool and the auto-observation path.
+ *
+ * The content script enforces its own timeout by polling with a 100ms
+ * setInterval, but Chrome throttles timers in a hidden/occluded tab to roughly
+ * once a minute — and the agent's window is deliberately kept unfocused. On a
+ * continuously-repainting canvas page (Google Docs) the page never goes quiet,
+ * so the settle depends entirely on that throttled timeout: a 10s budget once
+ * took 371s of wall clock. The deadline therefore lives HERE, in the worker,
+ * with a small slack over the page's own budget; whichever resolves first wins.
  */
 export async function settleTab(
   tabId: number,
@@ -279,14 +311,28 @@ export async function settleTab(
   attempts = 20,
 ): Promise<unknown> {
   let lastError = "";
+  const deadline = timeoutMs + 2_000;
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      return await chrome.tabs.sendMessage(
-        tabId,
-        { type: "ba/settle", timeoutMs },
-        { frameId: 0 },
+      return await withDeadline(
+        chrome.tabs.sendMessage(
+          tabId,
+          { type: "ba/settle", timeoutMs },
+          { frameId: 0 },
+        ),
+        deadline,
       );
     } catch (err) {
+      if (err === SETTLE_DEADLINE) {
+        // Page never reported in time — a background-throttled or endlessly
+        // repainting tab. Return "not settled" and let the caller observe the
+        // page as-is; never stall the run on a clock the page can't keep.
+        return {
+          settled: false,
+          reason: `worker deadline: page did not report settle within ${deadline}ms (background-throttled or continuously-repainting tab) — reading the page as-is`,
+          elapsedMs: deadline,
+        };
+      }
       lastError = String((err as Error)?.message ?? err);
       await new Promise((resolve) => setTimeout(resolve, 250));
     }

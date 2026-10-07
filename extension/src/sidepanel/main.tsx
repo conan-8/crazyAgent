@@ -1614,11 +1614,11 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
               </h3>
               <SelectRow
                 title="Where the agent works"
-                hint="Its own window, created once and reused, or one you pick. Either way it can only see and act inside that window — your other windows are out of reach, and it never takes your focus."
+                hint="Its own window, created once and reused, or this tab — the window the panel is open in. Either way it can only see and act inside that window — your other windows are out of reach, and it never takes your focus."
                 value={s.agentWindow.mode}
                 options={[
                   { value: "own", label: "Its own window" },
-                  { value: "adopt", label: "A window I pick" },
+                  { value: "adopt", label: "This tab (my window)" },
                 ]}
                 onChange={(v) => {
                   set("agentWindow", { ...s.agentWindow, mode: v });
@@ -3156,6 +3156,24 @@ function App() {
       .catch(() => undefined);
   };
 
+  // Quick "this tab / own window" switch. The setting and the worker's binding
+  // are one state, so flipping the mode also performs it — identical semantics
+  // to the Settings dropdown and the AgentWindowControls buttons. "adopt" binds
+  // the window hosting this panel (windowAction resolves it via getCurrent).
+  const setAgentWindowMode = (mode: "own" | "adopt") => {
+    void windowAction(mode === "adopt" ? "window.bind" : "window.reset").then(
+      (status) => {
+        if (status) setAgentWindow(status);
+      },
+    );
+    void loadSettings().then((cur) =>
+      saveSettings({ ...cur, agentWindow: { ...cur.agentWindow, mode } }).then(
+        refreshSettings,
+      ),
+    );
+  };
+  const windowMode = agentWindow?.mode ?? settings?.agentWindow.mode ?? "own";
+
   const stop = () => postPort?.({ kind: "stop" });
 
   const resolveConfirm = (id: string, allow: boolean, always: boolean) => {
@@ -3768,6 +3786,22 @@ function App() {
                 : "own window · opens on Run"}
             </span>
           </span>
+          <div class="window-mode" role="group" aria-label="Where the agent works">
+            <button
+              class={`window-mode-opt${windowMode === "adopt" ? " is-on" : ""}`}
+              title="Work in THIS tab — the window the panel is open in. It stays in the foreground, so nothing gets background-throttled."
+              onClick={() => setAgentWindowMode("adopt")}
+            >
+              This tab
+            </button>
+            <button
+              class={`window-mode-opt${windowMode === "own" ? " is-on" : ""}`}
+              title="Give the agent its own window, created once and reused. It stays out of your way while you work in yours."
+              onClick={() => setAgentWindowMode("own")}
+            >
+              Own window
+            </button>
+          </div>
           {agentWindow?.alive && agentWindow.mode === "own" ? (
             <button
               class="window-btn"
