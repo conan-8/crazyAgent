@@ -1058,10 +1058,63 @@ Smoke: `canvas editors (Docs playbook)` D10–D12 drive the real tools through t
 gated path and pin all three (a typed change verifies, a no-op click reports
 and fails the promise, the missed click is rescued and re-judged).
 
-Not in this pass (Phases C–E in LOOP-PLAN.md): the `run_program` executor built
-on this substrate, per-step expects inside `input_sequence`, the plan-level
-state machine (per-item budgets, park-and-move-on, watchdog/resume),
-file-chooser upload via `Page.fileChooserOpened`, and shortcut harvesting.
+## `run_program` (2026-10-07, Phase C) — plan once, execute many
+
+The structural fix `docs/LOOP-PLAN.md` argued for: the loop's unit of work was
+one UI action per model round trip, and 65-74 % of every field-tested run was
+the model deciding single actions. Now the model compiles ONE checklist item
+into a program of typed steps and the harness runs them back to back.
+
+- **Pure half** (`shared/program.ts`): the step vocabulary (`docs_op`,
+  `menu_path`, `click`, `click_at`, `hover_at`, `key`, `type`, `type_at`,
+  `docs_locate`, `docs_read`, `docs_state`, `scroll`, `wait_for`, `screenshot`,
+  `assert`), a 12-step cap, and validation that runs BEFORE
+  anything executes: each step's arguments go through the tool's own JSON schema
+  (the effective args — a step's `expect` is merged in, which is how the gated
+  path receives it) and each `expect` through `parseExpect`. An unknown tool
+  names the whole vocabulary; an unknown expect key names the real keys. A
+  malformed program therefore costs one turn, not a half-executed sequence.
+- **Verification contract**: `expect` on the LAST step and never more than
+  `PROGRAM_MAX_UNVERIFIED_RUN = 2` steps in a row without one. Verification is
+  what lets the executor advance WITHOUT the model, so a program that promises
+  nothing is just a batched tool call with extra steps.
+- **Executor** (`background/tools/program.ts`): each step runs through the SAME
+  gated path a direct call takes — policy gate, settle, observation, effect
+  verdict, expectation check — injected as `setProgramStepRunner(executeToolGated)`
+  at module scope in `sw.ts`. A program therefore cannot bypass the gate or skip
+  verification, and the dev/panel tool channel behaves identically. The executor
+  STOPS at the first step whose promise fails (or whose tool fails) and returns
+  a step-by-step report plus that step's screenshot; steps after it do not run.
+  The closing `note` rides the existing `progress_note` event, and only when the
+  whole program landed — a note that claims completion for a stopped program is
+  worse than no note.
+- The model sees ONE tool card for the whole program (the nested steps emit no
+  events of their own) — the "41 actions · 1 note" shape the user asked for.
+- `assert` is a registered no-side-effect tool: a promise with no action, the
+  natural closing step of a program (and usable standalone). Its `expect` is
+  what gets checked.
+
+Three bugs the fixture caught while building it, all fixed and pinned:
+- Expectations were only checked for AUTO_OBSERVE tools, so an `assert` step
+  reported "ran" and a program never diverged. A declared `expect` now forces
+  the verification path for ANY tool (with a short 600 ms read instead of a
+  settle budget meant for an action).
+- The digest collapses to "[page unchanged since the previous observation]" when
+  it repeats, which left `text_landed` nothing to read. `observeAfterAction` now
+  returns `fullText` alongside the collapsed text: the model keeps the token
+  saving, the checker reads the page.
+- The step runner was wired at run-start, so the dev/panel channel had no
+  executor; it is wired at module scope now.
+
+Smoke: `canvas editors (Docs playbook)` D13–D14 drive real programs through the
+gated path — a two-step program that verifies both steps and notes progress, and
+a diverging program that stops at step 1 with nothing after it running and no
+progress note.
+
+Not in this pass (Phases D–E in LOOP-PLAN.md): per-step expects inside
+`input_sequence`, the plan-level state machine (per-item budgets,
+park-and-move-on, watchdog/resume), file-chooser upload via
+`Page.fileChooserOpened`, and shortcut harvesting.
 
 ## Capability tools (coordinate input, upload, netlog, handoff)
 

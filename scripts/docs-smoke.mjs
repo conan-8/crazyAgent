@@ -395,6 +395,49 @@ async function main() {
       noopText.replace(/\n/g, " | ").slice(0, 320),
     );
 
+    // ---- D13..D14: run_program — plan-as-data through the SAME gated path ----
+    // Phase C: one call runs a whole sequence, each step settled and verified by
+    // the harness, stopping at the first divergence. The steps go through
+    // executeToolGated exactly like direct calls, so policy and verification see
+    // every action. `note` rides the progress channel only when it all lands.
+    const goodProgram = await gatedCall("run_program", {
+      steps: [
+        { tool: "type", args: { text: " programmatic" }, expect: { pixel_changed: true } },
+        // The fixture's canvas text is not readable, but its toolbar text is
+        // ("… words", "… rejected"): the digest check has to see something the
+        // page really carries.
+        { tool: "assert", args: {}, expect: { text_landed: "words", dialog: "closed" } },
+      ],
+      note: "Progress: program text is in. Next: nothing.",
+    });
+    const goodText = String(goodProgram.text ?? goodProgram.error ?? "");
+    check(
+      "D13 a program runs its steps, verifies each, and notes progress",
+      /program complete: 2 step\(s\)/.test(goodText) &&
+        /1\. type text=\s*programmatic — verified/.test(goodText) &&
+        /2\. assert — verified: the page text contains "words"; the dialog is closed/.test(goodText.replace(/\\"/g, '"')) &&
+        /\[progress noted\]/.test(goodText),
+      JSON.stringify(goodProgram).replace(/\\n/g, " | ").slice(0, 400),
+    );
+
+    const badProgram = await gatedCall("run_program", {
+      steps: [
+        { tool: "assert", args: {}, expect: { pixel_changed: true } },
+        { tool: "assert", args: {}, expect: { text_landed: "never reached" } },
+      ],
+      note: "Progress: this must NOT be reported.",
+    });
+    // A failed tool REJECTS through the dev bridge, so the report lands in error.
+    const badText = String(badProgram.text ?? badProgram.error ?? "");
+    check(
+      "D14 a diverging step stops the program and nothing after it runs",
+      /program STOPPED at step 1 of 2/.test(badText) &&
+        /NOT VERIFIED: the frame did NOT change/.test(badText) &&
+        !/never reached/.test(badText) &&
+        !/progress noted/.test(badText),
+      badText.replace(/\n/g, " | ").slice(0, 300),
+    );
+
     // ---- D5: toolbar refs still work on a canvas page ----
     const bold = snap.payload?.elements?.find((e) => e.name === "Bold");
     const clicked = await call("click", { ref: bold?.ref });

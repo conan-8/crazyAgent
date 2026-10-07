@@ -37,7 +37,7 @@ import { DebuggerAdapter } from "./adapters/debugger";
 import { CdpAdapter } from "./adapters/cdp";
 import type { BrowserAdapter } from "./adapters/types";
 import { toolRegistry, toLlmTool, validateToolArgs } from "./tools/types";
-import { runAgentTask, type ExecuteBatch, type ExecuteResult } from "./agent/loop";
+import { runAgentTask, type ActionVerify, type ExecuteBatch, type ExecuteResult } from "./agent/loop";
 import { createLlmClient } from "./agent/llm";
 import { loadSettings } from "./settings";
 import { recordHistory } from "./history";
@@ -133,6 +133,8 @@ import {
 } from "./tools/perception";
 import { checkStepExpect, expectFailed } from "./tools/expect";
 import "./tools/perception"; // registers snapshot / screenshot / wait_for_settle / wait_for
+import { setProgramStepRunner } from "./tools/program";
+import "./tools/program"; // registers run_program / assert (plan-as-data executor)
 import "./tools/actions"; // registers click / type / select / key / hover / scroll / read_page
 import "./tools/paste"; // registers paste_image (staged-capture delivery)
 import "./tools/tabs"; // registers navigate / reload / back / forward / tabs_*
@@ -147,6 +149,13 @@ import "./tools/jev"; // registers judge (Jev sidecar; offered only when configu
 import "./tools/todo"; // registers todo_write (the live plan dropdown)
 import "./tools/docs"; // registers docs_read (Workspace export without navigation)
 import "./tools/docs-op"; // registers menu_path + docs_op (deterministic Docs procedures)
+
+// Programs (run_program) execute their steps through THIS gated path — the same
+// policy gate, settle, observation, effect verdict and expectation check a
+// direct call gets — so a program can never bypass the gate or skip
+// verification. Wired at module scope: the dev/panel tool channel uses the same
+// executor, and a step must behave identically however it was invoked.
+setProgramStepRunner((name, args) => executeToolGated(name, args));
 
 const ALWAYS_KEY = "baPolicyAlways";
 
@@ -950,7 +959,18 @@ function collapseRepeatObservation(
 async function observeAfterAction(
   tabId: number,
   settleMs = 10_000,
-): Promise<{ text: string | null; canvas: boolean; changed?: boolean } | null> {
+): Promise<{
+  text: string | null;
+  canvas: boolean;
+  changed?: boolean;
+  /**
+   * The same digest WITHOUT the "[page unchanged since the previous
+   * observation]" collapse. The model sees the collapsed form (it saves the
+   * history budget), but a `text_landed` expectation must read the page, not
+   * the fact that nothing moved.
+   */
+  fullText?: string;
+} | null> {
   try {
     // Shorter reachability budget than the manual tool: fail fast on pages
     // where the content script can never run (chrome://, PDF viewer, …).
@@ -965,17 +985,14 @@ async function observeAfterAction(
     // undefined when there is no previous observation to compare against, and
     // only meaningful on non-canvas pages, where the digest actually carries
     // the content.
+    const full =
+      text.length > OBSERVATION_MAX_CHARS
+        ? `${text.slice(0, OBSERVATION_MAX_CHARS)}…[truncated]`
+        : text;
     if (prev && sameObservation(prev, text)) {
-      return { text: "[page unchanged since the previous observation]", canvas, changed: false };
+      return { text: "[page unchanged since the previous observation]", canvas, changed: false, fullText: full };
     }
-    return {
-      text:
-        text.length > OBSERVATION_MAX_CHARS
-          ? `${text.slice(0, OBSERVATION_MAX_CHARS)}…[truncated]`
-          : text,
-      canvas,
-      changed: prev ? true : undefined,
-    };
+    return { text: full, canvas, changed: prev ? true : undefined, fullText: full };
   } catch {
     return null; // observation is an optimization — never fail the action
   }
@@ -1175,7 +1192,13 @@ async function executeToolGated(
   } else if (name === "tabs_close" && Number(args.tabId) === agentTabId) {
     noteAgentTab(undefined);
   }
-  if (!AUTO_OBSERVE_TOOLS.has(name) || stopRequested) {
+  // A declared `expect` forces the verification path: `assert` is exactly a
+  // promise with no action, and an expectation on any other tool must still be
+  // checked (found on the fixture: an assert step reported "ran" because the
+  // observation branch was skipped, so a program never diverged).
+  const hasExpect =
+    Boolean(args.expect) && typeof args.expect === "object" && Object.keys(args.expect as object).length > 0;
+  if ((!AUTO_OBSERVE_TOOLS.has(name) && !hasExpect) || stopRequested) {
     // Redundant-observation guard. Actions already return a fresh observation,
     // and a model that ignores that (or re-checks out of habit) used to receive
     // the identical multi-thousand-token page dump again — the exact text that
@@ -1216,8 +1239,11 @@ async function executeToolGated(
   // a second — and on a canvas editor (which never goes "quiet") the long
   // budget would be paid in full on every op for nothing.
   const docsTool = name === "menu_path" || name === "docs_op";
-  const settles =
-    coordinateTool || docsTool || (name === "input_sequence" && !enterish)
+  const settles = !AUTO_OBSERVE_TOOLS.has(name)
+    ? // an assertion (or an expect riding a non-observing tool) changed nothing:
+      // it needs a fresh read, not a settle budget meant for an action
+      600
+    : coordinateTool || docsTool || (name === "input_sequence" && !enterish)
       ? 2_500
       : (name === "type" && args.submit !== true) || (name === "key" && !enterish)
         ? 3_500
@@ -1256,7 +1282,7 @@ async function executeToolGated(
   // This is the only place that holds the fresh capture, the digest AND the
   // tool's arguments, so it is where the harness can answer "did it work?"
   // itself instead of leaving it to the next turn's screenshot squint.
-  const tail = await actionVerification({
+  const checked = await actionVerification({
     name,
     args,
     res,
@@ -1265,8 +1291,10 @@ async function executeToolGated(
     observed,
     settles,
   });
+  const tail = checked.lines;
   const body = tail.length ? `${text}\n${tail.join("\n")}` : text;
-  return image ? { ...res, text: body, image } : { ...res, text: body };
+  const stamped = checked.verify && Object.keys(checked.verify).length ? { verify: checked.verify } : {};
+  return image ? { ...res, text: body, image, ...stamped } : { ...res, text: body, ...stamped };
 }
 
 /** What `actionVerification` needs to judge and (safely) repair one action. */
@@ -1276,7 +1304,7 @@ interface ActionVerificationInput {
   res: ExecuteResult;
   tabId: number;
   observation: string | null;
-  observed: { canvas: boolean; changed?: boolean } | null;
+  observed: { canvas: boolean; changed?: boolean; fullText?: string } | null;
   settles: number;
 }
 
@@ -1294,29 +1322,37 @@ interface ActionVerificationInput {
  * Any other failed promise is reported, not re-applied: a second click on a
  * control that DID land would double-apply a toggle or a destructive row.
  */
-async function actionVerification(input: ActionVerificationInput): Promise<string[]> {
+async function actionVerification(
+  input: ActionVerificationInput,
+): Promise<{ lines: string[]; verify?: ActionVerify }> {
   const { name, args, res, tabId, observation, observed, settles } = input;
   const out: string[] = [];
+  const verify: ActionVerify = {};
   const verdict =
     takeFrameEffect(tabId) ?? (observed && observed.changed !== undefined ? digestEffect(observed.changed) : null);
+  if (verdict) verify.effect = verdict.verdict;
   if (verdict?.detail) out.push(`[${verdict.detail}]`);
   const parsed = parseExpect(args.expect);
   if (!parsed.ok) {
     out.push(`[${parsed.error}]`);
-    return out;
+    return { lines: out, verify };
   }
-  if (!parsed.expect) return out;
+  if (!parsed.expect) return { lines: out, verify };
   const adapter = await adapterForMode();
   const expectCtx = {
     tabId,
     adapter,
     expect: parsed.expect,
-    observationText: observation,
+    // The full digest, not the collapsed marker: a text_landed check must read
+    // the page even when the model's copy was deduplicated.
+    observationText: observed?.fullText ?? observation,
     verdict,
   };
   let line = await checkStepExpect(expectCtx);
-  if (!line) return out;
+  if (!line) return { lines: out, verify };
   out.push(`[${line}]`);
+  verify.expect = expectOutcome(line);
+  verify.expectDetail = expectDetailOf(line);
 
   // The one repair: a failed promise on a coordinate click that provably hit
   // no control and changed nothing. The rescue ref comes from the click's own
@@ -1328,12 +1364,13 @@ async function actionVerification(input: ActionVerificationInput): Promise<strin
     (name === "click_at" || name === "hover_at") &&
     typeof payload?.rescue === "string" &&
     payload.rescue.length > 0;
-  if (!canRescue) return out;
+  if (!canRescue) return { lines: out, verify };
   const retry = await executeTool(
     name === "hover_at" ? "hover_at" : "click_at",
     { ref: payload!.rescue! },
     tabId,
   );
+  verify.repaired = true;
   out.push(
     `[repair: the first ${name} changed nothing and had missed every control, so the harness re-aimed once at the nearest control (ref ${payload!.rescue}, ~${Math.round(payload!.rescueDistance ?? 0)}px away) — ${retry.ok ? "the rescue click landed" : `it failed: ${String(retry.error ?? "").slice(0, 120)}`}]`,
   );
@@ -1348,12 +1385,34 @@ async function actionVerification(input: ActionVerificationInput): Promise<strin
       (obs2 && obs2.changed !== undefined ? digestEffect(obs2.changed) : null);
     const after = await checkStepExpect({
       ...expectCtx,
-      observationText: obs2?.text ?? observation,
+      observationText: obs2?.fullText ?? obs2?.text ?? observation,
       verdict: verdict2,
     });
-    if (after) out.push(`[after the repair: ${after}]`);
+    if (after) {
+      out.push(`[after the repair: ${after}]`);
+      // The repair is part of the action: the program executor must see the
+      // POST-repair outcome, or it would stop on a step the harness just fixed.
+      verify.expect = expectOutcome(after);
+      verify.expectDetail = expectDetailOf(after);
+    }
   }
-  return out;
+  return { lines: out, verify };
+}
+
+/** Classify a verification line for the structured verdict. */
+function expectOutcome(line: string): ActionVerify["expect"] {
+  if (line.startsWith("NOT VERIFIED")) return "failed";
+  if (line.startsWith("verified")) return "verified";
+  return "unverified";
+}
+
+/** The line's detail, without its status prefix or the trailing advice — the
+ *  report composes its own "verified:" / "NOT VERIFIED:" around it. */
+function expectDetailOf(line: string): string {
+  return line
+    .replace(/^(?:NOT VERIFIED|verified|unverified):?\s*/, "")
+    .replace(/\s*—\s*look at the attached observation[^]*$/, "")
+    .trim();
 }
 
 /** Timestamped export filename, e.g. crazyagent-logs-2026-05-04T09-30-00.jsonl. */

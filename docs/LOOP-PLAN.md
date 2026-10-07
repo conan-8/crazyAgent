@@ -165,7 +165,17 @@ become verdict producers), `tools/perception.ts` (diff helper),
 `shared/tool-failure.ts`, `shared/docs-ops.ts` (expect vocabulary), tests +
 one smoke suite.
 
-### Phase C — `run_program` (plan-as-data)
+### Phase C — `run_program` (plan-as-data) — **SHIPPED 2026-10-07**
+
+Status: the tool, the pure vocabulary/caps/validation, the executor on the gated
+path, the prompt contract and the progress-note wiring all landed (905 unit
+tests green; docs smoke D13–D14 pin a verifying program and a diverging one).
+`docs/DEV.md` → "`run_program`" has the detail, including the three bugs the
+fixture caught (expectations unchecked on non-observed tools, the collapsed
+digest starving `text_landed`, and a run-start-only runner wiring). Not in this
+pass: per-step expects inside `input_sequence` steps and the panel's sequence
+grouping (the model already sees one card per program, which is the shape that
+matters).
 
 - New tool: `run_program({ steps: [...], note })`, steps from a small fixed
   vocabulary — `docs_op`, `menu_path`, `key`, `type`, `click` (by ref),

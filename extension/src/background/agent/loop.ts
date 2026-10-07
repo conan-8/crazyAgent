@@ -21,6 +21,23 @@ import { buildSystemPrompt, buildSystemVolatile } from "./prompts";
 
 export type AgentOutcome = "completed" | "stopped" | "capped";
 
+/**
+ * The harness's own check of one action (Phase B effect verification + declared
+ * expectations). Internal: it rides `ExecuteResult` so the program executor can
+ * decide "advance or stop" without parsing result text, and it never reaches
+ * the model or the panel as a field (its human-readable lines do, in `text`).
+ */
+export interface ActionVerify {
+  /** Did the page/frame visibly change? */
+  effect?: "changed" | "unchanged" | "unknown";
+  /** Outcome of the step's declared `expect`, when it carried one. */
+  expect?: "verified" | "failed" | "unverified";
+  /** The verification line, for compact program reports. */
+  expectDetail?: string;
+  /** The harness re-aimed a coordinate click that had missed every control. */
+  repaired?: boolean;
+}
+
 export interface ExecuteResult {
   ok: boolean;
   payload?: unknown;
@@ -29,6 +46,8 @@ export interface ExecuteResult {
   image?: string;
   /** Pre-formatted compact text for the LLM (instead of raw JSON). */
   text?: string;
+  /** The harness's structured verdict for this action (see ActionVerify). */
+  verify?: ActionVerify;
   /**
    * The Jev risk layer checked this mutating action and allowed it. Passed
    * through to the tool_result event so the panel can mark the card.
