@@ -31,6 +31,7 @@ import {
   planClick,
   planDrag,
   planHover,
+  RESCUE_RADIUS_PX,
   screenshotToViewportPoint,
   shapeCoordArgs,
   shapeDragList,
@@ -44,6 +45,7 @@ import {
   type StrokeStep,
   type ViewportInfo,
 } from "../../shared/coords";
+import { EXPECT_PROP } from "../../shared/expect";
 import { failureTag } from "../../shared/tool-failure";
 import { trustedInputFailure, keyEventParams, parseKeyCombo, planTyping } from "../../shared/trusted-input";
 import type { ElementProbe } from "../policy";
@@ -621,6 +623,35 @@ const FRAME_PROP = {
   },
 };
 
+/**
+ * The RESCUE probe: a coordinate click that provably landed on no control and
+ * changed nothing gets ONE second aim at the nearest interactive neighbour
+ * within RESCUE_RADIUS_PX — far wider than the magnet's 24px, which is safe
+ * here precisely because the outcome is already known (see shared/coords.ts).
+ * Returns null for every case the rescue must not touch: an unknown hit, a
+ * click that DID land on a control, on a canvas, on an editable field or over
+ * an iframe — those are real targets, not misses.
+ */
+async function rescueCandidate(
+  ctx: ToolContext,
+  resolved: Extract<ResolveOutcome, { ok: true }>,
+): Promise<{ ref: string; distance: number; text: string } | null> {
+  const hit = resolved.hit;
+  if (!hit || hit.interactive === true) return null;
+  if (hit.canvas || hit.editable || hit.overIframe) return null;
+  const res = await runContentAction(ctx.tabId, {
+    action: "probeAt",
+    x: resolved.from.x,
+    y: resolved.from.y,
+    space: "viewport",
+    radius: RESCUE_RADIUS_PX,
+  });
+  if (!res.ok) return null;
+  const snap = (res.data as { snap?: SnapCandidate | null } | undefined)?.snap;
+  if (!snap?.ref) return null;
+  return { ref: snap.ref, distance: snap.distance, text: snap.text.slice(0, 40) };
+}
+
 registerTool({
   name: "click_at",
   description:
@@ -641,6 +672,7 @@ registerTool({
         type: "number",
         description: "1 (default), 2 = double-click, 3 = triple-click",
       },
+      ...EXPECT_PROP,
     },
   },
   async run(args, ctx) {
@@ -651,12 +683,16 @@ registerTool({
     const { from, hit, viewport, source, probed, correction } = resolved;
     await sendStrokes(ctx, planClick(from, mods.button, mods.clickCount));
     const after = probed ? await afterHit(ctx, from) : null;
+    // Only when the click PROVABLY hit no control: a candidate for the one
+    // rescue attempt the harness may make if this click changes nothing.
+    const rescue = await rescueCandidate(ctx, resolved).catch(() => null);
     return {
       clicked: { x: from.x, y: from.y, button: mods.button, clickCount: mods.clickCount },
       hit: probed ? describeHit(hit) : "unknown (no content script at that point — the click still landed; verify the effect)",
       after,
       source,
       ...(correction ? { correction } : {}),
+      ...(rescue ? { rescue: rescue.ref, rescueDistance: rescue.distance, rescueText: rescue.text } : {}),
       viewport: viewport ? { width: viewport.width, height: viewport.height } : undefined,
     };
   },

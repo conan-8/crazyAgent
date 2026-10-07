@@ -6,6 +6,7 @@
 // runs. Planning is pure and unit-tested (shared/docs-ops.ts); execution here
 // uses the label-based content actions (clickByText / fillField / queryText)
 // so nothing depends on coordinates, and every op verifies its own effect.
+import { EXPECT_PROP } from "../../shared/expect";
 import { failureTag } from "../../shared/tool-failure";
 import {
   DOCS_OPS,
@@ -223,6 +224,7 @@ registerTool({
         items: { type: "string" },
         description: "Menu labels from the bar down to the final row (2–6 entries)",
       },
+      ...EXPECT_PROP,
     },
     required: ["path"],
   },

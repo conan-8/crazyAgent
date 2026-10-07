@@ -36,7 +36,7 @@ export type ActionRequest =
   | { action: "focus"; ref?: string }
   | { action: "canvasPoint" }
   | { action: "probe"; ref: string }
-  | { action: "probeAt"; x: number; y: number; space?: CoordSpace }
+  | { action: "probeAt"; x: number; y: number; space?: CoordSpace; radius?: number }
   | {
       action: "resolvePoint";
       /** Element to act on (its center, plus dx/dy). */
@@ -158,7 +158,7 @@ export class Actions {
         return { ok: true, data: probeOf(el) };
       }
       case "probeAt":
-        return this.#probeAt(req.x, req.y, req.space);
+        return this.#probeAt(req.x, req.y, req.space, req.radius);
       case "resolvePoint":
         return this.#resolvePoint(req);
       case "clickByText":
@@ -238,7 +238,7 @@ export class Actions {
    * around it, so a click 3px off a menu row's edge can be re-aimed at the
    * row instead of silently hitting the menu's padding and closing it.
    */
-  #probeAt(x: number, y: number, space?: CoordSpace): ActionResult {
+  #probeAt(x: number, y: number, space?: CoordSpace, radius?: number): ActionResult {
     const point = toViewportPoint(
       { x, y },
       space === "page" ? "page" : "viewport",
@@ -261,13 +261,14 @@ export class Actions {
             canvas: raw?.tagName === "CANVAS",
             overIframe: raw?.tagName === "IFRAME" || raw?.tagName === "FRAME",
             editable: isEditableHost(el) || undefined,
+            interactive: Boolean(target),
             rect: rectOf(el),
           }
         : null;
     // The ring search only matters when the point is NOT already on a ref'd
     // control — that is the near-miss case the magnet exists for. Skipped
     // otherwise, so the common hit pays no extra elementFromPoint calls.
-    const snap = hit?.ref ? null : this.#snapNear(point, el);
+    const snap = hit?.ref ? null : this.#snapNear(point, el, radius);
     const viewport: ViewportInfo = {
       width: window.innerWidth,
       height: window.innerHeight,
@@ -285,11 +286,13 @@ export class Actions {
    * wherever they live in the tree (no ancestor walk), which is exactly the
    * floating-menu case the logged near-misses came from.
    */
-  #snapNear(point: Point, exclude: Element | null): SnapCandidate | null {
+  #snapNear(point: Point, exclude: Element | null, radius = SNAP_RADIUS_PX): SnapCandidate | null {
+    const reach = Math.max(1, Math.min(Math.round(radius), 200));
     let best: SnapCandidate | null = null;
     const seen = new Set<Element>();
     if (exclude) seen.add(exclude);
-    for (const r of [12, SNAP_RADIUS_PX]) {
+    const rings = reach <= 12 ? [reach] : [12, Math.round(reach / 2), reach];
+    for (const r of rings) {
       for (let i = 0; i < 8; i++) {
         const a = (Math.PI * 2 * i) / 8;
         const px = point.x + Math.round(r * Math.cos(a));
@@ -307,7 +310,7 @@ export class Actions {
         const rect = rectOf(inter);
         if (rect.w <= 0 || rect.h <= 0) continue;
         const distance = rectDistance(point, rect);
-        if (distance > SNAP_RADIUS_PX) continue;
+        if (distance > reach) continue;
         if (best && best.distance <= distance) continue;
         const p = probeOf(inter);
         best = {

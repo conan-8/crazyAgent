@@ -12,6 +12,16 @@ import {
 } from "../../shared/frames";
 import { safeFilename, screenshotFilename } from "../../shared/filenames";
 import { screenshotToViewportPoint, type ShotMapping } from "../../shared/coords";
+import {
+  diffFrames,
+  DIFF_COLS,
+  DIFF_ROWS,
+  effectVerdict,
+  signatureFromLuminance,
+  type EffectVerdict,
+  type FrameDiff,
+  type FrameSignature,
+} from "../../shared/frame-diff";
 import { failureTag } from "../../shared/tool-failure";
 import {
   evalWaitCondition,
@@ -22,6 +32,7 @@ import {
 import { stageShelfImage } from "../shelf";
 import { ensureAgentWindow, resolveAgentWindow } from "../window-scope";
 import { ensureContentBridge } from "./content-action";
+import { withCursorHidden } from "./cursor-overlay";
 import { registerTool, type ToolContext } from "./types";
 
 export type { AggregatedSnapshot };
@@ -428,6 +439,74 @@ export async function layoutViewportCss(
   }
 }
 
+/**
+ * Last frame signature per tab: the "before" picture every action's capture is
+ * compared against. Cleared per tab, never per run — the model's mental picture
+ * of the page persists across runs, and so does this.
+ */
+const lastFrameSignatures = new Map<number, FrameSignature>();
+/**
+ * The signature pair from the MOST RECENT capture, waiting to be consumed by
+ * the action path (see takeFrameEffect). Keyed by tab and timestamped: a
+ * capture the model took itself must not be mistaken for an action's effect
+ * ten turns later.
+ */
+const pendingFrameDiffs = new Map<number, { diff: FrameDiff | null; at: number }>();
+/** How long a pending comparison stays fresh enough to describe an action. */
+const PENDING_DIFF_TTL_MS = 5_000;
+
+/**
+ * Mean luminance of one capture on a fixed coarse grid (32x20 cells).
+ *
+ * The decode uses the same OffscreenCanvas/ createImageBitmap path the
+ * screenshot downscaler already relies on in this worker, and the grid is
+ * deliberately coarse: JPEG noise and a blinking text caret must vanish into
+ * the cell average while a toolbar pill lighting up must survive as one
+ * strongly-changed cell (see shared/frame-diff.ts for the thresholds).
+ * Best-effort: null on any failure, and the caller falls back to the digest.
+ */
+export async function frameSignatureOf(
+  dataUrl: string,
+  cols = DIFF_COLS,
+  rows = DIFF_ROWS,
+): Promise<FrameSignature | null> {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const bmp = await createImageBitmap(blob, {
+      resizeWidth: cols,
+      resizeHeight: rows,
+      resizeQuality: "low",
+    });
+    const canvas = new OffscreenCanvas(cols, rows);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(bmp, 0, 0);
+    const { data } = ctx.getImageData(0, 0, cols, rows);
+    const lum: number[] = [];
+    for (let i = 0; i < data.length; i += 4) {
+      lum.push(0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!);
+    }
+    bmp.close();
+    return signatureFromLuminance(lum, cols, rows);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Consume the comparison for the newest capture on this tab, if it is fresh.
+ * The action path calls this right after its own capture; a screenshot the
+ * model took on its own leaves an entry that expires (PENDING_DIFF_TTL_MS)
+ * instead of being reported as some later action's effect.
+ */
+export function takeFrameEffect(tabId: number): EffectVerdict | null {
+  const pending = pendingFrameDiffs.get(tabId);
+  if (!pending) return null;
+  pendingFrameDiffs.delete(tabId);
+  if (Date.now() - pending.at > PENDING_DIFF_TTL_MS) return null;
+  return effectVerdict(pending.diff, "frame");
+}
+
 /** Downscale a viewport capture and record its mapping info for the
  *  coordinate tools. Every viewport capture (screenshot, blind shot) goes
  *  through here so `space:"screenshot"` always has fresh dims. A `crop` says
@@ -452,7 +531,20 @@ async function recordViewportShot(
     ...(crop ? { crop } : {}),
     at: Date.now(),
   };
-  if (width > 0 && height > 0) viewportShots.set(tabId, shot);
+  if (width > 0 && height > 0) {
+    viewportShots.set(tabId, shot);
+    // Frame differencing for the effect verdict: this capture becomes the
+    // "after" for the action that asked for it and the "before" for the next.
+    const signature = await frameSignatureOf(jpeg);
+    if (signature) {
+      const previous = lastFrameSignatures.get(tabId);
+      pendingFrameDiffs.set(tabId, {
+        diff: previous ? diffFrames(previous, signature) : null,
+        at: Date.now(),
+      });
+      lastFrameSignatures.set(tabId, signature);
+    }
+  }
   return { dataUrl: jpeg, shot };
 }
 
@@ -515,7 +607,10 @@ export async function captureBlindShot(
   tabId: number,
 ): Promise<string | undefined> {
   try {
-    const { dataUrl } = await adapter.screenshot(tabId);
+    // The agent's own cursor arrow is part of the page pixels; hide it for the
+    // capture so the before/after difference is about the PAGE (see
+    // cursor-overlay.withCursorHidden).
+    const { dataUrl } = await withCursorHidden(tabId, adapter, () => adapter.screenshot(tabId));
     return (await recordViewportShot(tabId, adapter, dataUrl)).dataUrl;
   } catch {
     return undefined;

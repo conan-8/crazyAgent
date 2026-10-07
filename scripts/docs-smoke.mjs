@@ -342,6 +342,59 @@ async function main() {
       `${JSON.stringify(refless.payload ?? refless.error ?? null).slice(0, 220)} | model: ${JSON.stringify(reflessModel).slice(0, 160)}`,
     );
 
+    // ---- D10..D12: the effect verdict, the declared expectation, the rescue ----
+    // Phase B: a mutating action now answers "did it work?" itself, from the
+    // before/after captures this fixture forces anyway (canvas page), and a
+    // click that provably missed every control AND changed nothing gets ONE
+    // wide-radius rescue instead of a blind replay. `toolGated` is the path the
+    // agent loop uses (observations + verdicts); `call` above is raw execution.
+    const gatedCall = async (name, args = {}) =>
+      JSON.parse(
+        await panel.eval(
+          `__ba.toolGated(${JSON.stringify(name)}, ${JSON.stringify(args)}).then((r) => JSON.stringify(r))`,
+        ),
+      );
+    // Prime the baseline: the FIRST capture has nothing to compare against, so
+    // its verdict is honestly "unknown" instead of a guessed "changed".
+    await gatedCall("screenshot", {});
+    const typedGated = await gatedCall("type", { text: " extra", expect: { pixel_changed: true } });
+    const typedText = String(typedGated.text ?? "");
+    check(
+      "D10 a visible change is seen and the declared expectation reads verified",
+      /\[effect: the frame changed/.test(typedText) &&
+        /\[verified: the frame visibly changed\]/.test(typedText),
+      typedText.replace(/\n/g, " | ").slice(0, 260),
+    );
+
+    // Aim into the toolbar between controls: nothing interactive within the
+    // magnet's 24px, but the Undo button sits inside the rescue's 120px.
+    // (The agent's own cursor arrow and ripple are hidden for the capture —
+    // without that, our own decoration read as a page change.)
+    const pad = jsonOf(
+      await call("evaluate_js", {
+        expression:
+          "(() => { const r = document.getElementById('wordcount').getBoundingClientRect(); return JSON.stringify({ x: Math.round(r.left + 30), y: Math.round(r.top + r.height / 2) }); })()",
+      }),
+    );
+    const noopClick = await gatedCall("click_at", {
+      x: pad.x,
+      y: pad.y,
+      expect: { pixel_changed: true },
+    });
+    const noopText = String(noopClick.text ?? "");
+    check(
+      "D11 a click that changed nothing says NO VISIBLE CHANGE and fails the promise",
+      /\[effect: NO VISIBLE CHANGE/.test(noopText) &&
+        /\[NOT VERIFIED: the frame did NOT change/.test(noopText),
+      noopText.replace(/\n/g, " | ").slice(0, 260),
+    );
+    check(
+      "D12 the missed click is rescued once and re-judged on fresh evidence",
+      /\[repair: the first click_at changed nothing/.test(noopText) &&
+        /\[after the repair: /.test(noopText),
+      noopText.replace(/\n/g, " | ").slice(0, 320),
+    );
+
     // ---- D5: toolbar refs still work on a canvas page ----
     const bold = snap.payload?.elements?.find((e) => e.name === "Bold");
     const clicked = await call("click", { ref: bold?.ref });

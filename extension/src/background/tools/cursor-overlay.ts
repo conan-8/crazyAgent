@@ -51,6 +51,11 @@ const CURSOR_FN_SRC = `(x, y, kind) => {
     if (kind === "move") return;
     const size = kind === "press" ? 16 : 26;
     const ring = document.createElement("div");
+    // Named so a capture can clear it: the ring removes itself on animation
+    // finish, and a BACKGROUND tab (the agent's own window usually is one)
+    // throttles animations — a "transient" ripple then sits on the page for
+    // ever and every later frame comparison sees it as a page change.
+    ring.className = "__baRipple";
     ring.style.cssText =
       "position:fixed;left:" + (x - size / 2) + "px;top:" + (y - size / 2) + "px;" +
       "width:" + size + "px;height:" + size + "px;border-radius:50%;pointer-events:none;" +
@@ -84,4 +89,68 @@ export function cursorPing(
 ): void {
   const expression = `(${CURSOR_FN_SRC})(${Math.round(x)}, ${Math.round(y)}, ${JSON.stringify(kind)})`;
   void adapter.send(tabId, "Runtime.evaluate", { expression }).catch(() => undefined);
+}
+
+/**
+ * Hide the overlay for the duration of one capture, then put it back.
+ *
+ * The frame differencer reads the pixels to decide whether an action changed
+ * anything — and the agent's OWN cursor arrow is painted into the page at the
+ * stroke point, so a no-op click measured a "changed" cell that was really our
+ * decoration (found on the canvas fixture: the arrow's 24x24 px plus its glow).
+ * Suppressing it for the ~200 ms of a capture is invisible to the human
+ * watching (the arrow is a slow-fade decoration), and it keeps the verdict
+ * about the PAGE. Fail-open: a page that refuses the evaluation just keeps its
+ * arrow and the verdict stays slightly conservative.
+ */
+export async function withCursorHidden<T>(
+  tabId: number,
+  adapter: BrowserAdapter,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const HIDE = `(() => {
+    document.querySelectorAll(".__baRipple").forEach((r) => r.remove());
+    const c = document.getElementById("__baCursor");
+    if (!c) return "";
+    const prev = c.style.opacity;
+    // The arrow's own CSS transition (opacity 240ms) would still be ~96%
+    // visible when the capture fires a few ms later — the first attempt at
+    // this fix measured exactly that (a 3x3 cell "change" at the arrow).
+    // Kill the transition for the hide and put it back on restore.
+    c.style.transition = "none";
+    c.style.opacity = "0";
+    clearTimeout(c.__baFadeT);
+    return prev;
+  })()`;
+  const SHOW = `(() => {
+    const c = document.getElementById("__baCursor");
+    if (!c) return;
+    c.style.transition = "left 90ms ease-out,top 90ms ease-out,opacity 240ms ease";
+    c.style.opacity = "1";
+    clearTimeout(c.__baFadeT);
+    c.__baFadeT = setTimeout(() => { if (c.isConnected) c.style.opacity = "0"; }, 2600);
+  })()`;
+  let prev: string | undefined;
+  try {
+    const res = await adapter.send<{ result?: { value?: string } }>(tabId, "Runtime.evaluate", {
+      expression: HIDE,
+      returnByValue: true,
+    });
+    prev = res?.result?.value;
+  } catch {
+    // no overlay / no evaluation context — capture as-is
+  }
+  try {
+    // One beat for the compositor: the capture must not race the style change.
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    return await fn();
+  } finally {
+    // Only restore an arrow that was actually visible: a hidden one (already
+    // faded) must stay hidden, or the next capture inherits our own glow.
+    if (prev === "1") {
+      await adapter
+        .send(tabId, "Runtime.evaluate", { expression: SHOW, returnByValue: true })
+        .catch(() => undefined);
+    }
+  }
 }

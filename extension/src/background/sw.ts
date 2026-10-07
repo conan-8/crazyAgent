@@ -119,6 +119,8 @@ import { isMutating } from "../shared/modes";
 import { describeToolFailure, failureTag } from "../shared/tool-failure";
 import { handoffMessage } from "../shared/handoff";
 import { detectAuthWall, HumanGate } from "./handoff";
+import { digestEffect } from "../shared/frame-diff";
+import { parseExpect } from "../shared/expect";
 import { probeElement } from "./tools/actions";
 import { probeElementAt } from "./tools/coords";
 import {
@@ -127,7 +129,9 @@ import {
   formatSnapshot,
   settleTab,
   tabIdentity,
+  takeFrameEffect,
 } from "./tools/perception";
+import { checkStepExpect, expectFailed } from "./tools/expect";
 import "./tools/perception"; // registers snapshot / screenshot / wait_for_settle / wait_for
 import "./tools/actions"; // registers click / type / select / key / hover / scroll / read_page
 import "./tools/paste"; // registers paste_image (staged-capture delivery)
@@ -946,7 +950,7 @@ function collapseRepeatObservation(
 async function observeAfterAction(
   tabId: number,
   settleMs = 10_000,
-): Promise<{ text: string | null; canvas: boolean } | null> {
+): Promise<{ text: string | null; canvas: boolean; changed?: boolean } | null> {
   try {
     // Shorter reachability budget than the manual tool: fail fast on pages
     // where the content script can never run (chrome://, PDF viewer, …).
@@ -957,8 +961,12 @@ async function observeAfterAction(
     const canvas = snap.frames.some((f) => (f.canvases ?? 0) > 0);
     const prev = lastObservations.get(tabId);
     lastObservations.set(tabId, text);
+    // `changed` is the digest half of the effect verdict (see shared/frame-diff):
+    // undefined when there is no previous observation to compare against, and
+    // only meaningful on non-canvas pages, where the digest actually carries
+    // the content.
     if (prev && sameObservation(prev, text)) {
-      return { text: "[page unchanged since the previous observation]", canvas };
+      return { text: "[page unchanged since the previous observation]", canvas, changed: false };
     }
     return {
       text:
@@ -966,6 +974,7 @@ async function observeAfterAction(
           ? `${text.slice(0, OBSERVATION_MAX_CHARS)}…[truncated]`
           : text,
       canvas,
+      changed: prev ? true : undefined,
     };
   } catch {
     return null; // observation is an optimization — never fail the action
@@ -1217,38 +1226,134 @@ async function executeToolGated(
   if (stopRequested) return res;
   const base = res.text ?? JSON.stringify(res.payload ?? null);
   const observation = observed?.text ?? null;
+  let text: string;
+  let image: string | undefined;
   if (!observation || observation.trim().length < 32) {
     // The action landed but the text tools see nothing: attach a screenshot so
     // the model verifies with its eyes instead of assuming nothing happened.
     const shot = await captureBlindShot(await adapterForMode(), obsTabId);
     const label = shot ? await tabIdentity(obsTabId) : "";
-    return shot
-      ? {
-          ...res,
-          text: `${base}\n\n--- page after action ---\n[The text tools see nothing on ${label} — screenshot attached. LOOK at it to verify what the action did.]`,
-          image: shot,
-        }
-      : res;
-  }
-  // A canvas surface paints its CONTENT into pixels: the digest above shows
-  // the chrome (refs, menus) but never what the action did to the document.
-  // Attach the shot the model would otherwise spend its NEXT turn taking —
-  // and make it the latest capture, so space:'screenshot' clicks resolve
-  // against exactly what the model is looking at.
-  if (observed?.canvas) {
+    text = shot
+      ? `${base}\n\n--- page after action ---\n[The text tools see nothing on ${label} — screenshot attached. LOOK at it to verify what the action did.]`
+      : base;
+    image = shot;
+  } else if (observed?.canvas) {
+    // A canvas surface paints its CONTENT into pixels: the digest above shows
+    // the chrome (refs, menus) but never what the action did to the document.
+    // Attach the shot the model would otherwise spend its NEXT turn taking —
+    // and make it the latest capture, so space:'screenshot' clicks resolve
+    // against exactly what the model is looking at.
     const shot = await captureBlindShot(await adapterForMode(), obsTabId);
-    if (shot) {
-      return {
-        ...res,
-        text: `${base}\n\n--- page after action (auto-settled, fresh snapshot) ---\n${observation}\n[The document body is canvas-painted — a screenshot is attached; its pixels are the only read of what the action did. No separate screenshot needed.]`,
-        image: shot,
-      };
-    }
+    text = shot
+      ? `${base}\n\n--- page after action (auto-settled, fresh snapshot) ---\n${observation}\n[The document body is canvas-painted — a screenshot is attached; its pixels are the only read of what the action did. No separate screenshot needed.]`
+      : `${base}\n\n--- page after action (auto-settled, fresh snapshot) ---\n${observation}`;
+    image = shot;
+  } else {
+    text = `${base}\n\n--- page after action (auto-settled, fresh snapshot) ---\n${observation}`;
   }
-  return {
-    ...res,
-    text: `${base}\n\n--- page after action (auto-settled, fresh snapshot) ---\n${observation}`,
+
+  // ---- effect verdict + declared expectation (Phase B) ----
+  // This is the only place that holds the fresh capture, the digest AND the
+  // tool's arguments, so it is where the harness can answer "did it work?"
+  // itself instead of leaving it to the next turn's screenshot squint.
+  const tail = await actionVerification({
+    name,
+    args,
+    res,
+    tabId: obsTabId,
+    observation,
+    observed,
+    settles,
+  });
+  const body = tail.length ? `${text}\n${tail.join("\n")}` : text;
+  return image ? { ...res, text: body, image } : { ...res, text: body };
+}
+
+/** What `actionVerification` needs to judge and (safely) repair one action. */
+interface ActionVerificationInput {
+  name: string;
+  args: Record<string, unknown>;
+  res: ExecuteResult;
+  tabId: number;
+  observation: string | null;
+  observed: { canvas: boolean; changed?: boolean } | null;
+  settles: number;
+}
+
+/**
+ * The effect verdict and the expectation check for one finished action, plus
+ * the single sanctioned REPAIR.
+ *
+ * Evidence (2026-10-06 runs): the E2 class was a silent no-op discovered turns
+ * later, and every one of those actions already carried the evidence to catch
+ * it — a before/after capture on canvas pages, a before/after digest elsewhere.
+ * `expect` is the model's own statement of what success means; when it fails on
+ * a click that never landed on a control AND changed nothing, the harness makes
+ * ONE rescue attempt with the wide-radius neighbour probe (the "menu shifted /
+ * off by 20px" class, E1) instead of asking the model to replay it blindly.
+ * Any other failed promise is reported, not re-applied: a second click on a
+ * control that DID land would double-apply a toggle or a destructive row.
+ */
+async function actionVerification(input: ActionVerificationInput): Promise<string[]> {
+  const { name, args, res, tabId, observation, observed, settles } = input;
+  const out: string[] = [];
+  const verdict =
+    takeFrameEffect(tabId) ?? (observed && observed.changed !== undefined ? digestEffect(observed.changed) : null);
+  if (verdict?.detail) out.push(`[${verdict.detail}]`);
+  const parsed = parseExpect(args.expect);
+  if (!parsed.ok) {
+    out.push(`[${parsed.error}]`);
+    return out;
+  }
+  if (!parsed.expect) return out;
+  const adapter = await adapterForMode();
+  const expectCtx = {
+    tabId,
+    adapter,
+    expect: parsed.expect,
+    observationText: observation,
+    verdict,
   };
+  let line = await checkStepExpect(expectCtx);
+  if (!line) return out;
+  out.push(`[${line}]`);
+
+  // The one repair: a failed promise on a coordinate click that provably hit
+  // no control and changed nothing. The rescue ref comes from the click's own
+  // probe (wide radius), so it is a real element the page exposes.
+  const payload = res.payload as { rescue?: string; rescueDistance?: number } | undefined;
+  const canRescue =
+    expectFailed(line) &&
+    verdict?.verdict === "unchanged" &&
+    (name === "click_at" || name === "hover_at") &&
+    typeof payload?.rescue === "string" &&
+    payload.rescue.length > 0;
+  if (!canRescue) return out;
+  const retry = await executeTool(
+    name === "hover_at" ? "hover_at" : "click_at",
+    { ref: payload!.rescue! },
+    tabId,
+  );
+  out.push(
+    `[repair: the first ${name} changed nothing and had missed every control, so the harness re-aimed once at the nearest control (ref ${payload!.rescue}, ~${Math.round(payload!.rescueDistance ?? 0)}px away) — ${retry.ok ? "the rescue click landed" : `it failed: ${String(retry.error ?? "").slice(0, 120)}`}]`,
+  );
+  if (retry.ok) {
+    // Judge the repair on FRESH evidence: a new capture (and therefore a new
+    // frame comparison) plus a new digest. Re-using the pre-repair verdict here
+    // would report the promise as still failed even when the rescue worked.
+    const obs2 = await observeAfterAction(tabId, settles).catch(() => null);
+    const shot2 = await captureBlindShot(adapter, tabId).catch(() => undefined);
+    const verdict2 =
+      (shot2 ? takeFrameEffect(tabId) : null) ??
+      (obs2 && obs2.changed !== undefined ? digestEffect(obs2.changed) : null);
+    const after = await checkStepExpect({
+      ...expectCtx,
+      observationText: obs2?.text ?? observation,
+      verdict: verdict2,
+    });
+    if (after) out.push(`[after the repair: ${after}]`);
+  }
+  return out;
 }
 
 /** Timestamped export filename, e.g. crazyagent-logs-2026-05-04T09-30-00.jsonl. */

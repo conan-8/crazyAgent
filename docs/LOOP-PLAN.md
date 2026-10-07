@@ -136,7 +136,15 @@ immediately, and C's executor cannot work on a menu map that is wrong.
 | A6 | **Completion gate + `blocked`**: a final answer with open todos gets ≤2 nudges naming the open items; `todo_write` gains `blocked` (the ladder already tells the model to mark items blocked, but the status does not exist). | D quit at 12/32 and was accepted as `done` | `agent/loop.ts`, `tools/todo.ts`, `sidepanel/*`, `shared/chat.ts` |
 | A7 | **`type` without a ref warns on canvas editors** (keystrokes are going to the document body, not the dialog/iframe the model thinks it focused). | E t113/t149 "the query leaked into the body again" ×2 in F too | `tools/actions.ts` |
 
-### Phase B — deterministic effect verification (the executor's substrate)
+### Phase B — deterministic effect verification (the executor's substrate) — **SHIPPED 2026-10-07**
+
+Status: the verdict, the expectation vocabulary and the one safe repair landed
+(890 unit tests green, docs smoke D10–D12 pin the three behaviours end to end).
+`docs/DEV.md` → "Effect verification" has the measurements, including the two
+bugs the fixtures caught: the 32×20 grid was blind to thin document text
+(best cell delta 1 vs 11 cells at 96×60) and the agent's own cursor overlay was
+being counted as a page change. Deferred to Phase C: expects inside
+`input_sequence` steps and the `run_program` executor itself.
 
 The executor can only auto-advance if a step can be judged **without asking
 the model**. Build one verdict for every mutating call:

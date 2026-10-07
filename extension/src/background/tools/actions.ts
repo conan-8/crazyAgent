@@ -7,6 +7,7 @@
 import type { ActionResult } from "../../content/actions";
 import { detectOpaqueSurface } from "../../shared/frames";
 import { shouldUseTrustedInput, type InputHints } from "../../shared/trusted-input";
+import { EXPECT_PROP } from "../../shared/expect";
 import { failureTag } from "../../shared/tool-failure";
 import type { ElementProbe } from "../policy";
 import { runContentAction, parseRef } from "./content-action";
@@ -77,6 +78,7 @@ registerTool({
         description:
           "true = send real keystrokes through the browser's input pipeline; false = synthesise DOM events. Omit to let the tool decide.",
       },
+      ...EXPECT_PROP,
     },
     required: ["text"],
   },
@@ -156,6 +158,7 @@ registerTool({
         description:
           "true = send the key through the browser's input pipeline; false = dispatch DOM key events. Omit to let the tool decide.",
       },
+      ...EXPECT_PROP,
     },
     required: ["key"],
   },

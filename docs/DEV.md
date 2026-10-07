@@ -995,10 +995,73 @@ the ritual the canvas skill forbids and that died with TRANSPORT-FAILED in F;
 it now points at `docs_read`/`docs_state`. The note is a pure, tested builder
 (`trustedInputNote`).
 
-Not in this pass (Phase B–E in LOOP-PLAN.md): deterministic per-step effect
-verification, the `run_program` executor, the plan-level state machine
-(per-item budgets, park-and-move-on, watchdog/resume), file-chooser upload
-via `Page.fileChooserOpened`, and shortcut harvesting.
+## Effect verification (2026-10-07, Phase B) — "did that action actually work?"
+
+The second half of the field-test plan (`docs/LOOP-PLAN.md` §3). The E2 class in
+the 2026-10-06 logs was a silent no-op discovered turns later ("Title style
+didn't apply (toolbar still shows Normal text)", "paste didn't land", "image
+insertion didn't land", "fill didn't apply"), and those runs spent 24 % / 30 % /
+49 % of their turns on read-only verification. Every mutating action already
+paid for the evidence — a before/after capture on canvas pages, a before/after
+digest elsewhere — and then threw it away after showing it to the model. Now the
+harness reads it and says what it means in the same result.
+
+**The verdict** (`shared/frame-diff.ts` pure, `tools/perception.ts` IO).
+`captureBlindShot` records a luminance signature of every viewport capture; the
+action path consumes the comparison for its own capture and appends one line:
+`[effect: the frame changed (~4% of the grid, the top-left (6×3 cells))]` or
+`[effect: NO VISIBLE CHANGE — … if you expected the page to change, the action
+was a no-op or missed: re-read the page, then change route (ref instead of
+coordinates, keyboard instead of the menu) rather than repeating the same
+call]`. Ordinary pages use the snapshot-digest comparison the observation
+pipeline already performs; a comparison that cannot be made says nothing
+("unknown") instead of guessing.
+
+Two bugs were found by measuring rather than reasoning, and both are pinned:
+- **The grid was too coarse.** At 32×20 a six-character insertion into a
+  document line moved its best cell by ONE luminance unit — invisible — while
+  the same captures at 96×60 showed eleven cells past the floor (max delta 235).
+  Two back-to-back captures of an unchanged page differ by exactly zero at
+  96×60, so the finer grid is free. `DIFF_COLS/ROWS = 96/60`, `CELL_DELTA = 12`,
+  and ONE cell past the floor is a change: a false "changed" costs nothing,
+  a false "unchanged" misleads the model and can trigger a repair.
+- **Our own cursor overlay counted as a page change.** The agent paints a
+  glowing arrow and a ripple at every stroke point, so a no-op click measured a
+  "changed" cell that was really our decoration; the arrow's 240 ms opacity
+  transition then kept it ~96 % visible when the capture fired a few ms after
+  the hide. `cursor-overlay.withCursorHidden` now kills the transition, removes
+  ripples (a BACKGROUND tab throttles their removal animation, so they can sit
+  on the page for ever — the agent's own window usually is one) and restores the
+  arrow afterwards; captures are about the page.
+
+**Declared expectations** (`shared/expect.ts` pure, `tools/expect.ts` IO).
+`expect` is the model's own statement of what success looks like, checked right
+after the action settles and answered in the same `docs_op` vocabulary the
+model already reads: `verified:` / `NOT VERIFIED:` / `unverified (…)`.
+Keys: `export_contains` (Workspace export HTML), `toolbar_style`, `dialog`
+("open"/"closed"), `text_landed` (the digest), `pixel_changed` (the verdict
+above). Parsing rejects an unknown key with the real vocabulary — a typo'd
+expectation that silently does nothing is worse than none. `EXPECT_PROP` is
+spread into `click_at`, `key`, `type` and `menu_path`'s schemas; validation
+ignores undeclared properties, so ANY tool accepts it.
+
+**One repair, and only where it is provably safe.** When a declared promise
+fails on a coordinate click whose probe found NO interactive control at the
+point, the click is known to have achieved nothing, so the harness re-aims once
+at the nearest interactive neighbour within `RESCUE_RADIUS_PX = 120` (far wider
+than the magnet's deliberate 24 px, because the magnet acts before the outcome
+is known) and re-judges the promise on FRESH evidence. A failed promise on any
+other action is reported, not re-applied: a second click on a control that DID
+land would double-apply a toggle or a destructive row.
+
+Smoke: `canvas editors (Docs playbook)` D10–D12 drive the real tools through the
+gated path and pin all three (a typed change verifies, a no-op click reports
+and fails the promise, the missed click is rescued and re-judged).
+
+Not in this pass (Phases C–E in LOOP-PLAN.md): the `run_program` executor built
+on this substrate, per-step expects inside `input_sequence`, the plan-level
+state machine (per-item budgets, park-and-move-on, watchdog/resume),
+file-chooser upload via `Page.fileChooserOpened`, and shortcut harvesting.
 
 ## Capability tools (coordinate input, upload, netlog, handoff)
 

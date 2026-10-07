@@ -51,6 +51,10 @@ export interface HitInfo {
   /** The hit accepts text input (input/textarea/contenteditable) — clicking
    *  it is caret placement, so the magnet must never re-aim it. */
   editable?: boolean;
+  /** The hit IS an interactive control (not just the element under the point).
+   *  `false` on a plain <div>/<span> means the click landed on a surface with
+   *  no control — the provable-miss case the rescue probe exists for. */
+  interactive?: boolean;
   /** The hit element's box, for the centre-promotion decision. */
   rect?: ElementRect;
 }
@@ -241,6 +245,15 @@ export function boundsError(point: Point, viewport: ViewportInfo): string | null
 
 /** How far from the requested point the magnet looks for a control. */
 export const SNAP_RADIUS_PX = 24;
+/**
+ * How far the RESCUE probe looks for a control after a coordinate click that
+ * provably missed every control AND changed nothing. Deliberately far wider
+ * than the magnet: a 24px magnet must never guess, because it acts BEFORE the
+ * outcome is known, while a rescue runs only after the click is known to have
+ * achieved nothing — so a 120px guess is strictly better than no second try
+ * (the "menu shifted / off by ~20px" class in the 2026-10-06 logs).
+ */
+export const RESCUE_RADIUS_PX = 120;
 /** Centre-promotion size caps: menu rows, buttons, icons — not page-wrappers.
  *  A control bigger than this may hold several distinct aim points (a card
  *  with its own buttons), so the model's exact point is respected. */
