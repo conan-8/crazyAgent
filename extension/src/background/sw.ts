@@ -151,6 +151,7 @@ import "./tools/jev"; // registers judge (Jev sidecar; offered only when configu
 import "./tools/todo"; // registers todo_write (the live plan dropdown)
 import "./tools/docs"; // registers docs_read (Workspace export without navigation)
 import "./tools/docs-op"; // registers menu_path + docs_op (deterministic Docs procedures)
+import "./tools/docs-table"; // registers docs_table (address-based table ops)
 
 // Programs (run_program) execute their steps through THIS gated path — the same
 // policy gate, settle, observation, effect verdict and expectation check a

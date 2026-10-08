@@ -21,6 +21,7 @@ export const MUTATING_TOOLS = new Set([
   // controls, so they gate exactly like any other action.
   "menu_path",
   "docs_op",
+  "docs_table",
 ]);
 
 export function isMutating(tool: string): boolean {

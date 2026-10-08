@@ -3156,23 +3156,26 @@ function App() {
       .catch(() => undefined);
   };
 
-  // Quick "this tab / own window" switch. The setting and the worker's binding
-  // are one state, so flipping the mode also performs it — identical semantics
-  // to the Settings dropdown and the AgentWindowControls buttons. "adopt" binds
-  // the window hosting this panel (windowAction resolves it via getCurrent).
+  // Quick "this window / own window" switch. The SETTING is the source of truth
+  // (sw.ts reads it at run start), so update it optimistically — the async
+  // window.bind/reset reply carries a status whose `.mode` is read from the
+  // not-yet-saved setting, so keying the highlight off that reply made "Own
+  // window" take two clicks to light up. Perform the binding too, so the two
+  // never drift apart.
   const setAgentWindowMode = (mode: "own" | "adopt") => {
+    setSettingsState((cur) =>
+      cur ? { ...cur, agentWindow: { ...cur.agentWindow, mode } } : cur,
+    );
     void windowAction(mode === "adopt" ? "window.bind" : "window.reset").then(
       (status) => {
         if (status) setAgentWindow(status);
       },
     );
     void loadSettings().then((cur) =>
-      saveSettings({ ...cur, agentWindow: { ...cur.agentWindow, mode } }).then(
-        refreshSettings,
-      ),
+      saveSettings({ ...cur, agentWindow: { ...cur.agentWindow, mode } }),
     );
   };
-  const windowMode = agentWindow?.mode ?? settings?.agentWindow.mode ?? "own";
+  const windowMode = settings?.agentWindow.mode ?? "own";
 
   const stop = () => postPort?.({ kind: "stop" });
 
@@ -3771,28 +3774,13 @@ function App() {
             per-run read-only grant. The agent itself can never widen its own
             scope — only these controls can. */}
         <div class="window-bar">
-          <span
-            class={`window-chip${agentWindow?.alive ? " is-live" : ""}`}
-            title={
-              agentWindow?.alive
-                ? `The agent works only inside this window (${agentWindow.tabs} tab${agentWindow.tabs === 1 ? "" : "s"}). Your other windows are invisible to it.`
-                : "The agent gets its own window the moment a run starts. Yours stays untouched."
-            }
-          >
-            <Icon d={ICONS.window} size={11} />
-            <span class="window-chip-text">
-              {agentWindow?.alive
-                ? `${agentWindow.mode === "adopt" ? "this window" : "own window"} #${agentWindow.windowId} · ${agentWindow.tabs} tab${agentWindow.tabs === 1 ? "" : "s"}`
-                : "own window · opens on Run"}
-            </span>
-          </span>
           <div class="window-mode" role="group" aria-label="Where the agent works">
             <button
               class={`window-mode-opt${windowMode === "adopt" ? " is-on" : ""}`}
-              title="Work in THIS tab — the window the panel is open in. It stays in the foreground, so nothing gets background-throttled."
+              title="Work in THIS window — the one the panel is open in. It stays in the foreground, so nothing gets background-throttled."
               onClick={() => setAgentWindowMode("adopt")}
             >
-              This tab
+              This window
             </button>
             <button
               class={`window-mode-opt${windowMode === "own" ? " is-on" : ""}`}
@@ -3802,7 +3790,7 @@ function App() {
               Own window
             </button>
           </div>
-          {agentWindow?.alive && agentWindow.mode === "own" ? (
+          {agentWindow?.alive && windowMode === "own" ? (
             <button
               class="window-btn"
               title="Move this tab into the agent's window so the agent can work on it — the page keeps its state (scroll, form, logins)"

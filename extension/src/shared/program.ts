@@ -21,6 +21,7 @@ import { failureTag } from "./tool-failure";
  */
 export const PROGRAM_TOOLS = [
   "docs_op",
+  "docs_table",
   "menu_path",
   "click",
   "click_at",

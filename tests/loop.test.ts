@@ -6,6 +6,7 @@ import {
   estimateMessages,
   isRoutineStep,
   JEV_PROGRESS_CONFIDENCE,
+  OFF_REASONING_CAP_CHARS,
   reasoningCapChars,
   runAgentTask,
   truncateHistory,
@@ -1407,15 +1408,15 @@ class RunawayLlm implements LlmClient {
 }
 
 describe("reasoning cap", () => {
-  it("derives the ceiling from the level's own budget, and caps nothing at Off", () => {
+  it("derives the ceiling from the level's own budget, and still caps Off", () => {
     // low = 1,024 tokens × 4 chars × the overrun factor of 3.
     expect(reasoningCapChars("low")).toBe(12_288);
     expect(reasoningCapChars("medium")).toBe(4_096 * 4 * 3);
-    expect(reasoningCapChars("off")).toBe(0);
-    expect(reasoningCapChars(undefined)).toBe(0);
+    expect(reasoningCapChars("off")).toBe(OFF_REASONING_CAP_CHARS);
+    expect(reasoningCapChars(undefined)).toBe(OFF_REASONING_CAP_CHARS);
   });
 
-  it("cuts a runaway stream and re-asks the SAME step with thinking off", async () => {
+  it("cuts a runaway stream and re-asks the SAME step with its conclusions and thinking off", async () => {
     const llm = new RunawayLlm([{ text: "the answer", toolCalls: [], stopReason: "end" }]);
     const cp = makeCheckpoint();
     const { events, deps } = harness([], { llm, thinking: "low", stepCap: 2 });
@@ -1424,10 +1425,17 @@ describe("reasoning cap", () => {
     expect(outcome).toBe("completed");
     expect(llm.capHits).toBe(1);
     expect(llm.seen).toHaveLength(2);
-    // Same step, so the same history — only the thinking level changed.
     expect(llm.seen[0]!.thinking).toBe("low");
     expect(llm.seen[1]!.thinking).toBe("off");
-    expect(llm.seen[1]!.messages).toEqual(llm.seen[0]!.messages);
+    // Same history plus one salvage note carrying the cut reasoning's tail.
+    const reask = llm.seen[1]!.messages;
+    expect(reask.slice(0, -1)).toEqual(llm.seen[0]!.messages);
+    const note = reask.at(-1)!;
+    expect(note.role).toBe("user");
+    expect(String(note.content)).toContain("Do not deliberate further");
+    expect(String(note.content)).toContain("xxxx");
+    // The salvage note is request-only; it never lands in the checkpoint.
+    expect(cp.messages.some((m) => String(m.content).includes("Do not deliberate"))).toBe(false);
     expect(
       events.some(
         (e) => e.kind === "info" && e.message.includes("overran the 1024-token budget"),
@@ -1550,6 +1558,102 @@ describe("reasoning cap", () => {
     expect(llm.seen).toHaveLength(1);
     expect(llm.seen[0]!.thinking).toBe("low");
   });
+
+  it("caps a model that reasons at Off, and survives the salvage re-ask overrunning too", async () => {
+    // The endpoint ignores thinking:off — every call streams a soliloquy until
+    // the 8,192-char floor cuts it. Both cuts in a step must fall to the
+    // empty-reply nudge, never kill the run.
+    let calls = 0;
+    const ignoresOff: LlmClient = {
+      async complete(_req, onText, signal, onReasoning) {
+        calls++;
+        if (calls <= 2) {
+          for (let k = 0; k < 80; k++) {
+            onReasoning?.("y".repeat(400));
+            if (signal?.aborted) throw new Error("aborted");
+          }
+        }
+        onText?.("done");
+        return { text: "done", toolCalls: [], stopReason: "end" };
+      },
+    };
+    const cp = makeCheckpoint();
+    const { events, deps } = harness([], { llm: ignoresOff, thinking: "off", stepCap: 4 });
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    expect(calls).toBe(3);
+    expect(
+      events.some(
+        (e) => e.kind === "info" && e.message.includes(`${OFF_REASONING_CAP_CHARS.toLocaleString()}-char ceiling`),
+      ),
+    ).toBe(true);
+    expect(
+      events.some(
+        (e) => e.kind === "info" && e.message.includes("salvage re-ask overran"),
+      ),
+    ).toBe(true);
+    const nudge = cp.messages.find(
+      (m) => m.role === "user" && String(m.content).includes("act without deliberating"),
+    );
+    expect(nudge).toBeDefined();
+  });
+
+  it("names an endpoint that ignores thinking:off, once", async () => {
+    const chatty: LlmClient = {
+      async complete(_req, onText, _signal, onReasoning) {
+        onReasoning?.("z".repeat(2_000));
+        onText?.("ok");
+        return {
+          text: "",
+          toolCalls: [{ id: `t${Math.random()}`, name: "snapshot", args: {} }],
+          stopReason: "tool_use",
+        };
+      },
+    };
+    const { events, deps } = harness([], { llm: chatty, thinking: "off", stepCap: 3 });
+    await runAgentTask(makeCheckpoint(), deps);
+    const notices = events.filter(
+      (e) => e.kind === "info" && e.message.includes("ignores thinking:off"),
+    );
+    expect(notices).toHaveLength(1);
+  });
+});
+
+describe("stream idle guard", () => {
+  it("aborts a stream that goes silent mid-reply and retries the attempt", async () => {
+    let attempts = 0;
+    const stalls: LlmClient = {
+      complete(_req, onText, signal) {
+        attempts++;
+        if (attempts === 1) {
+          onText?.("partial");
+          return new Promise((resolve, reject) => {
+            const t = setTimeout(
+              () => resolve({ text: "late", toolCalls: [], stopReason: "end" }),
+              5_000,
+            );
+            signal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(t);
+                reject(new Error("The user aborted a request."));
+              },
+              { once: true },
+            );
+          });
+        }
+        onText?.("fast");
+        return Promise.resolve({ text: "recovered", toolCalls: [], stopReason: "end" });
+      },
+    };
+    const { events, deps } = harness([], { llm: stalls, streamIdleMs: 60 });
+    const outcome = await runAgentTask(makeCheckpoint(), deps);
+    expect(outcome).toBe("completed");
+    expect(attempts).toBe(2);
+    expect(
+      events.some((e) => e.kind === "info" && e.message.includes("went silent")),
+    ).toBe(true);
+  }, 15_000);
 });
 
 describe("Jev per-step effort routing", () => {

@@ -292,7 +292,7 @@ const EFFORT_STYLE_MODELS = /^(?:o\d|gpt-5|gpt-oss|grok|kimi|moonshot)/i;
 
 /** True when a provider error text is about the thinking knobs we sent. */
 export function isThinkingKnobError(detail: string): boolean {
-  return /reasoning_effort|thinking_budget|enable_thinking|chat_template_kwargs/i.test(detail);
+  return /reasoning_effort|thinking_budget|enable_thinking|chat_template_kwargs|\breasoning\b/i.test(detail);
 }
 
 /** Remove every thinking knob from a built body — the graceful-degradation
@@ -303,6 +303,7 @@ export function stripThinkingKnobs(body: Record<string, unknown>): Record<string
   delete out.thinking_budget;
   delete out.enable_thinking;
   delete out.chat_template_kwargs;
+  delete out.reasoning;
   return out;
 }
 
@@ -382,6 +383,13 @@ export function buildOpenAiBody(
       // gateway that knows neither ignores whichever one it gets.
       if (EFFORT_STYLE_MODELS.test(model)) body.reasoning_effort = level;
       else body.thinking_budget = thinkingBudgetFor(level);
+    }
+    // OpenRouter normalises reasoning through its own `reasoning` object and
+    // drops the server-specific fields above.
+    if ((opts.baseUrl ?? "").includes("openrouter.ai")) {
+      body.reasoning = thinking
+        ? { max_tokens: thinkingBudgetFor(level) }
+        : { enabled: false };
     }
   } else if (reasoner && level !== "off") {
     body.reasoning_effort = level;

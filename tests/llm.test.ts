@@ -372,6 +372,21 @@ describe("provider request shaping", () => {
     expect(body.max_completion_tokens).toBe(4_096);
     expect(body.max_tokens).toBeUndefined();
   });
+
+  it("speaks OpenRouter's own reasoning knob, and says Off out loud", () => {
+    const opts = { baseUrl: "https://openrouter.ai/api/v1" };
+    const off = buildOpenAiBody(req, "deepseek/deepseek-v4.1-flash", opts) as Record<string, unknown>;
+    expect(off.reasoning).toEqual({ enabled: false });
+    const low = buildOpenAiBody(
+      { ...req, thinking: "low" },
+      "deepseek/deepseek-v4.1-flash",
+      opts,
+    ) as Record<string, unknown>;
+    expect(low.reasoning).toEqual({ max_tokens: 1_024 });
+    expect(stripThinkingKnobs(low).reasoning).toBeUndefined();
+    const elsewhere = buildOpenAiBody(req, "m1") as Record<string, unknown>;
+    expect(elsewhere.reasoning).toBeUndefined();
+  });
 });
 
 describe("system prompt appendix (lessons learned)", () => {

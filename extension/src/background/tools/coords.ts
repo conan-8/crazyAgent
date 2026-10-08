@@ -565,7 +565,7 @@ function strokeParams(step: StrokeStep, pressed: string | null): Record<string, 
   };
 }
 
-async function sendStrokes(
+export async function sendStrokes(
   ctx: ToolContext,
   steps: StrokeStep[],
 ): Promise<void> {

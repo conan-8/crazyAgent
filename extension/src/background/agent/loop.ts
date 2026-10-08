@@ -139,6 +139,8 @@ export interface LoopDeps {
    * guard. Defaults to TTFT_STALL_MS.
    */
   ttftStallMs?: number;
+  /** Mid-stream silence ceiling (see STREAM_IDLE_MS); 0/Infinity disables. */
+  streamIdleMs?: number;
   /**
    * Mid-run steering: user messages queued from the panel since the last
    * step. Drained before every LLM call and appended as ordinary user turns,
@@ -231,6 +233,15 @@ const RETRY_DELAYS_MS = [1_000, 3_000];
 export const TTFT_STALL_MS = 25_000;
 
 /**
+ * Mid-stream silence guard: once tokens have started, an attempt that goes
+ * this long without another delta is aborted and retried like a stall. The
+ * TTFT guard stops watching at the first token, so a stream that died after
+ * it (the 530s step of the 2026-10-08 run ended in a network error) had
+ * nothing watching it at all.
+ */
+export const STREAM_IDLE_MS = 30_000;
+
+/**
  * Recovery budget for replies that carry no answer (see the non-answer gate
  * below). A reasoning model can burn its whole output budget on thinking and
  * stream back nothing at all; each such reply gets a re-prompt and — when it
@@ -260,6 +271,22 @@ const MAX_OUTPUT_TOKENS = 32_000;
  * provider that does honour its budget (Anthropic) can never reach it.
  */
 const REASONING_OVERRUN_FACTOR = 3;
+
+/**
+ * Reasoning ceiling for a step sent at "off". Off is a request, not a
+ * guarantee: on the 2026-10-08 endpoint the 14 steps sent at off still
+ * streamed a median 8,416 reasoning chars (max 44,753), and with no cap at
+ * off the loop's own "turn thinking off" fallback removed the only bound.
+ * An endpoint that honours off never streams reasoning, so it never reaches
+ * this.
+ */
+export const OFF_REASONING_CAP_CHARS = 8_192;
+
+/** How much of a cut reasoning stream the re-ask is handed back. */
+const SALVAGE_TAIL_CHARS = 1_500;
+
+/** Reasoning at "off" past this marks the endpoint as ignoring the knob. */
+const OFF_IGNORED_CHARS = 500;
 
 /**
  * How many consecutive steps in a row before a run level above "off" is
@@ -403,13 +430,26 @@ export function boundCheckpoint(messages: LlmMessage[]): {
 }
 
 /**
- * The reasoning ceiling for one step, in CHARACTERS (0 = no cap). Derived from
- * the level's own token budget at the same chars/4 ratio the rest of the token
- * math uses, so one number means the same thing everywhere.
+ * The reasoning ceiling for one step, in CHARACTERS. Derived from the level's
+ * own token budget at the same chars/4 ratio the rest of the token math uses;
+ * "off" gets OFF_REASONING_CAP_CHARS — never unbounded.
  */
 export function reasoningCapChars(level: ThinkingLevel | undefined): number {
   const budget = thinkingBudgetFor(level ?? "off");
-  return budget > 0 ? budget * 4 * REASONING_OVERRUN_FACTOR : 0;
+  return budget > 0 ? budget * 4 * REASONING_OVERRUN_FACTOR : OFF_REASONING_CAP_CHARS;
+}
+
+/**
+ * The re-ask after a reasoning cut. It carries the tail of the thinking that
+ * was cut, so the model acts on its own conclusions instead of re-deriving
+ * them — on an endpoint that ignores "off", a bare re-ask just thinks again.
+ */
+function salvageNote(tail: string): string {
+  return (
+    "[harness] Your reasoning for this step ran past the limit and was cut. " +
+    (tail.trim() ? `It ended with:\n<<<\n${tail.trim()}\n>>>\n` : "") +
+    "Do not deliberate further: emit the next tool call(s) now, or the final answer if the task is done."
+  );
 }
 
 /**
@@ -417,10 +457,14 @@ export function reasoningCapChars(level: ThinkingLevel | undefined): number {
  * call. It lands as an ordinary user turn, so it survives checkpointing and
  * the model sees its own dead end.
  */
-function emptyReplyNudge(truncated: boolean): string {
+function emptyReplyNudge(truncated: boolean, reasoningCut = false): string {
   return (
     "[harness] Your previous reply arrived EMPTY — no answer text and no tool calls" +
-    (truncated ? " (the output token limit cut it off mid-stream)" : "") +
+    (reasoningCut
+      ? " (it reasoned past the limit twice and was cut both times — act without deliberating)"
+      : truncated
+        ? " (the output token limit cut it off mid-stream)"
+        : "") +
     ". That is not a completion and the task is NOT done. Continue from where you " +
     "were: call the next tool, or — only if the work is genuinely complete — give " +
     "the final answer in plain text."
@@ -637,16 +681,21 @@ export function createStuckGuard(): StuckGuard {
  *
  * `reasoningCap` is a character count (0 = uncapped). Past it the stream is cut
  * and the call comes back `capped` with NO result, so the caller re-asks the
- * step with thinking off rather than waiting out a 98-second soliloquy. That
- * abort is ours, so it is not a transient failure and burns no retry — but the
- * reasoning it did stream is reported back, because it was generated and paid
- * for, and the run's stats would understate the cost otherwise.
+ * step rather than waiting out a 98-second soliloquy. That abort is ours, so
+ * it is not a transient failure and burns no retry. `reasoningTail` is the end
+ * of what the cut attempt thought, for the re-ask to act on.
+ *
+ * `cappedChars` is every reasoning char this call generated and threw away —
+ * the cut attempt's AND any attempt that died mid-stream before a retry —
+ * because it was generated and paid for either way.
+ *
+ * Two silence guards share the abort controller: TTFT (nothing at all within
+ * `ttftStallMs`) and mid-stream idle (no delta for `streamIdleMs` after the
+ * stream started). Both count as transient failures and burn a retry.
  *
  * Timing: each ATTEMPT stamps its own request-start and first-token time, and
  * the returned `ttftMs`/`decodeMs` describe the attempt whose reply survived
- * (a failed attempt that never produced a token reports neither). This is the
- * split that says whether a slow round trip is prefill/queue (TTFT — cut input
- * tokens) or decode (cut reasoning): wall-clock alone cannot tell them apart.
+ * (a failed attempt that never produced a token reports neither).
  */
 async function completeWithRetry(
   deps: LoopDeps,
@@ -658,10 +707,12 @@ async function completeWithRetry(
   result?: LlmResult;
   capped: boolean;
   cappedChars: number;
+  reasoningTail?: string;
   ttftMs?: number;
   decodeMs?: number;
 }> {
   let lastErr: unknown;
+  let discarded = 0;
   for (let attempt = 0; attempt < LLM_ATTEMPTS; attempt++) {
     if (attempt > 0) {
       const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]!;
@@ -675,30 +726,38 @@ async function completeWithRetry(
     // Per attempt: the cut is only attributable to the attempt that made it.
     let capped = false;
     let chars = 0;
+    let tail = "";
     const stallMs = deps.ttftStallMs ?? TTFT_STALL_MS;
     const guardStall = Number.isFinite(stallMs) && stallMs > 0;
-    // One controller serves both cut paths (reasoning overrun, TTFT stall):
-    // each is armed only when its ceiling exists, and either aborts the stream.
-    const ctl = reasoningCap > 0 || guardStall ? new AbortController() : undefined;
+    const idleMs = deps.streamIdleMs ?? STREAM_IDLE_MS;
+    const guardIdle = Number.isFinite(idleMs) && idleMs > 0;
+    const ctl =
+      reasoningCap > 0 || guardStall || guardIdle ? new AbortController() : undefined;
     const attemptStart = Date.now();
     let firstDeltaAt = 0;
-    let stallTimer: ReturnType<typeof setTimeout> | undefined;
-    const clearStallTimer = (): void => {
-      if (stallTimer !== undefined) {
-        clearTimeout(stallTimer);
-        stallTimer = undefined;
+    let idled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clearTimer = (): void => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
       }
     };
+    // One timer, re-armed on every delta: before the first token it is the
+    // TTFT guard, after it the idle guard.
     const mark = (): void => {
-      if (!firstDeltaAt) {
-        firstDeltaAt = Date.now();
-        // First token landed — the stall guard's job is done for this attempt.
-        clearStallTimer();
+      if (!firstDeltaAt) firstDeltaAt = Date.now();
+      clearTimer();
+      if (ctl && guardIdle && !capped) {
+        timer = setTimeout(() => {
+          idled = true;
+          ctl.abort();
+        }, idleMs);
       }
     };
     if (ctl && guardStall) {
-      stallTimer = setTimeout(() => {
-        if (!firstDeltaAt) ctl!.abort();
+      timer = setTimeout(() => {
+        if (!firstDeltaAt) ctl.abort();
       }, stallMs);
     }
     try {
@@ -712,37 +771,41 @@ async function completeWithRetry(
         (t) => {
           mark();
           chars += t.length;
+          tail = (tail + t).slice(-SALVAGE_TAIL_CHARS);
           // Reasoning streams BEFORE the answer on every wire we speak, so
-          // cutting here loses nothing but the thinking itself. (The explicit
-          // cap check matters now that `ctl` can exist for the stall guard
-          // alone: a 0 cap must never cut.)
+          // cutting here loses nothing but the thinking itself.
           if (reasoningCap > 0 && ctl && !capped && chars > reasoningCap) {
             capped = true;
-            clearStallTimer();
+            clearTimer();
             ctl.abort();
           }
           onReasoning(t);
         },
       );
-      clearStallTimer();
+      clearTimer();
+      if (capped) {
+        return { capped: true, cappedChars: discarded + chars, reasoningTail: tail };
+      }
       return {
         result,
-        capped,
-        cappedChars: capped ? chars : 0,
+        capped: false,
+        cappedChars: discarded,
         ttftMs: firstDeltaAt ? firstDeltaAt - attemptStart : undefined,
         decodeMs: firstDeltaAt ? Date.now() - firstDeltaAt : undefined,
       };
     } catch (err) {
-      clearStallTimer();
+      clearTimer();
       // Cutting the stream can surface as a rejection out of the reader rather
       // than a graceful end. Either way this is the cap doing its job.
-      if (capped) return { capped: true, cappedChars: chars };
+      if (capped) return { capped: true, cappedChars: discarded + chars, reasoningTail: tail };
+      discarded += chars;
       if (ctl?.signal.aborted && !firstDeltaAt) {
-        // The stall guard fired: the connection produced nothing at all within
-        // the ceiling. That is a transient failure like any other — it burns a
-        // retry and gets named for what it was, not left as a raw AbortError.
         lastErr = new Error(
           `stalled — no first token for ${(stallMs / 1000).toFixed(0)}s, attempt aborted`,
+        );
+      } else if (idled) {
+        lastErr = new Error(
+          `stream went silent for ${(idleMs / 1000).toFixed(0)}s mid-reply, attempt aborted`,
         );
       } else {
         lastErr = err;
@@ -804,6 +867,8 @@ export async function runAgentTask(
   // is re-asked at "off"), so three wasted cuts mean this run's ceiling is not
   // buying anything.
   let overruns = 0;
+  // Said once per run: a step at "off" that reasoned anyway.
+  let offIgnoredNoted = false;
   // Adaptive per-step thinking (deps.adaptiveThinking): consecutive routine
   // steps so far, whether subsequent steps are currently sent with thinking
   // off, and whether the lowering has been announced (once per run, not once
@@ -946,8 +1011,11 @@ export async function runAgentTask(
       thinking: effectiveThinking,
     };
     const onText = (text: string): void => deps.emit({ kind: "token_delta", text });
-    const onReasoning = (text: string): void =>
+    let streamedReasoning = 0;
+    const onReasoning = (text: string): void => {
+      streamedReasoning += text.length;
       deps.emit({ kind: "reasoning_delta", text });
+    };
     // The panel's "what is it doing" window starts here: everything before
     // this line was local bookkeeping, everything after is the provider's
     // queue + prefill + first token.
@@ -960,6 +1028,9 @@ export async function runAgentTask(
     // Reasoning generated by an attempt the cap cut short. Still generated,
     // still paid for, so it is counted even though its reply was thrown away.
     let cappedChars = 0;
+    // Both the step and its salvage re-ask overran: handled by the empty-reply
+    // gate below rather than ending the run.
+    let doubleCut = false;
     // Timing of the attempt whose reply survived (see completeWithRetry).
     let ttftMs: number | undefined;
     let decodeMs: number | undefined;
@@ -969,15 +1040,16 @@ export async function runAgentTask(
         request,
         onText,
         onReasoning,
-        reasoningCapChars(thinking),
+        reasoningCapChars(effectiveThinking),
       );
       cappedChars = first.cappedChars;
       ttftMs = first.ttftMs;
       decodeMs = first.decodeMs;
       if (first.capped || !first.result) {
         // The model was still thinking when the ceiling came down. Re-ask the
-        // SAME step with thinking off: the run needs an actionable reply, and
-        // one cheap round trip costs less than the rest of the soliloquy.
+        // SAME step at off, handing back the tail of what it thought: the run
+        // needs an actionable reply, and the model's own conclusions are
+        // cheaper to act on than to re-derive.
         overruns += 1;
         // A reasoning overrun is the opposite of routine — adaptive lowering
         // (if any) lifts immediately, and any pending effort hint dies: the
@@ -989,8 +1061,8 @@ export async function runAgentTask(
         deps.emit({
           kind: "info",
           message:
-            `reasoning overran the ${thinkingBudgetFor(thinking ?? "off")}-token budget for '${thinking ?? "off"}'` +
-            ` — cut the stream at ~${Math.ceil(cappedChars / 4).toLocaleString()} tokens and re-asked the step with thinking off`,
+            `reasoning overran the ${effectiveThinking && effectiveThinking !== "off" ? `${thinkingBudgetFor(effectiveThinking)}-token budget for '${effectiveThinking}'` : `${OFF_REASONING_CAP_CHARS.toLocaleString()}-char ceiling for 'off'`}` +
+            ` — cut the stream at ~${Math.ceil(cappedChars / 4).toLocaleString()} tokens and re-asked the step with its conclusions and thinking off`,
         });
         if (overruns >= MAX_REASONING_OVERRUNS && thinking !== "off") {
           thinking = "off";
@@ -1001,15 +1073,27 @@ export async function runAgentTask(
         }
         const second = await completeWithRetry(
           deps,
-          { ...request, thinking: "off" },
+          {
+            ...request,
+            thinking: "off",
+            messages: [
+              ...request.messages,
+              { role: "user", content: salvageNote(first.reasoningTail ?? "") },
+            ],
+          },
           onText,
           onReasoning,
+          OFF_REASONING_CAP_CHARS,
         );
         cappedChars += second.cappedChars;
         ttftMs = second.ttftMs;
         decodeMs = second.decodeMs;
-        if (!second.result) throw new Error("reasoning cap tripped with thinking already off");
-        result = second.result;
+        if (second.result && !second.capped) {
+          result = second.result;
+        } else {
+          doubleCut = true;
+          result = { text: "", toolCalls: [], stopReason: "reasoning_cap" };
+        }
       } else {
         // NOTE: `overruns` deliberately survives a healthy step — see its
         // declaration. A run that keeps paying for cuts it then throws away
@@ -1047,6 +1131,17 @@ export async function runAgentTask(
       reasoningChars: result.reasoning?.length ?? 0,
       thinking: effectiveThinking,
     });
+    if (
+      !offIgnoredNoted &&
+      (effectiveThinking ?? "off") === "off" &&
+      Math.max((result.reasoning?.length ?? 0) + cappedChars, streamedReasoning) > OFF_IGNORED_CHARS
+    ) {
+      offIgnoredNoted = true;
+      deps.emit({
+        kind: "info",
+        message: `this endpoint ignores thinking:off — a step sent at off streamed ${Math.max((result.reasoning?.length ?? 0) + cappedChars, streamedReasoning).toLocaleString()} reasoning chars. Every step stays under the ${OFF_REASONING_CAP_CHARS.toLocaleString()}-char ceiling regardless`,
+      });
+    }
 
     // Live usage for the stats bar: provider numbers when reported, else an
     // estimate of what was actually SENT (the truncated request view; images
@@ -1129,7 +1224,12 @@ export async function runAgentTask(
         });
         return finish(cp, deps, "stopped", lastStats);
       }
-      if (truncated && maxTokens < MAX_OUTPUT_TOKENS) {
+      if (doubleCut) {
+        deps.emit({
+          kind: "info",
+          message: "the salvage re-ask overran the reasoning ceiling too — asking the model to act without deliberating",
+        });
+      } else if (truncated && maxTokens < MAX_OUTPUT_TOKENS) {
         // The reply hit the output cap — almost always thinking, not the
         // answer. Give the next attempt more room instead of re-prompting the
         // model to repeat the same wall.
@@ -1146,7 +1246,7 @@ export async function runAgentTask(
             : "the model returned an empty reply — asking it to continue",
         });
       }
-      cp.messages.push({ role: "user", content: emptyReplyNudge(truncated) });
+      cp.messages.push({ role: "user", content: emptyReplyNudge(truncated, doubleCut) });
       // An empty reply is a surprise by definition: the routine streak (and
       // any adaptive lowering) resets so the next step thinks at full level,
       // and any pending effort hint dies with it.

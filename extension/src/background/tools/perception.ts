@@ -31,7 +31,8 @@ import {
 } from "../../shared/wait";
 import { stageShelfImage } from "../shelf";
 import { ensureAgentWindow, resolveAgentWindow } from "../window-scope";
-import { ensureContentBridge } from "./content-action";
+import { ensureContentBridge, runContentAction } from "./content-action";
+import { marksLegend, planMarks, type Mark, type MarkCandidate } from "../../shared/marks";
 import { withCursorHidden } from "./cursor-overlay";
 import { registerTool, type ToolContext } from "./types";
 
@@ -1053,10 +1054,94 @@ async function resolveCropRect(
   return { x, y, w, h };
 }
 
+/**
+ * Interactive elements of every reachable frame, in TOP-viewport CSS px,
+ * labelled with the refs they now carry (this IS a fresh snapshot — refs
+ * renumber, exactly as `snapshot` does). Subframe boxes are shifted by the
+ * frame's own offset, measured by the content bridge's frameElement walk.
+ */
+async function collectMarks(
+  tabId: number,
+  viewport: { width: number; height: number },
+): Promise<Mark[]> {
+  const snap = await collectSnapshot(tabId);
+  const offsets = new Map<number, { x: number; y: number }>([[0, { x: 0, y: 0 }]]);
+  const candidates: MarkCandidate[] = [];
+  for (const el of snap.elements) {
+    if (!el.box) continue;
+    let off = offsets.get(el.frameId);
+    if (!off) {
+      const res = await runContentAction(tabId, { action: "resolvePoint", x: 0, y: 0 }, el.frameId).catch(
+        () => null,
+      );
+      const point = res?.ok ? (res.data as { point?: { x: number; y: number } } | null)?.point : undefined;
+      off = point ?? { x: Number.NaN, y: Number.NaN };
+      offsets.set(el.frameId, off);
+    }
+    if (!Number.isFinite(off.x)) continue;
+    const local = el.ref.slice(el.ref.indexOf("#") + 1);
+    candidates.push({
+      ref: el.frameId ? el.ref : local,
+      name: el.name,
+      tag: el.tag,
+      role: el.role,
+      box: { x: el.box.x + off.x, y: el.box.y + off.y, w: el.box.w, h: el.box.h },
+    });
+  }
+  return planMarks(candidates, viewport);
+}
+
+/** Draw the marks onto a finished capture whose pixels cover `rect` (CSS px). */
+async function drawMarks(
+  dataUrl: string,
+  marks: Mark[],
+  rect: { x: number; y: number; w: number; h: number },
+): Promise<string> {
+  try {
+    const bmp = await createImageBitmap(await (await fetch(dataUrl)).blob());
+    const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+    const g = canvas.getContext("2d");
+    if (!g) return dataUrl;
+    g.drawImage(bmp, 0, 0);
+    const sx = bmp.width / rect.w;
+    const sy = bmp.height / rect.h;
+    bmp.close();
+    const px = (x: number): number => (x - rect.x) * sx;
+    const py = (y: number): number => (y - rect.y) * sy;
+    const font = Math.max(10, Math.round(11 * sy));
+    g.font = `bold ${font}px sans-serif`;
+    g.textBaseline = "top";
+    g.lineWidth = Math.max(1, sy * 1.5);
+    for (const m of marks) {
+      g.strokeStyle = "rgba(255,0,170,0.9)";
+      g.strokeRect(px(m.box.x), py(m.box.y), m.box.w * sx, m.box.h * sy);
+    }
+    // Labels last, so no box outline is ever drawn over a number.
+    for (const m of marks) {
+      const lx = px(m.label.x);
+      const ly = py(m.label.y);
+      const lw = Math.max(g.measureText(m.ref).width + 6, m.label.w * sx);
+      g.fillStyle = "rgba(255,0,170,0.95)";
+      g.fillRect(lx, ly, lw, m.label.h * sy);
+      g.fillStyle = "#fff";
+      g.fillText(m.ref, lx + 3, ly + 1);
+    }
+    const out = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.8 });
+    const bytes = new Uint8Array(await out.arrayBuffer());
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8_000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8_000));
+    }
+    return `data:image/jpeg;base64,${btoa(binary)}`;
+  } catch {
+    return dataUrl;
+  }
+}
+
 registerTool({
   name: "screenshot",
   description:
-    "Capture a JPEG screenshot of the visible viewport. The image is ATTACHED to this result and you WILL see it — looking at it is the fastest way to resolve any confusion about what the page shows. Take one whenever you are confused, uncertain, or concerned — before guessing, before retrying a failing approach, and before reporting a blocker. PRECISION: pass zoom:2..4 for a sharper centered crop before exact coordinate work (placing a caret on a text line, table grids, resize handles), or x/y/w/h (+ space) for any region — crops arrive at native resolution and space:'screenshot' coordinates then resolve against the crop. The result reports the image's pixel dimensions: point at anything you see with type_at/click_at/hover_at/drag_at using space:'screenshot' and x/y in image pixels — the tool converts to viewport coordinates for you. Every capture also STAGES itself on the image shelf (shot_N): `paste_image` can then deliver those exact bytes into another page (chat composer, upload form, dropzone) with no disk and no paths. save_to_disk:true additionally writes the JPEG into the Downloads folder and reports its absolute path (SENSITIVE — confirmation required).",
+    "Capture a JPEG screenshot of the visible viewport. The image is ATTACHED to this result and you WILL see it — looking at it is the fastest way to resolve any confusion about what the page shows. Take one whenever you are confused, uncertain, or concerned — before guessing, before retrying a failing approach, and before reporting a blocker. TARGETING: marks:true draws a labelled box on every interactive element in view, each label being that element's ref — then click {ref} / click_at {ref} hits its exact centre with no pixel estimate (the reliable way to hit small toolbar icons, menu rows and dialog buttons). PRECISION: pass zoom:2..4 for a sharper centered crop before exact coordinate work (placing a caret on a text line, table grids, resize handles), or x/y/w/h (+ space) for any region — crops arrive at native resolution and space:'screenshot' coordinates then resolve against the crop. The result reports the image's pixel dimensions: point at anything you see with type_at/click_at/hover_at/drag_at using space:'screenshot' and x/y in image pixels — the tool converts to viewport coordinates for you. Every capture also STAGES itself on the image shelf (shot_N): `paste_image` can then deliver those exact bytes into another page (chat composer, upload form, dropzone) with no disk and no paths. save_to_disk:true additionally writes the JPEG into the Downloads folder and reports its absolute path (SENSITIVE — confirmation required).",
   parameters: {
     type: "object",
     properties: {
@@ -1081,6 +1166,11 @@ registerTool({
       filename: {
         type: "string",
         description: "File name for the saved image (default screenshot-<timestamp>.jpg)",
+      },
+      marks: {
+        type: "boolean",
+        description:
+          "Set-of-Mark: draw a labelled box on every interactive element in view. Each label IS the element's ref (fresh — supersedes the previous snapshot's refs): act with click {ref} / click_at {ref} instead of estimating pixels",
       },
     },
   },
@@ -1132,6 +1222,28 @@ registerTool({
       tabId: ctx.tabId,
     });
     const shot = staged.id ? { id: staged.id, name: filename } : undefined;
+    // Marks are drawn on the model's copy only: the shelf keeps clean bytes for
+    // paste_image, and the frame signature above was taken on the clean image
+    // so the next action's effect diff never mistakes a mark for a change.
+    let legend: string | undefined;
+    let markCount: number | undefined;
+    if (args.marks === true && shotInfo.imageW > 0) {
+      const vp = await layoutViewportCss(ctx.tabId, ctx.adapter).catch(() => undefined);
+      if (vp) {
+        const marks = await collectMarks(ctx.tabId, vp).catch(() => [] as Mark[]);
+        const rect = shotInfo.crop ?? { x: 0, y: 0, w: vp.width, h: vp.height };
+        const inRect = marks.filter(
+          (m) =>
+            m.box.x < rect.x + rect.w &&
+            m.box.x + m.box.w > rect.x &&
+            m.box.y < rect.y + rect.h &&
+            m.box.y + m.box.h > rect.y,
+        );
+        if (inRect.length) jpeg = await drawMarks(jpeg, inRect, rect);
+        legend = marksLegend(inRect);
+        markCount = inRect.length;
+      }
+    }
     // The image→viewport mapping, so the model can point at what it sees:
     // type_at/click_at space:'screenshot' takes x/y in THIS image's pixels.
     const coords =
@@ -1145,14 +1257,15 @@ registerTool({
                 : {}),
             }
         : undefined;
-    if (args.save_to_disk !== true) return { dataUrl: jpeg, ident, shot, coords };
+    const marked = markCount !== undefined ? { marks: { count: markCount, legend } } : {};
+    if (args.save_to_disk !== true) return { dataUrl: jpeg, ident, shot, coords, ...marked };
     const downloadId = await chrome.downloads.download({
       url: jpeg,
       filename,
       saveAs: false,
     });
     const path = await finalDownloadPath(downloadId);
-    return { dataUrl: jpeg, saved: { downloadId, filename, path }, ident, shot, coords };
+    return { dataUrl: jpeg, saved: { downloadId, filename, path }, ident, shot, coords, ...marked };
   },
   present(payload) {
     const p = payload as {
@@ -1164,6 +1277,7 @@ registerTool({
         image: { width: number; height: number };
         crop?: { x: number; y: number; w: number; h: number };
       };
+      marks?: { count: number; legend?: string };
     };
     const where = p.ident ? ` of ${p.ident}` : "";
     const saved = p.saved
@@ -1177,8 +1291,13 @@ registerTool({
         ? ` — CROP of viewport CSS rect (${Math.round(p.coords.crop.x)},${Math.round(p.coords.crop.y)} ${Math.round(p.coords.crop.w)}×${Math.round(p.coords.crop.h)}), native-resolution image ${p.coords.image.width}×${p.coords.image.height} px: type_at/click_at with space:'screenshot' now point into THIS crop`
         : ` — the image is ${p.coords.image.width}×${p.coords.image.height} px; type_at/click_at/hover_at/drag_at with space:'screenshot' take x/y in these image pixels and convert for you`
       : "";
+    const marks = p.marks
+      ? p.marks.count
+        ? `\n--- ${p.marks.count} marks (label = ref; act with click {ref} or click_at {ref} — no pixel estimates) ---\n${p.marks.legend ?? ""}`
+        : "\n[marks: no interactive DOM element is in view — a canvas surface; use docs tools / keyboard or space:'screenshot' coordinates]"
+      : "";
     return {
-      text: `[screenshot captured${where}${saved}${staged}${dims} — the image is attached below; look at it]`,
+      text: `[screenshot captured${where}${saved}${staged}${dims} — the image is attached below; look at it]${marks}`,
       image: p.dataUrl,
     };
   },

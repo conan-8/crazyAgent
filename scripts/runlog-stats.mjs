@@ -96,6 +96,23 @@ function analyse(records) {
       byTool.set(c.name, e);
     }
   }
+  // Reasoning that bought nothing: tokens cut by the ceiling (the re-ask
+  // re-paid the step), salvage re-asks that overran too, and steps that
+  // streamed reasoning at off. Read from the turn notes the loop emits.
+  const waste = { overruns: 0, cutTokens: 0, salvageOverruns: 0, offIgnored: 0, stalls: 0, reasoningChars: 0 };
+  for (const t of turns) {
+    waste.reasoningChars += (t.reasoning?.length ?? 0) + (t.reasoningDropped ?? 0);
+    for (const n of t.notes ?? []) {
+      const m = n.message ?? "";
+      const cut = /^reasoning overran .*cut the stream at ~([\d,]+) tokens/.exec(m);
+      if (cut) {
+        waste.overruns++;
+        waste.cutTokens += Number(cut[1].replace(/,/g, ""));
+      } else if (m.startsWith("the salvage re-ask overran")) waste.salvageOverruns++;
+      else if (m.startsWith("this endpoint ignores thinking:off")) waste.offIgnored++;
+      else if (m.includes("went silent") || m.includes("no first token")) waste.stalls++;
+    }
+  }
   latencies.sort((a, b) => a - b);
   ttfts.sort((a, b) => a - b);
   decodes.sort((a, b) => a - b);
@@ -133,6 +150,7 @@ function analyse(records) {
     cache: cached.length ? { tokens: cacheReported, input: cacheInput } : null,
     prefixTokens: stats.map((x) => x.prefixTokens).filter(Boolean).at(-1) ?? 0,
     fit: fitLatency(turns),
+    waste,
   };
 }
 
@@ -186,6 +204,10 @@ function report(name, a) {
   console.log(
     `waste: ${a.screenshotOnly}/${a.turns} turns were screenshot-only (${pct(a.screenshotOnly, a.turns)}) · ${a.failedTurns} turns carried a failed call (${pct(a.failedTurns, a.turns)})`,
   );
+  const w = a.waste;
+  console.log(
+    `reasoning: ~${Math.round(w.reasoningChars / 4).toLocaleString()} tokens streamed · ${w.overruns} ceiling cuts (~${w.cutTokens.toLocaleString()} tokens thrown away) · ${w.salvageOverruns} salvage overruns${w.offIgnored ? " · endpoint IGNORES thinking:off" : ""} · ${w.stalls} stalled attempts`,
+  );
   console.log("slowest tools:");
   for (const [n, e] of [...a.byTool].sort((x, y) => y[1].ms - x[1].ms).slice(0, 8)) {
     console.log(
@@ -224,6 +246,8 @@ if (results.length > 1) {
     );
   }
   row("screenshot-only turns", before.screenshotOnly, after.screenshotOnly);
+  row("reasoning tokens", Math.round(before.waste.reasoningChars / 4), Math.round(after.waste.reasoningChars / 4));
+  row("ceiling cuts", before.waste.overruns, after.waste.overruns);
   if (before.fit && after.fit) {
     row("fixed cost/step (s)", +(before.fit.fixedMs / 1000).toFixed(1), +(after.fit.fixedMs / 1000).toFixed(1));
   }

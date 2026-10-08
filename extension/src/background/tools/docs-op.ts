@@ -136,7 +136,7 @@ async function walkOnce(ctx: ToolContext, labels: MenuLabel[]): Promise<WalkAtte
  * that desync; see shouldRetryWalk for why step-1 misses and DISABLED rows
  * are excluded from the retry.
  */
-async function walkMenu(
+export async function walkMenu(
   ctx: ToolContext,
   labels: MenuLabel[],
 ): Promise<{ ok: true; steps: string[] } | { ok: false; error: string; steps: string[] }> {

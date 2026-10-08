@@ -174,21 +174,22 @@ describe("canvas document editor procedure", () => {
 
   it("tells the model the sink ref will not exist and not to hunt for it", () => {
     expect(skill.body).toContain("no ref exists for it");
-    expect(skill.body).toContain("hidden typing sink");
+    expect(skill.body).toContain("editor's typing sink");
   });
 
-  it("routes writes through type_at / one ref-less type call, never per-keystroke", () => {
-    expect(skill.body).toContain("THE PRIMARY MOVE IS `type_at`");
+  it("routes writes through anchored routes first, pixels last, never per-keystroke", () => {
+    expect(skill.body).toContain("ROUTE ORDER");
+    expect(skill.body).toContain("docs_locate {phrase, caret:'after'|'before'|'select'}");
+    expect(skill.body).toContain("`type_at` (fallback)");
     expect(skill.body).toContain("ONE trusted sequence");
-    expect(skill.body).toContain("ONE no-ref `type` call");
     expect(skill.body).toContain("NEVER type character-by-character");
   });
 
-  it("forbids line-counting navigation and prefers visual selection", () => {
+  it("forbids line-counting navigation and anchors on text instead", () => {
     expect(skill.body).toContain("NEVER navigate by Home/arrows/Shift+Down line counting");
     expect(skill.body).toContain("STYLE AHEAD OF THE CARET");
     expect(skill.body).toContain("select_to:{x,y}");
-    expect(skill.body).toContain("zoom:2..4");
+    expect(skill.body).toContain("Anchor on text");
   });
 
   it("carries the atomic rebuild mode for tangled bodies", () => {

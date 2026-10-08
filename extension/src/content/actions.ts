@@ -35,6 +35,7 @@ export type ActionRequest =
   | { action: "history"; dir: number }
   | { action: "focus"; ref?: string }
   | { action: "canvasPoint" }
+  | { action: "caretRect" }
   | { action: "probe"; ref: string }
   | { action: "probeAt"; x: number; y: number; space?: CoordSpace; radius?: number }
   | {
@@ -153,6 +154,8 @@ export class Actions {
       }
       case "canvasPoint":
         return canvasPointOf();
+      case "caretRect":
+        return { ok: true, data: caretRectOf() };
       case "probe": {
         const el = this.#resolve(req.ref);
         return { ok: true, data: probeOf(el) };
@@ -1421,6 +1424,42 @@ function makeDragEvent(type: string, dt: DataTransfer): Event {
  * trusted click lands when an editor's hidden sink will not take focus on its
  * own (clicking the document surface is how a person wakes it up).
  */
+/**
+ * Where the text caret is, in top-viewport CSS px. Canvas editors paint the
+ * text but keep the caret a DOM element (Docs: .kix-cursor-caret); other
+ * editors expose it through the selection. The editor's scroll offset rides
+ * along so a caller can carry an earlier caret point across a scroll.
+ * Collaborators' carets carry a visible name flag — the user's own does not.
+ */
+function caretRectOf(): { x: number; y: number; width: number; height: number; scrollTop: number; source: string } | null {
+  const scroller = document.querySelector(".kix-appview-editor") as HTMLElement | null;
+  const scrollTop = scroller?.scrollTop ?? document.scrollingElement?.scrollTop ?? 0;
+  const carets = [...document.querySelectorAll(".kix-cursor-caret")] as HTMLElement[];
+  const own = carets
+    .map((el) => {
+      const cursor = el.closest(".kix-cursor");
+      const flag = cursor?.querySelector(".kix-cursor-name") as HTMLElement | null;
+      const named = Boolean(flag && collapse(flag.textContent).length && flag.getBoundingClientRect().width > 0);
+      return { el, named, rect: el.getBoundingClientRect() };
+    })
+    .filter((c) => c.rect.height > 0)
+    .sort((a, b) => Number(a.named) - Number(b.named));
+  if (own[0]) {
+    const r = own[0].rect;
+    return { x: r.left, y: r.top, width: r.width, height: r.height, scrollTop, source: "kix-caret" };
+  }
+  const sel = window.getSelection?.();
+  if (sel && sel.rangeCount) {
+    const range = sel.getRangeAt(0).cloneRange();
+    range.collapse(false);
+    const r = range.getClientRects()[0] ?? range.getBoundingClientRect();
+    if (r && r.height > 0) {
+      return { x: r.left, y: r.top, width: r.width, height: r.height, scrollTop, source: "selection" };
+    }
+  }
+  return null;
+}
+
 function canvasPointOf(): ActionResult {
   const canvas = document.querySelector("canvas") as HTMLElement | null;
   if (!canvas) return { ok: true, data: null };

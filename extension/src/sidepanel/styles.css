@@ -1212,29 +1212,6 @@ input[type="number"]::-webkit-inner-spin-button {
   color: var(--text-faint);
 }
 
-.window-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  font-variant-numeric: tabular-nums;
-}
-
-.window-chip.is-live {
-  color: var(--text-soft);
-  border-color: var(--border-strong);
-}
-
-.window-chip-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .window-btn {
   padding: 3px 9px;
   font-size: 10.5px;
