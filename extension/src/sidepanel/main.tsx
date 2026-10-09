@@ -66,7 +66,7 @@ import {
   type JevSettings,
 } from "../background/settings";
 import { Icon, ICONS } from "./icons";
-import { Collapse, useAutosize, usePresence, useStickToBottom } from "./motion";
+import { Collapse, useAutosize, usePresence, useSmoothFollow, useStickToBottom } from "./motion";
 
 const app = document.getElementById("app");
 if (!app) throw new Error("#app missing");
@@ -456,6 +456,7 @@ function ReasoningBlock({
     if (expanded && !seen) setSeen(true);
   }, [expanded, seen]);
   const words = reasoningWords(block, text);
+  const follow = useSmoothFollow<HTMLDivElement>(live && expanded, text.length);
   return (
     <div class={`reasoning${live ? " is-live" : ""}${expanded ? " is-open" : ""}`}>
       <button
@@ -478,7 +479,11 @@ function ReasoningBlock({
         </span>
       </button>
       <Collapse open={expanded}>
-        {expanded || seen ? <div class="reasoning-body">{text.trim()}</div> : null}
+        {expanded || seen ? (
+          <div class="reasoning-body" ref={follow.ref} onScroll={follow.onScroll}>
+            {text.trim()}
+          </div>
+        ) : null}
       </Collapse>
     </div>
   );
@@ -2465,11 +2470,11 @@ function ImageViewer({ src, onClose }: { src: string | null; onClose: () => void
 // ------------------------------ plan dropdown ------------------------------
 
 /**
- * The agent's live todo list (`todo_write`), rendered as a dropdown anchored
- * under the topbar. Updates arrive mid-run as whole-list replacements; the
- * collapsed strip always shows progress + the item in flight, expanding
- * reveals every row. `pulse` remounts the count on each update so the arrival
- * animation replays — a mid-run change is visible without stealing a click.
+ * The agent's live todo list (`todo_write`): a one-line strip under the topbar
+ * (progress + the item in flight) that opens the full list as a full-width
+ * sheet from the right. Updates arrive mid-run as whole-list replacements.
+ * `pulse` remounts the count on each update so the arrival animation replays —
+ * a mid-run change is visible without stealing a click.
  */
 function TodoBar({
   items,
@@ -2477,12 +2482,14 @@ function TodoBar({
   pulse,
   running,
   onToggle,
+  onClose,
 }: {
   items: TodoItem[];
   open: boolean;
   pulse: number;
   running: boolean;
   onToggle: () => void;
+  onClose: () => void;
 }) {
   if (!items.length) return null;
   const done = items.filter((t) => t.status === "completed").length;
@@ -2497,29 +2504,40 @@ function TodoBar({
         ? `${items.length - done - blocked} left · ${blocked} blocked`
         : `${items.length - done} left`;
   return (
-    <div class={`todo-bar${open ? " is-open" : ""}${running ? "" : " is-idle"}`}>
-      <button
-        class="todo-strip"
-        onClick={onToggle}
-        aria-expanded={open}
-        aria-label="Agent plan"
-        title="The agent's live plan — it updates this itself while it works"
-      >
-        <span class="todo-ic">
-          <Icon d={ICONS.list} size={13} />
-        </span>
-        <span class="todo-count" key={pulse}>
-          {done}/{items.length}
-        </span>
-        <span class="todo-meter" aria-hidden="true">
+    <>
+      <div class={`todo-bar${running ? "" : " is-idle"}`}>
+        <button
+          class="todo-strip"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label="Agent plan"
+          title="The agent's live plan — it updates this itself while it works"
+        >
+          <span class="todo-ic">
+            <Icon d={ICONS.list} size={13} />
+          </span>
+          <span class="todo-count" key={pulse}>
+            {done}/{items.length}
+          </span>
+          <span class="todo-meter" aria-hidden="true">
+            <span style={`transform:scaleX(${ratio})`} />
+          </span>
+          <span class="todo-current">{headline}</span>
+          <span class="todo-chev">
+            <Icon d={ICONS.chevron} size={13} />
+          </span>
+        </button>
+      </div>
+      <Sheet open={open} side="right" class="todo-sheet" label="Agent plan" onClose={onClose}>
+        <SheetHead
+          title="Plan"
+          sub={`${done}/${items.length} done${blocked ? ` · ${blocked} blocked` : ""}`}
+          icon={ICONS.list}
+          onClose={onClose}
+        />
+        <div class="todo-sheet-meter" aria-hidden="true">
           <span style={`transform:scaleX(${ratio})`} />
-        </span>
-        <span class="todo-current">{headline}</span>
-        <span class={`todo-chev${open ? " is-open" : ""}`}>
-          <Icon d={ICONS.chevron} size={13} />
-        </span>
-      </button>
-      <Collapse open={open}>
+        </div>
         <ul class="todo-list">
           {items.map((t, i) => (
             <li key={`${i}-${t.content}`} class={`todo-item is-${t.status}`}>
@@ -2538,8 +2556,8 @@ function TodoBar({
             </li>
           ))}
         </ul>
-      </Collapse>
-    </div>
+      </Sheet>
+    </>
   );
 }
 
@@ -2638,7 +2656,6 @@ function App() {
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [todoOpen, setTodoOpen] = useState(false);
   const [todoPulse, setTodoPulse] = useState(0);
-  const todoAutoOpened = useRef(false);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [modelList, setModelList] = useState<string[]>([]);
@@ -2748,6 +2765,12 @@ function App() {
       port.onMessage.addListener((msg: SwToPanel) => {
         if (msg.type === "agent.event") {
           eventBuffer.push(bufferedEvent(msg.event));
+          const isDelta =
+            msg.event.kind === "token_delta" || msg.event.kind === "reasoning_delta";
+          if (isDelta && awaitingModelRef.current) {
+            awaitingModelRef.current = null;
+            setAwaitingModel(null);
+          }
           if (msg.event.kind === "usage") {
             setUsage({
               totalTokens: msg.event.totalTokens,
@@ -2791,21 +2814,11 @@ function App() {
             };
             awaitingModelRef.current = awaiting;
             setAwaitingModel(awaiting);
-          } else if (
-            (msg.event.kind === "token_delta" || msg.event.kind === "reasoning_delta") &&
-            awaitingModelRef.current
-          ) {
-            awaitingModelRef.current = null;
-            setAwaitingModel(null);
           } else if (msg.event.kind === "todo_update") {
             // The plan is UI state, not chat content — foldEvent never sees
             // it (the todo_write tool card already rides the transcript).
             setTodos(msg.event.items);
             setTodoPulse((p) => p + 1);
-            if (msg.event.items.length && !todoAutoOpened.current) {
-              todoAutoOpened.current = true;
-              setTodoOpen(true);
-            }
           } else if (currentConv) {
             foldEvent(currentConv, msg.event);
             // Only a tool_result can attach a screenshot — trimming on every
@@ -2820,9 +2833,7 @@ function App() {
           }
           // Deltas are the only high-volume events; everything else is a state
           // change a caller (or the user) is waiting to see, so it paints now.
-          const streaming =
-            msg.event.kind === "token_delta" || msg.event.kind === "reasoning_delta";
-          bump(!streaming);
+          bump(!isDelta);
         } else if (msg.type === "pong") {
           setSwStartedAt(msg.startedAt);
         } else if (msg.type === "tool_result") {
@@ -3092,11 +3103,9 @@ function App() {
   ) => {
     const isDemo = typeof taskOrDemo !== "string";
     eventBuffer.length = 0;
-    // A fresh run starts with no plan: clear the previous run's list and let
-    // the first todo_update open the dropdown again.
+    // A fresh run starts with no plan: clear the previous run's list.
     setTodos([]);
     setTodoOpen(false);
-    todoAutoOpened.current = false;
     // Grab the hero orb before the welcome unmounts: a ghost clone flies from
     // this rect into the first assistant badge once it mounts (orbFly effect).
     // Skipped under reduced motion — the badge simply appears.
@@ -3275,7 +3284,6 @@ function App() {
     setShowHistory(false);
     setTodos([]);
     setTodoOpen(false);
-    todoAutoOpened.current = false;
     inputRef.current?.focus();
   };
 
@@ -3729,6 +3737,7 @@ function App() {
         pulse={todoPulse}
         running={running}
         onToggle={() => setTodoOpen((o) => !o)}
+        onClose={() => setTodoOpen(false)}
       />
 
       <div class="stage">

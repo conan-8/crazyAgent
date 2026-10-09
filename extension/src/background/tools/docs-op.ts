@@ -5,18 +5,25 @@
 // is a label walk + trusted keys + an effect check, which is what this file
 // runs. Planning is pure and unit-tested (shared/docs-ops.ts); execution here
 // uses the label-based content actions (clickByText / fillField / queryText)
-// so nothing depends on coordinates, and every op verifies its own effect.
+// and every op verifies its own effect. The one coordinate is the table size
+// grid, which has no labels to click — and it reports its own size, so the aim
+// is confirmed before the click commits.
 import { EXPECT_PROP } from "../../shared/expect";
 import { failureTag } from "../../shared/tool-failure";
 import {
   DOCS_OPS,
+  gridCellPoint,
+  gridCellPx,
+  parseGridStatus,
   planDocsOp,
   shouldRetryWalk,
   type DialogFill,
   type MenuLabel,
   type VerifyPlan,
 } from "../../shared/docs-ops";
+import type { SelectorBox } from "../../content/actions";
 import { runContentAction } from "./content-action";
+import { sendStrokes } from "./coords";
 import { fetchWorkspaceExport } from "./docs";
 import { ensureTabActive, sendTrustedKey, sendTrustedText } from "./trusted-input";
 import { registerTool, type ToolContext } from "./types";
@@ -158,10 +165,79 @@ export async function walkMenu(
   };
 }
 
-/** One real (CDP) key combo — the table picker and shortcuts need trusted keys. */
+/** One real (CDP) key combo — Docs ignores synthetic keys for shortcuts. */
 async function sendTrustedCombo(ctx: ToolContext, combo: string): Promise<void> {
   await sendTrustedKey(ctx.tabId, ctx.adapter, combo);
   await sleep(BETWEEN_STEPS_MS);
+}
+
+/**
+ * Drive the Insert ▸ Table size grid: aim at a cell, read the grid's own size
+ * label back, and click only when it names the size that was asked for.
+ *
+ * The grid takes no keyboard input — arrows and Enter sent at it land in the
+ * document instead (a probe came back with a stray empty paragraph and no
+ * table), so this is the one op that aims at a position. Two passes at most:
+ * the block the grid already has highlighted spans exactly the columns its
+ * label names, which measures the real cell size instead of assuming one.
+ */
+const GRID_MOUSECATCHER = ".goog-dimension-picker-mousecatcher";
+const GRID_STATUS = ".goog-dimension-picker-status";
+const GRID_HIGHLIGHTED = ".goog-dimension-picker-highlighted";
+/** Only the first aim's guess; the grid's own highlight replaces it. */
+const GRID_GUESS_CELL_PX = 18;
+
+async function gridBoxes(ctx: ToolContext): Promise<Map<string, SelectorBox>> {
+  const res = await runContentAction(ctx.tabId, {
+    action: "boxes",
+    selectors: [GRID_MOUSECATCHER, GRID_STATUS, GRID_HIGHLIGHTED],
+  }).catch(() => null);
+  const boxes = res?.ok ? ((res.data as { boxes?: SelectorBox[] } | undefined)?.boxes ?? []) : [];
+  return new Map(boxes.map((b) => [b.selector, b]));
+}
+
+async function pickGridSize(
+  ctx: ToolContext,
+  rows: number,
+  cols: number,
+): Promise<{ ok: true; steps: string[] } | { ok: false; error: string }> {
+  let cell = GRID_GUESS_CELL_PX;
+  let seen = "nothing readable";
+  for (let pass = 0; pass < 2; pass++) {
+    const boxes = await gridBoxes(ctx);
+    const grid = boxes.get(GRID_MOUSECATCHER);
+    if (!grid) {
+      return {
+        ok: false,
+        error: `${failureTag("tool")}: the table size grid never appeared (${GRID_MOUSECATCHER} is not on screen) — the Insert ▸ Table submenu may have closed; re-run insert_table once`,
+      };
+    }
+    const before = parseGridStatus(boxes.get(GRID_STATUS)?.text ?? "");
+    const measured = before
+      ? gridCellPx(boxes.get(GRID_HIGHLIGHTED)?.w ?? 0, before.cols)
+      : null;
+    if (measured) cell = measured;
+    const at = gridCellPoint({ x: grid.x, y: grid.y }, cell, cols, rows);
+    await sendStrokes(ctx, [{ type: "mouseMoved", x: at.x, y: at.y }]);
+    await sleep(BETWEEN_STEPS_MS);
+    const shown = parseGridStatus((await gridBoxes(ctx)).get(GRID_STATUS)?.text ?? "");
+    seen = shown ? `${shown.cols} x ${shown.rows}` : "nothing readable";
+    if (shown?.cols === cols && shown.rows === rows) {
+      await sendStrokes(ctx, [
+        { type: "mouseMoved", x: at.x, y: at.y },
+        { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 },
+        { type: "mouseReleased", x: at.x, y: at.y, button: "left", clickCount: 1 },
+      ]);
+      return {
+        ok: true,
+        steps: [`aimed the size grid at (${at.x},${at.y}) — it reads "${seen}" — and clicked`],
+      };
+    }
+  }
+  return {
+    ok: false,
+    error: `${failureTag("tool")}: the size grid reads "${seen}", not ${cols} x ${rows}, so nothing was clicked (the visible grid is smaller than 20×20 — sizes beyond it cannot be picked this way). Re-run insert_table, or open Insert ▸ Table yourself and click the cell on a screenshot`,
+  };
 }
 
 /**
@@ -261,7 +337,7 @@ registerTool({
 registerTool({
   name: "docs_op",
   description:
-    "Run ONE Google Docs UI operation deterministically — the interface knowledge is built in (exact menu routes read off the live 2026 Docs menu, shortcuts, dialog fields), so one call replaces a multi-turn pixel hunt, and the op verifies its own effect. Ops: apply_style {style:'Title'|'Subtitle'|'Normal text'|'Heading 1'..'Heading 6'} (Heading 1-6 ride Ctrl+Alt+1..6); page_setup {size?:'Letter'|'A4'|…, margins?:inches for all four sides (e.g. 1) or {top,right,bottom,left}, orientation?:'portrait'|'landscape'} — at least one of the three; page_numbers {position:'footer'|'header'} (Insert ▸ Page elements ▸ Page numbers); insert_table {rows:1..20, cols:1..20}; page_break (Ctrl+Enter); table_of_contents {style?:'linked'|'plain'|'dotted'}; equation {text:'E = mc^2'} (Insert ▸ Symbols ▸ Equation, then types the text). The caret/selection must already be where the op applies (click into the document first). The result lists the steps taken and a verification line ('verified:' / 'NOT VERIFIED:' — read it); the fresh observation rides along as with any action. If an op's menu row is missing, the error names the rows the open menu actually shows — read that list instead of re-trying the same path.",
+    "Run ONE Google Docs UI operation deterministically — the interface knowledge is built in (exact menu routes read off the live 2026 Docs menu, shortcuts, dialog fields), so one call replaces a multi-turn pixel hunt, and the op verifies its own effect. Ops: apply_style {style:'Title'|'Subtitle'|'Normal text'|'Heading 1'..'Heading 6'} (Heading 1-6 ride Ctrl+Alt+1..6); page_setup {size?:'Letter'|'A4'|…, margins?:inches for all four sides (e.g. 1) or {top,right,bottom,left}, orientation?:'portrait'|'landscape'} — at least one of the three (NOT reliable yet: the dialog's size dropdown has been missed — read the verification line); page_numbers {position:'footer'|'header'} (Insert ▸ Page elements ▸ Page numbers); insert_table {rows:1..20, cols:1..20} (drives the size grid with the mouse and REFUSES unless the grid reports the size asked for — read its verification line, and confirm the table in docs_read outline before filling it); page_break (Ctrl+Enter); table_of_contents {style?:'linked'|'plain'|'dotted'}; equation {text:'E = mc^2'} (Insert ▸ Symbols ▸ Equation, then types the text). The caret/selection must already be where the op applies (click into the document first). The result lists the steps taken and a verification line ('verified:' / 'NOT VERIFIED:' — read it); the fresh observation rides along as with any action. If an op's menu row is missing, the error names the rows the open menu actually shows — read that list instead of re-trying the same path.",
   parameters: {
     type: "object",
     properties: {
@@ -345,13 +421,14 @@ registerTool({
         steps.push(c.clicked);
         break;
       }
-      case "menuThenKeys": {
+      case "menuThenGridPick": {
         const w = await walkMenu(ctx, plan.labels);
         steps.push(...w.steps);
         if (!w.ok) return fail(w.error);
         await ensureTabActive(ctx.tabId, ctx.adapter);
-        for (const combo of plan.combos) await sendTrustedCombo(ctx, combo);
-        steps.push(`sent ${plan.combos.length} trusted key(s) to the grid picker`);
+        const picked = await pickGridSize(ctx, plan.rows, plan.cols);
+        if (!picked.ok) return fail(picked.error);
+        steps.push(...picked.steps);
         break;
       }
       case "menuThenType": {

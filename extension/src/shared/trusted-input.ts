@@ -252,7 +252,33 @@ export function keyEventParams(
 
 export type TypingStep =
   | { kind: "insertText"; text: string }
-  | { kind: "key"; key: string };
+  /** `text` is set when the key inserts that character (a lead key). */
+  | { kind: "key"; key: string; text?: string };
+
+const SHIFTED_DIGIT_KEY: Record<string, string> = Object.fromEntries(
+  Object.entries(SHIFTED_DIGITS).map(([digit, sym]) => [sym, digit]),
+);
+
+/** Symbols that open an editor popup when keyed (Docs' "@" smart-chip menu). */
+const NO_LEAD_KEY = new Set(["@"]);
+
+/**
+ * The key combo that types `ch` as a real keystroke, or null when it has no
+ * US-layout key (non-ASCII, control characters) or must not be keyed.
+ */
+export function leadKeyCombo(ch: string): string | null {
+  if (ch.length !== 1 || NO_LEAD_KEY.has(ch)) return null;
+  if (/[a-z0-9]/.test(ch)) return ch;
+  if (/[A-Z]/.test(ch)) return `Shift+${ch.toLowerCase()}`;
+  if (ch === " ") return "space";
+  if (SHIFTED_DIGIT_KEY[ch]) return `Shift+${SHIFTED_DIGIT_KEY[ch]}`;
+  for (const [name, def] of Object.entries(NAMED_KEYS)) {
+    if (def.code === "Space" || def.code === "Enter" || def.code === "Tab") continue;
+    if (def.text === ch) return ch;
+    if (def.shifted === ch) return `Shift+${def.text ?? name}`;
+  }
+  return null;
+}
 
 /**
  * Split text into the fewest browser-level steps that reproduce it.
@@ -262,13 +288,26 @@ export type TypingStep =
  * the editor sees `beforeinput(insertParagraph)` and starts a new paragraph:
  * measured, `insertText` with an embedded "\n" splits a <div> but never emits
  * insertParagraph, so paragraph structure would be wrong.
+ *
+ * The FIRST character goes as a real keystroke when it has a key: measured in
+ * Docs, `insertText` lands BEFORE an active selection instead of replacing it,
+ * while a trusted keyDown carrying text replaces it — so "select, then type"
+ * works with no selection tracking, and with nothing selected it simply types.
  */
 export function planTyping(text: string, opts: { submit?: boolean } = {}): TypingStep[] {
   const steps: TypingStep[] = [];
   const segments = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
   segments.forEach((segment, i) => {
     if (i > 0) steps.push({ kind: "key", key: "Enter" });
-    if (segment) steps.push({ kind: "insertText", text: segment });
+    if (!segment) return;
+    const first = segment.charAt(0);
+    const lead = steps.length === 0 ? leadKeyCombo(first) : null;
+    if (lead) {
+      steps.push({ kind: "key", key: lead, text: first });
+      if (segment.length > 1) steps.push({ kind: "insertText", text: segment.slice(1) });
+    } else {
+      steps.push({ kind: "insertText", text: segment });
+    }
   });
   if (opts.submit) steps.push({ kind: "key", key: "Enter" });
   // An empty string with submit still means "press Enter".
@@ -322,6 +361,10 @@ export interface InputHints {
   /** Canvas count in the top document, when the frame can reach it. */
   topCanvases?: number;
   sinkSignature?: boolean;
+  /** A `key` call with no ref: it acts on whatever is focused. */
+  refless?: boolean;
+  /** Focus is inside, or the page shows, an open menu/dialog/listbox. */
+  inPopup?: boolean;
 }
 
 export interface TrustedInputDecision {
@@ -348,6 +391,11 @@ export function shouldUseTrustedInput(hints: InputHints): TrustedInputDecision {
     (isCanvasEditorUrl(hints.topUrl ?? hints.frameUrl) || (hints.frameCanvases ?? 0) > 0)
   ) {
     return { use: true, reason: "focus is inside an embedded canvas editor frame" };
+  }
+  // Canvas editors ignore synthetic keys; after a menu or toolbar click the
+  // focus is on a non-editable host and a DOM key would be a silent no-op.
+  if (hints.refless && (isCanvasEditorUrl(hints.topUrl) || isCanvasEditorUrl(hints.frameUrl))) {
+    return { use: true, reason: "ref-less key on a canvas editor page" };
   }
   if (!hints.editable) {
     return { use: false, reason: "target is not an editable host" };

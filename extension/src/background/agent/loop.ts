@@ -13,7 +13,15 @@ import type {
 } from "../../shared/llm";
 import { THINKING_LEVELS, thinkingBudgetFor } from "../../shared/llm";
 import { JEV_EFFORT_CONFIDENCE, thinkingForEffort } from "../../shared/jev";
-import { openTodos, type Checkpoint, type RunStats, type StepEvent } from "../../shared/protocol";
+import {
+  openTodos,
+  type Checkpoint,
+  type MalformedCall,
+  type RunStats,
+  type StepEvent,
+} from "../../shared/protocol";
+import { missingTarget } from "../../shared/coords";
+import { planDocsOp } from "../../shared/docs-ops";
 import { validateToolArgs } from "../tools/types";
 import { estimateTokens } from "../../shared/modes";
 import { madmanExclamation, madmanLabel } from "../../shared/madman";
@@ -368,6 +376,115 @@ const MAX_REASONING_OVERRUNS = 3;
  */
 const MAX_COMPLETION_NUDGES = 2;
 
+/**
+ * Consecutive turns carrying a malformed call before requests go out
+ * non-streamed. A dropped SSE fragment can leave valid-but-incomplete JSON
+ * (`,"y":146` vanishing keeps the object parseable), so a streaming fault
+ * looks exactly like a model fault. The fallback both routes around it and,
+ * logged per turn, tells the two apart.
+ */
+export const MALFORMED_STREAK_FALLBACK = 2;
+/** Turns a fallback stays non-streamed before streaming is tried again. */
+export const UNSTREAMED_TURNS = 8;
+/** Whole-request ceiling when there is no delta stream to watch for stalls. */
+export const UNSTREAMED_TIMEOUT_MS = 180_000;
+/** First stall nudge after this many steps in a row where nothing executed… */
+export const STALL_NUDGE_FIRST = 3;
+/** …then again every this many. Nudges only: the run never ends on this. */
+export const STALL_NUDGE_EVERY = 5;
+const MALFORMED_RAW_CHARS = 300;
+
+/** Example of a complete call for the tools whose target shape is not schema-enforced. */
+const COMPLETE_CALL_EXAMPLE: Record<string, string> = {
+  click_at: `click_at {"x": 412, "y": 233, "space": "screenshot"} or click_at {"ref": "e12"}`,
+  hover_at: `hover_at {"x": 412, "y": 233, "space": "screenshot"}`,
+  type_at: `type_at {"x": 412, "y": 233, "space": "screenshot", "text": "…"}`,
+  element_at: `element_at {"x": 412, "y": 233, "space": "screenshot"}`,
+  drag_at: `drag_at {"x": 100, "y": 200, "to_x": 300, "to_y": 200, "space": "screenshot"}`,
+  docs_op: `docs_op {"op": "apply_style", "style": "Heading 1"}`,
+};
+
+/**
+ * Why a call cannot run as sent, or null when it can. Pure — the loop drops
+ * such calls BEFORE the assistant turn is committed, so a corrupted call never
+ * becomes an example the model copies (7× `{op:'apply_style',cols:0}`, 35×
+ * `{space,expect}` in one run) and never feeds the identical-call ban.
+ */
+export function precheckCall(call: ToolCall, specs: Map<string, LlmToolSpec>): string | null {
+  if (call.invalidJson !== undefined) return "the arguments were not valid JSON";
+  const spec = specs.get(call.name);
+  if (!spec) return `there is no tool named '${call.name}'`;
+  const validation = validateToolArgs(spec, call.args);
+  if (validation.error) return validation.error.replace(/^ERROR:\s*/, "");
+  const missing = missingTarget(call.name, call.args);
+  if (missing) return `${missing} missing`;
+  if (call.name === "docs_op") {
+    const planned = planDocsOp(call.args.op, call.args);
+    if (!planned.ok) return planned.error.replace(/^INPUT-FAILED:\s*/, "");
+  }
+  return null;
+}
+
+/** The in-band notice for calls that were dropped instead of executed. */
+export function malformedHint(dropped: { call: ToolCall; reason: string }[]): string {
+  const lines = dropped.map(({ call, reason }) => {
+    const arrived =
+      call.invalidJson !== undefined
+        ? `unparseable arguments ${JSON.stringify(call.invalidJson.slice(0, 120))}`
+        : `{${Object.keys(call.args).join(", ")}}`;
+    const example = COMPLETE_CALL_EXAMPLE[call.name];
+    return `- ${call.name} arrived as ${arrived} — ${reason}.${example ? ` Complete form: ${example}` : ""}`;
+  });
+  return (
+    `[harness] ${dropped.length === 1 ? "This call was" : "These calls were"} NOT executed and NOT kept in history ` +
+    `(your turn shows only the complete calls):\n${lines.join("\n")}\n` +
+    "Re-issue with every argument present if it is still the right move."
+  );
+}
+
+/** The escalating nudge after steps in a row where nothing executed. */
+export function stallNudge(streak: number, recent: ToolCall[]): string {
+  const echoed = recent
+    .slice(-4)
+    .map((c) => `- ${c.name} ${clip(c.invalidJson ?? JSON.stringify(c.args), 160)}`)
+    .join("\n");
+  return (
+    `[harness] ${streak} steps in a row have executed nothing (each call was blocked, invalid or dropped). Your last calls:\n` +
+    `${echoed || "- (none)"}\n` +
+    "Before the next call: state in one sentence what the page shows right now. Then take a DIFFERENT route " +
+    "(another tool, another control, a menu path by label) — or, if this item cannot be done, rewrite the plan " +
+    'with todo_write marking it "blocked" with a one-line reason, and move to the next item.'
+  );
+}
+
+export function shouldStallNudge(streak: number): boolean {
+  return (
+    streak === STALL_NUDGE_FIRST ||
+    (streak > STALL_NUDGE_FIRST && (streak - STALL_NUDGE_FIRST) % STALL_NUDGE_EVERY === 0)
+  );
+}
+
+/**
+ * Steps without a todo_write, while the plan has open items, before the
+ * harness asks for a plan update. A run that stops ticking its plan is
+ * usually spiralling on one item (the 641s header-colour spiral never
+ * touched the plan); the nudge makes it account for that item.
+ */
+export const TODO_STALE_STEPS = 30;
+
+export function todoStaleNudge(open: { content: string }[], steps: number): string {
+  const listed = open
+    .slice(0, 5)
+    .map((t) => `- ${t.content}`)
+    .join("\n");
+  const more = open.length > 5 ? `\n…and ${open.length - 5} more.` : "";
+  return (
+    `[harness] ${steps} steps since the plan was last updated, and it still has ${open.length} open item(s):\n` +
+    `${listed}${more}\n` +
+    "Update it now with todo_write: mark what is done (and verified), and if the current item is not " +
+    'moving, mark it "blocked" with a one-line reason and go to the next one.'
+  );
+}
 /**
  * Ceiling on the RAW checkpoint's message chars (see boundCheckpoint). Four
  * times the per-step budget, so the model's visible history is untouched in
@@ -727,12 +844,17 @@ async function completeWithRetry(
     let capped = false;
     let chars = 0;
     let tail = "";
-    const stallMs = deps.ttftStallMs ?? TTFT_STALL_MS;
+    // A non-streamed reply has no deltas: the silence guards would abort every
+    // request at TTFT_STALL_MS and the cap would only fire after the whole
+    // reasoning was paid for. One whole-request timeout replaces all three.
+    const unstreamed = req.stream === false;
+    const cap = unstreamed ? 0 : reasoningCap;
+    const stallMs = unstreamed ? UNSTREAMED_TIMEOUT_MS : (deps.ttftStallMs ?? TTFT_STALL_MS);
     const guardStall = Number.isFinite(stallMs) && stallMs > 0;
     const idleMs = deps.streamIdleMs ?? STREAM_IDLE_MS;
-    const guardIdle = Number.isFinite(idleMs) && idleMs > 0;
+    const guardIdle = !unstreamed && Number.isFinite(idleMs) && idleMs > 0;
     const ctl =
-      reasoningCap > 0 || guardStall || guardIdle ? new AbortController() : undefined;
+      cap > 0 || guardStall || guardIdle ? new AbortController() : undefined;
     const attemptStart = Date.now();
     let firstDeltaAt = 0;
     let idled = false;
@@ -774,7 +896,7 @@ async function completeWithRetry(
           tail = (tail + t).slice(-SALVAGE_TAIL_CHARS);
           // Reasoning streams BEFORE the answer on every wire we speak, so
           // cutting here loses nothing but the thinking itself.
-          if (reasoningCap > 0 && ctl && !capped && chars > reasoningCap) {
+          if (cap > 0 && ctl && !capped && chars > cap) {
             capped = true;
             clearTimer();
             ctl.abort();
@@ -801,7 +923,9 @@ async function completeWithRetry(
       discarded += chars;
       if (ctl?.signal.aborted && !firstDeltaAt) {
         lastErr = new Error(
-          `stalled — no first token for ${(stallMs / 1000).toFixed(0)}s, attempt aborted`,
+          unstreamed
+            ? `no non-streamed reply within ${(stallMs / 1000).toFixed(0)}s, attempt aborted`
+            : `stalled — no first token for ${(stallMs / 1000).toFixed(0)}s, attempt aborted`,
         );
       } else if (idled) {
         lastErr = new Error(
@@ -838,7 +962,6 @@ export async function runAgentTask(
   // provider usage is the story; the next 200 identical misses add nothing.
   let usageSilenceNoted = false;
   let lastStats: RunStats | undefined;
-  let invalidStreak = 0;
   const guard = createStuckGuard();
   // Uncapped by default. `Infinity` keeps the loop condition identical to the
   // capped path, so there is one code path rather than two.
@@ -855,6 +978,14 @@ export async function runAgentTask(
   // Times a final answer was bounced back because the plan still had open
   // items (see the completion gate below).
   let completionNudges = 0;
+  // Turns in a row that carried a malformed call, and how many upcoming turns
+  // go out non-streamed because of it (see MALFORMED_STREAK_FALLBACK).
+  let malformedTurns = 0;
+  let unstreamedLeft = 0;
+  // Steps in a row where no call reached the executor, and the calls they made.
+  let idleSteps = 0;
+  let idleCalls: ToolCall[] = [];
+  let stepsSinceTodo = 0;
   // Effective thinking level. Starts at the configured one and is dropped to
   // "off" for the rest of the run once the reasoning cap has tripped
   // MAX_REASONING_OVERRUNS times (see reasoningCapChars and the counter below).
@@ -998,6 +1129,13 @@ export async function runAgentTask(
     ) {
       effectiveThinking = "off";
     }
+    const unstreamedTurn = unstreamedLeft > 0;
+    if (unstreamedTurn) {
+      unstreamedLeft -= 1;
+      // No delta stream means no reasoning cap: a non-streamed turn must not
+      // be able to think unbounded before anything can stop it.
+      effectiveThinking = "off";
+    }
     const request: LlmRequest = {
       system: systemPrompt,
       systemSuffix: deps.lessonsBlock || undefined,
@@ -1009,6 +1147,7 @@ export async function runAgentTask(
       tools,
       maxTokens,
       thinking: effectiveThinking,
+      ...(unstreamedTurn ? { stream: false } : {}),
     };
     const onText = (text: string): void => deps.emit({ kind: "token_delta", text });
     let streamedReasoning = 0;
@@ -1118,6 +1257,23 @@ export async function runAgentTask(
       return finish(cp, deps, "stopped", lastStats);
     }
 
+    // Precheck BEFORE anything is committed: a call that cannot run as sent is
+    // dropped from the turn (see precheckCall). Recorded raw, as the provider
+    // delivered it, so the log can say where the corruption came from.
+    const dropped: { call: ToolCall; reason: string }[] = [];
+    for (const call of result.toolCalls) {
+      const reason = precheckCall(call, specsByName);
+      if (reason !== null) dropped.push({ call, reason });
+    }
+    const malformed: MalformedCall[] = dropped.map(({ call, reason }) => ({
+      name: call.name,
+      reason,
+      raw: clip(
+        result.rawArgs?.[call.id] ?? call.invalidJson ?? JSON.stringify(call.args),
+        MALFORMED_RAW_CHARS,
+      ),
+    }));
+
     // Per-step timing split, once per turn: TTFT (prefill/queue) vs decode.
     // The effective thinking level rides along — the verification rig for
     // effort routing: reasoning chars per step vs THIS field is how the
@@ -1130,6 +1286,8 @@ export async function runAgentTask(
       decodeMs,
       reasoningChars: result.reasoning?.length ?? 0,
       thinking: effectiveThinking,
+      upstream: result.upstream,
+      malformed: malformed.length ? malformed : undefined,
     });
     if (
       !offIgnoredNoted &&
@@ -1263,6 +1421,30 @@ export async function runAgentTask(
     }
     emptyReplies = 0;
 
+    if (dropped.length) {
+      malformedTurns += 1;
+      deps.emit({
+        kind: "info",
+        message:
+          `dropped ${dropped.length} malformed call(s) — ${dropped.map((d) => `${d.call.name}: ${d.reason}`).join("; ")} — ` +
+          "not executed, not kept in history",
+      });
+      if (malformedTurns >= MALFORMED_STREAK_FALLBACK && unstreamedLeft === 0 && !unstreamedTurn) {
+        unstreamedLeft = UNSTREAMED_TURNS;
+        deps.emit({
+          kind: "info",
+          message:
+            `${malformedTurns} turns in a row carried malformed tool calls — the next ${UNSTREAMED_TURNS} requests go out ` +
+            "non-streamed (thinking off), to rule out a corrupted stream",
+        });
+      }
+    } else {
+      malformedTurns = 0;
+    }
+    const droppedIds = new Set(dropped.map((d) => d.call.id));
+    const calls = result.toolCalls.filter((c) => !droppedIds.has(c.id));
+    const hint = dropped.length ? malformedHint(dropped) : null;
+
     const signedThinking = result.reasoningSignature
       ? result.reasoning || undefined
       : undefined;
@@ -1275,11 +1457,11 @@ export async function runAgentTask(
     // behind rather than a poisoned transcript. Signed thinking is only
     // replayable inside a tool-use continuation, so it does not justify
     // keeping a call-less empty turn.
-    if (result.toolCalls.length || result.text) {
+    if (calls.length || result.text) {
       cp.messages.push({
         role: "assistant",
         content: result.text,
-        toolCalls: result.toolCalls.length ? result.toolCalls : undefined,
+        toolCalls: calls.length ? calls : undefined,
         // Persist reasoning only when Anthropic signed it: the signature marks a
         // thinking block that MUST be replayed on the tool-use continuation.
         // OpenAI/DeepSeek reasoning has no signature and is streamed live to the
@@ -1289,7 +1471,35 @@ export async function runAgentTask(
       });
     }
 
-    if (!result.toolCalls.length) {
+    const noteIdle = (stepCalls: ToolCall[]): void => {
+      idleSteps += 1;
+      idleCalls = [...idleCalls, ...stepCalls].slice(-8);
+      if (shouldStallNudge(idleSteps)) {
+        cp.messages.push({ role: "user", content: stallNudge(idleSteps, idleCalls) });
+        deps.emit({
+          kind: "info",
+          message: `${idleSteps} steps in a row executed nothing — nudging the model to re-read the page and change route`,
+        });
+      }
+    };
+
+    if (!calls.length && hint) {
+      // Every call was dropped: this is not a final answer, whatever the text.
+      cp.messages.push({ role: "user", content: hint });
+      noteIdle(result.toolCalls);
+      routineStreak = 0;
+      adaptiveRoutine = false;
+      dropEffortHint();
+      endStickyRoutine();
+      cp.stepIndex = step + 1;
+      cp.updatedAt = Date.now();
+      capCheckpointImages(cp.messages);
+      await deps.save(cp);
+      emitHeartbeat(deps, cp);
+      continue;
+    }
+
+    if (!calls.length) {
       // Completion gate: a "final" answer while the live plan still owes work
       // is not a completion. Run D announced "12 of 32 verified, I need to
       // stop" and the run ended `done` with 19 items open — the user had to
@@ -1345,16 +1555,21 @@ export async function runAgentTask(
         kind: "done",
         summary: result.text.trim() || "task finished (no summary)",
         stats,
+        outcome: "completed",
       });
       return "completed";
     }
 
     // Execute the batch: all-read-only batches run concurrently; anything
     // else stays sequential with a stop check between calls. Outcomes are
-    // recorded in call order either way.
-    let aborted = false;
+    // recorded in call order either way. There is deliberately NO cap on
+    // steps that execute nothing: calls that cannot run are dropped before
+    // they reach history (precheckCall), refused or invalid ones come back as
+    // tool errors, and STALL_NUDGE_* escalates in-band — the run only ends on
+    // a real answer, the step cap, an explicit stop, or the empty-reply bound.
     // Per-step outcome flags for the adaptive-thinking routine test.
     let stepFailed = false;
+    let stepExecuted = false;
     // Freshest Jev routing verdicts from this step's gate calls (the LAST
     // stamped result wins — it saw the most recent page state). Cast
     // initializers: the assignments happen inside the record() closure, which
@@ -1366,9 +1581,11 @@ export async function runAgentTask(
       message: LlmMessage;
       event: StepEvent;
       invalid: boolean;
+      executed: boolean;
     }): void => {
       cp.messages.push(outcome.message);
       deps.emit(outcome.event);
+      if (outcome.executed) stepExecuted = true;
       if (outcome.event.kind === "tool_result") {
         if (outcome.event.jevEffort) lastJevEffort = outcome.event.jevEffort;
         if (outcome.event.jevProgress) lastJevProgress = outcome.event.jevProgress;
@@ -1376,17 +1593,8 @@ export async function runAgentTask(
       if (outcome.invalid || outcome.event.kind === "tool_result" && outcome.event.ok === false) {
         stepFailed = true;
       }
-      invalidStreak = outcome.invalid ? invalidStreak + 1 : 0;
-      if (invalidStreak >= 3) {
-        deps.emit({
-          kind: "error",
-          message: "three consecutive invalid tool calls — aborting",
-        });
-        aborted = true;
-      }
     };
 
-    const calls = result.toolCalls;
     const madman = deps.madman === true;
     // Madman mode: every tool call gets a cuss word we control, so the "every
     // tool call contains a cuss word" contract holds even when the model
@@ -1439,10 +1647,20 @@ export async function runAgentTask(
             count: calls.length,
           }),
         );
-        if (aborted) break;
       }
     }
-    if (aborted) return finish(cp, deps, "stopped", lastStats);
+
+    // After the tool results: the tool_use ↔ tool_result pairing stays intact.
+    if (hint) {
+      cp.messages.push({ role: "user", content: hint });
+      stepFailed = true;
+    }
+    if (stepExecuted) {
+      idleSteps = 0;
+      idleCalls = [];
+    } else {
+      noteIdle(result.toolCalls);
+    }
 
     // Adaptive thinking: fold this step's outcome into the routine streak.
     // Only fully-routine steps extend it; anything else resets it AND restores
@@ -1503,6 +1721,20 @@ export async function runAgentTask(
       );
     }
 
+    if (calls.some((c) => c.name === "todo_write")) {
+      stepsSinceTodo = 0;
+    } else if (++stepsSinceTodo >= TODO_STALE_STEPS) {
+      const open = openTodos(cp.todos);
+      if (open.length > 0) {
+        stepsSinceTodo = 0;
+        cp.messages.push({ role: "user", content: todoStaleNudge(open, TODO_STALE_STEPS) });
+        deps.emit({
+          kind: "info",
+          message: `${TODO_STALE_STEPS} steps without a plan update while ${open.length} item(s) are open — asking the model to update the plan`,
+        });
+      }
+    }
+
     cp.stepIndex = step + 1;
     cp.updatedAt = Date.now();
     capCheckpointImages(cp.messages);
@@ -1519,10 +1751,11 @@ async function runOne(
   specs: Map<string, LlmToolSpec>,
   guard: StuckGuard,
   batch: ExecuteBatch,
-): Promise<{ message: LlmMessage; event: StepEvent; invalid: boolean }> {
+): Promise<{ message: LlmMessage; event: StepEvent; invalid: boolean; executed: boolean }> {
   if (call.invalidJson !== undefined) {
     const error = `ERROR: tool arguments were not valid JSON: ${call.invalidJson.slice(0, 200)}`;
     return {
+      executed: false,
       invalid: true,
       message: { role: "tool", toolCallId: call.id, content: error },
       event: {
@@ -1538,12 +1771,12 @@ async function runOne(
   // failed twice is REFUSED without touching the executor — the third
   // identical attempt would produce the identical failure and burn a full
   // round trip doing it. Not flagged `invalid` (the arguments are fine; the
-  // plan behind them is what must change), so it never feeds the
-  // three-invalid-abort path — a blocked model should switch approaches, not
-  // lose the run.
+  // plan behind them is what must change) — a blocked model should switch
+  // approaches, not be told its call was malformed.
   const refusal = guard.blocked(call.name, call.args);
   if (refusal !== null) {
     return {
+      executed: false,
       invalid: false,
       message: { role: "tool", toolCallId: call.id, content: refusal },
       event: {
@@ -1560,6 +1793,7 @@ async function runOne(
   if (validation.error) {
     const error = validation.error;
     return {
+      executed: false,
       invalid: true,
       message: { role: "tool", toolCallId: call.id, content: error },
       event: { kind: "tool_result", stepIndex, name: call.name, result: error, ok: false },
@@ -1571,6 +1805,7 @@ async function runOne(
       const error = res.error ?? "tool failed";
       const content = `ERROR: ${error}${guard.note(call.name, call.args, true)}`;
       return {
+        executed: true,
         invalid: error.includes("missing required") || error.includes("must be"),
         message: {
           role: "tool",
@@ -1601,6 +1836,7 @@ async function runOne(
       (res.text ?? clip(JSON.stringify(res.payload ?? null), MAX_RESULT_CHARS)) +
       guard.note(call.name, call.args, false);
     return {
+      executed: true,
       invalid: false,
       message: {
         role: "tool",
@@ -1624,6 +1860,7 @@ async function runOne(
     const error = String((err as Error)?.message ?? err);
     const content = `ERROR: ${error}${guard.note(call.name, call.args, true)}`;
     return {
+      executed: true,
       invalid: false,
       message: { role: "tool", toolCallId: call.id, content },
       event: { kind: "tool_result", stepIndex, name: call.name, result: content, ok: false },
@@ -1648,7 +1885,12 @@ function finish(
       : outcome === "stopped"
         ? `stopped at step ${cp.stepIndex + 1}`
         : "completed";
-  deps.emit({ kind: "done", summary, stats });
+  deps.emit({
+    kind: "done",
+    summary,
+    stats,
+    outcome: outcome === "stopped" ? "stopped_by_user" : outcome,
+  });
   return outcome;
 }
 

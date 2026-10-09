@@ -30,6 +30,7 @@ import {
   planTyping,
   trustedInputFailure,
   type InputHints,
+  type TypingStep,
 } from "../../shared/trusted-input";
 import type { BrowserAdapter } from "../adapters/types";
 import { ensureWindowForInput } from "../window-scope";
@@ -161,18 +162,25 @@ export async function sendTrustedKey(
 }
 
 /**
- * Send text through the IME path (`Input.insertText`) — one trusted chunk,
- * not per-key strokes. What a focused find bar or plain input receives as
- * typed text; callers that need per-key effects (shortcuts, Enter) use
- * sendTrustedKey instead.
+ * Send text as typing — planTyping's steps: the first character as a real
+ * keystroke (so it REPLACES a selection, which bare insertText does not),
+ * the rest as one trusted IME chunk, newlines as Enter. What a focused find
+ * bar, editor box or the document receives as typed text; the caller owns
+ * activation/focus (ensureTabActive).
  */
 export async function sendTrustedText(
   tabId: number,
   adapter: BrowserAdapter,
   text: string,
 ): Promise<void> {
-  await adapter.send(tabId, "Input.insertText", { text });
-  await sleep(BETWEEN_STEPS_MS);
+  for (const step of planTyping(text)) {
+    if (step.kind === "insertText") {
+      await adapter.send(tabId, "Input.insertText", { text: step.text });
+      await sleep(BETWEEN_STEPS_MS);
+    } else {
+      await sendTrustedKey(tabId, adapter, step.key);
+    }
+  }
 }
 
 export interface FocusState {
@@ -274,12 +282,15 @@ async function editorSink(
 export async function resolveNoRefFocus(
   tabId: number,
   adapter: BrowserAdapter,
+  opts: { key?: boolean } = {},
 ): Promise<"focused" | "sink" | "none"> {
   const st = await focusTarget(tabId, "").catch(() => null);
   const hints = st && !("error" in st) ? st.hints : {};
   // A real editable (a dialog field, an input) already has focus — never steal
   // it on behalf of an editor sink the user is not typing into.
   if (hints.editable && !hints.sinkSignature && !hints.boxHidden) return "focused";
+  // Escape / arrows / Enter on an open menu or dialog belong to it.
+  if (opts.key && hints.inPopup) return "focused";
   if (await editorSink(tabId, adapter, true)) return "sink";
   if (hints.editable || hints.activeIsFrame) return "focused";
   return "none";
@@ -366,7 +377,7 @@ export async function runTrustedInput(
     // Ref-less input (the canvas-editor route): make sure the keystrokes have
     // somewhere real to land before sending them — a silent no-op is exactly
     // the failure that sends a run into a retry loop.
-    noRefFocus = await resolveNoRefFocus(tabId, adapter);
+    noRefFocus = await resolveNoRefFocus(tabId, adapter, { key: req.key !== undefined });
     if (noRefFocus === "none" && req.text !== undefined) {
       return {
         ok: false,
@@ -417,7 +428,7 @@ export async function runTrustedInput(
       : planTyping(req.text ?? "", { submit: req.submit });
   // select:"all" rides the SAME trusted sequence as the text — the selection
   // and the insert cannot be separated by a focus shift between calls.
-  const steps: { kind: "key"; key: string }[] | ReturnType<typeof planTyping> = req.selectAll
+  const steps: TypingStep[] = req.selectAll
     ? [{ kind: "key" as const, key: "Control+a" }, ...base]
     : base;
 
@@ -447,7 +458,8 @@ export async function runTrustedInput(
       }
       await adapter.send(tabId, "Input.dispatchKeyEvent", keyEventParams(parsed.parsed, "down"));
       await adapter.send(tabId, "Input.dispatchKeyEvent", keyEventParams(parsed.parsed, "up"));
-      keysSent += 1;
+      if (step.text) inserted += step.text.length;
+      else keysSent += 1;
     }
     await sleep(BETWEEN_STEPS_MS);
   }

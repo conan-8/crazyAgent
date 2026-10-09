@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Live plan (todo_write) verification driver: the REAL agent loop against a
 // scripted mock LLM, watched through the REAL panel DOM. Proves: the plan
-// dropdown appears under the topbar and auto-opens on the first update, the
-// strip tracks progress mid-run (whole-list replacements land live), a
-// user collapse is never stolen back, the checkpoint carries the plan, and
-// the run log keeps the final snapshot.
+// strip appears under the topbar on the first update (without covering the
+// run), it opens a full-width plan sheet and closes again, the strip tracks
+// progress mid-run (whole-list replacements land live), the checkpoint
+// carries the plan, and the run log keeps the final snapshot.
 // Usage: node scripts/todo-smoke.mjs
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -140,16 +140,18 @@ async function pollUntil(fn, ms = 15_000) {
   return null;
 }
 
-/** The plan dropdown's DOM state, as one JSON blob. */
+/** The plan strip + sheet DOM state, as one JSON blob. */
 const domOf = (panel) =>
   panel.eval(`(() => {
     const bar = document.querySelector(".todo-bar");
     if (!bar) return null;
+    const sheet = document.querySelector('.sheet-layer[data-state="open"] .todo-sheet');
     return JSON.stringify({
-      open: bar.classList.contains("is-open"),
+      open: Boolean(sheet),
+      fullWidth: sheet ? Math.abs(sheet.getBoundingClientRect().width - window.innerWidth) < 2 : null,
       count: bar.querySelector(".todo-count")?.textContent ?? "",
       current: bar.querySelector(".todo-current")?.textContent ?? "",
-      items: [...bar.querySelectorAll(".todo-item")].map((li) => ({
+      items: [...(sheet?.querySelectorAll(".todo-item") ?? [])].map((li) => ({
         cls: [...li.classList].filter((c) => c.startsWith("is-"))[0] ?? "",
         text: li.querySelector(".todo-text")?.textContent ?? "",
       })),
@@ -230,36 +232,47 @@ async function main() {
     // T0 — the tool spec reaches the model (the plan is a first-class tool).
     await panel.eval(`__ba.runTask("Capture and summarize the docs page"); "started"`);
 
-    // T1 — the first todo_update mounts the dropdown, auto-opened, 0/3.
+    // T1 — the first todo_update mounts the strip (0/3); the sheet stays shut
+    // so the plan never covers the run uninvited.
     const first = await pollUntil(() => domOf(panel));
     check(
-      "T1 plan dropdown appears on the first todo_update",
-      Boolean(first) && first.open === true && first.count === "0/3",
+      "T1 plan strip appears on the first todo_update, sheet closed",
+      Boolean(first) && first.open === false && first.count === "0/3",
       JSON.stringify(first),
     );
     check(
-      "T1b the list renders every item with status classes",
-      Boolean(first) &&
-        first.items.length === 3 &&
-        first.items[0].cls === "is-in_progress" &&
-        first.items[1].cls === "is-pending" &&
-        first.items[0].text === "Open the docs page",
-      JSON.stringify(first?.items),
-    );
-    check(
-      "T1c the collapsed strip names the item in flight",
+      "T1c the strip names the item in flight",
       first?.current === "Open the docs page",
       first?.current,
     );
 
-    // T2 — mid-run: the user collapses the dropdown; it stays theirs.
+    // T2 — clicking the strip opens the full-width plan sheet.
     await panel.eval(`document.querySelector(".todo-strip").click(); "clicked"`);
-    await sleep(300);
+    const opened = await pollUntil(async () => {
+      const d = await domOf(panel);
+      return d?.open ? d : null;
+    });
+    check(
+      "T2 clicking the strip opens a full-width plan sheet",
+      opened?.open === true && opened.fullWidth === true,
+      JSON.stringify(opened),
+    );
+    check(
+      "T1b the sheet renders every item with status classes",
+      Boolean(opened) &&
+        opened.items.length === 3 &&
+        opened.items[0].cls === "is-in_progress" &&
+        opened.items[1].cls === "is-pending" &&
+        opened.items[0].text === "Open the docs page",
+      JSON.stringify(opened?.items),
+    );
+    await panel.eval(`document.querySelector(".todo-sheet .sheet-head button").click(); "closed"`);
+    await sleep(400);
     const collapsed = await domOf(panel);
-    check("T2 clicking the strip collapses the dropdown", collapsed?.open === false);
+    check("T2b the sheet's close button dismisses it", collapsed?.open === false);
 
-    // T3 — the next whole-list replacement lands live WITHOUT stealing the
-    // dropdown back open (the navigate turn's 2s delay keeps the run active).
+    // T3 — the next whole-list replacement lands live WITHOUT reopening the
+    // sheet (the navigate turn's 2s delay keeps the run active).
     const progressed = await pollUntil(async () => {
       const d = await domOf(panel);
       return d && d.count === "1/3" ? d : null;
@@ -292,9 +305,11 @@ async function main() {
 
     // Let the run finish: the final replacement marks everything done.
     const evs = await waitDone(panel);
+    await pollUntil(async () => (await domOf(panel))?.count === "3/3");
+    await panel.eval(`document.querySelector(".todo-strip").click(); "clicked"`);
     const final = await pollUntil(async () => {
       const d = await domOf(panel);
-      return d && d.count === "3/3" ? d : null;
+      return d && d.open && d.items.length ? d : null;
     });
     check(
       "T4 the finished run keeps its final plan (3/3, all done)",

@@ -9,7 +9,8 @@
 // Records are keyed per *turn* (one user message → one assistant run), so a
 // thread reads as an ordered list of turns, each with its own start/end time,
 // duration, tool calls with args+results, token usage and final answer.
-import type { RunStats, StepEvent, TodoItem } from "./protocol";
+import type { MalformedCall, RunOutcome, RunStats, StepEvent, TodoItem } from "./protocol";
+import type { UpstreamInfo } from "./llm";
 
 export const LOG_KEY = "baRunLogs";
 /** Ring size for the persisted log store (oldest runs evicted first). */
@@ -140,6 +141,10 @@ export interface LogTurn {
    * that silently ignores the knob (level "off" + reasoning chars > 0).
    */
   thinking?: string;
+  /** Who served this turn's reply and how clean its stream was. */
+  upstream?: UpstreamInfo;
+  /** Calls the harness dropped as malformed (never executed, never in history). */
+  malformed?: MalformedCall[];
 }
 
 /** One logged user message: the task plus metadata, and the turns it spawned. */
@@ -170,6 +175,8 @@ export interface LogTurnRecord {
   updatedAt: number;
   /** `running` until a done/error event closes it, then `done`/`stopped`. */
   status: "running" | "done" | "error";
+  /** How the run ended; absent on records written before it was tracked. */
+  outcome?: RunOutcome;
   turns: LogTurn[];
   /** Wall-clock totals for the whole record. */
   durationMs?: number;
@@ -309,6 +316,8 @@ export function foldLogEvent(
       if (e.ttftMs !== undefined) turn.ttftMs = e.ttftMs;
       if (e.decodeMs !== undefined) turn.decodeMs = e.decodeMs;
       if (e.thinking !== undefined) turn.thinking = e.thinking;
+      if (e.upstream !== undefined) turn.upstream = e.upstream;
+      if (e.malformed?.length) turn.malformed = e.malformed;
       break;
     }
     case "llm_request_sent":
@@ -371,6 +380,7 @@ export function foldLogEvent(
       turn.errors.push({ at, message: e.message });
       closeTurn(turn, at);
       rec.status = "error";
+      rec.outcome = "error";
       rec.durationMs = Math.max(0, at - rec.startedAt);
       break;
     }
@@ -386,6 +396,7 @@ export function foldLogEvent(
       }
       closeTurn(turn, at);
       rec.status = "done";
+      if (e.outcome) rec.outcome = e.outcome;
       rec.durationMs = Math.max(0, at - rec.startedAt);
       break;
     }
@@ -498,6 +509,7 @@ export interface LogSummary {
   startedAt: number;
   updatedAt: number;
   status: LogTurnRecord["status"];
+  outcome?: RunOutcome;
   turns: number;
   toolCalls: number;
   durationMs?: number;
@@ -512,6 +524,7 @@ export function summarizeRecord(rec: LogTurnRecord): LogSummary {
     startedAt: rec.startedAt,
     updatedAt: rec.updatedAt,
     status: rec.status,
+    outcome: rec.outcome,
     turns: rec.turns.length,
     toolCalls: rec.toolCalls,
     durationMs: rec.durationMs,
@@ -558,7 +571,7 @@ export function toMarkdown(records: LogTurnRecord[]): string {
     if (rec.model) out.push(`- **model:** ${rec.model}`);
     if (rec.build) out.push(`- **build:** ${rec.build}`);
     out.push(
-      `- **status:** ${rec.status}${rec.resumed ? " (resumed after a service-worker restart)" : ""}${rec.status === "running" ? " — never closed: the worker died mid-run or the export caught it live" : ""}`,
+      `- **status:** ${rec.status}${rec.outcome ? ` (${rec.outcome.replace(/_/g, " ")})` : ""}${rec.resumed ? " (resumed after a service-worker restart)" : ""}${rec.status === "running" ? " — never closed: the worker died mid-run or the export caught it live" : ""}`,
     );
     out.push(`- **started:** ${iso(rec.startedAt)}`);
     out.push(`- **updated:** ${iso(rec.updatedAt)}`);
@@ -605,6 +618,16 @@ export function toMarkdown(records: LogTurnRecord[]): string {
         out.push(
           `_timing: ttft ${fmtDuration(turn.ttftMs)} · decode ${fmtDuration(turn.decodeMs)}${turn.thinking ? ` · thinking ${turn.thinking}` : ""}_`,
         );
+      }
+      if (turn.upstream) {
+        const u = turn.upstream;
+        const anomalies = u.nonDataLines + u.badJsonLines + u.joinedLines;
+        out.push(
+          `_upstream: ${u.provider ?? "?"} · ${u.model ?? "?"}${u.streamed ? "" : " · non-streamed"}${anomalies ? ` · stream anomalies: ${u.nonDataLines} non-data, ${u.badJsonLines} bad-json, ${u.joinedLines} joined` : ""}_`,
+        );
+      }
+      for (const m of turn.malformed ?? []) {
+        out.push(`- ⊘ **${m.name}** dropped as malformed (${m.reason}) — raw: \`${m.raw.replace(/`/g, "\\`")}\``);
       }
       if (turn.usage) {
         const u = turn.usage;

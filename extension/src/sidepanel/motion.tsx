@@ -97,6 +97,53 @@ export function useStickToBottom<
 }
 
 /**
+ * Glide a small scroll box down to its bottom as content streams in, instead
+ * of jumping a line at a time. Eases per frame toward the bottom; any upward
+ * scroll (only the user scrolls up) lets go, reaching the bottom re-pins.
+ */
+export function useSmoothFollow<E extends HTMLElement>(active: boolean, content: unknown) {
+  const ref = useRef<E | null>(null);
+  const pinned = useRef(true);
+  const lastTop = useRef(0);
+  const raf = useRef(0);
+
+  const onScroll = () => {
+    const el = ref.current;
+    if (!el) return;
+    if (el.scrollTop < lastTop.current - 1) pinned.current = false;
+    else if (el.scrollHeight - el.scrollTop - el.clientHeight < 6) pinned.current = true;
+    lastTop.current = el.scrollTop;
+  };
+
+  useEffect(() => {
+    if (!active || !pinned.current || raf.current) return;
+    let prev = performance.now();
+    const tick = (now: number) => {
+      const el = ref.current;
+      const dt = now - prev;
+      prev = now;
+      if (!el || !pinned.current) {
+        raf.current = 0;
+        return;
+      }
+      const gap = el.scrollHeight - el.clientHeight - el.scrollTop;
+      if (gap <= 0.5) {
+        raf.current = 0;
+        return;
+      }
+      el.scrollTop += Math.max(1, gap * (1 - Math.exp(-dt / 110)));
+      lastTop.current = el.scrollTop;
+      raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+  }, [active, content]);
+
+  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+
+  return { ref, onScroll };
+}
+
+/**
  * Grow a textarea with its content, up to `max` pixels. Re-measures when the
  * panel is resized, since wrapping (placeholder included) depends on width.
  */

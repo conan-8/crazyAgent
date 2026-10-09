@@ -9,7 +9,7 @@ export type ControlMode = "standard" | "unlimited";
 /** Run-log export encodings: JSON Lines for tooling, Markdown for reading. */
 export type LogExportFormat = "jsonl" | "md";
 
-import type { LlmMessage, LlmToolSpec } from "./llm";
+import type { LlmMessage, LlmToolSpec, UpstreamInfo } from "./llm";
 import type { Conversation, ConversationSummary } from "./chat";
 import type { LogSummary, LogTurnRecord } from "./logging";
 import type { Lesson, LessonCategory } from "./lessons";
@@ -206,6 +206,10 @@ export type StepEvent =
        * — and how a gateway that silently ignores the knob is exposed.
        */
       thinking?: string;
+      /** Who served the reply and how clean its stream was. */
+      upstream?: UpstreamInfo;
+      /** Calls dropped before execution (and before history) as malformed. */
+      malformed?: MalformedCall[];
     }
   /**
    * Checkpoint health pulse, emitted after each per-step checkpoint save:
@@ -231,8 +235,22 @@ export type StepEvent =
    */
   | { kind: "need_human"; id: string; reason: string; url: string }
   /** `stats` are the final numbers, so the bar survives the run ending. */
-  | { kind: "done"; summary: string; stats?: RunStats }
+  | { kind: "done"; summary: string; stats?: RunStats; outcome?: RunOutcome }
   | { kind: "error"; message: string };
+
+/**
+ * How a run ended. A user stop used to close as plain `done`, which made a
+ * run the user aborted indistinguishable from one that finished.
+ */
+export type RunOutcome = "completed" | "stopped_by_user" | "capped" | "interrupted" | "error";
+
+/** A tool call the harness refused to execute or keep, with the raw wire text. */
+export interface MalformedCall {
+  name: string;
+  reason: string;
+  /** Raw argument text as it arrived, clipped. */
+  raw: string;
+}
 
 /** Cumulative numbers for one agent run. */
 export interface RunStats {

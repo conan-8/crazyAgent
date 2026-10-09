@@ -192,6 +192,22 @@ describe("canvas document editor procedure", () => {
     expect(skill.body).toContain("Anchor on text");
   });
 
+  it("teaches format-first building and style-first lists, not type-then-fix", () => {
+    expect(skill.sections?.[0]?.id).toBe("build");
+    expect(skill.body).toContain("BUILD BIT BY BIT");
+    expect(skill.body).toContain("REPAIRING one mistake, never the plan");
+    expect(skill.body).toContain("LISTS ARE BUILT STYLE-FIRST");
+    expect(skill.body).toContain("NEVER convert items that already exist");
+    expect(skill.body).toContain("never the whole document in one call");
+    // Typing replaces a selection (lead keystroke); Backspace-first eats a
+    // space on whole words (2026-10-09 probe), and the unreliable ops are no
+    // longer sold as deterministic.
+    expect(skill.body).toContain("then type — the typing replaces the selection");
+    expect(skill.body).not.toContain("key Backspace, then type");
+    expect(skill.body).not.toContain("select and retype");
+    expect(skill.body).not.toContain("DETERMINISTIC ONE-CALL OPS");
+  });
+
   it("carries the atomic rebuild mode for tangled bodies", () => {
     expect(skill.body).toContain("do not patch — REBUILD");
     expect(skill.body).toContain("select:'all'");

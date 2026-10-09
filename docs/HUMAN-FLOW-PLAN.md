@@ -262,7 +262,7 @@ Build-order items 1–7, what actually landed and where:
    `createStuckGuard` gained `blocked()`: an exact call that failed twice is
    REFUSED on the third attempt (never executed), the second failure's note
    announces the ban, and a refusal is `ok:false, invalid:false` (it resets
-   adaptive thinking but never feeds the three-invalid abort). Wait tools are
+   adaptive thinking but cannot abort the run). Wait tools are
    banned identically — a longer `timeout_ms` is a different call and stays
    allowed. Tests: `tests/loop.test.ts` ("bans an exact call…", "refuses the
    third identical failing call WITHOUT executing it").

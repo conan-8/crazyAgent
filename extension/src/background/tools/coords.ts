@@ -307,16 +307,18 @@ async function resolveTarget(
   if (outOfBounds) {
     return { ok: false, error: `${failureTag("input")}: ${outOfBounds}${shotHint(shot)}` };
   }
-  // Click magnet: a point that missed every control but sits within a small
-  // radius of one is re-aimed at its centre (and a point ON a small control
-  // clicks the centre, not the edge pixel). The correction is reported in the
-  // result so the model sees what actually got clicked. CLICK-ish calls only —
+  // Click magnet: an unambiguous near miss is re-aimed at the control's
+  // centre, and a point on a small control's very edge clicks its centre;
+  // every interior point is the model's own aim and is kept. The correction
+  // is reported so the model sees what actually got clicked. Clicks only —
   // see ResolveOpts.magnet.
   let point = probed.point;
   let hit = probed.hit;
   if (opts.magnet) {
     const decision = snapOrPromote(point, probed.hit, probed.snap);
-    if (decision.kind !== "keep") {
+    if (decision.kind === "keep") {
+      if (decision.note) corrections.push(decision.note);
+    } else {
       point = decision.point;
       corrections.push(decision.label);
       // Re-probe the corrected point so the hit report — and the element the
@@ -655,7 +657,7 @@ async function rescueCandidate(
 registerTool({
   name: "click_at",
   description:
-    "Click at screen coordinates instead of an element ref. Use ONLY when the target is drawn into a <canvas> or otherwise has no ref in the snapshot (canvas editors, maps, drawing boards, sliders) — a ref-based `click` is always safer. Accepts: x/y (CSS px from the visible viewport's top-left; space:'page' for document coordinates; space:'screenshot' for pixels of the latest screenshot image — point at exactly what you see and the tool converts), OR ref + dx/dy (element centre, scrolled into view first and translated through iframes), OR frame + frame-local x/y. The point is probed before clicking (best-effort: the click still lands when the probe cannot run, the result just says so) and the result reports what the point hit before AND after the click. Built-in aim correction: a point that lands ON a small control clicks its centre, a point within ~24px of one snaps to it, image pixels passed without space:'screenshot' are re-interpreted, and scroll since the capture is compensated — every correction is named in the result. The same safety rules apply as for `click`.",
+    "Click at screen coordinates instead of an element ref. Use ONLY when the target is drawn into a <canvas> or otherwise has no ref in the snapshot (canvas editors, maps, drawing boards, sliders) — a ref-based `click` is always safer. Accepts: x/y (CSS px from the visible viewport's top-left; space:'page' for document coordinates; space:'screenshot' for pixels of the latest screenshot image — point at exactly what you see and the tool converts), OR ref + dx/dy (element centre, scrolled into view first and translated through iframes), OR frame + frame-local x/y. The point is probed before clicking (best-effort: the click still lands when the probe cannot run, the result just says so) and the result reports what the point hit before AND after the click. Built-in aim correction: a point inside a control is clicked exactly where you aimed (only its outermost ~4px edge re-aims to the centre), a point that missed every control snaps to the one nearby control within ~24px (6px for menu rows; never when two controls are about equally close — the result names both), image pixels passed without space:'screenshot' are re-interpreted, and scroll since the capture is compensated — every correction is named in the result. The same safety rules apply as for `click`.",
   parameters: {
     type: "object",
     properties: {
@@ -714,7 +716,7 @@ registerTool({
 registerTool({
   name: "type_at",
   description:
-    "Click a point to place the caret (or make a selection), then type — ONE call, the primary move on canvas editors (Google Docs/Slides, Figma, any drawn surface): LOOK (screenshot — zoom:2..4 when the target is a text line), then type_at where the caret should go. Coordinate modes like click_at: x/y with space:'screenshot' (image px of the latest capture, full or crop), 'viewport' CSS px, or 'page', or ref+dx/dy, or frame-local. click_count:2 double-clicks (selects the word), 3 triple-clicks (selects the paragraph). select_to:{x,y} (same space) clicks the start then shift-clicks the end — one visual selection in the same call. select:'all' sends Ctrl+A first (atomic replace). keys_after:['Control+b',…] applies shortcut(s) after the text lands. Click, selection and typing run in ONE trusted sequence — focus cannot shift between them (the two-call version is how a run duplicated its document).",
+    "Click a point to place the caret (or make a selection), then type — ONE call, the primary move on canvas editors (Google Docs/Slides, Figma, any drawn surface): LOOK (screenshot — zoom:2..4 when the target is a text line), then type_at where the caret should go. Coordinate modes like click_at: x/y with space:'screenshot' (image px of the latest capture, full or crop), 'viewport' CSS px, or 'page', or ref+dx/dy, or frame-local. click_count:2 double-clicks (selects the word), 3 triple-clicks (selects the paragraph). select_to:{x,y} (same space) clicks the start then shift-clicks the end — one visual selection in the same call. select:'all' sends Ctrl+A first. Typed text REPLACES a selection (the first character goes as a real keystroke), so select-then-type is a replace — verify with docs_read. keys_after:['Control+b',…] applies shortcut(s) after the text lands. Click, selection and typing run in ONE trusted sequence — focus cannot shift between them (the two-call version is how a run duplicated its document).",
   parameters: {
     type: "object",
     properties: {
@@ -801,7 +803,7 @@ registerTool({
       await sleep(80);
       let inserted = 0;
       let keysSent = 0;
-      const sendCombo = async (combo: string) => {
+      const sendCombo = async (combo: string, typed?: string) => {
         const parsed = parseKeyCombo(combo);
         if (!parsed.ok) throw new Error(parsed.error);
         await adapter.send(
@@ -814,7 +816,8 @@ registerTool({
           "Input.dispatchKeyEvent",
           keyEventParams(parsed.parsed, "up"),
         );
-        keysSent += 1;
+        if (typed) inserted += typed.length;
+        else keysSent += 1;
         await sleep(BETWEEN_STEPS_MS);
       };
       if (args.select === "all") await sendCombo("Control+a");
@@ -823,7 +826,7 @@ registerTool({
           await adapter.send(ctx.tabId, "Input.insertText", { text: step.text });
           inserted += step.text.length;
         } else {
-          await sendCombo(step.key);
+          await sendCombo(step.key, step.text);
         }
       }
       const keysAfter = Array.isArray(args.keys_after)
@@ -924,10 +927,13 @@ registerTool({
           if (!mods.ok) {
             return { ok: false, error: `steps[${i}]: ${mods.error}`, completed: done, failedAt: i };
           }
-          // The click magnet applies to sequence clicks and hovers exactly as
-          // it does to the standalone tools (and the policy gate mirrors it —
-          // see probeElementAt).
-          const resolved = await resolveTarget(ctx, payload, { scrollRef: true, magnet: true });
+          // The click magnet applies to sequence clicks exactly as it does to
+          // click_at (the policy gate mirrors it — see probeElementAt); a
+          // hover goes where it was aimed, like hover_at.
+          const resolved = await resolveTarget(ctx, payload, {
+            scrollRef: true,
+            magnet: step.kind === "click",
+          });
           if (!resolved.ok) {
             return { ok: false, error: `steps[${i}]: ${resolved.error}`, completed: done, failedAt: i };
           }
@@ -1019,7 +1025,7 @@ registerTool({
     properties: { ...POINT_PROPS, ...REF_PROP, ...FRAME_PROP, dx: { type: "number" }, dy: { type: "number" } },
   },
   async run(args, ctx) {
-    const resolved = await resolveTarget(ctx, args, { scrollRef: true, magnet: true });
+    const resolved = await resolveTarget(ctx, args, { scrollRef: true });
     if (!resolved.ok) return { ok: false, error: resolved.error };
     const { from, hit, probed, correction } = resolved;
     await sendStrokes(ctx, planHover(from));

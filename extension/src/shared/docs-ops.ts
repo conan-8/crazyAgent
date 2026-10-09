@@ -4,13 +4,16 @@
 // missed the font box"); every one of those is a procedure a human does the
 // same way every time. This module PLANS those procedures (pure, unit-tested);
 // background/tools/docs-op.ts executes them with label-based content actions
-// and trusted keystrokes — never coordinates.
+// and trusted keystrokes. Coordinates appear in exactly one place, where a
+// control has no label to click at all: menuThenGridPick aims at a grid cell
+// and reads the grid's own size label back before it commits the click.
 //
 // Plan shapes mirror the human route exactly:
 //   keys         — a keyboard shortcut (Ctrl+Alt+1 for Heading 1)
 //   menu         — walk menu rows by visible label (Insert ▸ Page numbers ▸ …)
 //   dialog       — open a dialog by menu, fill its fields by label, confirm
-//   menuThenKeys — open a picker by menu, drive it with arrows (table grid)
+//   menuThenGridPick — open the table size grid, aim at a cell, read the grid's
+//                      own size label back, and only then click
 //   menuThenType — open an input by menu, then type into it (equation box)
 //
 // The Insert menu this file targets was read off the live DOM during the
@@ -66,9 +69,10 @@ export type DocsOpPlan =
       verify?: VerifyPlan;
     }
   | {
-      kind: "menuThenKeys";
+      kind: "menuThenGridPick";
       labels: MenuLabel[];
-      combos: string[];
+      rows: number;
+      cols: number;
       describe: string;
       verify?: VerifyPlan;
     }
@@ -83,6 +87,48 @@ export type DocsOpPlan =
 export type DocsOpPlanResult =
   | { ok: true; op: DocsOp; plan: DocsOpPlan }
   | { ok: false; error: string };
+
+// ---------------- the table grid picker ----------------
+
+/** Google wraps the picker's size label in bidi control characters. */
+const BIDI_CONTROLS_RE = /[\u202a-\u202e\u2066-\u2069]/g;
+
+/**
+ * The grid picker's own size label — "‪4 x 2‬" is columns × rows. Reading it
+ * back is what makes an aimed click safe: the picker states the size it is
+ * about to insert, so the tool can refuse rather than insert the wrong table.
+ */
+export function parseGridStatus(text: string): { cols: number; rows: number } | null {
+  const flat = text.replace(BIDI_CONTROLS_RE, " ").replace(/\s+/g, " ").trim();
+  const m = /^(\d{1,2})\s*[x×]\s*(\d{1,2})$/i.exec(flat);
+  if (!m) return null;
+  const cols = Number(m[1]);
+  const rows = Number(m[2]);
+  return cols > 0 && rows > 0 ? { cols, rows } : null;
+}
+
+/**
+ * One grid cell's side in px, measured from the block the picker has already
+ * highlighted — it spans exactly `cols` cells. Measured rather than assumed:
+ * 18px on the 2026 picker is a layout constant this codebase does not own.
+ */
+export function gridCellPx(highlightWidth: number, cols: number): number | null {
+  if (!(highlightWidth > 0) || !(cols > 0)) return null;
+  return highlightWidth / cols;
+}
+
+/** The viewport point at the centre of cell (`cols`, `rows`); the grid starts at `origin`. */
+export function gridCellPoint(
+  origin: { x: number; y: number },
+  cell: number,
+  cols: number,
+  rows: number,
+): { x: number; y: number } {
+  return {
+    x: Math.round(origin.x + cell * (cols - 0.5)),
+    y: Math.round(origin.y + cell * (rows - 0.5)),
+  };
+}
 
 const inputError = (msg: string): DocsOpPlanResult => ({
   ok: false,
@@ -316,21 +362,20 @@ export function planDocsOp(opRaw: unknown, args: Record<string, unknown>): DocsO
           `insert_table needs integer rows and cols in 1..20 (got rows=${String(rows)}, cols=${String(cols)})`,
         );
       }
-      // The Insert ▸ Table grid picker is keyboard-drivable: arrows move the
-      // highlighted size, Enter inserts. No pixel hunting for grid cells.
-      const combos: string[] = [
-        ...Array.from({ length: cols - 1 }, () => "ArrowRight"),
-        ...Array.from({ length: rows - 1 }, () => "ArrowDown"),
-        "Enter",
-      ];
+      // The grid picker takes NO keyboard input: a probe sent arrows + Enter at
+      // it and every keystroke landed in the document body instead (a stray
+      // empty paragraph, no table). It is a mousecatcher with no labels, so the
+      // only way in is a position — and the picker states the size it is about
+      // to insert, which the executor reads back before it clicks.
       return {
         ok: true,
         op,
         plan: {
-          kind: "menuThenKeys",
+          kind: "menuThenGridPick",
           labels: ["Insert", "Table"],
-          combos,
-          describe: `insert a ${rows}×${cols} table via Insert ▸ Table + ${cols - 1} right / ${rows - 1} down + Enter`,
+          rows,
+          cols,
+          describe: `insert a ${rows}×${cols} table via Insert ▸ Table, then the size grid`,
           verify: {
             check: "exportHtmlContains",
             needle: "<table",
@@ -414,4 +459,35 @@ export function planDocsOp(opRaw: unknown, args: Record<string, unknown>): DocsO
 export function shouldRetryWalk(failedStepIndex: number, error: string): boolean {
   if (failedStepIndex < 1) return false;
   return !/DISABLED/i.test(error);
+}
+
+/** A find-bar match counter ("2 of 5", "0 of 0", "1/3"). */
+export interface FindCount {
+  current: number;
+  total: number;
+}
+
+const FIND_COUNTER_RE = /^\s*(\d+)\s*(?:of|\/|von|de|di|sur|из|件中)\s*(\d+)\s*件?\s*$/i;
+
+/** The first text in `texts` shaped like a find counter, or null. */
+export function parseFindCounter(texts: string[]): FindCount | null {
+  for (const raw of texts) {
+    const m = FIND_COUNTER_RE.exec(raw);
+    if (!m) continue;
+    const current = Number(m[1]);
+    const total = Number(m[2]);
+    if (current <= total) return { current, total };
+  }
+  return null;
+}
+
+/** Case-insensitive, whitespace-tolerant occurrences of `phrase` in `text` — the find bar's own matching. */
+export function countPhrase(text: string, phrase: string): number {
+  const norm = (s: string) => s.replace(/\s+/g, " ").toLowerCase();
+  const hay = norm(text);
+  const needle = norm(phrase.trim());
+  if (!needle) return 0;
+  let n = 0;
+  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + needle.length)) n++;
+  return n;
 }

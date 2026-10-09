@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Phase 4 verification driver: the REAL agent loop against a scripted mock
 // LLM over real HTTP/SSE, once per provider (OpenAI-compatible + Anthropic).
-// Proves: streamed text, tool-call sequence, invalid-args feedback without
-// execution, per-step checkpointing, final summary, checkpoint cleanup.
+// Proves: streamed text, tool-call sequence, a malformed call dropped before
+// history with a hint fed back, per-step checkpointing, final summary,
+// checkpoint cleanup.
 // Usage: node scripts/phase4-smoke.mjs
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -184,6 +185,7 @@ async function main() {
       );
 
       // Run the REAL agent loop.
+      const bodiesBefore = mock.requests().length;
       await panel.eval(
         `__ba.runTask("Open the docs page and summarize it."); "started"`,
       );
@@ -210,19 +212,25 @@ async function main() {
       const calls = events.filter((e) => e.kind === "tool_call");
       const names = calls.map((e) => e.name);
       check(
-        `${P}2 tool-call sequence matches the script`,
+        `${P}2 tool-call sequence matches the script (malformed click dropped)`,
         JSON.stringify(names) ===
-          JSON.stringify(["navigate", "wait_for_settle", "click", "screenshot", "read_page"]),
+          JSON.stringify(["navigate", "wait_for_settle", "screenshot", "read_page"]),
         names.join(","),
       );
 
       const results3 = events.filter((e) => e.kind === "tool_result");
-      const clickResult = results3.find((e) => e.name === "click");
+      const dropInfo = events.find(
+        (e) => e.kind === "info" && String(e.message).startsWith("dropped 1 malformed call"),
+      );
+      const hinted = mock.requests().slice(bodiesBefore).some((b) =>
+        JSON.stringify(b.messages ?? []).includes("NOT executed and NOT kept in history"),
+      );
       check(
-        `${P}3 invalid args fed back without execution`,
-        clickResult?.ok === false &&
-          String(clickResult.result).includes("missing required parameter: ref"),
-        clickResult?.result ?? "(none)",
+        `${P}3 invalid args dropped before history, hint fed back`,
+        String(dropInfo?.message).includes("missing required parameter: ref") &&
+          !results3.some((e) => e.name === "click") &&
+          hinted,
+        `${dropInfo?.message ?? "(no drop info)"} hinted=${hinted}`,
       );
       check(
         `${P}4 screenshot tool succeeded (image path)`,

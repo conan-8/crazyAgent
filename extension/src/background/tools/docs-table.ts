@@ -14,7 +14,6 @@ import {
   type DocBlock,
   type TableBlock,
 } from "../../shared/docs-structure";
-import { planTyping } from "../../shared/trusted-input";
 import {
   caretPoint,
   fetchWorkspaceExport,
@@ -73,13 +72,21 @@ async function gotoCell(
   const r = planned.route;
   await ensureTabActive(ctx.tabId, ctx.adapter);
   let route: string;
-  if (r.via === "cell") {
-    await findBarCaret(ctx, r.phrase, r.occurrence, "before");
-    route = `found "${r.phrase}" (r${r.anchor.row}c${r.anchor.col})`;
-  } else if (r.via === "before-table") {
-    await findBarCaret(ctx, r.phrase, r.occurrence, "after");
-    await press(ctx, "ArrowRight", r.rights);
-    route = `found "${r.phrase}" before the table, ${r.rights}× →`;
+  if (r.via === "cell" || r.via === "before-table") {
+    // The phrase came from a fresh export, so a second export read to count it is waste.
+    // A cell anchor stays SELECTED and Home collapses it inside the cell: an
+    // arrow key at a cell boundary can step out of the table (a probe saw a
+    // whole fill land in the paragraph above).
+    const found = await findBarCaret(ctx, r.phrase, r.occurrence, r.via === "cell" ? "select" : "after", {
+      exportCount: false,
+    });
+    if (found.missing) return { ok: false, error: `${failureTag("tool")}: the caret route failed — ${found.missing}` };
+    if (r.via === "cell") await press(ctx, "Home");
+    if (r.via === "before-table") await press(ctx, "ArrowRight", r.rights);
+    route =
+      r.via === "cell"
+        ? `found "${r.phrase}" (r${r.anchor.row}c${r.anchor.col})`
+        : `found "${r.phrase}" before the table, ${r.rights}× →`;
   } else {
     await press(ctx, "Control+Home");
     await press(ctx, "ArrowRight", r.rights);
@@ -98,10 +105,7 @@ function tableOf(blocks: DocBlock[], index: number): TableBlock | null {
 }
 
 async function typeText(ctx: ToolContext, text: string): Promise<void> {
-  for (const s of planTyping(text)) {
-    if (s.kind === "insertText") await sendTrustedText(ctx.tabId, ctx.adapter, s.text);
-    else await sendTrustedKey(ctx.tabId, ctx.adapter, s.key);
-  }
+  await sendTrustedText(ctx.tabId, ctx.adapter, text);
 }
 
 /** Re-read the export (it trails the editor by a beat) until `check` passes or tries run out. */
@@ -298,6 +302,8 @@ registerTool({
             const w = wrong[0]!;
             return `${wrong.length} cell(s) differ — first r${w.addr.row}c${w.addr.col}: expected "${w.text.slice(0, 30)}", reads "${(cellAt(now, w.addr)?.text ?? "∅").slice(0, 30)}"`;
           });
+          // No export to check against: the screen is the only evidence of where the text went.
+          const image = verdict.startsWith("unverified") ? await captureBlindShot(ctx.adapter, ctx.tabId) : undefined;
           return {
             op,
             table,
@@ -306,6 +312,7 @@ registerTool({
             typed,
             route: moved.route,
             verdict,
+            ...(image ? { image } : {}),
             ...(multiLine.length
               ? { warning: `${multiLine.length} target cell(s) held multi-line text; only their last line was replaced` }
               : {}),
@@ -379,7 +386,8 @@ registerTool({
       }
       case "fill":
         return {
-          text: `filled ${p.cells} cell(s) of table ${p.table} from ${cell(p.from)} (${p.typed} typed) — ${p.verdict}${p.warning ? ` · ${p.warning}` : ""}`,
+          text: `filled ${p.cells} cell(s) of table ${p.table} from ${cell(p.from)} (${p.typed} typed) — ${p.verdict}${p.warning ? ` · ${p.warning}` : ""}${typeof p.image === "string" ? " — the attached screenshot shows the table now; check every value sits in its cell" : ""}`,
+          ...(typeof p.image === "string" ? { image: p.image } : {}),
         };
       case "select":
         return { text: String(p.note ?? "selected"), ...(typeof p.image === "string" ? { image: p.image } : {}) };

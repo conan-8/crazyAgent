@@ -95,6 +95,31 @@ export interface LlmRequest {
    * without support ignore it rather than failing the turn.
    */
   thinking?: ThinkingLevel;
+  /** `false` asks for one JSON reply instead of SSE (fallback when the stream looks corrupt). */
+  stream?: boolean;
+}
+
+/**
+ * What the wire looked like for one reply: who served it, and how many lines
+ * the reader could not use. A reader that drops `,"y":146` silently still
+ * yields valid JSON — these counters are the only trace such a loss leaves.
+ */
+export interface UpstreamInfo {
+  /** OpenRouter's `provider` field on chunks (the actual upstream host). */
+  provider?: string;
+  model?: string;
+  /** First 24 chars of the response id. */
+  id?: string;
+  fingerprint?: string;
+  streamed: boolean;
+  /** Non-empty lines that were neither `data:`, an SSE field, nor a comment. */
+  nonDataLines: number;
+  /** `data:` payloads that never parsed, even joined with the next one. */
+  badJsonLines: number;
+  /** `data:` payloads that only parsed joined with the following line. */
+  joinedLines: number;
+  /** First few offending lines, clipped. */
+  samples?: string[];
 }
 
 export interface LlmResult {
@@ -116,6 +141,9 @@ export interface LlmResult {
   reasoning?: string;
   /** Anthropic thinking-block signature, needed to replay it next turn. */
   reasoningSignature?: string;
+  upstream?: UpstreamInfo;
+  /** Raw argument text per tool-call id, exactly as it arrived on the wire. */
+  rawArgs?: Record<string, string>;
 }
 
 export type LlmTextSink = (text: string) => void;

@@ -5,6 +5,10 @@ import {
   createStuckGuard,
   estimateMessages,
   isRoutineStep,
+  malformedHint,
+  precheckCall,
+  shouldStallNudge,
+  TODO_STALE_STEPS,
   JEV_PROGRESS_CONFIDENCE,
   OFF_REASONING_CAP_CHARS,
   reasoningCapChars,
@@ -542,7 +546,7 @@ describe("runAgentTask", () => {
     expect(batches).toEqual([{ index: 0, count: 1 }]);
   });
 
-  it("feeds validation errors back without executing, then recovers", async () => {
+  it("drops an invalid call from history, hints in-band, then recovers", async () => {
     const cp = makeCheckpoint();
     const { events, executed, deps } = harness([
       toolCall("click", {}, "bad"), // missing required ref
@@ -553,34 +557,141 @@ describe("runAgentTask", () => {
 
     expect(outcome).toBe("completed");
     expect(executed).toEqual([{ name: "click", args: { ref: "2" } }]);
-    const badResult = events.find(
-      (e) => e.kind === "tool_result" && e.ok === false,
-    ) as Extract<StepEvent, { kind: "tool_result" }>;
-    expect(badResult.result).toContain("missing required parameter: ref");
-    const errToolMsg = cp.messages.find(
-      (m) => m.role === "tool" && m.content.startsWith("ERROR"),
-    );
-    expect(errToolMsg?.content).toContain("missing required");
+    // The malformed call never became part of the model's own history…
+    const committedIds = cp.messages.flatMap((m) => m.toolCalls?.map((c) => c.id) ?? []);
+    expect(committedIds).toEqual(["good"]);
+    expect(cp.messages.some((m) => m.role === "tool" && m.toolCallId === "bad")).toBe(false);
+    // …the model is told what arrived and what was missing instead.
+    const hint = cp.messages.find((m) => m.role === "user" && m.content.startsWith("[harness]"));
+    expect(hint?.content).toContain("click arrived as {}");
+    expect(hint?.content).toContain("missing required parameter: ref");
+    expect(hint?.content).toContain("NOT kept in history");
+    // …and the log records it raw, per turn.
+    const timing = events.find((e) => e.kind === "turn_timing") as Extract<
+      StepEvent,
+      { kind: "turn_timing" }
+    >;
+    expect(timing.malformed).toEqual([
+      { name: "click", reason: "missing required parameter: ref", raw: "{}" },
+    ]);
   });
 
-  it("aborts after three consecutive invalid calls", async () => {
+  it("prefers the provider's raw argument string in the malformed record", async () => {
     const cp = makeCheckpoint();
     const { events, deps } = harness([
-      {
-        text: "",
-        toolCalls: [
-          { id: "a", name: "click", args: {} },
-          { id: "b", name: "click", args: {} },
-          { id: "c", name: "click", args: {} },
-        ],
-        stopReason: "tool_use",
-      },
+      { ...toolCall("click", {}, "bad"), rawArgs: { bad: '{"space":"screenshot"' } },
+      { text: "done", toolCalls: [], stopReason: "end" },
+    ]);
+    await runAgentTask(cp, deps);
+    const timing = events.find((e) => e.kind === "turn_timing") as Extract<
+      StepEvent,
+      { kind: "turn_timing" }
+    >;
+    expect(timing.malformed?.[0]?.raw).toBe('{"space":"screenshot"');
+  });
+
+  it("drops coordinate calls with no target and never feeds the identical-call ban", async () => {
+    const cp = makeCheckpoint({
+      toolSpecs: [
+        {
+          name: "click_at",
+          description: "",
+          parameters: {
+            type: "object",
+            properties: { x: { type: "number" }, y: { type: "number" }, space: { type: "string" } },
+          },
+        },
+      ],
+    });
+    const noPoint = { space: "screenshot", expect: "menu opens" };
+    const { executed, deps } = harness(
+      [
+        toolCall("click_at", noPoint, "a"),
+        toolCall("click_at", noPoint, "b"),
+        toolCall("click_at", noPoint, "c"),
+        toolCall("click_at", { x: 5, y: 6, space: "screenshot" }, "d"),
+        { text: "done", toolCalls: [], stopReason: "end" },
+      ],
+      { stepCap: 10 },
+    );
+    await runAgentTask(cp, deps);
+    expect(executed).toEqual([{ name: "click_at", args: { x: 5, y: 6, space: "screenshot" } }]);
+    const hints = cp.messages.filter((m) => m.role === "user" && m.content.includes("arrived as"));
+    expect(hints).toHaveLength(3);
+    expect(hints[0]!.content).toContain("click_at arrived as {space, expect} — x and y (or ref) missing");
+    expect(cp.messages.some((m) => m.content.includes("BLOCKED"))).toBe(false);
+  });
+
+  it("does not treat an all-malformed turn as a final answer", async () => {
+    const cp = makeCheckpoint();
+    const { executed, events, deps } = harness([
+      { text: "I'll click it.", toolCalls: [{ id: "x", name: "click", args: {} }], stopReason: "tool_use" },
+      toolCall("click", { ref: "1" }, "y"),
+      { text: "done", toolCalls: [], stopReason: "end" },
+    ]);
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    expect(executed).toHaveLength(1);
+    expect(events.filter((e) => e.kind === "done")).toHaveLength(1);
+    // The text survives as a plain assistant turn, without the dropped call.
+    const first = cp.messages.find((m) => m.role === "assistant");
+    expect(first).toMatchObject({ content: "I'll click it." });
+    expect(first?.toolCalls).toBeUndefined();
+  });
+
+  it("goes non-streamed with thinking off after two malformed turns", async () => {
+    const cp = makeCheckpoint();
+    const llm = new FakeLlm([
+      toolCall("click", {}, "a"),
+      toolCall("click", {}, "b"),
+      toolCall("click", { ref: "1" }, "c"),
+      { text: "done", toolCalls: [], stopReason: "end" },
+    ]);
+    const { events, deps } = harness([], { llm, thinking: "medium", stepCap: 10 });
+    await runAgentTask(cp, deps);
+    expect(llm.seen.map((r) => r.stream)).toEqual([undefined, undefined, false, false]);
+    expect(llm.seen[2]!.thinking).toBe("off");
+    expect(
+      events.some((e) => e.kind === "info" && e.message.includes("non-streamed")),
+    ).toBe(true);
+  });
+
+  it("nudges at 3 idle steps and every 5 after, never ending the run", async () => {
+    const cp = makeCheckpoint();
+    const script: LlmResult[] = [];
+    for (let i = 0; i < 9; i++) script.push(toolCall("click", {}, `bad${i}`));
+    script.push(toolCall("click", { ref: "1" }, "good"));
+    for (let i = 0; i < 3; i++) script.push(toolCall("click", {}, `late${i}`));
+    script.push({ text: "done", toolCalls: [], stopReason: "end" });
+    const { deps } = harness(script, { stepCap: 30 });
+    const outcome = await runAgentTask(cp, deps);
+    expect(outcome).toBe("completed");
+    const nudges = cp.messages.filter(
+      (m) => m.role === "user" && m.content.includes("in a row have executed nothing"),
+    );
+    // Streak 3 and 8, then reset by the executed call, then 3 again.
+    expect(nudges.map((m) => m.content.match(/^\[harness\] (\d+) steps/)?.[1])).toEqual([
+      "3",
+      "8",
+      "3",
+    ]);
+    expect(nudges[0]!.content).toContain("todo_write");
+  });
+
+  it("keeps running through consecutive invalid calls — no abort", async () => {
+    const cp = makeCheckpoint();
+    const { events, executed, deps } = harness([
+      toolCall("click", {}, "bad1"), // missing required ref
+      toolCall("click", {}, "bad2"),
+      toolCall("click", {}, "bad3"),
+      toolCall("click", { ref: "2" }, "good"),
+      { text: "done", toolCalls: [], stopReason: "end" },
     ]);
     const outcome = await runAgentTask(cp, deps);
 
-    expect(outcome).toBe("stopped");
-    expect(events.at(-1)).toMatchObject({ kind: "done" });
-    expect(events.some((e) => e.kind === "error")).toBe(true);
+    expect(outcome).toBe("completed");
+    expect(executed).toEqual([{ name: "click", args: { ref: "2" } }]);
+    expect(events.some((e) => e.kind === "error")).toBe(false);
   });
 
   it("stops at the step cap", async () => {
@@ -706,6 +817,37 @@ describe("completion gate", () => {
     { content: "Set page to Letter", status: "pending" as const },
     { content: "Insert the table", status: "in_progress" as const },
   ];
+
+  it("asks for a plan update after TODO_STALE_STEPS steps without todo_write", async () => {
+    const steps = Array.from({ length: TODO_STALE_STEPS + 2 }, (_, i) =>
+      toolCall("snapshot", { n: i }, `s${i}`),
+    );
+    const cp = makeCheckpoint({ todos: openPlan });
+    const { events, deps } = harness(steps, { stepCap: TODO_STALE_STEPS + 2 });
+    await runAgentTask(cp, deps);
+    const nudges = cp.messages.filter(
+      (m) => m.role === "user" && String(m.content).includes("since the plan was last updated"),
+    );
+    expect(nudges).toHaveLength(1);
+    expect(String(nudges[0]!.content)).toContain("Insert the table");
+    expect(events.some((e) => e.kind === "info" && e.message.includes("without a plan update"))).toBe(true);
+  });
+
+  it("never asks for a plan update when the plan is ticked or empty", async () => {
+    const ticking = Array.from({ length: TODO_STALE_STEPS + 2 }, (_, i) =>
+      toolCall(i % 10 === 0 ? "todo_write" : "snapshot", { n: i }, `t${i}`),
+    );
+    for (const [cp, script] of [
+      [makeCheckpoint({ todos: openPlan }), ticking],
+      [makeCheckpoint(), ticking.map((_, i) => toolCall("snapshot", { n: i }, `u${i}`))],
+    ] as const) {
+      const { deps } = harness([...script], { stepCap: TODO_STALE_STEPS + 2 });
+      await runAgentTask(cp, deps);
+      expect(
+        cp.messages.some((m) => String(m.content).includes("since the plan was last updated")),
+      ).toBe(false);
+    }
+  });
 
   it("bounces a final answer while the plan still owes work", async () => {
     const cp = makeCheckpoint({ todos: openPlan });
@@ -1835,5 +1977,42 @@ describe("Jev per-step effort routing", () => {
         events.some((e) => e.kind === "tool_result" && e.result.includes("Jev progress check")),
       ).toBe(false);
     }
+  });
+});
+
+describe("precheckCall", () => {
+  const specs = new Map([
+    ["docs_op", { name: "docs_op", description: "", parameters: { type: "object" as const, properties: { op: { type: "string" }, rows: { type: "number" } }, required: ["op"] } }],
+    ["click_at", { name: "click_at", description: "", parameters: { type: "object" as const, properties: { x: { type: "number" } } } }],
+  ]);
+
+  it("passes a complete call", () => {
+    expect(precheckCall({ id: "1", name: "click_at", args: { x: 1, y: 2 } }, specs)).toBeNull();
+    expect(precheckCall({ id: "1", name: "docs_op", args: { op: "apply_style", style: "h1" } }, specs)).toBeNull();
+  });
+
+  it("names the layer that is wrong", () => {
+    expect(precheckCall({ id: "1", name: "nope", args: {} }, specs)).toContain("no tool named 'nope'");
+    expect(precheckCall({ id: "1", name: "click_at", args: {}, invalidJson: "{x" }, specs)).toContain("not valid JSON");
+    expect(precheckCall({ id: "1", name: "click_at", args: { x: "1" } }, specs)).toBe("parameter x must be a number");
+    expect(precheckCall({ id: "1", name: "click_at", args: { space: "screenshot" } }, specs)).toBe("x and y (or ref) missing");
+  });
+
+  it("applies docs_op's own op rules", () => {
+    const reason = precheckCall({ id: "1", name: "docs_op", args: { op: "apply_style", cols: 0 } }, specs);
+    expect(reason).toContain("apply_style needs style");
+    expect(reason).not.toMatch(/^INPUT-FAILED/);
+  });
+
+  it("hints with what arrived and a complete form", () => {
+    const hint = malformedHint([
+      { call: { id: "1", name: "click_at", args: { space: "screenshot", expect: "x" } }, reason: "x and y (or ref) missing" },
+    ]);
+    expect(hint).toContain("click_at arrived as {space, expect} — x and y (or ref) missing.");
+    expect(hint).toContain('click_at {"x": 412');
+  });
+
+  it("nudges at 3, 8, 13 …", () => {
+    expect([1, 2, 3, 4, 7, 8, 9, 13].filter(shouldStallNudge)).toEqual([3, 8, 13]);
   });
 });

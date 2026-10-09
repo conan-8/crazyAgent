@@ -17,6 +17,7 @@
 import { failureTag } from "../../shared/tool-failure";
 import { planClick, planDrag } from "../../shared/coords";
 import { docTables, formatOutline, parseDocStructure } from "../../shared/docs-structure";
+import { countPhrase, parseFindCounter } from "../../shared/docs-ops";
 import { runContentAction } from "./content-action";
 import { sendStrokes } from "./coords";
 import { captureBlindShot, layoutViewportCss, truncateWithNote } from "./perception";
@@ -112,16 +113,23 @@ export async function fetchWorkspaceExport(
     return { ok: false, error: `${failureTag("input")}: no ${format} export for this document type` };
   }
   let res: Response;
-  try {
-    // SW-side fetch: host permissions attach the session cookies, so this
-    // is the SAME authenticated export the page-context fetch attempted —
-    // without the page context (Trusted Types) or the debugger (transport).
-    res = await fetch(target, { credentials: "include", redirect: "follow" });
-  } catch (err) {
-    return {
-      ok: false,
-      error: `${failureTag("transport")}: the export fetch failed (${String((err as Error)?.message ?? err)}) — the network or the session refused it; retry once, then fall back to reading visually (screenshot)`,
-    };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      // SW-side fetch: host permissions attach the session cookies, so this
+      // is the SAME authenticated export the page-context fetch attempted —
+      // without the page context (Trusted Types) or the debugger (transport).
+      res = await fetch(target, { credentials: "include", redirect: "follow" });
+    } catch (err) {
+      return {
+        ok: false,
+        error: `${failureTag("transport")}: the export fetch failed (${String((err as Error)?.message ?? err)}) — the network or the session refused it; retry once, then fall back to reading visually (screenshot)`,
+      };
+    }
+    // Measured: about ten export reads a minute draw a 429. A short wait
+    // clears it, so the harness waits instead of handing the model a failure
+    // it would only retry immediately.
+    if ((res.status !== 429 && res.status !== 503) || attempt >= EXPORT_RETRIES) break;
+    await sleep(exportRetryDelayMs(res.headers.get("retry-after"), attempt));
   }
   if (!res.ok) {
     const hint =
@@ -129,10 +137,21 @@ export async function fetchWorkspaceExport(
         ? "the signed-in account cannot export this document (permission or sign-in state) — check the account chip; do not retry"
         : res.status === 404
           ? "no such document (wrong id, moved or deleted)"
-          : `export endpoint returned ${res.status}`;
+          : res.status === 429 || res.status === 503
+            ? `Google is rate-limiting document exports (${res.status}, still refused after ${EXPORT_RETRIES} waits) — do NOT re-read now: keep working and read once at the end of the block, or check the screen with a screenshot`
+            : `export endpoint returned ${res.status}`;
     return { ok: false, error: `${failureTag("tool")}: ${hint}` };
   }
   return { ok: true, body: await res.text(), doc };
+}
+
+const EXPORT_RETRIES = 2;
+
+/** How long to wait before re-asking a rate-limited export: Retry-After (capped), else a growing backoff. */
+export function exportRetryDelayMs(retryAfter: string | null, attempt: number): number {
+  const secs = retryAfter !== null && /^\s*\d+(\.\d+)?\s*$/.test(retryAfter) ? Number(retryAfter) : NaN;
+  if (Number.isFinite(secs)) return Math.min(5_000, Math.max(250, Math.round(secs * 1000)));
+  return 1_200 * (attempt + 1);
 }
 
 registerTool({
@@ -276,13 +295,15 @@ function sleep(ms: number): Promise<void> {
  * Read where the caret is. The caret blinks and re-layouts after a move, so
  * a few short polls; null when the editor exposes no caret element at all
  * (the keyboard routes still work — only the measured-pointer moves need it).
+ * Pass `tries: 1` where a missing caret just means "cannot verify" and the
+ * four-poll wait would be pure cost.
  */
-export async function readCaret(ctx: ToolContext): Promise<CaretBox | null> {
-  for (let i = 0; i < 4; i++) {
+export async function readCaret(ctx: ToolContext, tries = 4): Promise<CaretBox | null> {
+  for (let i = 0; i < tries; i++) {
     const res = await runContentAction(ctx.tabId, { action: "caretRect" }).catch(() => null);
     const box = res?.ok ? (res.data as CaretBox | null) : null;
     if (box && box.height > 0) return box;
-    await sleep(120);
+    if (i + 1 < tries) await sleep(120);
   }
   return null;
 }
@@ -295,19 +316,160 @@ export function caretPoint(box: CaretBox, scrollNow = box.scrollTop): { x: numbe
   };
 }
 
+export interface FindBarResult {
+  /** The counter as the find bar shows it ("2 of 5"), when readable. */
+  matches?: string;
+  /** Total matches, and where that number came from; absent = unknown. */
+  total?: number;
+  countSource?: "find bar" | "export";
+  image?: string;
+  /** Set when the requested occurrence does not exist — nothing was selected. */
+  missing?: string;
+  /** Set when the caret had to be placed by Home/End because the match sits on
+   *  a cell or line edge, where an arrow key would have left it. */
+  repaired?: boolean;
+}
+
+/** Total matches for `phrase`: the find bar's counter, else a count over the text export. */
+async function findTotal(
+  ctx: ToolContext,
+  phrase: string,
+  exportCount: boolean,
+): Promise<{ total: number; source: "find bar" | "export"; text?: string } | null> {
+  const res = await runContentAction(ctx.tabId, { action: "findTexts" }).catch(() => null);
+  const texts = res?.ok ? ((res.data as { texts?: string[] } | undefined)?.texts ?? []) : [];
+  const counted = parseFindCounter(texts);
+  if (counted) {
+    const text = texts.find((t) => parseFindCounter([t]));
+    return { total: counted.total, source: "find bar", ...(text ? { text } : {}) };
+  }
+  if (!exportCount) return null;
+  const out = await fetchWorkspaceExport(ctx.tabId, "text");
+  return out.ok ? { total: countPhrase(out.body, phrase), source: "export" } : null;
+}
+
+/**
+ * Two carets on the same text line? Compared in document space (viewport y plus
+ * the editor's scroll), so a scroll between the two reads cannot fake a move.
+ */
+export function sameLine(a: CaretBox, b: CaretBox): boolean {
+  return Math.abs(a.y + a.scrollTop - (b.y + b.scrollTop)) <= Math.max(2, Math.min(a.height, b.height) / 2);
+}
+
+/**
+ * Did ONE arrow key move the caret further than a character? Only a cell edge
+ * does that on a single step, so this is the sideways escape `sameLine` cannot
+ * see. The threshold rides the caret height (a font-size proxy) rather than a
+ * fixed px: measured, stepping out of a second-column cell jumped 134px with a
+ * 17px caret, while the widest ordinary character is well under 1.5× its size.
+ */
+export function crossedCell(a: CaretBox, b: CaretBox): boolean {
+  return Math.abs(a.x - b.x) > Math.max(12, 1.5 * Math.min(a.height, b.height));
+}
+
+/** Re-open the find bar on `phrase` and leave the match selected. */
+async function selectMatch(ctx: ToolContext, phrase: string, occurrence: number): Promise<void> {
+  const { tabId, adapter } = ctx;
+  await sendTrustedKey(tabId, adapter, "Control+f");
+  await sendTrustedText(tabId, adapter, phrase);
+  for (let i = 1; i < occurrence; i++) {
+    await sendTrustedKey(tabId, adapter, "Enter");
+  }
+  await sleep(250);
+  await sendTrustedKey(tabId, adapter, "Escape");
+}
+
+/**
+ * Collapse the find bar's selection to the match's start (`before`) or end
+ * (`after`) without letting the caret leave a table cell.
+ *
+ * An arrow key at a cell's edge steps OUT of the cell: with the match at the
+ * start of a first-column cell, Escape+ArrowLeft was measured to put the caret
+ * in the paragraph above the table, and at the start of a second-column cell it
+ * put the caret at the end of the cell to its left — the next `type` wrote
+ * there either time. Stepping BACK always undoes that (it returns the caret to
+ * the match edge it fell off), so the collapse is one arrow, one step back, and
+ * a comparison of the two caret reads:
+ *
+ *   same line, one character apart — no edge was crossed: step toward again.
+ *   same line, a jump wider than a character — a sideways cell escape: the
+ *     step back is already the match edge, so stop there.
+ *   a different line — either a vertical cell escape (the step back is right)
+ *     or a match that begins at a wrapped line's end (stepping toward was
+ *     right). Home/End cannot leave a cell, so re-select and press one: its
+ *     line says which of the two it was.
+ *
+ * The common case pays one extra arrow and two caret reads.
+ *
+ * KNOWN GAP: a sideways step into a NEARLY FULL neighbouring cell can be
+ * shorter than a wide character, so it stays invisible — which is why the tool
+ * description steers table edits towards docs_table, whose cell route never
+ * collapses with an arrow at all.
+ */
+export async function collapseToMatch(
+  ctx: ToolContext,
+  phrase: string,
+  occurrence: number,
+  side: "before" | "after",
+): Promise<boolean> {
+  const { tabId, adapter } = ctx;
+  const toward = side === "before" ? "ArrowLeft" : "ArrowRight";
+  const away = side === "before" ? "ArrowRight" : "ArrowLeft";
+  await sleep(80);
+  await sendTrustedKey(tabId, adapter, toward);
+  // One read, not the polling one: an editor that exposes no caret gets exactly
+  // the old behaviour (a single arrow) instead of paying for polls twice.
+  const at = await readCaret(ctx, 1);
+  if (!at) return false;
+  // One step back: if that crosses a line boundary, `toward` had landed on a
+  // cell/line edge — the only places an arrow can leave the match's own line.
+  await sendTrustedKey(tabId, adapter, away);
+  const stepped = await readCaret(ctx, 1);
+  if (!stepped) {
+    await sendTrustedKey(tabId, adapter, toward);
+    return false;
+  }
+  if (sameLine(at, stepped)) {
+    // A sideways cell escape: the step back already returned the caret to the
+    // match edge, and stepping toward again would push it out of the cell once
+    // more. Otherwise the two reads are one character apart, so the step toward
+    // is what lands the caret on the edge that was asked for — without it every
+    // caret mode ends up one character inside the match.
+    if (crossedCell(at, stepped)) return true;
+    await sendTrustedKey(tabId, adapter, toward);
+    return false;
+  }
+  await selectMatch(ctx, phrase, occurrence);
+  // Cell-safe: Home/End stay inside the cell, and at a cell edge they ARE the
+  // match's edge — which is the case that made the arrow leave the table.
+  await sendTrustedKey(tabId, adapter, side === "before" ? "Home" : "End");
+  if (side === "after") return true;
+  const edge = await readCaret(ctx, 1);
+  if (edge && sameLine(edge, stepped)) return true;
+  // The match begins at a wrapped line's end: Home overshot to that line's
+  // start, so walk back to its last character.
+  await sendTrustedKey(tabId, adapter, "End");
+  await sleep(60);
+  await sendTrustedKey(tabId, adapter, "ArrowLeft");
+  return true;
+}
+
 /**
  * The find-bar move: Ctrl+F, type the phrase, Enter to the occurrence, then
  * (with a caret mode) Escape — which hands focus back to the document with
- * the match selected — and collapse it by arrow key. Returns the counter text
- * when readable. Throws on a dead debugger channel.
+ * the match selected — and collapse it by arrow key. A phrase that is not
+ * there is reported as `missing` with NOTHING selected: closing a find bar
+ * with no match leaves the old caret in place, and the caller's next
+ * keystroke would land there (a probe saw Backspace eat the document's last
+ * letter after a no-match "select"). Throws on a dead debugger channel.
  */
 export async function findBarCaret(
   ctx: ToolContext,
   phrase: string,
   occurrence: number,
   caret: "before" | "after" | "select" | undefined,
-  opts: { keepOpen?: boolean; shot?: boolean } = {},
-): Promise<{ matches?: string; image?: string }> {
+  opts: { keepOpen?: boolean; shot?: boolean; exportCount?: boolean } = {},
+): Promise<FindBarResult> {
   await ensureTabActive(ctx.tabId, ctx.adapter);
   await sendTrustedKey(ctx.tabId, ctx.adapter, "Control+f");
   await sendTrustedText(ctx.tabId, ctx.adapter, phrase);
@@ -316,14 +478,33 @@ export async function findBarCaret(
   }
   // Let the app scroll to the match and paint the highlight.
   await sleep(opts.shot ? 400 : 250);
-  const counter = await readField(ctx, ['[class*="findbar"] [class*="counter"]', ".docs-findbar-counter"]);
+  const found = await findTotal(ctx, phrase, opts.exportCount !== false);
+  const counted = found
+    ? { total: found.total, countSource: found.source, ...(found.text ? { matches: found.text } : {}) }
+    : {};
+  if (found && occurrence > found.total) {
+    await sendTrustedKey(ctx.tabId, ctx.adapter, "Escape");
+    if (found.total > 0) {
+      // The bar wrapped onto an earlier match, which Escape just selected —
+      // collapse it so the next keystroke cannot replace the wrong text.
+      await sleep(80);
+      await sendTrustedKey(ctx.tabId, ctx.adapter, "ArrowLeft");
+    }
+    return {
+      ...counted,
+      missing:
+        found.total === 0
+          ? `"${phrase}" is not in the document (${found.source === "find bar" ? "the find bar counts 0 matches" : "0 matches in the text export, which can trail typing from the last second or two"}) — NOTHING was selected and the caret did not move`
+          : `"${phrase}" has only ${found.total} match(es), so occurrence ${occurrence} does not exist — nothing is selected (the caret is now just BEFORE an earlier match)`,
+    };
+  }
   const image = opts.shot ? await captureBlindShot(ctx.adapter, ctx.tabId) : undefined;
   if (caret || !opts.keepOpen) await sendTrustedKey(ctx.tabId, ctx.adapter, "Escape");
-  if (caret === "before" || caret === "after") {
-    await sleep(80);
-    await sendTrustedKey(ctx.tabId, ctx.adapter, caret === "before" ? "ArrowLeft" : "ArrowRight");
-  }
-  return { ...(counter?.text ? { matches: counter.text } : {}), ...(image ? { image } : {}) };
+  const repaired =
+    caret === "before" || caret === "after"
+      ? await collapseToMatch(ctx, phrase, occurrence, caret)
+      : false;
+  return { ...counted, ...(repaired ? { repaired } : {}), ...(image ? { image } : {}) };
 }
 
 /** Bring a recorded point into view by wheel-scrolling the editor; returns the point now. */
@@ -377,7 +558,7 @@ export async function selectFromCaretTo(
 registerTool({
   name: "docs_locate",
   description:
-    "Jump to a phrase inside a Google Doc/Sheet/Slide using the app's OWN find bar — the human move for deep-document navigation: opens Ctrl+F, types the phrase (the app highlights every match), presses Enter to reach the requested occurrence, and ATTACHES A SCREENSHOT of the match in view. TO EDIT AT A PHRASE, pass caret:'before'|'after'|'select': closing the find bar leaves the match selected and the tool collapses it by arrow key — the caret lands exactly at the text with NO pixel aiming; type right away (insert after a heading = caret:'after' then key Enter + type; replace a phrase = caret:'select' then type; format a phrase = caret:'select' then key Control+b). TO SELECT A SPAN (a sentence, a paragraph, several paragraphs) pass through:'<last words of the span>': the selection runs from the START of phrase to the END of through, measured from the editor's own caret — then type to replace it or press a format shortcut. The result reports caretAt (viewport px) when the editor exposes its caret. occurrence:2 = the second match. Use this instead of scrolling-and-hunting, counting lines, or clicking on canvas text.",
+    "Jump to a phrase inside a Google Doc/Sheet/Slide using the app's OWN find bar — the human move for deep-document navigation: opens Ctrl+F, types the phrase (the app highlights every match), presses Enter to reach the requested occurrence, and ATTACHES A SCREENSHOT of the match in view. TO EDIT AT A PHRASE, pass caret:'before'|'after'|'select': closing the find bar leaves the match selected and the tool collapses it by arrow key — the caret lands exactly at the text with NO pixel aiming (inside a TABLE use docs_table instead — 'before'/'after' collapse with an arrow key, which at a cell's edge steps OUT of the table, and the text lands in the paragraph above it); type right away (insert after a heading = caret:'after' then key Enter + type; replace a phrase = caret:'select', then type — the typing replaces the selection; format a phrase = caret:'select' then key Control+b). TO SELECT A SPAN (a sentence, a paragraph, several paragraphs) pass through:'<last words of the span>': the selection runs from the START of phrase to the END of through, measured from the editor's own caret — then type to replace it, or press a format shortcut. A phrase that is not in the document FAILS with nothing selected. The result reports caretAt (viewport px) when the editor exposes its caret. occurrence:2 = the second match. Use this instead of scrolling-and-hunting, counting lines, or clicking on canvas text.",
   parameters: {
     type: "object",
     properties: {
@@ -397,12 +578,12 @@ registerTool({
         type: "string",
         enum: ["before", "after", "select"],
         description:
-          "Place the caret by KEYBOARD at the match: 'before' / 'after' collapse to its start / end, 'select' leaves the match selected (type to replace it, or format it). Then type immediately — no click.",
+          "Place the caret by KEYBOARD at the match: 'before' / 'after' collapse to its start / end, 'select' leaves the match selected (type to replace it, or press a format shortcut). Then act immediately — no click.",
       },
       through: {
         type: "string",
         description:
-          "Select from the start of `phrase` to the END of this later phrase (spans lines and paragraphs). Implies a selection; type replaces it, shortcuts format it.",
+          "Select from the start of `phrase` to the END of this later phrase (spans lines and paragraphs). Implies a selection; typing replaces it, shortcuts format it.",
       },
       through_occurrence: {
         type: "number",
@@ -437,14 +618,20 @@ registerTool({
         error: `${failureTag("input")}: docs_locate drives Google's in-page find bar — this tab (${url || "unknown"}) is not a Google Doc/Sheet/Slide. On ordinary pages, find text with read_page / snapshot instead.`,
       };
     }
+    const notFound = (missing: string) => ({
+      ok: false as const,
+      error: `${failureTag("input")}: ${missing}. Check the exact wording with docs_read (text) — the find bar matches literally, ignoring case — then retry with words that are really there.`,
+    });
     try {
       if (through) {
         // End first: record where the span ends, then put the caret at its
         // start (the view scrolls there) and extend with a measured
         // shift+click — the end point is re-scrolled into view if needed.
-        await findBarCaret(ctx, through, nth(args.through_occurrence), "after");
+        const tail = await findBarCaret(ctx, through, nth(args.through_occurrence), "after");
+        if (tail.missing) return notFound(tail.missing);
         const end = await readCaret(ctx);
-        await findBarCaret(ctx, phrase, occurrence, "before");
+        const head = await findBarCaret(ctx, phrase, occurrence, "before");
+        if (head.missing) return notFound(head.missing);
         if (!end) {
           return {
             ok: false,
@@ -471,22 +658,32 @@ registerTool({
         };
       }
       const found = await findBarCaret(ctx, phrase, occurrence, caret, { keepOpen, shot: true });
+      if (found.missing) return notFound(found.missing);
       const at = caret ? await readCaret(ctx) : null;
+      const unverified =
+        found.total === undefined
+          ? " The match count is UNVERIFIED (neither the find bar's counter nor the export could be read) — confirm on the attached screenshot that the phrase is highlighted before typing."
+          : "";
+      const repaired = found.repaired
+        ? " The phrase sits at a cell or line edge, where a lone arrow key steps OUT of the cell — the caret was corrected back onto the match edge; check the first read-back."
+        : "";
       return {
         phrase,
         occurrence,
         ...(found.matches ? { matches: found.matches } : {}),
+        ...(found.total !== undefined ? { total: found.total } : {}),
         findBarClosed: Boolean(caret) || !keepOpen,
         ...(caret ? { caret } : {}),
         ...(at ? { caretAt: caretPoint(at) } : {}),
         ...(found.image ? { image: found.image } : {}),
-        note: caret
-          ? caret === "select"
-            ? `the match is SELECTED in the document — typing replaces it; a formatting call (bold, docs_op apply_style) applies to it. No click needed.`
-            : `the caret is now ${caret === "before" ? "immediately BEFORE" : "immediately AFTER"} the match — type (type / key) right away; do NOT click first, a click would move it. Verify the text landed with docs_read.`
-          : found.image
-            ? "the attached screenshot shows the match highlighted and in view — it is now the LATEST capture (prefer caret:'before'|'after'|'select': no pixel aim needed)"
-            : "the screenshot could not be captured — take one with `screenshot` before pointing at the match",
+        note:
+          (caret
+            ? caret === "select"
+              ? `the match is SELECTED in the document — type to replace it, or apply formatting (bold, docs_op apply_style) to it. No click needed.`
+              : `the caret is now ${caret === "before" ? "immediately BEFORE" : "immediately AFTER"} the match — type (type / key) right away; do NOT click first, a click would move it. Verify the text landed with docs_read.`
+            : found.image
+              ? "the attached screenshot shows the match highlighted and in view — it is now the LATEST capture (prefer caret:'before'|'after'|'select': no pixel aim needed)"
+              : "the screenshot could not be captured — take one with `screenshot` before pointing at the match") + repaired + unverified,
       };
     } catch (err) {
       return {

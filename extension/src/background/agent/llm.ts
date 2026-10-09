@@ -9,6 +9,7 @@ import type {
   LlmResult,
   LlmTextSink,
   ToolCall,
+  UpstreamInfo,
 } from "../../shared/llm";
 import { thinkingBudgetFor } from "../../shared/llm";
 import type { AgentSettings } from "../settings";
@@ -187,7 +188,7 @@ export function buildAnthropicBody(
     system,
     tools,
     messages,
-    stream: true,
+    stream: req.stream !== false,
   };
   const level = req.thinking ?? "off";
   if (level !== "off" && anthropicSupportsThinking(model)) {
@@ -352,8 +353,9 @@ export function buildOpenAiBody(
     // carried exactly one call). The field is standard on this wire; unknown
     // fields are ignored by the servers that don't use it.
     parallel_tool_calls: true,
-    stream: true,
-    stream_options: { include_usage: true },
+    ...(req.stream === false
+      ? { stream: false }
+      : { stream: true, stream_options: { include_usage: true } }),
   };
   if (!strictOpenAi) {
     // vLLM/SGLang-style switch; most OpenAI-compatible servers ignore unknown
@@ -441,6 +443,112 @@ export interface StreamAggregator {
   usage?: StreamUsage;
 }
 
+const ANOMALY_SAMPLES = 6;
+const ANOMALY_SAMPLE_CHARS = 200;
+/** A held-back `data:` payload longer than this is junk, not half an event. */
+const MAX_PENDING_PAYLOAD = 64_000;
+
+/**
+ * SSE line → JSON event, counting every line it cannot use instead of
+ * dropping it silently. A `data:` payload that fails to parse is held and
+ * retried joined with the next `data:` line (legal multi-line SSE). Bare
+ * non-data fragments are recorded only — splicing them into JSON would be a
+ * guess.
+ */
+export function createSseDecoder(): {
+  decode(line: string): Record<string, unknown> | null;
+  /** Call once at end of stream; folds a still-pending payload into the counts. */
+  info(): UpstreamInfo;
+} {
+  const info: UpstreamInfo = {
+    streamed: true,
+    nonDataLines: 0,
+    badJsonLines: 0,
+    joinedLines: 0,
+  };
+  const samples: string[] = [];
+  let pending = "";
+  const sample = (kind: string, text: string): void => {
+    if (samples.length < ANOMALY_SAMPLES) {
+      samples.push(`${kind}: ${text.slice(0, ANOMALY_SAMPLE_CHARS)}`);
+    }
+  };
+  const parse = (text: string): Record<string, unknown> | null => {
+    try {
+      const v = JSON.parse(text) as unknown;
+      return v && typeof v === "object" && !Array.isArray(v)
+        ? (v as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  const dropPending = (): void => {
+    if (!pending) return;
+    info.badJsonLines += 1;
+    sample("bad-json", pending);
+    pending = "";
+  };
+  return {
+    decode(line) {
+      if (!line) {
+        // A blank line ends the SSE event; a payload still held is unusable.
+        dropPending();
+        return null;
+      }
+      if (line.startsWith(":")) return null;
+      if (!line.startsWith("data:")) {
+        if (/^(?:event|id|retry):/.test(line)) return null;
+        info.nonDataLines += 1;
+        sample("non-data", line);
+        return null;
+      }
+      // Per the SSE spec only ONE leading space is stripped: trimming the tail
+      // would eat the space at a split inside a JSON string.
+      let payload = line.slice(5).replace(/\r$/, "");
+      if (payload.startsWith(" ")) payload = payload.slice(1);
+      if (payload.trim() === "[DONE]") {
+        dropPending();
+        return null;
+      }
+      if (pending) {
+        // SSE joins multi-line data with "\n"; a split inside a JSON string
+        // only parses joined bare. Either way the join is counted.
+        const joined = parse(`${pending}\n${payload}`) ?? parse(`${pending}${payload}`);
+        if (joined) {
+          info.joinedLines += 1;
+          sample("joined", pending);
+          pending = "";
+          return joined;
+        }
+        dropPending();
+      }
+      const event = parse(payload);
+      if (event) return event;
+      pending = payload.length > MAX_PENDING_PAYLOAD ? "" : payload;
+      if (!pending) {
+        info.badJsonLines += 1;
+        sample("bad-json", payload);
+      }
+      return null;
+    },
+    info() {
+      dropPending();
+      return samples.length ? { ...info, samples: [...samples] } : { ...info };
+    },
+  };
+}
+
+/** Upstream identity fields an OpenAI-compatible chunk may carry. */
+function noteOpenAiUpstream(info: UpstreamInfo, event: Record<string, unknown>): void {
+  if (!info.provider && typeof event.provider === "string") info.provider = event.provider;
+  if (!info.model && typeof event.model === "string") info.model = event.model;
+  if (!info.id && typeof event.id === "string") info.id = event.id.slice(0, 24);
+  if (!info.fingerprint && typeof event.system_fingerprint === "string") {
+    info.fingerprint = event.system_fingerprint;
+  }
+}
+
 /**
  * Anthropic splits usage across two events: `message_start` carries the input
  * side (including the prompt-cache counters) and `message_delta` carries the
@@ -486,21 +594,22 @@ export function anthropicAggregator(
   let stopReason = "";
   let reasoning = "";
   let signature = "";
+  const sse = createSseDecoder();
+  let messageId: string | undefined;
+  let messageModel: string | undefined;
   const agg: StreamAggregator = {
     text: "",
     get reasoning() {
       return reasoning;
     },
     feed(line) {
-      if (!line.startsWith("data:")) return;
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(line.slice(5).trim());
-      } catch {
-        return;
-      }
+      const event = sse.decode(line);
+      if (!event) return;
       const type = event.type as string;
       if (type === "message_start") {
+        const msg = event.message as { id?: unknown; model?: unknown } | undefined;
+        if (typeof msg?.id === "string") messageId = msg.id.slice(0, 24);
+        if (typeof msg?.model === "string") messageModel = msg.model;
         // The input side of usage — including the prompt-cache counters that
         // say how much of the ~8k-token prefix this step did NOT re-prefill.
         const usage = (
@@ -574,9 +683,12 @@ export function anthropicAggregator(
     },
     result() {
       const toolCalls: ToolCall[] = [];
+      const rawArgs: Record<string, string> = {};
       for (const block of blocks.values()) {
         if (block.kind !== "tool_use") continue;
-        toolCalls.push(makeToolCall(block.id ?? "", block.name ?? "", block.text));
+        const call = makeToolCall(block.id ?? "", block.name ?? "", block.text);
+        toolCalls.push(call);
+        rawArgs[call.id] = block.text;
       }
       return {
         text: agg.text,
@@ -585,6 +697,8 @@ export function anthropicAggregator(
         usage: agg.usage,
         reasoning: reasoning || undefined,
         reasoningSignature: signature || undefined,
+        upstream: { ...sse.info(), id: messageId, model: messageModel },
+        rawArgs: toolCalls.length ? rawArgs : undefined,
       };
     },
   };
@@ -598,21 +712,29 @@ export function openAiAggregator(
   const calls = new Map<number, { id: string; name: string; args: string }>();
   let stopReason = "";
   let reasoning = "";
+  const sse = createSseDecoder();
+  const upstream: UpstreamInfo = { streamed: true, nonDataLines: 0, badJsonLines: 0, joinedLines: 0 };
   const agg: StreamAggregator = {
     text: "",
     get reasoning() {
       return reasoning;
     },
     feed(line) {
-      if (!line.startsWith("data:")) return;
-      const payload = line.slice(5).trim();
-      if (payload === "[DONE]") return;
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(payload);
-      } catch {
-        return;
-      }
+      const event = sse.decode(line);
+      if (!event) return;
+      noteOpenAiUpstream(upstream, event);
+      // The include_usage chunk usually carries `choices: []`, so usage is
+      // read before the no-choice early return.
+      const usage = (event as {
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          prompt_tokens_details?: { cached_tokens?: number | null } | null;
+          /** DeepSeek spells the same idea differently. */
+          prompt_cache_hit_tokens?: number | null;
+        } | null;
+      }).usage;
+      if (usage) agg.usage = parseOpenAiUsage(usage);
       const choice = (event.choices as Record<string, unknown>[] | undefined)?.[0];
       if (!choice) return;
       const delta = (choice.delta ?? {}) as {
@@ -641,31 +763,121 @@ export function openAiAggregator(
         calls.set(index, call);
       }
       if (choice.finish_reason) stopReason = choice.finish_reason as string;
-      const usage = (event as {
-        usage?: {
-          prompt_tokens?: number;
-          completion_tokens?: number;
-          prompt_tokens_details?: { cached_tokens?: number | null } | null;
-          /** DeepSeek spells the same idea differently. */
-          prompt_cache_hit_tokens?: number | null;
-        };
-      }).usage;
-      if (usage) agg.usage = parseOpenAiUsage(usage);
     },
     result() {
+      const rawArgs: Record<string, string> = {};
       const toolCalls = [...calls.entries()]
         .sort((a, b) => a[0] - b[0])
-        .map(([index, call]) => makeToolCall(call.id || `call_${index}`, call.name, call.args));
+        .map(([index, call]) => {
+          const tc = makeToolCall(call.id || `call_${index}`, call.name, call.args);
+          rawArgs[tc.id] = call.args;
+          return tc;
+        });
       return {
         text: agg.text,
         toolCalls,
         stopReason,
         usage: agg.usage,
         reasoning: reasoning || undefined,
+        upstream: { ...sse.info(), ...pickIdentity(upstream) },
+        rawArgs: toolCalls.length ? rawArgs : undefined,
       };
     },
   };
   return agg;
+}
+
+function pickIdentity(u: UpstreamInfo): Partial<UpstreamInfo> {
+  const out: Partial<UpstreamInfo> = {};
+  if (u.provider) out.provider = u.provider;
+  if (u.model) out.model = u.model;
+  if (u.id) out.id = u.id;
+  if (u.fingerprint) out.fingerprint = u.fingerprint;
+  return out;
+}
+
+/** One non-streamed OpenAI-compatible reply → the same result shape. */
+export function parseOpenAiReply(
+  body: Record<string, unknown>,
+  onText?: LlmTextSink,
+  onReasoning?: LlmReasoningSink,
+): LlmResult {
+  const upstream: UpstreamInfo = { streamed: false, nonDataLines: 0, badJsonLines: 0, joinedLines: 0 };
+  noteOpenAiUpstream(upstream, body);
+  const choice = (body.choices as Record<string, unknown>[] | undefined)?.[0] ?? {};
+  const message = (choice.message ?? {}) as {
+    content?: string | null;
+    reasoning_content?: string | null;
+    reasoning?: string | null;
+    tool_calls?: { id?: string; function?: { name?: string; arguments?: unknown } }[];
+  };
+  const text = message.content ?? "";
+  const reasoning = message.reasoning_content ?? message.reasoning ?? "";
+  if (reasoning) onReasoning?.(reasoning);
+  if (text) onText?.(text);
+  const rawArgs: Record<string, string> = {};
+  const toolCalls = (message.tool_calls ?? []).map((tc, i) => {
+    const args = tc.function?.arguments;
+    const raw = typeof args === "string" ? args : JSON.stringify(args ?? {});
+    const call = makeToolCall(tc.id || `call_${i}`, tc.function?.name ?? "", raw);
+    rawArgs[call.id] = raw;
+    return call;
+  });
+  const usage = body.usage as Parameters<typeof parseOpenAiUsage>[0] | undefined;
+  return {
+    text,
+    toolCalls,
+    stopReason: (choice.finish_reason as string | undefined) ?? "",
+    usage: usage ? parseOpenAiUsage(usage) : undefined,
+    reasoning: reasoning || undefined,
+    upstream,
+    rawArgs: toolCalls.length ? rawArgs : undefined,
+  };
+}
+
+/** One non-streamed Anthropic Messages reply → the same result shape. */
+export function parseAnthropicReply(
+  body: Record<string, unknown>,
+  onText?: LlmTextSink,
+  onReasoning?: LlmReasoningSink,
+): LlmResult {
+  let text = "";
+  let reasoning = "";
+  let signature = "";
+  const toolCalls: ToolCall[] = [];
+  const rawArgs: Record<string, string> = {};
+  for (const block of (body.content as Record<string, unknown>[] | undefined) ?? []) {
+    if (block.type === "text" && typeof block.text === "string") text += block.text;
+    else if (block.type === "thinking") {
+      reasoning += (block.thinking as string | undefined) ?? "";
+      signature += (block.signature as string | undefined) ?? "";
+    } else if (block.type === "tool_use") {
+      const raw = JSON.stringify(block.input ?? {});
+      const call = makeToolCall((block.id as string) ?? "", (block.name as string) ?? "", raw);
+      toolCalls.push(call);
+      rawArgs[call.id] = raw;
+    }
+  }
+  if (reasoning) onReasoning?.(reasoning);
+  if (text) onText?.(text);
+  const usage = body.usage as Parameters<typeof mergeAnthropicUsage>[1] | undefined;
+  return {
+    text,
+    toolCalls,
+    stopReason: (body.stop_reason as string | undefined) ?? "",
+    usage: usage ? mergeAnthropicUsage(undefined, usage) : undefined,
+    reasoning: reasoning || undefined,
+    reasoningSignature: signature || undefined,
+    upstream: {
+      streamed: false,
+      nonDataLines: 0,
+      badJsonLines: 0,
+      joinedLines: 0,
+      id: typeof body.id === "string" ? body.id.slice(0, 24) : undefined,
+      model: typeof body.model === "string" ? body.model : undefined,
+    },
+    rawArgs: toolCalls.length ? rawArgs : undefined,
+  };
 }
 
 function makeToolCall(id: string, name: string, argsText: string): ToolCall {
@@ -702,9 +914,22 @@ async function readSse(
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
-    for (const line of lines) agg.feed(line.trim());
+    // Only the CR of a CRLF goes: trimming would eat payload whitespace at a
+    // split data line, and a whitespace-only line is an anomaly worth seeing.
+    for (const line of lines) agg.feed(line.replace(/\r$/, ""));
   }
+  // A final event without a trailing newline is still an event.
+  buffer += decoder.decode();
+  if (buffer.trim() && !signal?.aborted) agg.feed(buffer.replace(/\r$/, ""));
   return agg.result();
+}
+
+async function readJson(res: Response): Promise<Record<string, unknown>> {
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`LLM API error ${res.status}: ${detail.slice(0, 300)}`);
+  }
+  return (await res.json()) as Record<string, unknown>;
 }
 
 class AnthropicClient implements LlmClient {
@@ -726,6 +951,7 @@ class AnthropicClient implements LlmClient {
       },
       body: JSON.stringify(buildAnthropicBody(req, this.settings.model)),
     });
+    if (req.stream === false) return parseAnthropicReply(await readJson(res), onText, onReasoning);
     return readSse(res, anthropicAggregator(onText, onReasoning), signal);
   }
 }
@@ -764,6 +990,7 @@ class OpenAiCompatClient implements LlmClient {
         throw new Error(`LLM API error 400: ${detail.slice(0, 300)}`);
       }
     }
+    if (req.stream === false) return parseOpenAiReply(await readJson(res), onText, onReasoning);
     return readSse(res, openAiAggregator(onText, onReasoning), signal);
   }
 }

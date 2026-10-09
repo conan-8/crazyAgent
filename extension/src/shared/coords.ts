@@ -74,6 +74,9 @@ export interface SnapCandidate {
   rect: ElementRect;
   /** CSS-px distance from the requested point to the element's box. */
   distance: number;
+  /** The second-nearest distinct control the ring saw — a near tie means the
+   *  point sits in a gap between two controls and no guess is safe. */
+  runnerUp?: { tag: string; text: string; ref?: string; distance: number };
 }
 
 const BUTTONS: MouseButton[] = ["left", "right", "middle"];
@@ -141,6 +144,46 @@ export function shapeCoordArgs(args: Record<string, unknown>): ShapeResult {
     result.clickCount = n;
   }
   return result;
+}
+
+const finite = (v: unknown): boolean => typeof v === "number" && Number.isFinite(v);
+const hasPoint = (a: Record<string, unknown>): boolean => finite(a.x) && finite(a.y);
+
+/**
+ * The target-shape rule each coordinate tool needs before anything else can
+ * matter: no schema field is individually required (x/y OR ref OR frame+x/y),
+ * so `{space, expect}` with no point passed the schema and failed late — 35
+ * times in one run. Returns what is missing, or null when the shape is whole.
+ */
+export function missingTarget(name: string, args: Record<string, unknown>): string | null {
+  switch (name) {
+    case "click_at":
+    case "hover_at":
+    case "type_at":
+    case "element_at": {
+      if (typeof args.ref === "string" && args.ref) return null;
+      if (!hasPoint(args)) return "x and y (or ref)";
+      if (name === "type_at" && args.select_to !== undefined) {
+        const st = args.select_to as Record<string, unknown> | null;
+        if (!st || typeof st !== "object" || !hasPoint(st)) return "select_to.x and select_to.y";
+      }
+      return null;
+    }
+    case "drag_at": {
+      if (args.drags !== undefined) return null;
+      const start = (typeof args.ref === "string" && args.ref) || hasPoint(args);
+      if (!start) return "x and y (or ref) for the start point";
+      const end =
+        (typeof args.to_ref === "string" && args.to_ref) ||
+        (finite(args.to_x) && finite(args.to_y)) ||
+        finite(args.to_dx) ||
+        finite(args.to_dy);
+      if (!end) return "to_x and to_y (or to_ref, or to_dx/to_dy) for the end point";
+      return null;
+    }
+    default:
+      return null;
+  }
 }
 
 /** Convert a document-space point to viewport space (viewport space is a no-op). */
@@ -272,7 +315,7 @@ export function rectDistance(point: Point, r: ElementRect): number {
 }
 
 export type SnapDecision =
-  | { kind: "keep" }
+  | { kind: "keep"; note?: string }
   | { kind: "promote"; point: Point; label: string }
   | { kind: "snap"; point: Point; label: string };
 
@@ -281,24 +324,32 @@ function controlLabel(tag: string, text: string, ref?: string): string {
   return `<${tag}>${name}${ref ? ` ref ${ref}` : ""}`;
 }
 
+/** A promote only fires this close to the hit's edge (inside it). */
+export const PROMOTE_EDGE_PX = 4;
+/** Two candidates within this many px of each other are a tie: no snap. */
+export const SNAP_AMBIGUITY_PX = 6;
+/** Menu rows and options snap only from this close — a row is a commitment. */
+export const MENU_SNAP_PX = 6;
+
 /**
- * The magnet decision for a CLICK-ish call (never type_at/drag_at — caret and
- * plot positions are exact by intent):
+ * The magnet decision for a CLICK-ish call (never type_at/drag_at/hover_at —
+ * caret, plot and hover positions are exact by intent):
  *
- *   PROMOTE — the point already lands on a small interactive control (a menu
- *   row, a button): click its CENTRE instead. An edge pixel and a centre pixel
- *   fire the same control, but the centre cannot slip off a rounded corner,
- *   a 2px border or an anti-aliased edge — and the hit report names what was
- *   really clicked. Text inputs are exempt (a click there is caret placement)
- *   and so are canvas/iframe surfaces (no DOM to centre on).
+ *   PROMOTE — the point sits within PROMOTE_EDGE_PX of the edge of a small
+ *   interactive control: click a point safely inside it instead (its centre).
+ *   An edge pixel can slip off a rounded corner or a 2px border; an interior
+ *   point cannot, so an interior point is the model's aim and is KEPT — the
+ *   Docs table picker is one control whose every interior point means a
+ *   different grid, and centring it turned every pick into 6×3.
  *
- *   SNAP — the point missed every control but one sits within SNAP_RADIUS_PX
- *   (probed on a ring around it): the near-miss case the logs kept showing.
- *   Re-aim at that control's centre and SAY SO in the result, so the model
- *   sees the correction instead of a silently closed menu.
+ *   SNAP — the point missed every control (the hit is not interactive at
+ *   all) and exactly one control sits clearly nearest within SNAP_RADIUS_PX
+ *   (MENU_SNAP_PX for menu rows). A gap between two controls whose distances
+ *   tie within SNAP_AMBIGUITY_PX is not a near miss of either: the point is
+ *   kept and both are named.
  *
- *   KEEP — canvas pixels, editable hosts, big wrappers, empty space: the
- *   model's exact point is respected.
+ *   KEEP — canvas pixels, editable hosts, big wrappers, interior points,
+ *   empty space, ties: the model's exact point is respected.
  */
 export function snapOrPromote(
   point: Point,
@@ -307,27 +358,46 @@ export function snapOrPromote(
 ): SnapDecision {
   if (hit && !hit.canvas && !hit.overIframe && !hit.editable && hit.ref && hit.rect) {
     const r = hit.rect;
-    if (r.w > 0 && r.h > 0 && r.w <= PROMOTE_MAX_W && r.h <= PROMOTE_MAX_H) {
-      const c = rectCenter(r);
-      if (c.x !== point.x || c.y !== point.y) {
-        return {
-          kind: "promote",
-          point: c,
-          label: `aimed at the centre of ${controlLabel(hit.tag, hit.text, hit.ref)} — the control under the point (was ${point.x},${point.y})`,
-        };
+    if (
+      hit.interactive !== false &&
+      r.w > 0 &&
+      r.h > 0 &&
+      r.w <= PROMOTE_MAX_W &&
+      r.h <= PROMOTE_MAX_H
+    ) {
+      const edge = Math.min(point.x - r.x, r.x + r.w - point.x, point.y - r.y, r.y + r.h - point.y);
+      if (edge >= 0 && edge <= PROMOTE_EDGE_PX) {
+        const c = rectCenter(r);
+        if (c.x !== point.x || c.y !== point.y) {
+          return {
+            kind: "promote",
+            point: c,
+            label: `aimed at the centre of ${controlLabel(hit.tag, hit.text, hit.ref)} — the point (${point.x},${point.y}) was on its edge`,
+          };
+        }
       }
       return { kind: "keep" };
     }
   }
+  if (hit?.interactive) return { kind: "keep" };
   if (
     snap &&
     !snap.editable &&
-    snap.distance <= SNAP_RADIUS_PX &&
+    snap.distance <= (isMenuRow(snap.role) ? MENU_SNAP_PX : SNAP_RADIUS_PX) &&
     snap.rect.w > 0 &&
     snap.rect.h > 0 &&
     snap.rect.w <= PROMOTE_MAX_W &&
     snap.rect.h <= PROMOTE_MAX_H
   ) {
+    const runner = snap.runnerUp;
+    if (runner && runner.distance - snap.distance <= SNAP_AMBIGUITY_PX) {
+      return {
+        kind: "keep",
+        note:
+          `no snap — the point (${point.x},${point.y}) is between ${controlLabel(snap.tag, snap.text, snap.ref)} (${snap.distance}px) ` +
+          `and ${controlLabel(runner.tag, runner.text, runner.ref)} (${runner.distance}px); aim at one of them`,
+      };
+    }
     const c = rectCenter(snap.rect);
     return {
       kind: "snap",
@@ -336,6 +406,10 @@ export function snapOrPromote(
     };
   }
   return { kind: "keep" };
+}
+
+function isMenuRow(role: string | undefined): boolean {
+  return !!role && (role.startsWith("menuitem") || role === "option");
 }
 
 /**

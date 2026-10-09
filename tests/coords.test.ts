@@ -5,6 +5,7 @@ import {
   countRefDrags,
   describeHit,
   looksLikeShotPixels,
+  missingTarget,
   MAX_BATCH_DRAGS,
   MAX_SEQUENCE_STEPS,
   planClick,
@@ -429,6 +430,69 @@ describe("snapOrPromote — the click magnet", () => {
     };
     expect(snapOrPromote({ x: 482, y: 302 }, menuRowHit(), snap).kind).toBe("promote");
   });
+
+  it("keeps an interior point on a small control — the model's own aim", () => {
+    // 20px in from the left edge of a 260px row: deliberate, not an edge graze.
+    expect(snapOrPromote({ x: 500, y: 316 }, menuRowHit(), null).kind).toBe("keep");
+    // A grid picker cell aimed inside one big labelled div must stay put.
+    const picker = menuRowHit({ role: undefined, rect: { x: 300, y: 200, w: 200, h: 180 } });
+    expect(snapOrPromote({ x: 330, y: 230 }, picker, null).kind).toBe("keep");
+  });
+
+  it("never promotes a hit the probe flagged as non-interactive", () => {
+    expect(
+      snapOrPromote({ x: 482, y: 302 }, menuRowHit({ interactive: false }), null).kind,
+    ).toBe("keep");
+  });
+
+  it("never snaps away from an interactive control that simply has no ref yet", () => {
+    const unreffed = menuRowHit({ ref: undefined, interactive: true });
+    const snap: SnapCandidate = {
+      ref: "40",
+      tag: "div",
+      role: "button",
+      text: "Update 'Title' to match",
+      rect: { x: 480, y: 340, w: 200, h: 28 },
+      distance: 17,
+    };
+    expect(snapOrPromote({ x: 600, y: 320 }, unreffed, snap).kind).toBe("keep");
+  });
+
+  it("keeps an ambiguous gap between two controls and names both", () => {
+    const plain: HitInfo = { tag: "div", text: "", inForm: false, canvas: false, overIframe: false };
+    const snap: SnapCandidate = {
+      ref: "51",
+      tag: "div",
+      role: "button",
+      text: "Highlight color",
+      rect: { x: 200, y: 10, w: 24, h: 24 },
+      distance: 1,
+      runnerUp: { tag: "div", text: "Text color", ref: "50", distance: 2 },
+    };
+    const d = snapOrPromote({ x: 199, y: 20 }, plain, snap);
+    expect(d.kind).toBe("keep");
+    if (d.kind === "keep") {
+      expect(d.note).toContain("Highlight color");
+      expect(d.note).toContain("Text color");
+    }
+    // A clear winner still snaps.
+    const clear = { ...snap, runnerUp: { ...snap.runnerUp!, distance: 20 } };
+    expect(snapOrPromote({ x: 199, y: 20 }, plain, clear).kind).toBe("snap");
+  });
+
+  it("snaps to menu rows only from very close", () => {
+    const plain: HitInfo = { tag: "div", text: "", inForm: false, canvas: false, overIframe: false };
+    const row: SnapCandidate = {
+      ref: "60",
+      tag: "div",
+      role: "menuitem",
+      text: "Notification settings",
+      rect: { x: 400, y: 100, w: 220, h: 30 },
+      distance: 12,
+    };
+    expect(snapOrPromote({ x: 500, y: 88 }, plain, row).kind).toBe("keep");
+    expect(snapOrPromote({ x: 500, y: 96 }, plain, { ...row, distance: 4 }).kind).toBe("snap");
+  });
 });
 
 describe("rectDistance", () => {
@@ -477,5 +541,37 @@ describe("compensateShotScroll", () => {
     expect(still.dy).toBe(0);
     const unknown = compensateShotScroll({ x: 5, y: 5 }, undefined, { scrollX: 0, scrollY: 900 });
     expect(unknown.point).toEqual({ x: 5, y: 5 });
+  });
+});
+
+describe("missingTarget", () => {
+  it("rejects a coordinate click with no point and no ref", () => {
+    expect(missingTarget("click_at", { space: "screenshot", expect: "menu opens" })).toBe("x and y (or ref)");
+    expect(missingTarget("hover_at", { x: 5 })).toBe("x and y (or ref)");
+    expect(missingTarget("click_at", { x: 5, y: Number.NaN })).toBe("x and y (or ref)");
+  });
+
+  it("accepts a point or a ref", () => {
+    expect(missingTarget("click_at", { x: 5, y: 6 })).toBeNull();
+    expect(missingTarget("click_at", { ref: "e3", dx: 4 })).toBeNull();
+    expect(missingTarget("element_at", { x: 0, y: 0, frame: 2 })).toBeNull();
+  });
+
+  it("requires a whole select_to on type_at", () => {
+    expect(missingTarget("type_at", { x: 1, y: 2, text: "a", select_to: { x: 9 } })).toBe(
+      "select_to.x and select_to.y",
+    );
+    expect(missingTarget("type_at", { x: 1, y: 2, text: "a", select_to: { x: 9, y: 3 } })).toBeNull();
+  });
+
+  it("requires both ends of a single drag, but not of a batch", () => {
+    expect(missingTarget("drag_at", { x: 1, y: 2 })).toContain("end point");
+    expect(missingTarget("drag_at", { to_x: 1, to_y: 2 })).toContain("start point");
+    expect(missingTarget("drag_at", { x: 1, y: 2, to_dx: 40 })).toBeNull();
+    expect(missingTarget("drag_at", { drags: [] })).toBeNull();
+  });
+
+  it("has no opinion on other tools", () => {
+    expect(missingTarget("click", {})).toBeNull();
   });
 });

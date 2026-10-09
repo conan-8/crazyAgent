@@ -420,11 +420,13 @@ async function broadcastWindowStatus(): Promise<void> {
  * Streamed deltas arrive per SSE chunk — broadcasting one browser message and
  * one panel re-render per chunk is what made the UI (and with it the browser)
  * stutter during long answers. Coalesce for a few ms; every other event
- * flushes the buffer first, so ordering stays exact.
+ * flushes the buffer first, so ordering stays exact. One ordered queue, not a
+ * buffer per kind: a window holding reasoning→text must not flush as
+ * text→reasoning, which splits both blocks in the transcript.
  */
 const DELTA_COALESCE_MS = 80;
-let deltaText = "";
-let deltaReasoning = "";
+type DeltaKind = "token_delta" | "reasoning_delta";
+const deltaQueue: { kind: DeltaKind; text: string }[] = [];
 let deltaTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleDeltaFlush(): void {
@@ -440,16 +442,15 @@ function flushDeltas(): void {
     clearTimeout(deltaTimer);
     deltaTimer = null;
   }
-  if (deltaText) {
-    const text = deltaText;
-    deltaText = "";
-    emitNow({ kind: "token_delta", text });
-  }
-  if (deltaReasoning) {
-    const text = deltaReasoning;
-    deltaReasoning = "";
-    emitNow({ kind: "reasoning_delta", text });
-  }
+  const pending = deltaQueue.splice(0);
+  for (const d of pending) emitNow({ kind: d.kind, text: d.text });
+}
+
+function queueDelta(kind: DeltaKind, text: string): void {
+  const tail = deltaQueue[deltaQueue.length - 1];
+  if (tail?.kind === kind) tail.text += text;
+  else deltaQueue.push({ kind, text });
+  scheduleDeltaFlush();
 }
 
 function emitNow(event: StepEvent): void {
@@ -480,14 +481,8 @@ function emitNow(event: StepEvent): void {
 }
 
 function emit(event: StepEvent): void {
-  if (event.kind === "token_delta") {
-    deltaText += event.text;
-    scheduleDeltaFlush();
-    return;
-  }
-  if (event.kind === "reasoning_delta") {
-    deltaReasoning += event.text;
-    scheduleDeltaFlush();
+  if (event.kind === "token_delta" || event.kind === "reasoning_delta") {
+    if (event.text) queueDelta(event.kind, event.text);
     return;
   }
   flushDeltas();
@@ -578,8 +573,9 @@ async function closeLogRecord(): Promise<void> {
   const rec = currentLog;
   if (!rec) return;
   if (rec.status === "running") {
-    // Stopped by the user, or the loop returned without a terminal event.
+    // The loop returned without a terminal event.
     rec.status = "done";
+    rec.outcome = stopRequested ? "stopped_by_user" : "interrupted";
     rec.durationMs = Math.max(0, Date.now() - rec.startedAt);
   }
   if (logFlushTimer) {
@@ -1558,7 +1554,7 @@ async function startRun(
     // windowless, which would put the agent back on whatever is focused.
     const message = `could not open the agent's window: ${describeToolFailure(err)}`;
     emit({ kind: "error", message });
-    emit({ kind: "done", summary: message });
+    emit({ kind: "done", summary: message, outcome: "error" });
     return;
   }
   const allowOutside = scope?.allowOutside === true;

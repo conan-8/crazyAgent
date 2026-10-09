@@ -8,6 +8,9 @@ import {
   parseOpenAiUsage,
   isThinkingKnobError,
   stripThinkingKnobs,
+  createSseDecoder,
+  parseOpenAiReply,
+  parseAnthropicReply,
 } from "../extension/src/background/agent/llm";
 import type { LlmRequest } from "../extension/src/shared/llm";
 
@@ -723,5 +726,104 @@ describe("SSE aggregators", () => {
     const agg = openAiAggregator();
     agg.feed(`data: ${JSON.stringify({ choices: [{ delta: { content: "Hi" } }] })}`);
     expect(agg.result().reasoning).toBeUndefined();
+  });
+});
+
+describe("stream instrumentation (corruption evidence)", () => {
+  it("counts non-data lines and keeps a sample, without breaking the parse", () => {
+    const agg = openAiAggregator();
+    agg.feed(`data: ${JSON.stringify({ id: "gen-abcdef", provider: "Z.AI", model: "glm", choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "click_at", arguments: '{"x":5' } }] } }] })}`);
+    agg.feed(',"y":146');
+    agg.feed(": OPENROUTER PROCESSING");
+    agg.feed("event: message");
+    agg.feed(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "}" } }] }, finish_reason: "tool_calls" }] })}`);
+    const r = agg.result();
+    expect(r.toolCalls).toEqual([{ id: "c1", name: "click_at", args: { x: 5 } }]);
+    expect(r.rawArgs).toEqual({ c1: '{"x":5}' });
+    expect(r.upstream).toMatchObject({
+      streamed: true,
+      provider: "Z.AI",
+      model: "glm",
+      id: "gen-abcdef",
+      nonDataLines: 1,
+      badJsonLines: 0,
+    });
+    expect(r.upstream?.samples?.[0]).toContain(',"y":146');
+  });
+
+  it("re-joins a data payload split across two data lines", () => {
+    const sse = createSseDecoder();
+    const whole = JSON.stringify({ choices: [{ delta: { content: "hello world" } }] });
+    const cut = whole.indexOf("world");
+    expect(sse.decode(`data: ${whole.slice(0, cut)}`)).toBeNull();
+    expect(sse.decode(`data: ${whole.slice(cut)}`)).toEqual(JSON.parse(whole));
+    expect(sse.info()).toMatchObject({ joinedLines: 1, badJsonLines: 0 });
+  });
+
+  it("counts an unjoinable payload as bad JSON when the event ends", () => {
+    const sse = createSseDecoder();
+    sse.decode("data: {broken");
+    sse.decode("");
+    sse.decode("data: [DONE]");
+    expect(sse.info()).toMatchObject({ badJsonLines: 1, joinedLines: 0 });
+  });
+
+  it("reads usage from an include_usage chunk with empty choices", () => {
+    const agg = openAiAggregator();
+    agg.feed(`data: ${JSON.stringify({ choices: [{ delta: { content: "hi" } }] })}`);
+    agg.feed(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 100, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 60 } } })}`);
+    expect(agg.result().usage).toMatchObject({ inputTokens: 100, outputTokens: 5, cachedInputTokens: 60 });
+  });
+
+  it("parses a non-streamed OpenAI reply into the same shape", () => {
+    const texts: string[] = [];
+    const r = parseOpenAiReply(
+      {
+        id: "gen-1",
+        provider: "Z.AI",
+        choices: [
+          {
+            message: {
+              content: "ok",
+              tool_calls: [{ id: "t1", function: { name: "click_at", arguments: '{"x":1,"y":2}' } }],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 3 },
+      },
+      (t) => texts.push(t),
+    );
+    expect(r.toolCalls).toEqual([{ id: "t1", name: "click_at", args: { x: 1, y: 2 } }]);
+    expect(r.stopReason).toBe("tool_calls");
+    expect(r.upstream).toMatchObject({ streamed: false, provider: "Z.AI" });
+    expect(texts).toEqual(["ok"]);
+  });
+
+  it("parses a non-streamed Anthropic reply into the same shape", () => {
+    const r = parseAnthropicReply({
+      id: "msg_1",
+      model: "claude",
+      content: [
+        { type: "thinking", thinking: "hm", signature: "sig" },
+        { type: "text", text: "go" },
+        { type: "tool_use", id: "tu1", name: "click", input: { ref: "3" } },
+      ],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 9, output_tokens: 2 },
+    });
+    expect(r.toolCalls).toEqual([{ id: "tu1", name: "click", args: { ref: "3" } }]);
+    expect(r.reasoningSignature).toBe("sig");
+    expect(r.text).toBe("go");
+    expect(r.upstream).toMatchObject({ streamed: false, model: "claude" });
+  });
+
+  it("asks for a non-streamed reply only when told to", () => {
+    const req: LlmRequest = { system: "s", messages: [{ role: "user", content: "hi" }], tools: [], maxTokens: 10 };
+    expect(buildOpenAiBody(req, "m")).toMatchObject({ stream: true });
+    const off = buildOpenAiBody({ ...req, stream: false }, "m") as Record<string, unknown>;
+    expect(off.stream).toBe(false);
+    expect(off.stream_options).toBeUndefined();
+    expect(buildAnthropicBody({ ...req, stream: false }, "m")).toMatchObject({ stream: false });
   });
 });

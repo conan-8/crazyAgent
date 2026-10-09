@@ -298,6 +298,17 @@ describe("reading a run", () => {
   it("reports the stored status when the run was not stopped", () => {
     expect(runOutcome(failedRun())).toBe("done");
   });
+
+  it("prefers the recorded outcome over the summary heuristic", () => {
+    const rec = failedRun();
+    rec.outcome = "stopped_by_user";
+    expect(runOutcome(rec)).toBe("stopped");
+    rec.outcome = "completed";
+    rec.turns[rec.turns.length - 1]!.summary = "stopped looking — found it";
+    expect(runWasStopped(rec)).toBe(false);
+    rec.outcome = "interrupted";
+    expect(runOutcome(rec)).toBe("interrupted");
+  });
 });
 
 describe("shouldAutoReview", () => {

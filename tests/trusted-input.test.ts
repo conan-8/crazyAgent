@@ -8,6 +8,7 @@ import {
   keyEventParams,
   MODIFIER_BITS,
   parseKeyCombo,
+  leadKeyCombo,
   planTyping,
   shouldUseTrustedInput,
   trustedInputFailure,
@@ -148,18 +149,24 @@ describe("keyEventParams", () => {
 });
 
 describe("planTyping", () => {
-  it("sends one insertText for a plain run", () => {
-    expect(planTyping("hello docs")).toEqual([{ kind: "insertText", text: "hello docs" }]);
+  it("leads with a real keystroke (it replaces a selection), then one insertText", () => {
+    expect(planTyping("hello docs")).toEqual([
+      { kind: "key", key: "h", text: "h" },
+      { kind: "insertText", text: "ello docs" },
+    ]);
+    expect(planTyping("x")).toEqual([{ kind: "key", key: "x", text: "x" }]);
   });
 
   it("turns newlines into real Enter keys, so paragraphs are paragraphs", () => {
     expect(planTyping("one\ntwo")).toEqual([
-      { kind: "insertText", text: "one" },
+      { kind: "key", key: "o", text: "o" },
+      { kind: "insertText", text: "ne" },
       { kind: "key", key: "Enter" },
       { kind: "insertText", text: "two" },
     ]);
     expect(planTyping("one\r\ntwo\r\nthree")).toEqual([
-      { kind: "insertText", text: "one" },
+      { kind: "key", key: "o", text: "o" },
+      { kind: "insertText", text: "ne" },
       { kind: "key", key: "Enter" },
       { kind: "insertText", text: "two" },
       { kind: "key", key: "Enter" },
@@ -167,10 +174,23 @@ describe("planTyping", () => {
     ]);
   });
 
+  it("only the very first step leads: a leading Enter already replaces the selection", () => {
+    expect(planTyping("\nab")).toEqual([
+      { kind: "key", key: "Enter" },
+      { kind: "insertText", text: "ab" },
+    ]);
+  });
+
+  it("falls back to insertText when the first character has no key", () => {
+    expect(planTyping("éclair")).toEqual([{ kind: "insertText", text: "éclair" }]);
+    expect(planTyping("@name")).toEqual([{ kind: "insertText", text: "@name" }]);
+    expect(planTyping("\tx")).toEqual([{ kind: "insertText", text: "\tx" }]);
+  });
+
   it("does not invent empty insertText steps", () => {
     expect(planTyping("\n")).toEqual([{ kind: "key", key: "Enter" }]);
     expect(planTyping("a\n\nb")).toEqual([
-      { kind: "insertText", text: "a" },
+      { kind: "key", key: "a", text: "a" },
       { kind: "key", key: "Enter" },
       { kind: "key", key: "Enter" },
       { kind: "insertText", text: "b" },
@@ -179,11 +199,33 @@ describe("planTyping", () => {
 
   it("submit means a trailing Enter, even with nothing to type", () => {
     expect(planTyping("q", { submit: true })).toEqual([
-      { kind: "insertText", text: "q" },
+      { kind: "key", key: "q", text: "q" },
       { kind: "key", key: "Enter" },
     ]);
     expect(planTyping("", { submit: true })).toEqual([{ kind: "key", key: "Enter" }]);
     expect(planTyping("")).toEqual([]);
+  });
+});
+
+describe("leadKeyCombo", () => {
+  it("types exactly the character, for every printable ASCII key but @", () => {
+    for (let c = 0x20; c < 0x7f; c++) {
+      const ch = String.fromCharCode(c);
+      const combo = leadKeyCombo(ch);
+      if (ch === "@") {
+        expect(combo).toBeNull();
+        continue;
+      }
+      expect(combo, `no lead key for ${JSON.stringify(ch)}`).not.toBeNull();
+      const p = parsed(combo as string);
+      expect(p.text, `${JSON.stringify(ch)} via ${combo}`).toBe(ch);
+      expect(p.key).toBe(ch);
+      expect(p.modifiers & ~MODIFIER_BITS.shift).toBe(0);
+    }
+  });
+
+  it("refuses control characters and non-ASCII", () => {
+    for (const ch of ["\n", "\r", "\t", "é", "中", "", "ab"]) expect(leadKeyCombo(ch)).toBeNull();
   });
 });
 
@@ -262,6 +304,16 @@ describe("shouldUseTrustedInput", () => {
         topCanvases: 3,
         topUrl: "https://docs.google.com/document/d/ABC/edit",
       }).use,
+    ).toBe(false);
+  });
+
+  it("routes a ref-less key on a canvas editor page even when focus is not editable", () => {
+    // After a menu/toolbar click focus sits on a plain host; a DOM key is ignored there.
+    const afterMenu = { editable: false, topUrl: "https://docs.google.com/document/d/ABC/edit" };
+    expect(shouldUseTrustedInput({ ...afterMenu, refless: true })).toMatchObject({ use: true });
+    expect(shouldUseTrustedInput(afterMenu).use).toBe(false);
+    expect(
+      shouldUseTrustedInput({ editable: false, refless: true, topUrl: "https://example.com/" }).use,
     ).toBe(false);
   });
 

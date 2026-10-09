@@ -321,17 +321,20 @@ export interface ReviewTrigger {
 }
 
 /**
- * `stopped` is not a stored status: a run the user aborted (or that hit the
- * step budget) closes as `done` with a summary saying so — see loop.ts
- * `finish()`. The effective outcome is what a lesson should record.
+ * A run the user aborted (or that hit the step budget) closes with status
+ * `done`; `rec.outcome` says how it really ended. Records written before the
+ * outcome existed fall back to the summary loop.ts `finish()` writes.
  */
 export function runWasStopped(rec: LogTurnRecord): boolean {
+  if (rec.outcome) return rec.outcome === "stopped_by_user" || rec.outcome === "capped";
   const summary = [...rec.turns].reverse().find((t) => t.summary)?.summary ?? "";
   return /^stopped\b/i.test(summary.trim());
 }
 
-/** Outcome to record for a run: done / stopped / error. */
+/** Outcome to record for a run: done / stopped / interrupted / error. */
 export function runOutcome(rec: LogTurnRecord): string {
+  if (rec.outcome === "error") return "error";
+  if (rec.outcome === "interrupted") return "interrupted";
   return runWasStopped(rec) ? "stopped" : rec.status;
 }
 

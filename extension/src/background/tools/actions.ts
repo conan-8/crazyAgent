@@ -43,6 +43,7 @@ async function decideInputRoute(
   const hints: InputHints = {
     explicit,
     ...(inspected && "hints" in inspected ? inspected.hints : {}),
+    refless: !ref,
   };
   return shouldUseTrustedInput(hints);
 }

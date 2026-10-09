@@ -44,8 +44,9 @@ that risk.
   one tab over ("Hand this tab to the agent") moves that tab into the agent's
   window, which is a deliberate, visible user action.
 - **Cooperative stop** between tool calls (interruptible step waits).
-- **Step cap** (default 40) bounds runaway loops; malformed tool calls abort
-  after 3 consecutive failures.
+- **Step cap** (default 40) bounds runaway loops; malformed tool calls come
+  back as errors for the model to fix, and an exact call that fails twice is
+  refused outright (identical-call ban).
 - **Checkpointing** (`chrome.storage.session`) makes runs auditable and
   resumable; history of recent tasks is kept (`baHistory`).
 

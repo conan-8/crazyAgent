@@ -75,7 +75,12 @@ export type ActionRequest =
       kind?: "auto" | "text" | "select" | "radio";
     }
   /** Read an element's current text/value — by label candidates or CSS selector. */
-  | { action: "queryText"; labels?: string[]; selector?: string };
+  | { action: "queryText"; labels?: string[]; selector?: string }
+  /** Short visible leaf texts inside find-bar-like containers (the match counter lives there). */
+  | { action: "findTexts" }
+  /** The first VISIBLE match of each selector: its viewport rect and text. For
+   *  app-internal widgets no ref points at (a grid picker's mousecatcher). */
+  | { action: "boxes"; selectors: string[] };
 
 export interface ActionResult {
   ok: boolean;
@@ -170,6 +175,10 @@ export class Actions {
         return this.#fillField(req.labels ?? [], req.value, req.kind ?? "auto");
       case "queryText":
         return this.#queryText(req.labels, req.selector);
+      case "findTexts":
+        return { ok: true, data: { texts: findBarTexts() } };
+      case "boxes":
+        return { ok: true, data: { boxes: boxesOf(req.selectors ?? []) } };
       case "authSignals":
         return { ok: true, data: authSignalsOf() };
       case "readEl": {
@@ -268,10 +277,10 @@ export class Actions {
             rect: rectOf(el),
           }
         : null;
-    // The ring search only matters when the point is NOT already on a ref'd
-    // control — that is the near-miss case the magnet exists for. Skipped
-    // otherwise, so the common hit pays no extra elementFromPoint calls.
-    const snap = hit?.ref ? null : this.#snapNear(point, el, radius);
+    // The ring search only matters when the point is NOT already on a
+    // control — ref'd or not. A control with no ref yet is still the target:
+    // ringing past it is how a click snapped 17px onto a neighbouring button.
+    const snap = hit?.ref || hit?.interactive ? null : this.#snapNear(point, el, radius);
     const viewport: ViewportInfo = {
       width: window.innerWidth,
       height: window.innerHeight,
@@ -283,18 +292,23 @@ export class Actions {
 
   /**
    * Ring-probe around a point for the nearest interactive element — the
-   * magnet's candidate when the point itself missed every control. Two rings
-   * × 8 directions of `document.elementFromPoint` (each O(1) hit-testing),
-   * deduped, bounded by SNAP_RADIUS_PX. Overlays and popups are found
-   * wherever they live in the tree (no ancestor walk), which is exactly the
-   * floating-menu case the logged near-misses came from.
+   * magnet's candidate when the point itself missed every control. Rings at
+   * 6, 12, 24… px (doubling up to `radius`) × 8 directions of
+   * `document.elementFromPoint` (each O(1) hit-testing), deduped. The
+   * runner-up is tracked so a point in the gap between two controls reads as
+   * a tie, not a near miss of whichever was probed first. Overlays and popups
+   * are found wherever they live in the tree (no ancestor walk), which is
+   * exactly the floating-menu case the logged near-misses came from.
    */
   #snapNear(point: Point, exclude: Element | null, radius = SNAP_RADIUS_PX): SnapCandidate | null {
     const reach = Math.max(1, Math.min(Math.round(radius), 200));
-    let best: SnapCandidate | null = null;
+    const rings: number[] = [];
+    for (let r = 6; r < reach; r *= 2) rings.push(r);
+    rings.push(reach);
+    type Found = { el: Element; rect: SnapCandidate["rect"]; distance: number };
+    const found: Found[] = [];
     const seen = new Set<Element>();
     if (exclude) seen.add(exclude);
-    const rings = reach <= 12 ? [reach] : [12, Math.round(reach / 2), reach];
     for (const r of rings) {
       for (let i = 0; i < 8; i++) {
         const a = (Math.PI * 2 * i) / 8;
@@ -304,7 +318,7 @@ export class Actions {
         try {
           cand = document.elementFromPoint(px, py);
         } catch {
-          return best; // hit-testing unavailable — no magnet, honest miss
+          return null; // hit-testing unavailable — no magnet, honest miss
         }
         if (!cand) continue;
         const inter = nearestInteractive(cand);
@@ -314,20 +328,32 @@ export class Actions {
         if (rect.w <= 0 || rect.h <= 0) continue;
         const distance = rectDistance(point, rect);
         if (distance > reach) continue;
-        if (best && best.distance <= distance) continue;
-        const p = probeOf(inter);
-        best = {
-          ref: this.registry.refFor(inter) ?? undefined,
-          tag: p.tag,
-          role: p.role,
-          text: p.text,
-          editable: isEditableHost(inter) || undefined,
-          rect,
-          distance,
-        };
+        found.push({ el: inter, rect, distance });
       }
     }
-    return best;
+    if (!found.length) return null;
+    found.sort((a, b) => a.distance - b.distance);
+    const [best, second] = found;
+    const p = probeOf(best!.el);
+    const candidate: SnapCandidate = {
+      ref: this.registry.refFor(best!.el) ?? undefined,
+      tag: p.tag,
+      role: p.role,
+      text: p.text,
+      editable: isEditableHost(best!.el) || undefined,
+      rect: best!.rect,
+      distance: best!.distance,
+    };
+    if (second) {
+      const q = probeOf(second.el);
+      candidate.runnerUp = {
+        tag: q.tag,
+        text: q.text,
+        ref: this.registry.refFor(second.el) ?? undefined,
+        distance: second.distance,
+      };
+    }
+    return candidate;
   }
 
   /**
@@ -1003,7 +1029,30 @@ function collectInputHints(el: HTMLElement): InputHints {
     ),
     topCanvases,
     sinkSignature,
+    inPopup: popupOpen(el),
   };
+}
+
+const POPUP_ROLES = '[role="menu"],[role="dialog"],[role="alertdialog"],[role="listbox"]';
+
+/** Focus is in, or the page shows, an open menu/dialog — keys belong to it, not the editor. */
+function popupOpen(el: HTMLElement): boolean {
+  if (el.closest(POPUP_ROLES)) return true;
+  const docs: Document[] = [el.ownerDocument];
+  try {
+    const top = el.ownerDocument.defaultView?.top?.document;
+    if (top && top !== docs[0]) docs.push(top);
+  } catch {
+    // cross-origin top: the frame's own document is all we can see
+  }
+  for (const d of docs) {
+    for (const p of d.querySelectorAll<HTMLElement>(POPUP_ROLES)) {
+      if (p.getClientRects().length === 0) continue;
+      if (d.defaultView?.getComputedStyle(p).visibility === "hidden") continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 function safeRect(el: HTMLElement): { width: number; height: number } | null {
@@ -1431,6 +1480,63 @@ function makeDragEvent(type: string, dt: DataTransfer): Event {
  * along so a caller can carry an earlier caret point across a scroll.
  * Collaborators' carets carry a visible name flag — the user's own does not.
  */
+/**
+ * Short visible leaf texts inside any element whose class or id mentions
+ * "find" — matched by shape, not by an exact class, because the find bar's
+ * class names are app-internal and have already drifted once.
+ */
+function findBarTexts(): string[] {
+  const out: string[] = [];
+  const seen = new Set<Element>();
+  for (const box of document.querySelectorAll('[class*="find" i], [id*="find" i]')) {
+    for (const el of [box, ...box.querySelectorAll("*")]) {
+      if (seen.has(el) || el.childElementCount > 0) continue;
+      seen.add(el);
+      const text = collapse(el.textContent ?? "");
+      if (!text || text.length > 24) continue;
+      if ((el as HTMLElement).getClientRects?.().length === 0) continue;
+      out.push(text);
+      if (out.length >= 40) return out;
+    }
+  }
+  return out;
+}
+
+/** One selector's first visible match, as a viewport rect plus its text. */
+export interface SelectorBox {
+  selector: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text?: string;
+}
+
+const MAX_BOX_SELECTORS = 8;
+
+function boxesOf(selectors: string[]): SelectorBox[] {
+  const out: SelectorBox[] = [];
+  for (const selector of selectors.slice(0, MAX_BOX_SELECTORS)) {
+    let matches: NodeListOf<Element>;
+    try {
+      matches = document.querySelectorAll(selector);
+    } catch {
+      continue; // an invalid selector skips itself rather than failing the read
+    }
+    for (const el of matches) {
+      const node = el as HTMLElement;
+      const r = node.getBoundingClientRect?.();
+      // Hidden-but-present is the normal state of a closed menu: only a laid-out
+      // box with an area is something a stroke could land on.
+      if (!r || r.width <= 0 || r.height <= 0 || node.getClientRects?.().length === 0) continue;
+      const text = collapse(node.textContent ?? "").slice(0, 60);
+      out.push({ selector, x: r.x, y: r.y, w: r.width, h: r.height, ...(text ? { text } : {}) });
+      break;
+    }
+  }
+  return out;
+}
+
 function caretRectOf(): { x: number; y: number; width: number; height: number; scrollTop: number; source: string } | null {
   const scroller = document.querySelector(".kix-appview-editor") as HTMLElement | null;
   const scrollTop = scroller?.scrollTop ?? document.scrollingElement?.scrollTop ?? 0;

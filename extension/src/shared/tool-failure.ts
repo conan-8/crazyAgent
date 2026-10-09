@@ -94,11 +94,17 @@ function withAdvice(layer: FailureLayer, detail: string, advice: string): string
  * name both a transport and an injection problem).
  */
 export function classifyFailure(input: unknown): ToolFailure {
-  const detail = messageOf(input);
+  // Arg shapers prefix their text with "ERROR:" and the loop adds its own,
+  // which used to read "ERROR: UNKNOWN-FAILED: ERROR: …".
+  const detail = messageOf(input).replace(/^ERROR:\s*/, "");
   const text = detail.toLowerCase();
 
   // --- the model's own arguments -------------------------------------------
-  if (/missing required parameter|must be a (number|string|boolean)/.test(text)) {
+  if (
+    /missing required parameter|must be an? (number|string|boolean|finite number|integer|object|non-empty)|must be one of/.test(
+      text,
+    )
+  ) {
     return {
       layer: "input",
       detail,
@@ -194,7 +200,7 @@ export function isClassified(message: string): boolean {
  * specific guidance is never replaced by the generic one.
  */
 export function describeToolFailure(input: unknown): string {
-  const detail = messageOf(input);
+  const detail = messageOf(input).replace(/^ERROR:\s*/, "");
   if (isClassified(detail)) return detail;
-  return classifyFailure(input).message;
+  return classifyFailure(detail).message;
 }

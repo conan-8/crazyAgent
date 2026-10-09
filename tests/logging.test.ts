@@ -251,6 +251,23 @@ describe("run log store helpers", () => {
       durationMs: 200,
     });
   });
+
+  it("records how the run ended — a user stop is not a plain done", () => {
+    const stopped = newTurnRecord("long task", { at: 0 });
+    foldLogEvent(stopped, { kind: "done", summary: "stopped at step 9", outcome: "stopped_by_user" }, 5);
+    expect(stopped.status).toBe("done");
+    expect(stopped.outcome).toBe("stopped_by_user");
+    expect(summarizeRecord(stopped).outcome).toBe("stopped_by_user");
+    expect(toMarkdown([stopped])).toContain("done (stopped by user)");
+
+    const failed = newTurnRecord("bad task", { at: 0 });
+    foldLogEvent(failed, { kind: "error", message: "boom" }, 5);
+    expect(failed.outcome).toBe("error");
+
+    const legacy = newTurnRecord("old", { at: 0 });
+    foldLogEvent(legacy, { kind: "done", summary: "fine" }, 5);
+    expect(legacy.outcome).toBeUndefined();
+  });
 });
 
 describe("run log export", () => {

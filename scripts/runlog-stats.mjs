@@ -63,7 +63,9 @@ function fitLatency(turns) {
 function analyse(records) {
   const turns = records.flatMap((r) => r.turns ?? []);
   const tools = turns.flatMap((t) => t.tools ?? []);
-  const stats = records.map((r) => (r.turns ?? []).find((t) => t.stats)?.stats).filter(Boolean);
+  const stats = records
+    .map((r) => [...(r.turns ?? [])].reverse().find((t) => t.stats)?.stats)
+    .filter(Boolean);
 
   let llmMs = 0;
   let toolMs = 0;
@@ -125,6 +127,82 @@ function analyse(records) {
   const cached = stats.filter((x) => x.cachedInputTokens !== undefined);
   const cacheReported = cached.reduce((s, x) => s + x.cachedInputTokens, 0);
   const cacheInput = cached.reduce((s, x) => s + x.inputTokens, 0);
+  // Per-turn usage is the honest cache number: the run-level stats line only
+  // carries a cache figure when EVERY step reported one, so a run where some
+  // steps were silent showed "no cache numbers" while most turns had them.
+  // Turn usage holds RUNNING totals, so the newest turn that still carried a
+  // cache figure is the cumulative answer up to that point.
+  let turnCache = null;
+  for (const r of records) {
+    const ts = (r.turns ?? []).filter((t) => t.usage);
+    const lastIdx = ts.findLastIndex((t) => t.usage.cachedInputTokens !== undefined);
+    if (lastIdx < 0) continue;
+    const u = ts[lastIdx].usage;
+    turnCache ??= { turns: 0, of: 0, tokens: 0, input: 0 };
+    turnCache.turns += lastIdx + 1;
+    turnCache.of += (r.turns ?? []).length;
+    turnCache.tokens += u.cachedInputTokens;
+    turnCache.input += u.inputTokens ?? 0;
+  }
+
+  // How each run ended. Records before the outcome field: the loop's own
+  // summary wording ("stopped at step N", "stopped: reached the … budget").
+  const outcomes = new Map();
+  for (const r of records) {
+    const summary = [...(r.turns ?? [])].reverse().find((t) => t.summary)?.summary ?? "";
+    const o =
+      r.outcome ??
+      (/^stopped: reached/.test(summary)
+        ? "capped (inferred)"
+        : /^stopped\b/.test(summary)
+          ? "stopped_by_user (inferred)"
+          : r.status);
+    outcomes.set(o, (outcomes.get(o) ?? 0) + 1);
+  }
+
+  // Calls that executed nothing: dropped as malformed before history, or
+  // refused by the stuck guard (BLOCKED). Plus the in-band nudges they caused.
+  const malformedByTool = new Map();
+  let malformed = 0;
+  for (const t of turns) {
+    for (const m of t.malformed ?? []) {
+      malformed++;
+      malformedByTool.set(m.name, (malformedByTool.get(m.name) ?? 0) + 1);
+    }
+  }
+  const blocked = tools.filter((c) => typeof c.result === "string" && /\bBLOCKED\b/.test(c.result)).length;
+  const notes = turns.flatMap((t) => t.notes ?? []).map((n) => n.message ?? "");
+  const stallNudges = notes.filter((m) => /steps in a row executed nothing/.test(m)).length;
+  const unstreamedFallbacks = notes.filter((m) => /go out non-streamed/.test(m)).length;
+
+  // The corruption table: malformed-call rate per upstream (and stream mode),
+  // and on salvage re-asked turns vs the rest. One upstream far above the
+  // others points at the provider; a flat rate everywhere points at the model.
+  const byUpstream = new Map();
+  const bucket = (key) => {
+    const e = byUpstream.get(key) ?? { turns: 0, bad: 0, calls: 0, anomalies: 0, samples: [] };
+    byUpstream.set(key, e);
+    return e;
+  };
+  for (const t of turns) {
+    const u = t.upstream;
+    const isSalvage = (t.notes ?? []).some((n) => /^reasoning overran/.test(n.message ?? ""));
+    const keys = [
+      u ? `${u.provider ?? u.model ?? "?"}${u.streamed === false ? " [unstreamed]" : ""}` : "(not recorded)",
+      isSalvage ? "· salvage re-ask turns" : "· ordinary turns",
+    ];
+    for (const key of keys) {
+      const e = bucket(key);
+      e.turns++;
+      const n = (t.malformed ?? []).length;
+      if (n) e.bad++;
+      e.calls += n;
+      if (u) {
+        e.anomalies += (u.nonDataLines ?? 0) + (u.badJsonLines ?? 0) + (u.joinedLines ?? 0);
+        for (const s of u.samples ?? []) if (e.samples.length < 3) e.samples.push(s);
+      }
+    }
+  }
 
   return {
     runs: records.length,
@@ -148,6 +226,14 @@ function analyse(records) {
     inputTokens,
     outputTokens,
     cache: cached.length ? { tokens: cacheReported, input: cacheInput } : null,
+    turnCache,
+    outcomes,
+    malformed,
+    malformedByTool,
+    blocked,
+    stallNudges,
+    unstreamedFallbacks,
+    byUpstream,
     prefixTokens: stats.map((x) => x.prefixTokens).filter(Boolean).at(-1) ?? 0,
     fit: fitLatency(turns),
     waste,
@@ -195,6 +281,25 @@ function report(name, a) {
     );
   } else {
     console.log("cache: the endpoint reported no cache numbers for these runs");
+  }
+  if (a.turnCache) {
+    const c = a.turnCache;
+    console.log(
+      `cache (running total): ${c.tokens.toLocaleString()} of ${c.input.toLocaleString()} input tokens (${pct(c.tokens, c.input)}) through ${c.turns}/${c.of} turns${c.turns < c.of ? " — later turns reported no cache figure" : ""}`,
+    );
+  }
+  console.log(`outcome: ${[...a.outcomes].map(([o, n]) => (n > 1 ? `${o} ×${n}` : o)).join(", ")}`);
+  console.log(
+    `executed nothing: ${a.malformed} malformed call(s) dropped${a.malformed ? ` (${[...a.malformedByTool].map(([n, k]) => `${n} ${k}`).join(", ")})` : ""} · ${a.blocked} BLOCKED · ${a.stallNudges} stall nudges · ${a.unstreamedFallbacks} non-streamed fallbacks`,
+  );
+  if ([...a.byUpstream.keys()].some((k) => k !== "(not recorded)" && !k.startsWith("·"))) {
+    console.log("malformed calls by upstream:");
+    for (const [k, e] of [...a.byUpstream].sort((x, y) => y[1].turns - x[1].turns)) {
+      console.log(
+        `  ${k.padEnd(34)} turns=${String(e.turns).padStart(4)}  bad turns=${String(e.bad).padStart(3)} (${pct(e.bad, e.turns)})  calls=${String(e.calls).padStart(3)}  SSE anomalies=${e.anomalies}`,
+      );
+      for (const s of e.samples) console.log(`      sample: ${JSON.stringify(s)}`);
+    }
   }
   if (a.prefixTokens) {
     console.log(
@@ -246,6 +351,8 @@ if (results.length > 1) {
     );
   }
   row("screenshot-only turns", before.screenshotOnly, after.screenshotOnly);
+  row("malformed calls", before.malformed, after.malformed);
+  row("BLOCKED results", before.blocked, after.blocked);
   row("reasoning tokens", Math.round(before.waste.reasoningChars / 4), Math.round(after.waste.reasoningChars / 4));
   row("ceiling cuts", before.waste.overruns, after.waste.overruns);
   if (before.fit && after.fit) {
@@ -256,6 +363,14 @@ if (results.length > 1) {
       "cache hit %",
       Math.round((100 * before.cache.tokens) / before.cache.input),
       Math.round((100 * after.cache.tokens) / after.cache.input),
+      false,
+    );
+  }
+  if (before.turnCache && after.turnCache) {
+    row(
+      "cache hit % (per turn)",
+      Math.round((100 * before.turnCache.tokens) / Math.max(1, before.turnCache.input)),
+      Math.round((100 * after.turnCache.tokens) / Math.max(1, after.turnCache.input)),
       false,
     );
   }

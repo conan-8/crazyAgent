@@ -18,9 +18,28 @@ const splitText = (text, size) => {
   return out.length ? out : [""];
 };
 
+const DROP_HINT = "NOT executed and NOT kept in history";
+
+// A dropped malformed call leaves no tool result, only the harness hint, so
+// the hint also counts as one consumed script step.
+function countDropHints(body) {
+  let n = 0;
+  for (const m of body.messages ?? []) {
+    if (m.role !== "user") continue;
+    if (typeof m.content === "string") {
+      if (m.content.includes(DROP_HINT)) n++;
+      continue;
+    }
+    for (const block of Array.isArray(m.content) ? m.content : []) {
+      if (block.type === "text" && String(block.text).includes(DROP_HINT)) n++;
+    }
+  }
+  return n;
+}
+
 function countToolResults(body, kind) {
   if (kind === "openai") {
-    return (body.messages ?? []).filter((m) => m.role === "tool").length;
+    return (body.messages ?? []).filter((m) => m.role === "tool").length + countDropHints(body);
   }
   let n = 0;
   for (const m of body.messages ?? []) {
@@ -28,7 +47,7 @@ function countToolResults(body, kind) {
       if (block.type === "tool_result") n++;
     }
   }
-  return n;
+  return n + countDropHints(body);
 }
 
 function sse(res, obj) {
