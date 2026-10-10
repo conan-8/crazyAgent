@@ -4,6 +4,7 @@ import {
   compensateShotScroll,
   countRefDrags,
   describeHit,
+  isSelectAll,
   looksLikeShotPixels,
   missingTarget,
   MAX_BATCH_DRAGS,
@@ -13,6 +14,7 @@ import {
   planHover,
   rectDistance,
   screenshotToViewportPoint,
+  selectsThenOverwrites,
   shapeCoordArgs,
   shapeDragList,
   shapeModifiers,
@@ -573,5 +575,53 @@ describe("missingTarget", () => {
 
   it("has no opinion on other tools", () => {
     expect(missingTarget("click", {})).toBeNull();
+  });
+});
+
+// The sequence that wiped a real document: click a dialog field, Escape (which
+// closed the dialog), Control+a (which then selected the DOCUMENT), type a URL
+// over nine minutes of work — every step reporting success.
+describe("the select-all guard", () => {
+  const shaped = (steps: unknown[]) => {
+    const out = shapeSequenceSteps({ steps });
+    if (!out.ok) throw new Error(out.error);
+    return out.steps;
+  };
+
+  it("recognises a select-all combo in every spelling the model writes", () => {
+    for (const combo of ["Control+a", "control+A", "Ctrl+a", "Meta+a", "Command+a"]) {
+      expect(isSelectAll(combo)).toBe(true);
+    }
+    for (const combo of ["Control+Shift+a", "Control+b", "a", "", undefined]) {
+      expect(isSelectAll(combo)).toBe(false);
+    }
+  });
+
+  it("flags the run's own sequence at the step that types over the selection", () => {
+    const steps = shaped([
+      { click: { ref: "325" } },
+      { key: "Escape" },
+      { key: "Control+a" },
+      { type: "https://upload.wikimedia.org/wikipedia/commons/3/3a/Cat03.jpg" },
+      { wait_ms: 1500 },
+      { click: { ref: "328" } },
+    ]);
+    expect(selectsThenOverwrites(steps, 2)).toBe(3);
+  });
+
+  it("flags a delete as readily as a type", () => {
+    expect(selectsThenOverwrites(shaped([{ key: "Control+a" }, { key: "Backspace" }]), 0)).toBe(1);
+    expect(selectsThenOverwrites(shaped([{ key: "Control+a" }, { key: "Delete" }]), 0)).toBe(1);
+  });
+
+  it("leaves a select-all that only formats, or that a click interrupts, alone", () => {
+    expect(selectsThenOverwrites(shaped([{ key: "Control+a" }, { key: "Control+b" }]), 0)).toBeNull();
+    expect(
+      selectsThenOverwrites(
+        shaped([{ key: "Control+a" }, { click: { x: 1, y: 2 } }, { type: "safe" }]),
+        0,
+      ),
+    ).toBeNull();
+    expect(selectsThenOverwrites(shaped([{ key: "Control+a" }]), 0)).toBeNull();
   });
 });

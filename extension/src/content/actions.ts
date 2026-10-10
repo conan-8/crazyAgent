@@ -78,6 +78,8 @@ export type ActionRequest =
   | { action: "queryText"; labels?: string[]; selector?: string }
   /** Short visible leaf texts inside find-bar-like containers (the match counter lives there). */
   | { action: "findTexts" }
+  /** Is the app's menu bar actually on screen? Docs' full-screen mode hides it. */
+  | { action: "menuBarState" }
   /** The first VISIBLE match of each selector: its viewport rect and text. For
    *  app-internal widgets no ref points at (a grid picker's mousecatcher). */
   | { action: "boxes"; selectors: string[] };
@@ -179,6 +181,8 @@ export class Actions {
         return { ok: true, data: { texts: findBarTexts() } };
       case "boxes":
         return { ok: true, data: { boxes: boxesOf(req.selectors ?? []) } };
+      case "menuBarState":
+        return { ok: true, data: menuBarState() };
       case "authSignals":
         return { ok: true, data: authSignalsOf() };
       case "readEl": {
@@ -368,14 +372,25 @@ export class Actions {
     if (!labels.length) return { ok: false, error: "clickByText needs at least one label" };
     const found = findByText(labels);
     if (!found) {
-      const rows = visibleLabels(
-        Array.from(document.querySelectorAll<HTMLElement>(MENU_ROW_CANDIDATES)),
-        labelOf,
-        12,
-      );
+      // Teach with the rows of the menu that is OPEN — the ones the caller can
+      // actually choose from. Page-wide labels are the fallback, and they are
+      // labelled as such so a closed menu is not mistaken for an empty one.
+      const open = openMenuRows(12);
+      const hint = open.length
+        ? missHint(open, "rows in the OPEN menu")
+        : (() => {
+            const pageRows = visibleLabels(allMenuRows(), labelOf, 12);
+            return pageRows.length
+              ? ` — no menu is open right now, so its rows are not on screen (open it first)${missHint(pageRows, "clickable labels on the page")}`
+              : // Measured live: the bar can be in the DOM with a 0×0 box and
+                // every one of its rows invisible, while the toolbar renders
+                // normally. "Open it first" is a dead end there — the caller
+                // cannot open a bar that is not on screen.
+                " — and the MENU BAR IS NOT ON SCREEN at all (not one menu row is visible). Docs hides it in full-screen mode: Ctrl+Shift+F brings the menus back (menu_path tries that itself before giving up). Failing that, take a screenshot and reach this command by keyboard shortcut or a toolbar control.";
+          })();
       return {
         ok: false,
-        error: `no visible clickable element matches ${JSON.stringify(labels)}${missHint(rows, "menu rows")}`,
+        error: `no visible clickable element matches ${JSON.stringify(labels)}${hint}`,
       };
     }
     if (isDisabledEl(found.el)) {
@@ -1047,8 +1062,7 @@ function popupOpen(el: HTMLElement): boolean {
   }
   for (const d of docs) {
     for (const p of d.querySelectorAll<HTMLElement>(POPUP_ROLES)) {
-      if (p.getClientRects().length === 0) continue;
-      if (d.defaultView?.getComputedStyle(p).visibility === "hidden") continue;
+      if (!onScreenPopup(p)) continue;
       return true;
     }
   }
@@ -1373,6 +1387,74 @@ function describeFound(f: FoundByLabel): string {
 /** Menu-ish rows — the siblings a failed menu walk should be taught. */
 const MENU_ROW_CANDIDATES =
   '.goog-menuitem, [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]';
+
+/** Every menu row in the page, whether its menu is open or not. */
+function allMenuRows(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(MENU_ROW_CANDIDATES));
+}
+
+/** What the label walker needs to know before it blames a missing row. */
+export interface MenuBarState {
+  /** The bar itself is rendered. */
+  visible: boolean;
+  /** A bar exists in the DOM but is not rendered — the full-screen signature. */
+  hiddenBar: boolean;
+}
+
+const MENU_BAR_SELECTORS = '.docs-menubar, [role="menubar"]';
+
+/**
+ * Is the menu bar on screen? Google Docs' full-screen mode (Ctrl+Shift+F) sets
+ * the bar's WRAPPER to display:none and leaves the bar itself in the DOM with
+ * every label intact — measured: `.docs-menubars` display:none, `.docs-menubar`
+ * inline-block/visible/opacity 1 with a 0×0 box, 0 of 387 rows visible, toolbar
+ * fine. Every label walk then misses at step 1 on File/Edit/Format alike, which
+ * reads exactly like a renamed menu.
+ */
+function menuBarState(): MenuBarState {
+  const bars = [...document.querySelectorAll<HTMLElement>(MENU_BAR_SELECTORS)];
+  // Judged by the BAR, never by the rows: with the bar hidden, a walk's first
+  // step can prefix-match a toolbar control ("Insert" → "Insert image") and open
+  // a popup whose rows would otherwise look like a working menu bar.
+  const visible = bars.some(isVisibleLoose);
+  return { visible, hiddenBar: bars.length > 0 && !visible };
+}
+
+/**
+ * The rows of the menu that is actually OPEN. Page-wide enumeration is worse
+ * than useless here: in Google Docs it returns the menu bar and the sidebar's
+ * heading list, so a run that missed "Color" inside Format ▸ Text was told the
+ * visible rows were "File, Edit, View, Insert, …" and retried blind five times.
+ * A submenu is appended after its parent, so the last open popup holding rows
+ * is the one waiting for a choice.
+ */
+function openMenuRows(limit: number): string[] {
+  const popups = [...document.querySelectorAll<HTMLElement>(POPUP_ROLES)].filter(onScreenPopup);
+  for (let i = popups.length - 1; i >= 0; i--) {
+    const rows = visibleLabels(
+      Array.from(popups[i]!.querySelectorAll<HTMLElement>(MENU_ROW_CANDIDATES)),
+      labelOf,
+      limit,
+    );
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
+/**
+ * A popup the user can actually see. `isVisibleLoose` alone is not enough:
+ * parked menus sit off-screen with a real width and height, and treating one
+ * as open would make every page look like it has a dialog up.
+ */
+function onScreenPopup(el: HTMLElement): boolean {
+  if (!isVisibleLoose(el)) return false;
+  if (!documentHasLayout()) return true; // no layout to judge by (jsdom)
+  const r = el.getBoundingClientRect();
+  const vw = document.defaultView?.innerWidth ?? 0;
+  const vh = document.defaultView?.innerHeight ?? 0;
+  if (!vw || !vh) return true;
+  return r.right > 0 && r.bottom > 0 && r.left < vw && r.top < vh;
+}
 
 /** Visible, de-duplicated labels from `nodes`, capped for one result line. */
 function visibleLabels(

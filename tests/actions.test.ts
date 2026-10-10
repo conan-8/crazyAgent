@@ -694,7 +694,7 @@ describe("label-based actions (clickByText / fillField / queryText)", () => {
     const miss = actions.run({ action: "clickByText", labels: ["Headers and footers"] });
     expect(miss.ok).toBe(false);
     if (!miss.ok) {
-      expect(miss.error).toContain("visible menu rows");
+      expect(miss.error).toContain("rows in the OPEN menu");
       expect(miss.error).toContain("Header");
       expect(miss.error).toContain("Watermark");
     }
@@ -709,6 +709,109 @@ describe("label-based actions (clickByText / fillField / queryText)", () => {
     if (!field.ok) {
       expect(field.error).toContain("visible fields");
       expect(field.error).toContain("Top margin");
+    }
+  });
+
+  it("teaches the OPEN submenu's rows, not the menu bar's", () => {
+    // The real failure this replaces: Format ▸ Text ▸ Color missed and the hint
+    // read "visible menu rows: File, Edit, View, Insert, Format, …" — the bar
+    // and the sidebar, so the model could not see what the submenu offered and
+    // retried the same wrong label.
+    setBody(`
+      <div role="menubar">
+        <div role="menuitem">File</div>
+        <div role="menuitem">Edit</div>
+        <div role="menuitem">Format</div>
+      </div>
+      <div role="menu">
+        <div role="menuitem">Font</div>
+        <div role="menuitem">Size</div>
+        <div role="menuitem">Text colour</div>
+      </div>`);
+    const miss = actions.run({ action: "clickByText", labels: ["Underline"] });
+    expect(miss.ok).toBe(false);
+    if (!miss.ok) {
+      expect(miss.error).toContain("rows in the OPEN menu");
+      expect(miss.error).toContain("Text colour");
+      expect(miss.error).not.toContain("File");
+    }
+  });
+
+  it("says when no menu is open instead of implying the rows are gone", () => {
+    setBody(`<div><div role="menuitem">File</div><div role="menuitem">Edit</div></div>`);
+    const miss = actions.run({ action: "clickByText", labels: ["Underline"] });
+    expect(miss.ok).toBe(false);
+    if (!miss.ok) {
+      expect(miss.error).toContain("no menu is open");
+      expect(miss.error).toContain("File");
+    }
+  });
+
+  it("reports a hidden menu bar (Docs full-screen) separately from a rendered one", () => {
+    // display:none on the bar AND its row: jsdom has no layout, so a hidden
+    // PARENT would not hide its children here the way a 0×0 box does in a
+    // browser (where the real signal is `.docs-menubars { display: none }`).
+    setBody(`
+      <div class="docs-menubars">
+        <div class="docs-menubar" role="menubar" style="display:none">
+          <div role="menuitem" style="display:none">Format</div>
+        </div>
+      </div>`);
+    expect(actions.run({ action: "menuBarState" })).toMatchObject({
+      ok: true,
+      data: { visible: false, hiddenBar: true },
+    });
+
+    setBody(`
+      <div class="docs-menubars">
+        <div class="docs-menubar" role="menubar">
+          <div role="menuitem">Format</div>
+        </div>
+      </div>`);
+    expect(actions.run({ action: "menuBarState" })).toMatchObject({
+      ok: true,
+      data: { visible: true, hiddenBar: false },
+    });
+  });
+
+  it("does not let an open popup stand in for the bar — the miss that skipped the recovery", () => {
+    // Measured live (probe v8.4 S5): with the bar hidden, a walk's step 1
+    // prefix-matched a toolbar control ("Insert" → "Insert image") and opened a
+    // popup. Counting that popup's rows as "the bar is up" is what stopped
+    // Ctrl+Shift+F from being pressed, so the walk failed twice and gave up.
+    setBody(`
+      <div class="docs-menubars">
+        <div class="docs-menubar" role="menubar" style="display:none">
+          <div role="menuitem" style="display:none">Insert</div>
+        </div>
+      </div>
+      <div role="menu">
+        <div role="menuitem">Upload</div>
+        <div role="menuitem">By URL</div>
+      </div>`);
+    expect(actions.run({ action: "menuBarState" })).toMatchObject({
+      ok: true,
+      data: { visible: false, hiddenBar: true },
+    });
+  });
+
+  it("says when the menu bar itself is not rendered — 'open it first' is a dead end there", () => {
+    // Measured live: .docs-menubar present with a 0×0 box, 0 of 387 menu rows
+    // visible, toolbar fine. A run that is told to "open the menu first" cannot.
+    // (display:none on the rows themselves: jsdom has no layout, so a hidden
+    // PARENT would not hide its children here the way a browser's 0×0 box does.)
+    setBody(`
+      <div role="menubar">
+        <div role="menuitem" style="display:none">File</div>
+        <div role="menuitem" style="display:none">Format</div>
+      </div>
+      <button>Normal text</button>`);
+    const miss = actions.run({ action: "clickByText", labels: ["Underline"] });
+    expect(miss.ok).toBe(false);
+    if (!miss.ok) {
+      expect(miss.error).toContain("MENU BAR IS NOT ON SCREEN");
+      expect(miss.error).toContain("keyboard shortcut");
+      expect(miss.error).not.toContain("open it first");
     }
   });
 

@@ -649,6 +649,35 @@ export type SequenceResult =
   | { ok: true; steps: SequenceStep[] }
   | { ok: false; error: string };
 
+/** A combo that selects everything in whatever currently has focus. */
+const SELECT_ALL_RE = /^(?:control|ctrl|meta|command|cmd)\+a$/i;
+
+export function isSelectAll(combo: string | undefined): boolean {
+  return !!combo && SELECT_ALL_RE.test(combo.trim());
+}
+
+const DELETE_KEYS = new Set(["backspace", "delete"]);
+
+/**
+ * The index of the first step after `from` that would type over — or delete —
+ * whatever a select-all just selected, or null when nothing does. A click ends
+ * the scan: it collapses the selection, so later typing is harmless.
+ *
+ * This pairing is what makes a select-all dangerous rather than merely broad.
+ * A real run chained [click a dialog field, Escape, Control+a, type a URL]:
+ * the Escape closed the dialog, so the select-all took the DOCUMENT and the
+ * type step replaced nine minutes of work with one URL.
+ */
+export function selectsThenOverwrites(steps: SequenceStep[], from: number): number | null {
+  for (let i = from + 1; i < steps.length; i++) {
+    const s = steps[i]!;
+    if (s.kind === "click") return null;
+    if (s.kind === "type" && (s.text ?? "").length > 0) return i;
+    if (s.kind === "key" && DELETE_KEYS.has((s.key ?? "").trim().toLowerCase())) return i;
+  }
+  return null;
+}
+
 /**
  * Find the steps list in whatever shape the model produced it: `steps` as
  * documented, a common alias (`sequence`/`actions`/`calls`), or the single

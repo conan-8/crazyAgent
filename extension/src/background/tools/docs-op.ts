@@ -21,7 +21,7 @@ import {
   type MenuLabel,
   type VerifyPlan,
 } from "../../shared/docs-ops";
-import type { SelectorBox } from "../../content/actions";
+import type { MenuBarState, SelectorBox } from "../../content/actions";
 import { runContentAction } from "./content-action";
 import { sendStrokes } from "./coords";
 import { fetchWorkspaceExport } from "./docs";
@@ -135,13 +135,41 @@ async function walkOnce(ctx: ToolContext, labels: MenuLabel[]): Promise<WalkAtte
 }
 
 /**
+ * Bring the menu bar back when the app has hidden it, and say whether that
+ * worked. Docs' full-screen mode leaves the bar in the DOM with every label
+ * intact but its wrapper at display:none, so EVERY walk misses at step 1 —
+ * indistinguishable from a renamed menu, and unfixable by retrying. One
+ * Ctrl+Shift+F restores it (measured: the wrapper goes back to display:block
+ * and the same walk then clicks Format ▸ Text). Only pressed when the bar is
+ * actually detected as hidden, never on a plain miss.
+ */
+async function revealMenuBar(ctx: ToolContext): Promise<boolean> {
+  const read = async (): Promise<MenuBarState | null> => {
+    const res = await runContentAction(ctx.tabId, { action: "menuBarState" }).catch(() => null);
+    return res?.ok ? ((res.data as MenuBarState | undefined) ?? null) : null;
+  };
+  const before = await read();
+  if (!before || before.visible || !before.hiddenBar) return false;
+  // The failed walk may have clicked a toolbar control whose label merely
+  // STARTS with the menu's ("Insert" → "Insert image") and left a popup open;
+  // clear it first, or the restored bar is still covered by it.
+  await sendTrustedKey(ctx.tabId, ctx.adapter, "Escape").catch(() => undefined);
+  await sendTrustedKey(ctx.tabId, ctx.adapter, "Control+Shift+f").catch(() => undefined);
+  await sleep(BETWEEN_STEPS_MS * 3);
+  const after = await read();
+  return Boolean(after?.visible);
+}
+
+/**
  * Walk a whole menu path; stops at the first step that cannot be clicked.
  *
- * A miss after step 1 gets ONE recovery: Escape (closing a stale open menu or
- * a half-open submenu that made the walk see a closed one), then a fresh walk
- * from the top. Runs D and F both lost rows that were on screen to exactly
- * that desync; see shouldRetryWalk for why step-1 misses and DISABLED rows
- * are excluded from the retry.
+ * Two recoveries, each tried once. A HIDDEN MENU BAR (Docs full-screen) makes
+ * every label miss, so it is restored first — it is the one failure no retry can
+ * fix. Then a miss after step 1 gets the older recovery: Escape (closing a
+ * stale open menu or a half-open submenu that made the walk see a closed one),
+ * then a fresh walk from the top. Runs D and F both lost rows that were on
+ * screen to exactly that desync; see shouldRetryWalk for why step-1 misses and
+ * DISABLED rows are excluded from the Escape retry.
  */
 export async function walkMenu(
   ctx: ToolContext,
@@ -149,14 +177,21 @@ export async function walkMenu(
 ): Promise<{ ok: true; steps: string[] } | { ok: false; error: string; steps: string[] }> {
   const first = await walkOnce(ctx, labels);
   if (first.ok) return first;
-  if (!shouldRetryWalk(first.failedAt, first.rawError)) {
-    return { ok: false, error: first.error, steps: first.steps };
+  let attempt = first;
+  if (await revealMenuBar(ctx)) {
+    const restored = await walkOnce(ctx, labels);
+    const note = "the menu bar was hidden (full-screen mode) — Ctrl+Shift+F brought it back";
+    if (restored.ok) return { ok: true, steps: [note, ...restored.steps] };
+    attempt = { ...restored, steps: [note, ...restored.steps] };
+  }
+  if (!shouldRetryWalk(attempt.failedAt, attempt.rawError)) {
+    return { ok: false, error: attempt.error, steps: attempt.steps };
   }
   await sendTrustedKey(ctx.tabId, ctx.adapter, "Escape").catch(() => undefined);
   await sleep(BETWEEN_STEPS_MS * 2);
   const second = await walkOnce(ctx, labels);
   if (second.ok) {
-    return { ok: true, steps: [...first.steps, "Escape (reset the menu)", ...second.steps] };
+    return { ok: true, steps: [...attempt.steps, "Escape (reset the menu)", ...second.steps] };
   }
   return {
     ok: false,
@@ -291,7 +326,7 @@ async function verifyPlan(ctx: ToolContext, verify: VerifyPlan | undefined): Pro
 registerTool({
   name: "menu_path",
   description:
-    "Click through a menu path BY LABEL in one call — replaces the open-menu / look / click-row turn chain and never guesses a coordinate. path: ['File','Page setup'], ['Insert','Break','Page break'], ['Format','Paragraph styles','Heading 2']. Each step waits up to ~2.4s for its row to appear, clicks the visible element whose text/aria-label matches (menu arrows, accelerator suffixes and 'Updated' badges are ignored), and the result lists every click; the walk stops at the first label it cannot find, retries once after Escape (which repairs a stale open menu), and on a miss NAMES the rows the open menu actually shows — read that list and correct the path instead of repeating it. The fresh page observation rides the result like any action. Works on any web app's DOM menus (Google Workspace, Drive, school portals) — menus are DOM, so this is always safer than coordinate clicks.",
+    "Click through a menu path BY LABEL in one call — replaces the open-menu / look / click-row turn chain and never guesses a coordinate. path: ['File','Page setup'], ['Insert','Break','Page break'], ['Format','Paragraph styles','Heading 2']. Each step waits up to ~2.4s for its row to appear, clicks the visible element whose text/aria-label matches (menu arrows, accelerator suffixes and 'Updated' badges are ignored), and the result lists every click; the walk stops at the first label it cannot find, restores the menu bar if the app has hidden it (Docs full-screen mode — every label misses at step 1 then), retries once after Escape (which repairs a stale open menu), and on a miss NAMES the rows the open menu actually shows — read that list and correct the path instead of repeating it. The fresh page observation rides the result like any action. Works on any web app's DOM menus (Google Workspace, Drive, school portals) — menus are DOM, so this is always safer than coordinate clicks.",
   parameters: {
     type: "object",
     properties: {

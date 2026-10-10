@@ -296,6 +296,21 @@ export async function resolveNoRefFocus(
   return "none";
 }
 
+/**
+ * Is a REAL text field focused — a dialog input, a textarea — rather than the
+ * document body, an editor's typing sink, or a menu?
+ *
+ * Stricter than `resolveNoRefFocus() === "focused"`, which also answers
+ * "focused" for a canvas editor's iframe when the sink cannot be primed. The
+ * distinction matters for select-all: in a field it selects that field's text,
+ * anywhere else it selects the whole document.
+ */
+export async function editableFieldFocused(tabId: number): Promise<boolean> {
+  const st = await focusTarget(tabId, "").catch(() => null);
+  const hints = st && !("error" in st) ? st.hints : {};
+  return Boolean(hints.editable && !hints.sinkSignature && !hints.boxHidden);
+}
+
 export interface TrustedInputRequest {
   tabId: number;
   adapter: BrowserAdapter;

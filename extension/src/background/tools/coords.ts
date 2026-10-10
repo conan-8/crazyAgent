@@ -27,12 +27,14 @@ import {
   boundsError,
   compensateShotScroll,
   describeHit,
+  isSelectAll,
   looksLikeShotPixels,
   planClick,
   planDrag,
   planHover,
   RESCUE_RADIUS_PX,
   screenshotToViewportPoint,
+  selectsThenOverwrites,
   shapeCoordArgs,
   shapeDragList,
   shapeModifiers,
@@ -57,7 +59,7 @@ import {
   viewportShotMapping,
   type ViewportShotInfo,
 } from "./perception";
-import { ensureTabActive, resolveNoRefFocus } from "./trusted-input";
+import { editableFieldFocused, ensureTabActive, resolveNoRefFocus } from "./trusted-input";
 import { registerTool, type ToolContext } from "./types";
 
 /** Keystroke/mouse steps are separate CDP calls; a beat keeps them ordered. */
@@ -879,7 +881,7 @@ registerTool({
 registerTool({
   name: "input_sequence",
   description:
-    "Chain mouse/keyboard steps into ONE call — the menu-path and fill primitive: [{click:{x,y,space}}, {hover:{x,y}}, {wait_ms:300}, {type:{text, select?}}, {key:'Return'}]. Each click/hover takes click_at's full arg shape (x/y with space:'screenshot'|'viewport'|'page', or ref+dx/dy, or frame-local) resolved AT EXECUTION TIME; key takes any combo ('Control+a'); type inserts at the focused target (optionally select:'all' first); wait_ms lets menus/animations open. click_at/type_at/hover_at work as step keys too (type_at expands to click+type). Up to 24 steps. RULE: never chain a click on a target you have not SEEN (a menu row after a click that opens the menu) — its coordinates must come from a screenshot taken after the menu appeared. Sequences are for coordinates you already know, type/key runs, and table fills. Execution stops at the first failure and reports the completed steps. The glowing cursor rides every click — the screenshot after the call shows where each landed.",
+    "Chain mouse/keyboard steps into ONE call — the menu-path and fill primitive: [{click:{x,y,space}}, {hover:{x,y}}, {wait_ms:300}, {type:{text, select?}}, {key:'Return'}]. Each click/hover takes click_at's full arg shape (x/y with space:'screenshot'|'viewport'|'page', or ref+dx/dy, or frame-local) resolved AT EXECUTION TIME; key takes any combo ('Control+a'); type inserts at the focused target (optionally select:'all' first); wait_ms lets menus/animations open. click_at/type_at/hover_at work as step keys too (type_at expands to click+type). Up to 24 steps. RULE: never chain a click on a target you have not SEEN (a menu row after a click that opens the menu) — its coordinates must come from a screenshot taken after the menu appeared. A Control+a step selects whatever has focus at that moment: if an earlier Escape closed the dialog you clicked into, that is the whole DOCUMENT, so the sequence is REFUSED before it replaces anything — drop the Escape, or put select:'all' on the type step. Sequences are for coordinates you already know, type/key runs, and table fills. Execution stops at the first failure and reports the completed steps. The glowing cursor rides every click — the screenshot after the call shows where each landed.",
   parameters: {
     type: "object",
     properties: {
@@ -958,6 +960,27 @@ registerTool({
           continue;
         }
         if (step.kind === "key") {
+          // A select-all lands on whatever has focus. When that is the editor
+          // and not the field an earlier step clicked — because an Escape in
+          // between closed the dialog — the next type step replaces the WHOLE
+          // document. A real run lost nine minutes of work that way, with every
+          // step reporting success.
+          if (isSelectAll(step.key)) {
+            const over = selectsThenOverwrites(shaped.steps, i);
+            if (over !== null && !(await editableFieldFocused(ctx.tabId))) {
+              const next = shaped.steps[over]!;
+              return {
+                ok: false,
+                error:
+                  `${failureTag("input")}: steps[${i}]: ${step.key} would select the WHOLE DOCUMENT — no text field is focused ` +
+                  `(an earlier step closed the dialog, or never opened one) — and steps[${over}] then ${next.kind === "type" ? "types over all of it" : "deletes it"}. ` +
+                  "Nothing was selected and nothing was typed. To fill a dialog field: click it and type in the SAME sequence with no " +
+                  "Escape between, or put select:'all' on that type step. To replace the document on purpose: one `type {select:'all', text}` call of its own.",
+                completed: done,
+                failedAt: i,
+              };
+            }
+          }
           await sendCombo(step.key!);
           done.push({ i, what: `key ${step.key}` });
           continue;
