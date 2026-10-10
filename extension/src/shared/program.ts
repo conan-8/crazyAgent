@@ -12,6 +12,7 @@
 // turns on the identical input_sequence mistake). Execution lives in
 // background/tools/program.ts.
 import { parseExpect, type StepExpect } from "./expect";
+import { isMutating } from "./modes";
 import { failureTag } from "./tool-failure";
 
 /**
@@ -46,10 +47,11 @@ export type ProgramTool = (typeof PROGRAM_TOOLS)[number];
  */
 export const PROGRAM_MAX_STEPS = 12;
 /**
- * The longest run of consecutive steps allowed WITHOUT an `expect` (so an
- * expect is needed at least every third step). Verification is what lets the
- * executor advance WITHOUT the model, so a program that never promises
- * anything is just a batched tool call with extra steps.
+ * How many consecutive MUTATING steps may carry no expect of their own before
+ * the harness attaches its weakest one (`pixel_changed`) — see assumeExpects.
+ * Verification is what lets the executor advance WITHOUT the model, so a
+ * program that promises nothing is given a promise rather than refused:
+ * refusing an 8-step batch just sends the model back to eight round trips.
  */
 export const PROGRAM_MAX_UNVERIFIED_RUN = 2;
 /** The closing note rides the progress-note event; same cap as that tool. */
@@ -66,6 +68,9 @@ export interface Program {
   steps: ProgramStep[];
   /** One or two sentences for the user, emitted when the program completes. */
   note?: string;
+  /** 0-based indexes of the steps the harness gave an ASSUMED expect (see
+   *  assumeExpects) — reported back so the model learns to write its own. */
+  assumedExpects?: number[];
 }
 
 /** Argument validation, injected so this module stays pure (no tool registry). */
@@ -114,14 +119,23 @@ export function parseProgram(
         error: `${failureTag("input")}: steps[${i}].tool "${tool}" is not in the program vocabulary — use one of: ${PROGRAM_TOOLS.join(", ")}`,
       };
     }
-    const args =
+    const declared =
       o.args && typeof o.args === "object" && !Array.isArray(o.args)
         ? (o.args as Record<string, unknown>)
         : o.args === undefined
           ? {}
           : null;
-    if (args === null) {
+    if (declared === null) {
       return { ok: false, error: `${failureTag("input")}: steps[${i}].args must be an object` };
+    }
+    // The model routinely hoists a step's arguments onto the step itself —
+    // {tool:"key", key:"Enter"} instead of {tool:"key", args:{key:"Enter"}} —
+    // which cost six of seven run_program calls in one archived run. Fold them
+    // in rather than refusing a program that meant the right thing.
+    const args: Record<string, unknown> = { ...declared };
+    for (const [k, v] of Object.entries(o)) {
+      if (k === "tool" || k === "args" || k === "expect" || k in args) continue;
+      args[k] = v;
     }
     const parsedExpect = parseExpect(o.expect);
     if (!parsedExpect.ok) {
@@ -143,41 +157,53 @@ export function parseProgram(
       ...(parsedExpect.expect ? { expect: parsedExpect.expect } : {}),
     });
   }
-  const run = longestUnverifiedRun(steps);
-  if (run > PROGRAM_MAX_UNVERIFIED_RUN) {
-    return {
-      ok: false,
-      error:
-        `${failureTag("input")}: ${run} steps in a row have no expect — never more than ${PROGRAM_MAX_UNVERIFIED_RUN} ` +
-        "(and the LAST step always needs one), because the harness advances without the model only where it can check the result",
-    };
-  }
-  if (!steps[steps.length - 1]!.expect) {
-    return {
-      ok: false,
-      error:
-        `${failureTag("input")}: the LAST step needs an expect — it is how the harness knows the program landed. ` +
-        'Add expect:{pixel_changed:true} to a mutating step, or end with {tool:"assert", args:{}, expect:{…}}',
-    };
-  }
+  // A program that promised nothing used to be REFUSED here, which sent the
+  // model back to one action per turn — the exact cost programs exist to
+  // remove. Two of the four run_program failures in a 420-turn benchmark run
+  // were that refusal, one of them on an 8-step batch. The harness now attaches
+  // its weakest real check to the steps that need one and reports which it
+  // assumed, so a step that changed nothing still fails — and the model still
+  // learns to write its own expects.
+  const assumedExpects = assumeExpects(steps, PROGRAM_MAX_UNVERIFIED_RUN);
   let note: string | undefined;
   if (typeof rawNote === "string" && rawNote.trim()) {
     note = rawNote.trim().slice(0, PROGRAM_NOTE_MAX_CHARS);
   } else if (rawNote !== undefined && rawNote !== null && typeof rawNote !== "string") {
     return { ok: false, error: `${failureTag("input")}: note must be a string` };
   }
-  return { ok: true, program: { steps, note } };
+  return {
+    ok: true,
+    program: { steps, note, ...(assumedExpects.length ? { assumedExpects } : {}) },
+  };
 }
 
-/** The longest run of consecutive steps that promise nothing. */
-export function longestUnverifiedRun(steps: ProgramStep[]): number {
-  let longest = 0;
+/**
+ * Give the harness's weakest real check — `pixel_changed` — to the mutating
+ * steps that would otherwise run unverified, and return their indexes.
+ *
+ * Read-only steps are skipped: a `docs_read` or `screenshot` cannot silently
+ * fail to change anything, and its own output is the check. A mutating step
+ * gets an assumed expect when it would end a run longer than `maxRun`, or when
+ * it is the program's last step — so the program always ends on something the
+ * harness can verify.
+ */
+export function assumeExpects(steps: ProgramStep[], maxRun: number): number[] {
+  const assumed: number[] = [];
   let run = 0;
-  for (const step of steps) {
-    run = step.expect ? 0 : run + 1;
-    if (run > longest) longest = run;
+  for (const [i, step] of steps.entries()) {
+    if (!isMutating(step.tool)) continue;
+    if (step.expect) {
+      run = 0;
+      continue;
+    }
+    run += 1;
+    if (run > maxRun || i === steps.length - 1) {
+      step.expect = { pixel_changed: true };
+      assumed.push(i);
+      run = 0;
+    }
   }
-  return longest;
+  return assumed;
 }
 
 /** One line naming a step, for the result and the run log. */

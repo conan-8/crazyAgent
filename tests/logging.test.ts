@@ -57,8 +57,43 @@ describe("run log folding", () => {
     });
   });
 
-  it("splits turns and keeps call order across steps", () => {
-    const rec = newTurnRecord("t", { at: 0 });
+  it("records where a call's wall clock went, and renders the split", () => {
+    // A `key` call logged 1.4s for a keystroke that measures 40ms; the split is
+    // what says which part of the harness owned the rest.
+    const rec = newTurnRecord("Bold a word", { conversationId: "c1", mode: "standard", at: 1_000 });
+    foldLogEvent(rec, { kind: "step_started", stepIndex: 0 }, 1_000);
+    foldLogEvent(
+      rec,
+      { kind: "tool_call", stepIndex: 0, name: "key", args: { key: "Control+b" } },
+      1_100,
+    );
+    foldLogEvent(
+      rec,
+      {
+        kind: "tool_result",
+        stepIndex: 0,
+        name: "key",
+        result: "sent",
+        ok: true,
+        timings: { probe: 12, gate: 1_040, tool: 45, observe: 210, capture: 233, verify: 3 },
+      },
+      2_500,
+    );
+    const call = rec.turns[0]!.tools[0]!;
+    expect(call.timings).toMatchObject({ gate: 1_040, tool: 45 });
+    const md = toMarkdown([rec]);
+    expect(md).toContain("gate 1.0s");
+    expect(md).toContain("tool 45ms");
+    expect(md).toContain("obs 210ms");
+    expect(md).toContain("shot 233ms");
+    expect(md).toContain("probe 12ms");
+    // Sub-5ms parts are noise and stay out of the line.
+    expect(md).not.toContain("check 3ms");
+    // And the split survives the archival format, not just the rendered one.
+    expect(toJsonl([rec])).toContain('"gate":1040');
+  });
+
+  it("splits turns and keeps call order across steps", () => {    const rec = newTurnRecord("t", { at: 0 });
     foldLogEvent(rec, { kind: "step_started", stepIndex: 0 }, 0);
     foldLogEvent(rec, { kind: "token_delta", text: "one" }, 10);
     foldLogEvent(rec, { kind: "step_started", stepIndex: 1 }, 100);

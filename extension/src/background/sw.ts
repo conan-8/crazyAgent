@@ -2,6 +2,7 @@
 // The Phase 4 agent loop replaces the echo task behind the same bus.
 import {
   PORT_NAME,
+  type CallTimings,
   type Checkpoint,
   type ControlMode,
   type DemoConfig,
@@ -103,6 +104,7 @@ import {
   assess,
   assessWithJev,
   buildRiskState,
+  jevWorthAsking,
   toEffortHint,
   toProgressVerdict,
   toRiskAnswers,
@@ -170,7 +172,13 @@ const ALWAYS_KEY = "baPolicyAlways";
  */
 let currentJev: JevClient | null = null;
 let jevFallbackNoted = false;
-const JEV_GATE_TIMEOUT_MS = 2_000;
+/**
+ * The gate is on the critical path of EVERY action it is asked about, and a
+ * timeout falls through to the deterministic verdict — so a slow decisions
+ * endpoint costs wall clock and buys nothing. 2s was the original budget;
+ * measured, the gate was ~1.1s of a 1.4s `key` call.
+ */
+const JEV_GATE_TIMEOUT_MS = 600;
 
 /**
  * Debugger-transport auto-recovery budget (per run). A TRANSPORT-FAILED result
@@ -1094,6 +1102,9 @@ async function executeToolGated(
   args: Record<string, unknown>,
   batch?: ExecuteBatch,
 ): Promise<ExecuteResult> {
+  // Where this call's wall clock goes. A `key` logged 1.4s for a keystroke
+  // that measures 40ms; the split below is what says where the rest went.
+  const timings: CallTimings = {};
   let probe: ElementProbe | null = null;
   // `click_at`/`type_at`/`drag_at` carry a point instead of a ref; the probe
   // then comes from whatever sits under that point, so coordinate actions
@@ -1108,28 +1119,39 @@ async function executeToolGated(
     name === "drag_at";
   const tabId = await agentTab();
   if (needsProbe && tabId !== undefined) {
+    const startedProbe = Date.now();
     probe =
       typeof args.ref === "string"
         ? await probeElement(tabId, args.ref).catch(() => null)
         : // The tool name lets the probe mirror the executor's click magnet, so
           // the gate assesses the element the CORRECTED click lands on.
           await probeElementAt(tabId, args, name).catch(() => null);
+    timings.probe = Date.now() - startedProbe;
   }
   let risk = assess(name, args, probe);
   // Jev risk gate: mutating actions the regex rules allowed get one batched,
-  // time-boxed decision call. Union-only — Jev can add a confirm, never drop
-  // one — and any failure falls through to the deterministic verdict. A
-  // completed check is stamped on the result (`jevGate`) so the panel can
-  // mark the card pink — the check itself is otherwise invisible.
+  // time-boxed decision call — but only the ones a regex cannot judge (see
+  // jevWorthAsking: consequential labels, destructive keys, submits,
+  // navigation). Union-only — Jev can add a confirm, never drop one — and any
+  // failure or timeout falls through to the deterministic verdict. A completed
+  // check is stamped on the result (`jevGate`) so the panel can mark the card
+  // pink — the check itself is otherwise invisible.
   let jevChecked = false;
   let jevEffort: { choice: string; confidence: number } | null = null;
   let jevProgress: { choice: string; confidence: number } | null = null;
-  if (risk.level === "allow" && isMutating(name) && currentJev && !stopRequested) {
+  if (
+    risk.level === "allow" &&
+    isMutating(name) &&
+    jevWorthAsking(name, args, probe) &&
+    currentJev &&
+    !stopRequested
+  ) {
     try {
       // With per-step routing on, the effort/progress questions ride the SAME
       // POST (all questions in one Jev request are evaluated together — zero
       // extra round trips), and the gate state carries the recent-call
       // history that makes those verdicts outcome-aware.
+      const startedGate = Date.now();
       const result = await currentJev.decide(
         buildRiskState(
           currentTask,
@@ -1141,6 +1163,7 @@ async function executeToolGated(
         currentAutoThinking ? JEV_GATE_QUESTIONS : JEV_RISK_QUESTIONS,
         { timeoutMs: JEV_GATE_TIMEOUT_MS },
       );
+      timings.gate = Date.now() - startedGate;
       jevChecked = true;
       risk = assessWithJev(risk, toRiskAnswers(result.answers), probe?.text ?? undefined);
       if (currentAutoThinking) {
@@ -1182,10 +1205,15 @@ async function executeToolGated(
       return { ok: true, text: handoffMessage(wall.reason, handled) };
     }
   }
+  const startedTool = Date.now();
   let res = await executeTool(name, args);
   // Transport flake → the harness performs the sanctioned reload+retry itself
   // (budgeted per run) instead of spending model turns on it.
   res = await withTransportRecovery(name, args, res, tabId);
+  timings.tool = Date.now() - startedTool;
+  // The same object is filled in as the observation and the check run, and
+  // every return below spreads `res`, so the parts measured later still land.
+  res.timings = timings;
   if (jevChecked) res.jevGate = true;
   if (jevEffort) res.jevEffort = jevEffort;
   if (jevProgress) res.jevProgress = jevProgress;
@@ -1261,7 +1289,9 @@ async function executeToolGated(
       : (name === "type" && args.submit !== true) || (name === "key" && !enterish)
         ? 3_500
         : 10_000;
+  const startedObserve = Date.now();
   const observed = await observeAfterAction(obsTabId, settles);
+  timings.observe = Date.now() - startedObserve;
   if (stopRequested) return res;
   const base = res.text ?? JSON.stringify(res.payload ?? null);
   const observation = observed?.text ?? null;
@@ -1270,7 +1300,9 @@ async function executeToolGated(
   if (!observation || observation.trim().length < 32) {
     // The action landed but the text tools see nothing: attach a screenshot so
     // the model verifies with its eyes instead of assuming nothing happened.
+    const startedShot = Date.now();
     const shot = await captureBlindShot(await adapterForMode(), obsTabId);
+    timings.capture = (timings.capture ?? 0) + (Date.now() - startedShot);
     const label = shot ? await tabIdentity(obsTabId) : "";
     text = shot
       ? `${base}\n\n--- page after action ---\n[The text tools see nothing on ${label} — screenshot attached. LOOK at it to verify what the action did.]`
@@ -1282,7 +1314,9 @@ async function executeToolGated(
     // Attach the shot the model would otherwise spend its NEXT turn taking —
     // and make it the latest capture, so space:'screenshot' clicks resolve
     // against exactly what the model is looking at.
+    const startedShot = Date.now();
     const shot = await captureBlindShot(await adapterForMode(), obsTabId);
+    timings.capture = (timings.capture ?? 0) + (Date.now() - startedShot);
     text = shot
       ? `${base}\n\n--- page after action (auto-settled, fresh snapshot) ---\n${observation}\n[The document body is canvas-painted — a screenshot is attached; its pixels are the only read of what the action did. No separate screenshot needed.]`
       : `${base}\n\n--- page after action (auto-settled, fresh snapshot) ---\n${observation}`;
@@ -1295,6 +1329,7 @@ async function executeToolGated(
   // This is the only place that holds the fresh capture, the digest AND the
   // tool's arguments, so it is where the harness can answer "did it work?"
   // itself instead of leaving it to the next turn's screenshot squint.
+  const startedCheck = Date.now();
   const checked = await actionVerification({
     name,
     args,
@@ -1304,6 +1339,7 @@ async function executeToolGated(
     observed,
     settles,
   });
+  timings.verify = Date.now() - startedCheck;
   const tail = checked.lines;
   const body = tail.length ? `${text}\n${tail.join("\n")}` : text;
   const stamped = checked.verify && Object.keys(checked.verify).length ? { verify: checked.verify } : {};

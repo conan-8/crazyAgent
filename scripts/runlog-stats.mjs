@@ -76,6 +76,9 @@ function analyse(records) {
   const ttfts = [];
   const decodes = [];
   const byTool = new Map();
+  // The harness's own share of each call, from the per-call timings the gated
+  // executor records: what a tool's durationMs is actually made of.
+  const split = { calls: 0, probe: 0, gate: 0, tool: 0, observe: 0, capture: 0, verify: 0 };
   for (const t of turns) {
     const tm = (t.tools ?? []).reduce((s, c) => s + (c.durationMs ?? 0), 0);
     toolMs += tm;
@@ -96,6 +99,12 @@ function analyse(records) {
       e.max = Math.max(e.max, c.durationMs ?? 0);
       if (c.ok === false) e.fail++;
       byTool.set(c.name, e);
+      if (c.timings) {
+        split.calls++;
+        for (const k of ["probe", "gate", "tool", "observe", "capture", "verify"]) {
+          split[k] += c.timings[k] ?? 0;
+        }
+      }
     }
   }
   // Reasoning that bought nothing: tokens cut by the ceiling (the re-ask
@@ -217,6 +226,7 @@ function analyse(records) {
     withScreenshot,
     failedTurns,
     byTool,
+    split,
     ttft: ttfts.length
       ? { n: ttfts.length, p50: qt(ttfts, 0.5), p90: qt(ttfts, 0.9), total: sum(ttfts) }
       : null,
@@ -313,6 +323,19 @@ function report(name, a) {
   console.log(
     `reasoning: ~${Math.round(w.reasoningChars / 4).toLocaleString()} tokens streamed · ${w.overruns} ceiling cuts (~${w.cutTokens.toLocaleString()} tokens thrown away) · ${w.salvageOverruns} salvage overruns${w.offIgnored ? " · endpoint IGNORES thinking:off" : ""} · ${w.stalls} stalled attempts`,
   );
+  if (a.split.calls) {
+    const sp = a.split;
+    const known = sp.probe + sp.gate + sp.tool + sp.observe + sp.capture + sp.verify;
+    console.log(
+      `harness split over ${sp.calls} measured call(s): probe ${secs(sp.probe)} · gate ${secs(sp.gate)} · tool ${secs(sp.tool)} · observe ${secs(sp.observe)} · shot ${secs(sp.capture)} · check ${secs(sp.verify)}` +
+        `  (avg per call: gate ${Math.round(sp.gate / sp.calls)}ms, observe ${Math.round(sp.observe / sp.calls)}ms, shot ${Math.round(sp.capture / sp.calls)}ms, tool ${Math.round(sp.tool / sp.calls)}ms)`,
+    );
+    if (known) {
+      console.log(
+        `  shares: gate ${pct(sp.gate, known)} · tool ${pct(sp.tool, known)} · observe ${pct(sp.observe, known)} · shot ${pct(sp.capture, known)} · probe ${pct(sp.probe, known)} · check ${pct(sp.verify, known)}`,
+      );
+    }
+  }
   console.log("slowest tools:");
   for (const [n, e] of [...a.byTool].sort((x, y) => y[1].ms - x[1].ms).slice(0, 8)) {
     console.log(

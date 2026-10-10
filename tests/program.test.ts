@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  assumeExpects,
   describeStep,
-  longestUnverifiedRun,
   PROGRAM_MAX_STEPS,
   PROGRAM_TOOLS,
   parseProgram,
@@ -78,15 +78,10 @@ describe("parseProgram", () => {
     if (!out.ok) expect(out.error).toContain("unknown expect key");
   });
 
-  it("demands an expect on the last step, and never two steps in a row without one", () => {
-    const noLast = parseProgram(
-      [step("type", { text: "hi" }, { pixel_changed: true }), step("key", { key: "Enter" })],
-      undefined,
-      noArgs,
-    );
-    expect(noLast.ok).toBe(false);
-    if (!noLast.ok) expect(noLast.error).toContain("LAST step needs an expect");
-
+  it("assumes pixel_changed where a program promised nothing, and names the steps", () => {
+    // This used to be a refusal, and the refusal cost two of the four
+    // run_program failures in a 420-turn benchmark run — one of them on an
+    // 8-step batch, which is exactly the batching the tool exists for.
     const gap = parseProgram(
       [
         step("type", { text: "hi" }, { pixel_changed: true }),
@@ -98,20 +93,53 @@ describe("parseProgram", () => {
       undefined,
       noArgs,
     );
-    expect(gap.ok).toBe(false);
-    if (!gap.ok) expect(gap.error).toContain("have no expect");
-    // Two unverified steps in a row are allowed; three are not.
-    const two = parseProgram(
+    expect(gap.ok).toBe(true);
+    // The third consecutive unverified mutating step is the one that gets it.
+    if (gap.ok) expect(gap.program.assumedExpects).toEqual([3]);
+
+    const noLast = parseProgram(
+      [step("type", { text: "hi" }, { pixel_changed: true }), step("key", { key: "Enter" })],
+      undefined,
+      noArgs,
+    );
+    expect(noLast.ok).toBe(true);
+    if (noLast.ok) {
+      expect(noLast.program.assumedExpects).toEqual([1]);
+      expect(noLast.program.steps[1]!.expect).toEqual({ pixel_changed: true });
+    }
+
+    // A program that writes its own expects is left exactly as written.
+    const own = parseProgram(
+      [step("type", { text: "hi" }, { text_landed: "hi" }), step("assert", {}, { text_landed: "hi" })],
+      undefined,
+      noArgs,
+    );
+    expect(own.ok && own.program.assumedExpects).toBeUndefined();
+  });
+
+  it("folds step arguments the model hoisted onto the step itself", () => {
+    // {tool:"key", key:"Enter"} — six of seven run_program calls in one
+    // archived run were refused for this shape alone.
+    const out = parseProgram(
       [
-        step("type", { text: "hi" }, { pixel_changed: true }),
-        step("key", { key: "Enter" }),
-        step("key", { key: "Tab" }),
-        step("assert", {}, { text_landed: "hi" }),
+        { tool: "key", key: "Control+Alt+2" },
+        { tool: "type", text: "Section One", expect: { text_landed: "Section One" } },
       ],
       undefined,
       noArgs,
     );
-    expect(two.ok).toBe(true);
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.program.steps[0]!.args).toEqual({ key: "Control+Alt+2" });
+      expect(out.program.steps[1]!.args).toEqual({ text: "Section One" });
+    }
+    // A declared args object wins over a hoisted key of the same name.
+    const both = parseProgram(
+      [{ tool: "key", key: "Tab", args: { key: "Enter" } }, step("assert", {}, { text_landed: "x" })],
+      undefined,
+      noArgs,
+    );
+    expect(both.ok && both.program.steps[0]!.args).toEqual({ key: "Enter" });
   });
 
   it("caps the note and rejects a non-string one", () => {
@@ -121,15 +149,31 @@ describe("parseProgram", () => {
     expect(parseProgram([step("assert", {}, { text_landed: "x" })], 5, noArgs).ok).toBe(false);
   });
 
-  it("measures the longest unverified run and lists the promises", () => {
-    const steps = [
-      { tool: "type", args: {}, expect: { pixel_changed: true } },
-      { tool: "key", args: {} },
-      { tool: "key", args: {} },
-      { tool: "assert", args: {}, expect: { text_landed: "x" } },
-    ] as unknown as ProgramStep[];
-    expect(longestUnverifiedRun(steps)).toBe(2);
-    expect(longestUnverifiedRun([{ tool: "key", args: {}, expect: { text_landed: "x" } }] as ProgramStep[])).toBe(0);
+  it("assumes expects only on mutating steps, and only where a run grew too long", () => {
+    const keys = (n: number, withExpect = false) =>
+      Array.from({ length: n }, () => ({
+        tool: "key",
+        args: {},
+        ...(withExpect ? { expect: { text_landed: "x" } } : {}),
+      })) as unknown as ProgramStep[];
+    // Two unverified mutating steps are the model's own business…
+    expect(assumeExpects(keys(2), 2)).toEqual([1]); // …but the last one is the program's promise.
+    expect(assumeExpects([...keys(1, true), ...keys(2)], 2)).toEqual([2]);
+    expect(assumeExpects([...keys(1, true), ...keys(3)], 2)).toEqual([3]);
+    // Read-only steps neither need nor get an expect.
+    expect(assumeExpects([{ tool: "docs_read", args: {} }] as unknown as ProgramStep[], 2)).toEqual([]);
+    expect(
+      assumeExpects(
+        [
+          { tool: "key", args: {} },
+          { tool: "docs_read", args: {} },
+        ] as unknown as ProgramStep[],
+        2,
+      ),
+    ).toEqual([]);
+  });
+
+  it("lists the promises a program makes", () => {
     const program = {
       steps: [
         { tool: "type", args: {}, expect: { pixel_changed: true } },

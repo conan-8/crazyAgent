@@ -192,6 +192,81 @@ export function assess(
 
 // ---------------- Jev (System-One) risk layer ----------------
 
+/**
+ * Labels and arguments that a deterministic rule cannot judge: the risk is in
+ * what the control DOES, which only its wording hints at.
+ */
+const CONSEQUENCE_RE =
+  /(delete|remove|restore|revert|reset|discard|erase|send|publish|post|share|submit|pay|buy|checkout|subscribe|sign out|log ?out|deactivate|close account|version history|resolve|approve|reject)/i;
+/** A key that destroys content or selects all of it, in any spelling. */
+const DESTRUCTIVE_COMBOS = new Set([
+  "backspace",
+  "delete",
+  "shift+delete",
+  "control+a",
+  "ctrl+a",
+  "meta+a",
+  "command+a",
+  "cmd+a",
+  "control+x",
+  "ctrl+x",
+  "meta+x",
+  "command+x",
+  "cmd+x",
+]);
+
+/**
+ * Every key combo named anywhere in a call's arguments — including the steps of
+ * a sequence, which is where a lone select-all is harmless but a select-all
+ * followed by typing is not. Matched as whole combos on purpose: a substring
+ * test for "control+a" also matches "Control+Alt+2", which is Heading 2.
+ */
+function combosIn(value: unknown, depth = 0): string[] {
+  if (depth > 4 || value === null || value === undefined) return [];
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap((v) => combosIn(v, depth + 1));
+  if (typeof value !== "object") return [];
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (k === "key" || k === "keys_after" || k === "combo" || k === "steps") {
+      out.push(...combosIn(v, depth + 1));
+    }
+  }
+  return out;
+}
+
+function hasDestructiveKey(args: Record<string, unknown>): boolean {
+  return combosIn(args).some((c) => DESTRUCTIVE_COMBOS.has(c.trim().toLowerCase()));
+}
+
+/**
+ * Should an action the deterministic rules ALLOWED still be put to Jev?
+ *
+ * Jev is union-only — it can add a confirmation, never drop one — so asking it
+ * about an action `assess` already flagged is wasted by construction. Measured
+ * over two full benchmark runs it was asked 565 times and changed nothing, at
+ * roughly a second a call (~17% of wall clock), while the one destructive
+ * action on record — a sequence that closed a dialog, selected the whole
+ * document and typed over it — was checked and allowed. So it is asked only
+ * where a regex genuinely cannot see the risk: a control whose LABEL suggests
+ * something consequential (the "Restore" click in version history is exactly
+ * that), an argument that replaces or submits, a keystroke that deletes or
+ * selects everything, and navigation, which can throw away unsaved work.
+ * Everything else — a formatting shortcut, a menu row, a click on "Bold" — goes
+ * straight through on the deterministic verdict.
+ */
+export function jevWorthAsking(
+  name: string,
+  args: Record<string, unknown>,
+  probe?: ElementProbe | null,
+): boolean {
+  if (name === "navigate" || name === "tabs_close" || name === "history") return true;
+  if (args.submit === true || args.select === "all") return true;
+  const label = `${probe?.text ?? ""} ${probe?.role ?? ""}`;
+  if (CONSEQUENCE_RE.test(label)) return true;
+  return hasDestructiveKey(args);
+}
+
 /** Noul probabilities per risk question; absent = Jev gave no signal. */
 export interface JevRiskAnswers {
   purchase?: number;

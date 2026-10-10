@@ -95,6 +95,28 @@ export function openTodos(items: TodoItem[] | undefined): TodoItem[] {
   return (items ?? []).filter((t) => t.status === "pending" || t.status === "in_progress");
 }
 
+/**
+ * Where one tool call's wall clock went, in milliseconds. The harness's own
+ * work around an action used to be invisible: a `key` call logged 1.4s for a
+ * keystroke that measures 40ms, and the only way to find the rest was to
+ * subtract read-only tools from mutating ones. Every part is optional — an
+ * absent part cost nothing on that call.
+ */
+export interface CallTimings {
+  /** Element probe under the ref/point, before the policy verdict. */
+  probe?: number;
+  /** The Jev decision round trip (only when the gate was asked). */
+  gate?: number;
+  /** The tool itself. */
+  tool?: number;
+  /** Post-action settle + snapshot. */
+  observe?: number;
+  /** Screenshot capture and encode. */
+  capture?: number;
+  /** The harness's own effect/expect check. */
+  verify?: number;
+}
+
 export type StepEvent =
   | {
       kind: "info";
@@ -158,6 +180,8 @@ export type StepEvent =
        */
       jevEffort?: { choice: string; confidence: number };
       jevProgress?: { choice: string; confidence: number };
+      /** Where this call's wall clock went — see CallTimings. */
+      timings?: CallTimings;
     }
   /** Live run statistics for the composer's stats bar. */
   | {

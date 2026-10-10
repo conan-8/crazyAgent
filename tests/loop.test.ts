@@ -969,7 +969,9 @@ describe("truncateHistory", () => {
     const first = out[1]?.toolCalls?.[0];
     // the args of an old call are dead weight; the id must survive (it pairs
     // with the tool result) and the checkpoint itself must not be mutated
-    expect(first?.args).toEqual({ note: "args elided" });
+    expect(first?.args).toEqual({
+      _elided: "this older call's arguments were trimmed from history",
+    });
     expect(first?.id).toBe("c0");
     expect(messages[1]?.toolCalls?.[0]?.args).toEqual(fat);
   });

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assess,
   buildRiskState,
+  jevWorthAsking,
   JEV_GATE_QUESTIONS,
   JEV_RISK_QUESTIONS,
   toEffortHint,
@@ -364,5 +365,51 @@ describe("Jev per-step routing layer", () => {
       this_call_previously_run: 2,
       this_call_previous_failures: 1,
     });
+  });
+});
+
+// Jev is union-only and sits on the critical path of every action it is asked
+// about. Over two benchmark runs it was asked 565 times and raised nothing, at
+// ~1s a call, so it is now asked only where a deterministic rule cannot see the
+// risk. These pin both halves: the cheap actions that must NOT pay for a
+// decision call, and the ones that must keep getting one.
+describe("jevWorthAsking", () => {
+  const probe = (text: string, role = "menuitem"): ElementProbe => ({
+    tag: "div",
+    role,
+    text,
+    inForm: false,
+  });
+
+  it("does not ask about formatting keys, arrows, or ordinary menu rows", () => {
+    expect(jevWorthAsking("key", { key: "Control+b" })).toBe(false);
+    expect(jevWorthAsking("key", { key: "ArrowRight" })).toBe(false);
+    expect(jevWorthAsking("key", { key: "Control+Alt+2" })).toBe(false);
+    expect(jevWorthAsking("click_at", { x: 1, y: 2 }, probe("Bold"))).toBe(false);
+    expect(jevWorthAsking("menu_path", { path: ["Format", "Text"] }, probe("Text"))).toBe(false);
+    expect(jevWorthAsking("click", { ref: "e1" }, probe("Add item"))).toBe(false);
+    // A harmless sequence stays cheap; the same one with Ctrl+A does not.
+    expect(jevWorthAsking("input_sequence", { steps: [{ key: "Home" }, { type: "x" }] })).toBe(false);
+  });
+
+  it("asks about keystrokes that delete or select everything", () => {
+    expect(jevWorthAsking("key", { key: "Backspace" })).toBe(true);
+    expect(jevWorthAsking("key", { key: "Control+a" })).toBe(true);
+    // The composition that wiped a document: Escape, select-all, type.
+    expect(
+      jevWorthAsking("input_sequence", {
+        steps: [{ key: "Escape" }, { key: "Control+a" }, { type: "https://example.com" }],
+      }),
+    ).toBe(true);
+    expect(jevWorthAsking("type_at", { x: 1, y: 2, text: "x", keys_after: ["Control+x"] })).toBe(true);
+  });
+
+  it("asks about consequential labels, submits, whole-content replaces, and navigation", () => {
+    expect(jevWorthAsking("click_at", { x: 1, y: 2 }, probe("Restore"))).toBe(true);
+    expect(jevWorthAsking("menu_path", { path: ["File", "Share"] }, probe("Share"))).toBe(true);
+    expect(jevWorthAsking("click", { ref: "e9" }, probe("Delete row"))).toBe(true);
+    expect(jevWorthAsking("type", { ref: "e2", text: "x", submit: true })).toBe(true);
+    expect(jevWorthAsking("type", { text: "x", select: "all" })).toBe(true);
+    expect(jevWorthAsking("navigate", { url: "https://docs.new" })).toBe(true);
   });
 });

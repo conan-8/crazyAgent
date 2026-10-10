@@ -9,7 +9,7 @@
 // Records are keyed per *turn* (one user message → one assistant run), so a
 // thread reads as an ordered list of turns, each with its own start/end time,
 // duration, tool calls with args+results, token usage and final answer.
-import type { MalformedCall, RunOutcome, RunStats, StepEvent, TodoItem } from "./protocol";
+import type { CallTimings, MalformedCall, RunOutcome, RunStats, StepEvent, TodoItem } from "./protocol";
 import type { UpstreamInfo } from "./llm";
 
 export const LOG_KEY = "baRunLogs";
@@ -54,6 +54,8 @@ export interface LogToolCall {
   jev?: boolean;
   /** The Jev risk layer checked this mutating action and allowed it. */
   jevGate?: boolean;
+  /** Where the call's wall clock went, when the executor measured it. */
+  timings?: CallTimings;
 }
 
 /** Everything that happened inside one assistant turn, in arrival order. */
@@ -354,6 +356,7 @@ export function foldLogEvent(
           call.imageBytes = e.image.length;
         }
         call.jevGate = e.jevGate === true ? true : undefined;
+        call.timings = e.timings;
       }
       break;
     }
@@ -542,6 +545,27 @@ export function toJsonl(records: LogTurnRecord[]): string {
   return records.map((r) => JSON.stringify(r)).join("\n") + (records.length ? "\n" : "");
 }
 
+/**
+ * The harness's own share of one call, inline in the log line: a `key` that
+ * logged 1.4s for a 40ms keystroke now says which part cost what. Parts under
+ * 5ms are noise and stay out.
+ */
+function timingsNote(t: CallTimings | undefined): string {
+  if (!t) return "";
+  const parts: string[] = [];
+  const add = (label: string, v: number | undefined): void => {
+    if (v === undefined || v < 5) return;
+    parts.push(`${label} ${v < 1000 ? `${Math.round(v)}ms` : `${(v / 1000).toFixed(1)}s`}`);
+  };
+  add("probe", t.probe);
+  add("gate", t.gate);
+  add("tool", t.tool);
+  add("obs", t.observe);
+  add("shot", t.capture);
+  add("check", t.verify);
+  return parts.length ? ` · ${parts.join(" ")}` : "";
+}
+
 function fmtDuration(ms: number | undefined): string {
   if (ms === undefined) return "—";
   if (ms < 1_000) return `${ms}ms`;
@@ -664,7 +688,7 @@ export function toMarkdown(records: LogTurnRecord[]): string {
         // Jev provenance is recorded, not inferred — it survives export.
         const via = call.jev ? " · via Jev" : call.jevGate ? " · jev checked" : "";
         out.push(
-          `- **${status} ${call.name}** (call ${call.index + 1}, ${iso(call.at)}, ${fmtDuration(call.durationMs)}${via})`,
+          `- **${status} ${call.name}** (call ${call.index + 1}, ${iso(call.at)}, ${fmtDuration(call.durationMs)}${via}${timingsNote(call.timings)})`,
         );
         out.push("  - args: `" + call.args.replace(/`/g, "\\`") + "`");
         if (call.result !== undefined) {

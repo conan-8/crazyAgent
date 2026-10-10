@@ -15,6 +15,7 @@ import { THINKING_LEVELS, thinkingBudgetFor } from "../../shared/llm";
 import { JEV_EFFORT_CONFIDENCE, thinkingForEffort } from "../../shared/jev";
 import {
   openTodos,
+  type CallTimings,
   type Checkpoint,
   type MalformedCall,
   type RunStats,
@@ -69,6 +70,8 @@ export interface ExecuteResult {
    */
   jevEffort?: { choice: string; confidence: number };
   jevProgress?: { choice: string; confidence: number };
+  /** Where this call's wall clock went (probe/gate/tool/observe/capture). */
+  timings?: CallTimings;
 }
 
 /**
@@ -1824,6 +1827,7 @@ async function runOne(
           jevGate: res.jevGate === true ? true : undefined,
           jevEffort: res.jevEffort,
           jevProgress: res.jevProgress,
+          timings: res.timings,
         },
       };
     }
@@ -1854,6 +1858,7 @@ async function runOne(
         jevGate: res.jevGate === true ? true : undefined,
         jevEffort: res.jevEffort,
         jevProgress: res.jevProgress,
+        timings: res.timings,
       },
     };
   } catch (err) {
@@ -1973,7 +1978,10 @@ export function truncateHistory(
         // The id and name must survive (they pair with the tool result); the
         // arguments of an old call are dead weight the model never re-reads.
         if (JSON.stringify(tc.args ?? {}).length > TOOL_CALL_ARGS_KEEP_CHARS) {
-          tc.args = { note: "args elided" };
+          // Underscored and phrased as harness metadata on purpose: a real run
+          // copied `{"note":"args elided"}` out of its own history and sent it
+          // back as a fresh todo_write call.
+          tc.args = { _elided: "this older call's arguments were trimmed from history" };
         }
       }
     }

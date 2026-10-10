@@ -67,7 +67,12 @@ function report(program: Program, outcomes: StepOutcome[], stoppedAt?: number): 
       ? `program complete: ${program.steps.length} step(s), every promise held`
       : `program STOPPED at step ${stoppedAt + 1} of ${program.steps.length} — steps after it did NOT run`;
   const body = outcomes.map((o) => o.line).join("\n");
-  return `${header}\n${body}`;
+  // Named so the model learns to write its own expects instead of leaning on
+  // the assumed one: pixel_changed only proves that SOMETHING moved.
+  const assumed = program.assumedExpects?.length
+    ? `\n[harness] step(s) ${program.assumedExpects.map((i) => i + 1).join(", ")} carried no expect — assumed pixel_changed, which only proves something moved. Where you know what should be true, say it: export_contains, text_landed, dialog, toolbar_style.`
+    : "";
+  return `${header}\n${body}${assumed}`;
 }
 
 /**
@@ -137,7 +142,7 @@ export async function runProgramSteps(
 registerTool({
   name: "run_program",
   description:
-    `Run a SEQUENCE of tool steps in one call — the harness executes them back to back (settling and reading the page after each), so you spend one turn on a whole checklist item instead of one per action. Use it whenever you already know the route: fill the Page setup dialog, insert + verify a table, apply a style and type a value, walk a menu and check the result. Each step is {tool, args?, expect?}: tool is one of ${PROGRAM_TOOLS.join(", ")}; expect declares what that step must achieve (export_contains, toolbar_style, dialog, text_landed, pixel_changed) and is checked by the harness right after the step. 2-${PROGRAM_MAX_STEPS} steps; an expect on the LAST step and never more than ${PROGRAM_MAX_UNVERIFIED_RUN} steps in a row without one; put pixel_changed:true on a step that should change the page (not on a later assert). The report lists every step and where it stopped; if a step diverges the program STOPS there — fix that step and send the rest as a new program. Optional note: one or two sentences for the user, shown when the whole program lands.`, 
+    `Run a SEQUENCE of tool steps in one call — the harness executes them back to back (settling and reading the page after each), so you spend one turn on a whole checklist item instead of one per action. Use it whenever you already know the route: fill the Page setup dialog, insert + verify a table, apply a style and type a value, walk a menu and check the result. Each step is {tool, args?, expect?}: tool is one of ${PROGRAM_TOOLS.join(", ")}; expect declares what that step must achieve (export_contains, toolbar_style, dialog, text_landed, pixel_changed) and is checked by the harness right after the step. 2-${PROGRAM_MAX_STEPS} steps. Put an expect wherever you know what should be true (export_contains, text_landed, dialog, toolbar_style, pixel_changed:true for "the page moved"); a step with none is given an assumed pixel_changed and the report names it, so write your own when you can. Each step's arguments go INSIDE args — {tool:'key', args:{key:'Enter'}}. PREFER THIS over one action per turn: it costs one round trip, one page observation and one policy check instead of N of each. The report lists every step and where it stopped; if a step diverges the program STOPS there — fix that step and send the rest as a new program. Optional note: one or two sentences for the user, shown when the whole program lands.`, 
   parameters: {
     type: "object",
     properties: {
