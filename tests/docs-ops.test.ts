@@ -69,21 +69,45 @@ describe("planDocsOp", () => {
     }
   });
 
-  it("routes Title/Subtitle through Format ▸ Paragraph styles", () => {
+  it("routes Title through the submenu's APPLY row, not the opener", () => {
+    // The live 2026 flyout row is "Title ►" and its child is the
+    // <span> "Apply 'Title'" the harness read back from a real click. Matching
+    // the bare style name clicked the opener: the walk reported success,
+    // applied nothing, and left the flyout covering the toolbar.
     const out = planDocsOp("apply_style", { style: "title" });
     expect(out.ok).toBe(true);
     if (out.ok && out.plan.kind === "menu") {
-      expect(out.plan.labels).toEqual(["Format", "Paragraph styles", "Title"]);
+      expect(out.plan.labels).toEqual([
+        "Format",
+        "Paragraph styles",
+        "Title",
+        ["Apply 'Title'", "Apply \u2018Title\u2019", "Apply Title"],
+      ]);
       expect(out.plan.verify).toMatchObject({ check: "exportHtmlContains", needle: 'class="title"' });
     } else {
       throw new Error("expected a menu plan");
     }
-    // Normal text verifies via the toolbar style box (no export marker).
+    const sub = planDocsOp("apply_style", { style: "Subtitle" });
+    expect(sub.ok && sub.plan.kind === "menu" && sub.plan.labels[3]).toEqual([
+      "Apply 'Subtitle'",
+      "Apply \u2018Subtitle\u2019",
+      "Apply Subtitle",
+    ]);
+  });
+
+  it("leaves Normal text on the one-click path — no submenu was proven for it", () => {
     const normal = planDocsOp("apply_style", { style: "normal" });
-    expect(normal.ok && normal.plan.kind === "menu" && normal.plan.verify).toMatchObject({
-      check: "toolbarStylesShows",
-      needle: "Normal text",
-    });
+    expect(normal.ok).toBe(true);
+    if (normal.ok && normal.plan.kind === "menu") {
+      expect(normal.plan.labels).toEqual(["Format", "Paragraph styles", "Normal text"]);
+      // Normal text verifies via the toolbar style box (no export marker).
+      expect(normal.plan.verify).toMatchObject({
+        check: "toolbarStylesShows",
+        needle: "Normal text",
+      });
+    } else {
+      throw new Error("expected a menu plan");
+    }
   });
 
   it("rejects apply_style without a usable style name", () => {

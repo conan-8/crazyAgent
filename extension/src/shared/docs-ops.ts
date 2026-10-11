@@ -261,13 +261,34 @@ export function planDocsOp(opRaw: unknown, args: Record<string, unknown>): DocsO
       }
       const htmlNeedle =
         style === "Title" ? 'class="title"' : style === "Subtitle" ? 'class="subtitle"' : null;
+      // Title and Subtitle are NOT one-click rows. The live 2026 flyout shows
+      // "Title ►" / "Subtitle ►", whose children are "Apply 'Title'" and
+      // "Update 'Title' to match". Matching the bare style name clicks the
+      // OPENER: the walk reports success ("Format" → "Paragraph styles ►" →
+      // "Title ►"), nothing is applied, and the flyout is left covering the
+      // toolbar. Measured twice in one run, both NOT VERIFIED, and every style
+      // that did land there was a manual click on the "Apply '…'" span. So open
+      // the submenu, then name the row that actually applies. The straight
+      // quotes are what the harness read back from the live row
+      // (<span> "Apply 'Subtitle'"); the typographic variants are insurance,
+      // tried in order by the label matcher.
+      const needsApplyRow = style === "Title" || style === "Subtitle";
+      const applyRow = [
+        `Apply '${style}'`,
+        `Apply \u2018${style}\u2019`,
+        `Apply ${style}`,
+      ];
       return {
         ok: true,
         op,
         plan: {
           kind: "menu",
-          labels: ["Format", "Paragraph styles", style],
-          describe: `apply ${style} via Format ▸ Paragraph styles`,
+          labels: needsApplyRow
+            ? ["Format", "Paragraph styles", style, applyRow]
+            : ["Format", "Paragraph styles", style],
+          describe: needsApplyRow
+            ? `apply ${style} via Format ▸ Paragraph styles ▸ ${style} ▸ Apply '${style}'`
+            : `apply ${style} via Format ▸ Paragraph styles`,
           verify: htmlNeedle
             ? { check: "exportHtmlContains", needle: htmlNeedle, describe: `the exported HTML marks the paragraph as ${style.toLowerCase()}` }
             : { check: "toolbarStylesShows", needle: style, describe: `the toolbar's style box reads "${style}"` },

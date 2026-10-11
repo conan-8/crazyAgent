@@ -376,8 +376,15 @@ export class Actions {
       // actually choose from. Page-wide labels are the fallback, and they are
       // labelled as such so a closed menu is not mistaken for an empty one.
       const open = openMenuRows(12);
-      const hint = open.length
-        ? missHint(open, "rows in the OPEN menu")
+      const hint = open.labels.length
+        ? missHint(open.labels, "rows in the OPEN menu") +
+          // The list is capped, and a capped list that does not say so reads as
+          // a complete one: a run concluded "Page numbers" and "Table of
+          // contents" were missing from Insert and went off improvising
+          // coordinates, when both are real rows below the first twelve.
+          (open.total > open.labels.length
+            ? ` — that is the first ${open.labels.length} of ${open.total} rows, so a label absent from this list may still be further down the same menu`
+            : "")
         : (() => {
             const pageRows = visibleLabels(allMenuRows(), labelOf, 12);
             return pageRows.length
@@ -1428,17 +1435,14 @@ function menuBarState(): MenuBarState {
  * A submenu is appended after its parent, so the last open popup holding rows
  * is the one waiting for a choice.
  */
-function openMenuRows(limit: number): string[] {
+function openMenuRows(limit: number): { labels: string[]; total: number } {
   const popups = [...document.querySelectorAll<HTMLElement>(POPUP_ROLES)].filter(onScreenPopup);
   for (let i = popups.length - 1; i >= 0; i--) {
-    const rows = visibleLabels(
-      Array.from(popups[i]!.querySelectorAll<HTMLElement>(MENU_ROW_CANDIDATES)),
-      labelOf,
-      limit,
-    );
-    if (rows.length) return rows;
+    const rows = Array.from(popups[i]!.querySelectorAll<HTMLElement>(MENU_ROW_CANDIDATES));
+    const labels = visibleLabels(rows, labelOf, limit);
+    if (labels.length) return { labels, total: visibleLabels(rows, labelOf, Infinity).length };
   }
-  return [];
+  return { labels: [], total: 0 };
 }
 
 /**
