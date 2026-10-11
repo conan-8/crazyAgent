@@ -399,10 +399,17 @@ export function snapOrPromote(
       };
     }
     const c = rectCenter(snap.rect);
+    // `snap.distance` is the gap to the candidate's EDGE, which on a wide
+    // control can be tiny while its centre is far away. Measured 2026-10-10:
+    // five clicks aimed 2-3px below the Docs menu bar were reported as
+    // "snapped 2px" while actually moving up to 27px onto the Extensions menu,
+    // so the model kept re-aiming at the same spot and kept opening that menu.
+    // Report where the click really went.
+    const moved = Math.round(Math.hypot(c.x - point.x, c.y - point.y));
     return {
       kind: "snap",
       point: c,
-      label: `snapped ${snap.distance}px to the nearest control ${controlLabel(snap.tag, snap.text, snap.ref)} — the point (${point.x},${point.y}) was not on one`,
+      label: `snapped to the nearest control ${controlLabel(snap.tag, snap.text, snap.ref)} — the point (${point.x},${point.y}) was not on one (${snap.distance}px outside it); the click moved ${moved}px to (${c.x},${c.y})`,
     };
   }
   return { kind: "keep" };

@@ -389,7 +389,7 @@ describe("snapOrPromote — the click magnet", () => {
     expect(snapOrPromote({ x: 50, y: 450 }, tall, null).kind).toBe("keep");
   });
 
-  it("snaps a near miss to the nearby control and says so", () => {
+  it("snaps a near miss to the nearby control and reports where the click really went", () => {
     const snap: SnapCandidate = {
       ref: "22",
       tag: "div",
@@ -404,7 +404,11 @@ describe("snapOrPromote — the click magnet", () => {
     expect(d.kind).toBe("snap");
     if (d.kind === "snap") {
       expect(d.point).toEqual({ x: 984, y: 394 });
-      expect(d.label).toContain("snapped 14px");
+      // The edge gap and the real displacement are different numbers (14 vs
+      // 18 here); a wide control can make the gap look trivial while the click
+      // travels. Both must be stated, or the model cannot tell it was moved.
+      expect(d.label).toContain("14px outside it");
+      expect(d.label).toContain("moved 18px to (984,394)");
       expect(d.label).toContain("Comment");
     }
   });

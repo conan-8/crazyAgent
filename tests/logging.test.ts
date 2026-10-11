@@ -93,6 +93,31 @@ describe("run log folding", () => {
     expect(toJsonl([rec])).toContain('"gate":1040');
   });
 
+  it("splits the settle wait out of obs, but only when both halves are worth naming", () => {
+    const render = (timings: { observe?: number; settle?: number }): string => {
+      const rec = newTurnRecord("Bold a word", { conversationId: "c1", mode: "standard", at: 1_000 });
+      foldLogEvent(rec, { kind: "step_started", stepIndex: 0 }, 1_000);
+      foldLogEvent(
+        rec,
+        { kind: "tool_call", stepIndex: 0, name: "key", args: { key: "Control+b" } },
+        1_100,
+      );
+      foldLogEvent(
+        rec,
+        { kind: "tool_result", stepIndex: 0, name: "key", result: "sent", ok: true, timings },
+        2_500,
+      );
+      return toMarkdown([rec]);
+    };
+    // 1260ms of observation, 780ms of it spent WAITING for the page to go
+    // quiet. The two halves have opposite fixes, so both get named.
+    expect(render({ observe: 1_260, settle: 780 })).toContain("obs 1.3s (settle 780ms)");
+    // A settle that IS essentially the whole observation adds nothing.
+    expect(render({ observe: 800, settle: 780 })).not.toContain("settle");
+    // Exports written before the split existed carry no settle at all.
+    expect(render({ observe: 1_260 })).not.toContain("settle");
+  });
+
   it("splits turns and keeps call order across steps", () => {    const rec = newTurnRecord("t", { at: 0 });
     foldLogEvent(rec, { kind: "step_started", stepIndex: 0 }, 0);
     foldLogEvent(rec, { kind: "token_delta", text: "one" }, 10);

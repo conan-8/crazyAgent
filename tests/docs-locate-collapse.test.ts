@@ -29,7 +29,16 @@ const box = (x: number, y: number, height = 17): Caret => ({
 });
 
 const keys: string[] = [];
+/** Every `Input.insertText` payload — i.e. the phrase actually reaching the page. */
+const inserted: string[] = [];
+/** Does Control+f produce a find bar? Probe v10 S2 measured both states. */
+let findBarOpen = true;
 let carets: (Caret | null)[] = [];
+
+/** The search field probe v10 measured: focused while the bar is open, and not
+ *  laid out at all once it closes. The generated ids (c9, avWBGd-12) change per
+ *  session, so the guard keys off the aria-label instead. */
+const FIND_INPUT = 'input[aria-label="Find in document"]';
 
 const chromeMock = {
   tabs: { get: vi.fn(), update: vi.fn() },
@@ -51,10 +60,15 @@ function comboName(p: { key?: string; modifiers?: number }): string {
 
 const adapter = () => ({
   send: vi.fn(
-    async (_tab: number, method: string, params: { type?: string; key?: string; modifiers?: number } | undefined) => {
+    async (
+      _tab: number,
+      method: string,
+      params: { type?: string; key?: string; modifiers?: number; text?: string } | undefined,
+    ) => {
       if (method === "Input.dispatchKeyEvent" && params?.type === "keyDown" && params) {
         keys.push(comboName(params));
       }
+      if (method === "Input.insertText") inserted.push(String(params?.text ?? ""));
       return {};
     },
   ),
@@ -64,16 +78,26 @@ const adapter = () => ({
 beforeEach(() => {
   vi.resetAllMocks();
   keys.length = 0;
+  inserted.length = 0;
+  findBarOpen = true;
   carets = [];
   (globalThis as { chrome?: unknown }).chrome = chromeMock;
   chromeMock.tabs.get.mockResolvedValue({ id: 1, windowId: 1, active: true });
   chromeMock.tabs.update.mockResolvedValue({});
   chromeMock.storage.session.get.mockResolvedValue({});
   chromeMock.storage.local.get.mockResolvedValue({});
-  // Each call answers one caret read, in order — the sequence the collapse sees.
-  chromeMock.scripting.executeScript.mockImplementation(async () => [
-    { result: { ok: true, data: carets.shift() ?? null } },
-  ]);
+  chromeMock.scripting.executeScript.mockImplementation(async (opts: { args?: unknown[] }) => {
+    const req = (opts?.args?.[0] ?? {}) as { action?: string };
+    // The find-bar guard asks for the search field's box. Answer from the
+    // geometry probe v10 measured, so a closed bar really is closed.
+    if (req.action === "boxes") {
+      const boxes = findBarOpen ? [{ selector: FIND_INPUT, x: 1433, y: 137, w: 168, h: 24 }] : [];
+      return [{ result: { ok: true, data: { boxes } } }];
+    }
+    // Each other call answers one caret read, in order — the sequence the
+    // collapse sees.
+    return [{ result: { ok: true, data: carets.shift() ?? null } }];
+  });
 });
 
 async function collapse(side: "before" | "after", reads: (Caret | null)[]) {
@@ -145,5 +169,47 @@ describe("collapseToMatch at a table cell edge", () => {
     expect(out.keys.at(-2)).toBe("Escape");
     expect(out.keys.at(-1)).toBe("End");
     expect(out.repaired).toBe(true);
+  });
+});
+
+describe("findBarCaret never types into a find bar that did not open", () => {
+  // A 2026-10-10 run lost a paragraph this way: the document came back as
+  // EXACTLY the phrase docs_locate had been asked to find, and a following
+  // Control+z made it strictly worse ("M"), which is what proves the phrase had
+  // been INSERTED rather than the text merely hidden. sendTrustedText sends real
+  // keystrokes to whatever holds focus, so a swallowed Control+f — a menu,
+  // dialog or toolbar dropdown in front — writes the query into the document,
+  // replacing any live selection.
+  const PHRASE = "Zebra quartz lantern melody";
+
+  async function locate(barOpens: boolean) {
+    findBarOpen = barOpens;
+    carets = [box(597, 249)];
+    const m = await import("../extension/src/background/tools/docs");
+    const ctx = { tabId: 1, adapter: adapter(), emit: vi.fn() } as never;
+    const out = await m.findBarCaret(ctx, PHRASE, 1, "before", { exportCount: false });
+    return { keys: [...keys], inserted: [...inserted], out };
+  }
+
+  it("types NOTHING and reports a TOOL failure when Control+f is swallowed", async () => {
+    const r = await locate(false);
+    expect(r.inserted).toEqual([]);
+    expect(r.out.barNeverOpened).toBe(true);
+    expect(r.out.missing).toMatch(/did not open/);
+    // It offered the bar a chance to appear, then cleaned up after itself.
+    expect(r.keys[0]).toBe("Control+f");
+    expect(r.keys).toContain("Escape");
+    // No caret placement was attempted on a document it never searched.
+    expect(r.keys).not.toContain("Home");
+    expect(r.keys).not.toContain("ArrowLeft");
+  });
+
+  it("types the phrase once the bar is confirmed open", async () => {
+    const r = await locate(true);
+    // planTyping sends the first character as a lead key combo and the rest as
+    // one insertText, so the phrase arrives in two pieces.
+    expect(r.inserted).toEqual([PHRASE.slice(1)]);
+    expect(r.keys.some((k) => k.toLowerCase().endsWith("z"))).toBe(true);
+    expect(r.out.barNeverOpened).toBeUndefined();
   });
 });

@@ -991,11 +991,20 @@ async function observeAfterAction(
    * the fact that nothing moved.
    */
   fullText?: string;
+  /**
+   * Milliseconds spent WAITING for the page to go quiet, out of the caller's
+   * whole observation. Recorded because `obs` alone could not say whether the
+   * cost is the settle or the snapshot — and on a canvas editor, which mutates
+   * continuously, the 500ms quiet window is a floor paid on every action.
+   */
+  settleWaitMs: number;
 } | null> {
   try {
     // Shorter reachability budget than the manual tool: fail fast on pages
     // where the content script can never run (chrome://, PDF viewer, …).
+    const startedSettle = Date.now();
     await settleTab(tabId, settleMs, 8).catch(() => null);
+    const settleWaitMs = Date.now() - startedSettle;
     const snap = await collectSnapshot(tabId);
     if (!snap.frames.length) return null;
     const text = formatSnapshot(snap);
@@ -1011,9 +1020,15 @@ async function observeAfterAction(
         ? `${text.slice(0, OBSERVATION_MAX_CHARS)}…[truncated]`
         : text;
     if (prev && sameObservation(prev, text)) {
-      return { text: "[page unchanged since the previous observation]", canvas, changed: false, fullText: full };
+      return {
+        text: "[page unchanged since the previous observation]",
+        canvas,
+        changed: false,
+        fullText: full,
+        settleWaitMs,
+      };
     }
-    return { text: full, canvas, changed: prev ? true : undefined, fullText: full };
+    return { text: full, canvas, changed: prev ? true : undefined, fullText: full, settleWaitMs };
   } catch {
     return null; // observation is an optimization — never fail the action
   }
@@ -1292,6 +1307,7 @@ async function executeToolGated(
   const startedObserve = Date.now();
   const observed = await observeAfterAction(obsTabId, settles);
   timings.observe = Date.now() - startedObserve;
+  if (observed) timings.settle = observed.settleWaitMs;
   if (stopRequested) return res;
   const base = res.text ?? JSON.stringify(res.payload ?? null);
   const observation = observed?.text ?? null;
@@ -1398,6 +1414,28 @@ async function actionVerification(
     verdict,
   };
   let line = await checkStepExpect(expectCtx);
+  // A canvas editor paints its text into pixels and publishes it to the
+  // accessibility layer asynchronously, so the digest taken right after the
+  // settle can still predate the keystrokes that just landed. Measured
+  // 2026-10-10: nine text_landed misses in one run, and the model contradicted
+  // the verdict from its own screenshot twice ("Contents actually landed — the
+  // check was just stale"). Each miss STOPPED a run_program mid-sequence, so
+  // the remaining steps never ran and the retry re-typed text that was already
+  // there. Re-read once before calling it a failure.
+  if (
+    line &&
+    expectFailed(line) &&
+    observed?.canvas &&
+    parsed.expect.text_landed !== undefined &&
+    line.includes("page text does NOT contain")
+  ) {
+    const reread = await observeAfterAction(tabId, settles).catch(() => null);
+    const fresh = reread?.fullText ?? reread?.text;
+    if (fresh && fresh !== expectCtx.observationText) {
+      const again = await checkStepExpect({ ...expectCtx, observationText: fresh });
+      if (again) line = again;
+    }
+  }
   if (!line) return { lines: out, verify };
   out.push(`[${line}]`);
   verify.expect = expectOutcome(line);

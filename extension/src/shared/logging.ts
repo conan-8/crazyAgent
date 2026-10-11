@@ -553,14 +553,26 @@ export function toJsonl(records: LogTurnRecord[]): string {
 function timingsNote(t: CallTimings | undefined): string {
   if (!t) return "";
   const parts: string[] = [];
+  const ms = (v: number): string => (v < 1000 ? `${Math.round(v)}ms` : `${(v / 1000).toFixed(1)}s`);
   const add = (label: string, v: number | undefined): void => {
     if (v === undefined || v < 5) return;
-    parts.push(`${label} ${v < 1000 ? `${Math.round(v)}ms` : `${(v / 1000).toFixed(1)}s`}`);
+    parts.push(`${label} ${ms(v)}`);
   };
   add("probe", t.probe);
   add("gate", t.gate);
   add("tool", t.tool);
   add("obs", t.observe);
+  // The wait inside obs, but only when both halves are worth separating: a
+  // settle that IS the whole observation, or a snapshot that is, says nothing
+  // the `obs` total did not.
+  if (
+    t.settle !== undefined &&
+    t.settle >= 50 &&
+    t.observe !== undefined &&
+    t.observe - t.settle >= 50
+  ) {
+    parts.push(`(settle ${ms(t.settle)})`);
+  }
   add("shot", t.capture);
   add("check", t.verify);
   return parts.length ? ` · ${parts.join(" ")}` : "";

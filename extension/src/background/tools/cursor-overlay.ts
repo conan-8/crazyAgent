@@ -142,7 +142,13 @@ export async function withCursorHidden<T>(
   }
   try {
     // One beat for the compositor: the capture must not race the style change.
-    await new Promise((resolve) => setTimeout(resolve, 90));
+    // Only when there WAS a visible change — HIDE returns "" with no overlay and
+    // "0" for an arrow that already faded, and in both cases the pixels are
+    // identical whether or not we wait. The arrow fades 2.6s after a click, so
+    // most captures in a run are of an already-hidden one; this was a flat 90ms
+    // on every single shot (173 of them in one benchmark = ~15s).
+    const changedSomething = prev !== undefined && prev !== "" && prev !== "0";
+    if (changedSomething) await new Promise((resolve) => setTimeout(resolve, 90));
     return await fn();
   } finally {
     // Only restore an arrow that was actually visible: a hidden one (already

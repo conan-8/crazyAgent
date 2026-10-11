@@ -111,6 +111,14 @@ export interface CallTimings {
   tool?: number;
   /** Post-action settle + snapshot. */
   observe?: number;
+  /**
+   * The part of `observe` spent WAITING for the page to go quiet, as opposed to
+   * collecting the snapshot. `observe` alone could not say which, and the two
+   * have opposite fixes: a long wait means the settle budget or its 500ms quiet
+   * window is too generous for a page that never stops mutating (a canvas
+   * editor), while a long remainder means snapshot collection is the cost.
+   */
+  settle?: number;
   /** Screenshot capture and encode. */
   capture?: number;
   /** The harness's own effect/expect check. */

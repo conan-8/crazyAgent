@@ -79,6 +79,9 @@ function analyse(records) {
   // The harness's own share of each call, from the per-call timings the gated
   // executor records: what a tool's durationMs is actually made of.
   const split = { calls: 0, probe: 0, gate: 0, tool: 0, observe: 0, capture: 0, verify: 0 };
+  // `settle` is the WAIT inside `observe`, not a peer of it — tracked apart so it
+  // never gets double-counted into the shares below. Absent from older exports.
+  const settle = { ms: 0, calls: 0 };
   for (const t of turns) {
     const tm = (t.tools ?? []).reduce((s, c) => s + (c.durationMs ?? 0), 0);
     toolMs += tm;
@@ -103,6 +106,10 @@ function analyse(records) {
         split.calls++;
         for (const k of ["probe", "gate", "tool", "observe", "capture", "verify"]) {
           split[k] += c.timings[k] ?? 0;
+        }
+        if (typeof c.timings.settle === "number") {
+          settle.ms += c.timings.settle;
+          settle.calls++;
         }
       }
     }
@@ -227,6 +234,7 @@ function analyse(records) {
     failedTurns,
     byTool,
     split,
+    settle,
     ttft: ttfts.length
       ? { n: ttfts.length, p50: qt(ttfts, 0.5), p90: qt(ttfts, 0.9), total: sum(ttfts) }
       : null,
@@ -333,6 +341,15 @@ function report(name, a) {
     if (known) {
       console.log(
         `  shares: gate ${pct(sp.gate, known)} · tool ${pct(sp.tool, known)} · observe ${pct(sp.observe, known)} · shot ${pct(sp.capture, known)} · probe ${pct(sp.probe, known)} · check ${pct(sp.verify, known)}`,
+      );
+    }
+    // The wait inside observe. This is the line that decides whether the next
+    // optimization is the settle budget or snapshot collection.
+    if (a.settle.calls) {
+      const st = a.settle;
+      console.log(
+        `  of that observe, ${secs(st.ms)} over ${st.calls} call(s) (avg ${Math.round(st.ms / st.calls)}ms) was WAITING for the page to go quiet` +
+          ` — ${pct(st.ms, sp.observe)} of observe, ${pct(st.ms, known)} of the split; the remainder is snapshot collection`,
       );
     }
   }

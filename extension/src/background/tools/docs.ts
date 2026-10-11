@@ -23,6 +23,7 @@ import { sendStrokes } from "./coords";
 import { captureBlindShot, layoutViewportCss, truncateWithNote } from "./perception";
 import { ensureTabActive, sendTrustedKey, sendTrustedText } from "./trusted-input";
 import { registerTool, type ToolContext } from "./types";
+import type { SelectorBox } from "../../content/actions";
 
 /** What the current tab's URL says about the document, when it is one. */
 interface WorkspaceDoc {
@@ -328,7 +329,63 @@ export interface FindBarResult {
   /** Set when the caret had to be placed by Home/End because the match sits on
    *  a cell or line edge, where an arrow key would have left it. */
   repaired?: boolean;
+  /** Set when Control+f never produced a find bar, so nothing was typed. */
+  barNeverOpened?: boolean;
 }
+
+/**
+ * The find bar's own search field.
+ *
+ * Measured by probe v10 S2 on a live Doc: while the bar is open, focus is on
+ * `input[aria-label="Find in document"]` inside `[class*="FindbarFindInputContainer"]`;
+ * once it closes, no find-classed element is laid out at all and focus returns
+ * to the offscreen typing sink. The element IDS in that dump (`c9`, `elptr_8`,
+ * `avWBGd-12`) are generated per session and must never be used.
+ */
+const FIND_INPUT_SELECTORS = [
+  'input[aria-label="Find in document"]',
+  '[class*="FindbarFindInputContainer"] input',
+  '[class*="FindBarContainer"] input',
+];
+
+/** Is the find bar's search field on screen right now? */
+async function findBarIsOpen(ctx: ToolContext): Promise<boolean> {
+  const res = await runContentAction(ctx.tabId, {
+    action: "boxes",
+    selectors: FIND_INPUT_SELECTORS,
+  }).catch(() => null);
+  const boxes = res?.ok ? ((res.data as { boxes?: SelectorBox[] } | undefined)?.boxes ?? []) : [];
+  return boxes.length > 0;
+}
+
+/**
+ * Open the find bar and PROVE it opened before anything is typed into it.
+ *
+ * `sendTrustedText` sends real keystrokes to whatever holds focus. On a canvas
+ * editor with a live selection that REPLACES the selection — so if Control+f is
+ * swallowed (a menu, dialog or toolbar dropdown holding focus, a page still
+ * loading) the search phrase is typed straight into the document. A 2026-10-10
+ * run lost a paragraph exactly that way: it came back as the very phrase
+ * `docs_locate` had been asked to find, and an undo made it strictly worse,
+ * which is what proves the phrase had been inserted rather than the text merely
+ * hidden. Typing nothing and reporting the miss is always the cheaper outcome.
+ */
+async function openFindBar(ctx: ToolContext): Promise<boolean> {
+  await sendTrustedKey(ctx.tabId, ctx.adapter, "Control+f");
+  for (let i = 0; i < 10; i++) {
+    if (await findBarIsOpen(ctx)) return true;
+    await sleep(150);
+  }
+  // Leave no half-open popup behind before handing the failure back.
+  await sendTrustedKey(ctx.tabId, ctx.adapter, "Escape");
+  return false;
+}
+
+/** What to tell the model when the bar never appeared. */
+const FIND_BAR_MISSING =
+  `${failureTag("tool")}: the find bar did not open, so NOTHING was typed and the document is unchanged — ` +
+  `Control+f was swallowed, which means a menu, dialog or toolbar dropdown is holding focus (or the page is still loading). ` +
+  `Press Escape or click into the document body, then retry.`;
 
 /** Total matches for `phrase`: the find bar's counter, else a count over the text export. */
 async function findTotal(
@@ -367,16 +424,18 @@ export function crossedCell(a: CaretBox, b: CaretBox): boolean {
   return Math.abs(a.x - b.x) > Math.max(12, 1.5 * Math.min(a.height, b.height));
 }
 
-/** Re-open the find bar on `phrase` and leave the match selected. */
-async function selectMatch(ctx: ToolContext, phrase: string, occurrence: number): Promise<void> {
+/** Re-open the find bar on `phrase` and leave the match selected. False if the
+ *  bar never opened — in which case nothing was typed anywhere. */
+async function selectMatch(ctx: ToolContext, phrase: string, occurrence: number): Promise<boolean> {
   const { tabId, adapter } = ctx;
-  await sendTrustedKey(tabId, adapter, "Control+f");
+  if (!(await openFindBar(ctx))) return false;
   await sendTrustedText(tabId, adapter, phrase);
   for (let i = 1; i < occurrence; i++) {
     await sendTrustedKey(tabId, adapter, "Enter");
   }
   await sleep(250);
   await sendTrustedKey(tabId, adapter, "Escape");
+  return true;
 }
 
 /**
@@ -439,7 +498,7 @@ export async function collapseToMatch(
     await sendTrustedKey(tabId, adapter, toward);
     return false;
   }
-  await selectMatch(ctx, phrase, occurrence);
+  if (!(await selectMatch(ctx, phrase, occurrence))) return false;
   // Cell-safe: Home/End stay inside the cell, and at a cell edge they ARE the
   // match's edge — which is the case that made the arrow leave the table.
   await sendTrustedKey(tabId, adapter, side === "before" ? "Home" : "End");
@@ -471,7 +530,7 @@ export async function findBarCaret(
   opts: { keepOpen?: boolean; shot?: boolean; exportCount?: boolean } = {},
 ): Promise<FindBarResult> {
   await ensureTabActive(ctx.tabId, ctx.adapter);
-  await sendTrustedKey(ctx.tabId, ctx.adapter, "Control+f");
+  if (!(await openFindBar(ctx))) return { missing: FIND_BAR_MISSING, barNeverOpened: true };
   await sendTrustedText(ctx.tabId, ctx.adapter, phrase);
   for (let i = 1; i < occurrence; i++) {
     await sendTrustedKey(ctx.tabId, ctx.adapter, "Enter");
@@ -622,15 +681,24 @@ registerTool({
       ok: false as const,
       error: `${failureTag("input")}: ${missing}. Check the exact wording with docs_read (text) — the find bar matches literally, ignoring case — then retry with words that are really there.`,
     });
+    // A bar that never opened is a TOOL failure, not a wrong phrase: notFound's
+    // "check your wording" advice would send the model hunting a phrase that is
+    // definitely there, and it types nothing so there is no partial state.
+    const barFailure = (r: FindBarResult) =>
+      r.barNeverOpened ? { ok: false as const, error: r.missing ?? FIND_BAR_MISSING } : null;
     try {
       if (through) {
         // End first: record where the span ends, then put the caret at its
         // start (the view scrolls there) and extend with a measured
         // shift+click — the end point is re-scrolled into view if needed.
         const tail = await findBarCaret(ctx, through, nth(args.through_occurrence), "after");
+        const tailBar = barFailure(tail);
+        if (tailBar) return tailBar;
         if (tail.missing) return notFound(tail.missing);
         const end = await readCaret(ctx);
         const head = await findBarCaret(ctx, phrase, occurrence, "before");
+        const headBar = barFailure(head);
+        if (headBar) return headBar;
         if (head.missing) return notFound(head.missing);
         if (!end) {
           return {
@@ -658,6 +726,8 @@ registerTool({
         };
       }
       const found = await findBarCaret(ctx, phrase, occurrence, caret, { keepOpen, shot: true });
+      const bar = barFailure(found);
+      if (bar) return bar;
       if (found.missing) return notFound(found.missing);
       const at = caret ? await readCaret(ctx) : null;
       const unverified =
