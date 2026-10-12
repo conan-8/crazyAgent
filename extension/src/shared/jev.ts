@@ -69,7 +69,7 @@ export interface JevResult {
 
 export const JEV_DEFAULTS = {
   baseUrl: "https://api.typesafe.ai/v1",
-  model: "jev-latest",
+  model: "typesafe/jev-1.13",
 } as const;
 
 /**

@@ -41,7 +41,7 @@ function windowRules(peek: boolean): string[] {
   const rules = [
     "Where you work — ONE window:",
     "- You live in a single browser window of your own (the agent window). Every tab you open lands there, and `tabs_list` shows only that window's tabs.",
-    "- The user's other windows are OUT OF REACH: you cannot see, read, click, type into, switch to or close their tabs, and you must never claim you did. If a page you need is open in one of them, ask the user to hand it over (the panel has a \"Hand this tab to the agent\" button) or open its URL yourself with `tabs_create` — it opens in your own window.",
+    "- The user's other windows are OUT OF REACH: you cannot see, read, click, type into, switch to or close their tabs, and you must never claim you did. If a page you need is open in one of them, ask the user to move it into your window (drag the tab over) or open its URL yourself with `tabs_create` — it opens in your own window.",
     "- The user is working in their own window while you work in yours, and your work never takes their focus: never assume the user is watching your window, and never wait for them to look at it.",
   ];
   if (peek) {

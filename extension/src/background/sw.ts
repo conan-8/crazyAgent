@@ -386,7 +386,15 @@ const pendingUserInputs: string[] = [];
 /** Resolvers of in-flight step waits, woken early when stop is requested. */
 const stopWaiters = new Set<() => void>();
 
+/**
+ * Aborted the instant the user presses Stop: cuts the in-flight LLM request
+ * (the loop wires it into every attempt), so unfinished thinking is dropped
+ * instead of streaming on while the run winds down. Recreated per run.
+ */
+let runStopController = new AbortController();
+
 function signalStop(): void {
+  runStopController.abort();
   for (const waiter of stopWaiters) waiter();
   stopWaiters.clear();
 }
@@ -760,6 +768,7 @@ async function runFrom(cp: Checkpoint): Promise<void> {
   if (loopRunning) return;
   loopRunning = true;
   currentCp = cp;
+  runStopController = new AbortController();
   injectedLessonIds = [];
   injectedSkillIds = [];
   keepalive.start();
@@ -826,6 +835,8 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         emit,
         save: saveCheckpoint,
         shouldStop: () => stopRequested,
+        // Stop cuts the in-flight LLM request at the wire — see signalStop.
+        stopSignal: runStopController.signal,
         // No stepCap: the agent runs until it answers, the user stops it, or
         // an error aborts it.
         maxTokens: settings.maxTokens,

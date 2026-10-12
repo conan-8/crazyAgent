@@ -199,10 +199,9 @@ export function outOfWindowMessage(tabId: number, tabWindowId?: number): string 
     `TOOL-FAILED: tab ${tabId} is in the user's window` +
     (tabWindowId !== undefined ? ` (window ${tabWindowId})` : "") +
     ", not in the agent's own window — you cannot see or act on tabs outside it. " +
-    "Do not retry this call. Three ways forward: (1) ask the user to hand that tab over — " +
-    'the panel has a "Hand this tab to the agent" button; (2) open the page yourself with ' +
-    "tabs_create, which always opens in your own window; (3) if you only need to LOOK at which " +
-    'tabs the user has open, tell the user to switch on "Look outside" for the run.'
+    "Do not retry this call. Two ways forward: (1) ask the user to open the page " +
+    "for you — they can drag the tab into your window or paste you its URL; " +
+    "(2) open the page yourself with tabs_create, which always opens in your own window."
   );
 }
 

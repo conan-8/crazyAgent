@@ -58,10 +58,10 @@ export const THINKING_LEVELS: {
   /** Anthropic extended-thinking budget (tokens) for this level. */
   budget: number;
 }[] = [
-  { value: "off", label: "Off", hint: "No reasoning block — fastest", budget: 0 },
-  { value: "low", label: "Low", hint: "Brief reasoning — small latency cost", budget: 1_024 },
-  { value: "medium", label: "Medium", hint: "Balanced reasoning for multi-step tasks", budget: 4_096 },
-  { value: "high", label: "High", hint: "Deep reasoning — slowest, best on hard tasks", budget: 16_384 },
+  { value: "off", label: "Off", hint: "No thinking — fastest", budget: 0 },
+  { value: "low", label: "Low", hint: "Brief thinking — small delay", budget: 1_024 },
+  { value: "medium", label: "Medium", hint: "Balanced thinking for complex tasks", budget: 4_096 },
+  { value: "high", label: "High", hint: "Deep thinking — slowest, best for hard problems", budget: 16_384 },
 ];
 
 export function thinkingBudgetFor(level: ThinkingLevel): number {

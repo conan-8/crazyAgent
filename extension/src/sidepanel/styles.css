@@ -24,11 +24,11 @@
   --text-faint: #6f6660;
 
   /* The one accent. Everything else on this panel is warm black or white. */
-  --accent: #ff6a00;
-  --accent-strong: #ff8a33;
-  --accent-soft: rgba(255, 106, 0, 0.13);
-  --accent-line: rgba(255, 106, 0, 0.5);
-  --accent-glow: rgba(255, 106, 0, 0.22);
+  --accent: #e3521b;
+  --accent-strong: #f06b39;
+  --accent-soft: rgba(227, 82, 27, 0.13);
+  --accent-line: rgba(227, 82, 27, 0.5);
+  --accent-glow: rgba(227, 82, 27, 0.22);
   --accent-contrast: #150a02;
 
   /* Status keeps its meaning: green for OK, red for failed. The red is pushed
@@ -1076,40 +1076,33 @@ input[type="number"]::-webkit-inner-spin-button {
    the page you are looking at, and the per-run "look outside" grant. Sits
    directly above the composer because that is where a run starts — the scope
    is a run-level decision, not a buried preference. */
-.window-btn {
-  padding: 3px 9px;
-  font-size: 10.5px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-soft);
-  flex: none;
-}
-
-.window-btn:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
-/* Composer quick-switch: this tab (adopt the panel's window) vs its own window.
-   Two views of the same setting the Settings dropdown edits. */
+/* Composer quick-switch as ONE capsule: the chosen end fills with a dim
+   orange and shows its text; the other end of the same pill holds the gray
+   dot, no border of its own. Clicking the dot flips the two. Third view of
+   the same setting Settings edits. */
 .window-mode {
   display: inline-flex;
-  align-items: center;
+  align-items: stretch;
+  height: 26px;
   border: 1px solid var(--border);
   border-radius: 999px;
   overflow: hidden;
+  flex: none;
 }
 
 .window-mode-opt {
-  padding: 3px 9px;
+  display: flex;
+  align-items: center;
+  gap: 0; /* the base button's 6px gap would sit between dot and label, off-centring the collapsed end */
+  padding: 0;
+  border: 0;
   font-size: 10.5px;
+  background: transparent;
   color: var(--text-faint);
   cursor: pointer;
-  transition: color 0.2s var(--ease-out), background-color 0.2s var(--ease-out);
-}
-
-.window-mode-opt + .window-mode-opt {
-  border-left: 1px solid var(--border);
+  transition:
+    background-color 0.25s var(--ease-out),
+    color 0.2s var(--ease-out);
 }
 
 .window-mode-opt:hover {
@@ -1118,47 +1111,59 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .window-mode-opt.is-on {
-  color: var(--accent);
   background: var(--accent-soft);
+  color: var(--accent);
 }
 
-/* Settings → Agent window: what the worker currently believes + the gestures
-   that change it (bind this window / go back to its own / bring it forward). */
-.window-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
+.wm-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  margin: 0 9px;
+  background: var(--text-faint);
+  transition:
+    width 0.3s var(--ease-out),
+    margin 0.3s var(--ease-out),
+    background-color 0.2s var(--ease-out);
 }
 
-.window-state {
+.window-mode-opt.is-on .wm-dot {
+  width: 0;
   margin: 0;
-  font-size: 11px;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
 }
 
-.window-buttons {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+/* The selected label rides a 0fr→1fr track, so the fill's width IS the
+   animation. The label's padding and opacity transition WITH the track: a
+   padding snap on deselect made the old text jump and smear before the clip
+   caught up — that was the flash on switching. */
+.wm-text-wrap {
+  display: grid;
+  grid-template-columns: 0fr;
+  transition: grid-template-columns 0.32s var(--spring-soft);
 }
 
-.window-buttons .btn-ghost {
-  font-size: 11px;
-  padding: 5px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-soft);
+.wm-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 0;
+  opacity: 0;
+  transition:
+    padding 0.32s var(--spring-soft),
+    opacity 0.18s var(--ease-out);
 }
 
-.window-buttons .btn-ghost:hover:not(:disabled) {
-  background: var(--surface-hover);
-  color: var(--text);
+.window-mode-opt.is-on .wm-text-wrap {
+  grid-template-columns: 1fr;
 }
 
-.window-buttons .btn-ghost:disabled {
-  opacity: 0.45;
+.window-mode-opt.is-on .wm-text {
+  padding: 0 11px;
+  opacity: 1;
+  transition:
+    padding 0.32s var(--spring-soft),
+    opacity 0.22s var(--ease-out) 0.08s;
 }
 
 .attach-chip {
@@ -1222,11 +1227,32 @@ input[type="number"]::-webkit-inner-spin-button {
   color: color-mix(in srgb, var(--text) 92%, var(--text-soft));
 }
 
-.md > *:first-child {
+.md > *:first-child,
+.md-block > :first-child {
   margin-top: 0;
 }
-.md > *:last-child {
+.md > *:last-child,
+.md-block > :last-child {
   margin-bottom: 0;
+}
+
+/* Each markdown block is its own element (so streamed tokens never recreate
+   finished blocks' DOM). The wrapper restores the collapsed-margin rhythm
+   adjacent siblings used to have, and a NEW block fades in on mount instead
+   of popping — the "line by line jitter" fix. */
+.md-block + .md-block {
+  margin-top: 0.45em;
+}
+
+.md-block {
+  animation: block-in 0.26s var(--ease-out) both;
+}
+
+@keyframes block-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
 .md h1,
@@ -1357,8 +1383,8 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 /* Streaming caret after the newest text. */
-.md.is-streaming > :last-child:not(ul):not(ol):not(pre):not(table)::after,
-.md.is-streaming > :is(ul, ol):last-child > li:last-child::after {
+.md.is-streaming .md-block:last-child > :last-child:not(ul):not(ol):not(pre):not(table)::after,
+.md.is-streaming .md-block:last-child > :is(ul, ol):last-child > li:last-child::after {
   content: "";
   display: inline-block;
   width: 7px;
@@ -2231,23 +2257,53 @@ input[type="number"]::-webkit-inner-spin-button {
   transform: rotate(180deg);
 }
 
-/* send / stop morph */
+/* A glossy half-sphere pushing out of the composer: the one element allowed
+   to break the flat rule. All the realism is baked — radial body, specular
+   hotspot, underside shading, a warm rim bounce and a two-layer contact
+   shadow. Nothing animates; only :active presses it in. */
 .send {
   flex: none;
+  position: relative;
   width: 34px;
   height: 34px;
   border-radius: 999px;
   color: var(--accent-contrast);
-  background: var(--accent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(0, 0, 0, 0.25);
+  background: radial-gradient(
+    circle at 50% 30%,
+    #ff8a52 0%,
+    var(--accent) 46%,
+    #a63c11 82%,
+    #8a2f0b 100%
+  );
+  box-shadow:
+    inset 0 2px 3px rgba(255, 235, 220, 0.55),
+    inset 0 -6px 8px rgba(70, 18, 2, 0.6),
+    inset 0 -1px 1px rgba(255, 150, 100, 0.35),
+    0 5px 8px -2px rgba(0, 0, 0, 0.55),
+    0 12px 18px -8px rgba(0, 0, 0, 0.45);
   overflow: visible;
 }
 
+/* The specular hotspot: a soft white ellipse off-centre top-left, where a
+   real light source would bounce off the dome. */
+.send::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  width: 12px;
+  height: 7px;
+  border-radius: 999px;
+  background: radial-gradient(ellipse, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%);
+  transform: rotate(-22deg);
+  pointer-events: none;
+}
+
+/* Hover brightens the light, not the geometry — a physical object does not
+   grow when you point at it. */
 .send:hover:not(:disabled) {
-  background: var(--accent-strong);
   color: var(--accent-contrast);
-  transform: translateY(-1px) scale(1.05);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 8px 18px -8px var(--accent);
+  filter: brightness(1.09) saturate(1.05);
 }
 
 .send:disabled {
@@ -2256,6 +2312,10 @@ input[type="number"]::-webkit-inner-spin-button {
   color: var(--text-faint);
   box-shadow: none;
   border: 1px solid var(--border);
+}
+
+.send:disabled::before {
+  display: none;
 }
 
 .send-icons {
@@ -2276,21 +2336,20 @@ input[type="number"]::-webkit-inner-spin-button {
   transform: scale(0.3) rotate(-90deg);
 }
 
-.send:hover:not(:disabled):not(.stop) .i-send {
-  animation: nudge 0.6s var(--spring);
-}
-
-@keyframes nudge {
-  40% {
-    transform: translateY(-3px);
-  }
-}
-
+/* Stopping: the same dome, rendered in dark glass. */
 .send.stop {
   color: var(--text);
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  box-shadow: none;
+  background: radial-gradient(
+    circle at 50% 30%,
+    #52463f 0%,
+    #332a25 50%,
+    #17110e 100%
+  );
+  box-shadow:
+    inset 0 2px 3px rgba(255, 255, 255, 0.28),
+    inset 0 -6px 8px rgba(0, 0, 0, 0.6),
+    0 5px 8px -2px rgba(0, 0, 0, 0.55),
+    0 12px 18px -8px rgba(0, 0, 0, 0.45);
 }
 
 .send.stop:hover:not(:disabled) {
@@ -3092,63 +3151,6 @@ input[type="number"]::-webkit-inner-spin-button {
 .switch input:focus-visible + .switch-track {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-/* segmented control */
-.segmented {
-  position: relative;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  padding: 3px;
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-}
-
-.seg-glider {
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  left: 3px;
-  width: calc(50% - 3px);
-  border-radius: 9px;
-  background: var(--surface-solid);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-sm), var(--inner-hi);
-  transition: transform 0.5s var(--spring);
-}
-
-.segmented[data-index="1"] .seg-glider {
-  transform: translateX(100%);
-}
-
-.segmented button {
-  position: relative;
-  flex-direction: column;
-  gap: 0;
-  padding: 7px 8px;
-  border-radius: 9px;
-  line-height: 1.3;
-  color: var(--text-soft);
-}
-
-.segmented button.on {
-  color: var(--text);
-}
-
-.segmented button b {
-  font-weight: 600;
-  font-size: 12.5px;
-}
-
-.segmented button small {
-  font-size: 10.5px;
-  color: var(--text-faint);
-  font-family: var(--mono);
-}
-
-.segmented button:active:not(:disabled) {
-  transform: scale(0.97);
 }
 
 /* history */

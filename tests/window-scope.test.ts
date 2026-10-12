@@ -203,7 +203,7 @@ describe("the wall", () => {
       expect(out.error).toContain("TOOL-FAILED");
       expect(out.error).toContain("window 99");
       expect(out.error).toContain("Do not retry");
-      expect(out.error).toContain("Hand this tab to the agent");
+      expect(out.error).toContain("drag the tab into your window");
     }
   });
 });

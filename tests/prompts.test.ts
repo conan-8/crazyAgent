@@ -278,7 +278,7 @@ describe("window isolation rules", () => {
     expect(isolated).toContain("Where you work — ONE window:");
     expect(isolated).toContain("You live in a single browser window of your own");
     expect(isolated).toContain("The user's other windows are OUT OF REACH");
-    expect(isolated).toContain("Hand this tab to the agent");
+    expect(isolated).toContain("ask the user to move it into your window (drag the tab over)");
   });
 
   it("points at the 'look outside' switch instead of listing the user's tabs", () => {

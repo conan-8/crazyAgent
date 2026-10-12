@@ -95,6 +95,13 @@ export interface LoopDeps {
   emit(event: StepEvent): void;
   save(cp: Checkpoint): Promise<void>;
   shouldStop(): boolean;
+  /**
+   * Aborts the instant the user presses Stop: the in-flight LLM request is
+   * cut at the wire (whatever had not streamed yet — unfinished thinking
+   * included — is simply dropped) and the run finishes as stopped, instead
+   * of waiting the stream out, retrying, or re-asking the step.
+   */
+  stopSignal?: AbortSignal;
   execute(
     name: string,
     args: Record<string, unknown>,
@@ -932,8 +939,16 @@ async function completeWithRetry(
     const guardStall = Number.isFinite(stallMs) && stallMs > 0;
     const idleMs = deps.streamIdleMs ?? STREAM_IDLE_MS;
     const guardIdle = !unstreamed && Number.isFinite(idleMs) && idleMs > 0;
+    // The run's stop signal rides the same controller: one abort cuts the
+    // wire whether the cap, a stall guard or the Stop button fired it.
+    const stopSig = deps.stopSignal;
     const ctl =
-      cap > 0 || guardStall || guardIdle ? new AbortController() : undefined;
+      cap > 0 || guardStall || guardIdle || stopSig ? new AbortController() : undefined;
+    const onStop = (): void => ctl?.abort();
+    if (stopSig) {
+      if (stopSig.aborted) ctl?.abort();
+      else stopSig.addEventListener("abort", onStop);
+    }
     const attemptStart = Date.now();
     let firstDeltaAt = 0;
     let idled = false;
@@ -987,6 +1002,13 @@ async function completeWithRetry(
       if (capped) {
         return { capped: true, cappedChars: discarded + chars, reasoningTail: tail };
       }
+      // A stop cuts the wire; some stacks surface that as a rejection, others
+      // as a partial reply. Either way the run is over — never retry, never
+      // re-ask: what had not streamed yet (unfinished thinking) is dropped.
+      if (deps.shouldStop()) {
+        lastErr = new Error("stopped by user");
+        break;
+      }
       return {
         result,
         capped: false,
@@ -1000,6 +1022,11 @@ async function completeWithRetry(
       // than a graceful end. Either way this is the cap doing its job.
       if (capped) return { capped: true, cappedChars: discarded + chars, reasoningTail: tail };
       discarded += chars;
+      // A user stop is not a failure to retry away — end the attempt loop now.
+      if (deps.shouldStop()) {
+        lastErr = err;
+        break;
+      }
       if (ctl?.signal.aborted && !firstDeltaAt) {
         lastErr = new Error(
           unstreamed
@@ -1013,9 +1040,11 @@ async function completeWithRetry(
       } else {
         lastErr = err;
       }
+    } finally {
+      if (stopSig) stopSig.removeEventListener("abort", onStop);
     }
   }
-  throw lastErr;
+  throw lastErr ?? new Error("stopped before the model replied");
 }
 
 export async function runAgentTask(
@@ -1263,6 +1292,9 @@ export async function runAgentTask(
       cappedChars = first.cappedChars;
       ttftMs = first.ttftMs;
       decodeMs = first.decodeMs;
+      // Stop beats everything: no salvage re-ask, no cap recovery — the
+      // partial attempt (and its unfinished thinking) is simply dropped.
+      if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
       if (first.capped || !first.result) {
         // The model was still thinking when the ceiling came down. Re-ask the
         // SAME step at off, handing back the tail of what it thought: the run
@@ -1319,6 +1351,7 @@ export async function runAgentTask(
         result = first.result;
       }
     } catch (err) {
+      if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
       const message = String((err as Error)?.message ?? err);
       if (maxTokens > baseMaxTokens) {
         // The raised output cap is the likely culprit: some providers 400 on

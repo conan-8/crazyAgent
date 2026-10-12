@@ -134,6 +134,56 @@ describe("runAgentTask", () => {
     expect(done).toMatchObject({ kind: "done", summary: "All done!" });
   });
 
+  it("stop cuts the in-flight call at the wire and discards the partial reply", async () => {
+    // A stream that thinks forever and resolves a PARTIAL reply (with a tool
+    // call) the moment its signal aborts — exactly what the real readSse does
+    // on an abort. Stop must end the run at once: no tool executed from the
+    // partial, no salvage re-ask, one LLM call total.
+    class HangingLlm implements LlmClient {
+      calls = 0;
+      async complete(
+        _req: LlmRequest,
+        _onText?: (t: string) => void,
+        signal?: AbortSignal,
+        onReasoning?: (t: string) => void,
+      ): Promise<LlmResult> {
+        this.calls += 1;
+        return new Promise((resolve) => {
+          const drip = setInterval(() => onReasoning?.("still thinking…"), 5);
+          const finish = () => {
+            clearInterval(drip);
+            resolve(toolCall("click", { ref: "x" }));
+          };
+          if (signal?.aborted) {
+            finish();
+            return;
+          }
+          signal?.addEventListener("abort", finish, { once: true });
+        });
+      }
+    }
+    const cp = makeCheckpoint();
+    const ctl = new AbortController();
+    let stopped = false;
+    const llm = new HangingLlm();
+    const { events, executed, deps } = harness([], {
+      llm,
+      shouldStop: () => stopped,
+      stopSignal: ctl.signal,
+    });
+    const run = runAgentTask(cp, deps);
+    await new Promise((r) => setTimeout(r, 40)); // let the stream be in-flight
+    stopped = true;
+    ctl.abort();
+    const outcome = await run;
+
+    expect(outcome).toBe("stopped");
+    expect(llm.calls).toBe(1); // no salvage re-ask
+    expect(executed).toEqual([]); // the partial reply's tool call never ran
+    const done = events.at(-1);
+    expect(done).toMatchObject({ kind: "done" });
+  });
+
   it("does not end the run on an empty reply — it re-prompts the model", async () => {
     // Some models close a step with a reasoning-only or completely empty
     // reply. The loop used to read "no tool calls" as "final answer" and end

@@ -4,7 +4,7 @@
 // it. Threads persist to history with multi-turn context.
 // Test hooks stay on window.__ba (phase smokes rely on the stable surface).
 import { render, type ComponentChildren } from "preact";
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import {
@@ -183,17 +183,58 @@ function IconButton({
 
 // ------------------------------ blocks ------------------------------
 
+/**
+ * Split into blank-line-separated blocks, treating fenced code (``` / ~~~) as
+ * unbreakable — a blank line inside a fence is layout, not a boundary.
+ */
+function splitMarkdownBlocks(text: string): string[] {
+  const out: string[] = [];
+  let cur: string[] = [];
+  let fence = false;
+  for (const line of text.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    if (!fence && line.trim() === "") {
+      if (cur.length) out.push(cur.join("\n"));
+      cur = [];
+    } else {
+      cur.push(line);
+    }
+  }
+  if (cur.length) out.push(cur.join("\n"));
+  return out;
+}
+
 function Markdown({ text, streaming }: { text: string; streaming?: boolean }) {
-  // Parse+sanitize is the expensive part of a render, and a whole run folds into
-  // ONE assistant turn — so without this every streamed token re-parsed the
-  // markdown of every block the run had produced so far. Memoizing on `text`
-  // leaves only the block currently being written to.
-  const html = useMemo(() => renderMarkdown(text), [text]);
+  // One child element PER BLOCK, keyed by position: streamed tokens only ever
+  // touch the last block, so Preact keeps every finished block's DOM node
+  // (no re-created elements = no pop/flicker per line) and a NEW block mounts
+  // once with the block-in fade. Parsing is cached per block text, so a
+  // growing answer re-parses only the block being written — the same win the
+  // whole-text memo used to give, minus the wholesale innerHTML swap.
+  const cache = useRef(new Map<string, string>());
+  const blocks = useMemo(
+    () =>
+      splitMarkdownBlocks(text).map((segment) => {
+        let html = cache.current.get(segment);
+        if (html === undefined) {
+          html = renderMarkdown(segment);
+          if (cache.current.size > 400) cache.current.clear();
+          cache.current.set(segment, html);
+        }
+        return html;
+      }),
+    [text],
+  );
+  useEffect(() => {
+    // The cache is only valid for this message's lifetime.
+    return () => void cache.current.clear();
+  }, []);
   return (
-    <div
-      class={`md${streaming ? " is-streaming" : ""}`}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div class={`md${streaming ? " is-streaming" : ""}`}>
+      {blocks.map((html, i) => (
+        <div class="md-block" key={i} dangerouslySetInnerHTML={{ __html: html }} />
+      ))}
+    </div>
   );
 }
 
@@ -1259,10 +1300,9 @@ function switchJevTransport(jev: JevSettings, transport: JevTransport): JevSetti
 }
 
 /**
- * One window gesture, sent to the worker that owns the binding. Exported to
- * the settings body too: the mode dropdown and these buttons are two views of
- * the SAME state, so choosing "A window I pick" must bind this window (and
- * choosing "Its own window" must release it) or the pair would drift apart.
+ * One window gesture, sent to the worker that owns the binding. Used by the
+ * chat composer's window slider: the setting and the binding are one state, so
+ * picking a mode also performs it.
  */
 async function windowAction(
   type: "window.bind" | "window.reset" | "window.reveal",
@@ -1276,62 +1316,6 @@ async function windowAction(
   }
   const res = await chrome.runtime.sendMessage(payload).catch(() => undefined);
   return (res as { status?: AgentWindowStatus } | undefined)?.status ?? null;
-}
-
-/**
- * Window-isolation controls: which window the agent works in, plus the three
- * user gestures around it. The service worker owns the binding, so every
- * button here is a message + a re-read — the panel never keeps its own idea of
- * "the agent window" that could drift from the worker's.
- */
-function AgentWindowControls({ onMode }: { onMode?: (mode: "own" | "adopt") => void }) {
-  const [status, setStatus] = useState<AgentWindowStatus | null>(null);
-  const read = () =>
-    void chrome.runtime
-      .sendMessage({ type: "window.status" })
-      .then((r) => {
-        const s = (r as { status?: AgentWindowStatus } | undefined)?.status;
-        if (s) setStatus(s);
-      })
-      .catch(() => undefined);
-  useEffect(read, []);
-  // Every gesture keeps the SETTING and the BINDING in step (the mode dropdown
-  // is the third view of the same state) — otherwise the next run could start
-  // in a window the user no longer chose.
-  const act = (type: "window.bind" | "window.reset" | "window.reveal") => {
-    void windowAction(type).then((s) => {
-      if (s) setStatus(s);
-    });
-    if (type === "window.bind") onMode?.("adopt");
-    if (type === "window.reset") onMode?.("own");
-  };
-  return (
-    <div class="window-controls">
-      <p class="window-state">
-        {status?.alive
-          ? `Working in window #${status.windowId} · ${status.tabs} tab${status.tabs === 1 ? "" : "s"}`
-          : "No agent window yet — it opens on the next run"}
-        {status && status.raiseAttempts > 0
-          ? ` · brought forward ${status.raiseAttempts}× by you`
-          : ""}
-      </p>
-      <div class="window-buttons">
-        <button class="btn-ghost" onClick={() => act("window.bind")}>
-          Use this window for the agent
-        </button>
-        <button class="btn-ghost" onClick={() => act("window.reset")}>
-          Give it its own window
-        </button>
-        <button
-          class="btn-ghost"
-          disabled={!status?.alive}
-          onClick={() => act("window.reveal")}
-        >
-          Bring it forward
-        </button>
-      </div>
-    </div>
-  );
 }
 
 function SettingsBody({ onClose }: { onClose: () => void }) {
@@ -1386,36 +1370,6 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
 
             <section class="set-group" style="--i:1">
               <h3 class="set-title">
-                <Icon d={ICONS.cpu} size={12} /> Control transport
-              </h3>
-              <div class="segmented" data-index={s.mode === "unlimited" ? 1 : 0} role="radiogroup">
-                <span class="seg-glider" />
-                <button
-                  role="radio"
-                  aria-checked={s.mode === "standard"}
-                  class={s.mode === "standard" ? "on" : ""}
-                  onClick={() => set("mode", "standard")}
-                >
-                  <b>Standard</b>
-                  <small>chrome.debugger</small>
-                </button>
-                <button
-                  role="radio"
-                  aria-checked={s.mode === "unlimited"}
-                  class={s.mode === "unlimited" ? "on" : ""}
-                  onClick={() => set("mode", "unlimited")}
-                >
-                  <b>Unlimited</b>
-                  <small>helper daemon</small>
-                </button>
-              </div>
-              {s.mode === "unlimited" ? (
-                <NumberField label="CDP port" value={s.cdpPort} fallback={9222} onChange={(v) => set("cdpPort", v)} />
-              ) : null}
-            </section>
-
-            <section class="set-group" style="--i:2">
-              <h3 class="set-title">
                 <Icon d={ICONS.gauge} size={12} /> Model limits
               </h3>
               <div class="field-grid">
@@ -1434,7 +1388,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
               </div>
             </section>
 
-            <section class="set-group" style="--i:3">
+            <section class="set-group" style="--i:2">
               <h3 class="set-title">
                 <Icon d={ICONS.bolt} size={12} /> Behaviour
               </h3>
@@ -1452,24 +1406,24 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 checked={s.unattended}
                 onChange={(v) => set("unattended", v)}
                 title="Unattended runs"
-                hint="Nobody will click confirmations: sensitive actions fail fast (~15s) with a clear 'route unavailable' note instead of idling 2 minutes. Nothing is auto-approved"
+                hint="If a step needs your approval and you're away, it is skipped quickly instead of waiting. Nothing is approved automatically"
               />
               <Switch
                 checked={s.batchActions}
                 onChange={(v) => set("batchActions", v)}
                 title="Fast steps"
-                hint="Batch one logical unit of work (a form, a key sequence, a menu walk) into a single step and skip re-verifying actions that already returned a fresh snapshot. Fewer, fuller round trips — each one costs several seconds of fixed latency. Safety gates are unchanged"
+                hint="Does several small actions in one step, so runs finish sooner. Safety checks stay on"
               />
               <Switch
                 checked={s.adaptiveThinking === true}
                 onChange={(v) => set("adaptiveThinking", v)}
                 title="Skip thinking on routine steps"
-                hint="After a few consecutive routine steps (one successful call, little reasoning, no navigation), later steps are sent with thinking off until something surprising happens — a failure, a navigation, an empty reply — which restores the configured level immediately"
+                hint="Thinking turns off on easy, repetitive steps and comes back the moment something unexpected happens"
               />
               <div class="field-grid">
                 <button
                   class="btn-ghost"
-                  title="Turn on the speed profile for relay-style work: thinking off, fast steps on, routine-step thinking skipped"
+                  title="Speed preset: thinking off, fast steps on, routine thinking skipped"
                   onClick={() => {
                     set("thinking", "off");
                     set("batchActions", true);
@@ -1481,7 +1435,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
               </div>
             </section>
 
-            <section class="set-group" style="--i:4">
+            <section class="set-group" style="--i:3">
               <h3 class="set-title">
                 <Icon d={ICONS.bolt} size={12} /> Madman mode
               </h3>
@@ -1489,7 +1443,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 checked={s.madman}
                 onChange={(v) => set("madman", v)}
                 title="Unleash the profanity"
-                hint="Every tool call carries a cuss word; replies and mid-run exclamations swear"
+                hint="The agent swears in its actions and replies"
               />
               {s.madman ? (
                 <p class="madman-preview">
@@ -1498,7 +1452,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
               ) : null}
             </section>
 
-            <section class="set-group" style="--i:5">
+            <section class="set-group" style="--i:4">
               <h3 class="set-title">
                 <Icon d={ICONS.sparkles} size={12} /> Fast decisions (Jev)
               </h3>
@@ -1506,7 +1460,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 checked={s.jev.enabled}
                 onChange={(v) => set("jev", { ...s.jev, enabled: v })}
                 title="Enable Jev"
-                hint="A decision model working alongside your selected model: risk checks on sensitive actions, a judge tool for bulk decisions, optional effort routing"
+                hint="A second model that double-checks risky actions and speeds up decisions"
               />
               {s.jev.enabled ? (
                 <>
@@ -1514,8 +1468,8 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                     title="Jev endpoint"
                     hint={
                       s.jev.transport === "openai"
-                        ? "Chat wire (/chat/completions) for CHAT models used as judges (e.g. openai/gpt-oss-20b) — one model round-trip per decision. A real Jev model (typesafe/jev-*) always rides the /systemone decisions wire instead"
-                        : "The System One decisions wire (/systemone) — calibrated probabilities, answers in milliseconds. Works with a console.typesafe.ai key, or an OpenRouter key at https://openrouter.ai/api/v1"
+                        ? "Use any chat model (e.g. openai/gpt-oss-20b) as the decision model. Real Jev models switch to the Jev service automatically"
+                        : "The fast Jev decision service. Works with a TypeSafe key, or an OpenRouter key at openrouter.ai/api/v1"
                     }
                     value={s.jev.transport}
                     options={JEV_TRANSPORT_OPTIONS}
@@ -1525,9 +1479,8 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                   isJevDecisionsModel(s.jev.model ?? "") ? (
                     <p class="info-line is-jev">
                       <span class="jev-pill">Jev</span>
-                      {(s.jev.model ?? "").trim()} is a decisions model — it rides
-                      the /systemone decisions wire automatically (chat/completions
-                      can never answer it)
+                      {(s.jev.model ?? "").trim()} is a Jev decisions model — it
+                      uses the Jev service automatically
                     </p>
                   ) : null}
                   <label class="field">
@@ -1554,7 +1507,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                     checked={s.autoThinking}
                     onChange={(v) => set("autoThinking", v)}
                     title="Auto effort"
-                    hint="Let Jev grade each task AND each step (from the risk-check it already runs) and lower reasoning effort on routine work — never above your configured level, restored on any surprise (on by default)"
+                    hint="Jev turns thinking down on easy steps — never above the level you set, back up on anything unexpected"
                   />
                   <div class="field-grid">
                     <label class="field">
@@ -1588,7 +1541,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
               ) : null}
             </section>
 
-            <section class="set-group" style="--i:6">
+            <section class="set-group" style="--i:5">
               <h3 class="set-title">
                 <Icon d={ICONS.bulb} size={12} /> Self-improvement
               </h3>
@@ -1596,55 +1549,25 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                 checked={s.learn.enabled}
                 onChange={(v) => set("learn", { ...s.learn, enabled: v })}
                 title="Learn from my runs"
-                hint="A second agent on the same model writes down failures and what to do instead; later runs read those lessons back"
+                hint="After a run, mistakes and fixes get written down; future runs read those notes"
               />
               <Switch
                 checked={s.learn.auto}
                 onChange={(v) => set("learn", { ...s.learn, auto: v })}
                 title="Review failed runs automatically"
-                hint="Runs that errored, were stopped, or looped on a failing call get reviewed without asking; clean runs are reviewed only from the Lessons drawer"
+                hint="Failed runs get their lessons written without asking. Review good runs yourself from the Lessons menu"
               />
             </section>
 
-            <section class="set-group" style="--i:7">
+            <section class="set-group" style="--i:6">
               <h3 class="set-title">
                 <Icon d={ICONS.window} size={12} /> Agent window
               </h3>
-              <SelectRow
-                title="Where the agent works"
-                hint="Its own window, created once and reused, or this tab — the window the panel is open in. Either way it can only see and act inside that window — your other windows are out of reach, and it never takes your focus."
-                value={s.agentWindow.mode}
-                options={[
-                  { value: "own", label: "Its own window" },
-                  { value: "adopt", label: "This tab (my window)" },
-                ]}
-                onChange={(v) => {
-                  set("agentWindow", { ...s.agentWindow, mode: v });
-                  // The setting and the binding are one state: picking a mode
-                  // also performs it, so the next run cannot start in a window
-                  // the user no longer chose.
-                  void windowAction(v === "adopt" ? "window.bind" : "window.reset");
-                }}
-              />
               <Switch
                 checked={s.agentWindow.quietFocus}
                 onChange={(v) => set("agentWindow", { ...s.agentWindow, quietFocus: v })}
                 title="Never take focus"
-                hint="Keystrokes reach the page through CDP focus emulation, so the agent's window never jumps in front of yours while you work. Turn this off only if a site refuses input while its window is in the background: the agent will then raise its OWN window before typing, never yours."
-              />
-              <AgentWindowControls
-                onMode={(mode) => {
-                  // The binding changes the moment the button is pressed, so the
-                  // setting is persisted right away too: leaving it unsaved
-                  // until the Save button would let the next run resolve the
-                  // mismatch by opening a window the user did not pick.
-                  const next = { ...s, agentWindow: { ...s.agentWindow, mode } };
-                  setS(next);
-                  setSaved(false);
-                  void saveSettings({ ...next, apiKey: activeApiKey(next) }).then(() =>
-                    setSaved(true),
-                  );
-                }}
+                hint="The agent types without bringing its window in front of yours. Turn this off only if a page ignores the agent until its window is visible"
               />
             </section>
           </div>
@@ -2406,7 +2329,7 @@ interface UsageStats {
 
 function App() {
   const [conv, setConv] = useState<Conversation | null>(null);
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const [running, setRunning] = useState(false);
   const [pings, setPings] = useState(0);
   const [swStartedAt, setSwStartedAt] = useState<number | null>(null);
@@ -2478,10 +2401,94 @@ function App() {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const runStartRef = useRef(0);
   const dragDepth = useRef(0);
+  /** Set by the `done` handler; consumed by the layout effect below. */
+  const pendingDoneScroll = useRef(false);
+  /**
+   * View parked on the streaming answer's START (see the [tick] layout effect
+   * below). State drives the stick-to-bottom hook's follow; the ref is the
+   * synchronous truth the effects read.
+   */
+  const [answerHold, setAnswerHold] = useState(false);
+  const answerHoldRef = useRef(false);
   const { scrollRef, contentRef, atBottom, scrollToBottom } = useStickToBottom<
     HTMLElement,
     HTMLDivElement
-  >(running);
+  >(running && !answerHold);
+  // The finished answer is read from its START: once it lands, put the final
+  // response's top at the top of the viewport. A short response cannot reach
+  // that high — its bottom rests on the viewport floor instead. Exactly the
+  // two cases a reader wants, with no mode switch.
+  //
+  // Runs as a LAYOUT effect on the running→false transition: by then the
+  // stick-to-bottom pin (keyed on `running`) has let go and the final DOM is
+  // committed, so nothing re-pins the scroll back down and the geometry
+  // measured is the geometry painted.
+  useLayoutEffect(() => {
+    if (running || !pendingDoneScroll.current) return;
+    pendingDoneScroll.current = false;
+    const el = scrollRef.current;
+    const bubbles = el?.querySelectorAll(".bubble-assistant");
+    const lastTurn = bubbles?.[bubbles.length - 1] as HTMLElement | undefined;
+    // A whole run folds into ONE assistant turn, so the turn's first block is
+    // the run's first thought, not the answer. The answer is the LAST text
+    // block of the turn — reasoning, notes and tool cards never use `.md`.
+    const mds = lastTurn?.querySelectorAll(".md");
+    const answer = mds?.[mds.length - 1] as HTMLElement | undefined;
+    if (!el || !answer) return;
+    const firstBlock = (answer.querySelector(".md-block") as HTMLElement | null) ?? answer;
+    const elTop = el.getBoundingClientRect().top;
+    const top = firstBlock.getBoundingClientRect().top - elTop + el.scrollTop;
+    const bottom = answer.getBoundingClientRect().bottom - elTop + el.scrollTop;
+    // 72px of headroom clears the floating top chrome. The browser clamps
+    // the scroll to [0, max] on its own.
+    const target =
+      bottom - top >= el.clientHeight - 72 ? top - 72 : bottom - el.clientHeight;
+    el.scrollTo({ top: Math.max(0, target) });
+  }, [running]);
+
+  // The answer is read from its START, so the moment it outgrows the viewport
+  // the view parks where it begins and the follow lets go: the remaining
+  // tokens generate below the view instead of dragging the reader down page
+  // by page and snapping back when the run finishes. The "tall" test is the
+  // same one the done positioning uses, so a parked answer is already where
+  // done wants it and nothing moves at the end. Anything else taking over the
+  // live block (a tool call, a note, a confirm card) is not the final answer:
+  // control goes straight back to the bottom-follow.
+  useLayoutEffect(() => {
+    if (!running) return;
+    const turn = currentConv?.turns[currentConv.turns.length - 1];
+    const last =
+      turn && turn.role === "assistant" ? turn.blocks[turn.blocks.length - 1] : undefined;
+    if (answerHoldRef.current) {
+      if (!last || last.kind !== "text") {
+        answerHoldRef.current = false;
+        setAnswerHold(false);
+        scrollToBottom(false);
+      }
+      return;
+    }
+    if (!last || last.kind !== "text") return;
+    const el = scrollRef.current;
+    const mds = el?.querySelectorAll(".bubble-assistant .md");
+    const md = mds?.[mds.length - 1] as HTMLElement | undefined;
+    if (!el || !md) return;
+    const elTop = el.getBoundingClientRect().top;
+    const top = md.getBoundingClientRect().top - elTop + el.scrollTop;
+    const bottom = md.getBoundingClientRect().bottom - elTop + el.scrollTop;
+    if (bottom - top < el.clientHeight - 72) return;
+    answerHoldRef.current = true;
+    setAnswerHold(true);
+    el.scrollTo({ top: Math.max(0, top - 72) });
+  }, [tick]);
+
+  // Scrolling back to the bottom during a parked answer re-engages the
+  // follow — the reader asked to watch the stream again.
+  useEffect(() => {
+    if (atBottom && running && answerHoldRef.current) {
+      answerHoldRef.current = false;
+      setAnswerHold(false);
+    }
+  }, [atBottom]);
   const inputRef = useAutosize(taskText);
 
   /**
@@ -2634,6 +2641,10 @@ function App() {
             setDoneGlow(
               (msg.event.outcome ?? "completed") === "completed" && ran > 120_000,
             );
+            // Park the view on the answer's start — handled by the layout
+            // effect on the running→false transition, once the final DOM is
+            // committed and the bottom pin has let go.
+            pendingDoneScroll.current = true;
           }
           // Deltas are the only high-volume events; everything else is a state
           // change a caller (or the user) is waiting to see, so it paints now.
@@ -2788,6 +2799,8 @@ function App() {
     setRunning(true);
     setUsage(null);
     setDoneGlow(false);
+    answerHoldRef.current = false;
+    setAnswerHold(false);
     scrollToBottom(false);
     if (isDemo) {
       const demo = taskOrDemo as DemoConfig;
@@ -2822,17 +2835,6 @@ function App() {
       // settings say the agent works in the user's window rather than its own).
       panelWindowId: panelWindowRef.current,
     });
-  };
-
-  /** Move the tab the user is looking at into the agent's window. */
-  const handOverCurrentTab = () => {
-    void chrome.tabs
-      .query({ active: true, currentWindow: true })
-      .then(([tab]) => {
-        if (tab?.id === undefined) return;
-        postPort?.({ kind: "window.handover", tabId: tab.id });
-      })
-      .catch(() => undefined);
   };
 
   // Quick "this window / own window" switch. The SETTING is the source of truth
@@ -3466,7 +3468,7 @@ function App() {
             rows={1}
             placeholder={
               running
-                ? "Steer the agent — it reads this on its next step…"
+                ? "You can steer me mid-run."
                 : "Ask crazyAgent to do anything on the web…"
             }
             value={taskText}
@@ -3588,25 +3590,22 @@ function App() {
                 title="Work in THIS window — the one the panel is open in. It stays in the foreground, so nothing gets background-throttled."
                 onClick={() => setAgentWindowMode("adopt")}
               >
-                This window
+                <span class="wm-dot" aria-hidden="true" />
+                <span class="wm-text-wrap">
+                  <span class="wm-text">This window</span>
+                </span>
               </button>
               <button
                 class={`window-mode-opt${windowMode === "own" ? " is-on" : ""}`}
                 title="Give the agent its own window, created once and reused. It stays out of your way while you work in yours."
                 onClick={() => setAgentWindowMode("own")}
               >
-                Own window
+                <span class="wm-dot" aria-hidden="true" />
+                <span class="wm-text-wrap">
+                  <span class="wm-text">Own window</span>
+                </span>
               </button>
             </div>
-            {agentWindow?.alive && windowMode === "own" ? (
-              <button
-                class="window-btn"
-                title="Move this tab into the agent's window so the agent can work on it — the page keeps its state (scroll, form, logins)"
-                onClick={handOverCurrentTab}
-              >
-                Hand this tab
-              </button>
-            ) : null}
 
             <span class="toolbar-spacer" />
 
