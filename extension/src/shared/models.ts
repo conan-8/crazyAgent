@@ -52,6 +52,8 @@ export function describeHttpError(
   switch (status) {
     case 401:
       return `HTTP 401 — ${name} rejected the key for this connection. Check the key and that the connection is the active one.`;
+    case 402:
+      return `HTTP 402 — this key is out of credit. Top up in Settings → Credits, or add credit at the provider, then reopen the model list.`;
     case 403:
       return `HTTP 403 — the key is valid but not allowed to list models (often a restricted or project-scoped key). You can still type a model name manually.`;
     case 404:

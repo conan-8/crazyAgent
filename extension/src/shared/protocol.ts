@@ -9,7 +9,7 @@ export type ControlMode = "standard" | "unlimited";
 /** Run-log export encodings: JSON Lines for tooling, Markdown for reading. */
 export type LogExportFormat = "jsonl" | "md";
 
-import type { LlmMessage, LlmToolSpec, UpstreamInfo } from "./llm";
+import type { LlmErrorCode, LlmMessage, LlmToolSpec, UpstreamInfo } from "./llm";
 import type { Conversation, ConversationSummary } from "./chat";
 import type { LogSummary, LogTurnRecord } from "./logging";
 import type { Lesson, LessonCategory } from "./lessons";
@@ -268,7 +268,12 @@ export type StepEvent =
   | { kind: "need_human"; id: string; reason: string; url: string }
   /** `stats` are the final numbers, so the bar survives the run ending. */
   | { kind: "done"; summary: string; stats?: RunStats; outcome?: RunOutcome }
-  | { kind: "error"; message: string };
+  /**
+   * Structured cause for credit-shaped failures (out of credit, the credits
+   * service is dry, the key was replaced). Absent for everything else, so a
+   * plain API failure renders exactly as it always has.
+   */
+  | { kind: "error"; message: string; code?: LlmErrorCode };
 
 /**
  * How a run ended. A user stop used to close as plain `done`, which made a

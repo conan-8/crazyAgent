@@ -11,7 +11,14 @@ import type {
   ThinkingLevel,
   ToolCall,
 } from "../../shared/llm";
-import { THINKING_LEVELS, thinkingBudgetFor } from "../../shared/llm";
+import {
+  LlmHttpError,
+  THINKING_LEVELS,
+  isTerminalLlmError,
+  llmErrorCode,
+  llmFailureMessage,
+  thinkingBudgetFor,
+} from "../../shared/llm";
 import { JEV_EFFORT_CONFIDENCE, thinkingForEffort } from "../../shared/jev";
 import {
   openTodos,
@@ -918,7 +925,14 @@ async function completeWithRetry(
   let discarded = 0;
   for (let attempt = 0; attempt < LLM_ATTEMPTS; attempt++) {
     if (attempt > 0) {
-      const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]!;
+      // A provider that says "retry after N seconds" (the transient 402
+      // in-flight-budget variant does) is honoured even when N exceeds our
+      // own backoff.
+      const hint = lastErr instanceof LlmHttpError ? lastErr.retryAfterMs : undefined;
+      const delay = Math.max(
+        RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]!,
+        hint ?? 0,
+      );
       deps.emit({
         kind: "info",
         message: `LLM call failed (${String((lastErr as Error)?.message ?? lastErr)}) — retrying in ${delay / 1000}s (attempt ${attempt + 1}/${LLM_ATTEMPTS})`,
@@ -1024,6 +1038,13 @@ async function completeWithRetry(
       discarded += chars;
       // A user stop is not a failure to retry away — end the attempt loop now.
       if (deps.shouldStop()) {
+        lastErr = err;
+        break;
+      }
+      // An exhausted credit ceiling cannot recover on retry — end now instead
+      // of burning every remaining attempt (and the step-level re-ask) on a
+      // guaranteed-futile round trip.
+      if (isTerminalLlmError(err)) {
         lastErr = err;
         break;
       }
@@ -1352,20 +1373,21 @@ export async function runAgentTask(
       }
     } catch (err) {
       if (deps.shouldStop()) return finish(cp, deps, "stopped", lastStats);
-      const message = String((err as Error)?.message ?? err);
-      if (maxTokens > baseMaxTokens) {
+      const terminal = isTerminalLlmError(err);
+      if (!terminal && maxTokens > baseMaxTokens) {
         // The raised output cap is the likely culprit: some providers 400 on
         // max_tokens above the model's own limit. Drop back to the configured
         // cap and run the step again rather than dying mid-task over a
         // recovery that was itself optional.
         maxTokens = baseMaxTokens;
+        const message = String((err as Error)?.message ?? err);
         deps.emit({
           kind: "info",
           message: `LLM call failed (${message}) — retrying with the configured output cap ${baseMaxTokens}`,
         });
         continue;
       }
-      deps.emit({ kind: "error", message: `LLM call failed: ${message}` });
+      deps.emit({ kind: "error", message: llmFailureMessage(err), code: llmErrorCode(err) });
       return finish(cp, deps, "stopped", lastStats);
     }
 

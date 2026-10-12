@@ -1949,12 +1949,42 @@ input[type="number"]::-webkit-inner-spin-button {
 
 /* Settings drawer footer: which commit this build came from. */
 .version-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
   font-family: var(--mono);
   font-size: 11px;
-  opacity: 0.55;
   padding: 2px 14px 8px;
-  text-align: right;
   user-select: text;
+}
+
+/* The dimming lives on the two children, not the row, so hovering the link can
+   lift it to full strength — a parent's opacity would cap it. */
+.version-line .build {
+  opacity: 0.55;
+}
+
+.privacy-link {
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  opacity: 0.55;
+  padding: 0;
+  transition:
+    color 0.3s var(--ease-out),
+    border-color 0.3s var(--ease-out),
+    opacity 0.3s var(--ease-out);
+}
+
+.privacy-link:hover {
+  border-bottom-color: currentColor;
+  color: var(--accent-strong);
+  opacity: 1;
 }
 
 .is-human-note .note-icon {

@@ -4,7 +4,7 @@
 // is an ordered list of blocks (text / tool / confirm) so the final answer
 // naturally lands below the tool activity. `llm` carries the raw transcript so
 // follow-up turns can continue with real context.
-import type { LlmMessage } from "./llm";
+import type { LlmErrorCode, LlmMessage } from "./llm";
 import type { StepEvent } from "./protocol";
 
 export interface ToolCard {
@@ -61,6 +61,16 @@ export type ChatBlock =
       /** A model progress report — rendered as its own bubble with a
        *  `Progress` pill (the run's narration channel). */
       progress?: boolean;
+    }
+  | {
+      /**
+       * A credit-shaped run failure (out of credit / service dry / key
+       * replaced). Rendered as a card with the right actions — a paying
+       * customer running dry must read as "top up", never as a bug.
+       */
+      kind: "credits";
+      code: LlmErrorCode;
+      text: string;
     };
 
 export interface ChatTurn {
@@ -214,7 +224,13 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
       break;
     }
     case "error":
-      appendText(assistantTurn(), `⚠ ${e.message}\n`);
+      // Credit-shaped failures carry a code and render as a card with the
+      // right actions; everything else stays the historical ⚠ text line.
+      if (e.code) {
+        assistantTurn().blocks.push({ kind: "credits", code: e.code, text: e.message });
+      } else {
+        appendText(assistantTurn(), `⚠ ${e.message}\n`);
+      }
       break;
     case "info":
       // Generic info stays activity noise — but Jev notes (effort routing,

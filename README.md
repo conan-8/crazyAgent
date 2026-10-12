@@ -419,3 +419,17 @@ user's collapse never stolen back, the checkpoint carrying the plan and the
 run log keeping its final state — is proven by `scripts/todo-smoke.mjs`. A
 live-LLM run ("search Hacker News for X and summarize") needs your API key in
 Settings — the machinery is covered by the mock-LLM suite.
+
+## Privacy
+
+There is no server, no account and no telemetry: the extension never contacts
+anything operated by its author. Conversations, run logs, lessons, skills and
+your settings live in `chrome.storage.local` inside your Chrome profile and
+nowhere else, and screenshots exist only in memory — every image payload is
+stripped before a thread is written to disk. The only place your data goes is
+the AI provider *you* configure in Settings, straight from your browser, so
+that provider's own policy governs what you send it.
+
+[`PRIVACY.md`](PRIVACY.md) has the full version — what each storage key holds
+and its cap, what every permission is used for, and how to delete all of it.
+It is also linked from the panel, under **⚙ Settings**.

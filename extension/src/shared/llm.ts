@@ -157,3 +157,123 @@ export interface LlmClient {
     onReasoning?: LlmReasoningSink,
   ): Promise<LlmResult>;
 }
+
+// ---------------- failure taxonomy ----------------
+
+/**
+ * Structured error code an LLM failure can carry to the UI. Only credit-shaped
+ * failures get one; everything else stays plain text so BYO users see exactly
+ * what they saw before.
+ */
+export type LlmErrorCode = "out_of_credits" | "credits_service_dry" | "key_revoked";
+
+/** Why an HTTP-level LLM call failed, when the body lets us tell. */
+export type LlmFailureKind = LlmErrorCode | "in_flight_budget" | "transient";
+
+/**
+ * An HTTP failure from the provider, classified. The `message` is byte-identical
+ * to the plain `Error` it replaces (`LLM API error <status>: <detail>`), so
+ * existing tests and log-grep habits keep working; the class only ADDS the
+ * classification the loop and the panel need.
+ */
+export class LlmHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly detail: string,
+    readonly kind: LlmFailureKind,
+    readonly retryAfterMs?: number,
+  ) {
+    super(`LLM API error ${status}: ${detail.slice(0, 300)}`);
+    this.name = "LlmHttpError";
+  }
+}
+
+/**
+ * OpenRouter's 402 is three different failures, told apart only by
+ * `error.metadata.limit_source`:
+ *
+ *   openrouter_key_limit        the customer's prepaid ceiling — terminal
+ *   openrouter_credits          the ORG balance is dry — terminal, OUR fault
+ *   openrouter_in_flight_budget reservation of input + max_tokens — TRANSIENT
+ *
+ * The in-flight variant is estimated against `max_tokens`, which this app sets
+ * to 8,192 and doubles to 32,000 on truncation — a customer with money left can
+ * hit it on a big-context step. Treating every 402 as "buy more credit" would
+ * accuse them of being broke when they are not, so the split is not optional.
+ * A non-OpenRouter 402 (generic OpenAI-compatible gateway) still classifies as
+ * `out_of_credits`: 402 is a payment-required status everywhere.
+ */
+export function classifyLlmFailure(
+  status: number,
+  body: string,
+  retryAfter?: string | null,
+): { kind: LlmFailureKind; retryAfterMs?: number } {
+  let source: string | undefined;
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: { metadata?: { limit_source?: unknown } };
+    };
+    const raw = parsed?.error?.metadata?.limit_source;
+    if (typeof raw === "string") source = raw;
+  } catch {
+    // Not JSON — a plain-text gateway error; the bare status classifies it.
+  }
+  let kind: LlmFailureKind;
+  if (status === 402) {
+    if (source === "openrouter_credits") kind = "credits_service_dry";
+    else if (source === "openrouter_in_flight_budget") kind = "in_flight_budget";
+    else kind = "out_of_credits";
+  } else if (status === 401) {
+    kind = "key_revoked";
+  } else {
+    kind = "transient";
+  }
+  const retryAfterMs = parseRetryAfterMs(retryAfter);
+  return retryAfterMs === undefined ? { kind } : { kind, retryAfterMs };
+}
+
+/** `Retry-After` in seconds (the only form we act on), → ms. */
+function parseRetryAfterMs(header: string | null | undefined): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header.trim());
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  return Math.round(seconds * 1_000);
+}
+
+/**
+ * True when retrying cannot help. Deliberately 402-only: some gateways 401
+ * transiently during key rotation and the retry can save a run, so `key_revoked`
+ * is a UI concern, not a loop one.
+ */
+export function isTerminalLlmError(err: unknown): boolean {
+  return err instanceof LlmHttpError && (err.kind === "out_of_credits" || err.kind === "credits_service_dry");
+}
+
+/** The structured code an error should carry on the wire, if any. */
+export function llmErrorCode(err: unknown): LlmErrorCode | undefined {
+  if (!(err instanceof LlmHttpError)) return undefined;
+  if (err.kind === "out_of_credits" || err.kind === "credits_service_dry" || err.kind === "key_revoked") {
+    return err.kind;
+  }
+  return undefined;
+}
+
+/**
+ * Prose for the `error` event. Credit-shaped failures get a sentence that names
+ * the cause; everything else keeps the historical `LLM call failed: …` shape.
+ */
+export function llmFailureMessage(err: unknown): string {
+  const detail = String((err as Error)?.message ?? err);
+  if (err instanceof LlmHttpError) {
+    if (err.kind === "out_of_credits") {
+      return "LLM call failed: this key has no credit left (HTTP 402). Top it up, then send “continue” — this thread keeps its context.";
+    }
+    if (err.kind === "credits_service_dry") {
+      return "LLM call failed: the credits service is out of funds (HTTP 402) — that one is on the service, not your key.";
+    }
+    if (err.kind === "key_revoked") {
+      return "LLM call failed: the API key was rejected (HTTP 401) — it may have been disabled or replaced.";
+    }
+  }
+  return `LLM call failed: ${detail}`;
+}

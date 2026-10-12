@@ -10,7 +10,7 @@
 // thread reads as an ordered list of turns, each with its own start/end time,
 // duration, tool calls with args+results, token usage and final answer.
 import type { CallTimings, MalformedCall, RunOutcome, RunStats, StepEvent, TodoItem } from "./protocol";
-import type { UpstreamInfo } from "./llm";
+import type { UpstreamInfo, LlmErrorCode } from "./llm";
 
 export const LOG_KEY = "baRunLogs";
 /** Ring size for the persisted log store (oldest runs evicted first). */
@@ -99,7 +99,7 @@ export interface LogTurn {
     /** True when the user reported they handled it (vs. skipping). */
     handled?: boolean;
   }[];
-  errors: { at: number; message: string }[];
+  errors: { at: number; message: string; code?: LlmErrorCode }[];
   /**
    * Every `info` event of this turn, timestamped: LLM retries ("LLM call
    * failed — retrying…"), checkpoint resumes, reasoning-cap cuts, the
@@ -417,7 +417,7 @@ export function foldLogEvent(
     }
     case "error": {
       const turn = currentTurn(rec, at);
-      turn.errors.push({ at, message: e.message });
+      turn.errors.push({ at, message: e.message, code: e.code });
       closeTurn(turn, at);
       rec.status = "error";
       rec.outcome = "error";
@@ -435,8 +435,14 @@ export function foldLogEvent(
         if (e.stats.usageEstimated) rec.tokensEstimated = true;
       }
       closeTurn(turn, at);
-      rec.status = "done";
-      if (e.outcome) rec.outcome = e.outcome;
+      // An error already settled this record. Without this guard the `done`
+      // that follows every stopped run overwrote status AND outcome, so a run
+      // that died on an API error archived as `done / stopped_by_user` —
+      // nobody had stopped it, and the cause only lived in turn.errors.
+      if (rec.status !== "error") {
+        rec.status = "done";
+        if (e.outcome) rec.outcome = e.outcome;
+      }
       settleRecordDuration(rec, at);
       break;
     }

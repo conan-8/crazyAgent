@@ -1318,6 +1318,10 @@ async function windowAction(
   return (res as { status?: AgentWindowStatus } | undefined)?.status ?? null;
 }
 
+// The repo copy, not a bundled one: a zip install has nowhere to serve a page
+// from, and a second copy of the policy would only ever be the stale one.
+const PRIVACY_URL = "https://github.com/conan-8/crazyAgent/blob/main/PRIVACY.md";
+
 function SettingsBody({ onClose }: { onClose: () => void }) {
   const [s, setS] = useState<AgentSettings | null>(null);
   const [saved, setSaved] = useState(false);
@@ -1572,10 +1576,19 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
             </section>
           </div>
           <div class="version-line">
-            {versionLabel({
-              version: chrome.runtime.getManifest().version,
-              stamp: chrome.runtime.getManifest().version_name,
-            })}
+            <button
+              class="privacy-link"
+              title="What crazyAgent stores, and where your data goes"
+              onClick={() => void chrome.tabs.create({ url: PRIVACY_URL })}
+            >
+              Privacy
+            </button>
+            <span class="build">
+              {versionLabel({
+                version: chrome.runtime.getManifest().version,
+                stamp: chrome.runtime.getManifest().version_name,
+              })}
+            </span>
           </div>
           <footer class="sheet-foot">
             <span class={`save-state${saved ? " is-saved" : ""}`}>

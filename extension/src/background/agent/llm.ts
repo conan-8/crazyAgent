@@ -11,7 +11,7 @@ import type {
   ToolCall,
   UpstreamInfo,
 } from "../../shared/llm";
-import { thinkingBudgetFor } from "../../shared/llm";
+import { thinkingBudgetFor, LlmHttpError, classifyLlmFailure } from "../../shared/llm";
 import type { AgentSettings } from "../settings";
 
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -946,6 +946,16 @@ function makeToolCall(id: string, name: string, argsText: string): ToolCall {
 
 // ---------------- clients ----------------
 
+/** Classify an HTTP failure so the loop can stop retrying what cannot recover. */
+function httpError(res: Response, detail: string): LlmHttpError {
+  const { kind, retryAfterMs } = classifyLlmFailure(
+    res.status,
+    detail,
+    res.headers.get("retry-after"),
+  );
+  return new LlmHttpError(res.status, detail, kind, retryAfterMs);
+}
+
 async function readSse(
   res: Response,
   agg: StreamAggregator,
@@ -954,7 +964,7 @@ async function readSse(
   if (!res.body) throw new Error(`empty stream (HTTP ${res.status})`);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`LLM API error ${res.status}: ${detail.slice(0, 300)}`);
+    throw httpError(res, detail);
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -982,7 +992,7 @@ async function readSse(
 async function readJson(res: Response): Promise<Record<string, unknown>> {
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`LLM API error ${res.status}: ${detail.slice(0, 300)}`);
+    throw httpError(res, detail);
   }
   return (await res.json()) as Record<string, unknown>;
 }
@@ -1042,7 +1052,7 @@ class OpenAiCompatClient implements LlmClient {
         // the run; the loop's reasoning cap still backstops the output.
         res = await fetch(url, init(JSON.stringify(stripThinkingKnobs(built))));
       } else {
-        throw new Error(`LLM API error 400: ${detail.slice(0, 300)}`);
+        throw httpError(res, detail);
       }
     }
     if (req.stream === false) return parseOpenAiReply(await readJson(res), onText, onReasoning);
