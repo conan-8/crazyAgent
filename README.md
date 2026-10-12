@@ -123,9 +123,10 @@ npm run package      # → release/crazyagent.zip + its build stamp and sha256
 It builds without sourcemaps (they embed the original TypeScript), never
 touches your own `dist/`, and refuses to package an uncommitted tree unless you
 pass `--allow-dirty`. Attach the zip to a GitHub Release **keeping the name
-`crazyagent.zip`**: that stable name is what `update.sh` fetches from
-`releases/latest/download/crazyagent.zip`, so a new release is a new update for
-everyone without telling them a new URL.
+`crazyagent.zip`**: that stable name is what `update.sh` fetches — from
+`releases/latest/download/crazyagent.zip`, or from the newest release via the
+GitHub API while the latest one is still a pre-release — so a new release is a
+new update for everyone without telling them a new URL.
 
 ## Use
 
