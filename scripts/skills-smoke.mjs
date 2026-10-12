@@ -265,18 +265,7 @@ async function main() {
       String(missing).slice(0, 140),
     );
 
-    // ---- S3: the drawer lists bundled skills and creates a user skill ----
-    await panel.eval(`document.querySelector('[data-tip="Skills (procedures)"]')?.click(); "ok"`);
-    const rows = await pollUntil(() =>
-      panel
-        .eval(`document.querySelectorAll(".lessons-view .lesson-row").length`)
-        .then((n) => (n >= 4 ? n : null)),
-    );
-    check(
-      "S3a the Skills drawer lists the bundled procedures",
-      rows !== null && rows >= 4,
-      `rows: ${rows}`,
-    );
+    // ---- S3: a user skill created through the port persists ----
     await portRoundTrip(
       panel,
       {

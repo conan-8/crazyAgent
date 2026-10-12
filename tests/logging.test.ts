@@ -6,11 +6,48 @@ import {
   findResumable,
   foldLogEvent,
   newTurnRecord,
+  reopenRecord,
   summarizeRecord,
   toJsonl,
   toMarkdown,
   type LogTurnRecord,
 } from "../extension/src/shared/logging";
+
+describe("per-conversation records (follow-ups append, gaps don't count)", () => {
+  it("reopens for a follow-up, appending turns and summing only run time", () => {
+    const rec = newTurnRecord("Book a table", { conversationId: "c1", at: 1_000 });
+    foldLogEvent(rec, { kind: "token_delta", text: "Booked." }, 5_000);
+    foldLogEvent(rec, { kind: "done", summary: "Booked." }, 6_000);
+    expect(rec.durationMs).toBe(5_000);
+
+    // An hour later the user follows up in the same thread.
+    reopenRecord(rec, 3_600_000);
+    expect(rec.status).toBe("running");
+    foldLogEvent(rec, { kind: "token_delta", text: "Move it." }, 3_601_000);
+    foldLogEvent(rec, { kind: "done", summary: "Moved." }, 3_602_500);
+
+    expect(rec.turns).toHaveLength(2);
+    expect(rec.status).toBe("done");
+    // 5s + 2.5s — the idle hour in between never lands in the total.
+    expect(rec.durationMs).toBe(7_500);
+  });
+
+  it("settles a legacy record with no segment clock via its startedAt", () => {
+    const rec = newTurnRecord("old shape", { at: 1_000 });
+    delete rec.segmentStartedAt;
+    foldLogEvent(rec, { kind: "done", summary: "x" }, 4_000);
+    expect(rec.durationMs).toBe(3_000);
+  });
+
+  it("adopts a legacy record's stored duration as the running total on reopen", () => {
+    const rec = newTurnRecord("old shape", { at: 1_000 });
+    foldLogEvent(rec, { kind: "done", summary: "x" }, 4_000);
+    delete rec.activeMs;
+    reopenRecord(rec, 10_000);
+    foldLogEvent(rec, { kind: "done", summary: "y" }, 11_000);
+    expect(rec.durationMs).toBe(4_000); // 3s + 1s
+  });
+});
 
 describe("run log folding", () => {
   it("records a full turn with per-turn timestamps and tool timings", () => {

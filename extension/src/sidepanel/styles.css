@@ -243,12 +243,28 @@ kbd {
   border: 1px solid var(--accent);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.45s var(--ease-out);
+  transition:
+    opacity 0.45s var(--ease-out),
+    border-color 0.45s var(--ease-out),
+    box-shadow 0.45s var(--ease-out);
 }
 
 .shell.is-running .window-glow {
   opacity: 1;
   animation: rim-breathe 3.2s var(--ease-io) infinite;
+}
+
+/* A clean finish after a run longer than two minutes: the rim turns green and
+   washes the panel edges, held until the next run starts. Long enough that
+   the user looked away — one glance answers "did it finish?". Green is the
+   panel's OK, so an aborted, capped or failed run never earns it. */
+.shell.is-done .window-glow {
+  opacity: 1;
+  border-color: var(--ok);
+  box-shadow:
+    inset 0 0 34px -12px color-mix(in srgb, var(--ok) 45%, transparent),
+    inset 0 0 10px -4px var(--ok-soft);
+  animation: rim-breathe 4.2s var(--ease-io) infinite;
 }
 
 @keyframes rim-breathe {
@@ -261,6 +277,10 @@ kbd {
   }
 }
 
+/* No bar any more: one round glass bubble floats at the top-left holding a
+   burger. Hover (or keyboard focus on the burger) expands it into a wide pill
+   and the actions fan out inside. The header itself is a transparent hit-test
+   hole so the empty strip never eats clicks meant for the transcript. */
 .topbar {
   position: absolute;
   top: 0;
@@ -270,79 +290,140 @@ kbd {
   height: var(--topbar-h);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 10px 0 14px;
-  background: var(--glass);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border-bottom: 1px solid var(--border);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.brand-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.2;
-}
-
-.brand-name {
-  font-family: var(--display);
-  font-weight: 650;
-  font-size: 14px;
-  letter-spacing: -0.015em;
-}
-
-.brand-sub {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  animation: rise 0.4s var(--ease-out);
+  justify-content: flex-start;
+  padding: 0 0 0 12px;
+  pointer-events: none;
 }
 
 .topbar-actions {
+  pointer-events: auto;
   display: flex;
+  align-items: center;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--glass);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm), var(--inner-hi);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.actions-burger {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-soft);
+  cursor: default;
+  flex: none;
+  transition: color 0.25s var(--ease-out);
+}
+
+.topbar-actions:is(:hover, :focus-within) .actions-burger {
+  color: var(--accent-strong);
+}
+
+/* 0fr → 1fr grows the pill's width to exactly its content. */
+.actions-list-wrap {
+  display: grid;
+  grid-template-columns: 0fr;
+  transition: grid-template-columns 0.42s var(--spring-soft);
+}
+
+.topbar-actions:is(:hover, :focus-within) .actions-list-wrap {
+  grid-template-columns: 1fr;
+}
+
+.actions-list {
+  display: flex;
+  align-items: center;
   gap: 2px;
+  min-width: 0;
+  /* Hidden (not clipped) when collapsed: nothing paints outside the circle
+   and the buttons leave the tab order — tooltips stay unclipped. No padding
+   while collapsed either: 0fr cannot shrink padding, so it would leak into
+   the circle's width and shove the burger off-centre. */
+  visibility: hidden;
+  transition: visibility 0s 0.42s;
+}
+
+.topbar-actions:is(:hover, :focus-within) .actions-list {
+  visibility: visible;
+  transition: visibility 0s 0s;
+  padding-right: 6px;
+}
+
+.actions-list .btn-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  opacity: 0;
+  transform: translateX(-10px) scale(0.85);
+  transition:
+    opacity 0.22s var(--ease-out),
+    transform 0.32s var(--spring-soft),
+    background-color 0.2s var(--ease-out),
+    color 0.2s var(--ease-out);
+}
+
+.topbar-actions:is(:hover, :focus-within) .actions-list .btn-icon {
+  opacity: 1;
+  transform: none;
+}
+
+/* The fan: each icon joins a beat after the one before it, so the pill reads
+   as opening rather than switching on. Collapse (no delay) is instant. */
+.topbar-actions:is(:hover, :focus-within) .actions-list > :nth-child(1) {
+  transition-delay: 0.05s;
+}
+.topbar-actions:is(:hover, :focus-within) .actions-list > :nth-child(2) {
+  transition-delay: 0.09s;
+}
+.topbar-actions:is(:hover, :focus-within) .actions-list > :nth-child(3) {
+  transition-delay: 0.13s;
+}
+.topbar-actions:is(:hover, :focus-within) .actions-list > :nth-child(4) {
+  transition-delay: 0.17s;
+}
+.topbar-actions:is(:hover, :focus-within) .actions-list > :nth-child(5) {
+  transition-delay: 0.21s;
 }
 
 /* ---------------- plan dropdown (todo_write) ----------------
-   The agent's live plan, anchored under the topbar as its glass extension:
-   a one-line strip (progress + the item in flight) that expands into the
-   full list. It overlays the transcript rather than shifting it — same
-   floating-glass language as the topbar itself. */
-
+   The agent's live plan, on the top row: a one-line strip (progress + the
+   item in flight) that expands into the full list in the side sheet. It
+   overlays the transcript rather than shifting it. */
 .todo-bar {
   position: absolute;
-  top: var(--topbar-h);
-  left: 0;
-  right: 0;
+  top: 10px;
+  left: 56px;
+  right: 12px;
   z-index: 9;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  border-radius: 999px;
   background: var(--glass);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm), var(--inner-hi);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border-bottom: 1px solid var(--border);
   animation: rise 0.35s var(--ease-out);
 }
 
 .todo-strip {
   width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px 6px 14px;
+  padding: 0 12px 0 10px;
   border: 0;
-  border-radius: 0;
+  border-radius: inherit;
   background: transparent;
   font-size: 11.5px;
   color: var(--text-soft);
@@ -995,58 +1076,18 @@ input[type="number"]::-webkit-inner-spin-button {
    the page you are looking at, and the per-run "look outside" grant. Sits
    directly above the composer because that is where a run starts — the scope
    is a run-level decision, not a buried preference. */
-.window-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin: 0 4px 7px;
-  font-size: 10.5px;
-  color: var(--text-faint);
-}
-
 .window-btn {
   padding: 3px 9px;
   font-size: 10.5px;
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--text-soft);
+  flex: none;
 }
 
 .window-btn:hover {
   background: var(--surface-hover);
   color: var(--text);
-}
-
-.window-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-  user-select: none;
-  transition: color 0.2s var(--ease-out), border-color 0.2s var(--ease-out),
-    background-color 0.2s var(--ease-out);
-}
-
-.window-toggle:hover {
-  background: var(--surface-hover);
-  color: var(--text-soft);
-}
-
-.window-toggle.is-on {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
-.window-toggle input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
 }
 
 /* Composer quick-switch: this tab (adopt the panel's window) vs its own window.
@@ -1243,7 +1284,7 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .md li::marker {
-  color: var(--text-faint);
+  color: var(--accent);
 }
 
 .md code {
@@ -2510,19 +2551,6 @@ input[type="number"]::-webkit-inner-spin-button {
   background: var(--accent);
   border-radius: inherit;
   transition: transform 0.6s var(--ease-out);
-}
-
-.live-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--ok);
-  box-shadow: 0 0 0 3px var(--ok-soft);
-}
-
-.live-dot.idle {
-  animation: none;
 }
 
 /* ---------------- sheets (settings / history) ---------------- */

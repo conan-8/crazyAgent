@@ -77,13 +77,16 @@ export async function saveRecord(rec: LogTurnRecord): Promise<void> {
   await ensureMigrated();
   await serialized(async () => {
     const index = await readIndex();
+    // Ordered by last activity, not start: records are per conversation, so a
+    // thread continued today must not sit below one started later and
+    // abandoned — and eviction must drop the actually-stale thread.
     const next = [summarizeRecord(rec), ...index.filter((s) => s.id !== rec.id)]
-      .sort((a, b) => b.startedAt - a.startedAt)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, LOG_MAX_RUNS);
     const evicted = index.filter((s) => !next.some((n) => n.id === s.id));
     const writes: Record<string, unknown> = { [INDEX_KEY]: next };
-    // A record that sorts past the cap (e.g. one resumed with an ancient
-    // startedAt) is not written at all — no orphan key without an index entry.
+    // A record that sorts past the cap is not written at all — no orphan key
+    // without an index entry.
     if (next.some((n) => n.id === rec.id)) writes[keyFor(rec.id)] = rec;
     await chrome.storage.local.set(writes);
     if (evicted.length) {
@@ -130,6 +133,21 @@ export async function findOpenRecord(
     (s) => s.status === "running" && s.conversationId === conversationId,
   );
   return hit ? getRecord(hit.id) : null;
+}
+
+/**
+ * The newest record for a conversation, whatever its status — logs are
+ * per-conversation, so a follow-up run reopens this record instead of
+ * archiving a fragment.
+ */
+export async function findConversationRecord(
+  conversationId: string | undefined,
+): Promise<LogTurnRecord | null> {
+  if (!conversationId) return null;
+  const hits = (await listSummaries())
+    .filter((s) => s.conversationId === conversationId)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  return hits[0] ? getRecord(hits[0]!.id) : null;
 }
 
 export async function deleteRecord(id: string): Promise<void> {

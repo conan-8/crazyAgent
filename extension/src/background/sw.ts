@@ -61,6 +61,8 @@ import {
 import {
   foldLogEvent,
   newTurnRecord,
+  reopenRecord,
+  settleRecordDuration,
   toJsonl,
   toMarkdown,
   type LogTurnRecord,
@@ -68,6 +70,7 @@ import {
 import {
   clearRecords,
   deleteRecord,
+  findConversationRecord,
   findOpenRecord,
   getRecord,
   listRecords,
@@ -560,19 +563,35 @@ async function connectionStamp(): Promise<{
   }
 }
 
-/** Open a fresh log record for a new run. */
+/**
+ * Open the log record for a run. One record per CONVERSATION: a follow-up in
+ * a thread that already has a record reopens it (keeping its id, title and
+ * history) and appends, so steering and follow-ups read as one log instead of
+ * fragments. The follow-up text is folded in as a timestamped note so the
+ * timeline shows where each new user message landed.
+ */
 async function openLogRecord(
   task: string,
   mode: ControlMode,
   conversationId: string | undefined,
   attachments: RunAttachment[] | undefined,
 ): Promise<void> {
-  currentLog = newTurnRecord(task, {
-    conversationId,
-    mode,
-    ...(await connectionStamp()),
-    attachments: attachments?.map((a) => ({ name: a.name, kind: a.kind })),
-  });
+  const prior = await findConversationRecord(conversationId);
+  if (prior) {
+    reopenRecord(prior);
+    const names = attachments?.length
+      ? ` (+${attachments.map((a) => a.name).join(", ")})`
+      : "";
+    foldLogEvent(prior, { kind: "info", message: `follow-up: ${task}${names}` });
+    currentLog = prior;
+  } else {
+    currentLog = newTurnRecord(task, {
+      conversationId,
+      mode,
+      ...(await connectionStamp()),
+      attachments: attachments?.map((a) => ({ name: a.name, kind: a.kind })),
+    });
+  }
   await flushLog();
 }
 
@@ -582,9 +601,9 @@ async function closeLogRecord(): Promise<void> {
   if (!rec) return;
   if (rec.status === "running") {
     // The loop returned without a terminal event.
+    settleRecordDuration(rec);
     rec.status = "done";
     rec.outcome = stopRequested ? "stopped_by_user" : "interrupted";
-    rec.durationMs = Math.max(0, Date.now() - rec.startedAt);
   }
   if (logFlushTimer) {
     clearTimeout(logFlushTimer);

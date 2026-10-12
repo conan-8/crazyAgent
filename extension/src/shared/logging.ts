@@ -175,6 +175,15 @@ export interface LogTurnRecord {
   build?: string;
   startedAt: number;
   updatedAt: number;
+  /**
+   * Wall-clock the conversation has actually spent running, summed across
+   * every reopened segment. The idle time between one run's `done` and the
+   * next follow-up is conversation age, not run time, so it never lands here.
+   * Unset on records written before per-conversation merging existed.
+   */
+  activeMs?: number;
+  /** When the currently running segment began; unset while the record is closed. */
+  segmentStartedAt?: number;
   /** `running` until a done/error event closes it, then `done`/`stopped`. */
   status: "running" | "done" | "error";
   /** How the run ended; absent on records written before it was tracked. */
@@ -248,10 +257,38 @@ export function newTurnRecord(
     build: opts.build,
     startedAt: at,
     updatedAt: at,
+    segmentStartedAt: at,
     status: "running",
     turns: [],
     toolCalls: 0,
   };
+}
+
+/**
+ * Reopen a finished record for a follow-up run in the same conversation: the
+ * record keeps its id, task title and history, and the new run appends turns
+ * to it. Run time is accumulated per segment, so the gap since the previous
+ * `done` is never counted.
+ */
+export function reopenRecord(rec: LogTurnRecord, at: number = Date.now()): void {
+  rec.activeMs ??= rec.durationMs ?? 0;
+  rec.segmentStartedAt = at;
+  rec.status = "running";
+  rec.updatedAt = at;
+}
+
+/**
+ * Fold the just-finished segment into the record's running total.
+ * `segmentStartedAt` is unset on records written before merging existed;
+ * their `startedAt` is the only clock they ever had, so it stands in.
+ */
+export function settleRecordDuration(rec: LogTurnRecord, at: number = Date.now()): void {
+  const segStart = rec.segmentStartedAt ?? rec.startedAt;
+  const base =
+    rec.segmentStartedAt === undefined ? (rec.durationMs ?? 0) : (rec.activeMs ?? 0);
+  rec.activeMs = base + Math.max(0, at - segStart);
+  rec.segmentStartedAt = undefined;
+  rec.durationMs = rec.activeMs;
 }
 
 function currentTurn(rec: LogTurnRecord, at: number): LogTurn {
@@ -384,7 +421,7 @@ export function foldLogEvent(
       closeTurn(turn, at);
       rec.status = "error";
       rec.outcome = "error";
-      rec.durationMs = Math.max(0, at - rec.startedAt);
+      settleRecordDuration(rec, at);
       break;
     }
     case "done": {
@@ -400,7 +437,7 @@ export function foldLogEvent(
       closeTurn(turn, at);
       rec.status = "done";
       if (e.outcome) rec.outcome = e.outcome;
-      rec.durationMs = Math.max(0, at - rec.startedAt);
+      settleRecordDuration(rec, at);
       break;
     }
     case "info": {

@@ -187,11 +187,11 @@ async function main() {
     check("W0 the agent window is bound", bound?.windowId === agentWindowId, JSON.stringify(bound));
     await sleep(400);
     const barText = await panel.eval(
-      `document.querySelector(".window-bar")?.textContent ?? ""`,
+      `document.querySelector(".toolbar .window-mode")?.textContent ?? ""`,
     );
     check(
       "W0 the panel shows where the agent works",
-      barText.includes(`#${agentWindowId}`),
+      barText.includes("This window") && barText.includes("Own window"),
       barText.slice(0, 120),
     );
 

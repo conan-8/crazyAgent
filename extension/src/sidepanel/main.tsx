@@ -760,19 +760,24 @@ function TurnView({
           return <ReasoningBlock key={i} block={block} live={active && i === lastIndex} />;
         }
         if (block.kind === "note") {
-          // Jev sidecar notes: accented line with a `Jev` pill (never colour
-          // alone — the accent is shared with the progress notes now).
+          // Jev sidecar notes: ONE self-labelled orange box. A note that
+          // already names itself ("Jev is active") folds its whole text into
+          // the pill, so the brand is never said twice — box, then the same
+          // words again. Notes with real content keep the `Jev` pill in front.
           // Progress notes: the model's own narration between sequences — its
           // own accented bubble with a `Progress` pill, so a run reads as
           // "work … report … work … report" at a glance.
+          const selfLabelled = block.jev === true && /^Jev\b/.test(block.text);
           return (
             <p
               key={i}
               class={`info-line${block.jev ? " is-jev" : ""}${block.progress ? " is-progress" : ""}`}
             >
-              {block.jev ? <span class="jev-pill">Jev</span> : null}
+              {block.jev ? (
+                <span class="jev-pill">{selfLabelled ? block.text : "Jev"}</span>
+              ) : null}
               {block.progress ? <span class="progress-pill">Progress</span> : null}
-              {block.text}
+              {selfLabelled ? null : block.text}
             </p>
           );
         }
@@ -2018,195 +2023,6 @@ type CoachStatus = {
   message?: string;
 };
 
-/**
- * The lessons drawer: what the second (coach) agent learned from past runs.
- * The list is the agent's own reference material — editable and removable
- * here, because the user owns what it is allowed to remember.
- */
-function SkillsBody({
-  skills,
-  error,
-  onNew,
-  onUpdate,
-  onDelete,
-  onClose,
-}: {
-  skills: Skill[];
-  error?: string;
-  onNew: (skill: {
-    name: string;
-    whenToUse: string;
-    body: string;
-    hosts?: string[];
-    keywords?: string[];
-  }) => void;
-  onUpdate: (id: string, patch: { pinned?: boolean; whenToUse?: string; body?: string }) => void;
-  onDelete: (id: string) => void;
-  onClose: () => void;
-}) {
-  const [editing, setEditing] = useState<string | null>(null);
-  const [draftBody, setDraftBody] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newWhen, setNewWhen] = useState("");
-  const [newBody, setNewBody] = useState("");
-
-  return (
-    <>
-      <SheetHead
-        title="Skills"
-        sub={`${skills.length} on-demand procedure${skills.length === 1 ? "" : "s"} — the agent loads them with use_skill when the task matches`}
-        icon={ICONS.doc}
-        onClose={onClose}
-      />
-      <div class="lesson-actions">
-        <button class="btn-soft" onClick={() => setCreating((c) => !c)}>
-          <Icon d={ICONS.plus} size={12} />
-          {creating ? "Cancel" : "New skill"}
-        </button>
-      </div>
-      {error ? <p class="lesson-status is-error">{error}</p> : null}
-      {creating ? (
-        <div class="lesson-edit sheet-pad">
-          <input
-            placeholder="name (kebab-case, e.g. invoice-upload)"
-            value={newName}
-            onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
-          />
-          <input
-            placeholder="when to use it (one line — this is the catalog line)"
-            value={newWhen}
-            onInput={(e) => setNewWhen((e.target as HTMLInputElement).value)}
-          />
-          <textarea
-            rows={8}
-            placeholder="the full procedure (markdown) — what to do, in order, with the exact tool calls"
-            value={newBody}
-            onInput={(e) => setDraftBodySafe(setNewBody, e)}
-          />
-          <div class="lesson-edit-actions">
-            <button
-              class="btn-soft"
-              disabled={!newName.trim() || !newWhen.trim() || !newBody.trim()}
-              onClick={() => {
-                onNew({ name: newName.trim(), whenToUse: newWhen.trim(), body: newBody.trim() });
-                setCreating(false);
-                setNewName("");
-                setNewWhen("");
-                setNewBody("");
-              }}
-            >
-              Create
-            </button>
-            <button class="btn-ghost" onClick={() => setCreating(false)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : null}
-      <div class="sheet-body hist-body">
-        {skills.length === 0 ? (
-          <div class="empty">
-            <span class="empty-icon">
-              <Icon d={ICONS.doc} size={20} />
-            </span>
-            <b>No skills</b>
-            <p class="hint">
-              Skills are full procedures the agent loads on demand — the catalog
-              line rides every run's prompt appendix, the body only when used.
-              Bundled ones appear after the service worker loads once.
-            </p>
-          </div>
-        ) : (
-          skills.map((skill, i) => (
-            <div class="hist-row lesson-row" key={skill.id} style={`--i:${Math.min(i, 12)}`}>
-              <div class="lesson-item">
-                <div class="lesson-tags">
-                  <span class="lesson-tag">{skill.name}</span>
-                  <span class="lesson-tag is-soft">{skill.source}</span>
-                  {skill.pinned ? <span class="lesson-tag is-pin">pinned</span> : null}
-                  {skill.hosts?.map((h) => (
-                    <span class="lesson-tag" key={h}>
-                      {h}
-                    </span>
-                  ))}
-                </div>
-                {editing === skill.id ? (
-                  <div class="lesson-edit">
-                    <textarea
-                      value={draftBody}
-                      onInput={(e) => setDraftBodySafe(setDraftBody, e)}
-                    />
-                    <div class="lesson-edit-actions">
-                      <button
-                        class="btn-soft"
-                        onClick={() => {
-                          if (draftBody.trim()) onUpdate(skill.id, { body: draftBody.trim() });
-                          setEditing(null);
-                        }}
-                      >
-                        Save
-                      </button>
-                      <button class="btn-ghost" onClick={() => setEditing(null)}>
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <p class="lesson-text">{skill.whenToUse}</p>
-                    {skill.sections?.length ? (
-                      <details>
-                        <summary class="hint">
-                          {skill.sections.length} sections ({skill.sections.reduce((n, s) => n + s.body.length, 0).toLocaleString()} chars)
-                        </summary>
-                        {skill.sections.map((sec) => (
-                          <div key={sec.id} class="skill-section">
-                            <div class="skill-section-head">
-                              <code>{sec.id}</code> — <b>{sec.title}</b>
-                              {sec.useWhen ? <span class="hint"> · {sec.useWhen}</span> : null}
-                            </div>
-                            <pre class="skill-body">{sec.body}</pre>
-                          </div>
-                        ))}
-                      </details>
-                    ) : (
-                      <details>
-                        <summary class="hint">body ({skill.body.length.toLocaleString()} chars)</summary>
-                        <pre class="skill-body">{skill.body}</pre>
-                      </details>
-                    )}
-                  </>
-                )}
-                <div class="lesson-actions row-actions">
-                  <button
-                    class="btn-ghost"
-                    onClick={() => onUpdate(skill.id, { pinned: !skill.pinned })}
-                  >
-                    {skill.pinned ? "Unpin" : "Pin"}
-                  </button>
-                  <button
-                    class="btn-ghost"
-                    onClick={() => {
-                      setEditing(skill.id);
-                      setDraftBody(skill.body);
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button class="btn-ghost" onClick={() => onDelete(skill.id)}>
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </>
-  );
-}
-
 function setDraftBodySafe(
   set: (v: string) => void,
   e: { target: EventTarget | null },
@@ -2214,6 +2030,11 @@ function setDraftBodySafe(
   set((e.target as HTMLTextAreaElement).value);
 }
 
+/**
+ * The lessons drawer: what the second (coach) agent learned from past runs.
+ * The list is the agent's own reference material — editable and removable
+ * here, because the user owns what it is allowed to remember.
+ */
 function LessonsBody({
   lessons,
   status,
@@ -2599,9 +2420,6 @@ function App() {
   const [logDetail, setLogDetail] = useState<LogTurnRecord | null>(null);
   const [showLessons, setShowLessons] = useState(false);
   const [lessons, setLessons] = useState<Lesson[]>([]);
-  const [showSkills, setShowSkills] = useState(false);
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [skillsError, setSkillsError] = useState<string | undefined>();
   /**
    * Set while the step's LLM request is on the wire and nothing has streamed
    * back — the activity label uses it to say WHAT the wait is (context sent,
@@ -2630,7 +2448,6 @@ function App() {
    * renders it and sends the two user gestures (bind / hand over a tab).
    */
   const [agentWindow, setAgentWindow] = useState<AgentWindowStatus | null>(null);
-  const [allowOutside, setAllowOutside] = useState(false);
   /**
    * The agent's live plan (`todo_write` → `todo_update` events). Whole-list
    * replacements; the dropdown under the topbar renders it. `todoPulse`
@@ -2643,6 +2460,12 @@ function App() {
   const [todoPulse, setTodoPulse] = useState(0);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  /**
+   * Green "it finished" rim, held after a run that ran longer than two
+   * minutes and ended cleanly. Long enough that the user looked away — the
+   * glow stays until the next run, so a glance answers "did it finish?".
+   */
+  const [doneGlow, setDoneGlow] = useState(false);
   const [modelList, setModelList] = useState<string[]>([]);
   const [modelListState, setModelListState] = useState<"idle" | "loading" | "error">("idle");
   const [modelListError, setModelListError] = useState("");
@@ -2807,6 +2630,10 @@ function App() {
             setRunning(false);
             awaitingModelRef.current = null;
             setAwaitingModel(null);
+            const ran = msg.event.stats?.elapsedMs ?? Date.now() - runStartRef.current;
+            setDoneGlow(
+              (msg.event.outcome ?? "completed") === "completed" && ran > 120_000,
+            );
           }
           // Deltas are the only high-volume events; everything else is a state
           // change a caller (or the user) is waiting to see, so it paints now.
@@ -2847,9 +2674,6 @@ function App() {
           downloadLog(msg.filename, msg.content);
         } else if (msg.type === "lessons.list") {
           setLessons(msg.lessons);
-        } else if (msg.type === "skills.list") {
-          setSkills(msg.skills);
-          setSkillsError(msg.error);
         } else if (msg.type === "lessons.review") {
           // The coach runs in the worker: surface its progress in the drawer,
           // never in the chat thread (reviews are not part of the user's task).
@@ -2946,11 +2770,10 @@ function App() {
       else if (showHistory) setShowHistory(false);
       else if (showLogs) setShowLogs(false);
       else if (showLessons) setShowLessons(false);
-      else if (showSkills) setShowSkills(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [viewer, openMenu, showSettings, showHistory, showLogs, showLessons, showSkills]);
+  }, [viewer, openMenu, showSettings, showHistory, showLogs, showLessons]);
 
   // Accepts real-agent runs (string) and Phase 1 demo runs (demo object).
   const startRun = (
@@ -2964,6 +2787,7 @@ function App() {
     setTodoOpen(false);
     setRunning(true);
     setUsage(null);
+    setDoneGlow(false);
     scrollToBottom(false);
     if (isDemo) {
       const demo = taskOrDemo as DemoConfig;
@@ -2994,10 +2818,8 @@ function App() {
       mode: "standard",
       conversationId,
       attachments: attach.length ? attach : undefined,
-      // Window isolation: the per-run read-only grant, and which window this
-      // panel is in (used only when the settings say the agent works in the
-      // user's window rather than its own).
-      allowOutsideWindows: allowOutside || undefined,
+      // Window isolation: which window this panel is in (used only when the
+      // settings say the agent works in the user's window rather than its own).
       panelWindowId: panelWindowRef.current,
     });
   };
@@ -3103,28 +2925,6 @@ function App() {
   const exportLessons = (format: LogExportFormat) =>
     postPort?.({ kind: "lessons.export", format });
 
-  const openSkills = () => {
-    setShowSettings(false);
-    setShowHistory(false);
-    setShowLogs(false);
-    setShowLessons(false);
-    setShowSkills(true);
-    postPort?.({ kind: "skills.list" });
-  };
-
-  const newSkill = (skill: {
-    name: string;
-    whenToUse: string;
-    body: string;
-    hosts?: string[];
-    keywords?: string[];
-  }) => postPort?.({ kind: "skills.new", skill });
-
-  const updateSkill = (id: string, patch: { pinned?: boolean; whenToUse?: string; body?: string }) =>
-    postPort?.({ kind: "skills.update", id, patch });
-
-  const deleteSkill = (id: string) => postPort?.({ kind: "skills.delete", id });
-
   const newChat = () => {
     currentConv = null;
     setConv(null);
@@ -3132,6 +2932,7 @@ function App() {
     setShowHistory(false);
     setTodos([]);
     setTodoOpen(false);
+    setDoneGlow(false);
     inputRef.current?.focus();
   };
 
@@ -3324,7 +3125,6 @@ function App() {
       chrome.storage.local
         .get("baSkills")
         .then((r) => (r.baSkills as Skill[] | undefined) ?? []),
-    skillsUI: () => ({ open: showSkills }),
     // control bar surface
     usage: () => usage,
     addAttachment: (a: RunAttachment) => setAttachments((prev) => [...prev, a].slice(0, 4)),
@@ -3505,69 +3305,57 @@ function App() {
   const canSend = Boolean(taskText.trim() || attachments.length);
 
   return (
-    <div class={`shell${running ? " is-running" : ""}${conv ? " has-conv" : ""}`} {...dragHandlers}>
+    <div
+      class={`shell${running ? " is-running" : ""}${doneGlow ? " is-done" : ""}${conv ? " has-conv" : ""}`}
+      {...dragHandlers}
+    >
       <span class="window-glow" aria-hidden="true" />
 
       <header class="topbar">
-        <div class="brand">
-          <div class="brand-text">
-            <span class="brand-name">crazyAgent</span>
-            <span class="brand-sub" key={running ? "run" : "idle"}>
-              {running ? (
-                <span class="live-text">Working · {formatElapsed(elapsed)}</span>
-              ) : (
-                <>
-                  <span class="live-dot idle" />
-                  Ready
-                </>
-              )}
+        <nav class="topbar-actions" aria-label="Panel actions">
+          <button class="actions-burger" aria-label="Panel actions">
+            <Icon d={ICONS.menu} size={15} />
+          </button>
+          <span class="actions-list-wrap">
+            <span class="actions-list">
+              <IconButton icon={ICONS.compose} tip="New chat" label="New chat" onClick={newChat} />
+              <IconButton
+                icon={ICONS.history}
+                tip="History"
+                label="History"
+                class={showHistory ? "is-on" : ""}
+                onClick={() => (showHistory ? setShowHistory(false) : openHistory())}
+              />
+              <IconButton
+                icon={ICONS.logs}
+                tip="Run logs"
+                label="Run logs"
+                class={showLogs ? "is-on" : ""}
+                onClick={() => (showLogs ? setShowLogs(false) : openLogs())}
+              />
+              <span class={`badge-wrap${lessonBadge ? " has-badge" : ""}`}>
+                <IconButton
+                  icon={ICONS.bulb}
+                  tip="Lessons"
+                  label="Lessons"
+                  class={showLessons ? "is-on" : ""}
+                  onClick={() => (showLessons ? setShowLessons(false) : openLessons())}
+                />
+              </span>
+              <IconButton
+                icon={ICONS.settings}
+                tip="Settings"
+                label="Settings"
+                tipAlign="end"
+                class={showSettings ? "is-on" : ""}
+                onClick={() => {
+                  setShowHistory(false);
+                  setShowLogs(false);
+                  setShowSettings(!showSettings);
+                }}
+              />
             </span>
-          </div>
-        </div>
-        <nav class="topbar-actions">
-          <IconButton icon={ICONS.compose} tip="New chat" label="New chat" onClick={newChat} />
-          <IconButton
-            icon={ICONS.history}
-            tip="History"
-            label="History"
-            class={showHistory ? "is-on" : ""}
-            onClick={() => (showHistory ? setShowHistory(false) : openHistory())}
-          />
-          <IconButton
-            icon={ICONS.logs}
-            tip="Run logs"
-            label="Run logs"
-            class={showLogs ? "is-on" : ""}
-            onClick={() => (showLogs ? setShowLogs(false) : openLogs())}
-          />
-          <span class={`badge-wrap${lessonBadge ? " has-badge" : ""}`}>
-            <IconButton
-              icon={ICONS.bulb}
-              tip="Lessons"
-              label="Lessons"
-              class={showLessons ? "is-on" : ""}
-              onClick={() => (showLessons ? setShowLessons(false) : openLessons())}
-            />
           </span>
-          <IconButton
-            icon={ICONS.doc}
-            tip="Skills (procedures)"
-            label="Skills"
-            class={showSkills ? "is-on" : ""}
-            onClick={() => (showSkills ? setShowSkills(false) : openSkills())}
-          />
-          <IconButton
-            icon={ICONS.settings}
-            tip="Settings"
-            label="⚙"
-            tipAlign="end"
-            class={showSettings ? "is-on" : ""}
-            onClick={() => {
-              setShowHistory(false);
-              setShowLogs(false);
-              setShowSettings(!showSettings);
-            }}
-          />
         </nav>
       </header>
 
@@ -3618,49 +3406,6 @@ function App() {
       </div>
 
       <footer class="composer-wrap">
-        {/* Window isolation, visible where runs start: which window the agent
-            works in, a hand-over for the page you are looking at, and the
-            per-run read-only grant. The agent itself can never widen its own
-            scope — only these controls can. */}
-        <div class="window-bar">
-          <div class="window-mode" role="group" aria-label="Where the agent works">
-            <button
-              class={`window-mode-opt${windowMode === "adopt" ? " is-on" : ""}`}
-              title="Work in THIS window — the one the panel is open in. It stays in the foreground, so nothing gets background-throttled."
-              onClick={() => setAgentWindowMode("adopt")}
-            >
-              This window
-            </button>
-            <button
-              class={`window-mode-opt${windowMode === "own" ? " is-on" : ""}`}
-              title="Give the agent its own window, created once and reused. It stays out of your way while you work in yours."
-              onClick={() => setAgentWindowMode("own")}
-            >
-              Own window
-            </button>
-          </div>
-          {agentWindow?.alive && windowMode === "own" ? (
-            <button
-              class="window-btn"
-              title="Move this tab into the agent's window so the agent can work on it — the page keeps its state (scroll, form, logins)"
-              onClick={handOverCurrentTab}
-            >
-              Hand this tab to the agent
-            </button>
-          ) : null}
-          <label
-            class={`window-toggle${allowOutside ? " is-on" : ""}`}
-            title="For THIS run only: let the agent LIST your other windows' tabs (titles and URLs) when a task needs them. It still cannot click, type or read page content outside its own window."
-          >
-            <input
-              type="checkbox"
-              checked={allowOutside}
-              onChange={(e) => setAllowOutside((e.target as HTMLInputElement).checked)}
-            />
-            <Icon d={ICONS.eye} size={11} />
-            <span>Look outside</span>
-          </label>
-        </div>
         {attachments.length ? (
           <div class="draft-strip">
             {attachments.map((a, i) => (
@@ -3834,6 +3579,35 @@ function App() {
               </div>
             </Popover>
 
+            {/* Window isolation, where runs start: which window the agent works
+                in, and a hand-over for the page you are looking at. The agent
+                itself can never widen its own scope — only these controls can. */}
+            <div class="window-mode" role="group" aria-label="Where the agent works">
+              <button
+                class={`window-mode-opt${windowMode === "adopt" ? " is-on" : ""}`}
+                title="Work in THIS window — the one the panel is open in. It stays in the foreground, so nothing gets background-throttled."
+                onClick={() => setAgentWindowMode("adopt")}
+              >
+                This window
+              </button>
+              <button
+                class={`window-mode-opt${windowMode === "own" ? " is-on" : ""}`}
+                title="Give the agent its own window, created once and reused. It stays out of your way while you work in yours."
+                onClick={() => setAgentWindowMode("own")}
+              >
+                Own window
+              </button>
+            </div>
+            {agentWindow?.alive && windowMode === "own" ? (
+              <button
+                class="window-btn"
+                title="Move this tab into the agent's window so the agent can work on it — the page keeps its state (scroll, form, logins)"
+                onClick={handOverCurrentTab}
+              >
+                Hand this tab
+              </button>
+            ) : null}
+
             <span class="toolbar-spacer" />
 
             <button
@@ -3961,23 +3735,6 @@ function App() {
           onClear={clearLessons}
           onExport={exportLessons}
           onClose={() => setShowLessons(false)}
-        />
-      </Sheet>
-
-      <Sheet
-        open={showSkills}
-        side="left"
-        class="history-view lessons-view"
-        label="Skills"
-        onClose={() => setShowSkills(false)}
-      >
-        <SkillsBody
-          skills={skills}
-          error={skillsError}
-          onNew={newSkill}
-          onUpdate={updateSkill}
-          onDelete={deleteSkill}
-          onClose={() => setShowSkills(false)}
         />
       </Sheet>
 

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearRecords,
   deleteRecord,
+  findConversationRecord,
   findOpenRecord,
   getRecord,
   listRecords,
@@ -15,6 +16,7 @@ import {
   LOG_MAX_RUNS,
   foldLogEvent,
   newTurnRecord,
+  reopenRecord,
 } from "../extension/src/shared/logging";
 
 const store = new Map<string, unknown>();
@@ -128,5 +130,33 @@ describe("runlog persistence", () => {
     await saveRecord(open);
     expect(await findOpenRecord("c9")).toBeNull();
     expect(await findOpenRecord(undefined)).toBeNull();
+  });
+
+  it("finds a conversation's newest record whatever its status", async () => {
+    const mine = newTurnRecord("first run", { conversationId: "c7", at: 100 });
+    foldLogEvent(mine, { kind: "done", summary: "ok" }, 200);
+    await saveRecord(mine);
+    await saveRecord(newTurnRecord("another thread", { conversationId: "c8", at: 300 }));
+    const found = await findConversationRecord("c7");
+    expect(found?.id).toBe(mine.id);
+    expect(await findConversationRecord("nope")).toBeNull();
+    expect(await findConversationRecord(undefined)).toBeNull();
+  });
+
+  it("orders the index by last activity, so a continued thread floats back up", async () => {
+    await saveRecord(record("old thread", 100));
+    await saveRecord(record("recent thread", 200));
+    expect((await listSummaries()).map((s) => s.task)).toEqual([
+      "recent thread",
+      "old thread",
+    ]);
+    const old = (await listRecords()).find((r) => r.task === "old thread")!;
+    reopenRecord(old, 5_000);
+    foldLogEvent(old, { kind: "token_delta", text: "more" }, 5_100);
+    await saveRecord(old);
+    expect((await listSummaries()).map((s) => s.task)).toEqual([
+      "old thread",
+      "recent thread",
+    ]);
   });
 });
