@@ -259,7 +259,7 @@ const CANVAS_DOC_EDITORS_SECTIONS: SkillSection[] = [
     body: [
       "BUILD BIT BY BIT — the format goes on BEFORE the text, never typed first and fixed afterwards. One block at a time (one heading, one paragraph, one list group):",
       "1. Caret at the end (an empty body needs nothing; otherwise docs_locate {phrase, caret:'after'} on the last text, key End).",
-      "2. Set the format AHEAD of the caret: paragraph style (Control+Alt+1..6 headings, Control+Alt+0 normal text, or docs_op apply_style), font / size / colour from the toolbar, list type (section lists).",
+      "2. Set the format AHEAD of the caret: paragraph style (Control+Alt+1..6 headings, Control+Alt+0 normal text, or docs_op apply_style), font (docs_op set_font), size / colour from the toolbar, list type (section lists).",
       "3. Type the block in ONE call. Inline marks are toggles inside the same sequence: key Control+b, type 'word', key Control+b.",
       "4. Enter, then reset what the next block must not inherit (Control+Alt+0, toggles off, list exited).",
       "5. ONE docs_read (format:'outline') checks the block, then todo_write ticks its item.",
@@ -336,7 +336,7 @@ const CANVAS_DOC_EDITORS_SECTIONS: SkillSection[] = [
       "- TABLES by address, never pixels — `docs_table` (row/col 1-based, tables numbered as the outline prints them): fill {table, rows:[[…]]} writes the whole grid in ONE call (adds rows) and verifies; goto {table, cell} = caret in a cell; select {table, from, to, keys_after:['Control+b']} drags across cells; merge {table, from, to}. Header color: select the row, Format ▸ Table ▸ Table options.",
       "- Bookmark: caret on the heading, Insert ▸ Bookmark; then select the phrase, Ctrl+K (the dialog lists headings and bookmarks). TOC and headers: Insert ▸ Page elements (TOC after the headings exist).",
       "- Equation: Insert ▸ Symbols ▸ Equation, then type E = mc².",
-      "- Fonts not in the menu: font dropdown ▸ More fonts — a REAL search dialog; check each font, Done, apply. Never type into the font-name box on the toolbar (it is a div, not an input).",
+      "- Fonts: `docs_op {op:'set_font', font:'Playfair Display'}` — picks the family BY LABEL and verifies. Never type into or aim at the font box. Not listed: ▸ More fonts (a real search dialog).",
       "- `docs_op` (self-verifying): apply_style {style:'Title'|'Heading 1'…} — set it BEFORE typing the block; page_numbers {position:'footer'|'header'}; insert_table {rows, cols} — it refuses unless the size grid reports the size asked for; confirm in docs_read outline before docs_table fill. page_setup is NOT reliable yet: use menu_path, rows BY LABEL. Two misses → blocked; never re-aim pixels.",
     ].join("\n"),
   },

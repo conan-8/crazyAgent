@@ -110,6 +110,32 @@ describe("planDocsOp", () => {
     }
   });
 
+  it("plans set_font as a label click on the toolbar font box, verified by reading it back", () => {
+    // Reaching the font box by coordinate cost one run ~50 turns: every miss
+    // opened a side panel that covered the toolbar and staled the refs. The op
+    // aims at the box docs_state already reads, then picks the family BY LABEL.
+    const out = planDocsOp("set_font", { font: "  Playfair   Display " });
+    expect(out.ok).toBe(true);
+    if (out.ok && out.plan.kind === "comboboxThenLabel") {
+      expect(out.plan.selectors).toContain(".kix-fontfamily-combobox");
+      expect(out.plan.labels).toBe("Playfair Display");
+      expect(out.plan.verify).toMatchObject({
+        check: "toolbarFontShows",
+        needle: "Playfair Display",
+      });
+    } else {
+      throw new Error("expected a comboboxThenLabel plan");
+    }
+  });
+
+  it("rejects set_font without a usable family name", () => {
+    expect(planDocsOp("set_font", {}).ok).toBe(false);
+    expect(planDocsOp("set_font", { font: "   " }).ok).toBe(false);
+    const out = planDocsOp("set_font", { font: "" });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.error).toContain("Playfair Display");
+  });
+
   it("rejects apply_style without a usable style name", () => {
     const out = planDocsOp("apply_style", { style: "Fancy" });
     expect(out.ok).toBe(false);

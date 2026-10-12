@@ -12,6 +12,7 @@ import { EXPECT_PROP } from "../../shared/expect";
 import { failureTag } from "../../shared/tool-failure";
 import {
   DOCS_OPS,
+  FONT_BOX_SELECTORS,
   gridCellPoint,
   gridCellPx,
   parseGridStatus,
@@ -231,6 +232,18 @@ async function gridBoxes(ctx: ToolContext): Promise<Map<string, SelectorBox>> {
   return new Map(boxes.map((b) => [b.selector, b]));
 }
 
+/**
+ * The first selector that matches a LAID-OUT box, in preference order.
+ * `boxes` skips hidden-but-present elements, which is exactly what a toolbar
+ * control looks like when a panel is covering it — so an empty result means
+ * "not clickable right now", not "not found".
+ */
+async function firstBoxOf(ctx: ToolContext, selectors: string[]): Promise<SelectorBox | null> {
+  const res = await runContentAction(ctx.tabId, { action: "boxes", selectors }).catch(() => null);
+  const boxes = res?.ok ? ((res.data as { boxes?: SelectorBox[] } | undefined)?.boxes ?? []) : [];
+  return boxes[0] ?? null;
+}
+
 async function pickGridSize(
   ctx: ToolContext,
   rows: number,
@@ -308,6 +321,18 @@ async function verifyPlan(ctx: ToolContext, verify: VerifyPlan | undefined): Pro
         }
         return "unverified (the toolbar style box was not readable)";
       }
+      case "toolbarFontShows": {
+        for (const selector of FONT_BOX_SELECTORS) {
+          const res = await runContentAction(ctx.tabId, { action: "queryText", selector });
+          const text = String((res.data as { text?: string } | undefined)?.text ?? "");
+          if (res.ok && text) {
+            return text.toLowerCase().includes(verify.needle.toLowerCase())
+              ? `verified: ${verify.describe}`
+              : `NOT VERIFIED: the toolbar font box reads "${text.slice(0, 40)}", expected "${verify.needle}"`;
+          }
+        }
+        return "unverified (the toolbar font box was not readable)";
+      }
       case "dialogClosed": {
         const res = await runContentAction(ctx.tabId, {
           action: "queryText",
@@ -372,7 +397,7 @@ registerTool({
 registerTool({
   name: "docs_op",
   description:
-    "Run ONE Google Docs UI operation deterministically — the interface knowledge is built in (exact menu routes read off the live 2026 Docs menu, shortcuts, dialog fields), so one call replaces a multi-turn pixel hunt, and the op verifies its own effect. Ops: apply_style {style:'Title'|'Subtitle'|'Normal text'|'Heading 1'..'Heading 6'} (Heading 1-6 ride Ctrl+Alt+1..6); page_setup {size?:'Letter'|'A4'|…, margins?:inches for all four sides (e.g. 1) or {top,right,bottom,left}, orientation?:'portrait'|'landscape'} — at least one of the three (NOT reliable yet: the dialog's size dropdown has been missed — read the verification line); page_numbers {position:'footer'|'header'} (Insert ▸ Page elements ▸ Page numbers); insert_table {rows:1..20, cols:1..20} (drives the size grid with the mouse and REFUSES unless the grid reports the size asked for — read its verification line, and confirm the table in docs_read outline before filling it); page_break (Ctrl+Enter); table_of_contents {style?:'linked'|'plain'|'dotted'}; equation {text:'E = mc^2'} (Insert ▸ Symbols ▸ Equation, then types the text). The caret/selection must already be where the op applies (click into the document first). The result lists the steps taken and a verification line ('verified:' / 'NOT VERIFIED:' — read it); the fresh observation rides along as with any action. If an op's menu row is missing, the error names the rows the open menu actually shows — read that list instead of re-trying the same path.",
+    "Run ONE Google Docs UI operation deterministically — the interface knowledge is built in (exact menu routes read off the live 2026 Docs menu, shortcuts, dialog fields), so one call replaces a multi-turn pixel hunt, and the op verifies its own effect. Ops: apply_style {style:'Title'|'Subtitle'|'Normal text'|'Heading 1'..'Heading 6'} (Heading 1-6 ride Ctrl+Alt+1..6); set_font {font:'Playfair Display'} — opens the toolbar font box and clicks the family BY LABEL, then reads the font box back to verify. USE THIS for any font change: do not type into the font box (it is a div, and typed text goes to whatever holds focus — the document, if the box did not focus) and do not aim at it from a screenshot (a missed click opens a side panel that covers the toolbar and stales every ref); page_setup {size?:'Letter'|'A4'|…, margins?:inches for all four sides (e.g. 1) or {top,right,bottom,left}, orientation?:'portrait'|'landscape'} — at least one of the three (NOT reliable yet: the dialog's size dropdown has been missed — read the verification line); page_numbers {position:'footer'|'header'} (Insert ▸ Page elements ▸ Page numbers); insert_table {rows:1..20, cols:1..20} (drives the size grid with the mouse and REFUSES unless the grid reports the size asked for — read its verification line, and confirm the table in docs_read outline before filling it); page_break (Ctrl+Enter); table_of_contents {style?:'linked'|'plain'|'dotted'}; equation {text:'E = mc^2'} (Insert ▸ Symbols ▸ Equation, then types the text). The caret/selection must already be where the op applies (click into the document first). The result lists the steps taken and a verification line ('verified:' / 'NOT VERIFIED:' — read it); the fresh observation rides along as with any action. If an op's menu row is missing, the error names the rows the open menu actually shows — read that list instead of re-trying the same path.",
   parameters: {
     type: "object",
     properties: {
@@ -385,6 +410,11 @@ registerTool({
         type: "string",
         description:
           "apply_style: 'Title', 'Subtitle', 'Normal text', 'Heading 1'..'Heading 6'; table_of_contents: 'linked' (default), 'plain' or 'dotted'",
+      },
+      font: {
+        type: "string",
+        description:
+          "set_font: the family name exactly as Docs lists it, e.g. 'Playfair Display', 'Roboto Mono', 'Merriweather'",
       },
       text: {
         type: "string",
@@ -473,6 +503,35 @@ registerTool({
         await ensureTabActive(ctx.tabId, ctx.adapter);
         await sendTrustedText(ctx.tabId, ctx.adapter, plan.text);
         steps.push(`typed "${plan.text}" into the editor box`);
+        break;
+      }
+      case "comboboxThenLabel": {
+        const box = await firstBoxOf(ctx, plan.selectors);
+        if (!box) {
+          return fail(
+            `${failureTag("tool")}: no visible toolbar box matched ${plan.selectors.join(" / ")} — a panel may be covering the toolbar, or this is not a Docs editor. Nothing was clicked.`,
+          );
+        }
+        // Aim at the box's own measured centre: the whole point of the op is
+        // that nobody has to compute a coordinate from a screenshot.
+        const at = { x: Math.round(box.x + box.w / 2), y: Math.round(box.y + box.h / 2) };
+        await ensureTabActive(ctx.tabId, ctx.adapter);
+        await sendStrokes(ctx, [
+          { type: "mouseMoved", x: at.x, y: at.y },
+          { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 },
+          { type: "mouseReleased", x: at.x, y: at.y, button: "left", clickCount: 1 },
+        ]);
+        steps.push(`clicked the toolbar box (${box.selector}) at (${at.x},${at.y})`);
+        await sleep(BETWEEN_STEPS_MS * 2);
+        // By label, never by position — and never by typing: typed text goes to
+        // whatever holds focus, and an unfocused box means the document.
+        const row = await clickLabelStep(ctx, plan.labels);
+        if (!row.ok) {
+          return fail(
+            `${row.error}. The list is still open; if the row is below the fold, scroll it or pick from a screenshot.`,
+          );
+        }
+        steps.push(row.clicked);
         break;
       }
     }

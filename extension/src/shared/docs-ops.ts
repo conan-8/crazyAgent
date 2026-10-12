@@ -31,6 +31,7 @@ import { failureTag } from "./tool-failure";
 
 export const DOCS_OPS = [
   "apply_style",
+  "set_font",
   "page_setup",
   "page_numbers",
   "insert_table",
@@ -55,11 +56,38 @@ export interface DialogFill {
 export type VerifyPlan =
   | { check: "exportHtmlContains"; needle: string; describe: string }
   | { check: "toolbarStylesShows"; needle: string; describe: string }
+  | { check: "toolbarFontShows"; needle: string; describe: string }
   | { check: "dialogClosed"; name: string; describe: string };
+
+/**
+ * The toolbar's font-family combobox, in preference order.
+ *
+ * These are the same selectors `docs_state` already reads the font from, so the
+ * op aims at a box the harness has proven it can see. Reaching this control by
+ * coordinate instead cost one run ~50 turns: every miss opened a side panel that
+ * covered the toolbar and staled the refs.
+ */
+export const FONT_BOX_SELECTORS = [
+  '[aria-label="Font"]',
+  '[aria-label^="Font family"]',
+  ".kix-fontfamily-combobox",
+];
 
 export type DocsOpPlan =
   | { kind: "keys"; combos: string[]; describe: string; verify?: VerifyPlan }
   | { kind: "menu"; labels: MenuLabel[]; describe: string; verify?: VerifyPlan }
+  | {
+      /**
+       * Open a toolbar combobox by selector, then click a row BY LABEL in the
+       * list that opens. No coordinate the model has to compute, and no typed
+       text that could land in the document if the box failed to focus.
+       */
+      kind: "comboboxThenLabel";
+      selectors: string[];
+      labels: MenuLabel;
+      describe: string;
+      verify?: VerifyPlan;
+    }
   | {
       kind: "dialog";
       open: MenuLabel[];
@@ -292,6 +320,31 @@ export function planDocsOp(opRaw: unknown, args: Record<string, unknown>): DocsO
           verify: htmlNeedle
             ? { check: "exportHtmlContains", needle: htmlNeedle, describe: `the exported HTML marks the paragraph as ${style.toLowerCase()}` }
             : { check: "toolbarStylesShows", needle: style, describe: `the toolbar's style box reads "${style}"` },
+        },
+      };
+    }
+    case "set_font": {
+      const font = String(args.font ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!font || font.length > 60) {
+        return inputError(
+          `set_font needs font: the family's name exactly as Docs lists it (e.g. "Playfair Display", "Roboto Mono", "Merriweather")`,
+        );
+      }
+      return {
+        ok: true,
+        op,
+        plan: {
+          kind: "comboboxThenLabel",
+          selectors: FONT_BOX_SELECTORS,
+          labels: font,
+          describe: `set the font to ${font} via the toolbar font box`,
+          verify: {
+            check: "toolbarFontShows",
+            needle: font,
+            describe: `the toolbar's font box reads "${font}"`,
+          },
         },
       };
     }
