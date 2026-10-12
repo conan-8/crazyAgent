@@ -81,6 +81,52 @@ npm install && npm run build        # produces dist/
 > clones the login-bearing parts (works on Linux; elsewhere you may sign in
 > once inside the automation profile).
 
+## Install from a release zip (no repo checkout)
+
+A release zip is the whole thing in one ~300 KB file: the built extension under
+`dist/`, the Unlimited-mode `helper/`, `update.sh` and a `README.txt`. Install
+it once, into a directory you will not move:
+
+```sh
+mkdir -p ~/.local/share/crazyagent
+unzip crazyagent.zip -d ~/.local/share/crazyagent
+```
+
+Then `chrome://extensions` → Developer mode → **Load unpacked** →
+`~/.local/share/crazyagent/dist`, and pick your provider/model/key in
+**⚙ Settings** as above. Unlimited mode works from the same directory:
+`sh ~/.local/share/crazyagent/helper/install.sh <extension-id>`.
+
+**Updating** is one command, then the reload arrow on the extension's card in
+`chrome://extensions`:
+
+```sh
+sh ~/.local/share/crazyagent/update.sh
+```
+
+It fetches the newest release and replaces the folder's contents wholesale — no
+stale files left behind — so the reload is the only step for you. Pass a zip
+path to update from a local build instead: `sh update.sh /path/to/crazyagent.zip`.
+
+The folder itself never moves, and that is what makes the swap safe: Chromium
+derives an unpacked extension's id from the `sha256` of its absolute directory,
+so the same path means the same id. The browser reads it as an update, and your
+conversations, settings and native-host manifest all survive. Move the folder
+and you get a new id and empty storage.
+
+To cut a release:
+
+```sh
+npm run package      # → release/crazyagent.zip + its build stamp and sha256
+```
+
+It builds without sourcemaps (they embed the original TypeScript), never
+touches your own `dist/`, and refuses to package an uncommitted tree unless you
+pass `--allow-dirty`. Attach the zip to a GitHub Release **keeping the name
+`crazyagent.zip`**: that stable name is what `update.sh` fetches from
+`releases/latest/download/crazyagent.zip`, so a new release is a new update for
+everyone without telling them a new URL.
+
 ## Use
 
 The panel is a **chat**: type a task and hit **Run** (or Enter). Your message
@@ -310,6 +356,7 @@ chat thread or the run archive.
 
 ```sh
 npm run watch        # rebuild on change (then reload the extension)
+npm run package      # release zip (no sourcemaps) → release/
 npm test             # unit tests (vitest)
 npm run typecheck
 npm run verify       # full suite: unit + every phase's real-browser smoke
@@ -334,8 +381,9 @@ extension/src/background/  service worker, agent loop, tools, adapters, policy, 
 extension/src/content/     per-frame element registry, actions, settle detector
 extension/src/sidepanel/   panel UI (chat, tool cards, confirm cards, settings)
 helper/                    native-messaging daemon (Unlimited mode) + installers
+installer/                 files that ship inside the release zip (update.sh)
 e2e/fixture/               test site (forms, SPA, cross-origin iframe, API page)
-scripts/                   phase smoke drivers + verify orchestrator
+scripts/                   phase smoke drivers, verify orchestrator, release packaging
 ```
 
 ## Status
