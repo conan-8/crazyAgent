@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  BATCH_NUDGE_AFTER,
+  BATCH_NUDGE_REPEAT,
   boundCheckpoint,
   capCheckpointImages,
   createStuckGuard,
@@ -1210,6 +1212,50 @@ describe("createStuckGuard", () => {
     // Failures still count — a broken wait is a broken tool like any other.
     expect(guard.note("wait_for", { text: "x" }, true)).toBe("");
     expect(guard.note("wait_for", { text: "x" }, true)).toContain("RETRY WARNING");
+  });
+
+  it("nags to batch after a streak of one-gesture turns, and a program resets it", () => {
+    const guard = createStuckGuard();
+    // Fresh args every time, so no exact-repeat warning can fire — this is the
+    // 149-turn list loop from the 42-minute Docs run in miniature.
+    for (let i = 0; i < BATCH_NUDGE_AFTER - 1; i++) {
+      expect(guard.note("docs_locate", { phrase: `item ${i}` }, false)).toBe("");
+    }
+    const sixth = guard.note("key", { key: "Control+Shift+8" }, false);
+    expect(sixth).toContain(`[BATCHING: ${BATCH_NUDGE_AFTER} single-action round trips`);
+    // One batched call clears the streak entirely — the counter starts over.
+    expect(guard.note("run_program", { steps: [] }, false)).toBe("");
+    for (let i = 0; i < BATCH_NUDGE_AFTER - 1; i++) {
+      expect(guard.note("click_at", { x: i, y: i }, false)).toBe("");
+    }
+  });
+
+  it("reads do not count toward the batching streak", () => {
+    const guard = createStuckGuard();
+    // Reads alone, however many, never suggest batching.
+    for (let i = 0; i < 12; i++) {
+      expect(guard.note("docs_read", { format: "outline", max_chars: 1000 + i }, false)).toBe("");
+    }
+    // And they do not slow or speed the streak: still exactly the 6th gesture.
+    const g2 = createStuckGuard();
+    for (let i = 0; i < BATCH_NUDGE_AFTER - 1; i++) {
+      expect(g2.note("docs_locate", { phrase: `item ${i}` }, false)).toBe("");
+      expect(g2.note("snapshot", { max_chars: 1000 + i }, false)).toBe("");
+    }
+    expect(g2.note("click", { ref: String(BATCH_NUDGE_AFTER) }, false)).toContain(
+      `[BATCHING: ${BATCH_NUDGE_AFTER} single-action round trips`,
+    );
+  });
+
+  it("re-nags on a slow cadence, not on every gesture after the first", () => {
+    const guard = createStuckGuard();
+    let nags = 0;
+    const calls = BATCH_NUDGE_AFTER + BATCH_NUDGE_REPEAT + 2;
+    for (let i = 0; i < calls; i++) {
+      if (guard.note("type", { text: `line ${i}` }, false).includes("[BATCHING")) nags++;
+    }
+    // Fires at the threshold and again only after the repeat gap — not every call.
+    expect(nags).toBe(2);
   });
 
   it("bans an exact call after two identical failures — enforced, not advisory", () => {

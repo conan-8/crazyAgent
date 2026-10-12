@@ -57,6 +57,10 @@ registerTool({
   description: "Click the element with the given ref (scrolled into view first).",
   parameters: { type: "object", properties: { ...REF_PROP }, required: ["ref"] },
   run: (args, ctx) => runContentAction(ctx.tabId, { action: "click", ref: args.ref }),
+  present(payload) {
+    const d = ((payload ?? {}) as { data?: { clicked?: string } }).data;
+    return { text: d?.clicked ? `clicked ${d.clicked}` : "clicked" };
+  },
 });
 
 registerTool({

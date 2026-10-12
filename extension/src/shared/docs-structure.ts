@@ -12,6 +12,11 @@ export interface TextMarks {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  /** Strikethrough — and the ONLY readable signal a checklist item is CHECKED:
+   *  the export draws the checkbox itself as a CSS :before glyph the parser
+   *  never sees, but ticks the item's text through. A 42-minute run ended up
+   *  "trusting the visual" for this exact question. */
+  strike?: boolean;
 }
 
 export interface ParaBlock {
@@ -20,7 +25,7 @@ export interface ParaBlock {
   style: string;
   /** Plain text exactly as the find bar sees it. */
   text: string;
-  /** Text with **bold**, *italic*, __underline__ and [link](href) marks. */
+  /** Text with **bold**, *italic*, __underline__, ~~strike~~ and [link](href) marks. */
   marked: string;
   listLevel?: number;
   ordered?: boolean;
@@ -77,7 +82,8 @@ export function parseClassMarks(html: string): Map<string, TextMarks> {
     if (/font-weight\s*:\s*(700|bold)/i.test(body)) marks.bold = true;
     if (/font-style\s*:\s*italic/i.test(body)) marks.italic = true;
     if (/text-decoration[^;]*underline/i.test(body)) marks.underline = true;
-    if (marks.bold || marks.italic || marks.underline) out.set(cls, marks);
+    if (/text-decoration[^;]*line-through/i.test(body)) marks.strike = true;
+    if (marks.bold || marks.italic || marks.underline || marks.strike) out.set(cls, marks);
   }
   return out;
 }
@@ -94,11 +100,13 @@ function marksOf(attrs: string, classMarks: Map<string, TextMarks>): TextMarks {
     if (m?.bold) merged.bold = true;
     if (m?.italic) merged.italic = true;
     if (m?.underline) merged.underline = true;
+    if (m?.strike) merged.strike = true;
   }
   const inline = attr(attrs, "style") ?? "";
   if (/font-weight\s*:\s*(700|bold)/i.test(inline)) merged.bold = true;
   if (/font-style\s*:\s*italic/i.test(inline)) merged.italic = true;
   if (/text-decoration[^;]*underline/i.test(inline)) merged.underline = true;
+  if (/text-decoration[^;]*line-through/i.test(inline)) merged.strike = true;
   return merged;
 }
 
@@ -111,6 +119,7 @@ function wrap(text: string, m: TextMarks, href?: string): string {
   if (m.underline && !href) core = `__${core}__`;
   if (m.italic) core = `*${core}*`;
   if (m.bold) core = `**${core}**`;
+  if (m.strike) core = `~~${core}~~`;
   if (href) core = `[${core}](${href})`;
   return lead + core + trail;
 }
@@ -147,6 +156,7 @@ export function parseDocStructure(html: string): DocBlock[] {
       if (s.bold) m.bold = true;
       if (s.italic) m.italic = true;
       if (s.underline) m.underline = true;
+      if (s.strike) m.strike = true;
     }
     return m;
   };

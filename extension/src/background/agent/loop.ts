@@ -703,6 +703,15 @@ const PARALLEL_SAFE = new Set([
  * the STUCK note — a different symptom (the tool itself is dying) with a
  * different remedy (look at the page instead of re-aiming).
  *
+ * Separately from failure, the guard counts single-gesture calls (click, key,
+ * docs_locate, …) since anything batched them (run_program, input_sequence).
+ * One gesture per round trip is the expensive shape of a run — 603 of 617
+ * turns in a 42-minute Docs task were exactly that, 149 of them on a single
+ * checkbox — so past a threshold the result carries the BATCHING note sending
+ * the next steps as one program. Advisory by design: a single gesture is never
+ * provably futile the way an identical failing retry is, and an enforced ban
+ * would break honest explore-one-step-at-a-time phases.
+ *
  * Wait tools are exempt from the SUCCESS-repeat note only: re-issuing a wait
  * with the same arguments is legitimate (waiting on the next reply of the
  * same page), while their FAILURES still count toward the streak AND the
@@ -732,6 +741,41 @@ const WAIT_LIKE_TOOLS = new Set(["wait_for", "wait_for_settle"]);
 /** Failures of one exact call before the identical-call ban kicks in. */
 export const IDENTICAL_FAIL_BAN = 2;
 
+/**
+ * Fine-grained UI primitives — one gesture each. A run of these with nothing
+ * batched between them is the "one action per turn" grind: 603 of 617 turns in
+ * a 42-minute Docs run issued exactly one tool call, and 149 of them went on a
+ * single checkbox (numbered + bulleted + checklist) that six batched calls
+ * finished once the model finally sent them together.
+ */
+const SINGLE_GESTURE_TOOLS = new Set([
+  "click",
+  "click_at",
+  "key",
+  "type",
+  "type_at",
+  "drag_at",
+  "hover",
+  "hover_at",
+  "scroll",
+  "select",
+  "menu_path",
+  "docs_locate",
+]);
+
+/** Calls that carry several steps in one round trip — they break the streak. */
+const BATCHED_TOOLS = new Set(["run_program", "input_sequence", "docs_table", "docs_op"]);
+
+/** Consecutive single gestures before the batching nudge rides a result. */
+export const BATCH_NUDGE_AFTER = 6;
+
+/**
+ * How many more single gestures must pass before the nudge repeats. Nagging on
+ * every call after the first trains the model to ignore the note entirely, so
+ * it comes back on a slow cadence and stays short.
+ */
+export const BATCH_NUDGE_REPEAT = 10;
+
 /** Stable identity of an exact call — the ban and the repeat notes key on it. */
 function callKey(name: string, args: Record<string, unknown>): string {
   try {
@@ -746,6 +790,12 @@ export function createStuckGuard(): StuckGuard {
   const calls = new Map<string, number>();
   /** Failures per EXACT call — the identical-call ban's counter. */
   const fails = new Map<string, number>();
+  /** Consecutive single-gesture calls since anything batched them. */
+  let singleStreak = 0;
+  /** Single gestures since the last batching nudge was emitted. */
+  let sinceNudge = 0;
+  /** Whether any batching nudge has fired — sets the repeat cadence. */
+  let nudgeArmed = false;
   let coachNote = "";
   return {
     coach(message) {
@@ -768,6 +818,32 @@ export function createStuckGuard(): StuckGuard {
       // The armed coaching line rides this result and is consumed once.
       const coach = coachNote;
       coachNote = "";
+      // Batching streak: one gesture per round trip is the expensive shape. A
+      // batched call resets it; anything not on either list (a read, a
+      // screenshot, a todo update) leaves it alone.
+      if (BATCHED_TOOLS.has(name)) {
+        singleStreak = 0;
+        sinceNudge = 0;
+        nudgeArmed = false;
+      } else if (SINGLE_GESTURE_TOOLS.has(name)) {
+        singleStreak++;
+        sinceNudge++;
+      }
+      let batchNote = "";
+      // First nag at the threshold; afterwards only every REPEAT gestures, so
+      // the note stays rare enough to be read rather than tuned out.
+      const nextAt = nudgeArmed ? BATCH_NUDGE_REPEAT : BATCH_NUDGE_AFTER;
+      if (singleStreak >= BATCH_NUDGE_AFTER && sinceNudge >= nextAt) {
+        sinceNudge = 0;
+        nudgeArmed = true;
+        batchNote =
+          `\n\n[BATCHING: ${singleStreak} single-action round trips in a row, one gesture each. ` +
+          "If the next steps are knowable — and after this many they usually are — send them as ONE " +
+          "run_program (2-12 steps, an expect on the last, a Progress note at the end); it stops at the " +
+          "first divergence and reports every step, so you lose nothing by committing them together. " +
+          "Each separate turn costs a full round trip plus a screenshot. If you genuinely cannot know " +
+          "the next step until you see this one's result, say what you are waiting for and keep going.]";
+      }
       const key = callKey(name, args);
       const repeats = (calls.get(key) ?? 0) + 1;
       calls.set(key, repeats);
@@ -782,15 +858,15 @@ export function createStuckGuard(): StuckGuard {
           ? ` This exact call has now failed ${failedTimes} times — a THIRD identical attempt will NOT be executed at all. Change something real: the target, the tool, or the plan.`
           : "";
       if (failed && repeats > 1) {
-        return `${coach}\n\n[RETRY WARNING: this exact call has already failed in this run — repeating it will fail again. Do NOT run it again. Change the approach; if you are unsure what the page shows, take a screenshot and look at it.${banLine}]`;
+        return `${coach}\n\n[RETRY WARNING: this exact call has already failed in this run — repeating it will fail again. Do NOT run it again. Change the approach; if you are unsure what the page shows, take a screenshot and look at it.${banLine}]${batchNote}`;
       }
       if (failed && n >= 3) {
-        return `${coach}\n\n[STUCK: ${name} has now failed ${n} times in a row. Do not retry it. Take a screenshot to SEE what the page actually shows, switch to read_page / snapshot / ref-based tools, or report the blocker and stop.${banLine}]`;
+        return `${coach}\n\n[STUCK: ${name} has now failed ${n} times in a row. Do not retry it. Take a screenshot to SEE what the page actually shows, switch to read_page / snapshot / ref-based tools, or report the blocker and stop.${banLine}]${batchNote}`;
       }
       if (repeats >= 3 && !WAIT_LIKE_TOOLS.has(name)) {
-        return `${coach}\n\n[This exact call has now run ${repeats} times and returns the same thing — vary the approach instead of polling it again. If you are unsure what you are seeing, take a screenshot.]`;
+        return `${coach}\n\n[This exact call has now run ${repeats} times and returns the same thing — vary the approach instead of polling it again. If you are unsure what you are seeing, take a screenshot.]${batchNote}`;
       }
-      return coach;
+      return `${coach}${batchNote}`;
     },
   };
 }

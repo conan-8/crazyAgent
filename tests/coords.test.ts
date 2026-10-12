@@ -13,6 +13,7 @@ import {
   planDrag,
   planHover,
   rectDistance,
+  refBoundsError,
   screenshotToViewportPoint,
   selectsThenOverwrites,
   shapeCoordArgs,
@@ -109,6 +110,20 @@ describe("coordinate space conversion", () => {
     const err = boundsError({ x: -5, y: 10 }, vp);
     expect(err).toContain("outside the visible viewport");
     expect(err).toContain("800x600");
+  });
+
+  it("blames dx/dy and names the ref's box when a ref point lands outside", () => {
+    const vp = { width: 1432, height: 693, scrollX: 0, scrollY: 0 };
+    const rect = { x: 1200, y: 70, w: 70, h: 30 };
+    // The 2026-10-12 run: ref 57 + dx:-868 stroked (-868, 581) and reported success.
+    const err = refBoundsError({ x: -868, y: 581 }, vp, rect, "57");
+    expect(err).toContain("outside the visible viewport");
+    expect(err).toContain("dx/dy carried it off ref 57");
+    expect(err).toContain("(1200,70 70×30)");
+    expect(refBoundsError({ x: 1235, y: 85 }, vp, rect, "57")).toBeNull();
+    // No rect or ref: the plain bounds message, nothing invented.
+    expect(refBoundsError({ x: 1935, y: 584 }, vp)).toContain("outside the visible viewport");
+    expect(refBoundsError({ x: 1935, y: 584 }, vp)).not.toContain("dx/dy");
   });
 });
 

@@ -32,6 +32,7 @@ import {
   planClick,
   planDrag,
   planHover,
+  refBoundsError,
   RESCUE_RADIUS_PX,
   screenshotToViewportPoint,
   selectsThenOverwrites,
@@ -158,6 +159,30 @@ async function fromScreenshotSpace(
 }
 
 /**
+ * Bounds-check a ref/frame-resolved point. The coords path has always checked
+ * (see boundsError below) and #resolvePoint's own comment promises an off-screen
+ * ref "would fail the bounds check" — but the ref and frame paths returned
+ * before any check ran, so `click_at {ref, dx:-868}` stroked (-868, 581) and
+ * reported success. A run burned ~65 turns escalating dx/dy because nothing
+ * ever told it the point was impossible.
+ *
+ * `data.point` is in TOP-viewport coordinates while `data.viewport` is the
+ * resolving frame's own box, so they are only comparable when the frame offset
+ * is zero; a nested frame falls back to CDP layout metrics.
+ */
+async function checkResolvedBounds(
+  ctx: ToolContext,
+  data: ResolvedPoint,
+  ref: string | undefined,
+): Promise<string | null> {
+  const atTop = data.frameOffset.x === 0 && data.frameOffset.y === 0;
+  const viewport = atTop
+    ? data.viewport
+    : ((await layoutViewportCss(ctx.tabId, ctx.adapter).catch(() => undefined)) ?? data.viewport);
+  return refBoundsError(data.point, viewport, data.rect, ref);
+}
+
+/**
  * Resolve WHERE to act, in top-viewport coordinates, from any of the four
  * input modes: a snapshot `ref` (element centre + dx/dy, optionally scrolled
  * into view first), a `frame`-local point, screenshot-image pixels, or raw
@@ -190,6 +215,8 @@ async function resolveTarget(
       };
     }
     const data = res.data as ResolvedPoint;
+    const outOfBounds = await checkResolvedBounds(ctx, data, args.ref);
+    if (outOfBounds) return { ok: false, error: `${failureTag("input")}: ${outOfBounds}` };
     return {
       ok: true,
       source: "ref",
@@ -225,6 +252,8 @@ async function resolveTarget(
       };
     }
     const data = res.data as ResolvedPoint;
+    const outOfBounds = await checkResolvedBounds(ctx, data, undefined);
+    if (outOfBounds) return { ok: false, error: `${failureTag("input")}: ${outOfBounds}` };
     return {
       ok: true,
       source: "frame",
@@ -687,6 +716,23 @@ registerTool({
     const { from, hit, viewport, source, probed, correction } = resolved;
     await sendStrokes(ctx, planClick(from, mods.button, mods.clickCount));
     const after = probed ? await afterHit(ctx, from) : null;
+    // Nothing under the point before the stroke AND nothing after it: the click
+    // provably acted on no element. This used to come back as a success whose
+    // only hint was "nothing at that point" buried in the hit description, so a
+    // run widened its dx/dy guess turn after turn (-76, -289, -659, -868, -959)
+    // with no signal that any of them had landed on nothing.
+    if (probed && !hit && !after) {
+      return {
+        ok: false,
+        error:
+          `${failureTag("input")}: clicked (${from.x}, ${from.y}) and there is no element there — ` +
+          `nothing before the click, nothing after, so it changed nothing. ` +
+          (typeof args.ref === "string"
+            ? `The dx/dy offset missed ref ${args.ref}; take a fresh snapshot and click the ref without an offset, or aim inside its box. `
+            : `Take a fresh screenshot or snapshot and aim at a point that actually holds the control. `) +
+          `Do NOT retry the same point with a wider offset.`,
+      };
+    }
     // Only when the click PROVABLY hit no control: a candidate for the one
     // rescue attempt the harness may make if this click changes nothing.
     const rescue = await rescueCandidate(ctx, resolved).catch(() => null);

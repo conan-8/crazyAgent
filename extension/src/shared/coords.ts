@@ -273,6 +273,32 @@ export function boundsError(point: Point, viewport: ViewportInfo): string | null
   );
 }
 
+/**
+ * The bounds check for a point resolved from a REF (element centre + dx/dy).
+ * Same rule as boundsError, but the message has to blame the right thing: the
+ * ref resolved fine, it was the offset that carried the point off-screen. A run
+ * escalated dx from -76 to -959 across ~20 turns because every one of those
+ * strokes reported success — nothing ever said the point was impossible.
+ *
+ * Naming the ref's own box gives the next attempt somewhere to aim instead of a
+ * wider guess.
+ */
+export function refBoundsError(
+  point: Point,
+  viewport: ViewportInfo,
+  rect?: { x: number; y: number; w: number; h: number },
+  ref?: string,
+): string | null {
+  const outOfBounds = boundsError(point, viewport);
+  if (!outOfBounds) return null;
+  if (!ref || !rect) return outOfBounds;
+  return (
+    `${outOfBounds} — dx/dy carried it off ref ${ref}, whose box is ` +
+    `(${Math.round(rect.x)},${Math.round(rect.y)} ${Math.round(rect.w)}×${Math.round(rect.h)}); ` +
+    `aim inside that box or drop the offset`
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Click sanitizers — the "never misclick" pipeline's pure decisions. Measured
 // failure modes these kill (2026-10-06 run logs):

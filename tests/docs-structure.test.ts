@@ -11,15 +11,16 @@ import {
   type TableBlock,
 } from "../extension/src/shared/docs-structure";
 
-const STYLE = "<style>.c7{font-weight:700}.c8{font-style:italic}.c9{text-decoration:underline}.c1{color:#000}</style>";
+const STYLE = "<style>.c7{font-weight:700}.c8{font-style:italic}.c9{text-decoration:underline}.c1{color:#000}.c33{text-decoration:line-through}</style>";
 const doc = (body: string): string => `<html><head>${STYLE}</head><body class="c3">${body}</body></html>`;
 
 describe("parseClassMarks", () => {
-  it("maps export classes to bold/italic/underline only", () => {
+  it("maps export classes to bold/italic/underline/strike only", () => {
     const m = parseClassMarks(doc(""));
     expect(m.get("c7")).toEqual({ bold: true });
     expect(m.get("c8")).toEqual({ italic: true });
     expect(m.get("c9")).toEqual({ underline: true });
+    expect(m.get("c33")).toEqual({ strike: true });
     expect(m.has("c1")).toBe(false);
   });
 });
@@ -60,6 +61,24 @@ describe("parseDocStructure", () => {
       { style: "LI", text: "nested", listLevel: 1 },
       { style: "LI", text: "first", ordered: true },
     ]);
+  });
+
+  it("shows a CHECKED checklist item as struck — the export's only readable tick", () => {
+    // Google Docs draws the checkbox itself as a CSS :before glyph and ticks
+    // the item's text with line-through; without the strike mark the outline
+    // cannot tell a checked box from an empty one.
+    const blocks = parseDocStructure(
+      doc(
+        '<ul class="lst-kix_c-0">' +
+          '<li class="c2 lst-kix_c-0"><span class="c33">First checklist item</span></li>' +
+          '<li class="c2 lst-kix_c-0"><span>Second checklist item</span></li></ul>',
+      ),
+    );
+    expect(blocks).toMatchObject([
+      { style: "LI", marked: "~~First checklist item~~" },
+      { style: "LI", marked: "Second checklist item" },
+    ]);
+    expect(formatOutline(blocks)).toContain("• ~~First checklist item~~");
   });
 
   it("reads tables with merged cells and multi-paragraph cells", () => {

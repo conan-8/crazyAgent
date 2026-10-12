@@ -122,7 +122,7 @@ export class Actions {
   #dispatch(req: ActionRequest): ActionResult {
     switch (req.action) {
       case "click":
-        return this.#click(this.#resolve(req.ref));
+        return this.#click(this.#resolve(req.ref), req.ref);
       case "type":
         return this.#type(this.#resolve(req.ref), req.text, req.submit ?? false);
       case "select":
@@ -745,7 +745,7 @@ export class Actions {
     }
   }
 
-  #click(el: HTMLElement): ActionResult {
+  #click(el: HTMLElement, ref?: string): ActionResult {
     // Clicking a file input opens the OS file picker — a modal no tool can
     // drive, left sitting over the page. The `upload` tool (paths/files, or
     // trigger_ref for chooser buttons) is the only sane route; refuse with
@@ -762,43 +762,61 @@ export class Actions {
     this.#mouse(el, DOWN_SEQUENCE);
     this.#mouse(el, UP_SEQUENCE);
     el.click(); // the single real "click" event handlers act on
-    return { ok: true };
+    // Report WHAT got clicked. A bare {ok:true} let a run click ref 57 thirteen
+    // times after a re-snapshot had recycled 57 from the editing-mode dropdown
+    // onto a submit button — every one of those calls looked successful, so
+    // nothing ever contradicted the model's stale map of the toolbar.
+    const p = probeOf(el);
+    return {
+      ok: true,
+      data: {
+        clicked: `<${p.tag}${p.type && p.type !== "text" ? ` type=${p.type}` : ""}>${p.text ? ` "${p.text.slice(0, 40)}"` : ""}${ref ? ` ref ${ref}` : ""}`,
+      },
+    };
   }
 
   #type(el: HTMLElement, text: string, submit: boolean): ActionResult {
-    el.focus?.();
+    let target = el;
+    let substituted: string | undefined;
+    if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !isEditableHost(el)) {
+      // A ref usually lands on the labelled WRAPPER of a dialog field, not the
+      // input inside it — <div> "Paste an image URL here" around the real
+      // <input>. Erroring there cost a run four separate dialogs (image-by-URL,
+      // link, version name) and pushed it onto coordinate guessing. A human
+      // clicks the box and types; do the same when the box holds exactly one
+      // typable descendant.
+      const inner = onlyTypableDescendant(el);
+      if (!inner.ok) return inner;
+      target = inner.el;
+      substituted = `<${el.tagName.toLowerCase()}> ref is a wrapper — typed into the <${inner.el.tagName.toLowerCase()}${inner.el instanceof HTMLInputElement && inner.el.type !== "text" ? ` type=${inner.el.type}` : ""}> inside it`;
+    }
+    target.focus?.();
     // contenteditable (incl. IG's DM composer) and any non-form-control node:
     // never touch `.value` — assigning it on a div throws and the native
     // setter lookup is worse. Insert through the selection/Range API so rich
     // editors (Draft.js/Lexical/ProseMirror) observe a real DOM mutation.
     const isFormControl =
-      el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 
     if (!isFormControl) {
-      if (!isEditableHost(el)) {
-        return {
-          ok: false,
-          error: `element is not typable: <${el.tagName.toLowerCase()}> is neither a form control nor contenteditable`,
-        };
-      }
-      this.#insertIntoEditable(el, text);
+      this.#insertIntoEditable(target, text);
     } else {
       // Native prototype setter so React's value tracker sees the change.
       const proto =
-        el instanceof HTMLTextAreaElement
+        target instanceof HTMLTextAreaElement
           ? HTMLTextAreaElement.prototype
           : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-      if (setter) setter.call(el, text);
-      else el.setAttribute("value", text);
+      if (setter) setter.call(target, text);
+      else target.setAttribute("value", text);
       const data = { bubbles: true, cancelable: true, inputType: "insertText", data: text };
-      el.dispatchEvent(new InputEvent("beforeinput", data));
-      el.dispatchEvent(new InputEvent("input", data));
+      target.dispatchEvent(new InputEvent("beforeinput", data));
+      target.dispatchEvent(new InputEvent("input", data));
     }
-    el.dispatchEvent(new Event("change", { bubbles: true }));
+    target.dispatchEvent(new Event("change", { bubbles: true }));
     let submitNote: string | undefined;
     if (submit) {
-      const outcome = this.#submitFrom(el);
+      const outcome = this.#submitFrom(target);
       // A silent no-op here cost a real run a whole round trip: submit:true on
       // an SPA assessment form whose inputs live outside any <form> looked
       // successful and submitted nothing. Say what happened.
@@ -807,11 +825,12 @@ export class Actions {
           "submit requested but the element is not inside a <form> — nothing was submitted; find the page's submit control in the snapshot and click it by ref";
       }
     }
+    const note = [substituted, submitNote].filter(Boolean).join("; ");
     return {
       ok: true,
-      data: submitNote
-        ? { value: readValue(el), note: submitNote }
-        : { value: readValue(el) },
+      data: note
+        ? { value: readValue(target), note }
+        : { value: readValue(target) },
     };
   }
 
@@ -1236,6 +1255,73 @@ const CLICKABLE_CANDIDATES = [
 /** What the label scan considers for filling. */
 const FIELD_CANDIDATES =
   'input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"], [role="combobox"], [role="radio"], [role="checkbox"]';
+
+/** Input types that never take typed text — excluded from the wrapper fallback. */
+const NON_TEXT_INPUT =
+  ":not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]):not([disabled]):not([readonly])";
+
+const TYPABLE_DESCENDANTS =
+  `input${NON_TEXT_INPUT}, textarea:not([disabled]):not([readonly]), ` +
+  '[contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]';
+
+/**
+ * A field the user could actually type into. Style-based rather than
+ * geometry-based on purpose: a dialog can hold several fields with only one
+ * displayed, and `display`/`visibility` is what hides the others. Reading
+ * bounding boxes instead would also make every candidate look hidden in jsdom,
+ * where rects are always zero. Ancestors count — `display:none` on a wrapper
+ * does not change the child's own computed display.
+ */
+function isTypableCandidate(el: HTMLElement): boolean {
+  const view = el.ownerDocument.defaultView;
+  for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+    if (node.hidden) return false;
+    const style = view?.getComputedStyle(node);
+    if (!style) continue;
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    if (style.opacity === "0") return false;
+  }
+  return true;
+}
+
+/** "<input type=url> "Paste an image URL"" — enough to tell candidates apart. */
+function describeField(el: HTMLElement): string {
+  const type =
+    el instanceof HTMLInputElement && el.type !== "text" ? ` type=${el.type}` : "";
+  const label = el.getAttribute("aria-label") || el.getAttribute("placeholder") || "";
+  return `<${el.tagName.toLowerCase()}${type}>${label ? ` "${label.slice(0, 30)}"` : ""}`;
+}
+
+/**
+ * The single text field inside a non-typable wrapper, when there is exactly one.
+ * Refs from a snapshot often point at a dialog field's labelled container; the
+ * real <input> is a descendant. Ambiguity is refused rather than guessed — the
+ * candidates come back so the caller can name them by ref.
+ */
+export function onlyTypableDescendant(
+  el: HTMLElement,
+): { ok: true; el: HTMLElement } | { ok: false; error: string; candidates: HTMLElement[] } {
+  const candidates = [...el.querySelectorAll<HTMLElement>(TYPABLE_DESCENDANTS)].filter(
+    isTypableCandidate,
+  );
+  if (candidates.length === 1) return { ok: true, el: candidates[0]! };
+  const focused = candidates.find((c) => c === el.ownerDocument.activeElement);
+  if (candidates.length > 1 && focused) return { ok: true, el: focused };
+  const tag = el.tagName.toLowerCase();
+  const notTypable = `element is not typable: <${tag}> is neither a form control nor contenteditable`;
+  if (!candidates.length) {
+    return {
+      ok: false,
+      candidates,
+      error: `${notTypable}, and holds no text field — click the field's own ref from the snapshot, or type_at its coordinates`,
+    };
+  }
+  return {
+    ok: false,
+    candidates,
+    error: `${notTypable}, and holds ${candidates.length} text fields (${candidates.map(describeField).join(", ")}) — pick one by its own ref`,
+  };
+}
 
 interface FoundByLabel {
   el: HTMLElement;

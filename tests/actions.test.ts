@@ -35,6 +35,18 @@ describe("Actions", () => {
     expect(order).toEqual(["mousedown", "mouseup", "click"]);
   });
 
+  // A bare {ok:true} let a run click ref 57 thirteen times after a re-snapshot
+  // had recycled 57 from the editing-mode dropdown onto a submit button.
+  it("click reports what it actually clicked", () => {
+    setBody(`<button id="b" aria-label="Suggesting">Suggesting</button>`);
+    const res = actions.run({ action: "click", ref: refOf("Suggesting") });
+    expect(res.ok).toBe(true);
+    const data = res.data as { clicked: string };
+    expect(data.clicked).toContain("<button");
+    expect(data.clicked).toContain("Suggesting");
+    expect(data.clicked).toMatch(/ref \S+$/);
+  });
+
   it("refuses a bare file-input click (undrivable OS picker) and redirects to upload", () => {
     setBody(`<input id="f" type="file" aria-label="Attach" />`);
     let clicked = false;
@@ -205,6 +217,57 @@ describe("Actions", () => {
       const res = actions.run({ action: "type", ref: refOf("Plain"), text: "nope" });
       expect(res.ok).toBe(false);
       expect(res.error).toContain("not typable");
+    });
+
+    // A snapshot ref usually lands on a dialog field's labelled WRAPPER. Four
+    // dialogs in one run (image-by-URL, link, version name) died on "not
+    // typable: <div>" and fell back to coordinate guessing.
+    it("types into the single input inside a non-typable wrapper and says so", () => {
+      setBody(
+        `<div id="w" role="combobox" aria-label="Paste an image URL"><input id="url" type="url" placeholder="https://example.com/img.png" /></div>`,
+      );
+      const res = actions.run({ action: "type", ref: refOf("Paste an image URL"), text: "https://ex.com/a.png" });
+      expect(res.ok).toBe(true);
+      const data = res.data as { value?: string; note?: string };
+      expect(data.value).toBe("https://ex.com/a.png");
+      expect(data.note).toContain("wrapper");
+      expect(data.note).toContain("type=url");
+    });
+
+    it("ignores hidden and non-text inputs when picking the wrapper's field", () => {
+      setBody(
+        `<div id="w" role="combobox" aria-label="Dialog">` +
+          `<input type="hidden" name="token" value="x" />` +
+          `<input type="checkbox" aria-label="Notify" />` +
+          `<div style="display:none"><input id="gone" aria-label="Advanced" /></div>` +
+          `<textarea id="body" aria-label="Body"></textarea></div>`,
+      );
+      const res = actions.run({ action: "type", ref: refOf("Dialog"), text: "hello" });
+      expect(res.ok).toBe(true);
+      expect((document.getElementById("body") as HTMLTextAreaElement).value).toBe("hello");
+    });
+
+    it("refuses to guess between two visible fields and names both", () => {
+      setBody(
+        `<div id="w" role="combobox" aria-label="Two fields">` +
+          `<input aria-label="First name" /><input aria-label="Last name" /></div>`,
+      );
+      const res = actions.run({ action: "type", ref: refOf("Two fields"), text: "x" });
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("2 text fields");
+      expect(res.error).toContain("First name");
+      expect(res.error).toContain("Last name");
+    });
+
+    it("picks the focused field when a wrapper holds several", () => {
+      setBody(
+        `<div id="w" role="combobox" aria-label="Search dialog">` +
+          `<input aria-label="Query" id="q" /><input aria-label="Scope" /></div>`,
+      );
+      document.getElementById("q")!.focus();
+      const res = actions.run({ action: "type", ref: refOf("Search dialog"), text: "cats" });
+      expect(res.ok).toBe(true);
+      expect((document.getElementById("q") as HTMLInputElement).value).toBe("cats");
     });
   });
 
