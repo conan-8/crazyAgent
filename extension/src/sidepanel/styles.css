@@ -1,70 +1,59 @@
-/* crazyAgent side panel — graphite surfaces, one ember accent.
-   Neutral near-black chrome with hairline borders; colour is spent on the
-   ember mark, the primary action and live activity, nothing else.
+/* crazyAgent side panel — warm-black surfaces, white type, one bright orange.
+   Three colours only: the orange carries every accent, live-activity and
+   brand signal; success stays green and failure stays red so a status is never
+   mistaken for chrome. No gradients anywhere — every fill is flat.
    Motion rules: transforms/opacity only, spring easing for arrivals, quick
    ease-out for exits, everything off under prefers-reduced-motion. */
-
-@property --spin {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
 
 :root {
   color-scheme: dark;
 
-  --bg: #0c0c0d;
-  --bg-raised: #121213;
-  --surface: rgba(255, 255, 255, 0.028);
-  --surface-2: rgba(255, 255, 255, 0.05);
-  --surface-hover: rgba(255, 255, 255, 0.075);
-  --surface-solid: #151516;
-  --glass: rgba(12, 12, 13, 0.86);
-  --border: rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(255, 255, 255, 0.12);
+  --bg: #100d0c;
+  --bg-raised: #171312;
+  --surface: rgba(255, 255, 255, 0.03);
+  --surface-2: rgba(255, 255, 255, 0.055);
+  --surface-hover: rgba(255, 255, 255, 0.085);
+  --surface-solid: #1a1514;
+  --glass: rgba(16, 13, 12, 0.86);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
   --inner-hi: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
-  --text: #ededed;
-  --text-soft: #a3a3a3;
-  --text-faint: #6b6b6b;
+  --text: #fbf7f4;
+  --text-soft: #a79d97;
+  --text-faint: #6f6660;
 
-  /* Ember ramp, crimson → amber. Only the mark, progress and live-activity
-     motion use the full ramp; everything else takes the single --accent. */
-  --c1: #e8263b;
-  --c2: #ff4d2e;
-  --c3: #ff7a2f;
-  --c4: #ffb547;
-  --accent: #ff6b2c;
-  --accent-strong: #ff8450;
-  --accent-soft: rgba(255, 107, 44, 0.13);
-  --accent-line: rgba(255, 107, 44, 0.5);
-  --accent-contrast: #1a0900;
-  --grad: linear-gradient(100deg, var(--c1) 0%, var(--c2) 35%, var(--c3) 65%, var(--c4) 100%);
-  --grad-btn: linear-gradient(180deg, #ff7a3d 0%, #ff5f22 100%);
+  /* The one accent. Everything else on this panel is warm black or white. */
+  --accent: #ff6a00;
+  --accent-strong: #ff8a33;
+  --accent-soft: rgba(255, 106, 0, 0.13);
+  --accent-line: rgba(255, 106, 0, 0.5);
+  --accent-glow: rgba(255, 106, 0, 0.22);
+  --accent-contrast: #150a02;
 
+  /* Status keeps its meaning: green for OK, red for failed. The red is pushed
+     clear of the orange accent so the two never read as the same signal. */
   --ok: #3ddc97;
   --ok-soft: rgba(61, 220, 151, 0.14);
-  --danger: #ff6b7a;
-  --danger-soft: rgba(255, 107, 122, 0.13);
-  --warn: #ffc15e;
-  --warn-soft: rgba(255, 193, 94, 0.1);
-  --warn-contrast: #1d1300;
+  --danger: #ff4f58;
+  --danger-soft: rgba(255, 79, 88, 0.13);
 
-  /* Jev sidecar — "bright pink" highlight. A dedicated token pair (never a
-     one-off literal) so the accent stays tunable and survives theming. Chosen
-     to sit clearly apart from the ember accent (orange), --danger (rose):
-     hot pink, high chroma, reads as "this step was
-     a Jev decision" at a glance. */
-  --jev: #ff2fa0;
-  --jev-strong: #ff6cbb;
-  --jev-soft: rgba(255, 47, 160, 0.14);
-  --jev-line: rgba(255, 47, 160, 0.5);
-  --jev-glow: rgba(255, 47, 160, 0.22);
-  --jev-contrast: #1a0410;
-  --human: #33c3b0;
-  --human-soft: rgba(51, 195, 176, 0.14);
-  --human-line: rgba(51, 195, 176, 0.5);
-  --human-contrast: #03241f;
+  /* Warning, the Jev sidecar and the human handoff all fold onto the accent.
+     The tokens survive (the CSS below is written against them) but they are
+     aliases now — the pills, labels and icons are what tell those states
+     apart, never the hue. */
+  --warn: var(--accent);
+  --warn-soft: var(--accent-soft);
+  --warn-contrast: var(--accent-contrast);
+  --jev: var(--accent);
+  --jev-strong: var(--accent-strong);
+  --jev-soft: var(--accent-soft);
+  --jev-line: var(--accent-line);
+  --jev-glow: var(--accent-glow);
+  --jev-contrast: var(--accent-contrast);
+  --human: var(--accent);
+  --human-line: var(--accent-line);
+  --human-contrast: var(--accent-contrast);
 
   --radius-xl: 20px;
   --radius-lg: 16px;
@@ -89,51 +78,6 @@
   --spring-soft: cubic-bezier(0.3, 1.25, 0.5, 1);
 
   --topbar-h: 56px;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --bg: #f7f7f6;
-    --bg-raised: #ffffff;
-    --surface: #ffffff;
-    --surface-2: rgba(0, 0, 0, 0.04);
-    --surface-hover: rgba(0, 0, 0, 0.06);
-    --surface-solid: #ffffff;
-    --glass: rgba(247, 247, 246, 0.86);
-    --border: rgba(0, 0, 0, 0.08);
-    --border-strong: rgba(0, 0, 0, 0.14);
-    --inner-hi: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-    --text: #111111;
-    --text-soft: #555555;
-    --text-faint: #999999;
-    --accent: #f0561a;
-    --accent-strong: #d9480f;
-    --accent-soft: rgba(240, 86, 26, 0.1);
-    --accent-line: rgba(240, 86, 26, 0.45);
-    --accent-contrast: #ffffff;
-    --ok: #0f9d6b;
-    --ok-soft: rgba(15, 157, 107, 0.1);
-    --danger: #e0364c;
-    --danger-soft: rgba(224, 54, 76, 0.08);
-    --warn: #c97a00;
-    --warn-soft: rgba(230, 150, 20, 0.09);
-    --warn-contrast: #ffffff;
-    /* Jev pink, darkened for contrast on the light surface. */
-    --jev: #d1007a;
-    --jev-strong: #b30068;
-    --jev-soft: rgba(209, 0, 122, 0.09);
-    --jev-line: rgba(209, 0, 122, 0.42);
-    --jev-glow: rgba(209, 0, 122, 0.16);
-    --jev-contrast: #ffffff;
-    --human: #0e9c8a;
-    --human-soft: rgba(14, 156, 138, 0.1);
-    --human-line: rgba(14, 156, 138, 0.42);
-    --human-contrast: #ffffff;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-    --shadow-md: 0 10px 30px -12px rgba(0, 0, 0, 0.16);
-    --shadow-lg: 0 30px 70px -16px rgba(0, 0, 0, 0.24);
-  }
 }
 
 * {
@@ -246,12 +190,15 @@ kbd {
   }
 }
 
-@keyframes shimmer {
-  from {
-    background-position: 150% 0;
+/* Live-activity cue. A sweeping highlight would need a gradient, so the text
+   breathes on opacity instead — same "this is happening now" read. */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.45;
   }
-  to {
-    background-position: -50% 0;
+  50% {
+    opacity: 1;
   }
 }
 
@@ -267,164 +214,13 @@ kbd {
   }
 }
 
-.shimmer-text {
-  background: linear-gradient(
-      90deg,
-      var(--text-faint) 0%,
-      var(--text-faint) 35%,
-      var(--text) 50%,
-      var(--text-faint) 65%,
-      var(--text-faint) 100%
-    )
-    0 0 / 250% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shimmer 2.2s linear infinite;
+.live-text {
+  color: var(--text);
+  animation: pulse 2.2s var(--ease-io) infinite;
 }
 
-.grad-text {
-  background: linear-gradient(100deg, var(--c1), var(--c3), var(--c4), var(--c3), var(--c1));
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shimmer 6s linear infinite;
-}
-
-/* ---------------- mark (brand) ---------------- */
-
-/* An ember circle holding a slowly turning colour field; a soft top-left
-   highlight and an inner hairline keep it reading as an object, not a blob.
-   While the agent works the ember spins faster and the whole mark comes
-   alive: it morphs through shapes — triangle, square, star, hexagon,
-   pentagon — snapping a quick quarter- or half-turn at each change, then
-   holds still until the next one (see orb-morph). The glow is a
-   drop-shadow, not a box-shadow, so it traces whatever shape it wears. */
-.orb {
-  --orb: 22px;
-  position: relative;
-  display: inline-block;
-  flex: none;
-  width: var(--orb);
-  height: var(--orb);
-  border-radius: 50%;
-  overflow: hidden;
-  isolation: isolate;
-  background: var(--c2);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 2px 8px -3px var(--c2);
-  transition: box-shadow 0.6s var(--ease-out);
-}
-
-.orb::before {
-  content: "";
-  position: absolute;
-  inset: -35%;
-  background: conic-gradient(
-    from 0deg,
-    var(--c1),
-    var(--c2),
-    var(--c4),
-    var(--c3),
-    #b3122e,
-    var(--c1)
-  );
-  filter: blur(calc(var(--orb) * 0.14));
-  animation: spin 8s linear infinite;
-}
-
-.orb::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.55), transparent 45%),
-    radial-gradient(circle at 75% 85%, rgba(60, 0, 0, 0.35), transparent 55%);
-  mix-blend-mode: soft-light;
-}
-
-.orb-active {
-  filter: drop-shadow(0 0 6px var(--c2)) drop-shadow(0 0 16px var(--accent-soft));
-  animation: orb-morph 12s var(--ease-io) infinite;
-}
-
-.orb-active::before {
-  animation-duration: 1.8s;
-}
-
-/* Shape-shifting while a run is live. Every shape is a 10-point polygon
-   (few-cornered shapes repeat vertices) so clip-path can interpolate
-   smoothly between them; the near-circle start/end is a decagon that reads
-   as the idle circle. Rotation only moves during the short morph windows —
-   a twitchy, intermittent spin rather than a constant one — and the final
-   leg whips through a full extra turn back to the circle. */
-@keyframes orb-morph {
-  0%,
-  12% {
-    clip-path: polygon(
-      50% 0%, 79.4% 9.6%, 97.6% 34.6%, 97.6% 65.4%, 79.4% 90.4%,
-      50% 100%, 20.6% 90.4%, 2.4% 65.4%, 2.4% 34.6%, 20.6% 9.6%
-    );
-    transform: rotate(0deg);
-  }
-  16%,
-  28% {
-    clip-path: polygon(
-      50% 0%, 50% 0%, 50% 0%, 50% 0%, 93.3% 75%,
-      93.3% 75%, 93.3% 75%, 6.7% 75%, 6.7% 75%, 6.7% 75%
-    );
-    transform: rotate(120deg);
-  }
-  32%,
-  44% {
-    clip-path: polygon(
-      85.4% 14.6%, 85.4% 85.4%, 14.6% 85.4%, 14.6% 14.6%, 85.4% 14.6%,
-      85.4% 85.4%, 14.6% 85.4%, 14.6% 14.6%, 85.4% 14.6%, 85.4% 85.4%
-    );
-    transform: rotate(210deg);
-  }
-  48%,
-  60% {
-    clip-path: polygon(
-      50% 0%, 62.3% 33%, 97.6% 34.6%, 70% 56.5%, 79.4% 90.5%,
-      50% 71%, 20.6% 90.5%, 30% 56.5%, 2.4% 34.6%, 37.7% 33%
-    );
-    transform: rotate(288deg);
-  }
-  64%,
-  76% {
-    clip-path: polygon(
-      50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%,
-      6.7% 25%, 50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%
-    );
-    transform: rotate(396deg);
-  }
-  80%,
-  92% {
-    clip-path: polygon(
-      50% 0%, 97.6% 34.6%, 79.4% 90.5%, 20.6% 90.5%, 2.4% 34.6%,
-      50% 0%, 97.6% 34.6%, 79.4% 90.5%, 20.6% 90.5%, 2.4% 34.6%
-    );
-    transform: rotate(468deg);
-  }
-  100% {
-    clip-path: polygon(
-      50% 0%, 79.4% 9.6%, 97.6% 34.6%, 97.6% 65.4%, 79.4% 90.4%,
-      50% 100%, 20.6% 90.4%, 2.4% 65.4%, 2.4% 34.6%, 20.6% 9.6%
-    );
-    transform: rotate(720deg);
-  }
-}
-
-/* Shared-element handoff at chat start: a ghost of the welcome hero orb
-   shrinks and flies into the first assistant badge. JS measures both rects
-   and drives the flight with WAAPI (left/top/size); the real badge orb hides
-   (inline opacity, set by JS) until the ghost lands, so the mark never
-   blinks out. */
-.orb-fly {
-  position: fixed;
-  z-index: 500;
-  pointer-events: none;
+.accent-word {
+  color: var(--accent);
 }
 
 /* ---------------- layout ---------------- */
@@ -437,46 +233,31 @@ kbd {
   overflow: hidden;
 }
 
-/* The one "the agent is working" signal: an ember comet circling the rim of
-   the whole panel. Motion is spent here and nowhere else — the topbar, the
-   composer and the stop button all stay calm while it turns. */
+/* The one "the agent is working" signal: a flat orange hairline around the
+   whole panel, breathing slowly. Motion is spent here and nowhere else — the
+   topbar, the composer and the stop button all stay calm. */
 .window-glow {
   position: absolute;
   inset: 0;
   z-index: 100;
-  padding: 2px;
-  background: conic-gradient(
-    from var(--spin),
-    transparent 0 50%,
-    var(--c1) 72%,
-    var(--c3) 90%,
-    var(--c4)
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
+  border: 1px solid var(--accent);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.45s var(--ease-out);
-  animation: rim-spin 5s linear infinite;
-}
-
-.window-glow::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: inherit;
-  filter: blur(12px);
-  opacity: 0.45;
 }
 
 .shell.is-running .window-glow {
   opacity: 1;
+  animation: rim-breathe 3.2s var(--ease-io) infinite;
 }
 
-@keyframes rim-spin {
-  to {
-    --spin: 360deg;
+@keyframes rim-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
   }
 }
 
@@ -600,7 +381,7 @@ kbd {
 .todo-meter > span {
   position: absolute;
   inset: 0;
-  background: var(--grad);
+  background: var(--accent);
   transform-origin: left;
   transition: transform 0.45s var(--ease-out);
 }
@@ -643,7 +424,7 @@ kbd {
 .todo-sheet-meter > span {
   position: absolute;
   inset: 0;
-  background: var(--grad);
+  background: var(--accent);
   transform-origin: left;
   transition: transform 0.45s var(--ease-out);
 }
@@ -785,7 +566,7 @@ button:disabled {
 }
 
 .btn-primary {
-  background: var(--grad-btn);
+  background: var(--accent);
   color: var(--accent-contrast);
   font-weight: 600;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -997,18 +778,7 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .welcome > :nth-child(3) {
   animation-delay: 0.14s;
-}
-.welcome > :nth-child(4) {
-  animation-delay: 0.2s;
   animation-name: fade-in;
-}
-
-.hero-orb {
-  margin-bottom: 14px;
-}
-
-.hero-orb .orb {
-  animation: float 6s var(--ease-io) infinite;
 }
 
 @keyframes float {
@@ -1453,12 +1223,12 @@ input[type="number"]::-webkit-inner-spin-button {
 .md a {
   color: var(--accent-strong);
   text-decoration: none;
-  background: linear-gradient(currentColor, currentColor) 0 100% / 0 1px no-repeat;
-  transition: background-size 0.3s var(--ease-out);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.3s var(--ease-out);
 }
 
 .md a:hover {
-  background-size: 100% 1px;
+  border-bottom-color: currentColor;
 }
 
 .md ul,
@@ -1541,7 +1311,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .md hr {
   border: none;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+  background: var(--border-strong);
   margin: 1em 0;
 }
 
@@ -1555,7 +1325,7 @@ input[type="number"]::-webkit-inner-spin-button {
   margin-left: 3px;
   vertical-align: -0.15em;
   border-radius: 2px;
-  background: var(--grad);
+  background: var(--accent);
   animation: caret 1s steps(1) infinite;
 }
 
@@ -1609,7 +1379,7 @@ input[type="number"]::-webkit-inner-spin-button {
   height: 11px;
   width: 1.5px;
   border-radius: 2px;
-  background: linear-gradient(var(--border-strong), var(--border));
+  background: var(--border-strong);
 }
 
 .card:hover,
@@ -1688,12 +1458,8 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .card-run .tool-label {
-  background: linear-gradient(90deg, var(--text-soft) 0 35%, var(--text) 50%, var(--text-soft) 65% 100%) 0 0 /
-    250% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shimmer 1.8s linear infinite;
+  color: var(--text);
+  animation: pulse 1.8s var(--ease-io) infinite;
 }
 
 .tool-preview {
@@ -1828,9 +1594,10 @@ input[type="number"]::-webkit-inner-spin-button {
   width: 14px;
   height: 14px;
   border-radius: 999px;
-  background: conic-gradient(from 0deg, transparent 0 25%, var(--c2), var(--c4));
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  /* Two flat arcs, not a conic sweep: a dim track with one bright quarter
+     turning over it reads exactly the same at 14px. */
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
   animation: spin 0.8s linear infinite;
 }
 
@@ -1979,7 +1746,7 @@ input[type="number"]::-webkit-inner-spin-button {
   gap: 10px;
   padding: 14px;
   border-radius: var(--radius-lg);
-  background: linear-gradient(160deg, var(--warn-soft), transparent 70%), var(--surface);
+  background: color-mix(in srgb, var(--warn) 9%, var(--surface-solid));
   border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
   box-shadow: var(--inner-hi), 0 16px 40px -18px color-mix(in srgb, var(--warn) 55%, transparent);
   animation: confirm-in 0.6s var(--spring) both !important;
@@ -2073,12 +1840,12 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 /*
- * Human handoff: a sign-in wall or CAPTCHA. Deliberately NOT the amber warn
- * palette of the approval cards (this is not a risk decision) and not Jev
- * pink (no sidecar involved) — a cool teal that reads as "your turn".
+ * Human handoff: a sign-in wall or CAPTCHA. Shares the accent with the
+ * approval cards and the Jev highlight — the three-colour palette spends no
+ * hue on telling them apart, the card's own copy ("Waiting for you") does.
  */
 .confirm-card.is-human {
-  background: linear-gradient(160deg, var(--human-soft), transparent 70%), var(--surface);
+  background: color-mix(in srgb, var(--human) 9%, var(--surface-solid));
   border-color: var(--human-line);
   box-shadow: var(--inner-hi), 0 16px 40px -18px color-mix(in srgb, var(--human) 55%, transparent);
 }
@@ -2164,8 +1931,8 @@ input[type="number"]::-webkit-inner-spin-button {
   animation: rise 0.4s var(--ease-out) both;
 }
 
-.typing .shimmer-text {
-  animation: shimmer 2.2s linear infinite, rise 0.35s var(--ease-out);
+.typing .live-text {
+  animation: pulse 2.2s var(--ease-io) infinite, rise 0.35s var(--ease-out);
 }
 
 .typing-orbit {
@@ -2180,22 +1947,20 @@ input[type="number"]::-webkit-inner-spin-button {
   width: 5px;
   height: 5px;
   border-radius: 999px;
-  background: var(--c2);
+  background: var(--accent);
   top: 0;
   left: 6.5px;
   transform-origin: 2.5px 9px;
 }
 
 .typing-orbit span:nth-child(2) {
-  background: var(--c3);
   transform: rotate(120deg);
-  opacity: 0.8;
+  opacity: 0.7;
 }
 
 .typing-orbit span:nth-child(3) {
-  background: var(--c4);
   transform: rotate(240deg);
-  opacity: 0.6;
+  opacity: 0.4;
 }
 
 /* ---------------- jump to latest ---------------- */
@@ -2432,13 +2197,13 @@ input[type="number"]::-webkit-inner-spin-button {
   height: 34px;
   border-radius: 999px;
   color: var(--accent-contrast);
-  background: var(--grad-btn);
+  background: var(--accent);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(0, 0, 0, 0.25);
   overflow: visible;
 }
 
 .send:hover:not(:disabled) {
-  background: var(--grad-btn);
+  background: var(--accent-strong);
   color: var(--accent-contrast);
   transform: translateY(-1px) scale(1.05);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 8px 18px -8px var(--accent);
@@ -2742,7 +2507,7 @@ input[type="number"]::-webkit-inner-spin-button {
   position: absolute;
   inset: 0;
   transform-origin: left;
-  background: var(--grad);
+  background: var(--accent);
   border-radius: inherit;
   transition: transform 0.6s var(--ease-out);
 }
@@ -2859,7 +2624,7 @@ input[type="number"]::-webkit-inner-spin-button {
   width: 34px;
   height: 34px;
   border-radius: 11px;
-  background: var(--grad-btn);
+  background: var(--accent);
   color: var(--accent-contrast);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
@@ -3035,9 +2800,8 @@ input[type="number"]::-webkit-inner-spin-button {
 .skeleton {
   height: 64px;
   border-radius: var(--radius-md);
-  background: linear-gradient(90deg, var(--surface-2) 0 35%, var(--surface-hover) 50%, var(--surface-2) 65% 100%) 0 0 /
-    250% 100%;
-  animation: shimmer 1.4s linear infinite;
+  background: var(--surface-2);
+  animation: pulse 1.4s var(--ease-io) infinite;
 }
 
 .skeleton.short {
@@ -3073,7 +2837,7 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .key-row.key-active {
   border-color: var(--accent-line);
-  background: linear-gradient(160deg, var(--accent-soft), transparent 60%), var(--surface);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-solid));
 }
 
 .key-head {
@@ -3115,7 +2879,7 @@ input[type="number"]::-webkit-inner-spin-button {
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: var(--grad-btn);
+  background: var(--accent);
   transform: scale(0);
   transition: transform 0.4s var(--spring);
 }
@@ -3142,15 +2906,16 @@ input[type="number"]::-webkit-inner-spin-button {
   border-radius: 8px;
   font-size: 11.5px;
   font-weight: 700;
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
+/* The letter tells the providers apart; the fill only carries the palette. */
 .pb-anthropic {
-  background: linear-gradient(135deg, #e0996b, #c2603a);
+  background: var(--accent);
 }
 
 .pb-openai {
-  background: linear-gradient(135deg, #3fb68b, #1f7a5f);
+  background: var(--text);
 }
 
 .key-label-btn {
@@ -3274,7 +3039,7 @@ input[type="number"]::-webkit-inner-spin-button {
   width: 16px;
   height: 16px;
   border-radius: 999px;
-  background: #fff;
+  background: var(--text);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   transition: transform 0.45s var(--spring), width 0.25s var(--ease-out);
 }
@@ -3284,7 +3049,7 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .switch input:checked + .switch-track {
-  background: var(--grad-btn);
+  background: var(--accent);
   border-color: transparent;
 }
 
@@ -3782,7 +3547,7 @@ input[type="number"]::-webkit-inner-spin-button {
   height: 34px;
   padding: 0;
   border-radius: 999px;
-  color: #fff;
+  color: var(--text);
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
@@ -3839,11 +3604,11 @@ input[type="number"]::-webkit-inner-spin-button {
   color: var(--text-faint);
 }
 
-/* ---------------- Jev highlight (bright pink) ----------------
-   Anything the Jev sidecar touched is tinted hot pink so a Jev-assisted step is
-   obvious at a glance: the `judge` tool card (the model's only window onto
-   Jev), the eyebrow on a confirmation Jev raised, and the routing note. The
-   pink is deliberately stronger than the neutral card so it reads as a
+/* ---------------- Jev highlight ----------------
+   Anything the Jev sidecar touched is tinted with the accent so a Jev-assisted
+   step is obvious at a glance: the `judge` tool card (the model's only window
+   onto Jev), the eyebrow on a confirmation Jev raised, and the routing note.
+   The tint is deliberately stronger than the neutral card so it reads as a
    different kind of step, not a broken one — and it is always paired with a
    text label ("Jev" / "Jev flags…"), never colour alone. */
 
@@ -3869,7 +3634,7 @@ input[type="number"]::-webkit-inner-spin-button {
   color: var(--jev);
 }
 
-/* The judge card running: keep the shimmer, but in pink. */
+/* The judge card running: keep the glow on the accent. */
 .card-jev.card-run .tool-icon {
   color: var(--jev-strong);
   border-color: var(--jev-strong);
@@ -3891,9 +3656,9 @@ input[type="number"]::-webkit-inner-spin-button {
   font-weight: 600;
 }
 
-/* Confirmations Jev raised: pink instead of the amber rule-based warn. */
+/* Confirmations Jev raised rather than the regex rules. */
 .confirm-card.is-jev {
-  background: linear-gradient(160deg, var(--jev-soft), transparent 70%), var(--surface);
+  background: color-mix(in srgb, var(--jev) 9%, var(--surface-solid));
   border-color: var(--jev-line);
   box-shadow: var(--inner-hi), 0 16px 40px -18px color-mix(in srgb, var(--jev) 55%, transparent);
 }
@@ -3971,7 +3736,7 @@ input[type="number"]::-webkit-inner-spin-button {
   vertical-align: 1px;
 }
 
-/* Actions the Jev risk layer CHECKED and allowed: a quiet pink rail + dot.
+/* Actions the Jev risk layer CHECKED and allowed: a quiet accent rail + dot.
    Deliberately below the full Jev card tint — a passed check is routine, so
    the mark only needs to whisper, while the `Jev` tooltip names it. */
 .card-gate-jev {
@@ -3992,7 +3757,7 @@ input[type="number"]::-webkit-inner-spin-button {
   box-shadow: 0 0 0 2px var(--jev-soft);
 }
 
-/* Jev itself is the thing running: the orbit dots go pink. */
+/* Jev itself is the thing running: the orbit dots go accent-bright. */
 .typing.is-jev .typing-orbit span {
   background: var(--jev);
 }

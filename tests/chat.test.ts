@@ -240,6 +240,20 @@ describe("conversation folding", () => {
     expect(text.map((b) => b.text).join("")).toBe("Answer.");
   });
 
+  it("does not let a whitespace-only chunk split a reasoning block", () => {
+    const conv = newConversation("c9", "task");
+    foldUser(conv, "task");
+    foldEvent(conv, { kind: "reasoning_delta", text: "First half " });
+    foldEvent(conv, { kind: "token_delta", text: "\n\n" });
+    foldEvent(conv, { kind: "reasoning_delta", text: "second half." });
+    const blocks = conv.turns[1]!.blocks;
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      kind: "reasoning",
+      text: "First half second half.",
+    });
+  });
+
   it("accepts a done event carrying final run stats", () => {
     const conv = newConversation("c8", "task");
     foldUser(conv, "task");

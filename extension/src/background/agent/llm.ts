@@ -705,6 +705,16 @@ export function anthropicAggregator(
   return agg;
 }
 
+/**
+ * How much `content` is held back while the reasoning channel is still open,
+ * waiting to see whether it was leaked thinking (see openAiAggregator). Bounded
+ * on both axes so a real answer is never delayed by more than a couple of SSE
+ * chunks — the panel coalesces deltas over 80ms anyway, so this is inside one
+ * paint window.
+ */
+const LEAK_HOLD_CHUNKS = 3;
+const LEAK_HOLD_CHARS = 32;
+
 export function openAiAggregator(
   onText?: LlmTextSink,
   onReasoning?: LlmReasoningSink,
@@ -714,6 +724,39 @@ export function openAiAggregator(
   let reasoning = "";
   const sse = createSseDecoder();
   const upstream: UpstreamInfo = { streamed: true, nonDataLines: 0, badJsonLines: 0, joinedLines: 0 };
+  /**
+   * A gateway whose reasoning parser is misconfigured leaks the model's
+   * thinking into `content` instead of `reasoning_content`. The fragments are
+   * indistinguishable from prose, and they cost twice: they render as stray
+   * sentences in the answer AND, because each one interrupts the reasoning
+   * channel, they split one train of thought into several blocks.
+   *
+   * So while the reasoning channel is still open, `content` is held back for a
+   * few chunks. Reasoning resuming proves the held text was thinking, and it
+   * joins the reasoning; anything else (more content, a tool call, the end of
+   * the stream) releases it verbatim as answer text. A step that streams no
+   * reasoning holds nothing at all, so a healthy wire is untouched.
+   */
+  let held = "";
+  let heldChunks = 0;
+  let holding = true;
+  function releaseAsText(): void {
+    holding = false;
+    heldChunks = 0;
+    if (!held) return;
+    const text = held;
+    held = "";
+    agg.text += text;
+    onText?.(text);
+  }
+  function releaseAsReasoning(): void {
+    heldChunks = 0;
+    if (!held) return;
+    const text = held;
+    held = "";
+    reasoning += text;
+    onReasoning?.(text);
+  }
   const agg: StreamAggregator = {
     text: "",
     get reasoning() {
@@ -746,14 +789,22 @@ export function openAiAggregator(
       };
       const think = delta.reasoning_content ?? delta.reasoning;
       if (think) {
+        releaseAsReasoning();
         reasoning += think;
         onReasoning?.(think);
       }
       if (delta.content) {
-        agg.text += delta.content;
-        onText?.(delta.content);
+        if (holding && reasoning && heldChunks < LEAK_HOLD_CHUNKS && held.length < LEAK_HOLD_CHARS) {
+          held += delta.content;
+          heldChunks += 1;
+        } else {
+          releaseAsText();
+          agg.text += delta.content;
+          onText?.(delta.content);
+        }
       }
-      for (const chunk of delta.tool_calls ?? []) {
+      const chunks = delta.tool_calls ?? [];
+      for (const chunk of chunks) {
         const index = (chunk.index as number) ?? 0;
         const call = calls.get(index) ?? { id: "", name: "", args: "" };
         const fn = (chunk.function ?? {}) as { name?: string; arguments?: string };
@@ -762,9 +813,13 @@ export function openAiAggregator(
         if (fn.arguments) call.args += fn.arguments;
         calls.set(index, call);
       }
+      // A tool call or a finish reason means the answer phase is here: nothing
+      // more can be reasoning, so held text stops being suspect.
+      if (chunks.length || choice.finish_reason) releaseAsText();
       if (choice.finish_reason) stopReason = choice.finish_reason as string;
     },
     result() {
+      releaseAsText();
       const rawArgs: Record<string, string> = {};
       const toolCalls = [...calls.entries()]
         .sort((a, b) => a[0] - b[0])

@@ -727,6 +727,49 @@ describe("SSE aggregators", () => {
     agg.feed(`data: ${JSON.stringify({ choices: [{ delta: { content: "Hi" } }] })}`);
     expect(agg.result().reasoning).toBeUndefined();
   });
+
+  it("diverts thinking a gateway leaked into content back into reasoning", () => {
+    const text: string[] = [];
+    const think: string[] = [];
+    const agg = openAiAggregator(
+      (t) => text.push(t),
+      (t) => think.push(t),
+    );
+    const feed = (delta: Record<string, unknown>, finish?: string): void =>
+      agg.feed(
+        `data: ${JSON.stringify({ choices: [{ delta, ...(finish ? { finish_reason: finish } : {}) }] })}`,
+      );
+    feed({ reasoning_content: "The page has " });
+    // Leaked thinking: the reasoning channel resumes on the next chunk, which
+    // is the only proof this fragment was never answer prose.
+    feed({ content: "two menus. " });
+    feed({ reasoning_content: "Click the first." });
+    feed({ content: "Done." }, "stop");
+    const r = agg.result();
+    expect(r.reasoning).toBe("The page has two menus. Click the first.");
+    expect(r.text).toBe("Done.");
+    expect(text.join("")).toBe("Done.");
+    expect(think.join("")).toBe("The page has two menus. Click the first.");
+  });
+
+  it("holds nothing back on a step that streamed no reasoning", () => {
+    const seen: string[] = [];
+    const agg = openAiAggregator((t) => seen.push(t));
+    agg.feed(`data: ${JSON.stringify({ choices: [{ delta: { content: "A" } }] })}`);
+    // Delivered on the chunk it arrived in — no wait for the end of the stream.
+    expect(seen).toEqual(["A"]);
+  });
+
+  it("bounds the holdback, so the answer streams instead of stalling", () => {
+    const seen: string[] = [];
+    const agg = openAiAggregator((t) => seen.push(t));
+    agg.feed(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "hmm" } }] })}`);
+    for (let i = 0; i < 6; i++) {
+      agg.feed(`data: ${JSON.stringify({ choices: [{ delta: { content: `c${i}` } }] })}`);
+    }
+    expect(seen.join("")).toBe("c0c1c2c3c4c5");
+    expect(agg.result().text).toBe("c0c1c2c3c4c5");
+  });
 });
 
 describe("stream instrumentation (corruption evidence)", () => {

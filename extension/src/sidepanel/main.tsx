@@ -151,18 +151,6 @@ function newLocalConversation(task: string): Conversation {
 
 // ------------------------------ primitives ------------------------------
 
-/** Brand mark: an ember circle that, while the agent works, morphs through
- *  shapes (triangle, square, star, hexagon…) with intermittent rotation. */
-function Orb({ size = 22, active = false, class: cls = "" }: { size?: number; active?: boolean; class?: string }) {
-  return (
-    <span
-      class={`orb ${active ? "orb-active" : ""} ${cls}`}
-      style={`--orb:${size}px`}
-      aria-hidden="true"
-    />
-  );
-}
-
 /** Icon-only button with a styled tooltip; `label` is its (hidden) text. */
 function IconButton({
   icon,
@@ -311,7 +299,7 @@ function ToolRow({
   const state: ToolState = card.filled ? (card.ok ? "ok" : "err") : active ? "run" : "idle";
   const preview = useMemo(() => argPreview(card.args), [card.args]);
   const jev = card.jev === true;
-  // Silent Jev risk checks get a subtle mark (rail + dot); the full pink tint
+  // Silent Jev risk checks get a subtle mark (rail + dot); the full accent tint
   // stays reserved for calls Jev actually answered (judge) or escalated.
   const gate = card.jevGate === true && !jev;
   const toggle = () => {
@@ -470,7 +458,7 @@ function ReasoningBlock({
         <span class="reasoning-icon">
           <Icon d={ICONS.bulb} size={12} />
         </span>
-        <span class={live ? "shimmer-text" : ""}>{live ? "Thinking" : "Thought process"}</span>
+        <span class={live ? "live-text" : ""}>{live ? "Thinking" : "Thought process"}</span>
         <span class="reasoning-meta">
           {words} words
           <span class="chev">
@@ -718,7 +706,6 @@ function TurnView({
   return (
     <div class={`bubble bubble-assistant${active ? " is-active" : ""}`}>
       <div class="assistant-badge">
-        <Orb size={16} active={active} />
         <span class="assistant-name">crazyAgent</span>
         <span class="assistant-time">
           {new Date(turn.when).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
@@ -773,7 +760,8 @@ function TurnView({
           return <ReasoningBlock key={i} block={block} live={active && i === lastIndex} />;
         }
         if (block.kind === "note") {
-          // Jev sidecar notes: pink line with a `Jev` pill (never colour alone).
+          // Jev sidecar notes: accented line with a `Jev` pill (never colour
+          // alone — the accent is shared with the progress notes now).
           // Progress notes: the model's own narration between sequences — its
           // own accented bubble with a `Progress` pill, so a run reads as
           // "work … report … work … report" at a glance.
@@ -839,7 +827,7 @@ function WorkingIndicator({ label, jev }: { label: string; jev?: boolean }) {
         <span />
         <span />
       </span>
-      <span class="shimmer-text" key={label}>
+      <span class="live-text" key={label}>
         {label}…
       </span>
     </div>
@@ -2423,11 +2411,8 @@ const SUGGESTIONS = [
 function Welcome({ onPick }: { onPick: (task: string) => void }) {
   return (
     <div class="welcome">
-      <div class="hero-orb">
-        <Orb size={44} />
-      </div>
       <h2 class="welcome-title">
-        What can I <span class="grad-text">do</span> for you?
+        What can I <span class="accent-word">do</span> for you?
       </h2>
       <p class="welcome-sub">I can click, type and use your browser FOR you.</p>
       <div class="suggestions">
@@ -2663,14 +2648,6 @@ function App() {
   const [modelListError, setModelListError] = useState("");
   const [modelFilter, setModelFilter] = useState("");
   const [dragging, setDragging] = useState(false);
-  /**
-   * Shared-element handoff: when a chat starts from the welcome screen, the
-   * hero orb shrinks and flies into the first assistant badge instead of
-   * vanishing and reappearing smaller. Holds the hero's last rect while a
-   * ghost orb is in flight (see the orbFly effect).
-   */
-  const [orbFly, setOrbFly] = useState<{ x: number; y: number; w: number } | null>(null);
-  const orbFlyRef = useRef<HTMLSpanElement | null>(null);
   const modelCacheRef = useRef<{ signature: string; models: string[] } | null>(null);
   const portRef = useRef<chrome.runtime.Port | null>(null);
   /** The window hosting this panel — "adopt this window" mode names it. */
@@ -2960,127 +2937,6 @@ function App() {
     return () => document.removeEventListener("pointerdown", onDown);
   }, [openMenu]);
 
-  // Orb handoff flight: the assistant turn (and its badge orb) only mounts
-  // once the first run event arrives. A MutationObserver wakes the flight the
-  // moment it does (timer-polled as a backstop — no rAF: it starves in
-  // background documents), then the ghost hero orb shrinks into place while
-  // the real badge orb hides until landing. The hide is an INLINE opacity,
-  // not a class: Preact re-diffs the class prop on every streamed event and
-  // would wipe a manually added class. Landing fires from the animation's
-  // finish event AND a timer backstop (animation events need rendering
-  // steps, which can stall), with a small corrective hop for scroll drift
-  // during the flight. If the welcome comes back (new chat) or no badge
-  // shows within a few seconds, the ghost is dropped quietly.
-  useEffect(() => {
-    if (!orbFly) return;
-    const from = orbFly;
-    let cancelled = false;
-    let settled = false;
-    let timer = 0;
-    const started = performance.now();
-    const mo = new MutationObserver(attempt);
-
-    function land(badge: HTMLElement) {
-      const el = orbFlyRef.current;
-      if (!el) {
-        if (!cancelled) setOrbFly(null);
-        return;
-      }
-      settled = true;
-      mo.disconnect();
-      clearTimeout(timer);
-      const to = badge.getBoundingClientRect();
-      badge.style.opacity = "0";
-      let revealed = false;
-      const reveal = () => {
-        if (revealed) return;
-        revealed = true;
-        badge.style.opacity = "";
-        if (!cancelled) setOrbFly(null);
-      };
-      const anim = el.animate(
-        [
-          {
-            left: `${from.x}px`,
-            top: `${from.y}px`,
-            width: `${from.w}px`,
-            height: `${from.w}px`,
-          },
-          {
-            left: `${to.left}px`,
-            top: `${to.top}px`,
-            width: `${to.width}px`,
-            height: `${to.height}px`,
-          },
-        ],
-        { duration: 560, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" },
-      );
-      const finish = () => {
-        // The transcript may have scrolled mid-flight: hop the last few px
-        // if the badge drifted from where the ghost landed.
-        const now = badge.getBoundingClientRect();
-        const g = el.getBoundingClientRect();
-        if (Math.abs(now.x - g.x) + Math.abs(now.y - g.y) > 4) {
-          const hop = el.animate(
-            [
-              { left: `${g.x}px`, top: `${g.y}px`, width: `${g.width}px`, height: `${g.height}px` },
-              {
-                left: `${now.x}px`,
-                top: `${now.y}px`,
-                width: `${now.width}px`,
-                height: `${now.height}px`,
-              },
-            ],
-            { duration: 140, easing: "ease-out", fill: "forwards" },
-          );
-          hop.onfinish = reveal;
-          setTimeout(reveal, 300);
-        } else {
-          reveal();
-        }
-      };
-      anim.onfinish = finish;
-      // Finish events only fire on rendering steps; the timer guarantees the
-      // handoff completes even when those stall (occluded/headless documents).
-      setTimeout(finish, 810);
-    }
-
-    function attempt() {
-      if (cancelled || settled) return;
-      if (document.querySelector(".welcome")) {
-        settled = true;
-        mo.disconnect();
-        clearTimeout(timer);
-        setOrbFly(null);
-        return;
-      }
-      const badge = document.querySelector(".assistant-badge .orb") as HTMLElement | null;
-      if (badge) {
-        land(badge);
-        return;
-      }
-      if (performance.now() - started > 6000) {
-        settled = true;
-        mo.disconnect();
-        setOrbFly(null);
-      }
-    }
-
-    mo.observe(document.body, { childList: true, subtree: true });
-    timer = window.setTimeout(function poll() {
-      attempt();
-      if (!cancelled && !settled) timer = window.setTimeout(poll, 50);
-    }, 50);
-    attempt();
-
-    return () => {
-      cancelled = true;
-      settled = true;
-      mo.disconnect();
-      clearTimeout(timer);
-    };
-  }, [orbFly]);
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -3106,14 +2962,6 @@ function App() {
     // A fresh run starts with no plan: clear the previous run's list.
     setTodos([]);
     setTodoOpen(false);
-    // Grab the hero orb before the welcome unmounts: a ghost clone flies from
-    // this rect into the first assistant badge once it mounts (orbFly effect).
-    // Skipped under reduced motion — the badge simply appears.
-    const hero = document.querySelector(".hero-orb .orb") as HTMLElement | null;
-    if (hero && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      const r = hero.getBoundingClientRect();
-      setOrbFly({ x: r.left, y: r.top, w: r.width });
-    }
     setRunning(true);
     setUsage(null);
     scrollToBottom(false);
@@ -3659,14 +3507,6 @@ function App() {
   return (
     <div class={`shell${running ? " is-running" : ""}${conv ? " has-conv" : ""}`} {...dragHandlers}>
       <span class="window-glow" aria-hidden="true" />
-      {orbFly ? (
-        <span
-          ref={orbFlyRef}
-          class="orb orb-fly"
-          aria-hidden="true"
-          style={`left:${orbFly.x}px;top:${orbFly.y}px;width:${orbFly.w}px;height:${orbFly.w}px;--orb:${orbFly.w}px`}
-        />
-      ) : null}
 
       <header class="topbar">
         <div class="brand">
@@ -3674,7 +3514,7 @@ function App() {
             <span class="brand-name">crazyAgent</span>
             <span class="brand-sub" key={running ? "run" : "idle"}>
               {running ? (
-                <span class="shimmer-text">Working · {formatElapsed(elapsed)}</span>
+                <span class="live-text">Working · {formatElapsed(elapsed)}</span>
               ) : (
                 <>
                   <span class="live-dot idle" />

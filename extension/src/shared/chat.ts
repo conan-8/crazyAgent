@@ -135,7 +135,10 @@ export function foldEvent(conv: Conversation, e: StepEvent): void {
   const appendText = (turn: ChatTurn, chunk: string): void => {
     const lastBlock = turn.blocks[turn.blocks.length - 1];
     if (lastBlock?.kind === "text") lastBlock.text += chunk;
-    else turn.blocks.push({ kind: "text", text: chunk });
+    // A whitespace-only chunk never opens a block: it renders as an empty
+    // paragraph and, worse, wedges itself between two reasoning deltas and
+    // splits one train of thought in two.
+    else if (chunk.trim()) turn.blocks.push({ kind: "text", text: chunk });
   };
 
   switch (e.kind) {
