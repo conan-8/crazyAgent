@@ -851,8 +851,9 @@ async function runFrom(cp: Checkpoint): Promise<void> {
         judgeAvailable:
           jevEnabled && (cp.toolSpecs?.some((t) => t.name === "judge") ?? false),
         // Window isolation: the prompt states the wall, and whether THIS run
-        // was granted a look at the user's other windows (read-only).
-        windowPeek: cp.allowOutside === true,
+        // was granted a look at the user's other windows (read-only). Default
+        // ON — only a checkpoint that explicitly denied it opts out.
+        windowPeek: cp.allowOutside !== false,
         lessonsBlock: appendix || undefined,
         takeUserInput: () => {
           const inputs = pendingUserInputs.splice(0);
@@ -1568,7 +1569,7 @@ async function executeTool(
       // on its own (see tools/tabs.ts).
       scope: {
         agentWindowId: await resolveAgentWindow(),
-        allowOutside: currentCp?.allowOutside === true || devAllowOutside,
+        allowOutside: currentCp?.allowOutside !== false || devAllowOutside,
       },
     });
     // Action-style tools resolve with { ok: false, error } instead of throwing.
@@ -1661,7 +1662,9 @@ async function startRun(
     emit({ kind: "done", summary: message, outcome: "error" });
     return;
   }
-  const allowOutside = scope?.allowOutside === true;
+  // Look-outside defaults ON (matches the prompt's peek rules): the tool wall
+  // and the prompt must agree, or the model is promised tabs it cannot list.
+  const allowOutside = scope?.allowOutside !== false;
   emit({
     kind: "info",
     message:

@@ -23,10 +23,19 @@ describe("buildSystemPrompt", () => {
   // else moving between the two modes would be a safety change smuggled in as
   // a speed change.
   describe("fast steps (batchActions)", () => {
-    const off = buildSystemPrompt("task");
-    const on = buildSystemPrompt("task", false, false, true);
+    // Both variants pin judge/peek OFF so this block isolates the step rules.
+    const off = buildSystemPrompt("task", false, false, false, false);
+    const on = buildSystemPrompt("task", false, false, true, false);
 
-    it("defaults to the sequential wording", () => {
+    it("defaults to the batched wording", () => {
+      // Product default: everything on except madman — a bare call renders the
+      // full-fat prompt, so batching is what a default run gets.
+      const p = buildSystemPrompt("task");
+      expect(p).toContain("BATCH ONE LOGICAL UNIT INTO ONE STEP");
+      expect(p).not.toContain("Prefer small decisive steps: one or two actions");
+    });
+
+    it("keeps the sequential wording available when explicitly disabled", () => {
       expect(off).toContain("Prefer small decisive steps: one or two actions");
       expect(off).not.toContain("BATCH ONE LOGICAL UNIT INTO ONE STEP");
     });
@@ -131,6 +140,25 @@ describe("buildSystemPrompt", () => {
       expect(p).toContain("`bookmarks_search`");
       // One ask, then move on — same anti-re-litigation shape as rule 89.
       expect(p).toContain("Ask once, relay what came back, move on");
+    }
+  });
+
+  // Tabs the freedom rules open must not pile up: every later tabs_list pays
+  // for them, and a crowded agent window makes navigation errors likelier.
+  it("tells the model to close the tabs it opened once they served", () => {
+    for (const p of [buildSystemPrompt("t"), buildSystemPrompt("t", false, false, false, false)]) {
+      expect(p).toContain("`tabs_close` the tabs you opened once they have served");
+    }
+  });
+
+  // Screenshots are viewport-only while refs cover the whole document — the
+  // model must not read an image as the full page, and must scroll a target
+  // into view before pointing at it with a coordinate action.
+  it("bounds what a screenshot proves and demands in-view targets for _at actions", () => {
+    for (const p of [buildSystemPrompt("t"), buildSystemPrompt("t", false, false, false, false)]) {
+      expect(p).toContain("shows ONLY the current viewport");
+      expect(p).toContain("Never conclude from a screenshot that the page lacks something");
+      expect(p).toContain("`scroll` it into view first (ref-based actions scroll for you)");
     }
   });
 
@@ -291,8 +319,9 @@ describe("canvas document editor procedure", () => {
 describe("window isolation rules", () => {
   // The wall is enforced by the tools (background/window-scope.ts); the prompt
   // is how the model knows it exists, so it never wastes steps reaching for
-  // the user's tabs — and never claims it saw them.
-  const isolated = buildSystemPrompt("t");
+  // the user's tabs — and never claims it saw them. Peek defaults ON, so the
+  // isolated variant is pinned explicitly here.
+  const isolated = buildSystemPrompt("t", false, false, false, false);
   const peek = buildSystemPrompt("t", false, false, false, true);
 
   it("states that the agent lives in one window and cannot reach the user's", () => {
@@ -311,6 +340,18 @@ describe("window isolation rules", () => {
     expect(peek).toContain('marked with window "user"');
     expect(peek).toContain("Looking is ALL you may do with them");
     expect(peek).toContain("every click, type, switch, close and page read stays inside your own window");
+  });
+
+  it("defaults to everything on except madman", () => {
+    // The shipped product default: peek on, batching on, judge rules present,
+    // madman absent. Judge at RUNTIME still requires the sidecar to exist
+    // (loop.ts passes availability), but the bare-call default renders it.
+    const p = buildSystemPrompt("t");
+    expect(p).toContain('marked with window "user"');
+    expect(p).toContain("BATCH ONE LOGICAL UNIT INTO ONE STEP");
+    expect(p).toContain("`judge` (the Jev sidecar)");
+    expect(p).not.toContain("Madman mode");
+    expect(p).not.toContain("you cannot list them yourself");
   });
 
   it("never tells the model it may take the user's focus", () => {

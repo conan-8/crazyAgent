@@ -1170,9 +1170,13 @@ export async function runAgentTask(
   const systemPrompt = buildSystemPrompt(
     cp.task,
     deps.madman === true,
+    // Judge is availability, not preference: advertise it only when the
+    // sidecar's tool actually exists this run.
     deps.judgeAvailable === true,
-    deps.batchActions === true,
-    deps.windowPeek === true,
+    // Everything else defaults ON (product default); only an explicit false
+    // opts out.
+    deps.batchActions !== false,
+    deps.windowPeek !== false,
   );
   const prefixTokens =
     estimateTokens(systemPrompt) +

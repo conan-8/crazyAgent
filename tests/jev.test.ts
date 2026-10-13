@@ -823,8 +823,14 @@ describe("createJevClient", () => {
 
 describe("buildSystemPrompt — judge rule", () => {
   it("stays byte-identical without the judge tool", () => {
-    expect(buildSystemPrompt("t", false, false)).toBe(buildSystemPrompt("t"));
-    expect(buildSystemPrompt("t")).not.toContain("`judge`");
+    // Judge off must not leak judge text anywhere else in the prompt; with
+    // everything else left at its default (now: on), judge off simply omits
+    // the playbook.
+    const off = buildSystemPrompt("t", false, false);
+    expect(off).not.toContain("`judge`");
+    expect(off).not.toContain("Jev sidecar");
+    // The bare default now renders the judge playbook (everything on except
+    // madman); see prompts.test.ts "defaults to everything on except madman".
   });
 
   it("adds the judge playbook when Jev is available", () => {
