@@ -113,6 +113,27 @@ describe("buildSystemPrompt", () => {
     }
   });
 
+  // Freedom of movement: the model must know it can leave the starting page,
+  // open new tabs to search, and consult other chatbots (bookmarked ones
+  // preferred) instead of stalling on questions the page cannot answer.
+  it("says the model may leave the starting page and open new tabs to search", () => {
+    for (const p of [buildSystemPrompt("t"), buildSystemPrompt("t", false, false, true)]) {
+      expect(p).toContain("NOT confined to the page you started on");
+      expect(p).toContain("`tabs_create` opens a new tab in your own window");
+      expect(p).toContain("never to stall or hand the problem back to the user");
+    }
+  });
+
+  it("routes questions to other chatbots, bookmarked ones preferred", () => {
+    for (const p of [buildSystemPrompt("t"), buildSystemPrompt("t", false, false, true)]) {
+      expect(p).toContain("Other chatbots are part of your toolkit");
+      expect(p).toContain("BOOKMARKED ones preferred");
+      expect(p).toContain("`bookmarks_search`");
+      // One ask, then move on — same anti-re-litigation shape as rule 89.
+      expect(p).toContain("Ask once, relay what came back, move on");
+    }
+  });
+
   it("states there is no step limit and pushes loop discipline instead", () => {
     const p = buildSystemPrompt("t");
     expect(p).toContain("no step limit");
