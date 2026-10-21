@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CrazyAgent Work Fixture</title>
+  <style>
+    body { font: 15px/1.5 system-ui, -apple-system, sans-serif; margin: 24px; max-width: 780px; color: #111; }
+    h1 { margin: 0 0 12px; }
+    label.field-label { display: block; margin: 10px 0 2px; font-weight: 700; }
+    input[type="text"], input[type="password"], textarea {
+      display: block; font: inherit; padding: 7px 9px; width: 340px;
+      border: 1px solid #888; border-radius: 6px; background: #fff;
+    }
+    textarea { height: 76px; resize: vertical; }
+    #rich {
+      display: block; width: 460px; min-height: 52px; padding: 9px 11px;
+      border: 1px solid #888; border-radius: 6px; background: #fff; outline: none;
+    }
+    #rich:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, .25); }
+    #rich:empty::before { content: attr(data-placeholder); color: #9aa0a6; }
+    button[type="submit"] { margin-top: 14px; font: inherit; padding: 8px 16px; border: 1px solid #333; border-radius: 6px; background: #111; color: #fff; cursor: pointer; }
+    .row { margin: 16px 0; padding: 12px; border: 1px solid #ddd; border-radius: 8px; }
+    #editor {
+      display: block; width: 660px; height: 92px; margin-top: 8px; padding: 10px 12px;
+      font: 700 22px/1.4 ui-monospace, SFMono-Regular, monospace;
+      background: #0b1f2a; color: #e6fffb; border: 2px solid #1f6f5b;
+      border-radius: 8px; caret-color: #e6fffb; outline: none;
+    }
+    #editor:focus { border-color: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, .30); }
+    #second-link { color: #1d4ed8; font-weight: 700; }
+    #result { margin-top: 14px; padding: 10px; min-height: 22px; font-family: ui-monospace, monospace; white-space: pre-wrap; color: #065f46; background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 8px; }
+    #late { margin-top: 14px; padding: 10px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; font-weight: 700; }
+    #events { margin-top: 14px; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; color: #374151; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; max-height: 170px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>Work fixture</h1>
+  <p>Typing, keys, navigation, and waits all have deterministic effects.</p>
+
+  <form id="form" autocomplete="off">
+    <label class="field-label" for="name">Name</label>
+    <input id="name" name="name" type="text" aria-label="Name" />
+
+    <label class="field-label" for="notes">Notes</label>
+    <textarea id="notes" name="notes" aria-label="Notes"></textarea>
+
+    <label class="field-label" for="pass">Password</label>
+    <input id="pass" name="pass" type="password" aria-label="Password" />
+
+    <label class="field-label" for="rich">Rich text</label>
+    <div id="rich" contenteditable="true" role="textbox" aria-label="Rich text" tabindex="0" data-placeholder="Rich text"></div>
+
+    <button id="submit" type="submit">Submit</button>
+  </form>
+
+  <div class="row">
+    <strong>Canvas-style editor (click to focus, then type without a label)</strong>
+    <input id="editor" type="text" value="" aria-label="Canvas editor" />
+  </div>
+
+  <p><a id="second-link" href="second.html">Go to second page</a></p>
+
+  <div id="result">result: (none)</div>
+
+  <div id="events">events input=0 keydown=0 submit=0</div>
+
+  <script>
+    const counts = { input: 0, keydown: 0, submit: 0 }
+    const lines = []
+    const events = document.getElementById('events')
+    const record = (line) => {
+      lines.push(line)
+      if (lines.length > 60) lines.shift()
+      events.textContent = `events input=${counts.input} keydown=${counts.keydown} submit=${counts.submit}\n${lines.join('\n')}`
+    }
+
+    document.addEventListener('input', (event) => {
+      counts.input += 1
+      record(`input ${event.target.id || event.target.tagName.toLowerCase()}`)
+    }, true)
+
+    document.addEventListener('keydown', (event) => {
+      counts.keydown += 1
+      const mods = []
+      if (event.ctrlKey) mods.push('ctrl')
+      if (event.altKey) mods.push('alt')
+      if (event.shiftKey) mods.push('shift')
+      if (event.metaKey) mods.push('meta')
+      record(`keydown ${mods.length ? mods.join('+') + '+' : ''}${event.key} ${event.isTrusted ? 'trusted' : 'synthetic'}`)
+    }, true)
+
+    document.getElementById('form').addEventListener('submit', (event) => {
+      event.preventDefault()
+      counts.submit += 1
+      const data = new FormData(event.currentTarget)
+      const name = String(data.get('name') ?? '')
+      const notes = String(data.get('notes') ?? '')
+      const pass = String(data.get('pass') ?? '')
+      document.getElementById('result').textContent = `result: name=${name} notes=${notes} pass=${pass.length}chars`
+      record(`submit name=${name}`)
+    })
+
+    const delay = Number(new URLSearchParams(location.search).get('late')) || 900
+    setTimeout(() => {
+      const late = document.createElement('div')
+      late.id = 'late'
+      late.textContent = 'late content ready'
+      document.body.appendChild(late)
+    }, delay)
+
+    // Reset scroll on load so each navigation starts at a deterministic view.
+    window.scrollTo(0, 0)
+    document.getElementById('events').textContent = 'events input=0 keydown=0 submit=0'
+  </script>
+</body>
+</html>

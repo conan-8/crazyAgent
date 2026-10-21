@@ -132,6 +132,156 @@ const TABS = {
     { id: 8, title: 'Second Tab', url: 'https://example.test/two', active: false, pinned: false, status: 'complete' },
   ],
 }
+const TYPE = {
+  op: 'type',
+  tab: { id: 7, title: 'Fixture', url: 'https://example.test/fixture' },
+  viewport: { width: 1280, height: 720, dpr: 1 },
+  scroll: { x: 0, y: 0, maxY: 0, container: 'document', atTop: true, atBottom: true },
+  typed: {
+    label: 7,
+    chars: 12,
+    mode: 'replace',
+    submitted: false,
+    method: 'dom',
+    beforeChars: 0,
+    afterChars: 12,
+    valuePreview: 'jane@example.com',
+  },
+  changed: true,
+  signals: ['dom-mutations:2'],
+  labels: [{ id: 7, tag: 'input', role: 'textbox', text: 'Email', disabled: false, x: 10, y: 20, w: 200, h: 32 }],
+  labelCount: 1,
+  image: IMAGE,
+}
+const TYPE_FOCUSED = {
+  ...TYPE,
+  typed: {
+    chars: 5,
+    mode: 'append',
+    submitted: true,
+    method: 'trusted',
+    beforeChars: 0,
+    afterChars: 5,
+    valuePreview: 'hello',
+  },
+  labels: [],
+  labelCount: 0,
+}
+const TYPE_PASSWORD = {
+  ...TYPE,
+  typed: {
+    label: 8,
+    chars: 12,
+    mode: 'replace',
+    submitted: false,
+    method: 'trusted',
+    beforeChars: 0,
+    afterChars: 12,
+    valuePreview: '[password 12 chars]',
+  },
+  labels: [{ id: 8, tag: 'input', role: 'textbox', text: 'Password', disabled: false, x: 10, y: 60, w: 200, h: 32 }],
+}
+const TYPE_UNCHANGED = {
+  ...TYPE,
+  typed: {
+    label: 7,
+    chars: 3,
+    mode: 'replace',
+    submitted: false,
+    method: 'dom',
+    beforeChars: 0,
+    afterChars: 0,
+    valuePreview: '',
+  },
+  changed: false,
+  signals: [],
+}
+const PRESS_KEY = {
+  op: 'press_key',
+  tab: { id: 7, title: 'Fixture', url: 'https://example.test/fixture' },
+  viewport: { width: 1280, height: 720, dpr: 1 },
+  scroll: { x: 0, y: 0, maxY: 0, container: 'document', atTop: true, atBottom: true },
+  pressed: { key: 'KeyA', modifiers: ['ctrl'], trusted: true },
+  changed: true,
+  signals: ['dom-mutations:1'],
+  labels: [],
+  image: IMAGE,
+}
+const PRESS_KEY_SYNTHETIC = {
+  ...PRESS_KEY,
+  pressed: { key: 'Enter', modifiers: [], trusted: false },
+  changed: false,
+  signals: [],
+}
+const NAVIGATE = {
+  op: 'navigate',
+  tab: { id: 7, title: 'Fixture', url: 'https://example.test/fixture' },
+  viewport: { width: 1280, height: 720, dpr: 1 },
+  scroll: { x: 0, y: 0, maxY: 0, container: 'document', atTop: true, atBottom: true },
+  navigated: {
+    requestedUrl: 'https://example.test/docs',
+    fromUrl: 'https://example.test/start',
+    toUrl: 'https://example.test/docs',
+    tabId: 7,
+    newTab: false,
+    status: 'complete',
+    timedOut: false,
+    waitMs: 812,
+  },
+  changed: true,
+  signals: ['navigated'],
+  labels: [],
+  image: IMAGE,
+}
+const NAVIGATE_NEW_TAB = {
+  ...NAVIGATE,
+  tab: { id: 8, title: 'Fixture Docs', url: 'https://example.test/docs' },
+  navigated: { ...NAVIGATE.navigated, newTab: true, tabId: 8 },
+}
+const NAVIGATE_HISTORY = {
+  ...NAVIGATE,
+  navigated: {
+    fromUrl: 'https://example.test/b',
+    toUrl: 'https://example.test/a',
+    tabId: 7,
+    newTab: false,
+    history: 'back',
+    status: 'complete',
+    timedOut: false,
+    waitMs: 120,
+  },
+}
+const NAVIGATE_TIMEOUT = {
+  ...NAVIGATE,
+  navigated: {
+    requestedUrl: 'https://example.test/slow',
+    fromUrl: 'https://example.test/docs',
+    toUrl: 'https://example.test/slow',
+    tabId: 7,
+    newTab: false,
+    status: 'loading',
+    timedOut: true,
+    waitMs: 10000,
+  },
+  changed: false,
+  signals: [],
+}
+const WAIT_FOR = {
+  op: 'wait_for',
+  tab: { id: 7, title: 'Fixture', url: 'https://example.test/fixture' },
+  viewport: { width: 1280, height: 720, dpr: 1 },
+  scroll: { x: 0, y: 0, maxY: 0, container: 'document', atTop: true, atBottom: true },
+  waited: { conditions: { text: 'READY' }, found: true, timedOut: false, elapsedMs: 812 },
+  changed: true,
+  labels: [],
+  image: IMAGE,
+}
+const WAIT_FOR_TIMEOUT = {
+  ...WAIT_FOR,
+  waited: { conditions: { text: 'NEVER' }, found: false, timedOut: true, elapsedMs: 10000 },
+  changed: false,
+  signals: [],
+}
 
 async function startFakeBridge() {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
@@ -157,11 +307,33 @@ async function startFakeBridge() {
         const op = message.command?.op
         const args = message.command?.args ?? {}
         commands.push({ op, args })
+        const send = result => ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: message.id, ok: true, result }))
         if (op === 'click_at') {
-          const result = args.view === 'none' ? CLICK_AT_NONE
+          send(args.view === 'none' ? CLICK_AT_NONE
             : Array.isArray(args.points) ? CLICK_AT_MULTI
-              : CLICK_AT
-          ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: message.id, ok: true, result }))
+              : CLICK_AT)
+          return
+        }
+        if (op === 'type') {
+          send(args.text === 'NOCHANGE' ? TYPE_UNCHANGED
+            : args.label === 8 ? TYPE_PASSWORD
+              : args.label === undefined ? TYPE_FOCUSED
+                : TYPE)
+          return
+        }
+        if (op === 'press_key') {
+          send(Array.isArray(args.modifiers) && args.modifiers.length > 0 ? PRESS_KEY : PRESS_KEY_SYNTHETIC)
+          return
+        }
+        if (op === 'navigate') {
+          send(args.history === 'back' ? NAVIGATE_HISTORY
+            : args.new_tab === true ? NAVIGATE_NEW_TAB
+              : typeof args.url === 'string' && args.url.includes('slow') ? NAVIGATE_TIMEOUT
+                : NAVIGATE)
+          return
+        }
+        if (op === 'wait_for') {
+          send(args.text === 'NEVER' ? WAIT_FOR_TIMEOUT : WAIT_FOR)
           return
         }
         const result = op === 'scroll' ? SCROLL
@@ -171,7 +343,7 @@ async function startFakeBridge() {
                 : op === 'select_option' ? SELECT
                   : op === 'hover' ? HOVER
                     : SNAPSHOT
-        ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: message.id, ok: true, result }))
+        send(result)
       }
     })
   })
@@ -242,7 +414,7 @@ async function waitFor(predicate, timeoutMs = 2_000) {
   throw new Error('timed out waiting for condition')
 }
 
-test('registers the provider, guidance, and the nine browser tools', async t => {
+test('registers the provider, guidance, and the thirteen browser tools', async t => {
   const { server, url } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -253,13 +425,33 @@ test('registers the provider, guidance, and the nine browser tools', async t => 
   t.after(() => fake.dispose())
 
   assert.equal(String(fake.getProvider()), 'extension-current-window')
-  assert.deepEqual([...fake.tools.keys()].sort(), ['browser_click', 'browser_click_at', 'browser_hover', 'browser_read_text', 'browser_screenshot', 'browser_scroll', 'browser_select_option', 'browser_switch_tab', 'browser_tabs'])
+  assert.deepEqual([...fake.tools.keys()].sort(), [
+    'browser_click',
+    'browser_click_at',
+    'browser_hover',
+    'browser_navigate',
+    'browser_press_key',
+    'browser_read_text',
+    'browser_screenshot',
+    'browser_scroll',
+    'browser_select_option',
+    'browser_switch_tab',
+    'browser_tabs',
+    'browser_type',
+    'browser_wait_for',
+  ])
   assert.equal(fake.sections.length, 1)
-  assert.match(fake.sections[0].text, /untrusted data/)
-  assert.match(fake.sections[0].text, /points:\[\{x,y\}, \.\.\.\]/)
-  assert.match(fake.sections[0].text, /view:"none"/)
-  assert.match(fake.sections[0].text, /delay_ms/)
-  assert.doesNotMatch(fake.sections[0].text, /cannot click or type in Phase 1/)
+  const guidance = fake.sections[0].text
+  assert.match(guidance, /untrusted data/)
+  assert.match(guidance, /points:\[\{x,y\}, \.\.\.\]/)
+  assert.match(guidance, /view:"none"/)
+  assert.match(guidance, /delay_ms/)
+  for (const tool of ['browser_type', 'browser_press_key', 'browser_navigate', 'browser_wait_for']) {
+    assert.match(guidance, new RegExp(tool), tool)
+  }
+  assert.doesNotMatch(guidance, /cannot click or type in Phase 1/)
+  assert.doesNotMatch(guidance, /cannot type/i)
+  assert.doesNotMatch(guidance, /cannot navigate/i)
 })
 
 test('scroll tool returns metadata and an image block', async t => {
@@ -575,4 +767,200 @@ test('select and hover tools report their outcome', async t => {
   )
   assert.match(hover.content[0].text, /hovered label 5: button "Menu"/)
   assert.match(hover.content[0].text, /\[6\] button "Menu item"/)
+})
+
+test('type tool types into a labelled field and reports the new value', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_type')
+  const value = await definition.execute(
+    { text: 'jane@example.com', label: 7 },
+    { callId: 'c-type', signal: new AbortController().signal },
+  )
+  assert.equal(value.content[0].type, 'text')
+  assert.match(value.content[0].text, /typed into \[7\] textbox "Email" · replace · 12 chars · dom/)
+  assert.match(value.content[0].text, /value now "jane@example\.com"/)
+  assert.equal(value.content[1].type, 'image')
+  assert.deepEqual(commands.at(-1), { op: 'type', args: { text: 'jane@example.com', label: 7 } })
+})
+
+test('type tool supports focused append/submit and password previews', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_type')
+  const exec = { callId: 'c-type-2', signal: new AbortController().signal }
+  const focused = await definition.execute({ text: 'hello', mode: 'append', submit: true }, exec)
+  assert.match(focused.content[0].text, /typed 5 chars into the focused element · append · trusted · submitted/)
+  assert.match(focused.content[0].text, /value now "hello"/)
+  assert.deepEqual(commands.at(-1), { op: 'type', args: { text: 'hello', mode: 'append', submit: true } })
+
+  const password = await definition.execute({ text: 'supersecret', label: 8 }, exec)
+  assert.match(password.content[0].text, /typed into \[8\] textbox "Password" · replace · 12 chars · trusted/)
+  assert.match(password.content[0].text, /value now "\[password 12 chars\]"/)
+  assert.doesNotMatch(password.content[0].text, /supersecret/)
+
+  const unchanged = await definition.execute({ text: 'NOCHANGE', label: 7 }, exec)
+  assert.match(unchanged.content[0].text, /result: NO VISIBLE CHANGE/)
+})
+
+test('type validation rejects non-string text and bad options', async t => {
+  const { server, url } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_type')
+  const exec = { callId: 'c-type-bad', signal: new AbortController().signal }
+  await assert.rejects(() => definition.execute({ text: 5 }, exec), /requires a string text/)
+  await assert.rejects(() => definition.execute({ text: 'x', label: 0 }, exec), /label must be a positive integer/)
+  await assert.rejects(() => definition.execute({ text: 'x', mode: 'fill' }, exec), /replace" or "append"/)
+  const cleared = await definition.execute({ text: '', label: 7 }, exec)
+  assert.match(cleared.content[0].text, /typed into \[7\]/)
+})
+
+test('press_key reports the chord and rejects unknown modifiers', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_press_key')
+  const exec = { callId: 'c-key', signal: new AbortController().signal }
+  const trusted = await definition.execute({ key: 'KeyA', modifiers: ['ctrl'] }, exec)
+  assert.match(trusted.content[0].text, /pressed ctrl\+KeyA · trusted/)
+  assert.deepEqual(commands.at(-1), { op: 'press_key', args: { key: 'KeyA', modifiers: ['ctrl'] } })
+
+  const synthetic = await definition.execute({ key: 'Enter' }, exec)
+  assert.match(synthetic.content[0].text, /pressed Enter · synthetic/)
+  assert.deepEqual(commands.at(-1), { op: 'press_key', args: { key: 'Enter' } })
+
+  await assert.rejects(
+    () => definition.execute({ key: 'KeyA', modifiers: ['hyper'] }, exec),
+    /not one of ctrl, alt, shift, meta/,
+  )
+  await assert.rejects(() => definition.execute({ key: '' }, exec), /non-empty key name/)
+  await assert.rejects(() => definition.execute({ key: 'KeyA', modifiers: 'ctrl' }, exec), /modifiers must be an array/)
+})
+
+test('navigate reports the destination, history moves, and timeouts', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_navigate')
+  const exec = { callId: 'c-nav', signal: new AbortController().signal }
+  const direct = await definition.execute({ url: 'https://example.test/docs' }, exec)
+  assert.match(direct.content[0].text, /navigated to https:\/\/example\.test\/docs · loaded in 812ms/)
+  assert.equal(direct.content[1].type, 'image')
+  assert.deepEqual(commands.at(-1), { op: 'navigate', args: { url: 'https://example.test/docs' } })
+
+  const newTab = await definition.execute({ url: 'https://example.test/docs', new_tab: true }, exec)
+  assert.match(newTab.content[0].text, /new tab · loaded in 812ms/)
+  assert.deepEqual(commands.at(-1), { op: 'navigate', args: { url: 'https://example.test/docs', new_tab: true } })
+
+  const back = await definition.execute({ history: 'back' }, exec)
+  assert.match(back.content[0].text, /navigated back to https:\/\/example\.test\/a · loaded in 120ms/)
+  assert.deepEqual(commands.at(-1), { op: 'navigate', args: { history: 'back' } })
+
+  const slow = await definition.execute({ url: 'https://example.test/slow' }, exec)
+  assert.match(slow.content[0].text, /load timed out after 10000ms/)
+  assert.match(slow.content[0].text, /use browser_wait_for/)
+})
+
+test('navigate validation rejects bad targets and combinations', async t => {
+  const { server, url } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_navigate')
+  const exec = { callId: 'c-nav-bad', signal: new AbortController().signal }
+  await assert.rejects(() => definition.execute({}, exec), /requires url or history/)
+  await assert.rejects(
+    () => definition.execute({ url: 'https://example.test', history: 'back' }, exec),
+    /either url or history/,
+  )
+  await assert.rejects(() => definition.execute({ history: 'sideways' }, exec), /history must be/)
+  await assert.rejects(() => definition.execute({ url: 'ftp://example.test/x' }, exec), /only http and https/)
+  await assert.rejects(() => definition.execute({ url: 'not a url' }, exec), /absolute http\(s\) URL/)
+  await assert.rejects(() => definition.execute({ history: 'reload', new_tab: true }, exec), /new_tab is only valid with url/)
+})
+
+test('wait_for reports found and timed-out conditions', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_wait_for')
+  const exec = { callId: 'c-wait', signal: new AbortController().signal }
+  const found = await definition.execute({ text: 'READY' }, exec)
+  assert.match(found.content[0].text, /waited for text "READY" · found after 812ms/)
+  assert.equal(found.content[1].type, 'image')
+  assert.deepEqual(commands.at(-1), { op: 'wait_for', args: { text: 'READY' } })
+
+  const timeout = await definition.execute({ text: 'NEVER' }, exec)
+  assert.match(timeout.content[0].text, /timed out after 10000ms \(text "NEVER" not found\)/)
+
+  await definition.execute({ text: 'READY', timeout_ms: 15000 }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'wait_for', args: { text: 'READY', timeout_ms: 15000 } })
+})
+
+test('wait_for validation requires a condition and bounded values', async t => {
+  const { server, url } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_wait_for')
+  const exec = { callId: 'c-wait-bad', signal: new AbortController().signal }
+  await assert.rejects(() => definition.execute({}, exec), /at least one condition/)
+  await assert.rejects(() => definition.execute({ text: '' }, exec), /non-empty string/)
+  await assert.rejects(() => definition.execute({ idle: false }, exec), /at least one condition/)
+  await assert.rejects(() => definition.execute({ idle: 'yes' }, exec), /idle must be true or false/)
+  await assert.rejects(() => definition.execute({ ms: -1 }, exec), /between 0 and 30000/)
+  await assert.rejects(() => definition.execute({ ms: 40000 }, exec), /between 0 and 30000/)
+  await assert.rejects(
+    () => definition.execute({ text: 'x', timeout_ms: 500 }, exec),
+    /timeout_ms must be an integer between 1000 and 30000/,
+  )
 })

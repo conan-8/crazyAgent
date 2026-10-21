@@ -1,6 +1,6 @@
-# CrazyAgent — Phase 1 browser vision agent
+# CrazyAgent — a work-capable browser agent
 
-A Chrome/Edge side-panel agent that **sees the current tab, clicks labelled DOM controls or canvas coordinates (single points or a burst of up to eight per call), hovers, selects options, reads page text, scrolls, lists tabs, and switches tabs**. It cannot type, press keys, navigate by URL, drag, or upload files. The agent loop, sessions, tool pipeline, prompt assembly, attachments, and model routing are **DSH 0.2.1-rc.2**, not a custom harness.
+A Chrome/Edge side-panel agent that **sees the current tab, clicks labelled DOM controls or canvas coordinates (single points or a burst of up to eight per call), types into fields and focused editors, presses keys and shortcuts, hovers, selects options, reads page text, scrolls, navigates to URLs or through history, waits for page conditions, and lists or switches tabs**. It cannot drag/drop, upload files, download files, handle native JS dialogs, or capture full pages yet. The agent loop, sessions, tool pipeline, prompt assembly, attachments, and model routing are **DSH 0.2.1-rc.2**, not a custom harness. The agent loop, sessions, tool pipeline, prompt assembly, attachments, and model routing are **DSH 0.2.1-rc.2**, not a custom harness.
 
 The side panel is a normal MV3 extension page. The DSH runtime runs locally as a child of a small companion process; the browser and the harness talk over loopback WebSocket.
 
@@ -18,10 +18,14 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
 | `browser_screenshot` | Viewport screenshot + tab, viewport, scroll, and scale metadata |
 | `browser_click` | Clicks a numbered interactive element (DOM, shadow DOM, or iframe) from the current view. Labels come from yellow badges and a text list; coordinates are never accepted. Returns whether the page changed and a fresh view |
 | `browser_click_at` | Clicks screenshot-pixel or CSS coordinates for canvas, video, and iframe surfaces. `points: [{x,y}, …]` clicks up to 8 targets in one call (one debugger attach, one settle, one fresh view, per-point `changed`); `view: "none"` skips the screenshot for rapid repeated bursts; `settle_ms` tunes the post-click paint wait. Uses **trusted browser input** (DevTools protocol) and verifies with a **pixel diff**, which works where no DOM event fires |
+| `browser_type` | Types into a labelled input, textarea, or contenteditable (`mode: append|replace`, optional `submit`), or into the focused element when `label` is omitted — click a canvas editor caret first, then type through trusted `Input.insertText`. Returns a fresh view, the new value, and `changed`; password values are masked |
+| `browser_press_key` | Sends one real key press with optional `ctrl`/`alt`/`shift`/`meta`: Enter, Tab, Escape, Backspace, Delete, arrows, Home/End, PageUp/PageDown, Space, or a letter/digit. Used to submit, move focus, move a caret, and run shortcuts |
 | `browser_hover` | Hovers a labelled element and returns a fresh view, so hover-only menus and tooltips become clickable |
 | `browser_select_option` | Chooses an option on a native `<select>` by label id and option text (a synthetic click cannot open the OS dropdown) |
 | `browser_read_text` | Rendered page text (or just the viewport) as text, with `offset`/`max_chars` pagination. No screenshot; typically a few milliseconds and far fewer tokens |
 | `browser_scroll` | Scrolls the document or the largest visible nested scroller; falls back to a **trusted wheel event** for canvas apps; returns a fresh screenshot |
+| `browser_navigate` | Opens an absolute **http(s) URL** in the active tab or a new tab (`new_tab`), or goes history `back`/`forward`/`reload`; waits up to 15 s for load and reports `timedOut` |
+| `browser_wait_for` | Waits for rendered **text**, a **url** substring, DOM **idle**, and/or a fixed **ms**, bounded by `timeout_ms` (default 10 s); returns a fresh view and `found`/`timedOut` — use it instead of repeated screenshots |
 | `browser_tabs` | Lists the current window's tabs with ids, titles, URLs, and state |
 | `browser_switch_tab` | Activates a tab by `tab_id` or by a case-insensitive title/URL `query`; returns a fresh screenshot |
 | Vision model | Image-capable OpenRouter model through DSH's pi-ai adapter |
@@ -31,16 +35,17 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
 | Persistence | DSH session log and screenshot attachments under `.dsh-home` |
 | UI | Side-panel chat, live activity feed, tool cards with text previews and screenshot thumbnails, pause, settings, new chat |
 
-**No typing, key presses, URL navigation, drag/drop, file upload, downloads, or full-page capture exists in Phase 1. DOM clicks are limited to labelled, visible, hit-testable elements; canvas clicks use coordinates and trusted input.**
+**Not yet supported: drag/drop, file upload, downloads, native JavaScript dialogs, arbitrary JS, and full-page capture. DOM actions are limited to labelled, visible, hit-testable elements; canvas actions use explicit coordinates; typing goes only into labelled editable elements or the focused element; navigation is http(s) only.**
 
 ### Canvas, video, and iframe surfaces
 
-Canvas apps (Docs-style editors, maps, Figma-style tools, dashboards, games, video players) have no DOM controls to label, and their clicks never produce DOM mutations. The agent handles that in four ways:
+Canvas apps (Docs-style editors, maps, Figma-style tools, dashboards, games, video players) have no DOM controls to label, and their clicks never produce DOM mutations. The agent handles that in five ways:
 
 1. **Surface metadata.** Every view lists visible `canvas`, `video`, and `iframe` regions with size and position, so the model knows when to switch from labels to coordinates.
 2. **Coordinate clicks with trusted input.** `browser_click_at` maps screenshot pixels to CSS viewport pixels, then dispatches via `chrome.debugger` (`Input.dispatchMouseEvent`), so the page receives trusted mouse events that canvas handlers accept. If the debugger cannot attach (DevTools is open), it falls back to synthetic events and reports `trusted: false`.
 3. **Pixel-diff verification.** The side panel keeps the previous view image and samples a 240×240 CSS region around the click before and after. `pixels_changed` is the share of sampled pixels that changed, and it is the only reliable success signal for canvas. A click on an unchanged region returns **NO VISIBLE CHANGE**.
 4. **Burst clicking and hasty mode.** Several canvas targets are usually visible at once -- a reaction game can show ten. `browser_click_at` accepts up to eight `points` per call: they share one `chrome.debugger` attach, one adaptive paint settle, and one capture, and the result reports `changed` per point. `view: "none"` skips the capture entirely, the fastest path for rapid repeated bursts (at the cost of not seeing the result until the next screenshot). `settle_ms` (0-400) overrides the adaptive paint wait when a surface repaints slowly.
+5. **Typing into canvas editors.** `browser_click_at` sets the caret, then `browser_type` without a `label` sends trusted `Input.insertText` to the focused element, and `browser_press_key` moves the caret with arrows/Home/End or runs shortcuts. This is the Google Docs path: click where the text should go, then type.
 
 Canvas apps also keep their own scroll state, so `browser_scroll` first tries the DOM; if nothing moved, it dispatches a trusted wheel event at the viewport center and reports `wheel: true`.
 
@@ -150,7 +155,7 @@ Starts from `sdk-minimal` and:
 - sets a browser-agent persona, disables harness identity/runtime context, and serializes tool calls (`maxParallelToolCalls: 1`);
 - leaves attachments, compaction, image offload, and JSONL persistence in place.
 
-The result is nine model-visible tools and a small, stable request prefix.
+The result is thirteen model-visible tools and a small, stable request prefix.
 
 ## Configuration
 
@@ -259,14 +264,14 @@ Full schema, event types, `jq` recipes, and sharing instructions are in [`docs/D
 - Screenshots are sent to your configured model provider through DSH. They are also stored as DSH attachments and session logs under `.dsh-home`.
 - The bridge is loopback-only and token-authenticated. The token is stored in `chrome.storage.local` and in `.dsh-home/browser-agent/token`.
 - Auto-view can be turned off per side-panel settings; **Pause** disables browser commands without ending the chat.
-- Page content is treated as untrusted data in the prompt. Clicking can submit forms or trigger actions a page chooses; only visible, labelled controls can be clicked, and every click reports whether the page changed. There is no typing or URL navigation.
+- Page content is treated as untrusted data in the prompt. Clicking and typing can submit forms or trigger actions a page chooses; actions are limited to visible labelled controls, explicit coordinates, explicit text/keys, and http(s) URLs, and every action reports whether the page changed.
 - The label overlay is injected into the page for the duration of each view and is not persisted after the tab navigates.
 - Read [`PRIVACY.md`](PRIVACY.md) before using this on pages with sensitive information.
 
 ## Development and tests
 
 ```sh
-npm test          # 63 unit/integration checks: bridge, live activity, reasoning policy (incl. rapid), image budget, labels, click/click_at burst/select/hover tools, surfaces, prompt, log store, OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
+npm test          # 71 unit/integration checks: bridge, live activity, reasoning policy (incl. rapid), image budget, labels, click/burst/type/press_key/navigate/wait_for tools, surfaces, prompt, log store, OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
 npm run bench     # local bridge latency
 npm run setup     # idempotent profile/plugin verification
 ```
@@ -279,6 +284,7 @@ Additional dev-only checks (not part of `npm test`):
 - `scripts/edge-log-e2e.mjs` — drives the real Debug log modal and verifies that the ZIP download starts.
 - `scripts/edge-click-e2e.mjs` — drives the real extension against `e2e/fixtures/click.html`: label coverage, covered/hidden exclusion, click by label, no-op detection, disabled/stale refusals, checkbox, and navigation. Requires Edge with `--load-extension=extension` on port 9228.
 - `scripts/edge-canvas-e2e.mjs` — canvas checks on port 9230: surface metadata, trusted coordinate click, image-pixel mapping, pixel-diff detection, wheel scrolling, empty-area no-op, 5-point burst (one attach, +5 trusted clicks), `view:"none"` text-only burst, `delay_ms`, and single-point compatibility.
+- `scripts/edge-work-e2e.mjs` — work-foundation checks on port 9233 against `e2e/fixtures/form.html`: labelled typing (replace/append), contenteditable typing, password masking, `submit`, Tab/Enter, modifier shortcuts, label-less trusted typing into a focused editor, navigate URL/history, and `wait_for` found/timeout.
 - `scripts/edge-advanced-e2e.mjs` — shadow DOM, same- and cross-origin iframes, native select, and hover menus on port 9231.
 
 The fake-UI and Edge end-to-end scripts assume the companion is already configured with an OpenRouter key/model and that the model supports tools. Configure once from the side panel first. The model-latency figures were collected on the earlier direct Alibaba route; capture, bridge, tool, and logging measurements are provider-independent.

@@ -74,7 +74,7 @@ answers with `browser.result`.
 | Repo | `/home/conan/Documents/GitHub/crazyAgent` |
 | Node | 26.8.1 (needs 22.19+) |
 | DSH | `0.2.1-rc.2` (`@deepseek-ai/dsh`) |
-| Companion | running, PID in `logs/companion.pid` (1106505 after the burst-click restart) |
+| Companion | running, PID in `logs/companion.pid` (1320010 after the work-foundation restart) |
 | Bridge | `ws://127.0.0.1:17871/bridge` |
 | Health | `{"ok":true,"ui":false,"tools":true,"port":17871}` |
 | Token | read `.dsh-home/browser-agent/token` (do not commit it) |
@@ -84,9 +84,9 @@ answers with `browser.result`.
 | API key | stored, 73 bytes, `.dsh-home/browser-agent/api-key` (0600) |
 | Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash) |
 | Permissions | sidePanel, tabs, scripting, storage, **debugger**, **webNavigation**, host `<all_urls>` |
-| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-21T18-19-12-088Z-e0d364` (post-restart); game analysis run `run-2026-10-21T14-23-34-035Z-6c0408` |
-| Tests | 63/63 passing |
-| Git | `main` has the baseline commit plus the burst-click change; tree clean |
+| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-21T19-11-58-370Z-0ea2f0` (post-restart); the 8-turn game/work session is `run-2026-10-21T18-19-12-088Z-e0d364` |
+| Tests | 71/71 passing |
+| Git | `main` has baseline, burst-click, and work-foundation commits; tree clean |
 
 Latest real-world validation (from that run):
 
@@ -106,6 +106,15 @@ one capture per burst), `view:"none"` text-only fast mode, an adaptive paint
 settle, `delay_ms` screenshot waits, a `rapid` reasoning class (`off`), and
 corrected the stale "you cannot click" prompt text that made the first turn
 deliberate.
+
+2026-10-21 work foundation (the end goal is doing real work, not playing games):
+four new tools — `browser_type` (labelled inputs/textarea/contenteditable, trusted
+label-less typing into a focused canvas editor, replace/append, optional Submit,
+password masking), `browser_press_key` (trusted CDP key events with
+ctrl/alt/shift/meta), `browser_navigate` (http(s) url, new tab, back/forward/
+reload, 15 s load budget), `browser_wait_for` (text/url/idle/ms conditions with
+timeout). Roster is now **thirteen** tools; persona and GUIDANCE were updated in
+the same change so the model never again deliberates about a capability it has.
 
 ---
 
@@ -186,8 +195,10 @@ update them.
 1. **Do not fork DSH core.** Modify only the provider plugin, profile overlay,
    generated model overlay, companion, and extension. DSH is pinned to
    `0.2.1-rc.2`.
-2. **The model never gets arbitrary DOM automation.** It has exactly nine
-   browser tools; every action is a labelled element or an explicit coordinate.
+2. **The model never gets arbitrary DOM automation.** It has a fixed roster of
+   **thirteen** browser tools; every action is a labelled element, an explicit
+   coordinate, explicit text/keys, or an explicit http(s) URL. No JS evaluation,
+   selector guessing, or unlabelled DOM manipulation.
 3. **All browser execution lives in the side panel page.** No content script is
    installed; page code runs only for the duration of one `chrome.scripting`
    call in the `ISOLATED` world.
@@ -226,17 +237,21 @@ update them.
 
 ---
 
-## 5. Capabilities (nine model-visible tools)
+## 5. Capabilities (thirteen model-visible tools)
 
 | Tool | What it does | Notes |
 |---|---|---|
 | `browser_screenshot` | View with tab/viewport/scroll metadata, numbered labels, surface list | `detail:"high"` uses 2048 px width; `delay_ms` 0-5000 waits in the page before capturing |
 | `browser_click` | Click a labelled element | DOM, open shadow roots, iframes. Returns `changed` + signals + fresh view |
 | `browser_click_at` | Click screenshot pixels or CSS coordinates; `points` bursts up to 8 | Canvas/video/iframe. One debugger attach + one capture per burst, per-point pixel diff. `view:"none"` = text-only fast mode; `settle_ms` 0-400 |
+| `browser_type` | Type into a labelled editable field, or the focused element when unlabelled | DOM native setter + input/change for inputs/textarea, `execCommand` for contenteditable, trusted `Input.insertText` fallback and for canvas editors (Docs). `mode` replace/append; `submit` presses Enter; password values masked |
+| `browser_press_key` | One trusted key press with optional modifiers | Enter/Tab/Escape/Backspace/Delete/arrows/Home/End/PageUp/PageDown/Space/letters/digits; CDP `Input.dispatchKeyEvent` keyDown+keyUp, synthetic fallback |
 | `browser_hover` | Hover a labelled element | Reveals hover-only menus/tooltips |
 | `browser_select_option` | Choose a native `<select>` option | Sets value, fires `input`/`change` |
 | `browser_read_text` | Rendered text | `page`/`viewport`, `offset`, `max_chars`; ~4 ms on fixtures |
 | `browser_scroll` | Scroll + fresh view | DOM scroll first, trusted wheel fallback (`wheel:true`), optional `at_x`/`at_y` |
+| `browser_navigate` | Open an http(s) URL or move through history | Active or new tab, `back`/`forward`/`reload`, waits up to 15 s for load, reports `timedOut` |
+| `browser_wait_for` | Wait for page conditions, then return a fresh view | `text` substring, `url` substring, DOM `idle`, fixed `ms`; all supplied conditions must hold; `timeout_ms` default 10 s |
 | `browser_tabs` | List current-window tabs | id, title, URL, flags |
 | `browser_switch_tab` | Activate by `tab_id` or `query` | Query is case-insensitive title/URL substring |
 
@@ -253,6 +268,19 @@ Behavioural layers:
   view as `surfaces (no DOM labels; use browser_click_at): ...`.
 - **Pixel diff:** 240×240 CSS region sampled at 64×64; `pixelsChanged` percent;
   threshold 0.4 %. This is the canvas success signal.
+- **Typing:** label path tries the DOM (`value` native setter + `input`/`change`
+  for inputs and textarea, `document.execCommand('insertText')` for
+  contenteditable) and verifies by read-back; on mismatch it focuses the element
+  and falls back to trusted `Input.insertText`. Label-less typing is always
+  trusted into the focused element (canvas editors).
+- **Keys:** named keys and single characters map to CDP keyCode/code/modifiers
+  (alt=1, ctrl=2, meta=4, shift=8); `KeyA`/`Digit1` physical names are accepted.
+- **Navigation:** http(s) only; `chrome.tabs.create/update` plus `goBack`,
+  `goForward`, `reload`, with a navigation-start pre-wait so the load wait cannot
+  resolve against the old document.
+- **Waiting:** page-side poll + MutationObserver inside the tab; conditions are
+  combined (text AND url AND idle), `ms` delays first and counts toward the
+  timeout.
 - **Change signals for DOM clicks:** `url-change`, `title-change`,
   `scroll-change`, `text-change`, `dialog-change`, `dom-mutations:N`, `checked`,
   `aria-expanded`, `aria-selected`. A no-op returns **NO VISIBLE CHANGE**.
@@ -293,17 +321,17 @@ Behavioural layers:
 
 | File | Responsibility |
 |---|---|
-| `lib/index.js` (~1081 lines) | Plugin: bridge client (`tools` role), `registerTools` (~652), guidance, `apply` (~902), activity frames (`activityFromFrame` ~343), `formatView` (~443), `clickAtContent` (~541) with multi-point and view-none formatting, select/hover content, reasoning policy + image budget hooks, `llm/stream` is intentionally **not** used |
+| `lib/index.js` (~1384 lines) | Plugin: bridge client (`tools` role), `registerTools` (~795), guidance, `apply` (~1205), activity frames (`activityFromFrame` ~343), `formatView` (~443), coordinate/type/press/navigate/wait content formatters (`clickAtContent` ~546, `typeContent` ~664, `pressKeyContent` ~682, `navigateContent` ~696, `waitForContent` ~741), select/hover content, reasoning policy + image budget hooks, `llm/stream` is intentionally **not** used |
 | `lib/reasoning.js` | `classifyPrompt`, `autoEffort`, `effortFor` (navigate/inspect/synthesize/**rapid**) |
 | `lib/image-budget.js` | `planImageOffload` pure planner |
-| `test/*.test.mjs` | 9 tools, label prompts, activity forwarding, reasoning, image budget |
+| `test/*.test.mjs` | 13 tools, label prompts, activity forwarding, reasoning, image budget |
 
 ### Extension (`extension/`)
 
 | File | Responsibility |
 |---|---|
 | `manifest.json` | MV3, side panel, permissions above, `<all_urls>` |
-| `sidepanel/browser.js` (~1927 lines) | Browser executor. Key functions: `waitForPaint` (~192), `settleAfterInput` (~213), `withDebugger` (~231), `syntheticClickBurst` (~275), `diffRegion` (~336), `runInFrame` (~366), `labelAllFrames` (~406), `labelPage` (~484), `selectOption` (~719), `hoverLabelled` (~757), `clickLabelled` (~791), `scrollPage` (~945), `snapshot` (~1192), `scroll` (~1269), `parseClickAtArgs` (~1604), `clickAt` (~1649), `click` (~1760), `execute` (~1854) |
+| `sidepanel/browser.js` (~2676 lines) | Browser executor. Key functions: `waitForPaint` (~192), `settleAfterInput` (~213), `withDebugger` (~231), `syntheticClickBurst` (~275), `diffRegion` (~336), `runInFrame` (~366), `labelAllFrames` (~406), `labelPage` (~503), `selectOption` (~719), `hoverLabelled` (~757), `clickLabelled` (~791), `scrollPage` (~1193), `snapshot` (~1440), `waitForConditionsPage` (~1157), `scroll` (~1517), `parseClickAtArgs` (~1852), `clickAt` (~1897), `typeText` (~2209), `pressKey` (~2358), `navigate` (~2445), `waitFor` (~2550), `execute` (~2591) |
 | `sidepanel/app.js` | Chat UI, settings (key/base URL/model/effort), bridge lifecycle, live activity feed, tool cards, debug-log modal |
 | `sidepanel/index.html`, `style.css` | UI markup/styles |
 | `sidepanel/logger.js`, `protocol.js` | Client log batching, formatting helpers |
@@ -337,35 +365,36 @@ logs/<runId>/   events.jsonl, screenshots/, exports/, summary files
 - `docs/PHASE1-BENCH.md` — measured latencies.
 - `e2e/checklist.md` — manual acceptance checks (click, canvas, shadow, iframes,
   select, hover, reasoning policy).
-- `e2e/fixtures/` — `click.html`, `canvas.html`, `advanced.html`,
-  `frame-inner.html`, `article.html`, `second.html`, `many.html`.
+- `e2e/fixtures/` — `click.html`, `canvas.html`, `advanced.html`, `form.html`
+  (typing/keys/navigation/waiting), `frame-inner.html`, `article.html`,
+  `second.html`, `many.html`.
 
 ---
 
 ## 7. Test inventory
 
-`npm test` = 63 tests:
+`npm test` = 71 tests:
 
 - `companion/test/`: bridge (7), prompt (9), log store (2), credentials (2),
   openrouter (5).
 - `extension/test/`: helpers (3), logger (4), tab match (5).
-- `packages/dsh-browser-extension/test/`: tools (15), reasoning (7),
+- `packages/dsh-browser-extension/test/`: tools (23), reasoning (7),
   image budget (4).
 
 E2E suites (not in `npm test`): `edge-click-e2e.mjs` (9 behaviours),
 `edge-canvas-e2e.mjs` (surfaces, trusted click, image mapping, pixel diff,
-wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility), `edge-advanced-e2e.mjs` (shadow DOM, same/cross-origin iframes,
-select, hover).
+wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
+`edge-work-e2e.mjs` (typing, keys, navigation, waiting on `form.html`),
+`edge-advanced-e2e.mjs` (shadow DOM, same/cross-origin iframes, select, hover).
 
 ---
 
 ## 8. Known gaps / next steps, in suggested order
 
-1. **Typing and keys** — biggest missing capability. Canvas editors (Google
-   Docs), search boxes, forms. Suggested: `browser_type({label?, text})` for
-   inputs/contenteditable via DOM value + `input` events, plus trusted
-   `Input.insertText` / `Input.dispatchKeyEvent` via the existing debugger path
-   for canvas editors; `browser_press_key({key, modifiers})`.
+1. **Typing and navigation — DONE** (2026-10-21). `browser_type`,
+   `browser_press_key`, `browser_navigate` (url/new_tab/history), and
+   `browser_wait_for` are in the thirteen-tool roster. Remaining input gaps:
+   IME composition strings, file inputs, and drag/drop.
 2. **Fast/batch canvas clicking — DONE.** `browser_click_at` accepts `points`
    (1-8) and clicks a whole burst with one debugger attach and one capture;
    `view:"none"` skips the screenshot for text-only fast bursts; the fixed
@@ -388,16 +417,20 @@ select, hover).
 8. **Step/tool-call cap** — no hard cap exists. A scripted mock once ran ~150
    scroll steps. Real models rarely do this, but a per-turn guard is prudent;
    DSH exposes no cancel through the SDK, so this needs an agent-level guard.
-9. **Click outcome logging** — `browser.command.result` in `events.jsonl` lacks
-   `changed`/`pixelsChanged`/`clicked`; those are visible in `tool.result` text
-   but not structured. Add them to the extension's logger call.
+9. **Click outcome logging** — the four new ops are structured in
+   `browser.command.result` (`typed`, `pressed`, `navigated`, `waited`), but
+   `changed`/`pixelsChanged`/`clicked`/`points` are still only in `tool.result`
+   text. Add them to the extension's logger call.
 10. **Closed shadow roots / sandboxed frames / built-in PDF viewer** — not
     injectable. PDF.js pages (canvas) do work via `click_at`.
 11. **Reliability polish** — debugger banner flashes per trusted action;
     DevTools open blocks trusted input. Consider a persistent attach during a
     turn (banner stays) or a settings toggle.
-12. **Commit the repo — DONE.** The baseline and the burst-click change are
-    committed on `main`; keep future work as small reviewed commits.
+12. **Commit the repo — DONE.** Baseline, burst-click, and work-foundation
+    changes are committed on `main`; keep future work as small reviewed commits.
+13. **Form-fill batching** — type into several labelled fields in one call
+    (`fields: [{label, text}]`), the typing analogue of burst clicking. Cuts a
+    model round trip per field on multi-field forms.
 
 ---
 
@@ -451,6 +484,13 @@ select, hover).
 - **One debugger attach per burst.** Attach/detach is ~100 ms, so a 5-point
   burst in one attach costs about the same as a single click; a `view:"none"`
   5-point burst skips the capture entirely (~50 ms on the fixture).
+- **Native value setters + input events beat key-by-key typing** for DOM
+  fields, and survive React-style controlled inputs. Keep trusted
+  `Input.insertText` for the focused-element/canvas-editor path, where there is
+  no DOM value to set.
+- **The side-panel page caches `browser.js` as an ES module.** After editing the
+  executor, reload the side-panel page (or restart the isolated Edge) before an
+  e2e run, or the suite silently tests stale code.
 
 ---
 
@@ -521,7 +561,7 @@ exposed in Settings).
 |---|---|
 | Bridge | 127.0.0.1:17871, path `/bridge`, health `/health` |
 | Fixture server | 127.0.0.1:17872 (manual; not started by the companion) |
-| Edge e2e CDP | 9228 click, 9230 canvas, 9231 advanced |
+| Edge e2e CDP | 9228 click, 9230 canvas, 9231 advanced, 9233 work |
 | Extension ID (current path) | `kmipadgipilkdidennbhcgmoolfedgph` |
 | Debug runs | `.dsh-home/browser-agent/logs/<runId>/` |
 | Screenshots | `<run>/screenshots/*.jpg` |
@@ -549,8 +589,9 @@ read it from `chrome://extensions`.
 - Screenshots, page text, reasoning, and clicks are sent to the configured
   OpenRouter model and its upstream provider. Do not use it on sensitive pages
   without accepting that.
-- Clicking can submit forms or trigger page actions. Only visible/labelled or
-  explicit coordinates are clickable; there is no typing yet.
+- Clicking and typing can submit forms or trigger page actions. Actions are
+  limited to visible labelled controls, explicit coordinates, explicit
+  text/keys, and http(s) URLs; every action reports whether the page changed.
 - Debug bundles contain page content and screenshots; redaction covers tokens,
   keys, and secret-shaped values only.
 - `logs/`, `.dsh-home/`, `.env*`, `node_modules/`, `dist/`, `release/` are
@@ -562,7 +603,7 @@ read it from `chrome://extensions`.
 
 1. `cd /home/conan/Documents/GitHub/crazyAgent`
 2. `curl -s http://127.0.0.1:17871/health` — expect `tools:true`.
-3. `npm test` — expect 63 passing.
+3. `npm test` — expect 71 passing.
 4. Read the latest run under `.dsh-home/browser-agent/logs/` if investigating a
    specific behaviour (`events.jsonl`, `summary.md`).
 5. Reload the extension if `extension/` changed since the last load.
@@ -583,12 +624,16 @@ read it from `chrome://extensions`.
 - “Switch to the Second Fixture Page tab.”
 - “Read this page and give me the markers.”
 - “Scroll down 700 pixels.”
+- “Type ‘hello’ into the search box and press Enter.” (`form.html`)
+- “Click into the editor and type ‘draft text’.” (canvas-editor path)
+- “Go to 127.0.0.1:17872/second.html and tell me the marker.” (`navigate`)
+- “Wait for the page to show READY, then tell me what it says.” (`wait_for`)
 
 ---
 
 ## 14. Open questions for the user
 
-- Which comes first: typing/keyboard, drag, or file upload?
+- Which comes first now: file upload, native dialogs, or downloads?
 - Is the debugger banner acceptable, or should trusted input be opt-in per tab?
 - Should reasoning `auto` be tuned (e.g. `off` for short inspect prompts) using
   real `reasoning.policy` data?

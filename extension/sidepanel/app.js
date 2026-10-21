@@ -1353,6 +1353,10 @@ async function handleBrowserCommand(frame) {
       moved: result.moved,
       tabs: Array.isArray(result.tabs) ? result.tabs.length : undefined,
       tab: result.tab ? { id: result.tab.id, title: result.tab.title, url: result.tab.url } : undefined,
+      typed: result.typed,
+      pressed: result.pressed,
+      navigated: result.navigated,
+      waited: result.waited,
     }, 'info')
     sendBrowserResult(frame.id, true, result)
   } catch (error) {
@@ -1394,6 +1398,26 @@ function browserActivitySummary(op, result) {
   if (result.clicked) {
     parts.push(`click #${result.clicked.label} ${truncate(result.clicked.text || result.clicked.tag || '', 50)}`)
     parts.push(result.changed ? 'changed' : 'no visible change')
+  }
+  if (result.typed) {
+    parts.push(`${result.typed.method} typed ${result.typed.chars} chars${result.typed.submitted ? ' · submitted' : ''}`)
+    parts.push(result.changed ? 'changed' : 'no visible change')
+  }
+  if (result.pressed) {
+    const mods = Array.isArray(result.pressed.modifiers) && result.pressed.modifiers.length > 0
+      ? `${result.pressed.modifiers.join('+')}+`
+      : ''
+    parts.push(`pressed ${mods}${result.pressed.key}${result.pressed.trusted === false ? ' · synthetic' : ''}`)
+    parts.push(result.changed ? 'changed' : 'no visible change')
+  }
+  if (result.navigated) {
+    const action = result.navigated.history ?? 'url'
+    parts.push(`${action} → ${truncate(result.navigated.toUrl || result.navigated.requestedUrl || '', 70)}`)
+    if (result.navigated.timedOut) parts.push('load timed out')
+    if (result.navigated.newTab) parts.push('new tab')
+  }
+  if (result.waited) {
+    parts.push(`${result.waited.found ? 'found' : 'timed out'} after ${Math.round(result.waited.elapsedMs ?? 0)}ms`)
   }
   if (Number.isFinite(result.labelCount)) parts.push(`${result.labelCount} labels`)
   if (Number.isFinite(result.captureMs)) parts.push(`capture ${result.captureMs}ms`)

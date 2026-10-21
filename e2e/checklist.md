@@ -1,4 +1,4 @@
-# Phase 1 manual acceptance checklist
+# CrazyAgent manual acceptance checklist
 
 Use a **normal website tab** and the real side panel (not the extension page opened as a tab). Keep the companion running in a terminal.
 
@@ -127,11 +127,25 @@ Use `e2e/fixtures/advanced.html`.
 - Stop the companion (`Ctrl+C`). The banner should show “Companion offline”; no crash.
 - Start `npm run dev` again; click Reconnect; the token should still work (it is persisted).
 
-### 9. Phase 1 scope
+### 9. Typing, keys, navigation, waiting
 
-- Ask: “Click the first link.” / “Type in the search box.” / “Go to example.com.”
-- **Pass:** the model states it cannot click/type/navigate; no such tool exists.
-- Confirm the tool cards only ever show `screenshot`, `scroll`, `tabs`, `switch tab`, or `current view`.
+Use `e2e/fixtures/form.html`.
+
+- Ask: **“Type ‘Jane Doe’ into the Full name field.”** Expect a `type` card with `replace`, the character count, `value now "Jane Doe"`, and the input event count in `#events` increasing.
+- Ask: **“Append ‘ — test’ to the same field.”** The value keeps the old text and gains the suffix (`mode: append`).
+- Ask: **“Type a message in the Notes box and click Submit”** (or use `submit`): the form records the values in `#result`.
+- Ask: **“Press Tab, then press Enter.”** Focus moves to the next field and Enter submits.
+- Ask: **“Press Ctrl+K.”** The fixture records the shortcut as a trusted keydown.
+- Ask: **“Click into the editor and type ‘hello’.”** The focused editor receives trusted `Input.insertText`.
+- Ask: **“Go to 127.0.0.1:17872/second.html.”** Expect a `navigate` card, the URL changes, and a fresh view of the second page; then **“Go back.”**
+- Ask: **“Wait for READY on the page, then tell me what it says.”** Expect a `wait_for` card with `found` and a non-zero elapsed time.
+- Ask: **“Type into the password field.”** The card must show `value now "[password N chars]"`, never the secret.
+- **Pass:** no typing lands in the wrong element; navigation is http(s) only; waits report `found`/`timedOut` honestly.
+
+### 9b. Canvas editor typing
+
+- Open a Google Doc, click a caret position with `browser_click_at`, then ask the agent to type a short sentence; it must use label-less `browser_type` and `browser_press_key` for caret movement.
+- **Pass:** text appears at the caret; the agent does not claim it cannot type.
 
 ### 10. Debug log export
 
@@ -161,6 +175,8 @@ Record from the side-panel footer and `docs/PHASE1-BENCH.md`:
 - simple “what is this page” turn: _____ s;
 - scroll-and-describe turn: _____ s;
 - tabs + switch turn: _____ s;
+- type-into-field turn: _____ s;
+- navigate + wait turn: _____ s;
 - look time: _____ ms;
 - screenshot size/dimensions (from the card or `.dsh-home`): _____.
 

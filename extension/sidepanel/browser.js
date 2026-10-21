@@ -24,6 +24,25 @@ const lastViewByTab = new Map()
 /** Global label id -> owning frame for iframe-aware clicks. */
 const labelFrames = new Map()
 const lastScrollByTab = new Map()
+/** Named keys supported by press_key, with DOM and CDP keyboard data. */
+const KEY_SPECS = {
+  Enter: { key: 'Enter', code: 'Enter', keyCode: 13, text: '\r' },
+  Tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
+  Escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
+  Backspace: { key: 'Backspace', code: 'Backspace', keyCode: 8 },
+  Delete: { key: 'Delete', code: 'Delete', keyCode: 46 },
+  ArrowUp: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+  ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+  ArrowLeft: { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+  ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+  Home: { key: 'Home', code: 'Home', keyCode: 36 },
+  End: { key: 'End', code: 'End', keyCode: 35 },
+  PageUp: { key: 'PageUp', code: 'PageUp', keyCode: 33 },
+  PageDown: { key: 'PageDown', code: 'PageDown', keyCode: 34 },
+  Space: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
+}
+/** CDP Input.dispatchKeyEvent modifier bits. */
+const MODIFIER_BITS = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
 
 export class BrowserError extends Error {
   /**
@@ -936,6 +955,235 @@ async function clickLabelled(label) {
 }
 
 /**
+ * Type into a labelled field from inside the page. Self-contained: chrome
+ * scripting serializes this source, so it must not reference module state.
+ * Returns verification so the caller can fall back to trusted Input.insertText.
+ * @param {number} label
+ * @param {string} text
+ * @param {'replace'|'append'} mode
+ */
+async function typeLabelled(label, text, mode) {
+  const state = globalThis.__crazyagent
+  const el = state?.byId?.get(label)
+  if (!el) return { ok: false, code: 'UNKNOWN_LABEL', message: `Label ${label} is not in the current view.` }
+  if (!el.isConnected) return { ok: false, code: 'DETACHED', message: `Label ${label} no longer exists.` }
+  const info = state?.infoById?.get(label) ?? {}
+  const tag = el.tagName.toLowerCase()
+  const type = (el.type || '').toLowerCase()
+  const disabled = info.disabled === true || el.disabled === true || el.getAttribute('aria-disabled') === 'true'
+  if (disabled) return { ok: false, code: 'DISABLED', message: `Label ${label} is disabled and cannot be typed into.` }
+  const isField = tag === 'input' || tag === 'textarea'
+  const isPassword = tag === 'input' && type === 'password'
+  const acceptsText = tag === 'input' ? !['checkbox', 'radio', 'file', 'hidden'].includes(type) : tag === 'textarea'
+  const editable = acceptsText || el.isContentEditable === true
+  if (!editable) {
+    return { ok: false, code: 'NOT_EDITABLE', message: `Label ${label} (${tag}${type ? `:${type}` : ''}) does not accept text.` }
+  }
+  el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
+  if (typeof el.focus === 'function') el.focus({ preventScroll: true })
+  await Promise.race([
+    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    new Promise(resolve => setTimeout(resolve, 60)),
+  ])
+  const read = () => isField ? String(el.value ?? '') : String(el.innerText ?? el.textContent ?? '')
+  const preview = value => isPassword ? `[password ${value.length} chars]` : value.slice(0, 120)
+  const before = read()
+  if (isField) {
+    // The native setter bypasses framework value trackers so React/Vue see the
+    // same event a user would produce.
+    const proto = tag === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value')
+    const next = mode === 'append' ? before + text : text
+    if (descriptor?.set) descriptor.set.call(el, next)
+    else el.value = next
+    el.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: text.length === 0 ? 'deleteContentBackward' : 'insertText',
+      data: text,
+    }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  } else {
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    if (mode === 'append') range.collapse(false)
+    selection?.addRange(range)
+    try {
+      if (text.length === 0) document.execCommand('delete')
+      else document.execCommand('insertText', false, text)
+    } catch {
+      // Verification below decides whether the trusted fallback is needed.
+    }
+    el.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: text.length === 0 ? 'deleteContentBackward' : 'insertText',
+      data: text,
+    }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+  const after = read()
+  const expected = mode === 'append' ? before + text : text
+  const normalize = value => String(value).replace(/\s+/gu, ' ').trim()
+  const verified = after === expected || (!isField && normalize(after) === normalize(expected))
+  return {
+    ok: true,
+    tag,
+    type,
+    isPassword,
+    beforeChars: before.length,
+    beforePreview: preview(before),
+    afterChars: after.length,
+    valuePreview: preview(after),
+    verified,
+  }
+}
+
+/**
+ * Focus a labelled field and place the caret or selection for trusted typing.
+ * Self-contained page function.
+ * @param {number} label
+ * @param {'replace'|'append'} mode
+ */
+async function prepareLabelledTyping(label, mode) {
+  const state = globalThis.__crazyagent
+  const el = state?.byId?.get(label)
+  if (!el) return { ok: false, code: 'UNKNOWN_LABEL', message: `Label ${label} is not in the current view.` }
+  if (!el.isConnected) return { ok: false, code: 'DETACHED', message: `Label ${label} no longer exists.` }
+  el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
+  if (typeof el.focus === 'function') el.focus({ preventScroll: true })
+  const tag = el.tagName.toLowerCase()
+  if (tag === 'input' || tag === 'textarea') {
+    if (mode === 'replace') el.select?.()
+    else {
+      const end = String(el.value ?? '').length
+      el.setSelectionRange?.(end, end)
+    }
+  } else if (el.isContentEditable === true) {
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    if (mode === 'append') range.collapse(false)
+    selection?.addRange(range)
+  } else {
+    return { ok: false, code: 'NOT_EDITABLE', message: `Label ${label} does not accept text.` }
+  }
+  await Promise.race([
+    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    new Promise(resolve => setTimeout(resolve, 60)),
+  ])
+  return { ok: true }
+}
+
+/**
+ * Read a labelled field's value length and masked preview. Self-contained.
+ * @param {number} label
+ */
+function readLabelledField(label) {
+  const state = globalThis.__crazyagent
+  const el = state?.byId?.get(label)
+  if (!el || !el.isConnected) return { ok: false, code: 'DETACHED', message: `Label ${label} no longer exists.` }
+  const tag = el.tagName.toLowerCase()
+  const type = (el.type || '').toLowerCase()
+  const isPassword = tag === 'input' && type === 'password'
+  const value = (tag === 'input' || tag === 'textarea')
+    ? String(el.value ?? '')
+    : String(el.innerText ?? el.textContent ?? '')
+  return {
+    ok: true,
+    chars: value.length,
+    preview: isPassword ? `[password ${value.length} chars]` : value.slice(0, 120),
+    isPassword,
+  }
+}
+
+/**
+ * Read whatever field currently has focus in the top frame. Self-contained.
+ * Used by label-less trusted typing, where the caret was placed by a click.
+ */
+function readFocusedField() {
+  const el = document.activeElement
+  if (!el) return { chars: 0, preview: '', isPassword: false, tag: '' }
+  const tag = el.tagName.toLowerCase()
+  const type = (el.type || '').toLowerCase()
+  const isPassword = tag === 'input' && type === 'password'
+  let value = ''
+  if (tag === 'input' || tag === 'textarea') value = String(el.value ?? '')
+  else if (el.isContentEditable === true) value = String(el.innerText ?? el.textContent ?? '')
+  return {
+    chars: value.length,
+    preview: isPassword ? `[password ${value.length} chars]` : value.slice(0, 120),
+    isPassword,
+    tag: `${tag}${type ? `:${type}` : ''}`,
+  }
+}
+
+/**
+ * Synthetic key fallback when the debugger cannot attach. Self-contained page
+ * function; dispatches keydown/keyup on the focused element.
+ * @param {string} key
+ * @param {string} code
+ * @param {number} keyCode
+ * @param {number} modifiers CDP bitmask (alt=1, ctrl=2, meta=4, shift=8)
+ */
+function syntheticKeyPage(key, code, keyCode, modifiers) {
+  const target = document.activeElement || document.body || document.documentElement
+  const init = {
+    key,
+    code,
+    keyCode,
+    which: keyCode,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    ctrlKey: (modifiers & 2) !== 0,
+    altKey: (modifiers & 1) !== 0,
+    metaKey: (modifiers & 4) !== 0,
+    shiftKey: (modifiers & 8) !== 0,
+  }
+  target.dispatchEvent(new KeyboardEvent('keydown', init))
+  target.dispatchEvent(new KeyboardEvent('keyup', init))
+  return { dispatched: true, target: target.id || target.tagName || '' }
+}
+
+/**
+ * Poll page conditions until they all hold or the budget expires. Self-contained
+ * page function. `ms` is fulfilled by the caller's page-side delay, so it only
+ * has to be reported, not waited for again.
+ * @param {{text: string|null, url: string|null, idle: boolean}} conditions
+ * @param {number} timeoutMs
+ */
+async function waitForConditionsPage(conditions, timeoutMs) {
+  const started = performance.now()
+  const deadline = started + Math.max(0, Number(timeoutMs) || 0)
+  let lastMutationAt = performance.now()
+  let observer
+  if (conditions.idle === true) {
+    observer = new MutationObserver(() => { lastMutationAt = performance.now() })
+    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true })
+  }
+  const wantedText = typeof conditions.text === 'string' ? conditions.text.toLowerCase() : null
+  const wantedUrl = typeof conditions.url === 'string' ? conditions.url : null
+  const check = () => {
+    if (wantedText !== null) {
+      const bodyText = String(document.body?.innerText ?? '').toLowerCase()
+      if (!bodyText.includes(wantedText)) return false
+    }
+    if (wantedUrl !== null && !String(location.href).includes(wantedUrl)) return false
+    if (conditions.idle === true && performance.now() - lastMutationAt < 300) return false
+    return true
+  }
+  let found = check()
+  while (!found && performance.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+    found = check()
+  }
+  observer?.disconnect()
+  return { found, elapsedMs: Math.round(performance.now() - started) }
+}
+
+/**
  * Scroll the document or the largest visible nested scroller.
  * This function is serialized into the page; it must not reference module state.
  * @param {'up'|'down'|'left'|'right'} direction
@@ -1834,6 +2082,495 @@ async function click(settings, label) {
 
 export { labelPage as labelElements, clickLabelled as clickElementByLabel }
 
+/** @param {unknown} error */
+function isDebuggerBusy(error) {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'DEBUGGER_BUSY')
+}
+
+/**
+ * Validate type arguments.
+ * @param {Record<string, any>} args
+ * @returns {{text: string, mode: 'replace'|'append', label: number|undefined, submit: boolean}}
+ */
+function parseTypeArgs(args) {
+  if (typeof args.text !== 'string' || args.text.length > 20_000) {
+    throw new BrowserError('BAD_TEXT', 'text must be a string of at most 20000 characters')
+  }
+  let mode = 'replace'
+  if (args.mode !== undefined) {
+    if (args.mode !== 'replace' && args.mode !== 'append') {
+      throw new BrowserError('BAD_MODE', "mode must be 'replace' or 'append'")
+    }
+    mode = args.mode
+  }
+  let label
+  if (args.label !== undefined && args.label !== null) {
+    const value = Number(args.label)
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new BrowserError('BAD_LABEL', 'label must be a positive integer from the current view')
+    }
+    label = value
+  }
+  return { text: args.text, mode, label, submit: args.submit === true }
+}
+
+/**
+ * Trusted fallback for a labelled field whose DOM typing did not verify: focus
+ * and select in the page, then insert text through the debugger.
+ * @param {number} tabId
+ * @param {{frameId: number, localId: number}} target
+ * @param {{text: string, mode: 'replace'|'append'}} request
+ * @param {Record<string, any>} domResult
+ */
+async function trustedTypeIntoLabel(tabId, target, request, domResult) {
+  let prepared
+  try {
+    prepared = await runInFrame(tabId, target.frameId, prepareLabelledTyping, [target.localId, request.mode], 3_000)
+  } catch {
+    prepared = undefined
+  }
+  if (!prepared?.ok) return { method: 'dom', ...domResult }
+  try {
+    await withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: request.text }))
+  } catch (error) {
+    if (isDebuggerBusy(error)) throw error
+    return { method: 'dom', ...domResult }
+  }
+  let read
+  try {
+    read = await runInFrame(tabId, target.frameId, readLabelledField, [target.localId], 3_000)
+  } catch {
+    read = undefined
+  }
+  return {
+    method: 'trusted',
+    isPassword: domResult.isPassword === true,
+    beforeChars: domResult.beforeChars ?? 0,
+    beforePreview: domResult.beforePreview ?? '',
+    afterChars: read?.chars ?? domResult.afterChars ?? 0,
+    valuePreview: read?.preview ?? domResult.valuePreview ?? '',
+  }
+}
+
+/**
+ * Label-less trusted typing: Input.insertText goes to whatever already has
+ * focus (the canvas-editor case, where a caret click put it there).
+ * @param {number} tabId
+ * @param {{text: string}} request
+ */
+async function trustedTypeIntoFocus(tabId, request) {
+  let before
+  try {
+    before = await runInTab(tabId, readFocusedField, [], 2_000)
+  } catch {
+    before = undefined
+  }
+  await withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: request.text }))
+  await settleAfterInput(tabId, undefined)
+  let after
+  try {
+    after = await runInTab(tabId, readFocusedField, [], 2_000)
+  } catch {
+    after = undefined
+  }
+  return {
+    method: 'trusted',
+    isPassword: before?.isPassword === true || after?.isPassword === true,
+    beforeChars: before?.chars ?? 0,
+    beforePreview: before?.preview ?? '',
+    afterChars: after?.chars ?? 0,
+    valuePreview: after?.preview ?? '',
+  }
+}
+
+/**
+ * Press Enter through the debugger, falling back to synthetic key events.
+ * @param {number} tabId
+ */
+async function pressEnter(tabId) {
+  const spec = KEY_SPECS.Enter
+  try {
+    await withDebugger(tabId, () => dispatchTrustedKey(tabId, spec, 0))
+    return true
+  } catch (error) {
+    if (isDebuggerBusy(error)) throw error
+    await runInTab(tabId, syntheticKeyPage, [spec.key, spec.code, spec.keyCode, 0], 2_000)
+    return false
+  }
+}
+
+/**
+ * Type into a field. Label path prefers the DOM path and falls back to trusted
+ * Input.insertText; label-less path always types through the debugger into the
+ * focused element. Returns a fresh view plus what was typed.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {Record<string, any>} args
+ */
+async function typeText(settings, args) {
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  assertCapturable(tab)
+  const request = parseTypeArgs(args)
+  let outcome
+  if (request.label !== undefined) {
+    const target = labelFrames.get(request.label)
+    if (!target) throw new BrowserError('UNKNOWN_LABEL', `Label ${request.label} is not in the current view. Take a fresh screenshot.`)
+    let domResult
+    try {
+      domResult = await runInFrame(tab.id, target.frameId, typeLabelled, [target.localId, request.text, request.mode], 5_000)
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+      if (code === 'SCRIPT_TIMEOUT') throw new BrowserError('TYPE_TIMEOUT', 'Typing into this field did not complete. Take a fresh view and try again.')
+      throw error
+    }
+    if (domResult?.ok === false) {
+      throw new BrowserError(domResult.code ?? 'TYPE_FAILED', domResult.message ?? 'Could not type into this field.')
+    }
+    outcome = domResult.verified
+      ? { method: 'dom', ...domResult }
+      : await trustedTypeIntoLabel(tab.id, target, request, domResult)
+  } else {
+    outcome = await trustedTypeIntoFocus(tab.id, request)
+  }
+  let submitted = false
+  if (request.submit) {
+    await pressEnter(tab.id)
+    submitted = true
+  }
+  const shot = await snapshot('normal', settings)
+  const beforeChars = outcome.beforeChars ?? 0
+  const afterChars = outcome.afterChars ?? 0
+  const beforePreview = outcome.beforePreview ?? ''
+  const valuePreview = outcome.valuePreview ?? ''
+  const changed = afterChars !== beforeChars || valuePreview !== beforePreview
+  return {
+    ...shot,
+    op: 'type',
+    typed: {
+      ...(request.label === undefined ? {} : { label: request.label }),
+      chars: request.text.length,
+      mode: request.mode,
+      submitted,
+      method: outcome.method,
+      beforeChars,
+      afterChars,
+      valuePreview,
+    },
+    changed,
+    signals: changed ? ['text-changed'] : [],
+  }
+}
+
+/**
+ * Resolve a press_key key name into DOM + CDP keyboard data.
+ * @param {string} raw
+ * @param {number} mask
+ * @returns {{key: string, code: string, keyCode: number, text?: string}}
+ */
+function resolveKeySpec(raw, mask) {
+  const named = Object.keys(KEY_SPECS).find(name => name.toLowerCase() === raw.toLowerCase())
+  if (named) return KEY_SPECS[named]
+  const shifted = (mask & MODIFIER_BITS.shift) !== 0
+  const plain = (mask & (MODIFIER_BITS.ctrl | MODIFIER_BITS.alt | MODIFIER_BITS.meta)) === 0
+  // Physical key names are accepted too (the tool description mentions "KeyA").
+  const codeLetter = /^Key([a-zA-Z])$/u.exec(raw)
+  if (codeLetter) {
+    const upper = codeLetter[1].toUpperCase()
+    const key = shifted ? upper : upper.toLowerCase()
+    return { key, code: `Key${upper}`, keyCode: upper.charCodeAt(0), ...(plain ? { text: key } : {}) }
+  }
+  const codeDigit = /^Digit([0-9])$/u.exec(raw)
+  if (codeDigit) {
+    const shiftedChar = { 1: '!', 2: '@', 3: '#', 4: '$', 5: '%', 6: '^', 7: '&', 8: '*', 9: '(', 0: ')' }[codeDigit[1]]
+    const key = shifted ? shiftedChar : codeDigit[1]
+    return { key, code: `Digit${codeDigit[1]}`, keyCode: codeDigit[1].charCodeAt(0), ...(plain ? { text: key } : {}) }
+  }
+  if (/^[a-zA-Z]$/u.test(raw)) {
+    const upper = raw.toUpperCase()
+    const key = shifted ? upper : raw.toLowerCase()
+    return { key, code: `Key${upper}`, keyCode: upper.charCodeAt(0), ...(plain ? { text: key } : {}) }
+  }
+  if (/^[0-9]$/u.test(raw)) {
+    const shiftedChar = { 1: '!', 2: '@', 3: '#', 4: '$', 5: '%', 6: '^', 7: '&', 8: '*', 9: '(', 0: ')' }[raw]
+    const key = shifted ? shiftedChar : raw
+    return { key, code: `Digit${raw}`, keyCode: raw.charCodeAt(0), ...(plain ? { text: key } : {}) }
+  }
+  throw new BrowserError('BAD_KEY', `Unsupported key ${JSON.stringify(raw)}`)
+}
+
+/**
+ * Validate press_key arguments into a dispatchable key request.
+ * @param {Record<string, any>} args
+ */
+function parsePressKeyArgs(args) {
+  if (typeof args.key !== 'string' || args.key.length === 0) {
+    throw new BrowserError('BAD_KEY', 'key must be one of the supported key names or a single a-z, A-Z, 0-9 character')
+  }
+  const modifiers = []
+  if (args.modifiers !== undefined) {
+    if (!Array.isArray(args.modifiers)) throw new BrowserError('BAD_KEY', 'modifiers must be an array')
+    for (const item of args.modifiers) {
+      const value = String(item).toLowerCase()
+      if (!(value in MODIFIER_BITS)) throw new BrowserError('BAD_KEY', `Unsupported modifier ${JSON.stringify(item)}; use ctrl, alt, shift, meta`)
+      if (!modifiers.includes(value)) modifiers.push(value)
+    }
+  }
+  let mask = 0
+  for (const item of modifiers) mask |= MODIFIER_BITS[item]
+  // An explicit uppercase letter or digit is typed as a shifted key even when
+  // the caller did not list shift; the echoed modifiers stay as requested.
+  let spec = resolveKeySpec(args.key, mask)
+  if (/^[A-Z]$/u.test(args.key) && (mask & MODIFIER_BITS.shift) === 0) {
+    mask |= MODIFIER_BITS.shift
+    spec = resolveKeySpec(args.key, mask)
+  }
+  return { key: args.key, modifiers, mask, spec }
+}
+
+/**
+ * Dispatch one trusted keyDown/keyUp pair through the debugger. Key-down uses
+ * text when the key produces one (Enter submits forms, Space inserts), and
+ * rawKeyDown otherwise (Tab still moves focus).
+ * @param {number} tabId
+ * @param {{key: string, code: string, keyCode: number, text?: string}} spec
+ * @param {number} mask
+ */
+async function dispatchTrustedKey(tabId, spec, mask) {
+  const base = {
+    key: spec.key,
+    code: spec.code,
+    windowsVirtualKeyCode: spec.keyCode,
+    nativeVirtualKeyCode: spec.keyCode,
+    modifiers: mask,
+  }
+  const down = typeof spec.text === 'string'
+    ? { type: 'keyDown', ...base, text: spec.text, unmodifiedText: spec.text }
+    : { type: 'rawKeyDown', ...base }
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', down)
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', { type: 'keyUp', ...base })
+}
+
+/**
+ * Press one key with optional modifiers, then return a fresh view.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {Record<string, any>} args
+ */
+async function pressKey(settings, args) {
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  assertCapturable(tab)
+  const request = parsePressKeyArgs(args)
+  const before = lastViewByTab.get(tab.id)
+  let trusted = true
+  try {
+    await withDebugger(tab.id, () => dispatchTrustedKey(tab.id, request.spec, request.mask))
+  } catch (error) {
+    if (isDebuggerBusy(error)) throw error
+    trusted = false
+    await runInTab(tab.id, syntheticKeyPage, [request.spec.key, request.spec.code, request.spec.keyCode, request.mask], 2_000)
+  }
+  await settleAfterInput(tab.id, undefined)
+  const shot = await snapshot('normal', settings)
+  const viewport = shot.viewport ?? { width: 1, height: 1 }
+  const diff = await diffRegion(before, shot, viewport.width / 2, viewport.height / 2, Math.max(viewport.width, viewport.height))
+  return {
+    ...shot,
+    op: 'press_key',
+    pressed: { key: request.key, modifiers: request.modifiers, trusted },
+    changed: diff.changed,
+    signals: diff.changed ? ['pixels-changed'] : [],
+  }
+}
+
+/**
+ * Validate navigate arguments.
+ * @param {Record<string, any>} args
+ * @returns {{url: string, newTab: boolean} | {history: 'back'|'forward'|'reload'}}
+ */
+function parseNavigateArgs(args) {
+  const hasUrl = args.url !== undefined && args.url !== null && args.url !== ''
+  const hasHistory = args.history !== undefined && args.history !== null && args.history !== ''
+  if (hasUrl && hasHistory) throw new BrowserError('BAD_NAVIGATE', 'Provide either url or history for navigate, not both.')
+  if (!hasUrl && !hasHistory) throw new BrowserError('BAD_NAVIGATE', 'navigate requires a url or a history action')
+  if (hasHistory) {
+    if (args.new_tab !== undefined) throw new BrowserError('BAD_NAVIGATE', 'new_tab is only valid with a url')
+    const action = String(args.history)
+    if (action !== 'back' && action !== 'forward' && action !== 'reload') {
+      throw new BrowserError('BAD_NAVIGATE', "history must be 'back', 'forward', or 'reload'")
+    }
+    return { history: action }
+  }
+  let parsed
+  try {
+    parsed = new URL(String(args.url))
+  } catch {
+    throw new BrowserError('BAD_URL', 'url must be an absolute http(s) URL')
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new BrowserError('BAD_URL', 'Only http and https URLs can be navigated to')
+  }
+  return { url: parsed.href, newTab: args.new_tab === true }
+}
+
+/**
+ * Wait until a navigation has visibly started, so waitForTabComplete cannot
+ * resolve against the old, already-complete document.
+ * @param {number} tabId
+ * @param {string|undefined} expectedUrl
+ * @param {string} fromUrl
+ * @param {boolean} isReload
+ * @param {number} timeoutMs
+ */
+async function waitForNavigationStart(tabId, expectedUrl, fromUrl, isReload, timeoutMs) {
+  const started = performance.now()
+  while (performance.now() - started < timeoutMs) {
+    const tab = await chrome.tabs.get(tabId).catch(() => undefined)
+    if (!tab) return
+    if (tab.status === 'loading') return
+    if (typeof tab.pendingUrl === 'string' && tab.pendingUrl.length > 0) return
+    if (expectedUrl !== undefined && tab.url === expectedUrl) return
+    if (!isReload && tab.url !== fromUrl) return
+    // Reload and same-URL history entries may complete before they are observed.
+    if (performance.now() - started > 300 && tab.status === 'complete') return
+    await sleep(25)
+  }
+}
+
+/**
+ * Navigate the active tab (or a new tab) and return a fresh view. The load wait
+ * has a 15s budget; a timed-out load still returns a snapshot with timedOut.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {Record<string, any>} args
+ */
+async function navigate(settings, args) {
+  const request = parseNavigateArgs(args)
+  const windowId = await getWindowId()
+  const active = await getActiveTab(windowId)
+  const fromUrl = active.url ?? ''
+  let tabId = active.id
+  let newTab = false
+  let history
+  if (request.url !== undefined) {
+    if (request.newTab) {
+      let created
+      try {
+        created = await chrome.tabs.create({ url: request.url, active: true })
+      } catch (error) {
+        throw new BrowserError('BAD_NAVIGATE', `Chrome could not open a new tab: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      if (created?.id === undefined) throw new BrowserError('BAD_NAVIGATE', 'Chrome did not create the requested tab')
+      tabId = created.id
+      newTab = true
+    } else {
+      try {
+        await chrome.tabs.update(tabId, { url: request.url })
+      } catch (error) {
+        throw new BrowserError('BAD_NAVIGATE', `Chrome could not navigate this tab: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  } else {
+    history = request.history
+    try {
+      if (history === 'back') await chrome.tabs.goBack(tabId)
+      else if (history === 'forward') await chrome.tabs.goForward(tabId)
+      else await chrome.tabs.reload(tabId)
+    } catch (error) {
+      throw new BrowserError('BAD_NAVIGATE', `Chrome could not ${history} in this tab: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  const waitStarted = performance.now()
+  await waitForNavigationStart(tabId, request.url, fromUrl, history === 'reload', 1_500)
+  const remaining = Math.max(1, 15_000 - (performance.now() - waitStarted))
+  await waitForTabComplete(tabId, windowId, remaining)
+  const waitMs = Math.round(performance.now() - waitStarted)
+  const current = await chrome.tabs.get(tabId).catch(() => undefined)
+  const timedOut = (current?.status ?? 'complete') !== 'complete'
+  const shot = await snapshot('normal', settings)
+  return {
+    ...shot,
+    op: 'navigate',
+    navigated: {
+      ...(request.url === undefined ? {} : { requestedUrl: request.url }),
+      fromUrl,
+      toUrl: current?.url ?? shot.tab.url ?? '',
+      tabId,
+      newTab,
+      ...(history === undefined ? {} : { history }),
+      status: current?.status ?? shot.tab.status ?? 'unknown',
+      timedOut,
+      waitMs,
+    },
+  }
+}
+
+/**
+ * Validate wait_for arguments.
+ * @param {Record<string, any>} args
+ * @returns {{conditions: {text?: string, url?: string, idle?: boolean, ms?: number}, timeoutMs: number}}
+ */
+function parseWaitForArgs(args) {
+  const conditions = {}
+  if (args.text !== undefined) {
+    if (typeof args.text !== 'string' || args.text.length === 0) {
+      throw new BrowserError('BAD_WAIT', 'text must be a non-empty string')
+    }
+    conditions.text = args.text
+  }
+  if (args.url !== undefined) {
+    if (typeof args.url !== 'string') throw new BrowserError('BAD_WAIT', 'url must be a string')
+    conditions.url = args.url
+  }
+  if (args.idle === true) conditions.idle = true
+  if (args.ms !== undefined) {
+    const ms = Number(args.ms)
+    if (!Number.isFinite(ms) || ms < 0 || ms > 30_000) {
+      throw new BrowserError('BAD_WAIT', 'ms must be an integer from 0 to 30000')
+    }
+    conditions.ms = Math.round(ms)
+  }
+  if (Object.keys(conditions).length === 0) {
+    throw new BrowserError('BAD_WAIT', 'wait_for needs at least one of text, url, idle, or ms')
+  }
+  let timeoutMs = 10_000
+  if (args.timeout_ms !== undefined) {
+    const value = Number(args.timeout_ms)
+    if (!Number.isInteger(value) || value < 1_000 || value > 30_000) {
+      throw new BrowserError('BAD_TIMEOUT', 'timeout_ms must be an integer from 1000 to 30000')
+    }
+    timeoutMs = value
+  }
+  return { conditions, timeoutMs }
+}
+
+/**
+ * Wait for page conditions (text/url/idle), then return a fresh view.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {Record<string, any>} args
+ */
+async function waitFor(settings, args) {
+  const started = performance.now()
+  const { conditions, timeoutMs } = parseWaitForArgs(args)
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  assertCapturable(tab)
+  if (conditions.ms > 0) await pauseInTab(tab.id, conditions.ms)
+  const remaining = Math.max(1, timeoutMs - Math.round(performance.now() - started))
+  const pageConditions = {
+    text: conditions.text ?? null,
+    url: conditions.url ?? null,
+    idle: conditions.idle === true,
+  }
+  const polled = await runInTab(tab.id, waitForConditionsPage, [pageConditions, remaining], remaining + 2_000)
+  const found = polled?.found === true
+  const elapsedMs = Math.round(performance.now() - started)
+  const shot = await snapshot('normal', settings)
+  return {
+    ...shot,
+    op: 'wait_for',
+    waited: { conditions, found, timedOut: !found, elapsedMs },
+  }
+}
+
 /**
  * Clamp an optional model-requested page-side delay for a snapshot.
  * @param {unknown} value
@@ -1872,6 +2609,18 @@ export async function execute(op, args = {}, settings) {
   }
   if (op === 'click_at') {
     return clickAt(normalized, args)
+  }
+  if (op === 'type') {
+    return typeText(normalized, args)
+  }
+  if (op === 'press_key') {
+    return pressKey(normalized, args)
+  }
+  if (op === 'navigate') {
+    return navigate(normalized, args)
+  }
+  if (op === 'wait_for') {
+    return waitFor(normalized, args)
   }
   if (op === 'select_option') {
     const windowId = await getWindowId()
