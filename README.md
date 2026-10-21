@@ -1,6 +1,6 @@
 # CrazyAgent — Phase 1 browser vision agent
 
-A Chrome/Edge side-panel agent that **sees the current tab, clicks labelled DOM controls or canvas coordinates, hovers, selects options, reads page text, scrolls, lists tabs, and switches tabs**. It cannot type, press keys, navigate by URL, drag, or upload files. The agent loop, sessions, tool pipeline, prompt assembly, attachments, and model routing are **DSH 0.2.1-rc.2**, not a custom harness.
+A Chrome/Edge side-panel agent that **sees the current tab, clicks labelled DOM controls or canvas coordinates (single points or a burst of up to eight per call), hovers, selects options, reads page text, scrolls, lists tabs, and switches tabs**. It cannot type, press keys, navigate by URL, drag, or upload files. The agent loop, sessions, tool pipeline, prompt assembly, attachments, and model routing are **DSH 0.2.1-rc.2**, not a custom harness.
 
 The side panel is a normal MV3 extension page. The DSH runtime runs locally as a child of a small companion process; the browser and the harness talk over loopback WebSocket.
 
@@ -17,7 +17,7 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
 | Auto-view on every message | A fresh screenshot is attached to the user prompt, so the model starts each turn already looking at the page |
 | `browser_screenshot` | Viewport screenshot + tab, viewport, scroll, and scale metadata |
 | `browser_click` | Clicks a numbered interactive element (DOM, shadow DOM, or iframe) from the current view. Labels come from yellow badges and a text list; coordinates are never accepted. Returns whether the page changed and a fresh view |
-| `browser_click_at` | Clicks screenshot-pixel or CSS coordinates for canvas, video, and iframe surfaces. Uses **trusted browser input** (DevTools protocol) and verifies with a **pixel diff**, which works where no DOM event fires |
+| `browser_click_at` | Clicks screenshot-pixel or CSS coordinates for canvas, video, and iframe surfaces. `points: [{x,y}, …]` clicks up to 8 targets in one call (one debugger attach, one settle, one fresh view, per-point `changed`); `view: "none"` skips the screenshot for rapid repeated bursts; `settle_ms` tunes the post-click paint wait. Uses **trusted browser input** (DevTools protocol) and verifies with a **pixel diff**, which works where no DOM event fires |
 | `browser_hover` | Hovers a labelled element and returns a fresh view, so hover-only menus and tooltips become clickable |
 | `browser_select_option` | Chooses an option on a native `<select>` by label id and option text (a synthetic click cannot open the OS dropdown) |
 | `browser_read_text` | Rendered page text (or just the viewport) as text, with `offset`/`max_chars` pagination. No screenshot; typically a few milliseconds and far fewer tokens |
@@ -26,7 +26,7 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
 | `browser_switch_tab` | Activates a tab by `tab_id` or by a case-insensitive title/URL `query`; returns a fresh screenshot |
 | Vision model | Image-capable OpenRouter model through DSH's pi-ai adapter |
 | Live activity | Expanded side-panel feed streams reasoning/thinking deltas, assistant text, partial and committed tool calls, results, browser commands, token usage, finish reasons, and errors as they happen |
-| Reasoning effort | **Auto** by default: `off` for navigation-only turns, `low` for reading/describing/synthesis. Manual `off`/`low`/`medium`/`high` override in Settings |
+| Reasoning effort | **Auto** by default: `off` for navigation-only turns and **rapid game bursts**, `low` for reading/describing/synthesis. Manual `off`/`low`/`medium`/`high` override in Settings |
 | Image history | After each turn, the newest two screenshots stay in the request; older ones are durably offloaded to placeholder text while attachments remain on disk |
 | Persistence | DSH session log and screenshot attachments under `.dsh-home` |
 | UI | Side-panel chat, live activity feed, tool cards with text previews and screenshot thumbnails, pause, settings, new chat |
@@ -35,11 +35,12 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
 
 ### Canvas, video, and iframe surfaces
 
-Canvas apps (Docs-style editors, maps, Figma-style tools, dashboards, games, video players) have no DOM controls to label, and their clicks never produce DOM mutations. The agent handles that in three ways:
+Canvas apps (Docs-style editors, maps, Figma-style tools, dashboards, games, video players) have no DOM controls to label, and their clicks never produce DOM mutations. The agent handles that in four ways:
 
 1. **Surface metadata.** Every view lists visible `canvas`, `video`, and `iframe` regions with size and position, so the model knows when to switch from labels to coordinates.
 2. **Coordinate clicks with trusted input.** `browser_click_at` maps screenshot pixels to CSS viewport pixels, then dispatches via `chrome.debugger` (`Input.dispatchMouseEvent`), so the page receives trusted mouse events that canvas handlers accept. If the debugger cannot attach (DevTools is open), it falls back to synthetic events and reports `trusted: false`.
 3. **Pixel-diff verification.** The side panel keeps the previous view image and samples a 240×240 CSS region around the click before and after. `pixels_changed` is the share of sampled pixels that changed, and it is the only reliable success signal for canvas. A click on an unchanged region returns **NO VISIBLE CHANGE**.
+4. **Burst clicking and hasty mode.** Several canvas targets are usually visible at once -- a reaction game can show ten. `browser_click_at` accepts up to eight `points` per call: they share one `chrome.debugger` attach, one adaptive paint settle, and one capture, and the result reports `changed` per point. `view: "none"` skips the capture entirely, the fastest path for rapid repeated bursts (at the cost of not seeing the result until the next screenshot). `settle_ms` (0-400) overrides the adaptive paint wait when a surface repaints slowly.
 
 Canvas apps also keep their own scroll state, so `browser_scroll` first tries the DOM; if nothing moved, it dispatches a trusted wheel event at the viewport center and reports `wheel: true`.
 
@@ -213,7 +214,8 @@ npm run clean -- --yes   # removes .dsh-home; run npm run setup again afterwards
 | Interactive labelling (9–120 elements) | **7–21 ms** per view |
 | Click dispatch + settle + fresh view | **~250–370 ms** with no capture-quota hit; Chrome's 2-per-second capture quota can add ~650 ms when three captures land in one second |
 | Label a page with two child frames | **14–21 ms** (one round trip per frame) |
-| Trusted canvas click (attach → dispatch → detach) + pixel diff | **~200–400 ms** including the fresh view |
+| Trusted canvas click (attach → dispatch → detach) + adaptive pixel-diff view | **~200–300 ms** including the fresh view; the fixed 160 ms settle is now an adaptive two-frame paint wait |
+| Canvas burst, 5 points in one call | **one model round trip instead of five**; extra points cost a few ms each, and `view: "none"` drops a 5-point burst to **~50 ms** on the fixture |
 | Live snapshot: capture + encode + metadata | **95 ms** total (capture 31–35 ms, encode 35–58 ms) |
 | Auto-view observed in the real UI | **58–73 ms** |
 | Real screenshot | 1018×768 CSS at DPR 2 → 1280×966 JPEG, ~96 KB |
@@ -264,7 +266,7 @@ Full schema, event types, `jq` recipes, and sharing instructions are in [`docs/D
 ## Development and tests
 
 ```sh
-npm test          # 57 unit/integration checks: bridge, live activity, reasoning policy, image budget, labels, click/click_at/select/hover tools, surfaces, prompt, log store, OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
+npm test          # 63 unit/integration checks: bridge, live activity, reasoning policy (incl. rapid), image budget, labels, click/click_at burst/select/hover tools, surfaces, prompt, log store, OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
 npm run bench     # local bridge latency
 npm run setup     # idempotent profile/plugin verification
 ```
@@ -276,7 +278,7 @@ Additional dev-only checks (not part of `npm test`):
 - `scripts/log-probe.mjs` — connects as a fake side panel and requests `log.stats`, `log.summary`, and a ZIP export without starting a model turn.
 - `scripts/edge-log-e2e.mjs` — drives the real Debug log modal and verifies that the ZIP download starts.
 - `scripts/edge-click-e2e.mjs` — drives the real extension against `e2e/fixtures/click.html`: label coverage, covered/hidden exclusion, click by label, no-op detection, disabled/stale refusals, checkbox, and navigation. Requires Edge with `--load-extension=extension` on port 9228.
-- `scripts/edge-canvas-e2e.mjs` — canvas checks on port 9230: surface metadata, trusted coordinate click, image-pixel mapping, pixel-diff detection, wheel scrolling, and empty-area no-op.
+- `scripts/edge-canvas-e2e.mjs` — canvas checks on port 9230: surface metadata, trusted coordinate click, image-pixel mapping, pixel-diff detection, wheel scrolling, empty-area no-op, 5-point burst (one attach, +5 trusted clicks), `view:"none"` text-only burst, `delay_ms`, and single-point compatibility.
 - `scripts/edge-advanced-e2e.mjs` — shadow DOM, same- and cross-origin iframes, native select, and hover menus on port 9231.
 
 The fake-UI and Edge end-to-end scripts assume the companion is already configured with an OpenRouter key/model and that the model supports tools. Configure once from the side panel first. The model-latency figures were collected on the earlier direct Alibaba route; capture, bridge, tool, and logging measurements are provider-independent.

@@ -120,5 +120,128 @@ const noopPoint = await evaluate(`(async () => { ${prefix}
 assert.equal(noopPoint.changed, false, 'click on empty canvas margin reports no change')
 console.log('PASS empty-area click reports no change')
 
+const trustedCount = state => Number(/trusted (\d+)/.exec(String(state ?? ''))?.[1]) || 0
+
+const burstPoints = [
+  { x: center.x, y: center.y },
+  { x: center.x - 160, y: center.y - 80 },
+  { x: center.x + 160, y: center.y - 80 },
+  { x: center.x - 160, y: center.y + 80 },
+  { x: center.x + 160, y: center.y + 80 },
+]
+const burst = await evaluate(`(async () => { ${prefix}
+  const stateBefore = await read('state')
+  const result = await mod.execute('click_at', { points: ${JSON.stringify(burstPoints)}, space: 'css' }, settings)
+  return {
+    trusted: result.trusted,
+    pointCount: result.points?.length,
+    changedCount: result.changedCount,
+    changed: result.points?.map(point => point.changed),
+    image: result.image ? { width: result.image.width, height: result.image.height, hasData: typeof result.image.data === 'string' } : null,
+    labelCount: Array.isArray(result.labels) ? result.labels.length : null,
+    surfaceCount: Array.isArray(result.surfaces) ? result.surfaces.length : null,
+    stateBefore,
+    stateAfter: await read('state'),
+  }
+})()`)
+assert.equal(burst.trusted, true, 'burst uses trusted input')
+assert.equal(burst.pointCount, 5, 'burst reports all five points')
+assert.ok(burst.changedCount >= 1, 'burst detects canvas changes')
+assert.ok(burst.image?.hasData && burst.image.width > 0, 'burst returns one labelled image')
+assert.ok(burst.labelCount > 0, 'burst result keeps the snapshot labels')
+assert.ok(burst.surfaceCount > 0, 'burst result keeps the snapshot surfaces')
+assert.equal(
+  trustedCount(burst.stateAfter) - trustedCount(burst.stateBefore),
+  5,
+  'canvas saw five trusted clicks in one burst',
+)
+console.log(`PASS 5-point CSS burst — one capture, ${burst.changedCount}/5 points changed, +5 trusted clicks`)
+
+const nonePoints = [
+  { x: center.x + 60, y: center.y },
+  { x: center.x, y: center.y + 120 },
+  { x: center.x - 60, y: center.y - 120 },
+]
+const noneBurst = await evaluate(`(async () => { ${prefix}
+  const stateBefore = await read('state')
+  const result = await mod.execute('click_at', { points: ${JSON.stringify(nonePoints)}, space: 'css', view: 'none' }, settings)
+  return {
+    trusted: result.trusted,
+    pointCount: result.points?.length,
+    view: result.view,
+    screenshotSkipped: result.screenshotSkipped,
+    hasImage: result.image !== undefined,
+    hasLabels: result.labels !== undefined,
+    hasSurfaces: result.surfaces !== undefined,
+    changedValues: result.points?.map(point => point.changed),
+    changedCount: result.changedCount,
+    stateBefore,
+    stateAfter: await read('state'),
+  }
+})()`)
+assert.equal(noneBurst.trusted, true, 'view:none burst still uses trusted input')
+assert.equal(noneBurst.pointCount, 3, 'view:none burst reports all points')
+assert.equal(noneBurst.view, 'none', 'view:none is reported')
+assert.equal(noneBurst.screenshotSkipped, true, 'view:none reports screenshotSkipped')
+assert.equal(noneBurst.hasImage, false, 'view:none omits the image')
+assert.equal(noneBurst.hasLabels, false, 'view:none omits labels')
+assert.equal(noneBurst.hasSurfaces, false, 'view:none omits surfaces')
+assert.ok(noneBurst.changedValues.every(value => value === null), 'view:none cannot report pixel changes')
+assert.equal(noneBurst.changedCount, 0, 'view:none reports a numeric changedCount')
+assert.equal(
+  trustedCount(noneBurst.stateAfter) - trustedCount(noneBurst.stateBefore),
+  3,
+  'view:none burst still reaches the page',
+)
+console.log('PASS view:none burst — no screenshot, +3 trusted clicks')
+
+const delayed = await evaluate(`(async () => { ${prefix}
+  const started = performance.now()
+  const result = await mod.execute('snapshot', { delay_ms: 300 }, settings)
+  return {
+    op: result.op,
+    totalMs: result.totalMs,
+    wallMs: Math.round(performance.now() - started),
+    hasImage: typeof result.image?.data === 'string',
+    width: result.image?.width,
+  }
+})()`)
+assert.equal(delayed.op, 'snapshot', 'delay_ms keeps the snapshot op')
+assert.ok(delayed.totalMs >= 300, `snapshot delay_ms waits in the page (totalMs ${delayed.totalMs})`)
+assert.ok(delayed.wallMs >= 300, `snapshot delay_ms is in the call wall time (${delayed.wallMs}ms)`)
+assert.ok(delayed.hasImage && delayed.width > 0, 'delayed snapshot still returns the image')
+console.log(`PASS snapshot delay_ms:300 — totalMs ${delayed.totalMs}, image ${delayed.width}px`)
+
+const legacyPoint = { x: center.x + 40, y: center.y - 40 }
+const legacy = await evaluate(`(async () => { ${prefix}
+  const result = await mod.execute('click_at', { space: 'css', x: ${legacyPoint.x}, y: ${legacyPoint.y} }, settings)
+  return {
+    trusted: result.trusted,
+    pointCount: result.points?.length,
+    point: result.point,
+    changed: result.changed,
+    pixelsChanged: result.pixelsChanged,
+    pixelMean: result.pixelMean,
+    signals: result.signals,
+    changedCount: result.changedCount,
+    hasImage: typeof result.image?.data === 'string',
+  }
+})()`)
+assert.equal(legacy.pointCount, 1, 'single click reports one point')
+assert.equal(legacy.point?.space, 'css', 'legacy point keeps its coordinate space')
+assert.ok(
+  Math.abs(legacy.point.x - legacyPoint.x) < 0.01 && Math.abs(legacy.point.y - legacyPoint.y) < 0.01,
+  'legacy point echoes the requested coordinates',
+)
+assert.ok(Number.isInteger(legacy.point.cssX) && Number.isInteger(legacy.point.cssY), 'legacy point reports integer CSS coordinates')
+assert.equal(typeof legacy.changed, 'boolean', 'legacy result keeps changed')
+assert.equal(typeof legacy.pixelsChanged, 'number', 'legacy result keeps pixelsChanged')
+assert.equal(typeof legacy.pixelMean, 'number', 'legacy result keeps pixelMean')
+assert.ok(Array.isArray(legacy.signals), 'legacy result keeps signals')
+assert.equal(legacy.changedCount, legacy.changed ? 1 : 0, 'changedCount matches the single point')
+assert.equal(legacy.trusted, true, 'single-point click stays trusted')
+assert.ok(legacy.hasImage, 'single-point click still returns the image')
+console.log(`PASS single-point legacy fields — changed=${legacy.changed}, ${legacy.pixelsChanged}% pixels`)
+
 console.log('\nALL CANVAS CHECKS PASSED')
 panel.close()

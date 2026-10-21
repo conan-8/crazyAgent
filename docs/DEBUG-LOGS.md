@@ -75,11 +75,13 @@ Fields:
 | `companion` | `run.start`, `turn.start`, `autoCapture.start/end`, `prompt.build`, `tool.call`, `tool.result`, `turn.end`, `dsh.session`, `log.export`, `signal`, `terminal`, `run.stop` |
 | `plugin` | also `reasoning.policy` (classification, chosen effort, prompt size) and `image.budget` / `image.budget.error` (live images, offloaded count, keep budget) |
 | `bridge` | `frame.in`, `frame.out`, `frame.event`, `browser.command.in/out`, `browser.result`; inbound live `activity` frames from the provider plugin |
-| `extension` | `app.boot`, `app.context`, `settings.loaded`, `settings.save`, `settings.pause`, `bridge.connect.start`, `bridge.open`, `bridge.connected`, `bridge.closed`, `chat.send`, `browser.command.start/result/error` (including `click` with clicked label, `changed`, `signals`, and `navigated`; `click_at` with point, `trusted`, `pixelsChanged`; `select_option`; `hover`; `scroll` with `wheel`), `tab.active`, `testCapture.*`, `llm.models.request/result`, `llm.configure.request`, `llm.configured`, `log.modal.open`, `log.export.request/result` |
+| `extension` | `app.boot`, `app.context`, `settings.loaded`, `settings.save`, `settings.pause`, `bridge.connect.start`, `bridge.open`, `bridge.connected`, `bridge.closed`, `chat.send`, `browser.command.start/result/error` (command id, call id, op, `durationMs`, `captureMs`/`encodeMs`, image metadata, tab and scroll state), `tab.active`, `testCapture.*`, `llm.models.request/result`, `llm.configure.request`, `llm.configured`, `log.modal.open`, `log.export.request/result` |
 | `plugin` | `provider.registered`, `bridge.connected`, `bridge.disconnect`, `bridge.command.send`, `bridge.command.result/error` |
 | `dsh` | `startup`, `ready`, `notification`, `assistant.text`, `session.resumed`, `session.resume.error` |
 
 The `dsh.notification` events carry the raw SDK `session.event`/`session.status` payloads: durable assistant messages, usage, replay metadata, turn/step events, tool calls/results, and request headers. That is why the event file is detailed even before the raw DSH session is included.
+
+Click outcomes (`changed`, `signals`, `pixelsChanged`, and per-point burst results) are recorded in the matching `tool.result` text rather than as structured fields on `browser.command.result`; parse the tool result when you need them.
 
 Reasoning policy decisions are logged once per turn as `reasoning.policy` from the provider plugin, with `policy`, `classification`, `effort`, and `promptChars`. The chosen effort is applied to every step of that turn. Image-history trimming is logged as `image.budget` with `live`, `offloaded`, `keep`, and `targets`; failures appear as `image.budget.error`.
 

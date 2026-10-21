@@ -74,7 +74,7 @@ answers with `browser.result`.
 | Repo | `/home/conan/Documents/GitHub/crazyAgent` |
 | Node | 26.8.1 (needs 22.19+) |
 | DSH | `0.2.1-rc.2` (`@deepseek-ai/dsh`) |
-| Companion | running, PID in `logs/companion.pid` (was 507473) |
+| Companion | running, PID in `logs/companion.pid` (1106505 after the burst-click restart) |
 | Bridge | `ws://127.0.0.1:17871/bridge` |
 | Health | `{"ok":true,"ui":false,"tools":true,"port":17871}` |
 | Token | read `.dsh-home/browser-agent/token` (do not commit it) |
@@ -84,9 +84,9 @@ answers with `browser.result`.
 | API key | stored, 73 bytes, `.dsh-home/browser-agent/api-key` (0600) |
 | Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash) |
 | Permissions | sidePanel, tabs, scripting, storage, **debugger**, **webNavigation**, host `<all_urls>` |
-| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-21T14-23-34-035Z-6c0408` |
-| Tests | 57/57 passing |
-| Git | repo initialized, **no commits**; everything is untracked |
+| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-21T18-19-12-088Z-e0d364` (post-restart); game analysis run `run-2026-10-21T14-23-34-035Z-6c0408` |
+| Tests | 63/63 passing |
+| Git | `main` has the baseline commit plus the burst-click change; tree clean |
 
 Latest real-world validation (from that run):
 
@@ -97,6 +97,15 @@ Latest real-world validation (from that run):
   `browser_click` / `browser_hover` through the menus.
 - Turn times 41–53 s for 11–24 tool calls; model-latency bound.
 - One `PROTECTED_PAGE` error when the active tab was a browser-internal page.
+
+2026-10-21 latency work (full attribution in
+`.dsh-home/browser-agent/analysis/canvas-latency.md`, gitignored): per-click wall
+was **80% model round trip, 13.6% browser, 5% image commit**; the fixed 160 ms
+settle was 41% of the browser action. Added burst `points` (1-8, one attach and
+one capture per burst), `view:"none"` text-only fast mode, an adaptive paint
+settle, `delay_ms` screenshot waits, a `rapid` reasoning class (`off`), and
+corrected the stale "you cannot click" prompt text that made the first turn
+deliberate.
 
 ---
 
@@ -221,9 +230,9 @@ update them.
 
 | Tool | What it does | Notes |
 |---|---|---|
-| `browser_screenshot` | View with tab/viewport/scroll metadata, numbered labels, surface list | `detail:"high"` uses 2048 px width |
+| `browser_screenshot` | View with tab/viewport/scroll metadata, numbered labels, surface list | `detail:"high"` uses 2048 px width; `delay_ms` 0-5000 waits in the page before capturing |
 | `browser_click` | Click a labelled element | DOM, open shadow roots, iframes. Returns `changed` + signals + fresh view |
-| `browser_click_at` | Click screenshot pixels or CSS coordinates | Canvas/video/iframe. Trusted input + pixel diff |
+| `browser_click_at` | Click screenshot pixels or CSS coordinates; `points` bursts up to 8 | Canvas/video/iframe. One debugger attach + one capture per burst, per-point pixel diff. `view:"none"` = text-only fast mode; `settle_ms` 0-400 |
 | `browser_hover` | Hover a labelled element | Reveals hover-only menus/tooltips |
 | `browser_select_option` | Choose a native `<select>` option | Sets value, fires `input`/`change` |
 | `browser_read_text` | Rendered text | `page`/`viewport`, `offset`, `max_chars`; ~4 ms on fixtures |
@@ -247,7 +256,8 @@ Behavioural layers:
 - **Change signals for DOM clicks:** `url-change`, `title-change`,
   `scroll-change`, `text-change`, `dialog-change`, `dom-mutations:N`, `checked`,
   `aria-expanded`, `aria-selected`. A no-op returns **NO VISIBLE CHANGE**.
-- **Reasoning auto policy:** navigation → `off`; inspect/synthesis → `low`.
+- **Reasoning auto policy:** navigation → `off`; rapid game/reactive bursts →
+  `off`; inspect/synthesis → `low`.
   Manual Off/Low/Medium/High in Settings. Logged as `reasoning.policy`.
 - **Image budget:** after each `turn/end`, newest 2 images stay in the request;
   older ones become placeholders via `image/offload` (attachments remain on
@@ -283,8 +293,8 @@ Behavioural layers:
 
 | File | Responsibility |
 |---|---|
-| `lib/index.js` (~979 lines) | Plugin: bridge client (`tools` role), `registerTools` (~595), guidance, `apply` (~800), activity frames (`activityFromFrame` ~343), `formatView` (~437), click/click_at/select/hover content, reasoning policy + image budget hooks, `llm/stream` is intentionally **not** used |
-| `lib/reasoning.js` | `classifyPrompt`, `autoEffort`, `effortFor` (navigation/inspect/synthesize) |
+| `lib/index.js` (~1081 lines) | Plugin: bridge client (`tools` role), `registerTools` (~652), guidance, `apply` (~902), activity frames (`activityFromFrame` ~343), `formatView` (~443), `clickAtContent` (~541) with multi-point and view-none formatting, select/hover content, reasoning policy + image budget hooks, `llm/stream` is intentionally **not** used |
+| `lib/reasoning.js` | `classifyPrompt`, `autoEffort`, `effortFor` (navigate/inspect/synthesize/**rapid**) |
 | `lib/image-budget.js` | `planImageOffload` pure planner |
 | `test/*.test.mjs` | 9 tools, label prompts, activity forwarding, reasoning, image budget |
 
@@ -293,7 +303,7 @@ Behavioural layers:
 | File | Responsibility |
 |---|---|
 | `manifest.json` | MV3, side panel, permissions above, `<all_urls>` |
-| `sidepanel/browser.js` (~1700 lines) | Browser executor. Key functions: `withDebugger` (~192), `diffRegion` (~288), `runInFrame` (~318), `labelAllFrames` (~358), `labelPage` (~436), `selectOption` (~671), `hoverLabelled` (~709), `clickLabelled` (~743), `scrollPage` (~897), `snapshot` (~1143), `scroll` (~1217), `clickAt` (~1542), `click` (~1599), `execute` (~1682) |
+| `sidepanel/browser.js` (~1927 lines) | Browser executor. Key functions: `waitForPaint` (~192), `settleAfterInput` (~213), `withDebugger` (~231), `syntheticClickBurst` (~275), `diffRegion` (~336), `runInFrame` (~366), `labelAllFrames` (~406), `labelPage` (~484), `selectOption` (~719), `hoverLabelled` (~757), `clickLabelled` (~791), `scrollPage` (~945), `snapshot` (~1192), `scroll` (~1269), `parseClickAtArgs` (~1604), `clickAt` (~1649), `click` (~1760), `execute` (~1854) |
 | `sidepanel/app.js` | Chat UI, settings (key/base URL/model/effort), bridge lifecycle, live activity feed, tool cards, debug-log modal |
 | `sidepanel/index.html`, `style.css` | UI markup/styles |
 | `sidepanel/logger.js`, `protocol.js` | Client log batching, formatting helpers |
@@ -334,17 +344,17 @@ logs/<runId>/   events.jsonl, screenshots/, exports/, summary files
 
 ## 7. Test inventory
 
-`npm test` = 57 tests:
+`npm test` = 63 tests:
 
 - `companion/test/`: bridge (7), prompt (9), log store (2), credentials (2),
   openrouter (5).
 - `extension/test/`: helpers (3), logger (4), tab match (5).
-- `packages/dsh-browser-extension/test/`: tools (11), reasoning (5),
+- `packages/dsh-browser-extension/test/`: tools (15), reasoning (7),
   image budget (4).
 
 E2E suites (not in `npm test`): `edge-click-e2e.mjs` (9 behaviours),
 `edge-canvas-e2e.mjs` (surfaces, trusted click, image mapping, pixel diff,
-wheel, no-op), `edge-advanced-e2e.mjs` (shadow DOM, same/cross-origin iframes,
+wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility), `edge-advanced-e2e.mjs` (shadow DOM, same/cross-origin iframes,
 select, hover).
 
 ---
@@ -356,10 +366,11 @@ select, hover).
    inputs/contenteditable via DOM value + `input` events, plus trusted
    `Input.insertText` / `Input.dispatchKeyEvent` via the existing debugger path
    for canvas editors; `browser_press_key({key, modifiers})`.
-2. **Fast/batch canvas clicking** — a game turn used 46 `click_at` calls at
-   ~439 ms each. Options: accept multiple points in one call, or a
-   `skip_view`/`fast` flag that returns only the diff, cutting a model round
-   trip out of rapid sequences.
+2. **Fast/batch canvas clicking — DONE.** `browser_click_at` accepts `points`
+   (1-8) and clicks a whole burst with one debugger attach and one capture;
+   `view:"none"` skips the screenshot for text-only fast bursts; the fixed
+   160 ms settle became an adaptive paint wait. Verified by the extended canvas
+   e2e (5 points, +5 trusted clicks, one view).
 3. **Drag/drop, sliders, map panning** — trusted `Input.dispatchMouseEvent`
    with `mousePressed` → `mouseMoved` (buttons=1) → `mouseReleased`. Also
    right-click/context menu.
@@ -385,8 +396,8 @@ select, hover).
 11. **Reliability polish** — debugger banner flashes per trusted action;
     DevTools open blocks trusted input. Consider a persistent attach during a
     turn (banner stays) or a settings toggle.
-12. **Commit the repo** — it has no commits. Make an initial commit before
-    further work so changes are reviewable.
+12. **Commit the repo — DONE.** The baseline and the burst-click change are
+    committed on `main`; keep future work as small reviewed commits.
 
 ---
 
@@ -433,6 +444,13 @@ select, hover).
 - **Mock-model e2e is brittle.** It is easy to make it loop tool calls; use a
   stateful script that answers with text after one action. The old mock scripts
   were removed after use.
+- **Stale capability text is a latency bug.** The persona and GUIDANCE still
+  said "you cannot click" after the click tools shipped; the model spent its
+  whole first turn reasoning about the contradiction (558 reasoning chars per
+  step vs 110 after it resolved). Keep capability prose in sync with the tools.
+- **One debugger attach per burst.** Attach/detach is ~100 ms, so a 5-point
+  burst in one attach costs about the same as a single click; a `view:"none"`
+  5-point burst skips the capture entirely (~50 ms on the fixture).
 
 ---
 
@@ -472,6 +490,7 @@ Reasoning auto policy (per turn, from the claimed prompt):
 | navigate | “scroll down”, “list my tabs”, “go to my emails” | `off` |
 | inspect | “what is on this page?”, “go to Docs and tell me what’s there” | `low` |
 | synthesize | “summarize”, “compare”, “why…”, long/multi-question prompts | `low` |
+| rapid | “play the game”, “click the dots as they appear”, “as fast as you can” | `off` |
 
 Reasoning is held for all steps of a turn; decisions appear as
 `reasoning.policy` in `events.jsonl` and as `policy` entries in the live feed.
@@ -543,7 +562,7 @@ read it from `chrome://extensions`.
 
 1. `cd /home/conan/Documents/GitHub/crazyAgent`
 2. `curl -s http://127.0.0.1:17871/health` — expect `tools:true`.
-3. `npm test` — expect 57 passing.
+3. `npm test` — expect 63 passing.
 4. Read the latest run under `.dsh-home/browser-agent/logs/` if investigating a
    specific behaviour (`events.jsonl`, `summary.md`).
 5. Reload the extension if `extension/` changed since the last load.

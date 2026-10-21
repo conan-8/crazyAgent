@@ -184,6 +184,45 @@ async function pauseInTab(tabId, ms) {
 }
 
 /**
+ * Page-side paint wait for a burst: two animation frames, with a timer
+ * fallback so a throttled page still settles. Not a fixed sleep: canvas apps
+ * paint immediately after input, so two frames is usually enough.
+ * @param {number} maxMs
+ */
+function waitForPaint(maxMs) {
+  return new Promise(resolve => {
+    let finished = false
+    const finish = () => {
+      if (finished) return
+      finished = true
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(finish, Math.max(0, maxMs))
+    requestAnimationFrame(() => requestAnimationFrame(finish))
+  })
+}
+
+/**
+ * Settle after input before the capture. Without settle_ms this is an adaptive
+ * paint wait (two frames, ~120ms ceiling). An explicit settle_ms waits that
+ * long in the page, because the hidden side panel's timers are throttled.
+ * @param {number} tabId
+ * @param {number|undefined} settleMs
+ */
+async function settleAfterInput(tabId, settleMs) {
+  if (settleMs !== undefined) {
+    if (settleMs > 0) await pauseInTab(tabId, settleMs)
+    return
+  }
+  try {
+    await runInTab(tabId, waitForPaint, [120], 1_200)
+  } catch {
+    await pauseInTab(tabId, 120)
+  }
+}
+
+/**
  * Attach the Chrome DevTools protocol for trusted input. Detaches afterwards;
  * only one client may attach at a time (DevTools counts as a client).
  * @param {number} tabId
@@ -226,17 +265,26 @@ async function trustedWheel(tabId, x, y, deltaX, deltaY) {
   })
 }
 
-/** Synthetic fallback when trusted input is unavailable. */
-function syntheticClickAtPoint(x, y) {
-  const el = document.elementFromPoint(x, y)
-  if (!el) return false
-  const base = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y, button: 0, detail: 1 }
-  el.dispatchEvent(new PointerEvent('pointerdown', { ...base, buttons: 1, pointerType: 'mouse', isPrimary: true }))
-  el.dispatchEvent(new MouseEvent('mousedown', { ...base, buttons: 1 }))
-  el.dispatchEvent(new PointerEvent('pointerup', { ...base, buttons: 0, pointerType: 'mouse', isPrimary: true }))
-  el.dispatchEvent(new MouseEvent('mouseup', { ...base, buttons: 0 }))
-  el.dispatchEvent(new MouseEvent('click', { ...base, buttons: 0 }))
-  return true
+/**
+ * Synthetic fallback when trusted input is unavailable. A burst dispatches the
+ * full pointer/mouse sequence at every point in one page script, so a failed
+ * debugger attach costs one round trip rather than one per point.
+ * @param {Array<{x: number, y: number}>} points
+ * @returns {boolean[]} whether an element existed at each point
+ */
+function syntheticClickBurst(points) {
+  const clickPoint = (x, y) => {
+    const el = document.elementFromPoint(x, y)
+    if (!el) return false
+    const base = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y, button: 0, detail: 1 }
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...base, buttons: 1, pointerType: 'mouse', isPrimary: true }))
+    el.dispatchEvent(new MouseEvent('mousedown', { ...base, buttons: 1 }))
+    el.dispatchEvent(new PointerEvent('pointerup', { ...base, buttons: 0, pointerType: 'mouse', isPrimary: true }))
+    el.dispatchEvent(new MouseEvent('mouseup', { ...base, buttons: 0 }))
+    el.dispatchEvent(new MouseEvent('click', { ...base, buttons: 0 }))
+    return true
+  }
+  return points.map(point => clickPoint(point.x, point.y))
 }
 
 /** Synthetic wheel fallback. */
@@ -1139,12 +1187,16 @@ function assertCapturable(tab, force = false) {
  * @param {'normal'|'high'} detail
  * @param {import('./protocol.js').Settings} settings
  * @param {boolean} [retried]
+ * @param {number} [delayMs] page-side delay before labelling and capturing
  */
-async function snapshot(detail, settings, retried = false) {
+async function snapshot(detail, settings, retried = false, delayMs = 0) {
   const started = performance.now()
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
+  // An explicit delay runs in the page: the side panel is hidden and throttled,
+  // so its own timers are too coarse. It is counted in totalMs.
+  if (delayMs > 0) await pauseInTab(tab.id, delayMs)
   const quality = detail === 'high' ? 80 : Number(settings.quality) || 72
   const maxWidth = detail === 'high' ? 2048 : Number(settings.captureWidth) || 1280
   // The overlay must be painted before the capture, so label first, then shoot.
@@ -1532,10 +1584,65 @@ async function activateTab(settings, tabId, query) {
 }
 
 /**
- * Click a point. Used for canvas/video/iframe surfaces where no DOM label
- * exists. Coordinates default to screenshot pixels; `space: "css"` is direct
- * viewport CSS. Uses trusted browser input when possible and verifies with a
- * pixel diff, which is the only change signal those surfaces produce.
+ * Clamp an optional model-requested settle delay for a click burst.
+ * @param {unknown} value
+ * @returns {number|undefined}
+ */
+function parseSettleMs(value) {
+  if (value === undefined || value === null) return undefined
+  const ms = Number(value)
+  if (!Number.isFinite(ms)) return undefined
+  return Math.max(0, Math.min(400, Math.round(ms)))
+}
+
+/**
+ * Validate click_at arguments into a single burst request. A burst is either
+ * one legacy `x`/`y` pair or a `points` array of 1..8 pairs, never both.
+ * @param {Record<string, any>} args
+ * @returns {{points: Array<{x: number, y: number}>, space: 'image'|'css', view: 'fresh'|'none', settleMs: number|undefined}}
+ */
+function parseClickAtArgs(args) {
+  const hasPoints = args.points !== undefined
+  const hasCoordinates = args.x !== undefined || args.y !== undefined
+  if (hasPoints && hasCoordinates) {
+    throw new BrowserError('BAD_POINTS', 'Provide either x/y or points for click_at, not both.')
+  }
+  if (!hasPoints && !hasCoordinates) {
+    throw new BrowserError('BAD_POINTS', 'click_at requires x/y or a points array.')
+  }
+  const space = args.space === 'css' ? 'css' : 'image'
+  const view = args.view === 'none' ? 'none' : 'fresh'
+  const settleMs = parseSettleMs(args.settle_ms)
+  if (hasPoints) {
+    if (!Array.isArray(args.points) || args.points.length === 0 || args.points.length > 8) {
+      throw new BrowserError('BAD_POINTS', 'points must be an array of 1 to 8 {x, y} coordinate objects.')
+    }
+    const points = args.points.map((point, index) => {
+      const x = Number(point?.x)
+      const y = Number(point?.y)
+      if (typeof point !== 'object' || point === null || !Number.isFinite(x) || !Number.isFinite(y)) {
+        throw new BrowserError('BAD_POINTS', `points[${index}] must have finite x and y.`)
+      }
+      return { x, y }
+    })
+    return { points, space, view, settleMs }
+  }
+  const x = Number(args.x)
+  const y = Number(args.y)
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new BrowserError('BAD_POINT', 'x and y must be finite numbers from the current view')
+  }
+  return { points: [{ x, y }], space, view, settleMs }
+}
+
+/**
+ * Click one or more points in the current view. Used for canvas/video/iframe
+ * surfaces where no DOM label exists. Coordinates default to screenshot pixels;
+ * `space: "css"` is direct viewport CSS. A burst clicks up to 8 points with one
+ * debugger attach, one settle, and one capture; `view: "none"` skips the
+ * capture entirely and reports changed: null. Uses trusted browser input when
+ * possible and verifies with a pixel diff, which is the only change signal
+ * those surfaces produce.
  * @param {import('./protocol.js').Settings} settings
  * @param {Record<string, any>} args
  */
@@ -1544,51 +1651,105 @@ async function clickAt(settings, args) {
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
+  const request = parseClickAtArgs(args)
   const before = lastViewByTab.get(tab.id)
   const viewport = before?.viewport ?? await runInTab(tab.id, pageMetrics, [])
-  const space = args.space === 'css' ? 'css' : 'image'
-  let cssX
-  let cssY
-  if (space === 'css') {
-    cssX = Number(args.x)
-    cssY = Number(args.y)
-  } else {
-    if (!before?.image?.data || !Number.isFinite(before.image.width)) {
-      throw new BrowserError('NO_VIEW', 'Take a screenshot first so image coordinates can be mapped to the page.')
-    }
-    const scale = viewport.width / before.image.width
-    cssX = Number(args.x) * scale
-    cssY = Number(args.y) * scale
+  // Every image-space point shares the scale of the same previous view, so a
+  // whole burst maps consistently instead of drifting point by point.
+  if (request.space === 'image' && (!before?.image?.data || !Number.isFinite(before.image.width))) {
+    throw new BrowserError('NO_VIEW', 'Take a screenshot first so image coordinates can be mapped to the page.')
   }
-  if (!Number.isFinite(cssX) || !Number.isFinite(cssY)) {
-    throw new BrowserError('BAD_POINT', 'x and y must be finite numbers from the current view')
-  }
-  cssX = Math.max(0, Math.min(viewport.width - 1, cssX))
-  cssY = Math.max(0, Math.min(viewport.height - 1, cssY))
+  const imageScale = request.space === 'image' ? viewport.width / before.image.width : 1
+  const targets = request.points.map(point => ({
+    space: request.space,
+    x: point.x,
+    y: point.y,
+    cssX: Math.max(0, Math.min(viewport.width - 1, request.space === 'css' ? point.x : point.x * imageScale)),
+    cssY: Math.max(0, Math.min(viewport.height - 1, request.space === 'css' ? point.y : point.y * imageScale)),
+  }))
 
   let trusted = true
   try {
-    await withDebugger(tab.id, () => trustedClick(tab.id, cssX, cssY))
+    // One attach for the whole burst: the debugger handshake is not paid per point.
+    await withDebugger(tab.id, async () => {
+      for (const target of targets) await trustedClick(tab.id, target.cssX, target.cssY)
+    })
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'DEBUGGER_BUSY') throw error
     trusted = false
-    const dispatched = await runInTab(tab.id, syntheticClickAtPoint, [cssX, cssY], 2_000)
-    if (!dispatched) throw new BrowserError('CLICK_POINT_EMPTY', 'There is no element at that point.')
+    const dispatched = await runInTab(tab.id, syntheticClickBurst, [targets.map(target => ({ x: target.cssX, y: target.cssY }))], 4_000)
+    if (!Array.isArray(dispatched) || !dispatched.some(Boolean)) {
+      throw new BrowserError('CLICK_POINT_EMPTY', 'There is no element at that point.')
+    }
   }
-  await pauseInTab(tab.id, 160)
-  const shot = await snapshot('normal', settings)
-  const diff = await diffRegion(before, shot, cssX, cssY)
-  return {
+
+  let shot
+  let diffs = targets.map(() => ({ changed: false, percent: 0, mean: 0 }))
+  if (request.view === 'none') {
+    // No screenshot: a cheap page-metrics read keeps tab/viewport/scroll in the
+    // snapshot shape without paying capture or label cost.
+    const metrics = await runInTab(tab.id, pageMetrics, [])
+    shot = {
+      tab: {
+        id: tab.id,
+        title: metrics.title || tab.title || '',
+        url: metrics.url || tab.url || '',
+        windowId,
+        status: tab.status ?? 'unknown',
+      },
+      viewport: metrics.viewport,
+      scroll: lastScrollFor(tab.id, metrics.url) ?? metrics.scroll,
+      labelCount: 0,
+      labelMs: 0,
+      captureMs: 0,
+      encodeMs: 0,
+      totalMs: Math.round(performance.now() - started),
+    }
+  } else {
+    await settleAfterInput(tab.id, request.settleMs)
+    shot = await snapshot('normal', settings)
+    diffs = await Promise.all(targets.map(target => diffRegion(before, shot, target.cssX, target.cssY, 120)))
+    // A canvas frame can occasionally miss the first capture; retry once
+    // before reporting no change. Never more than two captures per burst.
+    if (diffs.every(diff => !diff.changed) && before?.image?.data) {
+      await pauseInTab(tab.id, 120)
+      shot = await snapshot('normal', settings)
+      diffs = await Promise.all(targets.map(target => diffRegion(before, shot, target.cssX, target.cssY, 120)))
+    }
+  }
+
+  const skipChange = request.view === 'none'
+  const points = targets.map((target, index) => ({
+    space: target.space,
+    x: target.x,
+    y: target.y,
+    cssX: Math.round(target.cssX),
+    cssY: Math.round(target.cssY),
+    changed: skipChange ? null : diffs[index].changed,
+    pixelsChanged: skipChange ? null : diffs[index].percent,
+    pixelMean: skipChange ? null : diffs[index].mean,
+  }))
+  const result = {
     ...shot,
     op: 'click_at',
-    point: { space, x: Number(args.x), y: Number(args.y), cssX: Math.round(cssX), cssY: Math.round(cssY) },
+    points,
     trusted,
-    changed: diff.changed,
-    pixelsChanged: diff.percent,
-    pixelMean: diff.mean,
-    signals: diff.changed ? ['pixels-changed'] : [],
+    changedCount: points.filter(point => point.changed === true).length,
     clickMs: Math.round(performance.now() - started),
   }
+  if (skipChange) {
+    result.view = 'none'
+    result.screenshotSkipped = true
+  }
+  if (points.length === 1) {
+    // Legacy single-point shape: existing consumers read point/changed directly.
+    result.point = { space: points[0].space, x: points[0].x, y: points[0].y, cssX: points[0].cssX, cssY: points[0].cssY }
+    result.changed = points[0].changed
+    result.pixelsChanged = points[0].pixelsChanged
+    result.pixelMean = points[0].pixelMean
+    result.signals = points[0].changed === true ? ['pixels-changed'] : []
+  }
+  return result
 }
 
 /**
@@ -1674,6 +1835,17 @@ async function click(settings, label) {
 export { labelPage as labelElements, clickLabelled as clickElementByLabel }
 
 /**
+ * Clamp an optional model-requested page-side delay for a snapshot.
+ * @param {unknown} value
+ * @returns {number}
+ */
+function normalizeDelayMs(value) {
+  const ms = Number(value)
+  if (!Number.isFinite(ms)) return 0
+  return Math.max(0, Math.min(5_000, Math.round(ms)))
+}
+
+/**
  * Execute one bridge command.
  * @param {string} op
  * @param {Record<string, any>} args
@@ -1684,7 +1856,7 @@ export async function execute(op, args = {}, settings) {
   if (normalized.paused) throw new BrowserError('PAUSED', 'Browser access is paused in the side panel.')
   if (op === 'snapshot') {
     const detail = args.detail === 'high' ? 'high' : 'normal'
-    return snapshot(detail, normalized)
+    return snapshot(detail, normalized, false, normalizeDelayMs(args.delay_ms))
   }
   if (op === 'scroll') {
     return scroll(normalized, args.direction, args.pages, args.amount_px, args.at_x, args.at_y)

@@ -5,6 +5,8 @@
  * expensive on long answer steps, so the policy classifies the *user prompt*
  * once per turn and holds that effort for every step of the turn (no mid-turn
  * request-header churn). The classification is local, deterministic, and free.
+ * Reactive game bursts are classified as `rapid`: tactical narration costs the
+ * reaction budget, so reasoning is switched off for those turns.
  */
 
 const VIEW_BLOCK = /<current_view>[\s\S]*?<\/current_view>/giu
@@ -17,8 +19,9 @@ export function stripViewHeader(text) {
 const NAVIGATE_VERB = /^(?:(?:please|ok|okay|now|can you|could you)\s+)*(?:go|switch|jump|move|take me|open|focus|scroll|page|list|show)\b/iu
 const REPORT_VERB = /\b(tell me|what|whats|what's|describe|read|find|check|look|see|summar|explain|which|where|report|give me)\b/iu
 const SYNTHESIZE = /\b(summar\w*|compare|contrast|analy[sz]\w*|evaluate|explain|why|how come|draft|write|compose|recommend|prioriti[sz]\w*|extract|list all|all about|every|each|detailed|in detail|step by step|outline|review|critique|assess|plan|research|organi[sz]e)\b/iu
+const REACTIVE = /\b(play|playing|game|whack(?:-a-mole)?|click the dots?|rapid|hasty|as fast as|spam|reflex|combo|reaction)\b/iu
 
-/** @typedef {'navigate'|'inspect'|'synthesize'} TurnClass */
+/** @typedef {'navigate'|'inspect'|'synthesize'|'rapid'} TurnClass */
 
 /**
  * @param {string} text user prompt without the view header
@@ -30,19 +33,20 @@ export function classifyPrompt(text) {
   const words = clean.split(/\s+/u).filter(Boolean).length
   const questions = (clean.match(/\?/gu) ?? []).length
   if (SYNTHESIZE.test(clean) || questions >= 2 || words > 60 || clean.length > 220) return 'synthesize'
+  if (REACTIVE.test(clean)) return 'rapid'
   if (NAVIGATE_VERB.test(clean) && !REPORT_VERB.test(clean) && words <= 25 && questions === 0) return 'navigate'
   return 'inspect'
 }
 
 /**
- * Effort for one turn under the `auto` policy. Navigation-only turns have no
- * user-facing synthesis, so reasoning is disabled; anything that must be read,
- * described, or synthesized keeps `low`.
+ * Effort for one turn under the `auto` policy. Navigation-only turns and
+ * reactive game bursts have no user-facing synthesis, so reasoning is
+ * disabled; anything that must be read, described, or synthesized keeps `low`.
  * @param {TurnClass} classification
  * @returns {'off'|'low'}
  */
 export function autoEffort(classification) {
-  return classification === 'navigate' ? 'off' : 'low'
+  return classification === 'navigate' || classification === 'rapid' ? 'off' : 'low'
 }
 
 /**

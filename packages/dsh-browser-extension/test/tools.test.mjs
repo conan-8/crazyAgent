@@ -48,13 +48,49 @@ const CLICK_AT = {
   viewport: { width: 1280, height: 720, dpr: 1 },
   scroll: { x: 0, y: 0, maxY: 0, container: 'document', atTop: true, atBottom: true },
   point: { space: 'image', x: 100, y: 200, cssX: 80, cssY: 160 },
+  points: [{ space: 'image', x: 100, y: 200, cssX: 80, cssY: 160, changed: true, pixelsChanged: 1.4, pixelMean: 3 }],
   trusted: true,
   changed: true,
+  changedCount: 1,
   pixelsChanged: 1.4,
   clickMs: 210,
   labels: [],
   surfaces: [{ kind: 'canvas', x: 20, y: 100, w: 800, h: 420 }],
   image: IMAGE,
+}
+const CLICK_AT_MULTI = {
+  op: 'click_at',
+  tab: { id: 7, title: 'Fixture', url: 'https://example.test/fixture' },
+  viewport: { width: 1280, height: 720, dpr: 1 },
+  scroll: { x: 0, y: 0, maxY: 0, container: 'document', atTop: true, atBottom: true },
+  points: [
+    { space: 'image', x: 100, y: 200, cssX: 80, cssY: 160, changed: true, pixelsChanged: 1.4, pixelMean: 3 },
+    { space: 'image', x: 300, y: 400, cssX: 240, cssY: 320, changed: false, pixelsChanged: 0, pixelMean: 0 },
+    { space: 'image', x: 500, y: 500, cssX: 400, cssY: 400, changed: true, pixelsChanged: 0.5, pixelMean: 2 },
+  ],
+  trusted: true,
+  changedCount: 2,
+  clickMs: 210,
+  labels: [],
+  surfaces: [{ kind: 'canvas', x: 20, y: 100, w: 800, h: 420 }],
+  image: IMAGE,
+}
+const CLICK_AT_NONE = {
+  op: 'click_at',
+  tab: { id: 7, title: 'Fixture', url: 'https://example.test/fixture' },
+  viewport: { width: 1280, height: 720, dpr: 1 },
+  scroll: { x: 0, y: 0, maxY: 0, container: 'document', atTop: true, atBottom: true },
+  view: 'none',
+  screenshotSkipped: true,
+  points: [
+    { space: 'image', x: 100, y: 200, cssX: 80, cssY: 160, changed: null, pixelsChanged: null, pixelMean: null },
+    { space: 'image', x: 300, y: 400, cssX: 240, cssY: 320, changed: null, pixelsChanged: null, pixelMean: null },
+  ],
+  trusted: true,
+  changed: null,
+  changedCount: null,
+  pixelsChanged: null,
+  clickMs: 180,
 }
 const SELECT = {
   op: 'select_option',
@@ -105,6 +141,7 @@ async function startFakeBridge() {
   })
   const port = server.address().port
   const activities = []
+  const commands = []
   server.on('connection', ws => {
     ws.on('message', data => {
       const message = JSON.parse(data.toString())
@@ -118,19 +155,27 @@ async function startFakeBridge() {
       }
       if (message.type === 'browser.command') {
         const op = message.command?.op
+        const args = message.command?.args ?? {}
+        commands.push({ op, args })
+        if (op === 'click_at') {
+          const result = args.view === 'none' ? CLICK_AT_NONE
+            : Array.isArray(args.points) ? CLICK_AT_MULTI
+              : CLICK_AT
+          ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: message.id, ok: true, result }))
+          return
+        }
         const result = op === 'scroll' ? SCROLL
           : op === 'tabs.list' ? TABS
             : op === 'read_text' ? READ_TEXT
               : op === 'click' ? CLICK
-                : op === 'click_at' ? CLICK_AT
-                  : op === 'select_option' ? SELECT
-                    : op === 'hover' ? HOVER
-                      : SNAPSHOT
+                : op === 'select_option' ? SELECT
+                  : op === 'hover' ? HOVER
+                    : SNAPSHOT
         ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: message.id, ok: true, result }))
       }
     })
   })
-  return { server, url: `ws://127.0.0.1:${port}/bridge`, activities }
+  return { server, url: `ws://127.0.0.1:${port}/bridge`, activities, commands }
 }
 
 function makeContext() {
@@ -211,6 +256,10 @@ test('registers the provider, guidance, and the nine browser tools', async t => 
   assert.deepEqual([...fake.tools.keys()].sort(), ['browser_click', 'browser_click_at', 'browser_hover', 'browser_read_text', 'browser_screenshot', 'browser_scroll', 'browser_select_option', 'browser_switch_tab', 'browser_tabs'])
   assert.equal(fake.sections.length, 1)
   assert.match(fake.sections[0].text, /untrusted data/)
+  assert.match(fake.sections[0].text, /points:\[\{x,y\}, \.\.\.\]/)
+  assert.match(fake.sections[0].text, /view:"none"/)
+  assert.match(fake.sections[0].text, /delay_ms/)
+  assert.doesNotMatch(fake.sections[0].text, /cannot click or type in Phase 1/)
 })
 
 test('scroll tool returns metadata and an image block', async t => {
@@ -345,6 +394,24 @@ test('screenshot content lists labels for clicking', async t => {
   assert.match(value.content[0].text, /\[9\] link "Forgot password\?"/)
 })
 
+test('screenshot forwards delay_ms to the bridge', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_screenshot')
+  assert.match(definition.description, /delay_ms/)
+  await definition.execute({ delay_ms: 350 }, { callId: 'c-delay', signal: new AbortController().signal })
+  assert.deepEqual(commands.at(-1), { op: 'snapshot', args: { detail: 'normal', delay_ms: 350 } })
+  await definition.execute({ detail: 'high' }, { callId: 'c-nodelay', signal: new AbortController().signal })
+  assert.deepEqual(commands.at(-1), { op: 'snapshot', args: { detail: 'high' } })
+})
+
 test('click tool reports the target and the resulting view', async t => {
   const { server, url } = await startFakeBridge()
   t.after(() => {
@@ -403,6 +470,87 @@ test('click_at reports trusted input and pixel change', async t => {
     () => definition.execute({ x: 'a', y: 2 }, { callId: 'c-bad-at', signal: new AbortController().signal }),
     /finite x and y/,
   )
+})
+
+test('click_at multi-point content lists every point and the changed count', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_click_at')
+  const value = await definition.execute({
+    points: [{ x: 100, y: 200 }, { x: 300, y: 400 }, { x: 500, y: 500 }],
+  }, { callId: 'c-multi', signal: new AbortController().signal })
+  const text = value.content[0].text
+  assert.match(text, /clicked 3 points with trusted input in 210ms/)
+  assert.match(text, /  \[1\] \(100, 200\) image → css \(80, 160\) · changed 1\.4%/)
+  assert.match(text, /  \[2\] \(300, 400\) image → css \(240, 320\) · no visible change/)
+  assert.match(text, /  \[3\] \(500, 500\) image → css \(400, 400\) · changed 0\.5%/)
+  assert.match(text, /2\/3 points changed pixels/)
+  assert.equal(value.content[1].type, 'image')
+  assert.deepEqual(commands.at(-1), { op: 'click_at', args: { points: [{ x: 100, y: 200 }, { x: 300, y: 400 }, { x: 500, y: 500 }] } })
+})
+
+test('click_at with view:none returns text only and explains the skipped screenshot', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_click_at')
+  const value = await definition.execute({
+    points: [{ x: 100, y: 200 }, { x: 300, y: 400 }],
+    view: 'none',
+    settle_ms: 80,
+  }, { callId: 'c-none', signal: new AbortController().signal })
+  assert.equal(value.content.length, 1)
+  assert.equal(value.content[0].type, 'text')
+  const text = value.content[0].text
+  assert.match(text, /clicked 2 points with trusted input in 180ms/)
+  assert.match(text, /change unknown \(no previous view\)/)
+  assert.match(text, /screenshot skipped \(view "none"\)/)
+  assert.match(text, /image coordinates still map to the previous view/)
+  assert.doesNotMatch(text, /points changed pixels/)
+  assert.doesNotMatch(text, /labels \(click by number\)/)
+  assert.deepEqual(commands.at(-1), {
+    op: 'click_at',
+    args: { points: [{ x: 100, y: 200 }, { x: 300, y: 400 }], view: 'none', settle_ms: 80 },
+  })
+})
+
+test('click_at rejects ambiguous, empty, and oversized point sets', async t => {
+  const { server, url } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_click_at')
+  const exec = { callId: 'c-invalid', signal: new AbortController().signal }
+  await assert.rejects(() => definition.execute({}, exec), /requires x and y, or a non-empty points array/)
+  await assert.rejects(() => definition.execute({ y: 2 }, exec), /requires both x and y/)
+  await assert.rejects(
+    () => definition.execute({ x: 1, y: 2, points: [{ x: 3, y: 4 }] }, exec),
+    /either x\/y or points, not both/,
+  )
+  await assert.rejects(() => definition.execute({ points: [] }, exec), /non-empty array/)
+  await assert.rejects(
+    () => definition.execute({ points: Array.from({ length: 9 }, (_, index) => ({ x: index, y: index })) }, exec),
+    /at most 8 points/,
+  )
+  await assert.rejects(() => definition.execute({ points: [{ x: 'a', y: 1 }] }, exec), /finite x and y/)
 })
 
 test('select and hover tools report their outcome', async t => {

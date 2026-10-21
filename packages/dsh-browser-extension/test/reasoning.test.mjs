@@ -22,9 +22,24 @@ test('keeps reading and reporting at inspect or synthesize', () => {
   assert.equal(classifyPrompt('a'.repeat(400)), 'synthesize')
 })
 
-test('auto effort is off only for navigation', () => {
+test('classifies reactive game prompts as rapid', () => {
+  assert.equal(classifyPrompt('play the canvas game and click the dots'), 'rapid')
+  assert.equal(classifyPrompt('restart the game and click the dots as they appear'), 'rapid')
+  assert.equal(classifyPrompt('whack the moles as fast as you can'), 'rapid')
+})
+
+test('auto effort is off for navigation and rapid bursts', () => {
   assert.equal(autoEffort('navigate'), 'off')
+  assert.equal(autoEffort('rapid'), 'off')
   assert.equal(autoEffort('inspect'), 'low')
+  assert.equal(autoEffort('synthesize'), 'low')
+  assert.equal(effortFor('auto', 'rapid'), 'off')
+})
+
+test('rapid classification does not slow down reading or synthesis', () => {
+  assert.equal(classifyPrompt('what is on this page?'), 'inspect')
+  assert.equal(autoEffort('inspect'), 'low')
+  assert.equal(classifyPrompt('go to docs and summarize'), 'synthesize')
   assert.equal(autoEffort('synthesize'), 'low')
 })
 
@@ -33,4 +48,8 @@ test('explicit policy overrides classification', () => {
   assert.equal(effortFor('high', 'navigate'), 'high')
   assert.equal(effortFor('medium', 'inspect'), 'medium')
   assert.equal(effortFor('auto', 'navigate'), 'off')
+  assert.equal(effortFor('high', 'rapid'), 'high')
+  assert.equal(effortFor('medium', 'rapid'), 'medium')
+  assert.equal(effortFor('low', 'rapid'), 'low')
+  assert.equal(effortFor('off', 'rapid'), 'off')
 })
