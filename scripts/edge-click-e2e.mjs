@@ -109,7 +109,7 @@ assert.ok(snapshot.ids.icon, 'icon button gets an accessible name')
 assert.ok(snapshot.labelMs < 100, `labelling is fast (${snapshot.labelMs}ms)`)
 
 const counter = await evaluate(`(async () => { ${prefix}
-  const view = await mod.execute('click', { label: ${snapshot.ids.counter} }, settings)
+  const view = await mod.execute('click', { label: ${snapshot.ids.counter}, view: 'full' }, settings)
   return {
     changed: view.changed,
     signals: view.signals,

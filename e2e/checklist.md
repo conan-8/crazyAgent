@@ -142,6 +142,18 @@ Use `e2e/fixtures/form.html`.
 - Ask: **“Type into the password field.”** The card must show `value now "[password N chars]"`, never the secret.
 - **Pass:** no typing lands in the wrong element; navigation is http(s) only; waits report `found`/`timedOut` honestly.
 
+### 9c. Batching and view modes
+
+Use `e2e/fixtures/form.html`.
+
+- Ask: **“Fill in the name and notes and submit.”** Expect a single `batch` card listing several actions, a header like `batch: N actions · S succeeded · Xms`, and **one** final view; the form records the values.
+- Ask for a sequence with a deliberately wrong label (or use a batch with one bad action) and check the card shows `FAILED at [i]` and, with `stop_on_error:false`, continues after the failure.
+- Do several actions in a row on the same page: after the first (full) view, later cards should say **compact** and carry no screenshot thumbnail, only a label delta like `labels +1/-1, 39 unchanged`.
+- Ask **“show me the page”**: the next action should return a full view (a thumbnail) because the model asked for `view:"full"`.
+- Take a view, do a compact action, then ask the agent to click an element whose label was only shown in the earlier view. It must resolve (cumulative label registry), not fail `UNKNOWN_LABEL`.
+- Ask the agent to press the `/` key: it must be accepted (no `BAD_KEY`).
+- **Pass:** batches run as one call, compact results never contain a stale screenshot, and label ids from earlier views still resolve.
+
 ### 9b. Canvas editor typing
 
 - Open a Google Doc, click a caret position with `browser_click_at`, then ask the agent to type a short sentence; it must use label-less `browser_type` and `browser_press_key` for caret movement.

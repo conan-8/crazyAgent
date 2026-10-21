@@ -108,7 +108,7 @@ const richLabel = labelId('Rich text', 'div')
 console.log(`PASS form fixture loads — ${setup.labels.length} labels, image ${setup.image.width}px`)
 
 const replace = await evaluate(`(async () => { ${prefix}
-  const result = await mod.execute('type', { label: ${nameLabel}, text: 'Ada Lovelace' }, settings)
+  const result = await mod.execute('type', { label: ${nameLabel}, text: 'Ada Lovelace', view: 'full' }, settings)
   const events = await read('events')
   return {
     op: result.op,
@@ -140,7 +140,17 @@ const append = await evaluate(`(async () => { ${prefix}
   const before = Number(/input=(\\d+)/.exec(await read('events'))?.[1] ?? -1)
   const result = await mod.execute('type', { label: ${nameLabel}, text: '!', mode: 'append' }, settings)
   const after = Number(/input=(\\d+)/.exec(await read('events'))?.[1] ?? -1)
-  return { typed: result.typed, value: await prop('name', 'value'), changed: result.changed, inputDelta: after - before }
+  return {
+    typed: result.typed,
+    value: await prop('name', 'value'),
+    changed: result.changed,
+    inputDelta: after - before,
+    view: result.view,
+    screenshotSkipped: result.screenshotSkipped,
+    hasImage: result.image !== undefined,
+    hasLabels: result.labels !== undefined,
+    delta: result.labelsDelta,
+  }
 })()`)
 assert.equal(append.typed.mode, 'append', 'append mode is echoed')
 assert.equal(append.typed.method, 'dom', 'append uses the DOM path')
@@ -149,7 +159,12 @@ assert.equal(append.typed.afterChars, 13, 'append adds one character')
 assert.equal(append.value, 'Ada Lovelace!', 'append preserved the old text')
 assert.equal(append.changed, true, 'append reports a change')
 assert.equal(append.inputDelta, 1, 'append fires exactly one input event')
-console.log('PASS append mode — value kept, one extra input event')
+assert.equal(append.view, 'compact', 'auto view stays compact after a fresh full view')
+assert.equal(append.screenshotSkipped, true, 'compact view skips the screenshot')
+assert.equal(append.hasImage, false, 'compact view has no image')
+assert.equal(append.hasLabels, false, 'compact view has no label list')
+assert.ok(append.delta && append.delta.count > 0 && typeof append.delta.addedCount === 'number', 'compact view carries a label delta')
+console.log(`PASS compact type — no image, delta ${append.delta.count} labels (+${append.delta.addedCount}/-${append.delta.removedCount}), changed`)
 
 const rich = await evaluate(`(async () => { ${prefix}
   const result = await mod.execute('type', { label: ${richLabel}, text: 'Hello rich text' }, settings)
@@ -184,7 +199,7 @@ console.log('PASS submit:true submits the form')
 const tabKey = await evaluate(`(async () => { ${prefix}
   await mod.execute('type', { label: ${nameLabel}, text: 'Enter Submit' }, settings)
   const before = await activeId()
-  const result = await mod.execute('press_key', { key: 'Tab' }, settings)
+  const result = await mod.execute('press_key', { key: 'Tab', view: 'full' }, settings)
   return { before, after: await activeId(), pressed: result.pressed, changed: result.changed, image: result.image?.width ?? null }
 })()`)
 assert.equal(tabKey.before, 'name', 'typing focused the name field')
@@ -321,6 +336,170 @@ assert.equal(labelLess.typed.afterChars, 12, 'label-less typing inserted the tex
 assert.equal(labelLess.value, 'trusted text', 'the focused editor received the text')
 assert.equal(labelLess.changed, true, 'label-less typing reports a change')
 console.log('PASS label-less trusted typing into the focused editor')
+
+const autoViews = await evaluate(`(async () => {
+  const mod = await import('./browser.js')
+  const settings = { ...mod.DEFAULT_SETTINGS }
+  const created = await chrome.tabs.create({ url: '${BASE}/form.html?autoview=1', active: true })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const views = []
+  for (let index = 0; index < 7; index += 1) {
+    const result = await mod.execute('type', { text: 'x' }, settings)
+    views.push({ view: result.view, hasImage: typeof result.image?.data === 'string', hasDelta: result.labelsDelta !== undefined })
+  }
+  await chrome.tabs.remove(created.id)
+  const original = (await chrome.tabs.query({})).find(item => item.url?.includes('/form.html'))
+  await chrome.tabs.update(original.id, { active: true })
+  return views
+})()`)
+assert.equal(autoViews[0].view, 'full', 'first action without a prior view uses a full view')
+assert.equal(autoViews[0].hasImage, true, 'first action carries the image')
+assert.equal(autoViews[1].view, 'compact', 'immediate follow-up action is compact')
+assert.equal(autoViews[1].hasImage, false, 'follow-up compact action has no image')
+assert.equal(autoViews[1].hasDelta, true, 'follow-up compact action carries a label delta')
+assert.ok(autoViews.slice(1, 6).every(item => item.view === 'compact'), 'auto stays compact during the streak')
+assert.equal(autoViews[6].view, 'full', 'compactStreak >= 5 escalates to a full view')
+console.log('PASS auto view policy — full first, compact streak, escalation after 5')
+
+const batch = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tabId, { active: true })
+  await chrome.tabs.update(tabId, { url: '${BASE}/form.html' })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const snap = await mod.execute('snapshot', {}, settings)
+  const name = snap.labels.find(item => item.tag === 'input' && item.text === 'Name')
+  const notes = snap.labels.find(item => item.tag === 'textarea' && item.text === 'Notes')
+  const started = performance.now()
+  const result = await mod.execute('batch', { actions: [
+    { op: 'type', args: { label: name.id, text: 'Batch Name' } },
+    { op: 'press_key', args: { key: 'Tab' } },
+    { op: 'type', args: { label: notes.id, text: 'batch notes' } },
+    { op: 'type', args: { label: name.id, text: 'Batch Submit', submit: true } },
+  ] }, settings)
+  return {
+    op: result.op,
+    view: result.view,
+    batch: result.batch,
+    actions: result.actions.map(item => ({
+      index: item.index,
+      op: item.op,
+      ok: item.ok,
+      hasImage: item.image !== undefined,
+      hasLabels: item.labels !== undefined,
+      hasTyped: item.typed !== undefined,
+      hasPressed: item.pressed !== undefined,
+    })),
+    hasImage: typeof result.image?.data === 'string',
+    labelCount: Array.isArray(result.labels) ? result.labels.length : null,
+    hasCaptureMs: result.captureMs !== undefined,
+    totalMs: result.totalMs,
+    wallMs: Math.round(performance.now() - started),
+    resultText: await read('result'),
+  }
+})()`)
+assert.equal(batch.op, 'batch', 'batch reports its op')
+assert.equal(batch.view, 'full', 'batch default view is full')
+assert.equal(batch.batch.total, 4, 'batch reports the requested action count')
+assert.equal(batch.batch.executed, 4, 'batch executed every action')
+assert.equal(batch.batch.succeeded, 4, 'batch reports four succeeded actions')
+assert.equal(batch.batch.ok, true, 'batch reports overall success')
+assert.equal(batch.batch.stoppedEarly, false, 'successful batch did not stop early')
+assert.equal(batch.batch.failedIndex, undefined, 'successful batch has no failed index')
+assert.ok(batch.batch.elapsedMs >= 0 && batch.batch.viewMs >= 0, 'batch reports action and view timing')
+assert.equal(batch.actions.length, 4, 'one result per attempted action')
+assert.ok(batch.actions.every(item => item.ok === true), 'every batch action succeeded')
+assert.deepEqual(batch.actions.map(item => item.op), ['type', 'press_key', 'type', 'type'])
+assert.ok(batch.actions.every(item => item.hasImage === false && item.hasLabels === false), 'inner actions build no view payload')
+assert.ok(batch.actions[0].hasTyped && batch.actions[1].hasPressed, 'inner actions return their outcome fields')
+assert.ok(batch.hasImage && batch.labelCount > 0, 'batch returns exactly one final full view')
+assert.ok(batch.hasCaptureMs, 'final view carries capture timing')
+assert.ok(batch.totalMs >= batch.batch.elapsedMs + batch.batch.viewMs - 5, 'batch totalMs covers actions and view')
+assert.match(batch.resultText, /name=Batch Submit/, 'batched typing and submit reached the form')
+console.log(`PASS batch sequence — 4 known-label actions, one final view (${batch.batch.elapsedMs}ms actions + ${batch.batch.viewMs}ms view)`)
+
+const batchErrors = await evaluate(`(async () => { ${prefix}
+  const stopped = await mod.execute('batch', { actions: [
+    { op: 'type', args: { label: 987654, text: 'x' } },
+    { op: 'press_key', args: { key: 'Tab' } },
+  ] }, settings)
+  const continued = await mod.execute('batch', { actions: [
+    { op: 'press_key', args: { key: 'not-a-key' } },
+    { op: 'press_key', args: { key: 'Tab' } },
+  ], stop_on_error: false }, settings)
+  const compact = await mod.execute('batch', { actions: [{ op: 'press_key', args: { key: 'Escape' } }], view: 'compact' }, settings)
+  const bad = await (async () => {
+    try { await mod.execute('batch', { actions: [{ op: 'snapshot' }] }, settings); return 'NO_ERROR' }
+    catch (error) { return error.code }
+  })()
+  return {
+    stopped: { batch: stopped.batch, actionCount: stopped.actions.length, errorCode: stopped.actions[0]?.error?.code },
+    continued: { batch: continued.batch, actionCount: continued.actions.length, oks: continued.actions.map(item => item.ok) },
+    compact: { view: compact.view, hasImage: compact.image !== undefined, hasLabels: compact.labels !== undefined, hasDelta: compact.labelsDelta !== undefined },
+    bad,
+  }
+})()`)
+assert.equal(batchErrors.stopped.batch.ok, false, 'stop_on_error batch reports failure')
+assert.equal(batchErrors.stopped.batch.stoppedEarly, true, 'stop_on_error stops at the first failure')
+assert.equal(batchErrors.stopped.batch.failedIndex, 1, 'stop_on_error reports the failed index')
+assert.equal(batchErrors.stopped.batch.executed, 1, 'executed counts the failed attempt')
+assert.equal(batchErrors.stopped.batch.succeeded, 0, 'failed batch has no succeeded actions')
+assert.equal(batchErrors.stopped.actionCount, 1, 'actions stop at the failure')
+assert.equal(batchErrors.stopped.errorCode, 'UNKNOWN_LABEL', 'action validation error is captured per action')
+assert.equal(batchErrors.continued.batch.ok, false, 'continue batch is not ok when an action failed')
+assert.equal(batchErrors.continued.batch.executed, 2, 'continue batch attempts later actions')
+assert.equal(batchErrors.continued.batch.succeeded, 1, 'continue batch reports its succeeded count')
+assert.equal(batchErrors.continued.batch.stoppedEarly, false, 'continue batch does not stop early')
+assert.deepEqual(batchErrors.continued.oks, [false, true], 'later action still ran')
+assert.equal(batchErrors.compact.view, 'compact', 'batch-level compact view is honoured')
+assert.equal(batchErrors.compact.hasImage, false, 'compact batch has no image')
+assert.equal(batchErrors.compact.hasLabels, false, 'compact batch has no label list')
+assert.equal(batchErrors.compact.hasDelta, true, 'compact batch carries a label delta')
+assert.equal(batchErrors.bad, 'BAD_BATCH', 'unknown batch ops are rejected')
+console.log('PASS batch stop_on_error / continue / compact view / BAD_BATCH')
+
+const punctuation = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tabId, { url: '${BASE}/form.html' })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const snap = await mod.execute('snapshot', {}, settings)
+  const name = snap.labels.find(item => item.tag === 'input' && item.text === 'Name')
+  await mod.execute('type', { label: name.id, text: '', view: 'none' }, settings)
+  const slash = await mod.execute('press_key', { key: '/', view: 'none' }, settings)
+  const question = await mod.execute('press_key', { key: '?', view: 'none' }, settings)
+  const semicolon = await mod.execute('press_key', { key: ';', view: 'none' }, settings)
+  const bracket = await mod.execute('press_key', { key: ']', view: 'none' }, settings)
+  return {
+    value: await prop('name', 'value'),
+    slash: slash.pressed,
+    question: question.pressed,
+    semicolon: semicolon.pressed,
+    bracket: bracket.pressed,
+  }
+})()`)
+assert.equal(punctuation.slash.key, '/', 'slash is a supported key')
+assert.equal(punctuation.question.key, '?', 'shifted punctuation is a supported key')
+assert.equal(punctuation.slash.trusted, true, 'punctuation uses trusted input')
+assert.equal(punctuation.value, '/?;]', 'punctuation characters reached the field')
+console.log('PASS punctuation keys / ? ; ]')
+
+const persistence = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tabId, { url: '${BASE}/form.html' })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const first = await mod.execute('snapshot', {}, settings)
+  const name = first.labels.find(item => item.tag === 'input' && item.text === 'Name')
+  await mod.execute('scroll', { direction: 'down', amount_px: 600 }, settings)
+  const clicked = await mod.execute('click', { label: name.id, view: 'full' }, settings)
+  return {
+    nameLabel: name.id,
+    view: clicked.view,
+    clickedLabel: clicked.clicked?.label,
+    image: clicked.image?.width ?? null,
+    url: clicked.tab.url,
+  }
+})()`)
+assert.equal(persistence.clickedLabel, persistence.nameLabel, 'a label id from an earlier view still resolves')
+assert.equal(persistence.view, 'full', 'explicit full view is honoured')
+assert.ok(persistence.image > 0, 'label-persistence click returns a labelled view')
+assert.match(persistence.url, /form\.html/, 'label persistence is on the same page')
+console.log('PASS label persistence across views')
 
 console.log('\nALL WORK CHECKS PASSED')
 panel.close()

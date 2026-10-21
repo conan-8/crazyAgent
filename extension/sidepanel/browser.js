@@ -19,11 +19,22 @@ export const DEFAULT_SETTINGS = {
 
 const CAPTURE_INTERVAL_MS = 0
 const LABEL_LIMIT = 120
-/** Most recent labelled view per tab, used for pixel-diff verification. */
+/**
+ * Most recent labelled view per tab, used for pixel-diff verification, the
+ * auto view policy, and compact label deltas.
+ */
 const lastViewByTab = new Map()
-/** Global label id -> owning frame for iframe-aware clicks. */
-const labelFrames = new Map()
+/**
+ * Cumulative label registry per tab: global label id -> owning frame. Labels
+ * merge across views so an id from an earlier view on the same page still
+ * resolves. A URL change invalidates the whole entry.
+ * @type {Map<number, {url: string, labels: Map<number, {frameId: number, localId: number}>, at: number}>}
+ */
+const tabLabelsByTab = new Map()
+const MAX_LABEL_TABS = 20
 const lastScrollByTab = new Map()
+/** >0 while batch actions run: inner actions must not build their own view. */
+let batchDepth = 0
 /** Named keys supported by press_key, with DOM and CDP keyboard data. */
 const KEY_SPECS = {
   Enter: { key: 'Enter', code: 'Enter', keyCode: 13, text: '\r' },
@@ -43,6 +54,46 @@ const KEY_SPECS = {
 }
 /** CDP Input.dispatchKeyEvent modifier bits. */
 const MODIFIER_BITS = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
+
+/**
+ * Every printable ASCII character mapped to its physical key and key code.
+ * Base characters carry their shifted symbol; shifted variants need shift.
+ */
+const KEY_CHAR_TABLE = (() => {
+  /** @type {Record<string, {key: string, code: string, keyCode: number, shifted?: string, needsShift?: boolean}>} */
+  const table = {}
+  const add = (key, code, keyCode, extra = {}) => { table[key] = { key, code, keyCode, ...extra } }
+  for (let index = 0; index < 26; index += 1) {
+    const lower = String.fromCharCode(97 + index)
+    const upper = lower.toUpperCase()
+    add(lower, `Key${upper}`, 65 + index, { shifted: upper })
+    add(upper, `Key${upper}`, 65 + index, { needsShift: true })
+  }
+  const digitShifted = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')']
+  for (let digit = 0; digit <= 9; digit += 1) {
+    add(String(digit), `Digit${digit}`, 48 + digit, { shifted: digitShifted[digit] })
+    add(digitShifted[digit], `Digit${digit}`, 48 + digit, { needsShift: true })
+  }
+  const punctuation = [
+    ['`', 'Backquote', 192, '~'],
+    ['-', 'Minus', 189, '_'],
+    ['=', 'Equal', 187, '+'],
+    ['[', 'BracketLeft', 219, '{'],
+    [']', 'BracketRight', 221, '}'],
+    ['\\', 'Backslash', 220, '|'],
+    [';', 'Semicolon', 186, ':'],
+    ["'", 'Quote', 222, '"'],
+    [',', 'Comma', 188, '<'],
+    ['.', 'Period', 190, '>'],
+    ['/', 'Slash', 191, '?'],
+  ]
+  for (const [base, code, keyCode, shifted] of punctuation) {
+    add(base, code, keyCode, { shifted })
+    add(shifted, code, keyCode, { needsShift: true })
+  }
+  add(' ', 'Space', 32, { shifted: ' ' })
+  return table
+})()
 
 export class BrowserError extends Error {
   /**
@@ -422,14 +473,15 @@ async function listFrames(tabId) {
  * @param {number} tabId
  * @param {number} limit
  */
-async function labelAllFrames(tabId, limit) {
+async function labelAllFrames(tabId, limit, options = {}) {
   const frames = await listFrames(tabId)
   const topIndex = frames.findIndex(frame => frame.frameId === 0)
   if (topIndex > 0) frames.unshift(frames.splice(topIndex, 1)[0])
+  const paint = options.paint !== false
   const outcomes = await Promise.all(frames.map(async frame => {
     const cap = frame.frameId === 0 ? limit : Math.min(40, limit)
     try {
-      const result = await runInFrame(tabId, frame.frameId, labelPage, [cap], 2_000)
+      const result = await runInFrame(tabId, frame.frameId, labelPage, [cap, paint], 2_000)
       return { frameId: frame.frameId, result }
     } catch (error) {
       return { frameId: frame.frameId, error }
@@ -440,18 +492,68 @@ async function labelAllFrames(tabId, limit) {
     const detail = top?.result?.__labelError ?? (top?.error instanceof Error ? top.error.message : 'no result')
     throw new BrowserError('LABEL_FAILED', `Could not label the page: ${detail}`)
   }
-  labelFrames.clear()
   const labels = []
+  const registry = labelRegistryFor(tabId, top.result.url)
   for (const item of outcomes) {
     const data = item.result
     if (!data || data.__labelError) continue
     for (const label of data.labels) {
       const globalId = item.frameId === 0 ? label.id : item.frameId * 100_000 + label.id
-      labelFrames.set(globalId, { frameId: item.frameId, localId: label.id })
+      registry.labels.set(globalId, { frameId: item.frameId, localId: label.id })
       labels.push({ ...label, id: globalId, ...item.frameId === 0 ? {} : { frame: item.frameId } })
     }
   }
+  registry.at = Date.now()
+  pruneLabelRegistry(tabId)
   return { metrics: top.result, labels }
+}
+
+/**
+ * Cumulative label registry for a tab. A different URL invalidates the whole
+ * entry, so labels from the previous page can never resolve to new elements.
+ * @param {number} tabId
+ * @param {string} url
+ */
+function labelRegistryFor(tabId, url) {
+  let registry = tabLabelsByTab.get(tabId)
+  if (registry && registry.url !== url) {
+    tabLabelsByTab.delete(tabId)
+    registry = undefined
+  }
+  if (!registry) {
+    registry = { url, labels: new Map(), at: Date.now() }
+    tabLabelsByTab.set(tabId, registry)
+  }
+  return registry
+}
+
+/**
+ * Prune least-recently-used tabs beyond the registry limit.
+ * @param {number} currentTabId
+ */
+function pruneLabelRegistry(currentTabId) {
+  if (tabLabelsByTab.size <= MAX_LABEL_TABS) return
+  for (const tabId of [...tabLabelsByTab.keys()]) {
+    if (tabLabelsByTab.size <= MAX_LABEL_TABS) break
+    if (tabId === currentTabId) continue
+    tabLabelsByTab.delete(tabId)
+  }
+}
+
+/**
+ * Resolve a label id using the tab's cumulative registry. Returns undefined for
+ * labels from a different page or an id this page never produced.
+ * @param {chrome.tabs.Tab} tab
+ * @param {number} label
+ */
+function resolveLabelTarget(tab, label) {
+  const registry = tabLabelsByTab.get(tab.id)
+  if (!registry) return undefined
+  if (registry.url !== (tab.url ?? '')) {
+    tabLabelsByTab.delete(tab.id)
+    return undefined
+  }
+  return registry.labels.get(label)
 }
 
 /** Remove overlays from every frame. */
@@ -468,10 +570,19 @@ function pageMetrics() {
   const root = document.scrollingElement || document.documentElement
   const maxY = Math.max(0, root.scrollHeight - root.clientHeight)
   const maxX = Math.max(0, root.scrollWidth - root.clientWidth)
+  const active = document.activeElement
   return {
     title: document.title,
     url: location.href,
     readyState: document.readyState,
+    fingerprint: {
+      url: location.href,
+      title: document.title,
+      scrollX: Math.round(root.scrollLeft || 0),
+      scrollY: Math.round(root.scrollTop || 0),
+      textLen: String(document.body?.innerText ?? '').length,
+      active: active ? `${active.tagName.toLowerCase()}${active.id ? `#${active.id}` : ''}` : '',
+    },
     viewport: { width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1 },
     scroll: {
       x: root.scrollLeft || 0,
@@ -499,8 +610,9 @@ function pageMetrics() {
  * Label the interactive elements in the current viewport and return view
  * metrics plus the label list. Persistent ids survive relabelling.
  * @param {number} limit maximum labels to render
+ * @param {boolean} [paint] wait for the overlay to paint (needed before a capture)
  */
-async function labelPage(limit) {
+async function labelPage(limit, paint = true) {
   try {
     return await (async () => {
   const LABEL_SELECTOR = [
@@ -688,11 +800,14 @@ async function labelPage(limit) {
   ;(document.body || document.documentElement).appendChild(overlay)
 
   // Let the compositor paint the overlay before the screenshot is captured.
-  // A timeout fallback keeps this progressing where rAF is throttled.
-  await Promise.race([
-    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    new Promise(resolve => setTimeout(resolve, 60)),
-  ])
+  // A timeout fallback keeps this progressing where rAF is throttled. Labels-only
+  // views skip this: no capture follows, so waiting would only add latency.
+  if (paint !== false) {
+    await Promise.race([
+      new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      new Promise(resolve => setTimeout(resolve, 60)),
+    ])
+  }
 
   // Drop ids whose elements are gone so the map does not grow forever.
   if (state.byId.size > 800) {
@@ -701,10 +816,19 @@ async function labelPage(limit) {
     }
   }
 
+  const activeElement = document.activeElement
   return {
     title: document.title,
     url: location.href,
     readyState: document.readyState,
+    fingerprint: {
+      url: location.href,
+      title: document.title,
+      scrollX: Math.round(root.scrollLeft || 0),
+      scrollY: Math.round(root.scrollTop || 0),
+      textLen: String(document.body?.innerText ?? '').length,
+      active: activeElement ? `${activeElement.tagName.toLowerCase()}${activeElement.id ? `#${activeElement.id}` : ''}` : '',
+    },
     viewport: { width: vw, height: vh, dpr: window.devicePixelRatio || 1 },
     scroll: {
       x: root.scrollLeft || 0,
@@ -756,6 +880,7 @@ async function selectOption(label, wanted) {
       message: `No option matched ${JSON.stringify(wanted)}. Options: ${options.slice(0, 40).map(option => JSON.stringify((option.textContent || '').trim())).join(', ')}`,
     }
   }
+  const previousValue = String(el.value ?? '')
   el.focus?.({ preventScroll: true })
   el.value = match.value
   el.dispatchEvent(new Event('input', { bubbles: true }))
@@ -763,6 +888,7 @@ async function selectOption(label, wanted) {
   await new Promise(resolve => setTimeout(resolve, 80))
   return {
     ok: true,
+    previousValue,
     selected: { value: match.value, text: (match.textContent || '').trim() },
     selectedIndex: el.selectedIndex,
   }
@@ -1305,9 +1431,11 @@ async function captureVisibleTab(windowId, quality) {
       dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (/quota|MAX_CAPTURE_VISIBLE_TAB/i.test(message)) {
+      const quotaFailure = /quota|MAX_CAPTURE_VISIBLE_TAB/i.test(message)
+      const transientFailure = /image readback failed|failed to capture tab/i.test(message)
+      if (quotaFailure || transientFailure) {
         let retryError
-        for (const delay of [650, 900]) {
+        for (const delay of quotaFailure ? [650, 900] : [150, 400]) {
           await sleep(delay)
           lastCaptureAt = Date.now()
           try {
@@ -1466,6 +1594,17 @@ async function snapshot(detail, settings, retried = false, delayMs = 0) {
     image: { data: image.data, mimeType: image.mimeType, width: image.width, height: image.height },
     viewport: metrics.viewport,
     tab: { id: tab.id, title: metrics.title, url: metrics.url },
+    labels: metrics.labels,
+    scroll,
+    fingerprint: metrics.fingerprint ?? {
+      url: metrics.url,
+      title: metrics.title,
+      scrollX: Math.round(scroll?.x ?? 0),
+      scrollY: Math.round(scroll?.y ?? 0),
+      textLen: null,
+      active: '',
+    },
+    compactStreak: 0,
     at: Date.now(),
   })
   if (lastViewByTab.size > 20) {
@@ -1474,6 +1613,7 @@ async function snapshot(detail, settings, retried = false, delayMs = 0) {
   }
   return {
     op: 'snapshot',
+    view: 'full',
     labels: metrics.labels,
     surfaces: metrics.surfaces,
     tab: {
@@ -1509,6 +1649,303 @@ function lastScrollFor(tabId, url) {
   }
   if (last.url !== url) return undefined
   return last.scroll
+}
+
+/**
+ * Parse an optional view mode. Legacy click_at 'fresh' means full.
+ * @param {Record<string, any>} args
+ * @param {'auto'|'full'|'compact'|'none'} fallback
+ * @returns {'auto'|'full'|'compact'|'none'}
+ */
+function parseViewArg(args, fallback) {
+  const raw = args?.view
+  if (raw === undefined || raw === null) return fallback
+  if (raw === 'fresh') return 'full'
+  if (raw === 'auto' || raw === 'full' || raw === 'compact' || raw === 'none') return raw
+  return fallback
+}
+
+/**
+ * Tab summary shared by compact and none views.
+ * @param {chrome.tabs.Tab} tab
+ * @param {Record<string, any>} metrics
+ */
+function tabSummary(tab, metrics) {
+  return {
+    id: tab.id,
+    title: metrics?.title || tab.title || '',
+    url: metrics?.url || tab.url || '',
+    windowId: tab.windowId,
+    status: tab.status ?? 'unknown',
+  }
+}
+
+/**
+ * @param {chrome.tabs.Tab} tab
+ * @param {Record<string, any>} metrics
+ */
+function scrollFor(tab, metrics) {
+  return lastScrollFor(tab.id, metrics.url) ?? metrics.scroll
+}
+
+/**
+ * Cheap page fingerprint comparison used when no capture was taken.
+ * @param {Record<string, any> | undefined} before
+ * @param {Record<string, any> | undefined} after
+ */
+function fingerprintChanged(before, after) {
+  if (!before || !after) return false
+  return before.url !== after.url
+    || before.title !== after.title
+    || Math.abs((Number(before.scrollY) || 0) - (Number(after.scrollY) || 0)) > 2
+    || before.textLen !== after.textLen
+    || before.active !== after.active
+}
+
+/**
+ * Derive a compact outcome from the page fingerprint alone.
+ * @param {Record<string, any> | undefined} stored
+ * @param {Record<string, any>} metrics
+ */
+function deriveFingerprintOutcome(stored, metrics) {
+  const changed = fingerprintChanged(stored?.fingerprint, metrics?.fingerprint)
+  return { changed, signals: changed ? ['fingerprint-changed'] : [] }
+}
+
+/**
+ * Derive a compact outcome from the label delta (hover menus etc.).
+ * @param {{addedCount: number, removedCount: number} | undefined} delta
+ */
+function deriveLabelDeltaOutcome(delta) {
+  if (!delta) return { changed: false, signals: [] }
+  const signals = []
+  if (delta.addedCount > 0) signals.push('labels-added')
+  if (delta.removedCount > 0) signals.push('labels-removed')
+  return { changed: signals.length > 0, signals }
+}
+
+/**
+ * Compare the current label ids with the ids stored by the previous view.
+ * Ids are persistent per element, so ids are stable within a page.
+ * @param {Array<Record<string, any>>} previousLabels
+ * @param {Array<Record<string, any>>} currentLabels
+ */
+function labelDelta(previousLabels, currentLabels) {
+  const previous = new Map()
+  for (const label of previousLabels ?? []) {
+    if (label && Number.isFinite(label.id)) previous.set(label.id, label)
+  }
+  const current = new Set()
+  const added = []
+  let unchanged = 0
+  for (const label of currentLabels) {
+    if (!label || !Number.isFinite(label.id)) continue
+    current.add(label.id)
+    if (previous.has(label.id)) unchanged += 1
+    else added.push(label)
+  }
+  const removed = []
+  for (const [id, label] of previous) {
+    if (!current.has(id)) removed.push(label)
+  }
+  const listed = added.slice(0, 20).map(label => ({
+    id: label.id,
+    tag: label.tag,
+    role: label.role,
+    text: label.text,
+    disabled: label.disabled === true,
+    ...(label.frame === undefined ? {} : { frame: label.frame }),
+  }))
+  return {
+    count: currentLabels.length,
+    unchanged,
+    addedCount: added.length,
+    removedCount: removed.length,
+    added: listed,
+    ...(added.length > listed.length ? { truncated: true } : {}),
+  }
+}
+
+/**
+ * AUTO POLICY: stay compact unless we have no usable image, the page changed
+ * identity, or we have been compact for a while. Scroll changes do not force a
+ * full view (every DOM click centres its element); instead storeCompactView
+ * invalidates the stale image when the page scrolls, so image-space clicks fail
+ * with NO_VIEW rather than mapping from an old screenshot.
+ * @param {Record<string, any> | undefined} stored
+ * @param {Record<string, any>} metrics
+ */
+function autoEscalate(stored, metrics) {
+  if (!stored?.image?.data) return true
+  if ((stored.tab?.url ?? '') !== (metrics?.url ?? '')) return true
+  if ((stored.tab?.title ?? '') !== (metrics?.title ?? '')) return true
+  if ((stored.compactStreak ?? 0) >= 5) return true
+  return false
+}
+
+/**
+ * Labels-only view pass: no capture, no re-encode.
+ * @param {chrome.tabs.Tab} tab
+ */
+async function labelOnly(tab) {
+  const started = performance.now()
+  const labelled = await labelAllFrames(tab.id, LABEL_LIMIT, { paint: false })
+  return { metrics: labelled.metrics, labels: labelled.labels, labelMs: Math.round(performance.now() - started) }
+}
+
+/**
+ * Compact view payload (without the action outcome fields).
+ * @param {chrome.tabs.Tab} tab
+ * @param {Record<string, any>} metrics
+ * @param {Array<Record<string, any>>} labels
+ * @param {number} labelMs
+ * @param {Record<string, any>} delta
+ */
+function compactPayload(tab, metrics, labels, labelMs, delta) {
+  return {
+    view: 'compact',
+    screenshotSkipped: true,
+    tab: tabSummary(tab, metrics),
+    viewport: metrics.viewport,
+    scroll: scrollFor(tab, metrics),
+    labelCount: labels.length,
+    labelMs,
+    labelsDelta: delta,
+  }
+}
+
+/**
+ * Store a compact view: refresh labels/scroll/fingerprint, keep the previous
+ * image only while the page has not scrolled (a scrolled screenshot is stale
+ * for image-space coordinate mapping).
+ * @param {chrome.tabs.Tab} tab
+ * @param {Record<string, any>} metrics
+ * @param {Array<Record<string, any>>} labels
+ */
+function storeCompactView(tab, metrics, labels) {
+  const stored = lastViewByTab.get(tab.id)
+  if (!stored) {
+    lastViewByTab.set(tab.id, {
+      image: undefined,
+      viewport: metrics.viewport,
+      tab: { id: tab.id, title: metrics.title, url: metrics.url },
+      labels,
+      scroll: scrollFor(tab, metrics),
+      fingerprint: metrics.fingerprint,
+      compactStreak: 1,
+      at: Date.now(),
+    })
+    return
+  }
+  const before = stored.scroll ?? {}
+  const after = scrollFor(tab, metrics)
+  stored.tab = { id: tab.id, title: metrics.title, url: metrics.url }
+  stored.viewport = metrics.viewport
+  stored.labels = labels
+  stored.scroll = after
+  stored.fingerprint = metrics.fingerprint
+  stored.compactStreak = (stored.compactStreak ?? 0) + 1
+  stored.at = Date.now()
+  if (Math.abs((after?.y ?? 0) - (before?.y ?? 0)) > 40 || Math.abs((after?.x ?? 0) - (before?.x ?? 0)) > 40) {
+    delete stored.image
+  }
+}
+
+/**
+ * Build an action's view payload without any per-action image for compact and
+ * none modes. The caller merges the action outcome fields.
+ * @param {chrome.tabs.Tab} tab
+ * @param {import('./protocol.js').Settings} settings
+ * @param {'auto'|'full'|'compact'|'none'} requested
+ * @param {{changed?: boolean, signals?: string[], derive?: Function}} [options]
+ * @returns {Promise<{payload: Record<string, any>, mode: 'full'|'compact'|'none'}>}
+ */
+async function buildActionView(tab, settings, requested, options = {}) {
+  const baseChanged = options.changed === true
+  const baseSignals = Array.isArray(options.signals) ? options.signals : []
+  if (requested === 'none') {
+    const metrics = await runInTab(tab.id, pageMetrics, [])
+    let changed = baseChanged
+    let signals = baseSignals
+    if (typeof options.derive === 'function') {
+      const derived = options.derive({ stored: lastViewByTab.get(tab.id), metrics, labels: undefined, delta: undefined }) ?? {}
+      changed = derived.changed === true
+      signals = Array.isArray(derived.signals) ? derived.signals : []
+    }
+    return {
+      mode: 'none',
+      payload: {
+        view: 'none',
+        screenshotSkipped: true,
+        tab: tabSummary(tab, metrics),
+        viewport: metrics.viewport,
+        scroll: scrollFor(tab, metrics),
+        changed,
+        signals,
+      },
+    }
+  }
+  if (requested === 'full') {
+    const shot = await snapshot('normal', settings)
+    return { mode: 'full', payload: shot }
+  }
+  // compact or auto: one labels-only pass decides and feeds the delta
+  const labelled = await labelOnly(tab)
+  const stored = lastViewByTab.get(tab.id)
+  if (requested === 'auto' && autoEscalate(stored, labelled.metrics)) {
+    const shot = await snapshot('normal', settings)
+    return { mode: 'full', payload: shot }
+  }
+  const delta = labelDelta(stored?.labels ?? [], labelled.labels)
+  let changed = baseChanged
+  let signals = baseSignals
+  if (typeof options.derive === 'function') {
+    const derived = options.derive({ stored, metrics: labelled.metrics, labels: labelled.labels, delta }) ?? {}
+    changed = derived.changed === true
+    signals = Array.isArray(derived.signals) ? derived.signals : []
+  }
+  const payload = compactPayload(tab, labelled.metrics, labelled.labels, labelled.labelMs, delta)
+  payload.changed = changed
+  payload.signals = signals
+  storeCompactView(tab, labelled.metrics, labelled.labels)
+  return { mode: 'compact', payload }
+}
+
+/**
+ * Batch-level view: exactly one view for the whole batch, no per-action payload.
+ * @param {chrome.tabs.Tab} tab
+ * @param {import('./protocol.js').Settings} settings
+ * @param {'auto'|'full'|'compact'|'none'} requested
+ * @returns {Promise<{payload: Record<string, any>, mode: 'full'|'compact'|'none'}>}
+ */
+async function buildBatchView(tab, settings, requested) {
+  if (requested === 'none') {
+    const metrics = await runInTab(tab.id, pageMetrics, [])
+    return {
+      mode: 'none',
+      payload: {
+        view: 'none',
+        screenshotSkipped: true,
+        tab: tabSummary(tab, metrics),
+        viewport: metrics.viewport,
+        scroll: scrollFor(tab, metrics),
+      },
+    }
+  }
+  if (requested === 'full') {
+    const shot = await snapshot('normal', settings)
+    return { mode: 'full', payload: shot }
+  }
+  const labelled = await labelOnly(tab)
+  const stored = lastViewByTab.get(tab.id)
+  if (requested === 'auto' && autoEscalate(stored, labelled.metrics)) {
+    const shot = await snapshot('normal', settings)
+    return { mode: 'full', payload: shot }
+  }
+  const delta = labelDelta(stored?.labels ?? [], labelled.labels)
+  const payload = compactPayload(tab, labelled.metrics, labelled.labels, labelled.labelMs, delta)
+  storeCompactView(tab, labelled.metrics, labelled.labels)
+  return { mode: 'compact', payload }
 }
 
 /**
@@ -1554,12 +1991,31 @@ async function scroll(settings, direction, pages, amountPx, atX, atY) {
     }
     if (wheelUsed) await pauseInTab(tab.id, 180)
   }
+  let scroll
+  let moved
+  if (wheelUsed) {
+    const metricsAfter = await runInTab(tab.id, pageMetrics, [])
+    scroll = metricsAfter.scroll
+    moved = { dx: Math.round(scroll.x - beforeX), dy: Math.round(scroll.y - beforeY) }
+  } else {
+    scroll = scrollInfo.scroll
+    moved = scrollInfo.moved
+  }
+  lastScrollByTab.set(tab.id, { at: Date.now(), url: metrics.url, scroll })
+  if (batchDepth > 0) {
+    // Inner batch actions return outcome only; the batch builds one final view.
+    return {
+      op: 'scroll',
+      changed: Math.abs(moved.dx) >= 1 || Math.abs(moved.dy) >= 1,
+      signals: [],
+      scroll,
+      moved,
+      wheel: wheelUsed,
+      requestedPixels: pixels,
+      container: scrollInfo.container,
+    }
+  }
   const shot = await snapshot('normal', settings)
-  const scroll = wheelUsed ? shot.scroll : scrollInfo.scroll
-  const moved = wheelUsed
-    ? { dx: Math.round(scroll.x - beforeX), dy: Math.round(scroll.y - beforeY) }
-    : scrollInfo.moved
-  lastScrollByTab.set(tab.id, { at: Date.now(), url: shot.tab.url, scroll })
   return {
     ...shot,
     op: 'scroll',
@@ -1859,7 +2315,8 @@ function parseClickAtArgs(args) {
     throw new BrowserError('BAD_POINTS', 'click_at requires x/y or a points array.')
   }
   const space = args.space === 'css' ? 'css' : 'image'
-  const view = args.view === 'none' ? 'none' : 'fresh'
+  const rawView = parseViewArg(args, 'full')
+  const view = rawView === 'auto' ? 'full' : rawView
   const settleMs = parseSettleMs(args.settle_ms)
   if (hasPoints) {
     if (!Array.isArray(args.points) || args.points.length === 0 || args.points.length > 8) {
@@ -1931,29 +2388,10 @@ async function clickAt(settings, args) {
     }
   }
 
+  const noCapture = request.view === 'none' || request.view === 'compact' || batchDepth > 0
   let shot
   let diffs = targets.map(() => ({ changed: false, percent: 0, mean: 0 }))
-  if (request.view === 'none') {
-    // No screenshot: a cheap page-metrics read keeps tab/viewport/scroll in the
-    // snapshot shape without paying capture or label cost.
-    const metrics = await runInTab(tab.id, pageMetrics, [])
-    shot = {
-      tab: {
-        id: tab.id,
-        title: metrics.title || tab.title || '',
-        url: metrics.url || tab.url || '',
-        windowId,
-        status: tab.status ?? 'unknown',
-      },
-      viewport: metrics.viewport,
-      scroll: lastScrollFor(tab.id, metrics.url) ?? metrics.scroll,
-      labelCount: 0,
-      labelMs: 0,
-      captureMs: 0,
-      encodeMs: 0,
-      totalMs: Math.round(performance.now() - started),
-    }
-  } else {
+  if (!noCapture) {
     await settleAfterInput(tab.id, request.settleMs)
     shot = await snapshot('normal', settings)
     diffs = await Promise.all(targets.map(target => diffRegion(before, shot, target.cssX, target.cssY, 120)))
@@ -1965,28 +2403,51 @@ async function clickAt(settings, args) {
       diffs = await Promise.all(targets.map(target => diffRegion(before, shot, target.cssX, target.cssY, 120)))
     }
   }
-
-  const skipChange = request.view === 'none'
+  const noPixelDiff = request.view === 'none' || request.view === 'compact' || batchDepth > 0
   const points = targets.map((target, index) => ({
     space: target.space,
     x: target.x,
     y: target.y,
     cssX: Math.round(target.cssX),
     cssY: Math.round(target.cssY),
-    changed: skipChange ? null : diffs[index].changed,
-    pixelsChanged: skipChange ? null : diffs[index].percent,
-    pixelMean: skipChange ? null : diffs[index].mean,
+    changed: noPixelDiff ? null : diffs[index].changed,
+    pixelsChanged: noPixelDiff ? null : diffs[index].percent,
+    pixelMean: noPixelDiff ? null : diffs[index].mean,
   }))
+  if (batchDepth > 0) {
+    // Inner click_at: no capture at all. A fingerprint comparison still gives a
+    // cheap changed signal for the batch item.
+    const metrics = await runInTab(tab.id, pageMetrics, [])
+    const derived = deriveFingerprintOutcome(lastViewByTab.get(tab.id), metrics)
+    return {
+      points,
+      trusted,
+      changed: derived.changed,
+      clickMs: Math.round(performance.now() - started),
+    }
+  }
+  let payload
+  let mode
+  if (request.view === 'none' || request.view === 'compact') {
+    const view = await buildActionView(tab, settings, request.view, {
+      derive: ({ stored, metrics }) => deriveFingerprintOutcome(stored, metrics),
+    })
+    payload = view.payload
+    mode = view.mode
+  } else {
+    payload = shot
+    mode = 'full'
+  }
   const result = {
-    ...shot,
+    ...payload,
     op: 'click_at',
     points,
     trusted,
     changedCount: points.filter(point => point.changed === true).length,
     clickMs: Math.round(performance.now() - started),
   }
-  if (skipChange) {
-    result.view = 'none'
+  if (mode !== 'full') {
+    result.view = mode
     result.screenshotSkipped = true
   }
   if (points.length === 1) {
@@ -1995,7 +2456,9 @@ async function clickAt(settings, args) {
     result.changed = points[0].changed
     result.pixelsChanged = points[0].pixelsChanged
     result.pixelMean = points[0].pixelMean
-    result.signals = points[0].changed === true ? ['pixels-changed'] : []
+    result.signals = points[0].changed === true
+      ? ['pixels-changed']
+      : (Array.isArray(payload?.signals) ? payload.signals : [])
   }
   return result
 }
@@ -2003,21 +2466,22 @@ async function clickAt(settings, args) {
 /**
  * Click a labelled element and return the resulting view.
  * @param {import('./protocol.js').Settings} settings
- * @param {number} label
+ * @param {Record<string, any>} args
  */
-async function click(settings, label) {
-  const id = Number(label)
-  if (!Number.isSafeInteger(id) || id <= 0) {
+async function click(settings, args) {
+  const label = Number(args.label)
+  if (!Number.isSafeInteger(label) || label <= 0) {
     throw new BrowserError('BAD_LABEL', 'label must be a positive integer shown on the current view')
   }
+  const viewMode = parseViewArg(args, 'auto')
   const started = performance.now()
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
   const beforeUrl = tab.url ?? ''
   const __afterLookup = performance.now()
-  const target = labelFrames.get(id)
-  if (!target) throw new BrowserError('UNKNOWN_LABEL', `Label ${id} is not in the current view. Take a fresh screenshot to get current labels.`)
+  const target = resolveLabelTarget(tab, label)
+  if (!target) throw new BrowserError('UNKNOWN_LABEL', `Label ${label} is not in the current view. Take a fresh screenshot to get current labels.`)
   let result
   try {
     result = await runInFrame(tab.id, target.frameId, clickLabelled, [target.localId], 1_200)
@@ -2028,7 +2492,7 @@ async function click(settings, label) {
     const current = await chrome.tabs.get(tab.id).catch(() => undefined)
     const navigated = current !== undefined && (current.url ?? '') !== beforeUrl
     if (navigated || /frame.*(removed|gone)|cannot access contents|no frame|tab was closed/i.test(message)) {
-      result = { ok: true, clicked: { label: id, tag: '', role: '', text: '' }, changed: true, signals: ['navigation'], navigated: true }
+      result = { ok: true, clicked: { label, tag: '', role: '', text: '' }, changed: true, signals: ['navigation'], navigated: true }
     } else if (code === 'SCRIPT_TIMEOUT') {
       throw new BrowserError('CLICK_TIMEOUT', 'The click did not complete. Take a fresh view before trying again.')
     } else {
@@ -2053,19 +2517,27 @@ async function click(settings, label) {
     await waitForTabComplete(tab.id, windowId, 2_500)
   }
   const __afterWait = performance.now()
-  const shot = await snapshot('normal', settings)
-  const __afterSnapshot = performance.now()
-  const navigated = shot.tab.url !== beforeUrl
+  const currentAfter = await chrome.tabs.get(tab.id).catch(() => current)
+  const navigated = (currentAfter?.url ?? '') !== beforeUrl
   const pendingNavigation = result.pendingNavigation === true
-  const changed = pendingNavigation
-    ? navigated || (shot.tab.title ?? '') !== (tab.title ?? '')
-    : result.changed === true
+  const baseChanged = pendingNavigation ? navigated : result.changed === true
+  const signals = Array.isArray(result.signals) ? result.signals : []
+  if (batchDepth > 0) {
+    return { changed: baseChanged, signals, clicked: result.clicked, navigated }
+  }
+  const activeTab = await getActiveTab(windowId).catch(() => tab)
+  const __beforeView = performance.now()
+  const { payload, mode } = await buildActionView(activeTab, settings, viewMode, { changed: baseChanged, signals })
+  const viewMs = Math.round(performance.now() - __beforeView)
+  const changed = mode === 'full' && pendingNavigation
+    ? navigated || (payload.tab?.title ?? '') !== (tab.title ?? '')
+    : (payload.changed ?? baseChanged)
   return {
-    ...shot,
+    ...payload,
     op: 'click',
     clicked: result.clicked,
     changed,
-    signals: Array.isArray(result.signals) ? result.signals : [],
+    signals: mode === 'full' ? signals : (Array.isArray(payload.signals) ? payload.signals : []),
     navigated,
     clickMs: Math.round(performance.now() - started),
     clickTimings: {
@@ -2074,10 +2546,76 @@ async function click(settings, label) {
       runTabMs: Math.round(__afterClick - __afterLookup),
       sleepMs: Math.round(__afterTabGet - __afterClick),
       waitMs: Math.round(__afterWait - __afterTabGet),
-      snapshotMs: Math.round(__afterSnapshot - __afterWait),
+      snapshotMs: viewMs,
       tabStatus: current?.status,
     },
   }
+}
+
+/**
+ * Hover a labelled element and return the resulting view.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {Record<string, any>} args
+ */
+async function hover(settings, args) {
+  const label = Number(args.label)
+  if (!Number.isSafeInteger(label) || label <= 0) {
+    throw new BrowserError('BAD_LABEL', 'label must be a positive integer shown on the current view')
+  }
+  const viewMode = parseViewArg(args, 'auto')
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  assertCapturable(tab)
+  const target = resolveLabelTarget(tab, label)
+  if (!target) throw new BrowserError('UNKNOWN_LABEL', `Label ${label} is not in the current view. Take a fresh screenshot.`)
+  const hovered = await runInFrame(tab.id, target.frameId, hoverLabelled, [target.localId], 3_000)
+  if (hovered?.ok === false) throw new BrowserError(hovered.code ?? 'HOVER_FAILED', hovered.message ?? 'Could not hover')
+  await pauseInTab(tab.id, 80)
+  if (batchDepth > 0) {
+    const metrics = await runInTab(tab.id, pageMetrics, [])
+    const derived = deriveFingerprintOutcome(lastViewByTab.get(tab.id), metrics)
+    return { changed: derived.changed, signals: derived.signals, hovered: hovered.hovered }
+  }
+  const activeTab = await getActiveTab(windowId).catch(() => tab)
+  const { payload } = await buildActionView(activeTab, settings, viewMode, {
+    derive: ({ stored, metrics, delta }) => delta
+      ? deriveLabelDeltaOutcome(delta)
+      : deriveFingerprintOutcome(stored, metrics),
+  })
+  return { ...payload, op: 'hover', hovered: hovered.hovered }
+}
+
+/**
+ * Choose an option on a labelled select and return the resulting view.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {Record<string, any>} args
+ */
+async function selectOptionOp(settings, args) {
+  const label = Number(args.label)
+  if (!Number.isSafeInteger(label) || label <= 0) {
+    throw new BrowserError('BAD_LABEL', 'label must be a positive integer shown on the current view')
+  }
+  const viewMode = parseViewArg(args, 'auto')
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  assertCapturable(tab)
+  const target = resolveLabelTarget(tab, label)
+  if (!target) throw new BrowserError('UNKNOWN_LABEL', `Label ${label} is not in the current view. Take a fresh screenshot.`)
+  const picked = await runInFrame(tab.id, target.frameId, selectOption, [target.localId, String(args.option ?? '')], 3_000)
+  if (picked?.ok === false) throw new BrowserError(picked.code ?? 'SELECT_FAILED', picked.message ?? 'Could not select the option')
+  await pauseInTab(tab.id, 90)
+  const changed = String(picked.previousValue ?? '') !== String(picked.selected?.value ?? '')
+  const signals = changed ? ['value-changed'] : []
+  if (batchDepth > 0) {
+    return { changed, signals, selected: picked.selected, selectedIndex: picked.selectedIndex }
+  }
+  const activeTab = await getActiveTab(windowId).catch(() => tab)
+  const { payload } = await buildActionView(activeTab, settings, viewMode, {
+    changed,
+    signals,
+    derive: () => ({ changed, signals }),
+  })
+  return { ...payload, op: 'select_option', selected: picked.selected, selectedIndex: picked.selectedIndex }
 }
 
 export { labelPage as labelElements, clickLabelled as clickElementByLabel }
@@ -2213,7 +2751,7 @@ async function typeText(settings, args) {
   const request = parseTypeArgs(args)
   let outcome
   if (request.label !== undefined) {
-    const target = labelFrames.get(request.label)
+    const target = resolveLabelTarget(tab, request.label)
     if (!target) throw new BrowserError('UNKNOWN_LABEL', `Label ${request.label} is not in the current view. Take a fresh screenshot.`)
     let domResult
     try {
@@ -2237,28 +2775,42 @@ async function typeText(settings, args) {
     await pressEnter(tab.id)
     submitted = true
   }
-  const shot = await snapshot('normal', settings)
   const beforeChars = outcome.beforeChars ?? 0
   const afterChars = outcome.afterChars ?? 0
   const beforePreview = outcome.beforePreview ?? ''
   const valuePreview = outcome.valuePreview ?? ''
   const changed = afterChars !== beforeChars || valuePreview !== beforePreview
-  return {
-    ...shot,
-    op: 'type',
-    typed: {
-      ...(request.label === undefined ? {} : { label: request.label }),
-      chars: request.text.length,
-      mode: request.mode,
-      submitted,
-      method: outcome.method,
-      beforeChars,
-      afterChars,
-      valuePreview,
-    },
-    changed,
-    signals: changed ? ['text-changed'] : [],
+  const signals = changed ? ['text-changed'] : []
+  const typed = {
+    ...(request.label === undefined ? {} : { label: request.label }),
+    chars: request.text.length,
+    mode: request.mode,
+    submitted,
+    method: outcome.method,
+    beforeChars,
+    afterChars,
+    valuePreview,
   }
+  if (batchDepth > 0) return { changed, signals, typed }
+  const viewMode = parseViewArg(args, 'auto')
+  const activeTab = await getActiveTab(windowId).catch(() => tab)
+  const { payload } = await buildActionView(activeTab, settings, viewMode, { changed, signals })
+  return { ...payload, op: 'type', typed, changed, signals }
+}
+
+/**
+ * Normalize a key argument to its printable character entry. Physical code
+ * names KeyA / Digit1 are accepted as well.
+ * @param {string} raw
+ */
+function keyCharEntry(raw) {
+  let char = raw
+  const codeLetter = /^Key([a-zA-Z])$/u.exec(raw)
+  if (codeLetter) char = codeLetter[1].toLowerCase()
+  const codeDigit = /^Digit([0-9])$/u.exec(raw)
+  if (codeDigit) char = codeDigit[1]
+  const entry = KEY_CHAR_TABLE[char]
+  return entry ? { char, entry } : undefined
 }
 
 /**
@@ -2270,32 +2822,15 @@ async function typeText(settings, args) {
 function resolveKeySpec(raw, mask) {
   const named = Object.keys(KEY_SPECS).find(name => name.toLowerCase() === raw.toLowerCase())
   if (named) return KEY_SPECS[named]
+  const found = keyCharEntry(raw)
+  if (!found) throw new BrowserError('BAD_KEY', `Unsupported key ${JSON.stringify(raw)}`)
+  const { char, entry } = found
   const shifted = (mask & MODIFIER_BITS.shift) !== 0
   const plain = (mask & (MODIFIER_BITS.ctrl | MODIFIER_BITS.alt | MODIFIER_BITS.meta)) === 0
-  // Physical key names are accepted too (the tool description mentions "KeyA").
-  const codeLetter = /^Key([a-zA-Z])$/u.exec(raw)
-  if (codeLetter) {
-    const upper = codeLetter[1].toUpperCase()
-    const key = shifted ? upper : upper.toLowerCase()
-    return { key, code: `Key${upper}`, keyCode: upper.charCodeAt(0), ...(plain ? { text: key } : {}) }
-  }
-  const codeDigit = /^Digit([0-9])$/u.exec(raw)
-  if (codeDigit) {
-    const shiftedChar = { 1: '!', 2: '@', 3: '#', 4: '$', 5: '%', 6: '^', 7: '&', 8: '*', 9: '(', 0: ')' }[codeDigit[1]]
-    const key = shifted ? shiftedChar : codeDigit[1]
-    return { key, code: `Digit${codeDigit[1]}`, keyCode: codeDigit[1].charCodeAt(0), ...(plain ? { text: key } : {}) }
-  }
-  if (/^[a-zA-Z]$/u.test(raw)) {
-    const upper = raw.toUpperCase()
-    const key = shifted ? upper : raw.toLowerCase()
-    return { key, code: `Key${upper}`, keyCode: upper.charCodeAt(0), ...(plain ? { text: key } : {}) }
-  }
-  if (/^[0-9]$/u.test(raw)) {
-    const shiftedChar = { 1: '!', 2: '@', 3: '#', 4: '$', 5: '%', 6: '^', 7: '&', 8: '*', 9: '(', 0: ')' }[raw]
-    const key = shifted ? shiftedChar : raw
-    return { key, code: `Digit${raw}`, keyCode: raw.charCodeAt(0), ...(plain ? { text: key } : {}) }
-  }
-  throw new BrowserError('BAD_KEY', `Unsupported key ${JSON.stringify(raw)}`)
+  const key = entry.needsShift === true
+    ? entry.key
+    : (shifted && entry.shifted ? entry.shifted : char)
+  return { key, code: entry.code, keyCode: entry.keyCode, ...(plain ? { text: key } : {}) }
 }
 
 /**
@@ -2304,7 +2839,7 @@ function resolveKeySpec(raw, mask) {
  */
 function parsePressKeyArgs(args) {
   if (typeof args.key !== 'string' || args.key.length === 0) {
-    throw new BrowserError('BAD_KEY', 'key must be one of the supported key names or a single a-z, A-Z, 0-9 character')
+    throw new BrowserError('BAD_KEY', 'key must be a named key, a single printable ASCII character, or a KeyA/Digit1 code name')
   }
   const modifiers = []
   if (args.modifiers !== undefined) {
@@ -2317,14 +2852,12 @@ function parsePressKeyArgs(args) {
   }
   let mask = 0
   for (const item of modifiers) mask |= MODIFIER_BITS[item]
-  // An explicit uppercase letter or digit is typed as a shifted key even when
-  // the caller did not list shift; the echoed modifiers stay as requested.
-  let spec = resolveKeySpec(args.key, mask)
-  if (/^[A-Z]$/u.test(args.key) && (mask & MODIFIER_BITS.shift) === 0) {
+  // Shifted characters (A, ?, !) imply shift for dispatch; the echoed
+  // modifiers stay exactly as the caller supplied them.
+  if (keyCharEntry(args.key)?.entry.needsShift === true && (mask & MODIFIER_BITS.shift) === 0) {
     mask |= MODIFIER_BITS.shift
-    spec = resolveKeySpec(args.key, mask)
   }
-  return { key: args.key, modifiers, mask, spec }
+  return { key: args.key, modifiers, mask, spec: resolveKeySpec(args.key, mask) }
 }
 
 /**
@@ -2351,7 +2884,7 @@ async function dispatchTrustedKey(tabId, spec, mask) {
 }
 
 /**
- * Press one key with optional modifiers, then return a fresh view.
+ * Press one key with optional modifiers, then return the resulting view.
  * @param {import('./protocol.js').Settings} settings
  * @param {Record<string, any>} args
  */
@@ -2360,26 +2893,33 @@ async function pressKey(settings, args) {
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
   const request = parsePressKeyArgs(args)
+  const viewMode = parseViewArg(args, 'auto')
   const before = lastViewByTab.get(tab.id)
-  let trusted = true
+  const pressed = { key: request.key, modifiers: request.modifiers, trusted: true }
   try {
     await withDebugger(tab.id, () => dispatchTrustedKey(tab.id, request.spec, request.mask))
   } catch (error) {
     if (isDebuggerBusy(error)) throw error
-    trusted = false
+    pressed.trusted = false
     await runInTab(tab.id, syntheticKeyPage, [request.spec.key, request.spec.code, request.spec.keyCode, request.mask], 2_000)
   }
   await settleAfterInput(tab.id, undefined)
-  const shot = await snapshot('normal', settings)
-  const viewport = shot.viewport ?? { width: 1, height: 1 }
-  const diff = await diffRegion(before, shot, viewport.width / 2, viewport.height / 2, Math.max(viewport.width, viewport.height))
-  return {
-    ...shot,
-    op: 'press_key',
-    pressed: { key: request.key, modifiers: request.modifiers, trusted },
-    changed: diff.changed,
-    signals: diff.changed ? ['pixels-changed'] : [],
+  if (batchDepth > 0) {
+    const metrics = await runInTab(tab.id, pageMetrics, [])
+    const derived = deriveFingerprintOutcome(before, metrics)
+    return { changed: derived.changed, signals: derived.signals, pressed }
   }
+  const activeTab = await getActiveTab(windowId).catch(() => tab)
+  const { payload, mode } = await buildActionView(activeTab, settings, viewMode, {
+    derive: ({ stored, metrics }) => deriveFingerprintOutcome(stored, metrics),
+  })
+  if (mode === 'full') {
+    // Full views still verify the key press with a full-view pixel diff.
+    const viewport = payload.viewport ?? { width: 1, height: 1 }
+    const diff = await diffRegion(before, payload, viewport.width / 2, viewport.height / 2, Math.max(viewport.width, viewport.height))
+    return { ...payload, op: 'press_key', pressed, changed: diff.changed, signals: diff.changed ? ['pixels-changed'] : [] }
+  }
+  return { ...payload, op: 'press_key', pressed }
 }
 
 /**
@@ -2485,22 +3025,20 @@ async function navigate(settings, args) {
   const waitMs = Math.round(performance.now() - waitStarted)
   const current = await chrome.tabs.get(tabId).catch(() => undefined)
   const timedOut = (current?.status ?? 'complete') !== 'complete'
-  const shot = await snapshot('normal', settings)
-  return {
-    ...shot,
-    op: 'navigate',
-    navigated: {
-      ...(request.url === undefined ? {} : { requestedUrl: request.url }),
-      fromUrl,
-      toUrl: current?.url ?? shot.tab.url ?? '',
-      tabId,
-      newTab,
-      ...(history === undefined ? {} : { history }),
-      status: current?.status ?? shot.tab.status ?? 'unknown',
-      timedOut,
-      waitMs,
-    },
+  const navigated = {
+    ...(request.url === undefined ? {} : { requestedUrl: request.url }),
+    fromUrl,
+    toUrl: current?.url ?? '',
+    tabId,
+    newTab,
+    ...(history === undefined ? {} : { history }),
+    status: current?.status ?? 'unknown',
+    timedOut,
+    waitMs,
   }
+  if (batchDepth > 0) return { navigated }
+  const shot = await snapshot('normal', settings)
+  return { ...shot, op: 'navigate', navigated }
 }
 
 /**
@@ -2563,11 +3101,103 @@ async function waitFor(settings, args) {
   const polled = await runInTab(tab.id, waitForConditionsPage, [pageConditions, remaining], remaining + 2_000)
   const found = polled?.found === true
   const elapsedMs = Math.round(performance.now() - started)
+  const waited = { conditions, found, timedOut: !found, elapsedMs }
+  if (batchDepth > 0) return { waited }
   const shot = await snapshot('normal', settings)
+  return { ...shot, op: 'wait_for', waited }
+}
+
+const BATCH_OPS = new Set(['click', 'click_at', 'hover', 'select_option', 'type', 'press_key', 'scroll', 'wait_for', 'navigate'])
+const BATCH_ACTION_FIELDS = [
+  'changed', 'signals', 'clicked', 'hovered', 'selected', 'selectedIndex',
+  'typed', 'pressed', 'points', 'trusted', 'changedCount', 'clickMs',
+  'scroll', 'moved', 'wheel', 'requestedPixels', 'container', 'waited', 'navigated',
+]
+
+/**
+ * Run several already-validated actions in order with ONE final view.
+ * Inner actions run at batchDepth > 0 and therefore skip their own view.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {Record<string, any>} args
+ */
+async function batch(settings, args) {
+  const started = performance.now()
+  const rawActions = args?.actions
+  if (!Array.isArray(rawActions) || rawActions.length === 0 || rawActions.length > 20) {
+    throw new BrowserError('BAD_BATCH', 'actions must be an array of 1 to 20 action objects')
+  }
+  for (const [index, action] of rawActions.entries()) {
+    if (!action || typeof action !== 'object' || Array.isArray(action)) {
+      throw new BrowserError('BAD_BATCH', `action ${index + 1} must be an object`)
+    }
+    const op = action.op
+    if (typeof op !== 'string' || !BATCH_OPS.has(op)) {
+      throw new BrowserError('BAD_BATCH', `action ${index + 1} has unsupported op ${JSON.stringify(op)}; allowed: ${[...BATCH_OPS].join(', ')}`)
+    }
+    if (action.args !== undefined && (typeof action.args !== 'object' || action.args === null || Array.isArray(action.args))) {
+      throw new BrowserError('BAD_BATCH', `action ${index + 1} args must be an object`)
+    }
+  }
+  const stopOnError = args.stop_on_error !== false
+  const requestedView = parseViewArg(args, 'full')
+  /** @type {Array<Record<string, any>>} */
+  const actions = []
+  let ok = true
+  let failedIndex
+  let stoppedEarly = false
+  const actionsStarted = performance.now()
+  batchDepth += 1
+  try {
+    for (const [index, action] of rawActions.entries()) {
+      try {
+        const inner = await execute(action.op, action.args ?? {}, settings)
+        const item = { index: index + 1, op: action.op, ok: true }
+        for (const field of BATCH_ACTION_FIELDS) {
+          if (inner && inner[field] !== undefined) item[field] = inner[field]
+        }
+        actions.push(item)
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'BATCH_ACTION_FAILED'
+        const message = error instanceof Error ? error.message : String(error)
+        actions.push({ index: index + 1, op: action.op, ok: false, error: { code, message } })
+        ok = false
+        failedIndex = index + 1
+        if (stopOnError) {
+          stoppedEarly = true
+          break
+        }
+      }
+    }
+  } finally {
+    batchDepth -= 1
+  }
+  const elapsedMs = Math.round(performance.now() - actionsStarted)
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  const viewStarted = performance.now()
+  const built = await buildBatchView(tab, settings, requestedView)
+  const viewMs = Math.round(performance.now() - viewStarted)
+  const viewPayload = { ...built.payload }
+  // The frozen batch payload flattens the view on the root but drops the
+  // snapshot's own op/totalMs.
+  delete viewPayload.op
+  delete viewPayload.totalMs
   return {
-    ...shot,
-    op: 'wait_for',
-    waited: { conditions, found, timedOut: !found, elapsedMs },
+    op: 'batch',
+    view: built.mode,
+    totalMs: Math.round(performance.now() - started),
+    batch: {
+      total: rawActions.length,
+      executed: actions.length,
+      succeeded: actions.filter(item => item.ok === true).length,
+      ok,
+      stoppedEarly,
+      ...(failedIndex === undefined ? {} : { failedIndex }),
+      elapsedMs,
+      viewMs,
+    },
+    actions,
+    ...viewPayload,
   }
 }
 
@@ -2605,10 +3235,13 @@ export async function execute(op, args = {}, settings) {
     return activateTab(normalized, args.tab_id, args.query)
   }
   if (op === 'click') {
-    return click(normalized, args.label)
+    return click(normalized, args)
   }
   if (op === 'click_at') {
     return clickAt(normalized, args)
+  }
+  if (op === 'batch') {
+    return batch(normalized, args)
   }
   if (op === 'type') {
     return typeText(normalized, args)
@@ -2623,28 +3256,10 @@ export async function execute(op, args = {}, settings) {
     return waitFor(normalized, args)
   }
   if (op === 'select_option') {
-    const windowId = await getWindowId()
-    const tab = await getActiveTab(windowId)
-    assertCapturable(tab)
-    const selectTarget = labelFrames.get(Number(args.label))
-    if (!selectTarget) throw new BrowserError('UNKNOWN_LABEL', `Label ${args.label} is not in the current view. Take a fresh screenshot.`)
-    const picked = await runInFrame(tab.id, selectTarget.frameId, selectOption, [selectTarget.localId, String(args.option ?? '')], 3_000)
-    if (picked?.ok === false) throw new BrowserError(picked.code ?? 'SELECT_FAILED', picked.message ?? 'Could not select the option')
-    await pauseInTab(tab.id, 90)
-    const shot = await snapshot('normal', normalized)
-    return { ...shot, op: 'select_option', selected: picked.selected, selectedIndex: picked.selectedIndex }
+    return selectOptionOp(normalized, args)
   }
   if (op === 'hover') {
-    const windowId = await getWindowId()
-    const tab = await getActiveTab(windowId)
-    assertCapturable(tab)
-    const hoverTarget = labelFrames.get(Number(args.label))
-    if (!hoverTarget) throw new BrowserError('UNKNOWN_LABEL', `Label ${args.label} is not in the current view. Take a fresh screenshot.`)
-    const hovered = await runInFrame(tab.id, hoverTarget.frameId, hoverLabelled, [hoverTarget.localId], 3_000)
-    if (hovered?.ok === false) throw new BrowserError(hovered.code ?? 'HOVER_FAILED', hovered.message ?? 'Could not hover')
-    await pauseInTab(tab.id, 80)
-    const shot = await snapshot('normal', normalized)
-    return { ...shot, op: 'hover', hovered: hovered.hovered }
+    return hover(normalized, args)
   }
   if (op === 'labels.clear') {
     const windowId = await getWindowId()

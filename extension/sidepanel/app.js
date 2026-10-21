@@ -1357,6 +1357,9 @@ async function handleBrowserCommand(frame) {
       pressed: result.pressed,
       navigated: result.navigated,
       waited: result.waited,
+      view: result.view,
+      labelsDelta: result.labelsDelta,
+      batch: result.batch,
     }, 'info')
     sendBrowserResult(frame.id, true, result)
   } catch (error) {
@@ -1418,6 +1421,15 @@ function browserActivitySummary(op, result) {
   }
   if (result.waited) {
     parts.push(`${result.waited.found ? 'found' : 'timed out'} after ${Math.round(result.waited.elapsedMs ?? 0)}ms`)
+  }
+  if (result.batch) {
+    parts.push(`batch ${result.batch.executed}/${result.batch.total} · ${result.batch.succeeded ?? result.batch.executed} succeeded${result.batch.ok ? '' : ' · failed'}${result.batch.failedIndex === undefined ? '' : ` at ${result.batch.failedIndex}`}`)
+  }
+  if (result.view === 'compact') {
+    const delta = result.labelsDelta ?? {}
+    parts.push(`compact view · ${delta.count ?? 0} labels (+${delta.addedCount ?? 0}/-${delta.removedCount ?? 0})`)
+  } else if (result.view === 'none') {
+    parts.push('no screenshot')
   }
   if (Number.isFinite(result.labelCount)) parts.push(`${result.labelCount} labels`)
   if (Number.isFinite(result.captureMs)) parts.push(`capture ${result.captureMs}ms`)

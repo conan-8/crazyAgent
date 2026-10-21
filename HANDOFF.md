@@ -74,7 +74,7 @@ answers with `browser.result`.
 | Repo | `/home/conan/Documents/GitHub/crazyAgent` |
 | Node | 26.8.1 (needs 22.19+) |
 | DSH | `0.2.1-rc.2` (`@deepseek-ai/dsh`) |
-| Companion | running, PID in `logs/companion.pid` (1320010 after the work-foundation restart) |
+| Companion | running, PID in `logs/companion.pid` (1665702 after the B+C+E restart) |
 | Bridge | `ws://127.0.0.1:17871/bridge` |
 | Health | `{"ok":true,"ui":false,"tools":true,"port":17871}` |
 | Token | read `.dsh-home/browser-agent/token` (do not commit it) |
@@ -84,9 +84,9 @@ answers with `browser.result`.
 | API key | stored, 73 bytes, `.dsh-home/browser-agent/api-key` (0600) |
 | Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash) |
 | Permissions | sidePanel, tabs, scripting, storage, **debugger**, **webNavigation**, host `<all_urls>` |
-| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-21T19-11-58-370Z-0ea2f0` (post-restart); the 8-turn game/work session is `run-2026-10-21T18-19-12-088Z-e0d364` |
-| Tests | 71/71 passing |
-| Git | `main` has baseline, burst-click, and work-foundation commits; tree clean |
+| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-21T21-30-54-909Z-ac82d4` (post-restart); the 19-turn work analysis run is `run-2026-10-21T19-11-58-370Z-0ea2f0` |
+| Tests | 81/81 passing |
+| Git | `main` has baseline, burst-click, work-foundation and B+C+E commits; tree clean |
 
 Latest real-world validation (from that run):
 
@@ -113,8 +113,19 @@ label-less typing into a focused canvas editor, replace/append, optional Submit,
 password masking), `browser_press_key` (trusted CDP key events with
 ctrl/alt/shift/meta), `browser_navigate` (http(s) url, new tab, back/forward/
 reload, 15 s load budget), `browser_wait_for` (text/url/idle/ms conditions with
-timeout). Roster is now **thirteen** tools; persona and GUIDANCE were updated in
-the same change so the model never again deliberates about a capability it has.
+timeout). Roster became **thirteen** tools at that point; persona and GUIDANCE
+were updated in the same change so the model never again deliberates about a
+capability it has.
+
+2026-10-21 B+C+E (root-cause fix after 19 work turns / 220 steps): the loop was
+fully serialized (**0 steps in the whole run had more than one tool call**) and
+every action returned a full view, so prompts averaged **134 K tokens/step**
+(245 K max) with TTFT 2-4 s/step and 204 screenshots re-sent per run. Fixes:
+`browser_batch` (1-20 ordered actions per call, one final view, per-action
+outcomes, per-call bridge timeout), **view modes** (`auto`/`full`/`compact`/`none`
+with label deltas, compact DOM actions 18-35 ms instead of 360-1266 ms), cumulative
+per-tab label registry, printable-ASCII keys, and capture readback retries.
+Roster is now **fourteen** tools.
 
 ---
 
@@ -196,7 +207,7 @@ update them.
    generated model overlay, companion, and extension. DSH is pinned to
    `0.2.1-rc.2`.
 2. **The model never gets arbitrary DOM automation.** It has a fixed roster of
-   **thirteen** browser tools; every action is a labelled element, an explicit
+   **fourteen** browser tools; every action is a labelled element, an explicit
    coordinate, explicit text/keys, or an explicit http(s) URL. No JS evaluation,
    selector guessing, or unlabelled DOM manipulation.
 3. **All browser execution lives in the side panel page.** No content script is
@@ -228,22 +239,27 @@ update them.
 10. **The API key never touches `chrome.storage`.** It goes over loopback as a
     `llm.configure` frame, is passed to DSH as `CRAZYAGENT_API_KEY`, and is
     redacted from logs. The generated patch and `llm.json` contain no secret.
-11. **Speed rule:** every browser action returns a fresh labeled view, so the
-    model never needs a separate screenshot round trip. Avoid extra model
-    steps; each one costs ~1.5–3 s.
+11. **Speed rule:** never pay a model round trip per action. `browser_batch`
+    runs an ordered sequence in one call with one final view. DOM actions
+    default to a compact confirmation (no screenshot, label delta only) and
+    auto-escalate to a full labelled view when the page changes, when there is
+    no previous view, after 5 compact actions, or on `view:"full"`. Full views
+    still carry labels, so the model never needs a separate screenshot round
+    trip; compact results keep the request small so TTFT stays low.
 12. **Log redaction:** pairing token, API keys, `Bearer`, secret-named fields,
     sensitive query params, inline base64. Page text, screenshots, and reasoning
     are **not** redacted. Review bundles before sharing.
 
 ---
 
-## 5. Capabilities (thirteen model-visible tools)
+## 5. Capabilities (fourteen model-visible tools)
 
 | Tool | What it does | Notes |
 |---|---|---|
 | `browser_screenshot` | View with tab/viewport/scroll metadata, numbered labels, surface list | `detail:"high"` uses 2048 px width; `delay_ms` 0-5000 waits in the page before capturing |
 | `browser_click` | Click a labelled element | DOM, open shadow roots, iframes. Returns `changed` + signals + fresh view |
 | `browser_click_at` | Click screenshot pixels or CSS coordinates; `points` bursts up to 8 | Canvas/video/iframe. One debugger attach + one capture per burst, per-point pixel diff. `view:"none"` = text-only fast mode; `settle_ms` 0-400 |
+| `browser_batch` | Run an ordered sequence of 1-20 actions in one call | Allowed ops: click, click_at, hover, select_option, type, press_key, scroll, wait_for, navigate. One final view; compact per-action outcomes; `stop_on_error` default true; `view` default full; per-call timeout scales with action count |
 | `browser_type` | Type into a labelled editable field, or the focused element when unlabelled | DOM native setter + input/change for inputs/textarea, `execCommand` for contenteditable, trusted `Input.insertText` fallback and for canvas editors (Docs). `mode` replace/append; `submit` presses Enter; password values masked |
 | `browser_press_key` | One trusted key press with optional modifiers | Enter/Tab/Escape/Backspace/Delete/arrows/Home/End/PageUp/PageDown/Space/letters/digits; CDP `Input.dispatchKeyEvent` keyDown+keyUp, synthetic fallback |
 | `browser_hover` | Hover a labelled element | Reveals hover-only menus/tooltips |
@@ -281,6 +297,24 @@ Behavioural layers:
 - **Waiting:** page-side poll + MutationObserver inside the tab; conditions are
   combined (text AND url AND idle), `ms` delays first and counts toward the
   timeout.
+- **View modes:** DOM actions (`click`, `hover`, `select_option`, `type`,
+  `press_key`) default to `auto`: a compact confirmation with no capture, no
+  image, no label list, plus `labelsDelta` (added/removed/unchanged counts and
+  up to 20 new labels). Auto escalates to a full labelled view when there is no
+  stored view, on URL/title change, after 5 compact actions, or on demand.
+  `view:"none"` drops even the delta. `click_at` defaults to `full` so canvas
+  re-aiming stays stable. A compact action that scrolls >40 px invalidates the
+  stored image, so image-space `click_at` fails `NO_VIEW` instead of using a
+  stale screenshot.
+- **Batch:** inner actions run with `batchDepth > 0`, so they skip their own
+  view/label work; the batch builds exactly one view at the end and records
+  per-action outcomes (`{index, op, ok, changed/signals, clicked/typed/pressed/
+  points/waited/navigated}` or `error{code,message}`). A reveal boundary (menu,
+  dialog, new page) cannot be crossed inside one batch: the next action cannot
+  know a label that only appears after the previous action.
+- **Label registry:** labels are merged cumulatively per tab keyed by URL, so an
+  id from an earlier view still resolves to the same element (or fails
+  `DETACHED`); a URL change clears the tab's registry. LRU keeps 20 tabs.
 - **Change signals for DOM clicks:** `url-change`, `title-change`,
   `scroll-change`, `text-change`, `dialog-change`, `dom-mutations:N`, `checked`,
   `aria-expanded`, `aria-selected`. A no-op returns **NO VISIBLE CHANGE**.
@@ -321,17 +355,17 @@ Behavioural layers:
 
 | File | Responsibility |
 |---|---|
-| `lib/index.js` (~1384 lines) | Plugin: bridge client (`tools` role), `registerTools` (~795), guidance, `apply` (~1205), activity frames (`activityFromFrame` ~343), `formatView` (~443), coordinate/type/press/navigate/wait content formatters (`clickAtContent` ~546, `typeContent` ~664, `pressKeyContent` ~682, `navigateContent` ~696, `waitForContent` ~741), select/hover content, reasoning policy + image budget hooks, `llm/stream` is intentionally **not** used |
+| `lib/index.js` (~1713 lines) | Plugin: bridge client (`tools` role, now with a per-request timeout for batches), `registerTools` (~1037), guidance, `apply` (~1534), activity frames (`activityFromFrame` ~343), `formatView` (~443), shared view helpers (`labelsDeltaLines` ~556, `actionContent` ~588), coordinate/type/press/navigate/wait content formatters (`clickAtContent` ~647 and siblings), `batchContent` (~957), reasoning policy + image budget hooks, `llm/stream` is intentionally **not** used |
 | `lib/reasoning.js` | `classifyPrompt`, `autoEffort`, `effortFor` (navigate/inspect/synthesize/**rapid**) |
 | `lib/image-budget.js` | `planImageOffload` pure planner |
-| `test/*.test.mjs` | 13 tools, label prompts, activity forwarding, reasoning, image budget |
+| `test/*.test.mjs` | 14 tools, view modes/label deltas, batch, label prompts, activity forwarding, reasoning, image budget |
 
 ### Extension (`extension/`)
 
 | File | Responsibility |
 |---|---|
 | `manifest.json` | MV3, side panel, permissions above, `<all_urls>` |
-| `sidepanel/browser.js` (~2676 lines) | Browser executor. Key functions: `waitForPaint` (~192), `settleAfterInput` (~213), `withDebugger` (~231), `syntheticClickBurst` (~275), `diffRegion` (~336), `runInFrame` (~366), `labelAllFrames` (~406), `labelPage` (~503), `selectOption` (~719), `hoverLabelled` (~757), `clickLabelled` (~791), `scrollPage` (~1193), `snapshot` (~1440), `waitForConditionsPage` (~1157), `scroll` (~1517), `parseClickAtArgs` (~1852), `clickAt` (~1897), `typeText` (~2209), `pressKey` (~2358), `navigate` (~2445), `waitFor` (~2550), `execute` (~2591) |
+| `sidepanel/browser.js` (~3291 lines) | Browser executor. Key functions: `waitForPaint` (~192), `settleAfterInput` (~213), `withDebugger` (~231), `syntheticClickBurst` (~275), `diffRegion` (~336), `runInFrame` (~366), `labelAllFrames` (~406), `labelRegistryFor` (~517, cumulative per-tab labels), `labelPage` (~560), `snapshot` (~1568), `autoEscalate` (~1778), `labelOnly` (~1790), `compactPayload` (~1804), `buildActionView` (~1863), `buildBatchView` (~1921), `scroll` (~2010), `clickAt` (~2354), `typeText` (~2747), `pressKey` (~2891), `navigate` (~2985), `waitFor` (~3088), `batch` (~3123), `execute` (~3221) |
 | `sidepanel/app.js` | Chat UI, settings (key/base URL/model/effort), bridge lifecycle, live activity feed, tool cards, debug-log modal |
 | `sidepanel/index.html`, `style.css` | UI markup/styles |
 | `sidepanel/logger.js`, `protocol.js` | Client log batching, formatting helpers |
@@ -373,12 +407,12 @@ logs/<runId>/   events.jsonl, screenshots/, exports/, summary files
 
 ## 7. Test inventory
 
-`npm test` = 71 tests:
+`npm test` = 81 tests:
 
 - `companion/test/`: bridge (7), prompt (9), log store (2), credentials (2),
   openrouter (5).
 - `extension/test/`: helpers (3), logger (4), tab match (5).
-- `packages/dsh-browser-extension/test/`: tools (23), reasoning (7),
+- `packages/dsh-browser-extension/test/`: tools (33), reasoning (7),
   image budget (4).
 
 E2E suites (not in `npm test`): `edge-click-e2e.mjs` (9 behaviours),
@@ -393,7 +427,7 @@ wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
 
 1. **Typing and navigation — DONE** (2026-10-21). `browser_type`,
    `browser_press_key`, `browser_navigate` (url/new_tab/history), and
-   `browser_wait_for` are in the thirteen-tool roster. Remaining input gaps:
+   `browser_wait_for` are in the fourteen-tool roster. Remaining input gaps:
    IME composition strings, file inputs, and drag/drop.
 2. **Fast/batch canvas clicking — DONE.** `browser_click_at` accepts `points`
    (1-8) and clicks a whole burst with one debugger attach and one capture;
@@ -428,9 +462,9 @@ wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
     turn (banner stays) or a settings toggle.
 12. **Commit the repo — DONE.** Baseline, burst-click, and work-foundation
     changes are committed on `main`; keep future work as small reviewed commits.
-13. **Form-fill batching** — type into several labelled fields in one call
-    (`fields: [{label, text}]`), the typing analogue of burst clicking. Cuts a
-    model round trip per field on multi-field forms.
+13. **Form-fill batching — DONE.** `browser_batch` covers multi-field forms,
+    table cells (type + Tab), shortcut sequences and multi-click sequences with
+    one final view.
 
 ---
 
@@ -491,6 +525,16 @@ wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
 - **The side-panel page caches `browser.js` as an ES module.** After editing the
   executor, reload the side-panel page (or restart the isolated Edge) before an
   e2e run, or the suite silently tests stale code.
+- **Serialization is the real latency cost, not the browser.** Across 19 work
+  turns the model averaged 0.96 tool calls per step (0 of 220 steps had more
+  than one), so a 62-action turn was 62 model requests; each action also
+  appended a full view, pushing prompts to 134 K tokens/step and 245 K at worst.
+  Fix round trips (batch) and per-action payload (compact views) before tuning
+  browser timings.
+- **A batch cannot cross a reveal boundary.** A menu/dialog/page that appears
+  only after an action cannot be targeted by a later action in the same batch,
+  because its label id does not exist until a view is taken. Guidance tells the
+  model to stop the batch and take a view.
 
 ---
 
@@ -603,7 +647,7 @@ read it from `chrome://extensions`.
 
 1. `cd /home/conan/Documents/GitHub/crazyAgent`
 2. `curl -s http://127.0.0.1:17871/health` — expect `tools:true`.
-3. `npm test` — expect 71 passing.
+3. `npm test` — expect 81 passing.
 4. Read the latest run under `.dsh-home/browser-agent/logs/` if investigating a
    specific behaviour (`events.jsonl`, `summary.md`).
 5. Reload the extension if `extension/` changed since the last load.
@@ -624,6 +668,7 @@ read it from `chrome://extensions`.
 - “Switch to the Second Fixture Page tab.”
 - “Read this page and give me the markers.”
 - “Scroll down 700 pixels.”
+- “Fill the name and notes fields and submit” — should become one `browser_batch` call with one final view.
 - “Type ‘hello’ into the search box and press Enter.” (`form.html`)
 - “Click into the editor and type ‘draft text’.” (canvas-editor path)
 - “Go to 127.0.0.1:17872/second.html and tell me the marker.” (`navigate`)

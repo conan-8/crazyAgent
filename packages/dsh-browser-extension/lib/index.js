@@ -4,7 +4,8 @@
  *
  * Tools: screenshot, labelled click, coordinate burst click, typing, key
  * presses, URL/history navigation, waiting, hover, select, text read, scroll,
- * and tab listing/switching. Page content is untrusted data.
+ * tab listing/switching, and batched action sequences with compact or full
+ * views. Page content is untrusted data.
  *
  * @module dsh-browser-extension
  */
@@ -26,9 +27,10 @@ const MAX_PAYLOAD_BYTES = 32 * 1024 * 1024
 
 const GUIDANCE = `The browser tools operate the user's current Chrome window from the side panel.
 - Each screenshot shows only the current viewport plus tab, scroll, and scale metadata.
-- Every view includes yellow numbered badges on interactive elements and a "labels" list. Click by number with browser_click, never by guessed coordinates. Labels are stable for the page: a label either resolves to the same element or fails as stale.
+- Most actions accept view: "auto" (default) | "full" | "compact" | "none". auto returns a compact confirmation with a label delta and no screenshot, escalating to a full view when the page changes, after 5 actions, or when you pass view:"full"; ask for view:"full" when you need to see. view:"none" only when you do not need any confirmation of structure.
+- Every full view includes yellow numbered badges on interactive elements and a "labels" list. Click by number with browser_click, never by guessed coordinates. Labels are stable for the page: a label either resolves to the same element or fails as stale.
 - A view also lists its surfaces: canvas, video, and iframe regions with no DOM targets. Use browser_click_at with screenshot pixel coordinates for targets inside those regions or when no label covers the target. It uses trusted browser input and reports pixels_changed, so it works where DOM events never fire.
-- Click several targets with one browser_click_at call: pass points:[{x,y}, ...] (up to 8) instead of one call per click. A burst returns one fresh view with a per-point changed report, so one attach and one view cover the whole burst.
+- Click several targets with one browser_click_at call: pass points:[{x,y}, ...] (up to 8) instead of one call per click. A burst returns one confirmation with a per-point changed report, so one attach and one view cover the whole burst.
 - Add view:"none" to browser_click_at for rapid repeated bursts that do not need to see the result: it returns text only and skips the screenshot. Image coordinates still map to the previous view, so keep clicking without paying for another image; ask for a fresh view when the layout may have moved or you need to re-aim.
 - browser_screenshot accepts delay_ms (0-5000) to wait in the page before capturing, e.g. for a countdown or a short animation. One delayed screenshot is cheaper than repeated screenshots.
 - browser_scroll reports wheel=true when a canvas app handled a trusted wheel instead of DOM scrolling.
@@ -38,7 +40,9 @@ const GUIDANCE = `The browser tools operate the user's current Chrome window fro
 - browser_press_key sends one real key press with optional ctrl/alt/shift/meta modifiers: Enter submits, Tab/Shift+Tab moves focus, Escape dismisses, Backspace and arrow keys edit or move a caret.
 - browser_navigate opens an http(s) URL (new_tab keeps the current tab) or goes history back/forward, or reloads. Use it when no link leads to the target; it returns a fresh view after the load attempt.
 - browser_wait_for waits for text, a URL change, page idle, or a fixed ms instead of taking repeated screenshots. Give at least one condition; timeout_ms bounds the wait (default 10000).
-- browser_click returns a fresh view with new labels. Do not call browser_screenshot again after it. If the result says NO VISIBLE CHANGE, do not repeat the same click; try a different label, type into the field, or read the page.
+- browser_batch runs up to 20 actions in one call and returns one view for the whole sequence: fill several already-labelled fields (type label 10 "Jane", type label 12 "jane@…", press_key Enter), type with press_key Tab between table cells, run press_key shortcut sequences (ctrl+b, type, ctrl+b), click several already-visible labelled controls (checkboxes, toggles), click_at at known coordinates, or type then Enter/Tab to submit.
+- Only batch actions whose target you can already see in the current view or reach without seeing new state. If an action reveals new UI (a menu, a dialog, a new page), stop the batch and take a view before continuing. A batch stops at the first failure unless stop_on_error:false.
+- browser_click returns a confirmation of the click; with view:"auto" it is compact unless the page changed. Do not call browser_screenshot just to see unless you pass view:"full" or need visual detail. If the result says NO VISIBLE CHANGE, do not repeat the same click; try a different label, type into the field, or read the page.
 - Use browser_read_text for text-heavy pages (articles, email, documents, tables) when layout/images are not the point. It returns rendered text quickly and can paginate with offset/max_chars. Use screenshots when visual layout, images, or the current visual state matters.
 - browser_switch_tab accepts either a tab_id or a case-insensitive title/URL query. Use query when the user names a tab; use browser_tabs only when you need the full list.
 - browser_scroll and browser_switch_tab already return a fresh screenshot. Do not call browser_screenshot again after them unless you need detail "high" or the page changed outside your action.
@@ -163,9 +167,11 @@ class BridgeClient {
    * @param {{op: string, args?: Record<string, unknown>}} command
    * @param {string | undefined} callId
    * @param {AbortSignal | undefined} signal
+   * @param {number | undefined} [timeoutMs] per-request timeout; defaults to the configured timeout
    * @returns {Promise<Record<string, unknown>>}
    */
-  request(command, callId, signal) {
+  request(command, callId, signal, timeoutMs) {
+    const waitMs = Number.isFinite(timeoutMs) && Number(timeoutMs) > 0 ? Number(timeoutMs) : this.timeoutMs
     return new Promise((resolve, reject) => {
       if (this.#closed) {
         reject(new Error('browser bridge is closed'))
@@ -214,7 +220,7 @@ class BridgeClient {
         cleanup()
         reject(new Error('browser command cancelled'))
       }
-      const timer = setTimeout(() => finish(new Error(`browser command timed out after ${this.timeoutMs}ms`)), this.timeoutMs)
+      const timer = setTimeout(() => finish(new Error(`browser command timed out after ${waitMs}ms`)), waitMs)
       signal?.addEventListener('abort', onAbort, { once: true })
       this.#pending.set(id, { resolve: value => finish(undefined, value), reject: error => finish(error), timer, cleanup })
 
@@ -499,6 +505,101 @@ function viewContent(result, prefix) {
   return { content }
 }
 
+const VIEW_MODES = ['auto', 'full', 'compact', 'none']
+const CLICK_AT_VIEW_MODES = ['full', 'compact', 'none', 'fresh', 'auto']
+
+/**
+ * Validate a model-supplied view mode. Returns undefined when the caller did
+ * not send one; the executor owns the default.
+ * @param {unknown} view
+ * @param {string[]} [allowed]
+ * @returns {unknown}
+ */
+function checkedView(view, allowed = VIEW_MODES) {
+  if (view === undefined) return undefined
+  if (typeof view !== 'string' || !allowed.includes(view)) {
+    throw new Error(`view must be one of ${allowed.join(', ')}`)
+  }
+  return view
+}
+
+/**
+ * Resolve the model-facing view mode of an action result. Older executors omit
+ * `view` and always returned a full view; click_at's legacy `fresh` is a full
+ * view too. An explicit screenshotSkipped result counts as `none`.
+ * @param {Record<string, any>} result
+ * @returns {'full'|'compact'|'none'}
+ */
+function resultView(result) {
+  const view = result?.view
+  if (view === 'compact' || view === 'none') return view
+  if (view === 'full' || view === 'fresh' || view === 'auto') return 'full'
+  return result?.screenshotSkipped === true ? 'none' : 'full'
+}
+
+/**
+ * One `+[57] button "Bold"` line for an added label.
+ * @param {Record<string, any>} label
+ * @returns {string}
+ */
+function addedLabelLine(label) {
+  const role = label?.role || label?.tag || 'element'
+  return `+[${label?.id ?? '?'}] ${role} ${JSON.stringify(String(label?.text ?? ''))}`
+}
+
+/**
+ * Compact-view label delta lines. Supports an added-label array, a count-only
+ * delta, or a plain unchanged count so every executor shape formats sensibly.
+ * @param {Record<string, any>} result
+ * @returns {string[]}
+ */
+function labelsDeltaLines(result) {
+  const delta = isRecord(result?.labelsDelta) ? result.labelsDelta : {}
+  const addedValue = delta.added ?? delta.addedLabels
+  const removedValue = delta.removed ?? delta.removedCount
+  const added = Array.isArray(addedValue) ? addedValue : Array.isArray(delta.addedLabels) ? delta.addedLabels : []
+  const addedCount = Array.isArray(addedValue)
+    ? addedValue.length
+    : Number.isFinite(Number(addedValue)) ? Math.max(0, Math.floor(Number(addedValue))) : added.length
+  const removedCount = Array.isArray(removedValue)
+    ? removedValue.length
+    : Number.isFinite(Number(removedValue)) ? Math.max(0, Math.floor(Number(removedValue))) : 0
+  const unchangedValue = delta.unchanged ?? delta.same
+  const unchanged = Number.isFinite(Number(unchangedValue)) ? Math.max(0, Math.floor(Number(unchangedValue))) : undefined
+  if (addedCount === 0 && removedCount === 0) {
+    return [unchanged === undefined ? 'labels unchanged' : `labels unchanged (${unchanged})`]
+  }
+  const summary = [`labels +${addedCount}/-${removedCount}`]
+  if (unchanged !== undefined) summary.push(`${unchanged} unchanged`)
+  const lines = [summary.join(', ')]
+  for (const label of added.slice(0, 10)) lines.push(addedLabelLine(label))
+  if (added.length > 10) lines.push(`... ${added.length - 10} more added labels`)
+  return lines
+}
+
+/**
+ * Finish an action result in the requested view mode. Compact and none results
+ * are TEXT ONLY: a stale or skipped screenshot must never be attached.
+ * @param {Record<string, any>} result
+ * @param {string[]} lines action outcome lines
+ * @param {{noneNote?: string}} [options]
+ * @returns {{content: Array<Record<string, unknown>>}}
+ */
+function actionContent(result, lines, options = {}) {
+  const view = resultView(result)
+  if (view === 'compact') {
+    const text = [...lines, ...labelsDeltaLines(result), 'view: compact — no screenshot returned']
+    return { content: [{ type: 'text', text: text.join('\n') }] }
+  }
+  if (view === 'none') {
+    const skipped = options.noneNote
+      ? `view: skipped — no screenshot returned; ${options.noneNote}`
+      : 'view: skipped — no screenshot returned'
+    return { content: [{ type: 'text', text: [...lines, skipped].join('\n') }] }
+  }
+  return viewContent(result, lines.join('\n'))
+}
+
 /**
  * Model-facing select result.
  * @param {Record<string, any>} result
@@ -506,7 +607,7 @@ function viewContent(result, prefix) {
  */
 function selectContent(result) {
   const selected = result?.selected ?? {}
-  return viewContent(result, `selected ${JSON.stringify(selected.text ?? '')} (value ${JSON.stringify(selected.value ?? '')})`)
+  return actionContent(result, [`selected ${JSON.stringify(selected.text ?? '')} (value ${JSON.stringify(selected.value ?? '')})`])
 }
 
 /**
@@ -516,7 +617,7 @@ function selectContent(result) {
  */
 function hoverContent(result) {
   const hovered = result?.hovered ?? {}
-  return viewContent(result, `hovered label ${hovered.label ?? '?'}: ${hovered.role || hovered.tag || 'element'} ${JSON.stringify(hovered.text ?? '')}`)
+  return actionContent(result, [`hovered label ${hovered.label ?? '?'}: ${hovered.role || hovered.tag || 'element'} ${JSON.stringify(hovered.text ?? '')}`])
 }
 
 const NO_VISIBLE_CHANGE_SINGLE = 'result: NO VISIBLE CHANGE — the pixels in that region did not change. The point may be empty, non-interactive, or already in that state. Take a fresh view and try a different point.'
@@ -545,7 +646,6 @@ function pointChangeText(point) {
  */
 function clickAtContent(result) {
   const points = Array.isArray(result?.points) ? result.points : []
-  const requestedView = result?.view === 'none' || result?.screenshotSkipped === true
   const lines = []
   if (points.length > 1) {
     const trusted = result?.trusted === true ? 'trusted input' : 'synthetic fallback'
@@ -554,17 +654,17 @@ function clickAtContent(result) {
     for (const [index, point] of points.entries()) {
       lines.push(`  [${index + 1}] (${point?.x ?? '?'}, ${point?.y ?? '?'}) ${point?.space ?? 'image'} → css (${point?.cssX ?? '?'}, ${point?.cssY ?? '?'}) · ${pointChangeText(point)}`)
     }
-    if (!requestedView) {
-      const compared = points.some(point => point?.changed === true || point?.changed === false)
+    // Only report a changed count when the pixels were actually compared; a
+    // compact/none burst has no previous frame to diff against.
+    const compared = points.some(point => point?.changed === true || point?.changed === false)
+    if (compared) {
       const changedCount = Number.isFinite(result?.changedCount)
         ? Math.max(0, Math.floor(result.changedCount))
         : points.filter(point => point?.changed === true).length
       if (changedCount > 0) {
         lines.push(`${changedCount}/${points.length} points changed pixels`)
-      } else if (compared) {
-        lines.push(NO_VISIBLE_CHANGE_MULTI)
       } else {
-        lines.push(`${changedCount}/${points.length} points changed pixels · change not measured (no previous view)`)
+        lines.push(NO_VISIBLE_CHANGE_MULTI)
       }
     }
   } else {
@@ -582,12 +682,8 @@ function clickAtContent(result) {
     }
     if (Number.isFinite(result?.clickMs)) lines.push(`click ${result.clickMs}ms`)
   }
-  if (requestedView) {
-    lines.push('screenshot skipped (view "none") — no image was returned; image coordinates still map to the previous view.')
-    // No viewContent here: a skipped screenshot must not attach a stale image.
-    return { content: [{ type: 'text', text: lines.join('\n') }] }
-  }
-  return viewContent(result, lines.join('\n'))
+  // A skipped view must stay text-only and keep the coordinate-mapping note.
+  return actionContent(result, lines, { noneNote: 'image coordinates still map to the previous view' })
 }
 
 /**
@@ -608,7 +704,7 @@ function clickContent(result) {
     lines.push('result: NO VISIBLE CHANGE — the click was dispatched but the page did not change. Do not repeat the same click; try another label or read the page.')
   }
   if (Number.isFinite(result?.clickMs)) lines.push(`click ${result.clickMs}ms`)
-  return viewContent(result, lines.join('\n'))
+  return actionContent(result, lines)
 }
 
 /**
@@ -623,14 +719,16 @@ function typedTarget(result, typed) {
   const label = Number(typed?.label)
   const match = labels.find(item => item?.id === label) ?? {}
   return {
-    role: typed?.role || typed?.tag || match.role || match.tag || 'element',
+    role: typed?.role || typed?.tag || match.role || match.tag || '',
     text: typeof typed?.text === 'string' ? typed.text : typeof match.text === 'string' ? match.text : '',
   }
 }
 
 /**
- * Header line for a type result. A labelled field names the element; typing
- * without a label reports the focused element instead.
+ * Header line for a type result. A labelled field names the element when the
+ * result carries it; a label-less write reports the focused element instead.
+ * Compact views omit labels, so a known label without element details stays
+ * generic rather than inventing a role.
  * @param {Record<string, any>} result
  * @returns {string}
  */
@@ -643,7 +741,10 @@ function typeHeader(result) {
   const parts = []
   if (Number.isSafeInteger(label) && label > 0) {
     const target = typedTarget(result, typed)
-    parts.push(`typed into [${label}] ${target.role} ${JSON.stringify(target.text)}`)
+    const described = target.role && target.text.length > 0
+      ? `${target.role} ${JSON.stringify(target.text)}`
+      : target.role || ''
+    parts.push(described ? `typed into [${label}] ${described}` : `typed into [${label}]`)
     parts.push(mode)
     parts.push(`${chars} chars`)
     parts.push(method)
@@ -671,7 +772,7 @@ function typeContent(result) {
   } else if (result?.changed === true) {
     lines.push('result: changed')
   }
-  return viewContent(result, lines.join('\n'))
+  return actionContent(result, lines)
 }
 
 /**
@@ -684,7 +785,7 @@ function pressKeyContent(result) {
   const modifiers = Array.isArray(pressed.modifiers) ? pressed.modifiers.map(String) : []
   const keys = [...modifiers, pressed.key ?? '?'].join('+')
   const method = pressed.trusted === true ? 'trusted' : 'synthetic'
-  return viewContent(result, `pressed ${keys} · ${method}`)
+  return actionContent(result, [`pressed ${keys} · ${method}`])
 }
 
 /**
@@ -747,6 +848,147 @@ function waitForContent(result) {
     ? `timed out after ${elapsed ?? '?'}ms (${description} not found)`
     : `waited for ${description} · found after ${elapsed ?? '?'}ms`
   return viewContent(result, header)
+}
+
+const BATCH_OPS = ['click', 'click_at', 'hover', 'select_option', 'type', 'press_key', 'scroll', 'wait_for', 'navigate']
+const BATCH_FORBIDDEN_OPS = ['batch', 'tabs', 'screenshot', 'snapshot']
+
+/**
+ * Change fragment shared by batch action lines.
+ * @param {Record<string, any>} entry
+ * @returns {string}
+ */
+function batchChangeWord(entry) {
+  if (entry?.changed === true) return 'changed'
+  if (entry?.changed === false) return 'no visible change'
+  return 'ok'
+}
+
+/**
+ * Outcome parts for one successful batch action: a head fragment appended to
+ * the op with a space (e.g. `type "hello"`), then the remaining facts joined
+ * with separators (e.g. `5 chars · dom · changed`). `args` is the requested
+ * action object, which carries the echo data the response does not repeat.
+ * @param {Record<string, any>} entry
+ * @param {Record<string, any>} args
+ * @returns {{head: string, rest: string[]}}
+ */
+function batchOutcomeParts(entry, args) {
+  const op = entry?.op ?? args?.op
+  switch (op) {
+    case 'click':
+      return { head: '', rest: [batchChangeWord(entry)] }
+    case 'type': {
+      const typed = entry?.typed ?? {}
+      const text = typeof args?.text === 'string' ? args.text : typeof typed.text === 'string' ? typed.text : ''
+      const chars = Number.isFinite(Number(typed.chars)) ? Number(typed.chars) : text.length
+      const rest = [`${chars} chars`, typed.method === 'trusted' ? 'trusted' : 'dom']
+      if (typed.mode === 'append') rest.push('append')
+      if (typed.submitted === true) rest.push('submitted')
+      rest.push(batchChangeWord(entry))
+      return { head: JSON.stringify(text), rest }
+    }
+    case 'press_key':
+      return { head: String(entry?.pressed?.key ?? args?.key ?? '?'), rest: [batchChangeWord(entry)] }
+    case 'click_at': {
+      const points = Array.isArray(entry?.points)
+        ? entry.points.length
+        : Array.isArray(args?.points) ? args.points.length : 1
+      // Click_at inside a batch is intentionally no-capture (changed is null),
+      // so it reports dispatch instead of a NO VISIBLE CHANGE warning.
+      return { head: `${points} ${points === 1 ? 'point' : 'points'}`, rest: ['dispatched'] }
+    }
+    case 'wait_for': {
+      const waited = entry?.waited ?? {}
+      const conditions = waited.conditions ?? { text: args?.text, url: args?.url, idle: args?.idle, ms: args?.ms }
+      const status = waited.timedOut === true ? 'timed out' : waited.found === true ? 'found' : 'waited'
+      return { head: waitConditionsText(conditions), rest: [status] }
+    }
+    case 'navigate': {
+      const navigated = entry?.navigated ?? {}
+      const status = navigated.timedOut === true ? 'timed out' : navigated.history ? String(navigated.history) : 'loaded'
+      return { head: '', rest: [status] }
+    }
+    case 'select_option':
+      return { head: JSON.stringify(String(entry?.selected?.text ?? args?.option ?? '')), rest: [batchChangeWord(entry)] }
+    case 'hover': {
+      const hovered = entry?.hovered ?? {}
+      const label = hovered.label ?? args?.label ?? '?'
+      const role = hovered.role || hovered.tag
+      return { head: role ? `[${label}] ${role}` : `[${label}]`, rest: [batchChangeWord(entry)] }
+    }
+    case 'scroll': {
+      const moved = entry?.moved ?? {}
+      const dx = Math.round(Number(moved.dx) || 0)
+      const dy = Math.round(Number(moved.dy) || 0)
+      return { head: '', rest: [dx === 0 && dy === 0 ? 'no movement' : `moved dx=${dx} dy=${dy}`, batchChangeWord(entry)] }
+    }
+    default:
+      return { head: '', rest: [batchChangeWord(entry)] }
+  }
+}
+
+/**
+ * Model-facing line for one batch action.
+ * @param {Record<string, any>} entry
+ * @param {Record<string, any>} args requested action
+ * @param {number} position fallback one-based position
+ * @returns {string}
+ */
+function batchActionLine(entry, args, position) {
+  const index = Number.isFinite(Number(entry?.index)) ? Number(entry.index) : position
+  if (entry?.ok === false) {
+    const code = entry?.error?.code ?? 'ERROR'
+    const message = typeof entry?.error?.message === 'string' && entry.error.message.length > 0 ? ` — ${entry.error.message}` : ''
+    return `  [${index}] FAILED ${code}${message}`
+  }
+  const op = entry?.op ?? args?.op ?? '?'
+  const { head, rest } = batchOutcomeParts(entry, args)
+  return `  [${index}] ${op}${head ? ` ${head}` : ''}${rest.length > 0 ? ` · ${rest.join(' · ')}` : ''}`
+}
+
+/**
+ * Model-facing batch result: one header, one line per executed action, and
+ * exactly one final view. Compact and none batches stay text only.
+ * @param {Record<string, any>} result
+ * @param {Array<Record<string, any>>} requestedActions
+ * @returns {{content: Array<Record<string, unknown>>}}
+ */
+function batchContent(result, requestedActions) {
+  const batch = isRecord(result?.batch) ? result.batch : {}
+  const entries = Array.isArray(result?.actions) ? result.actions : []
+  const total = Number.isFinite(Number(batch.total)) ? Number(batch.total) : requestedActions.length
+  const executed = Number.isFinite(Number(batch.executed)) ? Number(batch.executed) : entries.length
+  // `succeeded` is the frozen numeric count; derive it from the action list if
+  // an executor only returns the boolean all-succeeded `ok` flag.
+  const succeeded = Number.isFinite(Number(batch.succeeded))
+    ? Number(batch.succeeded)
+    : entries.filter(entry => entry?.ok !== false).length
+  const elapsedMs = Number(batch.elapsedMs ?? result?.totalMs)
+  const elapsed = Number.isFinite(elapsedMs) ? `${Math.round(elapsedMs)}ms` : '?'
+  const failedEntry = entries.find(entry => entry?.ok === false)
+  const failedIndex = Number.isFinite(Number(batch.failedIndex))
+    ? Number(batch.failedIndex)
+    : Number.isFinite(Number(failedEntry?.index)) ? Number(failedEntry.index) : executed
+  const stoppedEarly = batch.stoppedEarly === true && failedEntry !== undefined
+  const header = stoppedEarly
+    ? `batch: ${executed}/${total} executed · FAILED at [${failedIndex}] · ${elapsed}`
+    : `batch: ${total} actions · ${succeeded} succeeded · ${elapsed}`
+  const lines = [header]
+  for (const [position, entry] of entries.entries()) {
+    const index = Number.isFinite(Number(entry?.index)) ? Number(entry.index) : position + 1
+    lines.push(batchActionLine(entry, requestedActions[index - 1] ?? {}, index))
+  }
+  const view = resultView(result)
+  if (view === 'compact') {
+    lines.push(...labelsDeltaLines(result), 'view: compact — no screenshot returned')
+    return { content: [{ type: 'text', text: lines.join('\n') }] }
+  }
+  if (view === 'none') {
+    lines.push('view: skipped — no screenshot returned')
+    return { content: [{ type: 'text', text: lines.join('\n') }] }
+  }
+  return viewContent(result, lines.join('\n'))
 }
 
 /**
@@ -849,19 +1091,24 @@ function registerTools(ctx, bridge) {
   ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'browser_click',
     rawName: 'browser_click',
-    description: 'Click a numbered interactive element from the current view. Use the yellow badge numbers and the "labels" list; coordinates are not accepted. Returns a fresh view with new labels plus whether the page changed. If the result says NO VISIBLE CHANGE, try a different label instead of repeating.',
+    description: 'Click a numbered interactive element from the current view. Use the yellow badge numbers and the "labels" list; coordinates are not accepted. Returns a confirmation of the click; the view is auto/compact (no screenshot) unless the page changed or you pass view:"full". If the result says NO VISIBLE CHANGE, try a different label instead of repeating.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       required: ['label'],
       properties: {
         label: { type: 'integer', minimum: 1, description: 'Label id from the current view.' },
+        view: { type: 'string', enum: ['auto', 'full', 'compact', 'none'], description: 'View mode. auto (default) confirms compactly and escalates to full when the page changes; full returns a screenshot; compact/none return text only. Ask for full when you need to see.' },
       },
     },
     async call(args, exec) {
       const label = Number(args.label)
       if (!Number.isSafeInteger(label) || label <= 0) throw new Error('browser_click requires a positive integer label from the current view')
-      const result = await bridge.request({ op: 'click', args: { label } }, exec.callId, exec.signal)
+      const view = checkedView(args.view)
+      const result = await bridge.request({
+        op: 'click',
+        args: { label, ...view === undefined ? {} : { view } },
+      }, exec.callId, exec.signal)
       return clickContent(result)
     },
   }))
@@ -869,7 +1116,7 @@ function registerTools(ctx, bridge) {
   ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'browser_click_at',
     rawName: 'browser_click_at',
-    description: 'Click coordinates in the current view. Use for canvas, video, or iframe surfaces (listed under surfaces) and when no label covers the target. Pass points:[{x,y}, ...] (up to 8) to click several targets in one call; a burst returns one fresh view with a per-point changed report. x and y are screenshot pixels by default; space:"css" means viewport CSS pixels. view:"none" skips the screenshot and returns text only for rapid repeated bursts. Uses trusted browser input and reports pixels_changed, which works even when the page emits no DOM events. Take a screenshot first so coordinates can be mapped.',
+    description: 'Click coordinates in the current view. Use for canvas, video, or iframe surfaces (listed under surfaces) and when no label covers the target. Pass points:[{x,y}, ...] (up to 8) to click several targets in one call; a burst returns one confirmation with a per-point changed report. x and y are screenshot pixels by default; space:"css" means viewport CSS pixels. view:"full" (default) returns a screenshot; "compact" returns text plus a label delta; "none" returns text only; "fresh" is a legacy alias of "full". Uses trusted browser input and reports pixels_changed, which works even when the page emits no DOM events. Take a screenshot first so coordinates can be mapped.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -892,7 +1139,7 @@ function registerTools(ctx, bridge) {
           },
         },
         space: { type: 'string', enum: ['image', 'css'], description: 'Coordinate space. Default image (screenshot pixels).' },
-        view: { type: 'string', enum: ['fresh', 'none'], description: 'fresh (default) returns a screenshot; none skips the screenshot and returns text only.' },
+        view: { type: 'string', enum: ['full', 'compact', 'none', 'fresh', 'auto'], description: 'View mode. full (default) and legacy fresh return a screenshot; compact returns text plus a label delta with no screenshot; none skips even the label delta. Image coordinates always refer to the last full view.' },
         settle_ms: { type: 'integer', minimum: 0, maximum: 400, description: 'Wait this many milliseconds after the clicks before capturing the view. Default: adaptive paint wait. 0 disables the wait; max 400.' },
       },
     },
@@ -926,7 +1173,8 @@ function registerTools(ctx, bridge) {
         forward.y = y
       }
       if (args.space !== undefined) forward.space = args.space
-      if (args.view !== undefined) forward.view = args.view
+      const view = checkedView(args.view, CLICK_AT_VIEW_MODES)
+      if (view !== undefined) forward.view = view
       if (args.settle_ms !== undefined) forward.settle_ms = args.settle_ms
       const result = await bridge.request({ op: 'click_at', args: forward }, exec.callId, exec.signal)
       return clickAtContent(result)
@@ -944,12 +1192,14 @@ function registerTools(ctx, bridge) {
       properties: {
         label: { type: 'integer', minimum: 1, description: 'Label id of the select.' },
         option: { type: 'string', description: 'Option text or value to choose.' },
+        view: { type: 'string', enum: ['auto', 'full', 'compact', 'none'], description: 'View mode. auto (default) confirms compactly and escalates to full when the page changes; full returns a screenshot; compact/none return text only. Ask for full when you need to see.' },
       },
     },
     async call(args, exec) {
+      const view = checkedView(args.view)
       const result = await bridge.request({
         op: 'select_option',
-        args: { label: Number(args.label), option: String(args.option ?? '') },
+        args: { label: Number(args.label), option: String(args.option ?? ''), ...view === undefined ? {} : { view } },
       }, exec.callId, exec.signal)
       return selectContent(result)
     },
@@ -958,15 +1208,22 @@ function registerTools(ctx, bridge) {
   ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'browser_hover',
     rawName: 'browser_hover',
-    description: 'Hover a labelled element and return a fresh labelled view. Use when a menu, submenu, or tooltip opens on hover and then click the revealed label.',
+    description: 'Hover a labelled element and return a confirmation of the hover; the view is auto/compact (no screenshot) unless the page changed or you pass view:"full". Use when a menu, submenu, or tooltip opens on hover and then click the revealed label.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       required: ['label'],
-      properties: { label: { type: 'integer', minimum: 1, description: 'Label id from the current view.' } },
+      properties: {
+        label: { type: 'integer', minimum: 1, description: 'Label id from the current view.' },
+        view: { type: 'string', enum: ['auto', 'full', 'compact', 'none'], description: 'View mode. auto (default) confirms compactly and escalates to full when the page changes; full returns a screenshot; compact/none return text only. Ask for full when you need to see.' },
+      },
     },
     async call(args, exec) {
-      const result = await bridge.request({ op: 'hover', args: { label: Number(args.label) } }, exec.callId, exec.signal)
+      const view = checkedView(args.view)
+      const result = await bridge.request({
+        op: 'hover',
+        args: { label: Number(args.label), ...view === undefined ? {} : { view } },
+      }, exec.callId, exec.signal)
       return hoverContent(result)
     },
   }))
@@ -1040,7 +1297,7 @@ function registerTools(ctx, bridge) {
   ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'browser_type',
     rawName: 'browser_type',
-    description: 'Type text into a labelled form field, or into the focused element when no label is given. Use it for inputs, textareas, and contenteditable editors (click a canvas editor first to place its caret). text:"" clears the field; mode:"append" keeps existing text; submit:true presses Enter. Returns a fresh view with the new value.',
+    description: 'Type text into a labelled form field, or into the focused element when no label is given. Use it for inputs, textareas, and contenteditable editors (click a canvas editor first to place its caret). text:"" clears the field; mode:"append" keeps existing text; submit:true presses Enter. Returns a confirmation; the view is auto/compact (no screenshot) unless the page changed or you pass view:"full".',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -1050,6 +1307,7 @@ function registerTools(ctx, bridge) {
         label: { type: 'integer', minimum: 1, description: 'Label id of the input, textarea, or contenteditable element. Omit to type into the focused element.' },
         mode: { type: 'string', enum: ['replace', 'append'], description: 'replace (default) selects the existing text first; append keeps it.' },
         submit: { type: 'boolean', description: 'Press Enter after typing. Default false.' },
+        view: { type: 'string', enum: ['auto', 'full', 'compact', 'none'], description: 'View mode. auto (default) confirms compactly and escalates to full when the page changes; full returns a screenshot; compact/none return text only. Ask for full when you need to see.' },
       },
     },
     async call(args, exec) {
@@ -1067,6 +1325,8 @@ function registerTools(ctx, bridge) {
         forward.mode = args.mode
       }
       if (args.submit !== undefined) forward.submit = args.submit === true
+      const view = checkedView(args.view)
+      if (view !== undefined) forward.view = view
       const result = await bridge.request({ op: 'type', args: forward }, exec.callId, exec.signal)
       return typeContent(result)
     },
@@ -1075,7 +1335,7 @@ function registerTools(ctx, bridge) {
   ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'browser_press_key',
     rawName: 'browser_press_key',
-    description: 'Press one key, optionally with ctrl/alt/shift/meta held. Use it for Enter to submit, Tab/Shift+Tab to move focus, Escape to dismiss, Backspace to edit, and arrow keys to move a caret. Uses trusted browser input and returns a fresh view.',
+    description: 'Press one key, optionally with ctrl/alt/shift/meta held. Use it for Enter to submit, Tab/Shift+Tab to move focus, Escape to dismiss, Backspace to edit, and arrow keys to move a caret. Uses trusted browser input and returns a confirmation; the view is auto/compact (no screenshot) unless the page changed or you pass view:"full".',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -1087,6 +1347,7 @@ function registerTools(ctx, bridge) {
           description: 'Modifier keys held during the press.',
           items: { type: 'string', enum: ['ctrl', 'alt', 'shift', 'meta'] },
         },
+        view: { type: 'string', enum: ['auto', 'full', 'compact', 'none'], description: 'View mode. auto (default) confirms compactly and escalates to full when the page changes; full returns a screenshot; compact/none return text only. Ask for full when you need to see.' },
       },
     },
     async call(args, exec) {
@@ -1101,6 +1362,8 @@ function registerTools(ctx, bridge) {
         }
         forward.modifiers = args.modifiers
       }
+      const view = checkedView(args.view)
+      if (view !== undefined) forward.view = view
       const result = await bridge.request({ op: 'press_key', args: forward }, exec.callId, exec.signal)
       return pressKeyContent(result)
     },
@@ -1194,6 +1457,72 @@ function registerTools(ctx, bridge) {
       }
       const result = await bridge.request({ op: 'wait_for', args: forward }, exec.callId, exec.signal)
       return waitForContent(result)
+    },
+  }))
+
+  ctx.tools.register(createMcpToolDefinition(ctx, {
+    name: 'browser_batch',
+    rawName: 'browser_batch',
+    description: 'Run a sequence of up to 20 browser actions in one call and return one view for the whole batch, so one round trip covers a form, table row, or shortcut sequence. Each action is {op, ...args} with the same args as the standalone tool; supported ops: click, click_at, hover, select_option, type, press_key, scroll, wait_for, navigate. Only batch actions whose target you can already see in the current view or reach without seeing new state: if an action reveals new UI (a menu, a dialog, a new page), stop the batch and take a view before continuing. The batch stops at the first failure unless stop_on_error:false.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['actions'],
+      properties: {
+        actions: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 20,
+          description: 'Actions to run in order. Each entry is {op, ...same args as the standalone tool}, e.g. {"op":"type","label":10,"text":"Jane"} or {"op":"press_key","key":"Tab"}. A nested args object ({"op":"type","args":{...}}) is accepted too.',
+          items: {
+            type: 'object',
+            required: ['op'],
+            additionalProperties: true,
+            properties: { op: { type: 'string', description: 'Standalone tool name without the browser_ prefix.' } },
+          },
+        },
+        stop_on_error: { type: 'boolean', description: 'Stop at the first failed action. Default true.' },
+        view: { type: 'string', enum: ['auto', 'full', 'compact', 'none'], description: 'View mode for the batch result. full (default) returns one screenshot at the end; auto/compact escalate or confirm compactly; none skips the view.' },
+      },
+    },
+    async call(args, exec) {
+      if (!Array.isArray(args.actions)) throw new Error('browser_batch requires an actions array')
+      if (args.actions.length === 0) throw new Error('browser_batch requires at least one action')
+      if (args.actions.length > 20) throw new Error(`browser_batch accepts at most 20 actions (got ${args.actions.length})`)
+      /** @type {Array<Record<string, any>>} */
+      const flatActions = []
+      /** @type {Array<Record<string, any>>} */
+      const bridgeActions = []
+      for (const [index, action] of args.actions.entries()) {
+        if (!isRecord(action)) throw new Error(`browser_batch actions[${index}] must be an object with an op`)
+        if (typeof action.op !== 'string' || action.op.length === 0) throw new Error(`browser_batch actions[${index}] requires a string op`)
+        if (action.op === 'batch') throw new Error('browser_batch cannot nest another browser_batch')
+        if (BATCH_FORBIDDEN_OPS.includes(action.op)) throw new Error(`browser_batch does not support the "${action.op}" op`)
+        if (!BATCH_OPS.includes(action.op)) {
+          throw new Error(`browser_batch actions[${index}] has unsupported op ${JSON.stringify(action.op)}; supported ops: ${BATCH_OPS.join(', ')}`)
+        }
+        const { op, args: nested, ...flat } = action
+        if (nested !== undefined && !isRecord(nested)) throw new Error(`browser_batch actions[${index}].args must be an object`)
+        // Model-facing flat args are normalized into the executor's {op, args}
+        // shape; a nested args object wins over duplicated flat fields.
+        const actionArgs = isRecord(nested) ? { ...flat, ...nested } : flat
+        flatActions.push({ op, ...actionArgs })
+        bridgeActions.push({ op, args: actionArgs })
+      }
+      if (args.stop_on_error !== undefined && typeof args.stop_on_error !== 'boolean') {
+        throw new Error('browser_batch stop_on_error must be true or false')
+      }
+      /** @type {Record<string, unknown>} */
+      const forward = { actions: bridgeActions }
+      if (args.stop_on_error !== undefined) forward.stop_on_error = args.stop_on_error
+      const view = checkedView(args.view)
+      if (view !== undefined) forward.view = view
+      // A batch runs many actions sequentially inside one command; the fixed
+      // bridge timeout is far too short, so allow a per-batch budget without
+      // changing the timeout for any other tool.
+      const batchTimeoutMs = Math.min(120000, Math.max(15000, 15000 + bridgeActions.length * 6000))
+      const result = await bridge.request({ op: 'batch', args: forward }, exec.callId, exec.signal, batchTimeoutMs)
+      return batchContent(result, flatActions)
     },
   }))
 }
@@ -1373,7 +1702,7 @@ export function apply(ctx, config = {}) {
     bridge.logEvent('provider.registered', {
       provider: 'extension-current-window',
       bridgeUrl,
-      tools: ['browser_click', 'browser_click_at', 'browser_hover', 'browser_navigate', 'browser_press_key', 'browser_read_text', 'browser_screenshot', 'browser_scroll', 'browser_select_option', 'browser_switch_tab', 'browser_tabs', 'browser_type', 'browser_wait_for'],
+      tools: ['browser_batch', 'browser_click', 'browser_click_at', 'browser_hover', 'browser_navigate', 'browser_press_key', 'browser_read_text', 'browser_screenshot', 'browser_scroll', 'browser_select_option', 'browser_switch_tab', 'browser_tabs', 'browser_type', 'browser_wait_for'],
     }, 'info')
     ctx.systemPrompt.section({
       name: 'browser-use:extension-current-window',

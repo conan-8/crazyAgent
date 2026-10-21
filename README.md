@@ -16,8 +16,9 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
 |---|---|
 | Auto-view on every message | A fresh screenshot is attached to the user prompt, so the model starts each turn already looking at the page |
 | `browser_screenshot` | Viewport screenshot + tab, viewport, scroll, and scale metadata |
-| `browser_click` | Clicks a numbered interactive element (DOM, shadow DOM, or iframe) from the current view. Labels come from yellow badges and a text list; coordinates are never accepted. Returns whether the page changed and a fresh view |
+| `browser_click` | Clicks a numbered interactive element (DOM, shadow DOM, or iframe) from the current view. Labels come from yellow badges and a text list; coordinates are never accepted. Returns whether the page changed; `view` defaults to `auto` (compact confirmation, escalating to a full view when the page changes, after 5 actions, or on `view:"full"`) |
 | `browser_click_at` | Clicks screenshot-pixel or CSS coordinates for canvas, video, and iframe surfaces. `points: [{x,y}, …]` clicks up to 8 targets in one call (one debugger attach, one settle, one fresh view, per-point `changed`); `view: "none"` skips the screenshot for rapid repeated bursts; `settle_ms` tunes the post-click paint wait. Uses **trusted browser input** (DevTools protocol) and verifies with a **pixel diff**, which works where no DOM event fires |
+| `browser_batch` | Runs an ordered sequence of up to 20 actions in **one call** (`click`, `type`, `press_key`, `click_at`, `hover`, `scroll`, `wait_for`, `navigate`) and returns compact per-action outcomes plus **one** final view. Only batch actions whose targets are already visible: an action that reveals new UI (menu, dialog, new page) needs a view before the next action |
 | `browser_type` | Types into a labelled input, textarea, or contenteditable (`mode: append|replace`, optional `submit`), or into the focused element when `label` is omitted — click a canvas editor caret first, then type through trusted `Input.insertText`. Returns a fresh view, the new value, and `changed`; password values are masked |
 | `browser_press_key` | Sends one real key press with optional `ctrl`/`alt`/`shift`/`meta`: Enter, Tab, Escape, Backspace, Delete, arrows, Home/End, PageUp/PageDown, Space, or a letter/digit. Used to submit, move focus, move a caret, and run shortcuts |
 | `browser_hover` | Hovers a labelled element and returns a fresh view, so hover-only menus and tooltips become clickable |
@@ -49,6 +50,15 @@ Canvas apps (Docs-style editors, maps, Figma-style tools, dashboards, games, vid
 
 Canvas apps also keep their own scroll state, so `browser_scroll` first tries the DOM; if nothing moved, it dispatches a trusted wheel event at the viewport center and reports `wheel: true`.
 
+### Batching and view modes
+
+Measured on real work sessions, the loop was dominated by two costs: **one model round trip per action** (the model averaged 0.96 tool calls per step, so a 62-action Docs turn was 62 requests) and **a full view returned by every action** (a 1280 px JPEG plus up to 60 label lines, which grew the prompt to 134 K tokens per step on average and 245 K at worst). Two mechanisms fix that at the root:
+
+- **`browser_batch`** executes an ordered action list inside the extension with one final view. Fill several already-labelled fields, type + Tab through table cells, run shortcut sequences, or click several visible controls in a single call. A batch stops at the first failure by default (`stop_on_error:false` to continue) and reports per-action outcomes, including the failed index.
+- **View modes** on every DOM action tool: `auto` (default) returns a **compact** confirmation with no screenshot — just the outcome, `changed`/signals, and a **label delta** (`labels +2/-1, 39 unchanged`, with the new labels listed) — and escalates to a full labelled view automatically when the page URL/title changes, when no previous view exists, after 5 compact actions, or when the model passes `view:"full"`. `view:"none"` omits even the label delta.
+
+A compact DOM action costs **18–35 ms** on a heavy page (no capture, no re-encode) instead of 360–1266 ms. Label ids stay cumulative per tab, so an id from an earlier view still resolves to the same element; a compact action that scrolls the page invalidates the stored screenshot so image-space `browser_click_at` fails safely with `NO_VIEW` instead of clicking the wrong pixel.
+
 Shadow DOM and iframes are handled for DOM clicking:
 
 - Open shadow roots are traversed recursively, so web-component controls are labelled and clickable.
@@ -60,7 +70,7 @@ Shadow DOM and iframes are handled for DOM clicking:
 
 ### How clicking stays accurate
 
-Every view (auto-capture, screenshot, scroll, tab switch, and click result) labels the interactive elements in the viewport:
+Every full view (auto-capture, screenshot, scroll, tab switch, navigate, and any action that refreshes the view) labels the interactive elements in the viewport; compact results carry only a delta of that list:
 
 - Candidates are links, buttons, inputs, selects, textareas, summaries, labels, ARIA button/link/tab/menuitem/checkbox/switch/radio/option/combobox roles, `[onclick]`, and focusable elements.
 - An element is labelled only if it has a real box, is visible, is not `pointer-events: none`/`aria-hidden`/`inert`/disabled, and is the element a real click would hit at its centre. Covered controls behind a modal or cookie banner are therefore not offered.
@@ -155,7 +165,7 @@ Starts from `sdk-minimal` and:
 - sets a browser-agent persona, disables harness identity/runtime context, and serializes tool calls (`maxParallelToolCalls: 1`);
 - leaves attachments, compaction, image offload, and JSONL persistence in place.
 
-The result is thirteen model-visible tools and a small, stable request prefix.
+The result is fourteen model-visible tools and a small, stable request prefix.
 
 ## Configuration
 
@@ -221,6 +231,8 @@ npm run clean -- --yes   # removes .dsh-home; run npm run setup again afterwards
 | Label a page with two child frames | **14–21 ms** (one round trip per frame) |
 | Trusted canvas click (attach → dispatch → detach) + adaptive pixel-diff view | **~200–300 ms** including the fresh view; the fixed 160 ms settle is now an adaptive two-frame paint wait |
 | Canvas burst, 5 points in one call | **one model round trip instead of five**; extra points cost a few ms each, and `view: "none"` drops a 5-point burst to **~50 ms** on the fixture |
+| Compact DOM action, no capture (`click`/`type`/`press_key`) | **18–35 ms** on a heavy page vs **360–1266 ms** when the action returns a full view |
+| `browser_batch`, 4 known-label actions | **~85 ms** of actions plus **~160 ms** for the single final view — one round trip instead of four |
 | Live snapshot: capture + encode + metadata | **95 ms** total (capture 31–35 ms, encode 35–58 ms) |
 | Auto-view observed in the real UI | **58–73 ms** |
 | Real screenshot | 1018×768 CSS at DPR 2 → 1280×966 JPEG, ~96 KB |
@@ -271,7 +283,7 @@ Full schema, event types, `jq` recipes, and sharing instructions are in [`docs/D
 ## Development and tests
 
 ```sh
-npm test          # 71 unit/integration checks: bridge, live activity, reasoning policy (incl. rapid), image budget, labels, click/burst/type/press_key/navigate/wait_for tools, surfaces, prompt, log store, OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
+npm test          # 81 unit/integration checks: bridge, live activity, reasoning policy (incl. rapid), image budget, labels, click/burst/type/press_key/navigate/wait_for/batch tools, view modes and label deltas, surfaces, prompt, log store, OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
 npm run bench     # local bridge latency
 npm run setup     # idempotent profile/plugin verification
 ```
@@ -284,7 +296,7 @@ Additional dev-only checks (not part of `npm test`):
 - `scripts/edge-log-e2e.mjs` — drives the real Debug log modal and verifies that the ZIP download starts.
 - `scripts/edge-click-e2e.mjs` — drives the real extension against `e2e/fixtures/click.html`: label coverage, covered/hidden exclusion, click by label, no-op detection, disabled/stale refusals, checkbox, and navigation. Requires Edge with `--load-extension=extension` on port 9228.
 - `scripts/edge-canvas-e2e.mjs` — canvas checks on port 9230: surface metadata, trusted coordinate click, image-pixel mapping, pixel-diff detection, wheel scrolling, empty-area no-op, 5-point burst (one attach, +5 trusted clicks), `view:"none"` text-only burst, `delay_ms`, and single-point compatibility.
-- `scripts/edge-work-e2e.mjs` — work-foundation checks on port 9233 against `e2e/fixtures/form.html`: labelled typing (replace/append), contenteditable typing, password masking, `submit`, Tab/Enter, modifier shortcuts, label-less trusted typing into a focused editor, navigate URL/history, and `wait_for` found/timeout.
+- `scripts/edge-work-e2e.mjs` — work-foundation checks on port 9233 against `e2e/fixtures/form.html`: labelled typing (replace/append), compact typing with label deltas, auto-view escalation, contenteditable typing, password masking, `submit`, Tab/Enter, modifier shortcuts, label-less trusted typing into a focused editor, navigate URL/history, `wait_for` found/timeout, batch sequences (success, stop-on-error, continue, `BAD_BATCH`), punctuation keys, and label persistence across views.
 - `scripts/edge-advanced-e2e.mjs` — shadow DOM, same- and cross-origin iframes, native select, and hover menus on port 9231.
 
 The fake-UI and Edge end-to-end scripts assume the companion is already configured with an OpenRouter key/model and that the model supports tools. Configure once from the side panel first. The model-latency figures were collected on the earlier direct Alibaba route; capture, bridge, tool, and logging measurements are provider-independent.
