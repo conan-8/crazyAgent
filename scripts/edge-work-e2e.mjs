@@ -501,5 +501,170 @@ assert.ok(persistence.image > 0, 'label-persistence click returns a labelled vie
 assert.match(persistence.url, /form\.html/, 'label persistence is on the same page')
 console.log('PASS label persistence across views')
 
+const fastView = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tabId, { active: true })
+  await chrome.tabs.update(tabId, { url: '${BASE}/form.html' })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const result = await mod.execute('snapshot', { detail: 'fast' }, settings)
+  return {
+    op: result.op,
+    view: result.view,
+    width: result.image?.width ?? null,
+    height: result.image?.height ?? null,
+    labelCount: result.labelCount,
+    hasLabels: Array.isArray(result.labels) && result.labels.length > 0,
+    hasSurfaces: Array.isArray(result.surfaces),
+    captureMs: result.captureMs,
+  }
+})()`)
+assert.equal(fastView.op, 'snapshot', 'detail:fast keeps the snapshot op')
+assert.equal(fastView.view, 'full', 'detail:fast still returns a full view')
+assert.equal(fastView.width, 640, 'detail:fast captures a 640px-wide image')
+assert.ok(fastView.height > 0, 'detail:fast reports the image height')
+assert.ok(fastView.labelCount > 0 && fastView.hasLabels, 'detail:fast still draws labels')
+console.log(`PASS detail:fast snapshot — ${fastView.width}x${fastView.height}, ${fastView.labelCount} labels, ${fastView.captureMs}ms capture`)
+
+const dragSelect = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tabId, { url: '${BASE}/form.html' })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const box = (await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const el = document.getElementById('selectable')
+      el.scrollIntoView({ block: 'center' })
+      const rect = el.getBoundingClientRect()
+      return { x: rect.left, y: rect.top, w: rect.width, h: rect.height }
+    },
+  }))[0].result
+  await mod.execute('snapshot', {}, settings)
+  const midY = box.y + box.h / 2
+  const drag = await mod.execute('select', { from: { x: box.x + 3, y: midY }, to: { x: box.x + box.w - 3, y: midY }, space: 'css' }, settings)
+  const collapsed = await mod.execute('select', { from: { x: box.x + 6, y: midY }, to: { x: box.x + 6, y: midY }, space: 'css', view: 'none' }, settings)
+  return {
+    drag: {
+      view: drag.view,
+      selected: drag.selected,
+      changed: drag.changed,
+      signals: drag.signals,
+      hasImage: drag.image !== undefined,
+      hasLabels: drag.labels !== undefined,
+    },
+    collapsed: {
+      view: collapsed.view,
+      selected: collapsed.selected,
+      changed: collapsed.changed,
+      signals: collapsed.signals,
+    },
+  }
+})()`)
+assert.equal(dragSelect.drag.view, 'compact', 'auto view after a full snapshot stays compact')
+assert.equal(dragSelect.drag.selected.collapsed, false, 'drag creates a non-collapsed selection')
+assert.ok(dragSelect.drag.selected.chars >= 10, `drag selected characters (${dragSelect.drag.selected.chars})`)
+assert.match(dragSelect.drag.selected.textPreview, /SELECT-ME/, 'selected text preview names the paragraph')
+assert.equal(dragSelect.drag.changed, true, 'selection reports a change')
+assert.deepEqual(dragSelect.drag.signals, ['selection-changed'], 'selection signal is reported')
+assert.equal(dragSelect.drag.hasImage, false, 'compact select has no image')
+assert.equal(dragSelect.drag.hasLabels, false, 'compact select has no label list')
+assert.equal(dragSelect.collapsed.view, 'none', 'explicit none select view is honoured')
+assert.equal(dragSelect.collapsed.selected.chars, 0, 'collapsed drag selects nothing')
+assert.equal(dragSelect.collapsed.selected.collapsed, true, 'collapsed drag is reported as collapsed')
+assert.equal(dragSelect.collapsed.changed, false, 'collapsed drag reports no change')
+assert.deepEqual(dragSelect.collapsed.signals, [], 'collapsed drag has no signals')
+console.log(`PASS drag selection — ${dragSelect.drag.selected.chars} chars, preview ${JSON.stringify(dragSelect.drag.selected.textPreview.slice(0, 40))}`)
+
+const batchSelect = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tabId, { url: '${BASE}/form.html' })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const box = (await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const el = document.getElementById('selectable')
+      el.scrollIntoView({ block: 'center' })
+      const rect = el.getBoundingClientRect()
+      return { x: rect.left, y: rect.top, w: rect.width, h: rect.height }
+    },
+  }))[0].result
+  await mod.execute('snapshot', {}, settings)
+  const midY = box.y + box.h / 2
+  const result = await mod.execute('batch', { actions: [
+    { op: 'select', args: { from: { x: box.x + 3, y: midY }, to: { x: box.x + box.w - 3, y: midY }, space: 'css' } },
+    { op: 'press_key', args: { key: 'ArrowRight' } },
+  ] }, settings)
+  return {
+    op: result.op,
+    view: result.view,
+    batch: result.batch,
+    hasImage: result.image !== undefined,
+    labelCount: Array.isArray(result.labels) ? result.labels.length : null,
+    actions: result.actions.map(item => ({
+      op: item.op,
+      ok: item.ok,
+      changed: item.changed,
+      hasSelected: item.selected !== undefined,
+      textPreview: item.selected?.textPreview,
+      pressed: item.pressed?.key,
+      hasImage: item.image !== undefined,
+      hasLabels: item.labels !== undefined,
+    })),
+  }
+})()`)
+assert.equal(batchSelect.op, 'batch', 'select runs inside a batch')
+assert.equal(batchSelect.view, 'full', 'batch default view is full')
+assert.equal(batchSelect.batch.ok, true, 'batch with select succeeds')
+assert.equal(batchSelect.batch.executed, 2, 'both batch actions ran')
+assert.equal(batchSelect.batch.succeeded, 2, 'both batch actions succeeded')
+assert.equal(batchSelect.actions[0].op, 'select', 'select is the first action')
+assert.equal(batchSelect.actions[0].hasSelected, true, 'batch select returns the selection')
+assert.match(batchSelect.actions[0].textPreview, /SELECT-ME/, 'batch select selected the paragraph text')
+assert.equal(batchSelect.actions[1].pressed, 'ArrowRight', 'the follow-up key ran in the same batch')
+assert.ok(batchSelect.actions.every(item => item.hasImage === false && item.hasLabels === false), 'inner select builds no view payload')
+assert.ok(batchSelect.hasImage && batchSelect.labelCount > 0, 'batch returns one final view')
+console.log('PASS batch [select, ArrowRight] — both actions ok, one final view')
+
+const focusFallback = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tabId, { url: '${BASE}/form.html' })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => document.getElementById('comment-card').scrollIntoView({ block: 'center' }),
+  })
+  const snap = await mod.execute('snapshot', {}, settings)
+  const card = snap.labels.find(item => item.tag === 'div' && item.text === 'Comment card')
+  const result = await mod.execute('type', { label: card.id, text: 'focus fallback text', view: 'none' }, settings)
+  const value = (await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => document.getElementById('comment-edit')?.innerText ?? '',
+  }))[0].result
+  return { labelFound: Boolean(card), typed: result.typed, changed: result.changed, value, view: result.view }
+})()`)
+assert.equal(focusFallback.labelFound, true, 'comment card label is visible after scrolling')
+assert.equal(focusFallback.typed.method, 'trusted-focus', 'non-editable label falls back to focused trusted typing')
+assert.ok(focusFallback.typed.afterChars > 0, 'fallback typing reports inserted characters')
+assert.match(focusFallback.value, /focus fallback text/, 'text landed in the editable descendant')
+assert.equal(focusFallback.changed, true, 'fallback typing reports a change')
+assert.equal(focusFallback.view, 'none', 'explicit none view on fallback typing is honoured')
+console.log(`PASS focus-fallback typing — method ${focusFallback.typed.method}, ${focusFallback.typed.afterChars} chars`)
+
+const namedKeys = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tabId, { url: '${BASE}/form.html' })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const snap = await mod.execute('snapshot', {}, settings)
+  const name = snap.labels.find(item => item.tag === 'input' && item.text === 'Name')
+  await mod.execute('type', { label: name.id, text: '', view: 'none' }, settings)
+  const period = await mod.execute('press_key', { key: 'Period', view: 'none' }, settings)
+  const colon = await mod.execute('press_key', { key: 'Colon', view: 'none' }, settings)
+  const value = (await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => document.getElementById('name')?.value ?? '',
+  }))[0].result
+  return { period: period.pressed, colon: colon.pressed, value }
+})()`)
+assert.equal(namedKeys.period.key, 'Period', 'named Period key is echoed')
+assert.equal(namedKeys.period.trusted, true, 'named Period uses trusted input')
+assert.equal(namedKeys.colon.key, 'Colon', 'named Colon key is echoed')
+assert.equal(namedKeys.colon.trusted, true, 'named Colon uses trusted input')
+assert.equal(namedKeys.value, '.:', 'named punctuation keys type their characters')
+console.log('PASS named punctuation keys — Period and Colon')
+
 console.log('\nALL WORK CHECKS PASSED')
 panel.close()

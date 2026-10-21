@@ -167,6 +167,14 @@ const TYPE_FOCUSED = {
   labels: [],
   labelCount: 0,
 }
+const TYPE_TRUSTED_FOCUS = {
+  ...TYPE_FOCUSED,
+  typed: {
+    ...TYPE_FOCUSED.typed,
+    submitted: false,
+    method: 'trusted-focus',
+  },
+}
 const TYPE_PASSWORD = {
   ...TYPE,
   typed: {
@@ -281,6 +289,58 @@ const WAIT_FOR_TIMEOUT = {
   waited: { conditions: { text: 'NEVER' }, found: false, timedOut: true, elapsedMs: 10000 },
   changed: false,
   signals: [],
+}
+const SELECT_RANGE = {
+  op: 'select',
+  tab: CLICK.tab,
+  viewport: CLICK.viewport,
+  scroll: CLICK.scroll,
+  selected: {
+    from: { x: 100, y: 100, cssX: 80, cssY: 80 },
+    to: { x: 500, y: 200, cssX: 400, cssY: 160 },
+    chars: 128,
+    textPreview: 'Bold heading text and more content',
+  },
+  changed: true,
+  signals: ['selection'],
+  labels: [],
+  image: IMAGE,
+}
+const SELECT_COLLAPSED = {
+  op: 'select',
+  tab: CLICK.tab,
+  viewport: CLICK.viewport,
+  scroll: CLICK.scroll,
+  selected: { collapsed: true, chars: 0, from: { x: 10, y: 10 }, to: { x: 10, y: 10 } },
+  changed: false,
+  signals: [],
+  labels: [],
+  image: IMAGE,
+}
+const SELECT_COMPACT = {
+  op: 'select',
+  view: 'compact',
+  tab: CLICK.tab,
+  viewport: CLICK.viewport,
+  scroll: CLICK.scroll,
+  selected: { from: { x: 100, y: 100 }, to: { x: 500, y: 200 }, chars: 128, textPreview: 'Bold heading text' },
+  changed: true,
+  signals: ['selection'],
+  labelsDelta: { count: 42, unchanged: 42, addedCount: 0, removedCount: 0, added: [] },
+  labelCount: 42,
+  screenshotSkipped: true,
+}
+const SELECT_NONE = {
+  op: 'select',
+  view: 'none',
+  tab: CLICK.tab,
+  viewport: CLICK.viewport,
+  scroll: CLICK.scroll,
+  selected: { from: { x: 100, y: 100 }, to: { x: 500, y: 200 }, chars: 128, textPreview: 'Bold heading text' },
+  changed: true,
+  signals: ['selection'],
+  labelCount: 42,
+  screenshotSkipped: true,
 }
 const CLICK_COMPACT = {
   op: 'click',
@@ -414,6 +474,24 @@ const BATCH_CLICK_AT = {
   scroll: CLICK.scroll,
   screenshotSkipped: true,
 }
+const BATCH_SELECT = {
+  op: 'batch',
+  view: 'compact',
+  totalMs: 620,
+  batch: { total: 3, executed: 3, succeeded: 3, ok: true, stoppedEarly: false, elapsedMs: 580, viewMs: 20 },
+  actions: [
+    { index: 1, op: 'select', ok: true, changed: true, signals: ['selection'], selected: { from: { x: 100, y: 100 }, to: { x: 500, y: 200 }, chars: 128, textPreview: 'Bold heading text' } },
+    { index: 2, op: 'select', ok: true, changed: false, selected: { collapsed: true, chars: 0 } },
+    { index: 3, op: 'press_key', ok: true, changed: true, pressed: { key: 'KeyB', modifiers: ['ctrl'], trusted: true } },
+  ],
+  tab: CLICK.tab,
+  viewport: CLICK.viewport,
+  scroll: CLICK.scroll,
+  labelCount: 41,
+  labelMs: 3,
+  labelsDelta: { count: 41, unchanged: 41, addedCount: 0, removedCount: 0, added: [] },
+  screenshotSkipped: true,
+}
 
 async function startFakeBridge(options = {}) {
   const delays = options.delays ?? {}
@@ -455,11 +533,22 @@ async function startFakeBridge(options = {}) {
         }
         if (op === 'batch') {
           const actions = Array.isArray(args.actions) ? args.actions : []
-          send(args.stop_on_error === false ? BATCH_STOP_OFF
-            : actions.length >= 6 ? BATCH_STOPPED
-              : actions.length === 3 ? BATCH_OK
-                : actions.length === 2 ? BATCH_CLICK_AT
-                  : BATCH_SINGLE)
+          send(actions.some(action => action?.op === 'select') ? BATCH_SELECT
+            : args.stop_on_error === false ? BATCH_STOP_OFF
+              : actions.length >= 6 ? BATCH_STOPPED
+                : actions.length === 3 ? BATCH_OK
+                  : actions.length === 2 ? BATCH_CLICK_AT
+                    : BATCH_SINGLE)
+          return
+        }
+        if (op === 'select') {
+          const from = args.from ?? {}
+          const to = args.to ?? {}
+          const collapsed = from.x === to.x && from.y === to.y
+          send(args.view === 'none' ? SELECT_NONE
+            : args.view === 'compact' ? SELECT_COMPACT
+              : collapsed ? SELECT_COLLAPSED
+                : SELECT_RANGE)
           return
         }
         if (op === 'click_at') {
@@ -478,9 +567,10 @@ async function startFakeBridge(options = {}) {
         if (op === 'type') {
           send(args.view === 'compact' ? TYPE_COMPACT
             : args.text === 'NOCHANGE' ? TYPE_UNCHANGED
-              : args.label === 8 ? TYPE_PASSWORD
-                : args.label === undefined ? TYPE_FOCUSED
-                  : TYPE)
+              : args.text === 'FOCUS' ? TYPE_TRUSTED_FOCUS
+                : args.label === 8 ? TYPE_PASSWORD
+                  : args.label === undefined ? TYPE_FOCUSED
+                    : TYPE)
           return
         }
         if (op === 'press_key') {
@@ -575,7 +665,7 @@ async function waitFor(predicate, timeoutMs = 2_000) {
   throw new Error('timed out waiting for condition')
 }
 
-test('registers the provider, guidance, and the fourteen browser tools', async t => {
+test('registers the provider, guidance, and the fifteen browser tools', async t => {
   const { server, url } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -596,6 +686,7 @@ test('registers the provider, guidance, and the fourteen browser tools', async t
     'browser_read_text',
     'browser_screenshot',
     'browser_scroll',
+    'browser_select',
     'browser_select_option',
     'browser_switch_tab',
     'browser_tabs',
@@ -608,9 +699,11 @@ test('registers the provider, guidance, and the fourteen browser tools', async t
   assert.match(guidance, /points:\[\{x,y\}, \.\.\.\]/)
   assert.match(guidance, /view:"none"/)
   assert.match(guidance, /delay_ms/)
-  for (const tool of ['browser_type', 'browser_press_key', 'browser_navigate', 'browser_wait_for', 'browser_batch']) {
+  for (const tool of ['browser_type', 'browser_press_key', 'browser_navigate', 'browser_wait_for', 'browser_batch', 'browser_select']) {
     assert.match(guidance, new RegExp(tool), tool)
   }
+  assert.match(guidance, /detail:"fast"/)
+  assert.match(guidance, /Ctrl\+Alt\+M/)
   assert.match(guidance, /view: "auto"/)
   assert.match(guidance, /view:"full"/)
   assert.match(guidance, /compact confirmation/)
@@ -765,10 +858,13 @@ test('screenshot forwards delay_ms to the bridge', async t => {
 
   const definition = fake.tools.get('browser_screenshot')
   assert.match(definition.description, /delay_ms/)
+  assert.match(definition.description, /fast/)
   await definition.execute({ delay_ms: 350 }, { callId: 'c-delay', signal: new AbortController().signal })
   assert.deepEqual(commands.at(-1), { op: 'snapshot', args: { detail: 'normal', delay_ms: 350 } })
   await definition.execute({ detail: 'high' }, { callId: 'c-nodelay', signal: new AbortController().signal })
   assert.deepEqual(commands.at(-1), { op: 'snapshot', args: { detail: 'high' } })
+  await definition.execute({ detail: 'fast' }, { callId: 'c-fast', signal: new AbortController().signal })
+  assert.deepEqual(commands.at(-1), { op: 'snapshot', args: { detail: 'fast' } })
 })
 
 test('click tool reports the target and the resulting view', async t => {
@@ -982,6 +1078,10 @@ test('type tool supports focused append/submit and password previews', async t =
 
   const unchanged = await definition.execute({ text: 'NOCHANGE', label: 7 }, exec)
   assert.match(unchanged.content[0].text, /result: NO VISIBLE CHANGE/)
+
+  const focusFallback = await definition.execute({ text: 'FOCUS' }, exec)
+  assert.match(focusFallback.content[0].text, /typed 5 chars into the focused element · append · trusted \(focused\)/)
+  assert.match(focusFallback.content[0].text, /value now "hello"/)
 })
 
 test('type validation rejects non-string text and bad options', async t => {
@@ -1433,4 +1533,148 @@ test('batch uses a per-call timeout without changing other tools', async t => {
     () => fake.tools.get('browser_click').execute({ label: 3 }, { callId: 'c-click-timeout', signal: new AbortController().signal }),
     /browser command timed out after 250ms/,
   )
+})
+
+test('select tool reports the range and its preview', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_select')
+  assert.equal(definition.name, 'browser_select')
+  const value = await definition.execute({
+    from: { x: 100, y: 100 },
+    to: { x: 500, y: 200 },
+  }, { callId: 'c-sel', signal: new AbortController().signal })
+  assert.equal(value.content[0].type, 'text')
+  assert.match(value.content[0].text, /selected 128 chars from \(100, 100\) to \(500, 200\) · "Bold heading text and more content"/)
+  assert.equal(value.content[1].type, 'image')
+  assert.deepEqual(commands.at(-1), { op: 'select', args: { from: { x: 100, y: 100 }, to: { x: 500, y: 200 } } })
+})
+
+test('select tool reports a collapsed selection', async t => {
+  const { server, url } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const value = await fake.tools.get('browser_select').execute({
+    from: { x: 10, y: 10 },
+    to: { x: 10, y: 10 },
+  }, { callId: 'c-sel-collapse', signal: new AbortController().signal })
+  assert.match(value.content[0].text, /selection collapsed \(nothing selected\)/)
+  assert.equal(value.content[1].type, 'image')
+})
+
+test('select compact and none views stay text only', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const exec = { callId: 'c-sel-view', signal: new AbortController().signal }
+  const compact = await fake.tools.get('browser_select').execute({
+    from: { x: 100, y: 100 },
+    to: { x: 500, y: 200 },
+    view: 'compact',
+  }, exec)
+  assert.equal(compact.content.length, 1)
+  assert.match(compact.content[0].text, /selected 128 chars from \(100, 100\) to \(500, 200\)/)
+  assert.match(compact.content[0].text, /labels unchanged \(42\)/)
+  assert.match(compact.content[0].text, /view: compact — no screenshot returned/)
+  assert.deepEqual(commands.at(-1), {
+    op: 'select',
+    args: { from: { x: 100, y: 100 }, to: { x: 500, y: 200 }, view: 'compact' },
+  })
+
+  const none = await fake.tools.get('browser_select').execute({
+    from: { x: 100, y: 100 },
+    to: { x: 500, y: 200 },
+    view: 'none',
+  }, exec)
+  assert.equal(none.content.length, 1)
+  assert.match(none.content[0].text, /selected 128 chars from \(100, 100\) to \(500, 200\)/)
+  assert.match(none.content[0].text, /view: skipped — no screenshot returned/)
+  assert.doesNotMatch(none.content[0].text, /labels unchanged/)
+})
+
+test('select validation rejects bad points, space, and view', async t => {
+  const { server, url } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_select')
+  const exec = { callId: 'c-sel-bad', signal: new AbortController().signal }
+  await assert.rejects(() => definition.execute({}, exec), /requires a from point/)
+  await assert.rejects(() => definition.execute({ from: 5, to: { x: 1, y: 2 } }, exec), /requires a from point/)
+  await assert.rejects(() => definition.execute({ from: { x: 1, y: 2 } }, exec), /requires a to point/)
+  await assert.rejects(
+    () => definition.execute({ from: { x: 'a', y: 2 }, to: { x: 1, y: 2 } }, exec),
+    /from requires finite x and y/,
+  )
+  await assert.rejects(
+    () => definition.execute({ from: { x: 1, y: 2 }, to: { x: 1, y: 2 }, space: 'viewport' }, exec),
+    /space must be "image" or "css"/,
+  )
+  await assert.rejects(
+    () => definition.execute({ from: { x: 1, y: 2 }, to: { x: 1, y: 2 }, view: 'mid' }, exec),
+    /view must be one of auto, full, compact, none/,
+  )
+})
+
+test('batch accepts select and formats range and collapsed lines', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const actions = [
+    { op: 'select', from: { x: 100, y: 100 }, to: { x: 500, y: 200 } },
+    { op: 'select', from: { x: 10, y: 10 }, to: { x: 10, y: 10 } },
+    { op: 'press_key', key: 'KeyB', modifiers: ['ctrl'] },
+  ]
+  const value = await fake.tools.get('browser_batch').execute(
+    { actions },
+    { callId: 'c-batch-select', signal: new AbortController().signal },
+  )
+  assert.equal(value.content.length, 1)
+  const text = value.content[0].text
+  assert.match(text, /batch: 3 actions · 3 succeeded · 580ms/)
+  assert.match(text, /  \[1\] select 128 chars · changed/)
+  assert.match(text, /  \[2\] select · collapsed/)
+  assert.match(text, /  \[3\] press_key KeyB · changed/)
+  assert.match(text, /labels unchanged \(41\)/)
+  assert.match(text, /view: compact — no screenshot returned/)
+  assert.deepEqual(commands.at(-1), {
+    op: 'batch',
+    args: {
+      actions: [
+        { op: 'select', args: { from: { x: 100, y: 100 }, to: { x: 500, y: 200 } } },
+        { op: 'select', args: { from: { x: 10, y: 10 }, to: { x: 10, y: 10 } } },
+        { op: 'press_key', args: { key: 'KeyB', modifiers: ['ctrl'] } },
+      ],
+    },
+  })
 })

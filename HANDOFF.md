@@ -74,7 +74,7 @@ answers with `browser.result`.
 | Repo | `/home/conan/Documents/GitHub/crazyAgent` |
 | Node | 26.8.1 (needs 22.19+) |
 | DSH | `0.2.1-rc.2` (`@deepseek-ai/dsh`) |
-| Companion | running, PID in `logs/companion.pid` (1665702 after the B+C+E restart) |
+| Companion | running, PID in `logs/companion.pid` (2171634 after the A+B+C+D restart) |
 | Bridge | `ws://127.0.0.1:17871/bridge` |
 | Health | `{"ok":true,"ui":false,"tools":true,"port":17871}` |
 | Token | read `.dsh-home/browser-agent/token` (do not commit it) |
@@ -84,9 +84,9 @@ answers with `browser.result`.
 | API key | stored, 73 bytes, `.dsh-home/browser-agent/api-key` (0600) |
 | Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash) |
 | Permissions | sidePanel, tabs, scripting, storage, **debugger**, **webNavigation**, host `<all_urls>` |
-| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-21T21-30-54-909Z-ac82d4` (post-restart); the 19-turn work analysis run is `run-2026-10-21T19-11-58-370Z-0ea2f0` |
-| Tests | 81/81 passing |
-| Git | `main` has baseline, burst-click, work-foundation and B+C+E commits; tree clean |
+| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-21T23-36-12-600Z-8f5493` (post-restart); the post-batch work run is `run-2026-10-21T21-30-54-909Z-ac82d4` |
+| Tests | 88/88 passing |
+| Git | `main` has baseline, burst-click, work-foundation, B+C+E and A+B+C+D commits; tree clean |
 
 Latest real-world validation (from that run):
 
@@ -125,7 +125,20 @@ every action returned a full view, so prompts averaged **134 K tokens/step**
 outcomes, per-call bridge timeout), **view modes** (`auto`/`full`/`compact`/`none`
 with label deltas, compact DOM actions 18-35 ms instead of 360-1266 ms), cumulative
 per-tab label registry, printable-ASCII keys, and capture readback retries.
-Roster is now **fourteen** tools.
+Roster became **fourteen** tools at that point.
+
+2026-10-21 A+B+C+D (root-cause fix after the next 5 work turns): reasoning
+tokens, not browser actions, dominated action turns. Turns at effort `off` ran
+0.87-1.94 s/step with 54-75 output tokens; comparable work at `low` ran
+3.16-6.96 s/step with 211-420 output tokens, of which 63-93% were hidden
+reasoning. The Docs comment turn also used 123 actions over 106 steps with 15
+Escapes and 3 disabled Comment menu items because there was no selection
+primitive. Fixes: `act` reasoning class (short imperative work prompts ->
+`off`), `browser_select` (trusted drag + selected-text readback,
+batch-compatible), `detail:"fast"` 640 px screenshots, `NOT_EDITABLE`
+focus-fallback typing, named punctuation keys, and a `compaction-basic` overlay
+(thresholdRatio 0.06 / retainRatio 0.02, ~63 K-token trigger) for cross-turn
+context. Roster is now **fifteen** tools.
 
 ---
 
@@ -207,9 +220,10 @@ update them.
    generated model overlay, companion, and extension. DSH is pinned to
    `0.2.1-rc.2`.
 2. **The model never gets arbitrary DOM automation.** It has a fixed roster of
-   **fourteen** browser tools; every action is a labelled element, an explicit
-   coordinate, explicit text/keys, or an explicit http(s) URL. No JS evaluation,
-   selector guessing, or unlabelled DOM manipulation.
+   **fifteen** browser tools; every action is a labelled element, an explicit
+   coordinate, explicit text/keys, an explicit drag range, or an explicit
+   http(s) URL. No JS evaluation, selector guessing, or unlabelled DOM
+   manipulation.
 3. **All browser execution lives in the side panel page.** No content script is
    installed; page code runs only for the duration of one `chrome.scripting`
    call in the `ISOLATED` world.
@@ -239,20 +253,23 @@ update them.
 10. **The API key never touches `chrome.storage`.** It goes over loopback as a
     `llm.configure` frame, is passed to DSH as `CRAZYAGENT_API_KEY`, and is
     redacted from logs. The generated patch and `llm.json` contain no secret.
-11. **Speed rule:** never pay a model round trip per action. `browser_batch`
-    runs an ordered sequence in one call with one final view. DOM actions
-    default to a compact confirmation (no screenshot, label delta only) and
-    auto-escalate to a full labelled view when the page changes, when there is
-    no previous view, after 5 compact actions, or on `view:"full"`. Full views
-    still carry labels, so the model never needs a separate screenshot round
-    trip; compact results keep the request small so TTFT stays low.
+11. **Speed rule:** never pay a model round trip per action, and never pay
+    reasoning tokens for acting. `browser_batch` runs an ordered sequence in one
+    call with one final view. DOM actions default to a compact confirmation (no
+    screenshot, label delta only) and auto-escalate to a full labelled view when
+    the page changes, when there is no previous view, after 5 compact actions,
+    or on `view:"full"`. Reasoning effort is per turn: navigation, rapid bursts
+    and short imperative work prompts run `off`; only reading/describing/
+    synthesizing keeps `low`. Context is compacted near 6% of the window (~63 K
+    tokens) so long sessions do not grow to 140 K+ prompts; images are offloaded
+    at turn boundaries, never mid-turn (that invalidates the prompt cache).
 12. **Log redaction:** pairing token, API keys, `Bearer`, secret-named fields,
     sensitive query params, inline base64. Page text, screenshots, and reasoning
     are **not** redacted. Review bundles before sharing.
 
 ---
 
-## 5. Capabilities (fourteen model-visible tools)
+## 5. Capabilities (fifteen model-visible tools)
 
 | Tool | What it does | Notes |
 |---|---|---|
@@ -266,6 +283,7 @@ update them.
 | `browser_select_option` | Choose a native `<select>` option | Sets value, fires `input`/`change` |
 | `browser_read_text` | Rendered text | `page`/`viewport`, `offset`, `max_chars`; ~4 ms on fixtures |
 | `browser_scroll` | Scroll + fresh view | DOM scroll first, trusted wheel fallback (`wheel:true`), optional `at_x`/`at_y` |
+| `browser_select` | Drag-select a text range between two points | Trusted CDP drag (mouseMoved → mousePressed → interpolated moves → mouseReleased); returns `selected:{chars,textPreview,collapsed,from,to}`; `space` image/css; `view` auto/full/compact/none; usable inside `browser_batch` (the Docs recipe: select → Ctrl+Alt+M → label-less type → submit) |
 | `browser_navigate` | Open an http(s) URL or move through history | Active or new tab, `back`/`forward`/`reload`, waits up to 15 s for load, reports `timedOut` |
 | `browser_wait_for` | Wait for page conditions, then return a fresh view | `text` substring, `url` substring, DOM `idle`, fixed `ms`; all supplied conditions must hold; `timeout_ms` default 10 s |
 | `browser_tabs` | List current-window tabs | id, title, URL, flags |
@@ -315,6 +333,22 @@ Behavioural layers:
 - **Label registry:** labels are merged cumulatively per tab keyed by URL, so an
   id from an earlier view still resolves to the same element (or fails
   `DETACHED`); a URL change clears the tab's registry. LRU keeps 20 tabs.
+- **Selection:** `browser_select` drives one trusted drag (mouseMoved →
+  mousePressed with buttons:1 → 4 interpolated moves → mouseReleased) and reads
+  `window.getSelection()` in the top frame (4 000-char cap, collapsed flag, range
+  rect). Untrusted synthetic mousemove cannot extend a native selection, so the
+  synthetic fallback may honestly report `collapsed`.
+- **Reasoning classes:** `navigate`, `rapid` (games) and `act` (short imperative
+  work prompts: add/delete/fill/click/reply/fix/select/...) map to `off`;
+  `inspect` and `synthesize` map to `low`. `act` is skipped when the prompt also
+  asks to report/summarize, so those stay `low`.
+- **Fast screenshots:** `detail:"fast"` captures at 640 px / JPEG 50 with labels
+  drawn (~195 image tokens) for quick visual checks; `normal` 1280 and `high`
+  2048 are unchanged.
+- **Context compaction:** the profile patches `compaction-basic` to
+  `thresholdRatio: 0.06`, `retainRatio: 0.02` (~63 K trigger, ~21 K retained) so
+  long sessions stop growing. Never prune history mid-turn: it would invalidate
+  the prompt cache on every subsequent request.
 - **Change signals for DOM clicks:** `url-change`, `title-change`,
   `scroll-change`, `text-change`, `dialog-change`, `dom-mutations:N`, `checked`,
   `aria-expanded`, `aria-selected`. A no-op returns **NO VISIBLE CHANGE**.
@@ -355,17 +389,17 @@ Behavioural layers:
 
 | File | Responsibility |
 |---|---|
-| `lib/index.js` (~1713 lines) | Plugin: bridge client (`tools` role, now with a per-request timeout for batches), `registerTools` (~1037), guidance, `apply` (~1534), activity frames (`activityFromFrame` ~343), `formatView` (~443), shared view helpers (`labelsDeltaLines` ~556, `actionContent` ~588), coordinate/type/press/navigate/wait content formatters (`clickAtContent` ~647 and siblings), `batchContent` (~957), reasoning policy + image budget hooks, `llm/stream` is intentionally **not** used |
+| `lib/index.js` (~1826 lines) | Plugin: bridge client (`tools` role, now with a per-request timeout for batches), `registerTools` (~1101), guidance, `apply` (~1647), activity frames (`activityFromFrame` ~343), `formatView` (~443), shared view helpers (`actionContent` ~589, `selectContent` ~609, `typeMethod` ~735), coordinate/type/press/navigate/wait content formatters (`clickAtContent` ~647 and siblings), `batchContent` (~1021), select/type/press/navigate/wait/select_option content, reasoning policy + image budget hooks, `llm/stream` is intentionally **not** used |
 | `lib/reasoning.js` | `classifyPrompt`, `autoEffort`, `effortFor` (navigate/inspect/synthesize/**rapid**) |
 | `lib/image-budget.js` | `planImageOffload` pure planner |
-| `test/*.test.mjs` | 14 tools, view modes/label deltas, batch, label prompts, activity forwarding, reasoning, image budget |
+| `test/*.test.mjs` | 15 tools, view modes/label deltas, batch, select, label prompts, activity forwarding, reasoning, image budget |
 
 ### Extension (`extension/`)
 
 | File | Responsibility |
 |---|---|
 | `manifest.json` | MV3, side panel, permissions above, `<all_urls>` |
-| `sidepanel/browser.js` (~3291 lines) | Browser executor. Key functions: `waitForPaint` (~192), `settleAfterInput` (~213), `withDebugger` (~231), `syntheticClickBurst` (~275), `diffRegion` (~336), `runInFrame` (~366), `labelAllFrames` (~406), `labelRegistryFor` (~517, cumulative per-tab labels), `labelPage` (~560), `snapshot` (~1568), `autoEscalate` (~1778), `labelOnly` (~1790), `compactPayload` (~1804), `buildActionView` (~1863), `buildBatchView` (~1921), `scroll` (~2010), `clickAt` (~2354), `typeText` (~2747), `pressKey` (~2891), `navigate` (~2985), `waitFor` (~3088), `batch` (~3123), `execute` (~3221) |
+| `sidepanel/browser.js` (~3609 lines) | Browser executor. Key functions: `waitForPaint` (~192), `settleAfterInput` (~213), `withDebugger` (~231), `syntheticClickBurst` (~275), `diffRegion` (~336), `runInFrame` (~366), `labelAllFrames` (~406), `labelRegistryFor` (~517), `labelPage` (~560), `readSelection` (~1327), `snapshot` (~1692, incl. `detail:"fast"` 640 px), `autoEscalate` (~1778), `labelOnly` (~1790), `compactPayload` (~1804), `buildActionView` (~1863), `buildBatchView` (~1921), `clickAt` (~2478), `typeText` (~2871, incl. `trusted-focus` fallback), `pressKey` (~3033), `navigate` (~3127), `waitFor` (~3230), `trustedDrag` (~3286), `selectRange` (~3315), `batch` (~3438), `execute` (~3536) |
 | `sidepanel/app.js` | Chat UI, settings (key/base URL/model/effort), bridge lifecycle, live activity feed, tool cards, debug-log modal |
 | `sidepanel/index.html`, `style.css` | UI markup/styles |
 | `sidepanel/logger.js`, `protocol.js` | Client log batching, formatting helpers |
@@ -407,12 +441,12 @@ logs/<runId>/   events.jsonl, screenshots/, exports/, summary files
 
 ## 7. Test inventory
 
-`npm test` = 81 tests:
+`npm test` = 88 tests:
 
 - `companion/test/`: bridge (7), prompt (9), log store (2), credentials (2),
   openrouter (5).
 - `extension/test/`: helpers (3), logger (4), tab match (5).
-- `packages/dsh-browser-extension/test/`: tools (33), reasoning (7),
+- `packages/dsh-browser-extension/test/`: tools (38), reasoning (9),
   image budget (4).
 
 E2E suites (not in `npm test`): `edge-click-e2e.mjs` (9 behaviours),
@@ -425,10 +459,11 @@ wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
 
 ## 8. Known gaps / next steps, in suggested order
 
-1. **Typing and navigation — DONE** (2026-10-21). `browser_type`,
-   `browser_press_key`, `browser_navigate` (url/new_tab/history), and
-   `browser_wait_for` are in the fourteen-tool roster. Remaining input gaps:
-   IME composition strings, file inputs, and drag/drop.
+1. **Typing, navigation and selection — DONE** (2026-10-21). `browser_type`,
+   `browser_press_key`, `browser_navigate`, `browser_wait_for` and
+   `browser_select` are in the fifteen-tool roster. Remaining input gaps: IME
+   composition strings, file inputs, and drag/drop (mouse-button drag of
+   elements, as opposed to text selection).
 2. **Fast/batch canvas clicking — DONE.** `browser_click_at` accepts `points`
    (1-8) and clicks a whole burst with one debugger attach and one capture;
    `view:"none"` skips the screenshot for text-only fast bursts; the fixed
@@ -535,6 +570,18 @@ wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
   only after an action cannot be targeted by a later action in the same batch,
   because its label id does not exist until a view is taken. Guidance tells the
   model to stop the batch and take a view.
+- **Reasoning tokens dominate action turns.** Post-batch measurement: turns at
+  effort `off` ran **0.87–1.94 s/step** with 54–75 output tokens; the same kind
+  of work at `low` ran **3.16–6.96 s/step** with 211–420 output tokens, of which
+  63–93% were hidden reasoning (a 686-token step carried only 312 chars of tool
+  arguments). Action prompts therefore classify as `act` → `off`.
+- **Never prune history mid-turn.** `image/offload` changes the request prefix,
+  so pruning during a turn would invalidate the prompt cache on every later
+  step. Prune at turn boundaries and configure `compaction-basic` for the
+  cross-turn growth instead.
+- **Native text selection needs trusted input.** Untrusted synthetic
+  `mousemove` events do not extend a selection; `browser_select` must use CDP
+  `Input.dispatchMouseEvent` with `buttons:1` between press and release.
 
 ---
 
@@ -575,6 +622,7 @@ Reasoning auto policy (per turn, from the claimed prompt):
 | inspect | “what is on this page?”, “go to Docs and tell me what’s there” | `low` |
 | synthesize | “summarize”, “compare”, “why…”, long/multi-question prompts | `low` |
 | rapid | “play the game”, “click the dots as they appear”, “as fast as you can” | `off` |
+| act | “delete it all”, “add some comments”, “fill the form and submit” | `off` |
 
 Reasoning is held for all steps of a turn; decisions appear as
 `reasoning.policy` in `events.jsonl` and as `policy` entries in the live feed.
@@ -647,7 +695,7 @@ read it from `chrome://extensions`.
 
 1. `cd /home/conan/Documents/GitHub/crazyAgent`
 2. `curl -s http://127.0.0.1:17871/health` — expect `tools:true`.
-3. `npm test` — expect 81 passing.
+3. `npm test` — expect 88 passing.
 4. Read the latest run under `.dsh-home/browser-agent/logs/` if investigating a
    specific behaviour (`events.jsonl`, `summary.md`).
 5. Reload the extension if `extension/` changed since the last load.
@@ -673,12 +721,16 @@ read it from `chrome://extensions`.
 - “Click into the editor and type ‘draft text’.” (canvas-editor path)
 - “Go to 127.0.0.1:17872/second.html and tell me the marker.” (`navigate`)
 - “Wait for the page to show READY, then tell me what it says.” (`wait_for`)
+- “Select the first paragraph and make it bold.” (`browser_select` + Ctrl+B)
+- “Add a comment on this sentence.” (select → Ctrl+Alt+M → type → submit)
+- “Take a quick look at the page.” (`browser_screenshot` detail:"fast")
 
 ---
 
 ## 14. Open questions for the user
 
-- Which comes first now: file upload, native dialogs, or downloads?
+- Which comes first now: file upload, native dialogs, downloads, or drag/drop?
+- Is effort `off` acceptable for complex action turns, or should some stay `low`?
 - Is the debugger banner acceptable, or should trusted input be opt-in per tab?
 - Should reasoning `auto` be tuned (e.g. `off` for short inspect prompts) using
   real `reasoning.policy` data?

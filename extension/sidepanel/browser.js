@@ -51,6 +51,18 @@ const KEY_SPECS = {
   PageUp: { key: 'PageUp', code: 'PageUp', keyCode: 33 },
   PageDown: { key: 'PageDown', code: 'PageDown', keyCode: 34 },
   Space: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
+  Period: { key: '.', code: 'Period', keyCode: 190, text: '.', shifted: '>' },
+  Comma: { key: ',', code: 'Comma', keyCode: 188, text: ',', shifted: '<' },
+  Semicolon: { key: ';', code: 'Semicolon', keyCode: 186, text: ';', shifted: ':' },
+  Colon: { key: ':', code: 'Semicolon', keyCode: 186, text: ':', shift: true },
+  Quote: { key: "'", code: 'Quote', keyCode: 222, text: "'", shifted: '"' },
+  Backquote: { key: '`', code: 'Backquote', keyCode: 192, text: '`', shifted: '~' },
+  Slash: { key: '/', code: 'Slash', keyCode: 191, text: '/', shifted: '?' },
+  Backslash: { key: '\\', code: 'Backslash', keyCode: 220, text: '\\', shifted: '|' },
+  Minus: { key: '-', code: 'Minus', keyCode: 189, text: '-', shifted: '_' },
+  Equal: { key: '=', code: 'Equal', keyCode: 187, text: '=', shifted: '+' },
+  BracketLeft: { key: '[', code: 'BracketLeft', keyCode: 219, text: '[', shifted: '{' },
+  BracketRight: { key: ']', code: 'BracketRight', keyCode: 221, text: ']', shifted: '}' },
 }
 /** CDP Input.dispatchKeyEvent modifier bits. */
 const MODIFIER_BITS = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
@@ -1310,6 +1322,118 @@ async function waitForConditionsPage(conditions, timeoutMs) {
 }
 
 /**
+ * Read the current top-frame text selection. Self-contained page function.
+ */
+function readSelection() {
+  const selection = window.getSelection()
+  const raw = String(selection?.toString() ?? '')
+  let rect = null
+  try {
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0).getBoundingClientRect()
+      rect = {
+        x: Math.round(range.left),
+        y: Math.round(range.top),
+        w: Math.round(range.width),
+        h: Math.round(range.height),
+      }
+    }
+  } catch {
+    rect = null
+  }
+  return {
+    text: raw.slice(0, 4_000),
+    chars: Math.min(raw.length, 4_000),
+    collapsed: selection ? selection.isCollapsed !== false : true,
+    rect,
+  }
+}
+
+/**
+ * Synthetic drag fallback: one self-contained page script pointer/mouse
+ * sequence from one point to another.
+ * @param {number} fromX
+ * @param {number} fromY
+ * @param {number} toX
+ * @param {number} toY
+ */
+async function syntheticDrag(fromX, fromY, toX, toY) {
+  const start = document.elementFromPoint(fromX, fromY)
+  if (!start) return { ok: false, reason: 'no-element' }
+  const base = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, detail: 1 }
+  start.dispatchEvent(new PointerEvent('pointerdown', { ...base, clientX: fromX, clientY: fromY, buttons: 1, pointerType: 'mouse', isPrimary: true }))
+  start.dispatchEvent(new MouseEvent('mousedown', { ...base, clientX: fromX, clientY: fromY, buttons: 1 }))
+  const steps = 4
+  for (let step = 1; step <= steps; step += 1) {
+    const progress = step / steps
+    const x = fromX + (toX - fromX) * progress
+    const y = fromY + (toY - fromY) * progress
+    const target = document.elementFromPoint(x, y) || start
+    target.dispatchEvent(new PointerEvent('pointermove', { ...base, clientX: x, clientY: y, buttons: 1, pointerType: 'mouse', isPrimary: true }))
+    target.dispatchEvent(new MouseEvent('mousemove', { ...base, clientX: x, clientY: y, buttons: 1 }))
+  }
+  start.dispatchEvent(new PointerEvent('pointerup', { ...base, clientX: toX, clientY: toY, buttons: 0, pointerType: 'mouse', isPrimary: true }))
+  start.dispatchEvent(new MouseEvent('mouseup', { ...base, clientX: toX, clientY: toY, buttons: 0 }))
+  return { ok: true }
+}
+
+/**
+ * Focus a typing target for a non-editable labelled surface: the element itself
+ * when it accepts text, otherwise a descendant or ancestor contenteditable,
+ * textarea, input, or [role="textbox"]. Self-contained page function.
+ * @param {number} label
+ */
+function focusTypingTarget(label) {
+  const state = globalThis.__crazyagent
+  const el = state?.byId?.get(label)
+  if (!el) return { ok: false, code: 'UNKNOWN_LABEL', message: `Label ${label} is not in the current view.` }
+  if (!el.isConnected) return { ok: false, code: 'DETACHED', message: `Label ${label} no longer exists.` }
+  const TYPING_SELECTOR = 'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, [contenteditable]:not([contenteditable="false"]), [role="textbox"]'
+  const typingTarget = node => {
+    if (!node || node.nodeType !== 1) return null
+    if (node.matches?.(TYPING_SELECTOR)) return node
+    if (node.isContentEditable === true) return node
+    return null
+  }
+  let target = typingTarget(el)
+  if (!target) target = el.querySelector?.(TYPING_SELECTOR) ?? null
+  if (!target) {
+    let ancestor = el.parentElement
+    while (ancestor && !target) {
+      target = typingTarget(ancestor) ?? ancestor.querySelector?.(TYPING_SELECTOR) ?? null
+      ancestor = ancestor.parentElement
+    }
+  }
+  if (!target) {
+    return { ok: false, code: 'NOT_EDITABLE', message: `Label ${label} has no focusable editable target.` }
+  }
+  if (target.disabled === true || target.getAttribute?.('aria-disabled') === 'true') {
+    return { ok: false, code: 'DISABLED', message: `Label ${label} resolves to a disabled editable target.` }
+  }
+  target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
+  if (typeof target.focus === 'function') target.focus({ preventScroll: true })
+  const tag = target.tagName.toLowerCase()
+  const type = (target.type || '').toLowerCase()
+  const isPassword = tag === 'input' && type === 'password'
+  const read = () => (tag === 'input' || tag === 'textarea')
+    ? String(target.value ?? '')
+    : String(target.innerText ?? target.textContent ?? '')
+  const before = read()
+  const active = document.activeElement
+  const activeEditable = Boolean(active && (typingTarget(active) || active.isContentEditable === true))
+  return {
+    ok: true,
+    tag,
+    type,
+    isPassword,
+    beforeChars: before.length,
+    beforePreview: isPassword ? `[password ${before.length} chars]` : before.slice(0, 120),
+    activeTag: active ? active.tagName.toLowerCase() : '',
+    activeEditable,
+  }
+}
+
+/**
  * Scroll the document or the largest visible nested scroller.
  * This function is serialized into the page; it must not reference module state.
  * @param {'up'|'down'|'left'|'right'} direction
@@ -1560,7 +1684,7 @@ function assertCapturable(tab, force = false) {
 }
 
 /**
- * @param {'normal'|'high'} detail
+ * @param {'fast'|'normal'|'high'} detail
  * @param {import('./protocol.js').Settings} settings
  * @param {boolean} [retried]
  * @param {number} [delayMs] page-side delay before labelling and capturing
@@ -1573,8 +1697,8 @@ async function snapshot(detail, settings, retried = false, delayMs = 0) {
   // An explicit delay runs in the page: the side panel is hidden and throttled,
   // so its own timers are too coarse. It is counted in totalMs.
   if (delayMs > 0) await pauseInTab(tab.id, delayMs)
-  const quality = detail === 'high' ? 80 : Number(settings.quality) || 72
-  const maxWidth = detail === 'high' ? 2048 : Number(settings.captureWidth) || 1280
+  const quality = detail === 'high' ? 80 : detail === 'fast' ? 50 : Number(settings.quality) || 72
+  const maxWidth = detail === 'high' ? 2048 : detail === 'fast' ? 640 : Number(settings.captureWidth) || 1280
   // The overlay must be painted before the capture, so label first, then shoot.
   // Only the visible viewport is labelled; persistent ids survive relabelling.
   const labelStarted = performance.now()
@@ -2762,11 +2886,18 @@ async function typeText(settings, args) {
       throw error
     }
     if (domResult?.ok === false) {
-      throw new BrowserError(domResult.code ?? 'TYPE_FAILED', domResult.message ?? 'Could not type into this field.')
+      if (domResult.code === 'NOT_EDITABLE') {
+        // Docs-style cards: the labelled surface is a div that wraps an editable
+        // child. Focus that child and use trusted input.
+        outcome = await trustedTypeIntoFallbackTarget(tab.id, target, request)
+      } else {
+        throw new BrowserError(domResult.code ?? 'TYPE_FAILED', domResult.message ?? 'Could not type into this field.')
+      }
+    } else {
+      outcome = domResult.verified
+        ? { method: 'dom', ...domResult }
+        : await trustedTypeIntoLabel(tab.id, target, request, domResult)
     }
-    outcome = domResult.verified
-      ? { method: 'dom', ...domResult }
-      : await trustedTypeIntoLabel(tab.id, target, request, domResult)
   } else {
     outcome = await trustedTypeIntoFocus(tab.id, request)
   }
@@ -2821,7 +2952,14 @@ function keyCharEntry(raw) {
  */
 function resolveKeySpec(raw, mask) {
   const named = Object.keys(KEY_SPECS).find(name => name.toLowerCase() === raw.toLowerCase())
-  if (named) return KEY_SPECS[named]
+  if (named) {
+    const base = KEY_SPECS[named]
+    const shiftedNamed = (mask & MODIFIER_BITS.shift) !== 0
+    if (shiftedNamed && base.shifted) {
+      return { key: base.shifted, code: base.code, keyCode: base.keyCode, text: base.shifted }
+    }
+    return base
+  }
   const found = keyCharEntry(raw)
   if (!found) throw new BrowserError('BAD_KEY', `Unsupported key ${JSON.stringify(raw)}`)
   const { char, entry } = found
@@ -2852,8 +2990,12 @@ function parsePressKeyArgs(args) {
   }
   let mask = 0
   for (const item of modifiers) mask |= MODIFIER_BITS[item]
-  // Shifted characters (A, ?, !) imply shift for dispatch; the echoed
-  // modifiers stay exactly as the caller supplied them.
+  // Shifted characters (A, ?, !) and shifted named keys (Colon) imply shift for
+  // dispatch; the echoed modifiers stay exactly as the caller supplied them.
+  const namedSpec = Object.keys(KEY_SPECS).find(name => name.toLowerCase() === args.key.toLowerCase())
+  if (namedSpec && KEY_SPECS[namedSpec].shift === true && (mask & MODIFIER_BITS.shift) === 0) {
+    mask |= MODIFIER_BITS.shift
+  }
   if (keyCharEntry(args.key)?.entry.needsShift === true && (mask & MODIFIER_BITS.shift) === 0) {
     mask |= MODIFIER_BITS.shift
   }
@@ -3107,7 +3249,180 @@ async function waitFor(settings, args) {
   return { ...shot, op: 'wait_for', waited }
 }
 
-const BATCH_OPS = new Set(['click', 'click_at', 'hover', 'select_option', 'type', 'press_key', 'scroll', 'wait_for', 'navigate'])
+/**
+ * Validate one side of a select drag.
+ * @param {unknown} value
+ * @param {string} name
+ */
+function parseSelectPoint(value, name) {
+  const x = Number(value?.x)
+  const y = Number(value?.y)
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || !Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new BrowserError('BAD_SELECTION', `${name} must be an object with finite x and y`)
+  }
+  return { x, y }
+}
+
+/**
+ * Validate select arguments.
+ * @param {Record<string, any>} args
+ */
+function parseSelectArgs(args) {
+  const from = parseSelectPoint(args.from, 'from')
+  const to = parseSelectPoint(args.to, 'to')
+  const space = args.space === 'css' ? 'css' : 'image'
+  const view = parseViewArg(args, 'auto')
+  return { from, to, space, view }
+}
+
+/**
+ * Trusted drag from one CSS point to another through the debugger.
+ * @param {number} tabId
+ * @param {number} fromX
+ * @param {number} fromY
+ * @param {number} toX
+ * @param {number} toY
+ */
+async function trustedDrag(tabId, fromX, fromY, toX, toY) {
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: fromX, y: fromY, button: 'none', clickCount: 0,
+  })
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: fromX, y: fromY, button: 'left', buttons: 1, clickCount: 1,
+  })
+  const steps = 4
+  for (let step = 1; step <= steps; step += 1) {
+    const progress = step / steps
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: fromX + (toX - fromX) * progress,
+      y: fromY + (toY - fromY) * progress,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+    })
+  }
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: toX, y: toY, button: 'left', buttons: 0, clickCount: 1,
+  })
+}
+
+/**
+ * Trusted drag selection between two points, then report the selected text.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {Record<string, any>} args
+ */
+async function selectRange(settings, args) {
+  const request = parseSelectArgs(args)
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  assertCapturable(tab)
+  const before = lastViewByTab.get(tab.id)
+  const viewport = before?.viewport ?? await runInTab(tab.id, pageMetrics, [])
+  // Image space maps through the stored view exactly like click_at.
+  if (request.space === 'image' && (!before?.image?.data || !Number.isFinite(before.image.width))) {
+    throw new BrowserError('NO_VIEW', 'Take a screenshot first so image coordinates can be mapped to the page.')
+  }
+  const scale = request.space === 'image' ? viewport.width / before.image.width : 1
+  const cssPoint = point => ({
+    x: Math.max(0, Math.min(viewport.width - 1, request.space === 'css' ? point.x : point.x * scale)),
+    y: Math.max(0, Math.min(viewport.height - 1, request.space === 'css' ? point.y : point.y * scale)),
+  })
+  const fromCss = cssPoint(request.from)
+  const toCss = cssPoint(request.to)
+  try {
+    await withDebugger(tab.id, () => trustedDrag(tab.id, fromCss.x, fromCss.y, toCss.x, toCss.y))
+  } catch (error) {
+    if (isDebuggerBusy(error)) throw error
+    try {
+      await runInTab(tab.id, syntheticDrag, [fromCss.x, fromCss.y, toCss.x, toCss.y], 2_000)
+    } catch {
+      // Fall through: the selection read below reports the real outcome.
+    }
+  }
+  let selection
+  try {
+    selection = await runInTab(tab.id, readSelection, [], 2_000)
+  } catch (error) {
+    throw new BrowserError('SELECT_FAILED', `Could not read the selection: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  const text = typeof selection?.text === 'string' ? selection.text : ''
+  const chars = Number.isFinite(Number(selection?.chars)) ? Number(selection.chars) : text.length
+  const selected = {
+    chars,
+    textPreview: text.slice(0, 200),
+    collapsed: selection?.collapsed !== false,
+    from: { space: request.space, x: request.from.x, y: request.from.y, cssX: Math.round(fromCss.x), cssY: Math.round(fromCss.y) },
+    to: { space: request.space, x: request.to.x, y: request.to.y, cssX: Math.round(toCss.x), cssY: Math.round(toCss.y) },
+  }
+  const changed = chars > 0
+  const signals = changed ? ['selection-changed'] : []
+  if (batchDepth > 0) return { changed, signals, selected }
+  const activeTab = await getActiveTab(windowId).catch(() => tab)
+  const { payload } = await buildActionView(activeTab, settings, request.view, { changed, signals })
+  return { ...payload, op: 'select', selected, changed, signals }
+}
+
+/**
+ * Type into a non-editable labelled surface by focusing the nearest editable
+ * target and using trusted Input.insertText.
+ * @param {number} tabId
+ * @param {{frameId: number, localId: number}} target
+ * @param {{text: string, mode: 'replace'|'append'}} request
+ */
+async function trustedTypeIntoFallbackTarget(tabId, target, request) {
+  let focused
+  try {
+    focused = await runInFrame(tabId, target.frameId, focusTypingTarget, [target.localId], 3_000)
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+    if (code === 'SCRIPT_TIMEOUT') {
+      throw new BrowserError('TYPE_TIMEOUT', 'Focusing the typing target did not complete. Take a fresh view and try again.')
+    }
+    throw error
+  }
+  if (focused?.ok === false) {
+    throw new BrowserError(focused.code ?? 'NOT_EDITABLE', focused.message ?? 'This element does not accept text.')
+  }
+  try {
+    await withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: request.text }))
+  } catch (error) {
+    if (isDebuggerBusy(error)) throw error
+    if (!focused.activeEditable) {
+      throw new BrowserError('NOT_EDITABLE', 'This element does not accept text and trusted input is unavailable.')
+    }
+    return {
+      method: 'trusted-focus',
+      isPassword: focused.isPassword === true,
+      beforeChars: focused.beforeChars ?? 0,
+      beforePreview: focused.beforePreview ?? '',
+      afterChars: focused.beforeChars ?? 0,
+      valuePreview: focused.beforePreview ?? '',
+    }
+  }
+  await settleAfterInput(tabId, undefined)
+  let after
+  try {
+    after = await runInFrame(tabId, target.frameId, readFocusedField, [], 2_000)
+  } catch {
+    after = undefined
+  }
+  const beforeChars = focused.beforeChars ?? 0
+  const afterChars = after?.chars ?? 0
+  if (afterChars === beforeChars && focused.activeEditable !== true) {
+    throw new BrowserError('NOT_EDITABLE', 'This element does not accept text.')
+  }
+  return {
+    method: 'trusted-focus',
+    isPassword: focused.isPassword === true || after?.isPassword === true,
+    beforeChars,
+    beforePreview: focused.beforePreview ?? '',
+    afterChars,
+    valuePreview: after?.preview ?? '',
+  }
+}
+
+const BATCH_OPS = new Set(['click', 'click_at', 'hover', 'select_option', 'type', 'press_key', 'scroll', 'wait_for', 'navigate', 'select'])
 const BATCH_ACTION_FIELDS = [
   'changed', 'signals', 'clicked', 'hovered', 'selected', 'selectedIndex',
   'typed', 'pressed', 'points', 'trusted', 'changedCount', 'clickMs',
@@ -3222,7 +3537,7 @@ export async function execute(op, args = {}, settings) {
   const normalized = normalizeSettings(settings)
   if (normalized.paused) throw new BrowserError('PAUSED', 'Browser access is paused in the side panel.')
   if (op === 'snapshot') {
-    const detail = args.detail === 'high' ? 'high' : 'normal'
+    const detail = args.detail === 'high' ? 'high' : args.detail === 'fast' ? 'fast' : 'normal'
     return snapshot(detail, normalized, false, normalizeDelayMs(args.delay_ms))
   }
   if (op === 'scroll') {
@@ -3239,6 +3554,9 @@ export async function execute(op, args = {}, settings) {
   }
   if (op === 'click_at') {
     return clickAt(normalized, args)
+  }
+  if (op === 'select') {
+    return selectRange(normalized, args)
   }
   if (op === 'batch') {
     return batch(normalized, args)

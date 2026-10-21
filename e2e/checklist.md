@@ -142,6 +142,18 @@ Use `e2e/fixtures/form.html`.
 - Ask: **“Type into the password field.”** The card must show `value now "[password N chars]"`, never the secret.
 - **Pass:** no typing lands in the wrong element; navigation is http(s) only; waits report `found`/`timedOut` honestly.
 
+### 9d. Selection, fast views, reasoning speed
+
+Use `e2e/fixtures/form.html` and a Google Doc.
+
+- Ask: **“Select the paragraph that says SELECT-ME-ALPHA and tell me what is selected.”** Expect a `select` card with the character count and a text preview; the page selection is highlighted.
+- Ask a select with identical start/end (or “click without selecting”): expect `selection collapsed (nothing selected)`.
+- On Google Docs: **“Comment on the second sentence.”** The agent should select the sentence with `browser_select`, press Ctrl+Alt+M, type the comment into the focused box (label-less `browser_type`, possibly `trusted-focus`), and submit — not fight the menu with dozens of Escapes.
+- Ask: **“Select this paragraph and make it bold.”** Expect select + Ctrl+B.
+- Ask: **“Take a quick look at the page.”** Expect `browser_screenshot` with `detail:"fast"`; card metadata shows a 640 px image.
+- Reasoning speed: with **Auto** effort, ask **“delete the extra paragraph”** or **“add a comment here”** — the policy line should say `reasoning off (act, auto)`. Ask **“what does this page say?”** — `reasoning low (inspect, auto)`.
+- **Pass:** selection text is reported honestly, the Docs comment flow completes in a handful of actions, and action prompts run with reasoning off.
+
 ### 9c. Batching and view modes
 
 Use `e2e/fixtures/form.html`.

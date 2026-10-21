@@ -15,7 +15,7 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
 | Capability | Result |
 |---|---|
 | Auto-view on every message | A fresh screenshot is attached to the user prompt, so the model starts each turn already looking at the page |
-| `browser_screenshot` | Viewport screenshot + tab, viewport, scroll, and scale metadata |
+| `browser_screenshot` | Viewport screenshot + tab, viewport, scroll, and scale metadata. `detail:"high"` is 2048 px, `detail:"fast"` is a 640 px cheap visual check |
 | `browser_click` | Clicks a numbered interactive element (DOM, shadow DOM, or iframe) from the current view. Labels come from yellow badges and a text list; coordinates are never accepted. Returns whether the page changed; `view` defaults to `auto` (compact confirmation, escalating to a full view when the page changes, after 5 actions, or on `view:"full"`) |
 | `browser_click_at` | Clicks screenshot-pixel or CSS coordinates for canvas, video, and iframe surfaces. `points: [{x,y}, …]` clicks up to 8 targets in one call (one debugger attach, one settle, one fresh view, per-point `changed`); `view: "none"` skips the screenshot for rapid repeated bursts; `settle_ms` tunes the post-click paint wait. Uses **trusted browser input** (DevTools protocol) and verifies with a **pixel diff**, which works where no DOM event fires |
 | `browser_batch` | Runs an ordered sequence of up to 20 actions in **one call** (`click`, `type`, `press_key`, `click_at`, `hover`, `scroll`, `wait_for`, `navigate`) and returns compact per-action outcomes plus **one** final view. Only batch actions whose targets are already visible: an action that reveals new UI (menu, dialog, new page) needs a view before the next action |
@@ -25,14 +25,16 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
 | `browser_select_option` | Chooses an option on a native `<select>` by label id and option text (a synthetic click cannot open the OS dropdown) |
 | `browser_read_text` | Rendered page text (or just the viewport) as text, with `offset`/`max_chars` pagination. No screenshot; typically a few milliseconds and far fewer tokens |
 | `browser_scroll` | Scrolls the document or the largest visible nested scroller; falls back to a **trusted wheel event** for canvas apps; returns a fresh screenshot |
+| `browser_select` | Selects a text range by **trusted drag** from one point to another (screenshot or CSS coordinates) and returns the selected text, so the agent can comment on, format, or delete a specific range. Also usable inside `browser_batch` |
 | `browser_navigate` | Opens an absolute **http(s) URL** in the active tab or a new tab (`new_tab`), or goes history `back`/`forward`/`reload`; waits up to 15 s for load and reports `timedOut` |
 | `browser_wait_for` | Waits for rendered **text**, a **url** substring, DOM **idle**, and/or a fixed **ms**, bounded by `timeout_ms` (default 10 s); returns a fresh view and `found`/`timedOut` — use it instead of repeated screenshots |
 | `browser_tabs` | Lists the current window's tabs with ids, titles, URLs, and state |
 | `browser_switch_tab` | Activates a tab by `tab_id` or by a case-insensitive title/URL `query`; returns a fresh screenshot |
 | Vision model | Image-capable OpenRouter model through DSH's pi-ai adapter |
 | Live activity | Expanded side-panel feed streams reasoning/thinking deltas, assistant text, partial and committed tool calls, results, browser commands, token usage, finish reasons, and errors as they happen |
-| Reasoning effort | **Auto** by default: `off` for navigation-only turns and **rapid game bursts**, `low` for reading/describing/synthesis. Manual `off`/`low`/`medium`/`high` override in Settings |
+| Reasoning effort | **Auto** by default: `off` for navigation-only turns, **rapid game bursts**, and **imperative action turns** (add/delete/fill/click/reply/fix/select/...), `low` for reading/describing/synthesis. Manual `off`/`low`/`medium`/`high` override in Settings |
 | Image history | After each turn, the newest two screenshots stay in the request; older ones are durably offloaded to placeholder text while attachments remain on disk |
+| Context control | DSH compaction summarizes older turns near **~63 K prompt tokens** (6% of the window) and keeps ~21 K verbatim, so long sessions stop growing instead of reaching 140 K+ per step |
 | Persistence | DSH session log and screenshot attachments under `.dsh-home` |
 | UI | Side-panel chat, live activity feed, tool cards with text previews and screenshot thumbnails, pause, settings, new chat |
 
@@ -58,6 +60,14 @@ Measured on real work sessions, the loop was dominated by two costs: **one model
 - **View modes** on every DOM action tool: `auto` (default) returns a **compact** confirmation with no screenshot — just the outcome, `changed`/signals, and a **label delta** (`labels +2/-1, 39 unchanged`, with the new labels listed) — and escalates to a full labelled view automatically when the page URL/title changes, when no previous view exists, after 5 compact actions, or when the model passes `view:"full"`. `view:"none"` omits even the label delta.
 
 A compact DOM action costs **18–35 ms** on a heavy page (no capture, no re-encode) instead of 360–1266 ms. Label ids stay cumulative per tab, so an id from an earlier view still resolves to the same element; a compact action that scrolls the page invalidates the stored screenshot so image-space `browser_click_at` fails safely with `NO_VIEW` instead of clicking the wrong pixel.
+
+### Speed levers
+
+Beyond batching and compact views, three controls keep work sessions fast:
+
+- **Reasoning effort.** Reasoning tokens, not browser actions, are the per-step cost on work turns: measured action turns with effort `off` ran at **0.87–1.94 s/step**, the same kind of turns at `low` at **3.16–6.96 s/step** (63–93% of their output tokens were hidden reasoning). The auto policy sends navigation, rapid game bursts, and short imperative work prompts to `off`; questions and synthesis stay `low`.
+- **Context control.** DSH `compaction-basic` is configured to summarize older turns near 6% of the model window (~63 K tokens) instead of the 80% default, so prompts stop climbing to 108–140 K. Images are offloaded at turn boundaries only — pruning mid-turn would invalidate the prompt cache on every later request.
+- **Fast screenshots.** `browser_screenshot` with `detail:"fast"` returns a 640 px view (~195 image tokens instead of ~780) for quick visual checks.
 
 Shadow DOM and iframes are handled for DOM clicking:
 
@@ -165,7 +175,7 @@ Starts from `sdk-minimal` and:
 - sets a browser-agent persona, disables harness identity/runtime context, and serializes tool calls (`maxParallelToolCalls: 1`);
 - leaves attachments, compaction, image offload, and JSONL persistence in place.
 
-The result is fourteen model-visible tools and a small, stable request prefix.
+The result is fifteen model-visible tools and a small, stable request prefix.
 
 ## Configuration
 
@@ -232,6 +242,7 @@ npm run clean -- --yes   # removes .dsh-home; run npm run setup again afterwards
 | Trusted canvas click (attach → dispatch → detach) + adaptive pixel-diff view | **~200–300 ms** including the fresh view; the fixed 160 ms settle is now an adaptive two-frame paint wait |
 | Canvas burst, 5 points in one call | **one model round trip instead of five**; extra points cost a few ms each, and `view: "none"` drops a 5-point burst to **~50 ms** on the fixture |
 | Compact DOM action, no capture (`click`/`type`/`press_key`) | **18–35 ms** on a heavy page vs **360–1266 ms** when the action returns a full view |
+| `detail:"fast"` screenshot | **~80–90 ms** capture/encode, 640 px, ~195 image tokens (vs ~780 for `normal`) |
 | `browser_batch`, 4 known-label actions | **~85 ms** of actions plus **~160 ms** for the single final view — one round trip instead of four |
 | Live snapshot: capture + encode + metadata | **95 ms** total (capture 31–35 ms, encode 35–58 ms) |
 | Auto-view observed in the real UI | **58–73 ms** |
@@ -283,7 +294,7 @@ Full schema, event types, `jq` recipes, and sharing instructions are in [`docs/D
 ## Development and tests
 
 ```sh
-npm test          # 81 unit/integration checks: bridge, live activity, reasoning policy (incl. rapid), image budget, labels, click/burst/type/press_key/navigate/wait_for/batch tools, view modes and label deltas, surfaces, prompt, log store, OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
+npm test          # 88 unit/integration checks: bridge, live activity, reasoning policy (incl. rapid/act), image budget, labels, click/burst/type/press_key/navigate/wait_for/select/batch tools, view modes and label deltas, surfaces, prompt, log store, OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
 npm run bench     # local bridge latency
 npm run setup     # idempotent profile/plugin verification
 ```
@@ -296,7 +307,7 @@ Additional dev-only checks (not part of `npm test`):
 - `scripts/edge-log-e2e.mjs` — drives the real Debug log modal and verifies that the ZIP download starts.
 - `scripts/edge-click-e2e.mjs` — drives the real extension against `e2e/fixtures/click.html`: label coverage, covered/hidden exclusion, click by label, no-op detection, disabled/stale refusals, checkbox, and navigation. Requires Edge with `--load-extension=extension` on port 9228.
 - `scripts/edge-canvas-e2e.mjs` — canvas checks on port 9230: surface metadata, trusted coordinate click, image-pixel mapping, pixel-diff detection, wheel scrolling, empty-area no-op, 5-point burst (one attach, +5 trusted clicks), `view:"none"` text-only burst, `delay_ms`, and single-point compatibility.
-- `scripts/edge-work-e2e.mjs` — work-foundation checks on port 9233 against `e2e/fixtures/form.html`: labelled typing (replace/append), compact typing with label deltas, auto-view escalation, contenteditable typing, password masking, `submit`, Tab/Enter, modifier shortcuts, label-less trusted typing into a focused editor, navigate URL/history, `wait_for` found/timeout, batch sequences (success, stop-on-error, continue, `BAD_BATCH`), punctuation keys, and label persistence across views.
+- `scripts/edge-work-e2e.mjs` — work-foundation checks on port 9233 against `e2e/fixtures/form.html`: labelled typing (replace/append), compact typing with label deltas, auto-view escalation, contenteditable typing, password masking, `submit`, Tab/Enter, modifier shortcuts, label-less trusted typing into a focused editor, navigate URL/history, `wait_for` found/timeout, batch sequences (success, stop-on-error, continue, `BAD_BATCH`), punctuation keys, label persistence across views, drag selection (range + collapsed), `batch [select, ArrowRight]`, `detail:"fast"` 640 px snapshots, focus-fallback typing into a non-editable card, and named punctuation keys.
 - `scripts/edge-advanced-e2e.mjs` — shadow DOM, same- and cross-origin iframes, native select, and hover menus on port 9231.
 
 The fake-UI and Edge end-to-end scripts assume the companion is already configured with an OpenRouter key/model and that the model supports tools. Configure once from the side panel first. The model-latency figures were collected on the earlier direct Alibaba route; capture, bridge, tool, and logging measurements are provider-independent.

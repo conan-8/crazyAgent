@@ -27,6 +27,14 @@
       border-radius: 8px; caret-color: #e6fffb; outline: none;
     }
     #editor:focus { border-color: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, .30); }
+    #selectable {
+      display: inline-block; margin: 18px 0 4px; padding: 8px 10px;
+      font: 700 18px/1.4 ui-monospace, SFMono-Regular, monospace;
+      background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+    }
+    #comment-card { margin-top: 8px; padding: 8px; border: 1px dashed #94a3b8; border-radius: 8px; background: #f8fafc; cursor: text; }
+    #comment-edit { min-height: 44px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; outline: none; }
+    #comment-edit:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, .2); }
     #second-link { color: #1d4ed8; font-weight: 700; }
     #result { margin-top: 14px; padding: 10px; min-height: 22px; font-family: ui-monospace, monospace; white-space: pre-wrap; color: #065f46; background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 8px; }
     #late { margin-top: 14px; padding: 10px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; font-weight: 700; }
@@ -56,6 +64,15 @@
   <div class="row">
     <strong>Canvas-style editor (click to focus, then type without a label)</strong>
     <input id="editor" type="text" value="" aria-label="Canvas editor" />
+  </div>
+
+  <p id="selectable" aria-label="selectable text">SELECT-ME-ALPHA BETA GAMMA</p>
+
+  <div class="row">
+    <strong>Non-editable comment card (types into the editable child)</strong>
+    <div id="comment-card" role="button" tabindex="0" aria-label="Comment card">
+      <div id="comment-edit" contenteditable="true" role="textbox" aria-label="Comment text"></div>
+    </div>
   </div>
 
   <p><a id="second-link" href="second.html">Go to second page</a></p>

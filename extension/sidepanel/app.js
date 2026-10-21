@@ -1357,6 +1357,7 @@ async function handleBrowserCommand(frame) {
       pressed: result.pressed,
       navigated: result.navigated,
       waited: result.waited,
+      selected: result.selected,
       view: result.view,
       labelsDelta: result.labelsDelta,
       batch: result.batch,
@@ -1421,6 +1422,10 @@ function browserActivitySummary(op, result) {
   }
   if (result.waited) {
     parts.push(`${result.waited.found ? 'found' : 'timed out'} after ${Math.round(result.waited.elapsedMs ?? 0)}ms`)
+  }
+  if (result.selected) {
+    parts.push(`selected ${result.selected.chars} chars${result.selected.collapsed ? ' · collapsed' : ''}`)
+    parts.push(result.changed ? 'changed' : 'no visible change')
   }
   if (result.batch) {
     parts.push(`batch ${result.batch.executed}/${result.batch.total} · ${result.batch.succeeded ?? result.batch.executed} succeeded${result.batch.ok ? '' : ' · failed'}${result.batch.failedIndex === undefined ? '' : ` at ${result.batch.failedIndex}`}`)

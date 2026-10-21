@@ -32,7 +32,8 @@ const GUIDANCE = `The browser tools operate the user's current Chrome window fro
 - A view also lists its surfaces: canvas, video, and iframe regions with no DOM targets. Use browser_click_at with screenshot pixel coordinates for targets inside those regions or when no label covers the target. It uses trusted browser input and reports pixels_changed, so it works where DOM events never fire.
 - Click several targets with one browser_click_at call: pass points:[{x,y}, ...] (up to 8) instead of one call per click. A burst returns one confirmation with a per-point changed report, so one attach and one view cover the whole burst.
 - Add view:"none" to browser_click_at for rapid repeated bursts that do not need to see the result: it returns text only and skips the screenshot. Image coordinates still map to the previous view, so keep clicking without paying for another image; ask for a fresh view when the layout may have moved or you need to re-aim.
-- browser_screenshot accepts delay_ms (0-5000) to wait in the page before capturing, e.g. for a countdown or a short animation. One delayed screenshot is cheaper than repeated screenshots.
+- browser_screenshot accepts delay_ms (0-5000) to wait in the page before capturing, e.g. for a countdown or a short animation. One delayed screenshot is cheaper than repeated screenshots. detail:"fast" returns a small 640px view: the cheap visual check when you only need to confirm layout or that an action visibly landed.
+- browser_select selects a text range: pass from:{x,y} and to:{x,y} in the current screenshot (or CSS pixels with space:"css"). Use it in editors and documents, then press Ctrl+Alt+M (or open the comment menu) to comment, type label-less into the focused comment box, and submit. Select plus ctrl+b/i/u formats the range; select a full range and press Backspace or Delete to remove it.
 - browser_scroll reports wheel=true when a canvas app handled a trusted wheel instead of DOM scrolling.
 - A native select cannot be opened by a click; use browser_select_option with the label and the option text.
 - Use browser_hover when a menu or tooltip opens on hover, then click the newly labelled item.
@@ -40,7 +41,7 @@ const GUIDANCE = `The browser tools operate the user's current Chrome window fro
 - browser_press_key sends one real key press with optional ctrl/alt/shift/meta modifiers: Enter submits, Tab/Shift+Tab moves focus, Escape dismisses, Backspace and arrow keys edit or move a caret.
 - browser_navigate opens an http(s) URL (new_tab keeps the current tab) or goes history back/forward, or reloads. Use it when no link leads to the target; it returns a fresh view after the load attempt.
 - browser_wait_for waits for text, a URL change, page idle, or a fixed ms instead of taking repeated screenshots. Give at least one condition; timeout_ms bounds the wait (default 10000).
-- browser_batch runs up to 20 actions in one call and returns one view for the whole sequence: fill several already-labelled fields (type label 10 "Jane", type label 12 "jane@…", press_key Enter), type with press_key Tab between table cells, run press_key shortcut sequences (ctrl+b, type, ctrl+b), click several already-visible labelled controls (checkboxes, toggles), click_at at known coordinates, or type then Enter/Tab to submit.
+- browser_batch runs up to 20 actions in one call and returns one view for the whole sequence: fill several already-labelled fields (type label 10 "Jane", type label 12 "jane@…", press_key Enter), type with press_key Tab between table cells, run press_key shortcut sequences (ctrl+b, type, ctrl+b), select ranges then format or comment, click several already-visible labelled controls (checkboxes, toggles), click_at at known coordinates, or type then Enter/Tab to submit. When every target is already known, batch instead of paying one round trip per action.
 - Only batch actions whose target you can already see in the current view or reach without seeing new state. If an action reveals new UI (a menu, a dialog, a new page), stop the batch and take a view before continuing. A batch stops at the first failure unless stop_on_error:false.
 - browser_click returns a confirmation of the click; with view:"auto" it is compact unless the page changed. Do not call browser_screenshot just to see unless you pass view:"full" or need visual detail. If the result says NO VISIBLE CHANGE, do not repeat the same click; try a different label, type into the field, or read the page.
 - Use browser_read_text for text-heavy pages (articles, email, documents, tables) when layout/images are not the point. It returns rendered text quickly and can paginate with offset/max_chars. Use screenshots when visual layout, images, or the current visual state matters.
@@ -725,6 +726,19 @@ function typedTarget(result, typed) {
 }
 
 /**
+ * Model-facing typing method label. The executor's focus-fallback path is
+ * trusted input after a trusted focus, so it keeps the trusted label with a
+ * focused marker instead of being mislabeled as the plain DOM path.
+ * @param {unknown} method
+ * @returns {string}
+ */
+function typeMethod(method) {
+  if (method === 'trusted') return 'trusted'
+  if (method === 'trusted-focus') return 'trusted (focused)'
+  return 'dom'
+}
+
+/**
  * Header line for a type result. A labelled field names the element when the
  * result carries it; a label-less write reports the focused element instead.
  * Compact views omit labels, so a known label without element details stays
@@ -736,7 +750,7 @@ function typeHeader(result) {
   const typed = result?.typed ?? {}
   const chars = Number.isFinite(Number(typed.chars)) ? Number(typed.chars) : 0
   const mode = typed.mode === 'append' ? 'append' : 'replace'
-  const method = typed.method === 'trusted' ? 'trusted' : 'dom'
+  const method = typeMethod(typed.method)
   const label = Number(typed.label)
   const parts = []
   if (Number.isSafeInteger(label) && label > 0) {
@@ -786,6 +800,50 @@ function pressKeyContent(result) {
   const keys = [...modifiers, pressed.key ?? '?'].join('+')
   const method = pressed.trusted === true ? 'trusted' : 'synthetic'
   return actionContent(result, [`pressed ${keys} · ${method}`])
+}
+
+/**
+ * Validate one selection point {x, y}.
+ * @param {unknown} value
+ * @param {string} name
+ * @returns {{x: number, y: number}}
+ */
+function selectPoint(value, name) {
+  if (!isRecord(value)) throw new Error(`browser_select requires a ${name} point {x, y}`)
+  const x = Number(value.x)
+  const y = Number(value.y)
+  if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`browser_select ${name} requires finite x and y`)
+  return { x, y }
+}
+
+/**
+ * Model-facing text-range selection result. The view payload follows the same
+ * full/compact/none rules as every other DOM action.
+ * @param {Record<string, any>} result
+ * @param {{from: {x: number, y: number}, to: {x: number, y: number}}} requested
+ * @returns {{content: Array<Record<string, unknown>>}}
+ */
+function selectRangeContent(result, requested) {
+  const selected = result?.selected ?? {}
+  const from = isRecord(selected.from) ? selected.from : requested.from
+  const to = isRecord(selected.to) ? selected.to : requested.to
+  const chars = Number.isFinite(Number(selected.chars))
+    ? Number(selected.chars)
+    : typeof selected.text === 'string' ? selected.text.length : 0
+  const preview = typeof selected.preview === 'string'
+    ? selected.preview
+    : typeof selected.textPreview === 'string' ? selected.textPreview
+      : typeof selected.text === 'string' ? selected.text : ''
+  const lines = []
+  if (selected.collapsed === true) {
+    lines.push('selection collapsed (nothing selected)')
+  } else if (chars > 0) {
+    lines.push(`selected ${chars} chars from (${from.x ?? '?'}, ${from.y ?? '?'}) to (${to.x ?? '?'}, ${to.y ?? '?'})${preview.length > 0 ? ` · ${JSON.stringify(preview)}` : ''}`)
+  } else {
+    const signals = Array.isArray(result?.signals) && result.signals.length > 0 ? ` (${result.signals.join(', ')})` : ''
+    lines.push(`selection changed${signals}`)
+  }
+  return actionContent(result, lines)
 }
 
 /**
@@ -850,7 +908,7 @@ function waitForContent(result) {
   return viewContent(result, header)
 }
 
-const BATCH_OPS = ['click', 'click_at', 'hover', 'select_option', 'type', 'press_key', 'scroll', 'wait_for', 'navigate']
+const BATCH_OPS = ['click', 'click_at', 'hover', 'select', 'select_option', 'type', 'press_key', 'scroll', 'wait_for', 'navigate']
 const BATCH_FORBIDDEN_OPS = ['batch', 'tabs', 'screenshot', 'snapshot']
 
 /**
@@ -882,7 +940,7 @@ function batchOutcomeParts(entry, args) {
       const typed = entry?.typed ?? {}
       const text = typeof args?.text === 'string' ? args.text : typeof typed.text === 'string' ? typed.text : ''
       const chars = Number.isFinite(Number(typed.chars)) ? Number(typed.chars) : text.length
-      const rest = [`${chars} chars`, typed.method === 'trusted' ? 'trusted' : 'dom']
+      const rest = [`${chars} chars`, typeMethod(typed.method)]
       if (typed.mode === 'append') rest.push('append')
       if (typed.submitted === true) rest.push('submitted')
       rest.push(batchChangeWord(entry))
@@ -911,6 +969,12 @@ function batchOutcomeParts(entry, args) {
     }
     case 'select_option':
       return { head: JSON.stringify(String(entry?.selected?.text ?? args?.option ?? '')), rest: [batchChangeWord(entry)] }
+    case 'select': {
+      const selected = entry?.selected ?? {}
+      const chars = Number(selected.chars)
+      if (selected.collapsed === true || (Number.isFinite(chars) && chars === 0)) return { head: '', rest: ['collapsed'] }
+      return { head: Number.isFinite(chars) && chars > 0 ? `${chars} chars` : '', rest: [batchChangeWord(entry)] }
+    }
     case 'hover': {
       const hovered = entry?.hovered ?? {}
       const label = hovered.label ?? args?.label ?? '?'
@@ -1038,17 +1102,17 @@ function registerTools(ctx, bridge) {
   ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'browser_screenshot',
     rawName: 'browser_screenshot',
-    description: 'See the active tab as a screenshot with tab, viewport, scroll, and scale metadata. Use detail "high" only when small text is unreadable. Use delay_ms to wait for a countdown or animation instead of taking repeated screenshots. The user prompt normally includes a fresh view already.',
+    description: 'See the active tab as a screenshot with tab, viewport, scroll, and scale metadata. detail "fast" returns a small 640px view: the cheap visual check when you only need to confirm layout or that an action visibly landed. Use detail "high" only when small text is unreadable. Use delay_ms to wait for a countdown or animation instead of taking repeated screenshots. The user prompt normally includes a fresh view already.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        detail: { type: 'string', enum: ['normal', 'high'], description: 'Image resolution. Default normal.' },
+        detail: { type: 'string', enum: ['normal', 'high', 'fast'], description: 'Image resolution. fast = small 640px check; normal = default; high = maximum detail for tiny text.' },
         delay_ms: { type: 'integer', minimum: 0, maximum: 5000, description: 'Wait this many milliseconds in the page before capturing, e.g. for a countdown or animation. Default 0.' },
       },
     },
     async call(args, exec) {
-      const detail = args.detail === 'high' ? 'high' : 'normal'
+      const detail = args.detail === 'high' ? 'high' : args.detail === 'fast' ? 'fast' : 'normal'
       const result = await bridge.request({
         op: 'snapshot',
         args: { detail, ...args.delay_ms === undefined ? {} : { delay_ms: args.delay_ms } },
@@ -1178,6 +1242,55 @@ function registerTools(ctx, bridge) {
       if (args.settle_ms !== undefined) forward.settle_ms = args.settle_ms
       const result = await bridge.request({ op: 'click_at', args: forward }, exec.callId, exec.signal)
       return clickAtContent(result)
+    },
+  }))
+
+  ctx.tools.register(createMcpToolDefinition(ctx, {
+    name: 'browser_select',
+    rawName: 'browser_select',
+    description: 'Select a text range in the page, document, or editor. from and to are the anchor and focus points in current screenshot pixels (or CSS pixels with space:"css"). Use it before formatting (select then ctrl+b/i/u), commenting (select then Ctrl+Alt+M or the comment menu), or deleting a range (select then Backspace/Delete). Returns the selected character count and a preview plus the usual view.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['from', 'to'],
+      properties: {
+        from: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['x', 'y'],
+          description: 'Selection anchor point.',
+          properties: {
+            x: { type: 'number', description: 'X in the current screenshot (or CSS px with space:"css").' },
+            y: { type: 'number', description: 'Y in the current screenshot (or CSS px with space:"css").' },
+          },
+        },
+        to: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['x', 'y'],
+          description: 'Selection focus point (the other end of the range).',
+          properties: {
+            x: { type: 'number', description: 'X in the current screenshot (or CSS px with space:"css").' },
+            y: { type: 'number', description: 'Y in the current screenshot (or CSS px with space:"css").' },
+          },
+        },
+        space: { type: 'string', enum: ['image', 'css'], description: 'Coordinate space. Default image (screenshot pixels).' },
+        view: { type: 'string', enum: ['auto', 'full', 'compact', 'none'], description: 'View mode. auto (default) confirms compactly and escalates to full when the page changes; full returns a screenshot; compact/none return text only. Ask for full when you need to see.' },
+      },
+    },
+    async call(args, exec) {
+      const from = selectPoint(args.from, 'from')
+      const to = selectPoint(args.to, 'to')
+      /** @type {Record<string, unknown>} */
+      const forward = { from, to }
+      if (args.space !== undefined) {
+        if (args.space !== 'image' && args.space !== 'css') throw new Error('browser_select space must be "image" or "css"')
+        forward.space = args.space
+      }
+      const view = checkedView(args.view)
+      if (view !== undefined) forward.view = view
+      const result = await bridge.request({ op: 'select', args: forward }, exec.callId, exec.signal)
+      return selectRangeContent(result, { from, to })
     },
   }))
 
@@ -1463,7 +1576,7 @@ function registerTools(ctx, bridge) {
   ctx.tools.register(createMcpToolDefinition(ctx, {
     name: 'browser_batch',
     rawName: 'browser_batch',
-    description: 'Run a sequence of up to 20 browser actions in one call and return one view for the whole batch, so one round trip covers a form, table row, or shortcut sequence. Each action is {op, ...args} with the same args as the standalone tool; supported ops: click, click_at, hover, select_option, type, press_key, scroll, wait_for, navigate. Only batch actions whose target you can already see in the current view or reach without seeing new state: if an action reveals new UI (a menu, a dialog, a new page), stop the batch and take a view before continuing. The batch stops at the first failure unless stop_on_error:false.',
+    description: 'Run a sequence of up to 20 browser actions in one call and return one view for the whole batch, so one round trip covers a form, table row, or shortcut sequence. Each action is {op, ...args} with the same args as the standalone tool; supported ops: click, click_at, hover, select, select_option, type, press_key, scroll, wait_for, navigate. Only batch actions whose target you can already see in the current view or reach without seeing new state: if an action reveals new UI (a menu, a dialog, a new page), stop the batch and take a view before continuing. The batch stops at the first failure unless stop_on_error:false.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -1702,7 +1815,7 @@ export function apply(ctx, config = {}) {
     bridge.logEvent('provider.registered', {
       provider: 'extension-current-window',
       bridgeUrl,
-      tools: ['browser_batch', 'browser_click', 'browser_click_at', 'browser_hover', 'browser_navigate', 'browser_press_key', 'browser_read_text', 'browser_screenshot', 'browser_scroll', 'browser_select_option', 'browser_switch_tab', 'browser_tabs', 'browser_type', 'browser_wait_for'],
+      tools: ['browser_batch', 'browser_click', 'browser_click_at', 'browser_hover', 'browser_navigate', 'browser_press_key', 'browser_read_text', 'browser_screenshot', 'browser_scroll', 'browser_select', 'browser_select_option', 'browser_switch_tab', 'browser_tabs', 'browser_type', 'browser_wait_for'],
     }, 'info')
     ctx.systemPrompt.section({
       name: 'browser-use:extension-current-window',

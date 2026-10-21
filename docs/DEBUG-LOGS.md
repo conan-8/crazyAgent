@@ -81,7 +81,7 @@ Fields:
 
 The `dsh.notification` events carry the raw SDK `session.event`/`session.status` payloads: durable assistant messages, usage, replay metadata, turn/step events, tool calls/results, and request headers. That is why the event file is detailed even before the raw DSH session is included.
 
-Action outcomes appear in the matching `tool.result` text. Structured fields on `browser.command.result` now include `typed`, `pressed`, `navigated`, `waited`, `view`, `labelsDelta` and `batch`; click pixel outcomes (`changed`, `signals`, `pixelsChanged`, `points`) remain text-only; parse the tool result when you need them. Compact and `view:"none"` results legitimately carry no image.
+Action outcomes appear in the matching `tool.result` text. Structured fields on `browser.command.result` now include `typed`, `pressed`, `navigated`, `waited`, `selected`, `view`, `labelsDelta` and `batch`; click pixel outcomes (`changed`, `signals`, `pixelsChanged`, `points`) remain text-only; parse the tool result when you need them. Compact and `view:"none"` results legitimately carry no image, and `detail:"fast"` snapshots are 640 px.
 
 Reasoning policy decisions are logged once per turn as `reasoning.policy` from the provider plugin, with `policy`, `classification`, `effort`, and `promptChars`. The chosen effort is applied to every step of that turn. Image-history trimming is logged as `image.budget` with `live`, `offloaded`, `keep`, and `targets`; failures appear as `image.budget.error`.
 
