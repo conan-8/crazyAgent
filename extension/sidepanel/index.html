@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CrazyAgent</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="logo" aria-hidden="true">◎</span>
+          <span class="brand-name">CrazyAgent</span>
+          <span class="phase">vision</span>
+        </div>
+        <div class="top-actions">
+          <button id="pause" class="icon-btn" type="button" title="Pause browser access" aria-label="Pause browser access">⏸</button>
+          <button id="new-chat" class="icon-btn" type="button" title="New chat" aria-label="New chat">＋</button>
+          <button id="debug-log" class="icon-btn" type="button" title="Export debug log" aria-label="Export debug log">▤</button>
+          <button id="settings" class="icon-btn" type="button" title="Settings" aria-label="Settings">⚙</button>
+        </div>
+      </header>
+
+      <div class="tabline">
+        <span id="status-dot" class="dot offline" aria-hidden="true"></span>
+        <span id="status-text" class="status-text">Connecting…</span>
+        <span id="active-tab" class="active-tab">No active tab</span>
+      </div>
+
+      <section id="activity" class="activity" aria-live="polite">
+        <div class="activity-head">
+          <span id="activity-dot" class="dot offline" aria-hidden="true"></span>
+          <span id="activity-phase" class="activity-phase">Idle</span>
+          <span id="activity-latest" class="activity-latest">Waiting for a turn</span>
+          <button id="activity-toggle" class="icon-btn activity-toggle" type="button" title="Collapse activity" aria-label="Toggle live activity">▴</button>
+        </div>
+        <div id="activity-log" class="activity-log">
+          <div class="activity-empty" id="activity-empty">Model thinking, streamed text, tool calls, and browser actions will appear here live.</div>
+        </div>
+      </section>
+
+      <div id="banner" class="banner hidden" role="status">
+        <span id="banner-text"></span>
+        <button id="banner-action" class="link" type="button">Reconnect</button>
+      </div>
+
+      <main id="chat" class="chat" aria-live="polite">
+        <div class="empty" id="empty">
+          <div class="empty-icon" aria-hidden="true">◉</div>
+          <h1>See the page with me</h1>
+          <p>Ask what's on the current tab, tell me to scroll, or ask me to switch tabs. I can look and move around, but I can't click or type yet.</p>
+        </div>
+      </main>
+
+      <form id="composer" class="composer">
+        <textarea id="input" rows="1" placeholder="Ask about this page…" autocomplete="off" spellcheck="false"></textarea>
+        <button id="send" class="send" type="submit" title="Send" aria-label="Send">↑</button>
+      </form>
+
+      <footer class="footer">
+        <span id="session-info"></span>
+        <span id="timing"></span>
+      </footer>
+    </div>
+
+    <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2 id="settings-title">Connection</h2>
+          <button id="settings-close" class="icon-btn" type="button" aria-label="Close">✕</button>
+        </div>
+        <label class="field">
+          <span>Bridge URL</span>
+          <input id="setting-url" type="text" spellcheck="false" />
+        </label>
+        <label class="field">
+          <span>Pairing token</span>
+          <input id="setting-token" type="password" spellcheck="false" placeholder="Printed by npm run dev" />
+        </label>
+
+        <label class="field">
+          <span>OpenRouter API key</span>
+          <input id="setting-apikey" type="password" spellcheck="false" autocomplete="new-password" placeholder="sk-or-v1-…" />
+        </label>
+        <label class="field">
+          <span>Model base URL</span>
+          <input id="setting-base-url" type="url" spellcheck="false" placeholder="https://openrouter.ai/api/v1" />
+        </label>
+        <label class="field">
+          <span>Model</span>
+          <div class="model-row">
+            <input id="setting-model" type="text" list="model-options" spellcheck="false" placeholder="Refresh and search image-capable models…" />
+            <button id="refresh-models" class="secondary" type="button">Refresh</button>
+          </div>
+          <datalist id="model-options"></datalist>
+        </label>
+        <label class="field">
+          <span>Reasoning effort</span>
+          <select id="setting-effort">
+            <option value="auto">Auto — off for navigation, low for reading and analysis (recommended)</option>
+            <option value="off">Off — fastest, terser answers</option>
+            <option value="low">Low — always think briefly</option>
+            <option value="medium">Medium</option>
+            <option value="high">High — slowest, deepest</option>
+          </select>
+        </label>
+        <p class="hint" id="effort-status">Auto picks the effort per turn from your prompt.</p>
+
+        <p class="hint" id="key-status">No OpenRouter API key configured.</p>
+        <p class="hint" id="model-status">OpenRouter models have not been loaded yet.</p>
+        <label class="check">
+          <input id="setting-remember-key" type="checkbox" checked />
+          <span>Remember the API key on this machine (mode 0600)</span>
+        </label>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Capture width</span>
+            <input id="setting-width" type="number" min="640" max="2048" step="64" />
+          </label>
+          <label class="field">
+            <span>JPEG quality</span>
+            <input id="setting-quality" type="number" min="40" max="90" step="1" />
+          </label>
+        </div>
+        <label class="check">
+          <input id="setting-autocapture" type="checkbox" />
+          <span>Attach a fresh view to every message</span>
+        </label>
+        <p class="hint">
+          The token is stored only in this browser profile. Screenshots go to your configured
+          model provider through the local DSH runtime. Keep the side panel open while the agent runs.
+        </p>
+        <div class="modal-actions">
+          <button id="test-capture" class="secondary" type="button">Test capture</button>
+          <button id="settings-save" class="primary" type="button">Save</button>
+        </div>
+      </div>
+    </div>
+
+
+    <div id="log-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="log-title">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2 id="log-title">Debug log</h2>
+          <button id="log-close" class="icon-btn" type="button" aria-label="Close">✕</button>
+        </div>
+        <div id="log-stats" class="log-stats">Connecting…</div>
+        <div id="log-signals" class="log-signals"></div>
+        <label class="check">
+          <input id="log-include-screenshots" type="checkbox" checked />
+          <span>Include screenshots</span>
+        </label>
+        <label class="check">
+          <input id="log-include-session" type="checkbox" checked />
+          <span>Include raw DSH session log</span>
+        </label>
+        <p class="hint">
+          The ZIP contains events.jsonl, summary.md, environment.json, and optionally screenshots and the
+          DSH session log. Pairing tokens, API keys, authorization headers, and secret-named fields are
+          redacted from JSONL. Screenshots may contain page content. Share the ZIP when a run looks
+          interesting.
+        </p>
+        <div class="modal-actions">
+          <button id="log-copy-summary" class="secondary" type="button">Copy summary</button>
+          <button id="log-copy-path" class="secondary" type="button">Copy logs path</button>
+          <button id="log-export" class="primary" type="button">Download bundle</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="image-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Screenshot">
+      <div class="image-card">
+        <button id="image-close" class="icon-btn image-close" type="button" aria-label="Close">✕</button>
+        <img id="image-modal-img" alt="Screenshot" />
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden" role="status"></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

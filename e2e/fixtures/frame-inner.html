@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Frame Inner</title>
+<style>body{font:14px/1.5 system-ui,sans-serif;margin:12px}</style></head>
+<body>
+  <p>Inner frame</p>
+  <button id="inner-button" type="button">Frame action</button>
+  <div id="inner-state">0</div>
+  <script>
+    let count = 0
+    document.getElementById('inner-button').addEventListener('click', () => {
+      count += 1
+      document.getElementById('inner-state').textContent = String(count)
+    })
+  </script>
+</body>
+</html>

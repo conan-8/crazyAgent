@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CrazyAgent Advanced Fixture</title>
+  <style>
+    body { font: 14px/1.6 system-ui, sans-serif; margin: 18px; color: #111; }
+    iframe { display: block; width: 420px; height: 120px; border: 1px solid #999; margin: 6px 0; }
+    .row { margin: 10px 0; }
+    #menu-popup { position: absolute; background: #fff; border: 1px solid #888; padding: 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Advanced fixture</h1>
+
+  <div class="row"><my-widget></my-widget></div>
+
+  <div class="row">
+    <label for="country">Country</label>
+    <select id="country">
+      <option value="us">United States</option>
+      <option value="ca">Canada</option>
+      <option value="gb">United Kingdom</option>
+    </select>
+    <span id="country-state">none</span>
+  </div>
+
+  <div class="row">
+    <button id="menu" type="button">Menu</button>
+    <div id="menu-popup" hidden><button id="menu-item" type="button">Menu item</button></div>
+    <span id="menu-state">0</span>
+  </div>
+
+  <div class="row">
+    <iframe id="same" src="frame-inner.html" title="Same origin frame"></iframe>
+    <iframe id="cross" src="http://localhost:17872/frame-inner.html" title="Cross origin frame"></iframe>
+  </div>
+
+  <script>
+    customElements.define('my-widget', class extends HTMLElement {
+      constructor() {
+        super()
+        const root = this.attachShadow({ mode: 'open' })
+        root.innerHTML = '<button id="shadow-button" type="button">Shadow action</button> <span id="shadow-state">0</span>'
+        let count = 0
+        root.getElementById('shadow-button').addEventListener('click', () => {
+          count += 1
+          root.getElementById('shadow-state').textContent = String(count)
+        })
+      }
+    })
+
+    document.getElementById('country').addEventListener('change', event => {
+      document.getElementById('country-state').textContent = event.target.value
+    })
+
+    const popup = document.getElementById('menu-popup')
+    document.getElementById('menu').addEventListener('mouseover', () => { popup.hidden = false })
+    let menuCount = 0
+    document.getElementById('menu-item').addEventListener('click', () => {
+      menuCount += 1
+      document.getElementById('menu-state').textContent = String(menuCount)
+    })
+  </script>
+</body>
+</html>

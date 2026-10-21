@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CrazyAgent Canvas Fixture</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 20px; color: #111; }
+    #board { display: block; width: 800px; height: 420px; border: 1px solid #333; background: #fff; }
+    #state { margin-top: 8px; font-family: ui-monospace, monospace; }
+    #dom-button { margin-top: 8px; padding: 8px 12px; font: inherit; }
+  </style>
+</head>
+<body>
+  <h1>Canvas fixture</h1>
+  <canvas id="board" width="800" height="420"></canvas>
+  <div id="state">trusted 0 · synthetic 0 · offset 0</div>
+  <button id="dom-button" type="button">DOM button</button>
+  <script>
+    const canvas = document.getElementById('board')
+    const context = canvas.getContext('2d')
+    const state = document.getElementById('state')
+    const dots = []
+    let trusted = 0
+    let synthetic = 0
+    let offset = 0
+
+    function draw() {
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.strokeStyle = '#d8d8d8'
+      context.lineWidth = 1
+      for (let x = 0; x <= canvas.width; x += 50) {
+        context.beginPath(); context.moveTo(x, 0); context.lineTo(x, canvas.height); context.stroke()
+      }
+      for (let y = 0; y <= canvas.height; y += 50) {
+        context.beginPath(); context.moveTo(0, y); context.lineTo(canvas.width, y); context.stroke()
+      }
+      context.fillStyle = '#111111'
+      context.font = '700 20px ui-sans-serif, system-ui, sans-serif'
+      context.fillText(`trusted ${trusted} · synthetic ${synthetic} · offset ${offset}`, 18, 34)
+      context.font = '14px ui-sans-serif, system-ui, sans-serif'
+      context.fillText('Canvas has no DOM targets: click by coordinate.', 18, 60)
+      for (const dot of dots) {
+        context.beginPath()
+        context.fillStyle = '#e11d48'
+        context.arc(dot.x, dot.y, 9, 0, Math.PI * 2)
+        context.fill()
+      }
+      state.textContent = `trusted ${trusted} · synthetic ${synthetic} · offset ${offset}`
+    }
+
+    canvas.addEventListener('pointerdown', event => {
+      if (event.isTrusted) trusted += 1
+      else synthetic += 1
+      const rect = canvas.getBoundingClientRect()
+      dots.push({ x: event.clientX - rect.left, y: event.clientY - rect.top })
+      if (dots.length > 12) dots.shift()
+      draw()
+    })
+
+    canvas.addEventListener('wheel', event => {
+      offset += Math.round(event.deltaY)
+      draw()
+      event.preventDefault()
+    }, { passive: false })
+
+    document.getElementById('dom-button').addEventListener('click', () => {
+      offset += 1
+      draw()
+    })
+
+    draw()
+  </script>
+</body>
+</html>

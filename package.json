@@ -1,0 +1,30 @@
+{
+  "name": "crazyagent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 1: DSH-powered vision browser agent in a Chrome side panel",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "node scripts/dev.mjs",
+    "test": "node --test companion/test extension/test packages/dsh-browser-extension/test",
+    "bench": "node scripts/bench.mjs",
+    "clean": "node scripts/clean.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-browser-use": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-credentials-local": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-sdk-client": "0.2.1-rc.2",
+    "fflate": "^0.8.3",
+    "js-yaml": "^4.3.2",
+    "ws": "^8.18.0"
+  }
+}

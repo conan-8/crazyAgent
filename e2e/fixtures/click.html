@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CrazyAgent Click Fixture</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; max-width: 720px; color: #111; }
+    button, .fake-button { font: inherit; padding: 8px 12px; margin: 4px 6px 4px 0; border: 1px solid #888; border-radius: 6px; background: #fff; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .row { margin: 14px 0; padding: 10px; border: 1px solid #ddd; border-radius: 8px; }
+    #covered-wrap { position: relative; display: inline-block; }
+    #cover { position: absolute; inset: -4px; background: rgba(240, 240, 240, .97); border: 1px dashed #999; z-index: 2; }
+    #hidden { display: none; }
+    .banner { padding: 6px 10px; background: #eef; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Click fixture</h1>
+  <p class="banner">Every control here has a deterministic effect, except <em>Does nothing</em>.</p>
+
+  <div class="row">
+    <button id="counter" type="button">Increment</button>
+    <strong>count: <span id="count">0</span></strong>
+    <script>
+      document.getElementById('counter').addEventListener('click', () => {
+        const el = document.getElementById('count')
+        el.textContent = String(Number(el.textContent) + 1)
+      })
+    </script>
+  </div>
+
+  <div class="row">
+    <button id="disabled" type="button" disabled>Disabled action</button>
+    <button id="icon" type="button" aria-label="Close dialog" title="Close">✕</button>
+    <button id="noop" type="button">Does nothing</button>
+    <button id="hidden" type="button">Hidden action</button>
+  </div>
+
+  <div class="row">
+    <div id="role" role="button" tabindex="0" class="fake-button">Role button</div>
+    <strong>role count: <span id="role-count">0</span></strong>
+    <script>
+      const role = document.getElementById('role')
+      const bump = () => { const el = document.getElementById('role-count'); el.textContent = String(Number(el.textContent) + 1) }
+      role.addEventListener('click', bump)
+      role.addEventListener('keydown', event => { if (event.key === 'Enter') bump() })
+    </script>
+  </div>
+
+  <div class="row">
+    <label><input id="check" type="checkbox" /> Toggle me</label>
+    <span id="check-state">unchecked</span>
+    <script>
+      document.getElementById('check').addEventListener('change', event => {
+        document.getElementById('check-state').textContent = event.target.checked ? 'checked' : 'unchecked'
+      })
+    </script>
+  </div>
+
+  <div class="row">
+    <span id="covered-wrap">
+      <button id="covered" type="button">Covered action</button>
+      <span id="cover" aria-hidden="true"></span>
+    </span>
+    <p>This button is visually covered; it must not appear in the label list.</p>
+  </div>
+
+  <div class="row">
+    <a id="next" href="./second.html">Go to second page</a>
+  </div>
+
+  <p><button id="nested" type="button"><span>Nested label</span></button></p>
+</body>
+</html>

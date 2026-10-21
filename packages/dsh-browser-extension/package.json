@@ -1,0 +1,17 @@
+{
+  "name": "dsh-browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH browser-use provider for the user's current Chrome window via the CrazyAgent bridge",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-browser-use": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-mcp-client": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "ws": "^8.18.0"
+  }
+}
