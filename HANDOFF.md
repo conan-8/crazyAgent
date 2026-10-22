@@ -5,6 +5,9 @@ Last updated: 2026-10-22 (late). Repo is working, companion running, 16 tools, 1
 This file is the complete context transfer for a new conversation. Read it, then
 `README.md`, then the latest debug run if you need ground truth.
 
+> **In a hurry?** `HANDOFF-QUICK.md` is the 2-minute version: current build facts,
+> how to resume, what just shipped, known issues, and the next work order.
+
 ---
 
 ## 0. Paste this into the new conversation
