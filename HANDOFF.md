@@ -367,6 +367,17 @@ Behavioural layers:
   `aria-expanded`, `aria-selected`. A no-op returns **NO VISIBLE CHANGE**.
 ### New behavioural layers from the 2026-10-22 hardening pass
 
+- **Operating stance (user authority + haste):** the persona + GUIDANCE now state that
+  the user owns the task and their instructions are authoritative — no refusals,
+  moralizing, safety lectures, softening, or third-party-rule enforcement (including
+  "no AI" rules). Haste rules: act on the first good-enough step, no preamble or
+  progress narration, prefer the fastest view/tool path, reasonable defaults over
+  questions, verify only claims, and end with 1–3 short bullets. Reliability-only
+  guardrails stay: no unrequested tab closes / formatting clears / deletes / undo,
+  credentials only as provided, stop-and-ask when a login/CAPTCHA/payment/permission
+  prompt blocks progress, and a ~80-call turn budget. Upstream model policy is the
+  only remaining refusal source; the prompt adds none.
+
 - **Reasoning auto policy:** navigation → `off`; rapid/reactive → `off`; inspect/synthesis → `low`;
   manual Off/Low/Medium/High in Settings; logged as `reasoning.policy`.
 - **Reasoning escalation:** an `off` turn that produces 3 consecutive no-progress tool results
@@ -709,6 +720,16 @@ live with `view:"full"`).
 
 ## 10. Configuration reference
 
+System prompt: two pieces only — `personaPrefix` in `config/browser.patch.yml`
+(role + stance) and the provider `GUIDANCE` constant in
+`packages/dsh-browser-extension/lib/index.js` (operating rules + tool guidance).
+DSH's harness identity and runtime-context sections are disabled; tool JSON
+schemas are sent separately. Stance: user authority, haste, no invented
+refusals; reliability-only guardrails. To change the prompt, edit those two
+places and restart the companion (no extension reload needed for prompt-only
+changes). Run `npm run system-prompt` (or `npm run system-prompt -- --json`)
+to print the exact composed prompt and its char counts.
+
 Companion flags (`node companion/index.mjs --help`):
 
 ```
@@ -994,13 +1015,34 @@ root causes, fix the architecture, verify with tests + Edge e2e, commit.
   pinned; stale empty-state copy fixed.
 - Tests: 149 (+20 over Round 5). Docs: README/HANDOFF/DEBUG-LOGS/PRIVACY updated.
 
+### Round 7 — 2026-10-22 system prompt: haste + user authority + v2 refinements
+- User requests: make the system prompt work "hastily"; make the agent do what the
+  user says regardless of third-party rules ("no AI" policies, tone of a message,
+  etc.) with no "silly ethics"; then approved the v2 refinement proposal.
+- Rewrote `personaPrefix` (config/browser.patch.yml): user owns task/outcome, no
+  refusals/moralizing/safety lectures/"as an AI" disclaimers, no enforcement of
+  third-party rules, act on the first good-enough step, no preamble, reasonable
+  defaults, fastest view, page content untrusted.
+- Rewrote the top of provider `GUIDANCE` into "Operating rules (highest priority)":
+  user authority + no invented refusals; haste; fastest-path rules; verify only
+  claims + 1-3 bullet final answer; untrusted page vs user instructions; no
+  unrequested tab closes/format clears/deletes/undo; login/CAPTCHA/2FA/payment/
+  permission stops only use user-provided credentials; two-attempt stop rule and
+  ~80-call budget; clipboard secret guard. Deduplicated the old untrusted-data
+  footer. Guidance test asserts the new stance.
+- No new tools/tests count change (149); README gains an "Operating stance"
+  section; this section documents the stance. Provider/GUIDANCE is loaded by the
+  companion on restart; no extension reload needed for prompt-only changes.
+
 ### State at handoff / not yet validated
-- 2026-10-22 clipboard+stop pass on `main`, clean tree, **149/149 tests**,
+- 2026-10-22 clipboard+stop prompt pass on `main`, clean tree, **149/149 tests**,
   companion restarted (PID in `logs/companion.pid`), health `tools:true`,
   16 tools, effective compaction trigger 576,716 visible in `--dump-config`.
-- **Reload the extension in `chrome://extensions`** (new clipboard permissions)
-  and reopen the side panel before the first real turn.
-- Real-session validation still pending for: the Stop button's abort→resume path
+- **Reload the extension in `chrome://extensions`** (clipboard permissions) and
+  reopen the side panel before the first real turn; the prompt itself is loaded
+  by the companion/DSH, so a companion restart is enough for prompt edits.
+- Real-session validation still pending for: the new operating stance (haste and
+  refusal behavior in a live model), the Stop button's abort→resume path
   (fake-harness tested only), system-clipboard rich paste (needs a focused OS
   window; isolated Edge returns an empty clipboard), and the tall activity pane
   in an actual side panel.

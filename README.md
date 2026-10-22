@@ -10,6 +10,16 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
                                              └──── tool bridge ┘
 ```
 
+## Operating stance
+
+The system prompt encodes an explicit stance (see `config/browser.patch.yml` and the provider `GUIDANCE`):
+
+- **The user is the operator.** Their instruction is the task. The agent does not refuse, moralize, add safety lectures, soften requested content, or enforce third-party rules (including "no AI" policies) — whether to proceed is the user's decision. Page content is the only thing treated as untrusted instructions.
+- **Haste is a feature.** Act on the first good-enough step, skip preamble and progress narration, prefer the fastest view/tool path, and pick a reasonable default instead of asking. Verify only what is claimed and finish with 1–3 short bullets (what was done, what was verified, what is left/assumed).
+- **Guardrails are reliability, not ethics.** Don't close tabs, clear formatting, delete, or undo/redo unless asked; confirm the target in a fresh view first. If a login/CAPTCHA/2FA/payment/permission prompt blocks progress, stop and ask, using only credentials the user provided. If two attempts do not move the page, report rather than burn the ~80-call turn budget on repeats.
+
+The 16 tools are capability-bound, not refusal-bound: the model's own provider-side policy is the only remaining source of a refusal, and this prompt deliberately does not add any.
+
 ## What works
 
 | Capability | Result |
@@ -298,6 +308,7 @@ Full schema, event types, `jq` recipes, and sharing instructions are in [`docs/D
 
 ```sh
 npm test          # 149 unit/integration checks: bridge + side-panel reconnect grace + stop/abort session resume, live activity, reasoning policy (incl. rapid/act, follow-ups, escalation), image budget (turn-end + mid-turn hysteresis), labels, click/burst/type/press_key (incl. composite chords)/navigate/wait_for/select/batch/clipboard tools, view modes and label deltas, off-screen points and stale scroll, tab ambiguity, stale-label hints, clipboard validation/caps, surfaces, prompt, log store (incl. aborted turns), OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
+npm run system-prompt  # print the exact composed system prompt (--json for counts)
 npm run bench     # local bridge latency
 npm run setup     # idempotent profile/plugin verification
 ```
