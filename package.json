@@ -15,7 +15,8 @@
     "dev": "node scripts/dev.mjs",
     "test": "node --test companion/test extension/test packages/dsh-browser-extension/test",
     "bench": "node scripts/bench.mjs",
-    "clean": "node scripts/clean.mjs"
+    "clean": "node scripts/clean.mjs",
+    "system-prompt": "node scripts/print-system-prompt.mjs"
   },
   "dependencies": {
     "@deepseek-ai/dsh": "0.2.1-rc.2",

@@ -952,6 +952,25 @@ test('registers the provider, guidance, and the sixteen browser tools', async t 
   assert.equal(fake.sections.length, 1)
   const guidance = fake.sections[0].text
   assert.match(guidance, /untrusted data/)
+  // Operating stance: user authority, haste, no invented refusals.
+  assert.match(guidance, /Operating rules \(highest priority\)/)
+  assert.match(guidance, /The user's instruction is the task/)
+  assert.match(guidance, /Do not refuse, moralize, warn/)
+  assert.match(guidance, /Be hasty/)
+  assert.match(guidance, /first good-enough step/)
+  assert.match(guidance, /Do not invent refusals/)
+  assert.match(guidance, /no AI/)
+  // v2 refinements: verification/claims, final-answer contract, destructive
+  // actions, blocked-by-user, stop-early budget, untrusted-vs-user, clipboard guard.
+  assert.match(guidance, /user's words are the instructions/)
+  assert.match(guidance, /1-3 short bullets/)
+  assert.match(guidance, /Never close tabs/)
+  assert.match(guidance, /clear formatting, delete text, or undo\/redo/)
+  assert.match(guidance, /login, CAPTCHA\/2FA, payment/)
+  assert.match(guidance, /only use credentials the user provided/)
+  assert.match(guidance, /turn budget is about 80/)
+  assert.match(guidance, /Never paste secrets or passwords/)
+  assert.match(guidance, /read the system clipboard only when the user asks/)
   assert.match(guidance, /points:\[\{x,y\}, \.\.\.\]/)
   assert.match(guidance, /view:"none"/)
   assert.match(guidance, /delay_ms/)
