@@ -9,6 +9,8 @@
     "tabs",
     "scripting",
     "storage",
+    "clipboardRead",
+    "clipboardWrite",
     "debugger",
     "webNavigation"
   ],

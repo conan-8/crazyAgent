@@ -6,6 +6,20 @@
  * is installed.
  */
 
+import {
+  CLIPBOARD_ACTIONS,
+  CLIPBOARD_READ_MAX_CHARS,
+  CLIPBOARD_SOURCES,
+  CLIPBOARD_STORAGE_KEY,
+  CLIPBOARD_TARGETS,
+  CLIPBOARD_TYPE_MAX_CHARS,
+  clipClipboardText,
+  clipboardPreview,
+  fitClipboardText,
+  makeClipboardEntry,
+  normalizeClipboardEntry,
+} from './clipboard.js'
+
 export const DEFAULT_SETTINGS = {
   bridgeUrl: 'ws://127.0.0.1:17871/bridge',
   token: '',
@@ -1463,8 +1477,83 @@ function readSelection() {
   return {
     text: raw.slice(0, 4_000),
     chars: Math.min(raw.length, 4_000),
+    totalChars: raw.length,
     collapsed: selection ? selection.isCollapsed !== false : true,
     rect,
+  }
+}
+
+/**
+ * Read the current top-frame text selection for the clipboard. Self-contained
+ * page function: the plain `readSelection` used by the select tool caps text at
+ * 4,000 chars for preview, but a copy should carry the whole selection up to the
+ * clipboard limit.
+ * @param {number} limit
+ */
+function readSelectionForClipboard(limit) {
+  const cap = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Math.min(Number(limit), 100_000) : 100_000
+  const selection = window.getSelection()
+  const raw = String(selection?.toString() ?? '')
+  return {
+    text: raw.slice(0, cap),
+    chars: Math.min(raw.length, cap),
+    totalChars: raw.length,
+    collapsed: selection ? selection.isCollapsed !== false : true,
+  }
+}
+
+/**
+ * Read one labelled element as clipboard text. Self-contained page function:
+ * chrome.scripting serializes this source alone, so it must not reference
+ * module constants or helpers.
+ *
+ * Inputs and textareas contribute their value; other elements contribute their
+ * rendered innerText, then aria-label, then textContent. Closed shadow roots are
+ * intentionally not reachable. Password fields are refused so secrets never
+ * flow into the clipboard through a label.
+ * @param {number} label
+ */
+function readLabelClipboardText(label) {
+  const state = globalThis.__crazyagent
+  const el = state?.byId?.get(label)
+  if (!el) return { ok: false, code: 'UNKNOWN_LABEL', message: `Label ${label} is not in the current view. Take a fresh screenshot.` }
+  if (!el.isConnected) return { ok: false, code: 'DETACHED', message: `Label ${label} no longer exists. Take a fresh screenshot.` }
+  const tag = String(el.tagName ?? '').toLowerCase()
+  const type = String(el.type ?? '').toLowerCase()
+  if (tag === 'input' && type === 'password') {
+    return { ok: false, code: 'PROTECTED_FIELD', message: `Label ${label} is a password field; its value cannot be copied.` }
+  }
+  const LIMIT = 100_000
+  let text = ''
+  let readFrom = 'innerText'
+  if (tag === 'input' || tag === 'textarea') {
+    text = String(el.value ?? '')
+    readFrom = 'value'
+  } else if (el.isContentEditable === true) {
+    text = String(el.innerText ?? el.textContent ?? '')
+  } else {
+    const inner = String(el.innerText ?? '')
+    if (inner.trim().length > 0) {
+      text = inner
+    } else {
+      const aria = el.getAttribute?.('aria-label')
+      if (typeof aria === 'string' && aria.trim().length > 0) {
+        text = aria
+        readFrom = 'aria-label'
+      } else {
+        text = String(el.textContent ?? '')
+        readFrom = 'textContent'
+      }
+    }
+  }
+  text = text.trim()
+  return {
+    ok: true,
+    text: text.slice(0, LIMIT),
+    chars: Math.min(text.length, LIMIT),
+    totalChars: text.length,
+    tag,
+    readFrom,
   }
 }
 
@@ -3717,6 +3806,466 @@ async function trustedTypeIntoFallbackTarget(tabId, target, request) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Clipboard: internal ("virtual") and system clipboard                 */
+/* ------------------------------------------------------------------ */
+
+/** Stable error for denied system-clipboard access, with an alternative. */
+function clipboardDeniedError(actionLabel, error) {
+  const detail = error instanceof Error ? `${error.name || 'Error'}: ${error.message}` : String(error)
+  return new BrowserError(
+    'CLIPBOARD_DENIED',
+    `The system clipboard is unavailable for ${actionLabel} (${detail}). Keep the side panel focused and allow clipboard access for this extension in chrome://extensions, or use the virtual clipboard with target:"virtual".`,
+  )
+}
+
+/** @param {string} text */
+async function writeSystemClipboard(text) {
+  try {
+    if (typeof navigator?.clipboard?.writeText !== 'function') throw new Error('navigator.clipboard.writeText is unavailable')
+    await navigator.clipboard.writeText(text)
+  } catch (error) {
+    throw clipboardDeniedError('writing', error)
+  }
+}
+
+/**
+ * Read text from the computer clipboard. Empty and non-text clipboards fail with
+ * CLIPBOARD_EMPTY so an empty result is never mistaken for content.
+ * @returns {Promise<string>}
+ */
+async function readSystemClipboard() {
+  let raw
+  try {
+    if (typeof navigator?.clipboard?.readText !== 'function') throw new Error('navigator.clipboard.readText is unavailable')
+    raw = await navigator.clipboard.readText()
+  } catch (error) {
+    throw clipboardDeniedError('reading', error)
+  }
+  const text = typeof raw === 'string' ? raw : String(raw ?? '')
+  if (text.trim().length === 0) {
+    throw new BrowserError('CLIPBOARD_EMPTY', 'The system clipboard is empty or holds no text. Copy something first, or use the virtual clipboard with target:"virtual".')
+  }
+  return text
+}
+
+/** chrome.storage.session is the virtual clipboard's only backing store. */
+function requireClipboardSession() {
+  const session = chrome.storage?.session
+  if (!session || typeof session.get !== 'function' || typeof session.set !== 'function') {
+    throw new BrowserError('CLIPBOARD_UNAVAILABLE', 'chrome.storage.session is unavailable in this extension context. Reload the extension so the virtual clipboard can be stored.')
+  }
+  return session
+}
+
+/** @returns {Promise<{text: string, chars: number, source: string, tabId: number|null, url: string, at: number}|undefined>} */
+async function readVirtualClipboard() {
+  const session = requireClipboardSession()
+  const stored = await session.get(CLIPBOARD_STORAGE_KEY)
+  return normalizeClipboardEntry(stored?.[CLIPBOARD_STORAGE_KEY])
+}
+
+/** @param {{text: string, chars: number, source: string, tabId: number|null, url: string, at: number}} entry */
+async function writeVirtualClipboard(entry) {
+  const session = requireClipboardSession()
+  await session.set({ [CLIPBOARD_STORAGE_KEY]: entry })
+}
+
+async function clearVirtualClipboard() {
+  const session = requireClipboardSession()
+  if (typeof session.remove !== 'function') {
+    await session.set({ [CLIPBOARD_STORAGE_KEY]: undefined })
+    return
+  }
+  await session.remove(CLIPBOARD_STORAGE_KEY)
+}
+
+/**
+ * Shared metadata on every clipboard result. Clipboard text can be large, so
+ * only char counts and a short preview ever appear here.
+ * @param {'virtual'|'system'} target
+ * @param {{chars?: number|null, preview?: string, source?: string, label?: number, truncated?: boolean, originalChars?: number, cleared?: boolean, rich?: boolean}} [extra]
+ */
+function clipboardMeta(target, extra = {}) {
+  const rawChars = extra.chars
+  const chars = rawChars === null || rawChars === undefined
+    ? null
+    : Number.isFinite(Number(rawChars)) ? Math.max(0, Math.floor(Number(rawChars))) : null
+  return {
+    target,
+    system: target === 'system',
+    chars,
+    ...(typeof extra.preview === 'string' && extra.preview.length > 0 ? { preview: extra.preview } : {}),
+    ...(typeof extra.source === 'string' && extra.source.length > 0 ? { source: extra.source } : {}),
+    ...(extra.label === undefined ? {} : { label: extra.label }),
+    ...(extra.truncated === true ? { truncated: true } : {}),
+    ...(Number.isFinite(Number(extra.originalChars)) ? { originalChars: Math.floor(Number(extra.originalChars)) } : {}),
+    ...(extra.cleared === true ? { cleared: true } : {}),
+    ...(extra.rich === true ? { rich: true } : {}),
+  }
+}
+
+/**
+ * Validate clipboard arguments before any page, storage, or clipboard access.
+ * @param {Record<string, any>} args
+ * @returns {{action: string, target: 'virtual'|'system', source: 'selection'|'label', label: number|undefined, text: string|undefined, mode: 'replace'|'append', submit: boolean, rich: boolean, view: 'auto'|'full'|'compact'|'none'}}
+ */
+export function parseClipboardArgs(args = {}) {
+  const raw = args ?? {}
+  const action = raw.action
+  if (typeof action !== 'string' || !CLIPBOARD_ACTIONS.includes(action)) {
+    throw new BrowserError('BAD_CLIPBOARD_ACTION', `action must be one of ${CLIPBOARD_ACTIONS.join(', ')}`)
+  }
+  let target = 'virtual'
+  if (raw.target !== undefined && raw.target !== null) {
+    if (typeof raw.target !== 'string' || !CLIPBOARD_TARGETS.includes(raw.target.toLowerCase())) {
+      throw new BrowserError('BAD_CLIPBOARD_TARGET', "target must be 'virtual' or 'system'")
+    }
+    target = raw.target.toLowerCase()
+  }
+  if (action === 'clear' && target !== 'virtual') {
+    throw new BrowserError('BAD_CLIPBOARD_TARGET', 'clear empties the virtual clipboard only; omit target or use target:"virtual"')
+  }
+  let label
+  if (raw.label !== undefined && raw.label !== null) {
+    const value = Number(raw.label)
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new BrowserError('BAD_LABEL', 'label must be a positive integer from the current view')
+    }
+    label = value
+  }
+  let source = 'selection'
+  if (action === 'copy') {
+    const explicitSource = raw.source
+    if (explicitSource !== undefined && explicitSource !== null) {
+      if (typeof explicitSource !== 'string' || !CLIPBOARD_SOURCES.includes(explicitSource)) {
+        throw new BrowserError('BAD_CLIPBOARD_SOURCE', "source must be 'selection' or 'label'")
+      }
+      source = explicitSource
+    } else if (label !== undefined) {
+      source = 'label'
+    }
+    if (source === 'label' && label === undefined) {
+      throw new BrowserError('BAD_LABEL', 'copy with source:"label" requires a label from the current view')
+    }
+    if (source === 'selection' && label !== undefined) {
+      throw new BrowserError('BAD_LABEL', 'label is only valid with copy source:"label"')
+    }
+  } else if (raw.source !== undefined && raw.source !== null) {
+    throw new BrowserError('BAD_CLIPBOARD_SOURCE', 'source is only valid for action "copy"')
+  }
+  let text
+  if (action === 'write') {
+    if (typeof raw.text !== 'string') {
+      throw new BrowserError('BAD_TEXT', 'write requires a string text')
+    }
+    if (raw.text.length === 0) {
+      throw new BrowserError('BAD_TEXT', 'text must not be empty; use action "clear" to empty the clipboard')
+    }
+    text = raw.text
+  } else if (raw.text !== undefined && typeof raw.text !== 'string') {
+    throw new BrowserError('BAD_TEXT', 'text must be a string')
+  }
+  let mode = 'replace'
+  if (raw.mode !== undefined && raw.mode !== null) {
+    if (raw.mode !== 'replace' && raw.mode !== 'append') {
+      throw new BrowserError('BAD_MODE', "mode must be 'replace' or 'append'")
+    }
+    mode = raw.mode
+  }
+  let rich = true
+  if (raw.rich !== undefined && raw.rich !== null) {
+    if (typeof raw.rich !== 'boolean') throw new BrowserError('BAD_RICH', 'rich must be true or false')
+    rich = raw.rich
+  }
+  return {
+    action,
+    target,
+    source,
+    label,
+    text,
+    mode,
+    submit: raw.submit === true,
+    rich,
+    view: parseViewArg(raw, action === 'paste' ? 'auto' : 'none'),
+  }
+}
+
+/**
+ * action copy: read the current page selection or one labelled element, then
+ * store it in the chosen clipboard. Never clicks or edits the page.
+ * @param {ReturnType<typeof parseClipboardArgs>} request
+ */
+async function clipboardCopy(request) {
+  const started = performance.now()
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  assertCapturable(tab)
+  let text = ''
+  let totalChars = 0
+  if (request.source === 'label') {
+    const target = resolveLabelTarget(tab, request.label)
+    if (!target) {
+      throw new BrowserError('UNKNOWN_LABEL', `Label ${request.label} is not in the current view. Take a fresh screenshot to get current labels.`)
+    }
+    let read
+    try {
+      read = await runInFrame(tab.id, target.frameId, readLabelClipboardText, [target.localId], 3_000)
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+      if (code === 'SCRIPT_TIMEOUT') {
+        throw new BrowserError('COPY_TIMEOUT', 'Reading this label did not complete. Take a fresh view and try again.')
+      }
+      throw error
+    }
+    if (read?.ok === false) {
+      throw new BrowserError(
+        typeof read.code === 'string' ? read.code : 'COPY_FAILED',
+        typeof read.message === 'string' ? read.message : `Could not read label ${request.label}.`,
+      )
+    }
+    text = typeof read?.text === 'string' ? read.text : ''
+    totalChars = Number.isFinite(Number(read?.totalChars)) ? Number(read.totalChars) : text.length
+  } else {
+    let selection
+    try {
+      selection = await runInTab(tab.id, readSelectionForClipboard, [100_000], 2_000)
+    } catch (error) {
+      throw new BrowserError('COPY_FAILED', `Could not read the page selection: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (selection?.collapsed === true || typeof selection?.text !== 'string' || selection.text.length === 0) {
+      throw new BrowserError('CLIPBOARD_EMPTY', 'Nothing is selected on the page. Select text first with browser_select, or copy a labelled element with source:"label".')
+    }
+    text = selection.text
+    totalChars = Number.isFinite(Number(selection.totalChars)) ? Number(selection.totalChars) : text.length
+  }
+  if (text.length === 0) {
+    throw new BrowserError('CLIPBOARD_EMPTY', request.source === 'label' ? `Label ${request.label} has no text to copy.` : 'Nothing is selected on the page.')
+  }
+  const fitted = fitClipboardText(text)
+  const originalChars = Math.max(totalChars, fitted.originalChars)
+  const truncated = fitted.truncated || originalChars > fitted.chars
+  if (request.target === 'system') {
+    await writeSystemClipboard(fitted.text)
+  } else {
+    await writeVirtualClipboard(makeClipboardEntry({
+      text: fitted.text,
+      source: request.source,
+      tabId: tab.id,
+      url: typeof tab.url === 'string' ? tab.url : '',
+      at: Date.now(),
+    }))
+  }
+  return {
+    op: 'clipboard',
+    action: 'copy',
+    clipboard: clipboardMeta(request.target, {
+      chars: fitted.chars,
+      preview: clipboardPreview(fitted.text),
+      source: request.source,
+      ...(request.label === undefined ? {} : { label: request.label }),
+      ...(truncated ? { truncated: true, originalChars } : {}),
+    }),
+    totalMs: Math.round(performance.now() - started),
+  }
+}
+
+/**
+ * action read: return clipboard text. The system clipboard is read only for an
+ * explicit target:"system" read. Returned text is capped at 20k chars and the
+ * full length is reported separately.
+ * @param {ReturnType<typeof parseClipboardArgs>} request
+ */
+async function clipboardRead(request) {
+  const started = performance.now()
+  if (request.target === 'system') {
+    const raw = await readSystemClipboard()
+    const clipped = clipClipboardText(raw, CLIPBOARD_READ_MAX_CHARS)
+    return {
+      op: 'clipboard',
+      action: 'read',
+      clipboard: clipboardMeta('system', { chars: raw.length, preview: clipboardPreview(clipped.text) }),
+      text: clipped.text,
+      totalChars: raw.length,
+      offset: clipped.offset,
+      truncated: clipped.truncated,
+      totalMs: Math.round(performance.now() - started),
+    }
+  }
+  const entry = await readVirtualClipboard()
+  if (!entry || entry.text.length === 0) {
+    throw new BrowserError('CLIPBOARD_EMPTY', 'The virtual clipboard is empty. Copy text first (action "copy" or "write"), or use target:"system".')
+  }
+  const clipped = clipClipboardText(entry.text, CLIPBOARD_READ_MAX_CHARS)
+  return {
+    op: 'clipboard',
+    action: 'read',
+    clipboard: {
+      ...clipboardMeta('virtual', {
+        chars: entry.chars,
+        preview: clipboardPreview(clipped.text),
+        source: entry.source,
+      }),
+      ...(entry.tabId === null ? {} : { tabId: entry.tabId }),
+      ...(entry.url.length === 0 ? {} : { url: entry.url }),
+      ...(entry.at > 0 ? { at: entry.at } : {}),
+    },
+    text: clipped.text,
+    totalChars: entry.chars,
+    offset: clipped.offset,
+    truncated: clipped.truncated,
+    totalMs: Math.round(performance.now() - started),
+  }
+}
+
+/**
+ * action write: store caller-supplied text (capped at 100k chars with a clear
+ * marker) in the chosen clipboard.
+ * @param {ReturnType<typeof parseClipboardArgs>} request
+ */
+async function clipboardWrite(request) {
+  const started = performance.now()
+  const fitted = fitClipboardText(request.text)
+  if (request.target === 'system') {
+    await writeSystemClipboard(fitted.text)
+  } else {
+    await writeVirtualClipboard(makeClipboardEntry({
+      text: fitted.text,
+      source: 'write',
+      tabId: null,
+      url: '',
+      at: Date.now(),
+    }))
+  }
+  return {
+    op: 'clipboard',
+    action: 'write',
+    clipboard: clipboardMeta(request.target, {
+      chars: fitted.chars,
+      preview: clipboardPreview(fitted.text),
+      source: 'write',
+      ...(fitted.truncated ? { truncated: true, originalChars: fitted.originalChars } : {}),
+    }),
+    totalMs: Math.round(performance.now() - started),
+  }
+}
+
+/** action clear: empty the virtual clipboard (the only clipboard it applies to). */
+async function clipboardClear() {
+  const started = performance.now()
+  await clearVirtualClipboard()
+  return {
+    op: 'clipboard',
+    action: 'clear',
+    clipboard: clipboardMeta('virtual', { chars: 0, cleared: true }),
+    totalMs: Math.round(performance.now() - started),
+  }
+}
+
+/**
+ * action paste: insert clipboard content into the page. The virtual clipboard
+ * (and system with rich:false) types text through the existing typeText path so
+ * mode/submit/verification match browser_type. system with rich:true (default)
+ * focuses the target and sends one trusted Ctrl+V so the page pastes rich text
+ * and images itself.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {ReturnType<typeof parseClipboardArgs>} request
+ */
+async function clipboardPaste(settings, request) {
+  const started = performance.now()
+  if (request.target === 'system' && request.rich) {
+    if (request.label !== undefined) {
+      const focused = await click(settings, { label: request.label, view: 'none' })
+      if (focused?.navigated === true) {
+        throw new BrowserError('PASTE_NAVIGATED', `Label ${request.label} navigated the page instead of focusing a field; take a fresh view and paste into the loaded page.`)
+      }
+    }
+    const keyed = await pressKey(settings, { key: 'v', modifiers: ['ctrl'], view: request.view })
+    const trusted = keyed?.pressed?.trusted === true
+    return {
+      ...keyed,
+      op: 'clipboard',
+      action: 'paste',
+      clipboard: clipboardMeta('system', { chars: null, rich: true }),
+      pasted: {
+        chars: null,
+        mode: 'keys',
+        ...(request.label === undefined ? {} : { label: request.label }),
+        via: 'keys',
+        trusted,
+        rich: true,
+        note: trusted
+          ? 'rich content (text, images) was pasted by the page via trusted Ctrl+V'
+          : 'the trusted Ctrl+V dispatch failed, so a synthetic paste cannot land; focus the page and retry',
+      },
+      totalMs: Math.round(performance.now() - started),
+    }
+  }
+  let text = ''
+  let totalChars = 0
+  let source = 'unknown'
+  if (request.target === 'system') {
+    text = await readSystemClipboard()
+    totalChars = text.length
+    source = 'system'
+  } else {
+    const entry = await readVirtualClipboard()
+    if (!entry || entry.text.length === 0) {
+      throw new BrowserError('CLIPBOARD_EMPTY', 'The virtual clipboard is empty. Copy text first (action "copy" or "write").')
+    }
+    text = entry.text
+    totalChars = entry.chars
+    source = entry.source
+  }
+  const clipped = clipClipboardText(text, CLIPBOARD_TYPE_MAX_CHARS)
+  const truncated = clipped.truncated
+  const typed = await typeText(settings, {
+    text: clipped.text,
+    ...(request.label === undefined ? {} : { label: request.label }),
+    mode: request.mode,
+    submit: request.submit,
+    view: request.view,
+  })
+  const pastedChars = Number.isFinite(Number(typed?.typed?.chars)) ? Number(typed.typed.chars) : clipped.chars
+  return {
+    ...typed,
+    op: 'clipboard',
+    action: 'paste',
+    clipboard: clipboardMeta(request.target, {
+      chars: totalChars,
+      preview: clipboardPreview(clipped.text),
+      source,
+      ...(truncated ? { truncated: true, originalChars: totalChars } : {}),
+    }),
+    pasted: {
+      chars: pastedChars,
+      mode: request.mode,
+      ...(request.label === undefined ? {} : { label: request.label }),
+      via: request.target === 'system' ? 'system' : 'virtual',
+      submitted: typed?.typed?.submitted === true,
+      ...(truncated ? { truncated: true, totalChars } : {}),
+    },
+    totalMs: Math.round(performance.now() - started),
+  }
+}
+
+/**
+ * Dispatch one validated clipboard call.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {Record<string, any>} args
+ */
+async function clipboardOp(settings, args) {
+  const request = parseClipboardArgs(args)
+  switch (request.action) {
+    case 'copy': return clipboardCopy(request)
+    case 'read': return clipboardRead(request)
+    case 'write': return clipboardWrite(request)
+    case 'paste': return clipboardPaste(settings, request)
+    case 'clear': return clipboardClear()
+    default: throw new BrowserError('BAD_CLIPBOARD_ACTION', `Unsupported clipboard action: ${String(request.action)}`)
+  }
+}
+
 const BATCH_OPS = new Set(['click', 'click_at', 'hover', 'select_option', 'type', 'press_key', 'scroll', 'wait_for', 'navigate', 'select'])
 const BATCH_ACTION_FIELDS = [
   'changed', 'signals', 'clicked', 'hovered', 'selected', 'selectedIndex',
@@ -3887,6 +4436,9 @@ export async function execute(op, args = {}, settings) {
     const offset = Number.isFinite(Number(args.offset)) ? Math.max(0, Math.floor(Number(args.offset))) : 0
     const maxChars = Number.isFinite(Number(args.max_chars)) ? Math.floor(Number(args.max_chars)) : 12_000
     return readText(normalized, scope, offset, maxChars)
+  }
+  if (op === 'clipboard') {
+    return clipboardOp(normalized, args)
   }
   throw new BrowserError('BAD_OP', `Unknown browser operation: ${String(op)}`)
 }

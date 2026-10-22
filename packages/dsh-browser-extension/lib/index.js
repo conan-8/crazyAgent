@@ -4,8 +4,8 @@
  *
  * Tools: screenshot, labelled click, coordinate burst click, typing, key
  * presses, URL/history navigation, waiting, hover, select, text read, scroll,
- * tab listing/switching, and batched action sequences with compact or full
- * views. Page content is untrusted data.
+ * tab listing/switching, clipboard copy/paste, and batched action sequences
+ * with compact or full views. Page content is untrusted data.
  *
  * @module dsh-browser-extension
  */
@@ -27,6 +27,12 @@ const MAX_PAYLOAD_BYTES = 32 * 1024 * 1024
 // Mid-turn image pruning tolerates this many live images above imageHistoryKeep
 // before one batched offload runs; batching keeps prompt-cache invalidation rare.
 const MID_TURN_IMAGE_GAP = 8
+/** Clipboard contract mirrored by the extension executor. */
+const CLIPBOARD_ACTIONS = ['copy', 'read', 'write', 'paste', 'clear']
+const CLIPBOARD_TARGETS = ['virtual', 'system']
+const CLIPBOARD_SOURCES = ['selection', 'label']
+const CLIPBOARD_MAX_CHARS = 100_000
+const CLIPBOARD_TARGET_LABELS = { virtual: 'virtual clipboard', system: 'system clipboard' }
 
 const GUIDANCE = `The browser tools operate the user's current Chrome window from the side panel.
 - Each screenshot shows only the current viewport plus tab, scroll, and scale metadata.
@@ -43,6 +49,8 @@ const GUIDANCE = `The browser tools operate the user's current Chrome window fro
 - Use browser_hover when a menu or tooltip opens on hover, then click the newly labelled item.
 - browser_type types into a labelled input, textarea, or contenteditable, or into the focused element when label is omitted (click a canvas editor first so its caret is focused). mode:"append" keeps existing text; submit:true presses Enter; text:"" clears the field.
 - browser_press_key sends one real key press with optional ctrl/alt/shift/meta modifiers: Enter submits, Tab/Shift+Tab moves focus, Escape dismisses, Backspace and arrow keys edit or move a caret. Use key:'Tab' with modifiers:['shift'] to move focus back; the composite form 'shift+Tab' is also accepted. Never press ctrl/cmd+W (it closes the tab) and do not press ctrl+Z casually: undo blindly can destroy work, so verify the current state in a fresh view before undoing.
+- browser_clipboard moves text between pages and apps. target:"virtual" (default) is an internal virtual clipboard kept for this browser session: action copy reads the page selection (select text with browser_select first) or a labelled element with source:"label"; read returns it; write stores text; paste inserts it into a labelled or focused field with mode/submit; clear empties it. Use it to carry text from one page or app to another instead of retyping it.
+- Use browser_clipboard target:"system" only when the user asks to use the computer clipboard, and never read the system clipboard without a user request. Paste with target:"system" and rich:true (the default) sends one trusted Ctrl+V so rich text and images paste through the page; rich:false or target:"virtual" types the system text like browser_type.
 - Upload-from-computer file pickers cannot be driven by browser_click. Use an in-page URL or search flow when the page has one; otherwise ask the user to pick the file.
 - browser_navigate opens an http(s) URL (new_tab keeps the current tab) or goes history back/forward, or reloads. Use it when no link leads to the target; it returns a fresh view after the load attempt.
 - browser_wait_for waits for text, a URL change, page idle, or a fixed ms instead of taking repeated screenshots. Give at least one condition; timeout_ms bounds the wait (default 10000).
@@ -1348,6 +1356,114 @@ function readTextContent(result) {
 }
 
 /**
+ * Human description of where clipboard content came from.
+ * @param {Record<string, any>} clipboard
+ * @returns {string}
+ */
+function clipboardSourceText(clipboard) {
+  const source = typeof clipboard?.source === 'string' ? clipboard.source : ''
+  if (source === 'selection') return 'the page selection'
+  if (source === 'label') return `label ${clipboard?.label ?? '?'}`
+  if (source === 'write') return 'text written with browser_clipboard'
+  if (source === 'system') return 'the system clipboard'
+  if (source === 'virtual') return 'the virtual clipboard'
+  return 'the clipboard'
+}
+
+/**
+ * Re-cap the executor-provided preview: clipboard content can be large, so the
+ * model sees at most 200 characters even if an executor echoes more.
+ * @param {unknown} preview
+ * @returns {string}
+ */
+function clipboardPreviewLine(preview) {
+  const text = typeof preview === 'string' ? preview : ''
+  if (text.length === 0) return ''
+  return text.length <= 200 ? text : `${text.slice(0, 199)}…`
+}
+
+/**
+ * Model-facing paste confirmation. Typed pastes behave like browser_type and
+ * report the resulting field value; the rich system paste reports the trusted
+ * Ctrl+V instead because the page owns the insertion.
+ * @param {Record<string, any>} result
+ * @returns {{content: Array<Record<string, unknown>>}}
+ */
+function clipboardPasteContent(result) {
+  const clipboard = isRecord(result?.clipboard) ? result.clipboard : {}
+  const pasted = isRecord(result?.pasted) ? result.pasted : {}
+  const target = CLIPBOARD_TARGET_LABELS[clipboard.target] ?? 'clipboard'
+  const targetLabel = pasted.label === undefined ? 'the focused element' : `[${pasted.label}]`
+  if (pasted.via === 'keys') {
+    const trusted = pasted.trusted !== false && result?.pressed?.trusted !== false
+    const lines = [`pasted the ${target} into ${targetLabel} via ${trusted ? 'a trusted Ctrl+V' : 'a synthetic key event'}`]
+    if (trusted) {
+      lines.push('the page inserted the rich content (text/images) itself; take a fresh view to verify what landed')
+    } else {
+      lines.push('warning: the trusted Ctrl+V could not be dispatched, so the page probably did not paste; click the target field and retry')
+    }
+    return actionContent(result, lines)
+  }
+  const chars = Number.isFinite(Number(pasted.chars)) ? Math.max(0, Math.floor(Number(pasted.chars))) : 0
+  const mode = pasted.mode === 'append' ? 'append' : 'replace'
+  const lines = [`pasted ${chars} chars from the ${target} into ${targetLabel} · ${mode}${pasted.submitted === true ? ' · submitted' : ''}`]
+  if (pasted.truncated === true) {
+    lines.push(`note: pasted the first ${chars} of ${pasted.totalChars ?? 'more'} chars (one typed paste is limited to 20000)`)
+  }
+  const typed = isRecord(result?.typed) ? result.typed : {}
+  if (result?.changed === false) {
+    lines.push('result: NO VISIBLE CHANGE — the field value did not change. Check that the label is an editable field, or click the field first and paste into the focused element.')
+  } else if (typeof typed.valuePreview === 'string') {
+    lines.push(`value now ${JSON.stringify(typed.valuePreview)}`)
+  }
+  return actionContent(result, lines)
+}
+
+/**
+ * Model-facing clipboard result. copy/read/write/clear are text only; paste
+ * keeps the executor's view and the usual auto/compact/full rules.
+ * @param {Record<string, any>} result
+ * @returns {{content: Array<Record<string, unknown>>}}
+ */
+function clipboardContent(result) {
+  const action = typeof result?.action === 'string' ? result.action : ''
+  if (action === 'paste') return clipboardPasteContent(result)
+  const clipboard = isRecord(result?.clipboard) ? result.clipboard : {}
+  const target = CLIPBOARD_TARGET_LABELS[clipboard.target] ?? 'clipboard'
+  const chars = Number.isFinite(Number(clipboard.chars)) ? Math.max(0, Math.floor(Number(clipboard.chars))) : 0
+  const preview = clipboardPreviewLine(clipboard.preview)
+  const source = clipboardSourceText(clipboard)
+  if (action === 'read') {
+    const text = typeof result?.text === 'string' ? result.text : ''
+    const total = Number.isFinite(Number(result?.totalChars)) ? Math.max(0, Math.floor(Number(result.totalChars))) : chars
+    const lines = [`read ${total} chars from the ${target}`]
+    if (result?.truncated === true) lines.push(`note: returned the first ${text.length} chars; the clipboard holds more`)
+    lines.push(`source: ${source}`)
+    lines.push('', text.length > 0 ? text : '[clipboard text is empty]')
+    return { content: [{ type: 'text', text: lines.join('\n') }] }
+  }
+  if (action === 'copy') {
+    const lines = [`copied ${chars} chars from ${source} to the ${target}`]
+    if (preview.length > 0) lines.push(`preview: ${JSON.stringify(preview)}`)
+    if (clipboard.truncated === true) {
+      lines.push(`note: only the first ${chars} of ${clipboard.originalChars ?? 'more'} chars were copied`)
+    }
+    lines.push('use browser_clipboard action:"paste" to insert it, or "read" to load the full text')
+    return { content: [{ type: 'text', text: lines.join('\n') }] }
+  }
+  if (action === 'write') {
+    const lines = [`wrote ${chars} chars to the ${target}`]
+    if (preview.length > 0) lines.push(`preview: ${JSON.stringify(preview)}`)
+    if (clipboard.truncated === true) lines.push(`note: text was capped at ${chars} chars`)
+    return { content: [{ type: 'text', text: lines.join('\n') }] }
+  }
+  if (action === 'clear') {
+    return { content: [{ type: 'text', text: `cleared the ${target}` }] }
+  }
+  return { content: [{ type: 'text', text: `clipboard ${action || 'result'}: ${chars} chars on the ${target}` }] }
+}
+
+/**
  * @param {Record<string, any>} result
  * @returns {{content: Array<Record<string, unknown>>}}
  */
@@ -1760,6 +1876,96 @@ function registerTools(ctx, bridge, budget) {
       if (view !== undefined) forward.view = view
       const result = await bridge.request({ op: 'press_key', args: forward }, exec.callId, exec.signal)
       return pressKeyContent(result)
+    },
+  }))
+
+  ctx.tools.register(define({
+    name: 'browser_clipboard',
+    rawName: 'browser_clipboard',
+    description: 'Copy, read, write, paste, or clear clipboard text. target "virtual" (default) is an internal clipboard kept for this browser session; target "system" is the computer clipboard. copy reads the current page selection (default; select text with browser_select first) or a labelled element (source:"label") and stores it; read returns the stored text; write stores the supplied text; paste inserts the clipboard into the page: target "virtual" (or system with rich:false) types it into a labelled or focused field like browser_type, while system with rich:true (the default) sends one trusted Ctrl+V so rich text and images paste through the page; clear empties the virtual clipboard. Use target "system" only when the user asks to use the computer clipboard, and never read the system clipboard without a user request.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: CLIPBOARD_ACTIONS, description: 'copy = read the page selection or a label into the clipboard; read = return clipboard text; write = store text; paste = insert clipboard content into the page; clear = empty the virtual clipboard.' },
+        target: { type: 'string', enum: CLIPBOARD_TARGETS, description: 'virtual (default) is the extension\'s own session clipboard; system is the computer clipboard. Use "system" only when the user asks.' },
+        source: { type: 'string', enum: CLIPBOARD_SOURCES, description: 'copy only. selection (default) reads the current page selection; label reads the labelled element. A label argument implies source:"label".' },
+        label: { type: 'integer', minimum: 1, description: 'Label id from the current view: the element to copy with source:"label", or the field to focus before a paste. Omit on paste to use the focused element.' },
+        text: { type: 'string', maxLength: CLIPBOARD_MAX_CHARS, description: 'write only: the text to store (at most 100000 characters).' },
+        mode: { type: 'string', enum: ['replace', 'append'], description: 'paste text path: replace (default) selects the existing field text first; append keeps it.' },
+        submit: { type: 'boolean', description: 'paste text path: press Enter after pasting.' },
+        rich: { type: 'boolean', description: 'target:"system" paste only: true (default) sends a trusted Ctrl+V so the page pastes rich text and images; false types the clipboard text instead.' },
+        view: { type: 'string', enum: ['auto', 'full', 'compact', 'none'], description: 'Paste view mode. auto (default) confirms compactly and escalates to full when the page changes; full returns a screenshot; compact/none return text only. Ask for full when you need to see.' },
+      },
+    },
+    async call(args, exec) {
+      const action = args.action
+      if (typeof action !== 'string' || !CLIPBOARD_ACTIONS.includes(action)) {
+        throw new Error(`browser_clipboard action must be one of ${CLIPBOARD_ACTIONS.join(', ')}`)
+      }
+      const target = args.target === undefined ? 'virtual' : args.target
+      if (typeof target !== 'string' || !CLIPBOARD_TARGETS.includes(target)) {
+        throw new Error('browser_clipboard target must be "virtual" or "system"')
+      }
+      if (action === 'clear' && target !== 'virtual') {
+        throw new Error('browser_clipboard clear only empties the virtual clipboard; omit target or use "virtual"')
+      }
+      if (args.source !== undefined) {
+        if (typeof args.source !== 'string' || !CLIPBOARD_SOURCES.includes(args.source)) {
+          throw new Error('browser_clipboard source must be "selection" or "label"')
+        }
+        if (action !== 'copy') throw new Error('browser_clipboard source is only valid with action "copy"')
+      }
+      let label
+      if (args.label !== undefined) {
+        const value = Number(args.label)
+        if (!Number.isSafeInteger(value) || value <= 0) throw new Error('browser_clipboard label must be a positive integer from the current view')
+        if (action !== 'copy' && action !== 'paste') throw new Error('browser_clipboard label is only valid with action "copy" or "paste"')
+        label = value
+      }
+      let source
+      if (action === 'copy') {
+        source = args.source ?? (label === undefined ? 'selection' : 'label')
+        if (source === 'label' && label === undefined) throw new Error('browser_clipboard copy with source "label" requires a label from the current view')
+        if (source === 'selection' && label !== undefined) throw new Error('browser_clipboard label is only valid with copy source "label"')
+      }
+      let text
+      if (args.text !== undefined && action !== 'write') {
+        throw new Error('browser_clipboard text is only valid with action "write" (write it, then paste)')
+      }
+      if (action === 'write') {
+        if (typeof args.text !== 'string') throw new Error('browser_clipboard write requires a string text')
+        if (args.text.length === 0) throw new Error('browser_clipboard write requires non-empty text; use action "clear" to empty the clipboard')
+        if (args.text.length > CLIPBOARD_MAX_CHARS) throw new Error(`browser_clipboard text must be at most ${CLIPBOARD_MAX_CHARS} characters`)
+        text = args.text
+      }
+      let mode
+      if (args.mode !== undefined) {
+        if (args.mode !== 'replace' && args.mode !== 'append') throw new Error('browser_clipboard mode must be "replace" or "append"')
+        if (action !== 'paste') throw new Error('browser_clipboard mode is only valid with action "paste"')
+        mode = args.mode
+      }
+      if (args.submit !== undefined) {
+        if (typeof args.submit !== 'boolean') throw new Error('browser_clipboard submit must be true or false')
+        if (action !== 'paste') throw new Error('browser_clipboard submit is only valid with action "paste"')
+      }
+      if (args.rich !== undefined) {
+        if (typeof args.rich !== 'boolean') throw new Error('browser_clipboard rich must be true or false')
+        if (action !== 'paste') throw new Error('browser_clipboard rich is only valid with action "paste"')
+      }
+      const view = checkedView(args.view)
+      /** @type {Record<string, unknown>} */
+      const forward = { action, target }
+      if (source !== undefined) forward.source = source
+      if (label !== undefined) forward.label = label
+      if (text !== undefined) forward.text = text
+      if (mode !== undefined) forward.mode = mode
+      if (args.submit !== undefined) forward.submit = args.submit
+      if (args.rich !== undefined) forward.rich = args.rich
+      if (action === 'paste' && view !== undefined) forward.view = view
+      const result = await bridge.request({ op: 'clipboard', args: forward }, exec.callId, exec.signal)
+      return clipboardContent(result)
     },
   }))
 
@@ -2184,7 +2390,7 @@ export function apply(ctx, config = {}) {
     bridge.logEvent('provider.registered', {
       provider: 'extension-current-window',
       bridgeUrl,
-      tools: ['browser_batch', 'browser_click', 'browser_click_at', 'browser_hover', 'browser_navigate', 'browser_press_key', 'browser_read_text', 'browser_screenshot', 'browser_scroll', 'browser_select', 'browser_select_option', 'browser_switch_tab', 'browser_tabs', 'browser_type', 'browser_wait_for'],
+      tools: ['browser_batch', 'browser_click', 'browser_click_at', 'browser_clipboard', 'browser_hover', 'browser_navigate', 'browser_press_key', 'browser_read_text', 'browser_screenshot', 'browser_scroll', 'browser_select', 'browser_select_option', 'browser_switch_tab', 'browser_tabs', 'browser_type', 'browser_wait_for'],
       budget: { maxToolCallsPerTurn, maxRepeatedCalls },
       imageBudget: { imageHistoryKeep, midTurnGap: MID_TURN_IMAGE_GAP },
     }, 'info')

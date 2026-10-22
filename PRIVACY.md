@@ -26,6 +26,15 @@ Chrome tab
 - **Local bridge:** the companion listens only on `127.0.0.1`. It is not reachable from your network. The WebSocket requires a random token.
 - **Extension network access:** Phase 1 makes no direct network requests other than the loopback WebSocket. The model calls originate from DSH.
 
+## Clipboard
+
+The agent has two clipboards:
+
+- **Virtual clipboard (default):** an internal clipboard stored under the `crazyagent.clipboard` key in `chrome.storage.session`. It holds text only, survives an extension reload within the same browser session, and is never written to `chrome.storage.local` or to disk; it disappears when the browser session ends. `browser_clipboard` actions `copy`, `read`, `write`, `paste`, and `clear` use this clipboard unless `target:"system"` is passed explicitly. Text is capped at 100,000 characters and truncation adds a visible marker.
+- **System clipboard (opt-in):** used only when a tool call explicitly sets `target:"system"`. Copy and write call `navigator.clipboard.writeText`; read and text-only paste call `navigator.clipboard.readText`; a rich paste focuses the target and sends one trusted Ctrl+V so the page itself pastes the computer clipboard, including rich text and images. This uses the `clipboardRead` and `clipboardWrite` permissions and can still fail with `CLIPBOARD_DENIED` when the side panel is unfocused or the browser blocks clipboard access.
+
+Clipboard access happens only on an explicit model tool call: neither clipboard is read at startup, on a turn, or in the background. Clipboard text returned by `read` is sent to the model provider like other page text, and text the model copies or writes can contain page content. Treat text copied from the system clipboard as sensitive: it may hold passwords or other data from outside the page.
+
 ## What is stored locally
 
 Under `.dsh-home/` (ignored by git):
@@ -40,7 +49,7 @@ Under `.dsh-home/` (ignored by git):
 | `browser-agent/logs/<runId>/` | Detailed debug logs: `events.jsonl` (bridge frames, extension/plugin events, DSH notifications, tool calls), `screenshots/`, and exported ZIPs; `summary.md`, `summary.json`, `environment.json`, and `manifest.json` are written on export |
 | `profiles/sdk-minimal/` | Generated DSH profile and local package links |
 
-The extension also stores bridge URL, token, capture width, JPEG quality, and the auto-view preference in `chrome.storage.local`. This is scoped to the extension and this browser profile.
+The extension also stores bridge URL, token, capture width, JPEG quality, and the auto-view preference in `chrome.storage.local`. This is scoped to the extension and this browser profile. The virtual clipboard lives separately in `chrome.storage.session` (see Clipboard above).
 
 The OpenRouter API key is entered in the side panel. It is sent over the loopback WebSocket, held in companion memory, and passed to DSH as `CRAZYAGENT_API_KEY`. It is **not** stored in `chrome.storage.local`. If you check **Remember the API key on this machine**, it is written to `.dsh-home/browser-agent/api-key` with mode `0600`; otherwise it disappears when the companion stops. A key can also come from `CRAZYAGENT_API_KEY`, `OPENROUTER_API_KEY`, or `refs.OPENROUTER_API_KEY` in your DSH credential store. The key is redacted from debug logs and never written into `llm.json` or the generated patch.
 
@@ -61,7 +70,9 @@ The extension requests:
 - `sidePanel` — open the agent as a side panel;
 - `tabs` — list the current window's tabs and read titles/URLs;
 - `scripting` — run the scroll/metrics function on the active tab;
-- `storage` — persist local settings;
+- `storage` — persist local settings and keep the session-scoped virtual clipboard;
+- `clipboardRead` — read the computer clipboard only when a tool call explicitly asks for `target:"system"`;
+- `clipboardWrite` — write to the computer clipboard for an explicit system copy or write;
 - host permission `<all_urls>` — capture and script arbitrary websites.
 
 `<all_urls>` is broad because the agent must work on any site the user visits. It does not mean the extension reads every page continuously. Chrome extension reviews and enterprise policy may still restrict this.
@@ -71,7 +82,7 @@ The extension requests:
 - **Pause** (side-panel toolbar) rejects browser commands without ending the chat.
 - **Settings → Attach a fresh view to every message** turns auto-capture off; the model can still call `browser_screenshot` explicitly.
 - Closing the side panel disconnects the browser bridge; tools fail until it is reopened.
-- Uninstalling the extension clears `chrome.storage.local` for this extension.
+- Uninstalling the extension clears `chrome.storage.local` and the virtual clipboard in `chrome.storage.session` for this extension.
 - `npm run clean -- --yes` removes `.dsh-home` (sessions, screenshots, debug logs, profile, token), but DSH attachments are not otherwise garbage-collected. Run `npm run setup` afterwards to rebuild the profile.
 
 ## Safety

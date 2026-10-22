@@ -248,6 +248,154 @@ const TYPE_UNCHANGED = {
   changed: false,
   signals: [],
 }
+const CLIPBOARD_COPY = {
+  op: 'clipboard',
+  action: 'copy',
+  clipboard: {
+    target: 'virtual',
+    system: false,
+    chars: 1_234,
+    preview: 'Selected article opening sentence about the fixture page…',
+    source: 'selection',
+  },
+  totalMs: 12,
+}
+const CLIPBOARD_COPY_LABEL = {
+  op: 'clipboard',
+  action: 'copy',
+  clipboard: {
+    target: 'virtual',
+    system: false,
+    chars: 24,
+    preview: 'Forgot password?',
+    source: 'label',
+    label: 9,
+  },
+  totalMs: 9,
+}
+const CLIPBOARD_READ = {
+  op: 'clipboard',
+  action: 'read',
+  clipboard: {
+    target: 'virtual',
+    system: false,
+    chars: 1_234,
+    preview: 'Selected article opening sentence about the fixture page…',
+    source: 'selection',
+    tabId: 7,
+    url: 'https://example.test/fixture',
+    at: 1_700_000_000_000,
+  },
+  text: 'ALPHA-MARKER\nBETA-MARKER',
+  totalChars: 1_234,
+  offset: 0,
+  truncated: true,
+  totalMs: 4,
+}
+const CLIPBOARD_READ_SYSTEM = {
+  op: 'clipboard',
+  action: 'read',
+  clipboard: {
+    target: 'system',
+    system: true,
+    chars: 24,
+    preview: 'CLIPBOARD-SYSTEM-MARKER',
+  },
+  text: 'CLIPBOARD-SYSTEM-MARKER',
+  totalChars: 24,
+  offset: 0,
+  truncated: false,
+  totalMs: 5,
+}
+const CLIPBOARD_WRITE = {
+  op: 'clipboard',
+  action: 'write',
+  clipboard: {
+    target: 'virtual',
+    system: false,
+    chars: 11,
+    preview: 'hello world',
+    source: 'write',
+  },
+  totalMs: 3,
+}
+const CLIPBOARD_CLEAR = {
+  op: 'clipboard',
+  action: 'clear',
+  clipboard: {
+    target: 'virtual',
+    system: false,
+    chars: 0,
+    cleared: true,
+  },
+  totalMs: 2,
+}
+const CLIPBOARD_PASTE = {
+  op: 'clipboard',
+  action: 'paste',
+  tab: TYPE.tab,
+  viewport: TYPE.viewport,
+  scroll: TYPE.scroll,
+  clipboard: {
+    target: 'virtual',
+    system: false,
+    chars: 16,
+    preview: 'jane@example.com',
+    source: 'selection',
+  },
+  pasted: { chars: 16, mode: 'replace', label: 7, via: 'virtual', submitted: false },
+  typed: {
+    label: 7,
+    chars: 16,
+    mode: 'replace',
+    submitted: false,
+    method: 'dom',
+    beforeChars: 0,
+    afterChars: 16,
+    valuePreview: 'jane@example.com',
+  },
+  changed: true,
+  signals: ['dom-mutations:1'],
+  labels: TYPE.labels,
+  labelCount: 1,
+  image: IMAGE,
+}
+const CLIPBOARD_PASTE_COMPACT = {
+  ...CLIPBOARD_PASTE,
+  view: 'compact',
+  screenshotSkipped: true,
+  labels: [],
+  labelCount: 0,
+  labelsDelta: { count: 0, unchanged: 0, addedCount: 0, removedCount: 0, added: [] },
+  image: undefined,
+}
+const CLIPBOARD_PASTE_KEYS = {
+  op: 'clipboard',
+  action: 'paste',
+  tab: TYPE.tab,
+  viewport: TYPE.viewport,
+  scroll: TYPE.scroll,
+  clipboard: { target: 'system', system: true, chars: null, rich: true },
+  pasted: { chars: null, mode: 'keys', label: 7, via: 'keys', trusted: true, rich: true },
+  pressed: { key: 'v', modifiers: ['ctrl'], trusted: true },
+  changed: true,
+  signals: ['fingerprint-changed'],
+  labels: [],
+  labelCount: 0,
+  image: IMAGE,
+}
+const CLIPBOARD_PASTE_SYSTEM_TEXT = {
+  ...CLIPBOARD_PASTE,
+  clipboard: {
+    target: 'system',
+    system: true,
+    chars: 24,
+    preview: 'CLIPBOARD-SYSTEM-MARKER',
+    source: 'system',
+  },
+  pasted: { chars: 24, mode: 'append', label: 7, via: 'system', submitted: false },
+  typed: { ...CLIPBOARD_PASTE.typed, chars: 24, mode: 'append', afterChars: 24, valuePreview: 'CLIPBOARD-SYSTEM-MARKER' },
+}
 const PRESS_KEY = {
   op: 'press_key',
   tab: { id: 7, title: 'Fixture', url: 'https://example.test/fixture' },
@@ -650,6 +798,40 @@ async function startFakeBridge(options = {}) {
           send(Array.isArray(args.modifiers) && args.modifiers.length > 0 ? PRESS_KEY : PRESS_KEY_SYNTHETIC)
           return
         }
+        if (op === 'clipboard') {
+          const target = args.target === 'system' ? 'system' : 'virtual'
+          const asTarget = result => ({ ...result, clipboard: { ...result.clipboard, target, system: target === 'system' } })
+          if (args.action === 'copy') {
+            send(asTarget(args.source === 'label' ? CLIPBOARD_COPY_LABEL : CLIPBOARD_COPY))
+            return
+          }
+          if (args.action === 'read') {
+            send(target === 'system' ? CLIPBOARD_READ_SYSTEM : CLIPBOARD_READ)
+            return
+          }
+          if (args.action === 'write') {
+            send(asTarget(CLIPBOARD_WRITE))
+            return
+          }
+          if (args.action === 'clear') {
+            send(CLIPBOARD_CLEAR)
+            return
+          }
+          if (args.action === 'paste') {
+            if (target === 'system') {
+              send(args.rich === false ? CLIPBOARD_PASTE_SYSTEM_TEXT : CLIPBOARD_PASTE_KEYS)
+              return
+            }
+            const base = args.view === 'compact' ? CLIPBOARD_PASTE_COMPACT : CLIPBOARD_PASTE
+            const mode = args.mode === 'append' ? 'append' : 'replace'
+            send({
+              ...base,
+              pasted: { ...base.pasted, mode, ...(args.submit === true ? { submitted: true } : {}) },
+              typed: { ...base.typed, mode, ...(args.submit === true ? { submitted: true } : {}) },
+            })
+            return
+          }
+        }
         if (op === 'navigate') {
           send(args.history === 'back' ? NAVIGATE_HISTORY
             : args.new_tab === true ? NAVIGATE_NEW_TAB
@@ -738,7 +920,7 @@ async function waitFor(predicate, timeoutMs = 2_000) {
   throw new Error('timed out waiting for condition')
 }
 
-test('registers the provider, guidance, and the fifteen browser tools', async t => {
+test('registers the provider, guidance, and the sixteen browser tools', async t => {
   const { server, url } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -753,6 +935,7 @@ test('registers the provider, guidance, and the fifteen browser tools', async t 
     'browser_batch',
     'browser_click',
     'browser_click_at',
+    'browser_clipboard',
     'browser_hover',
     'browser_navigate',
     'browser_press_key',
@@ -772,9 +955,15 @@ test('registers the provider, guidance, and the fifteen browser tools', async t 
   assert.match(guidance, /points:\[\{x,y\}, \.\.\.\]/)
   assert.match(guidance, /view:"none"/)
   assert.match(guidance, /delay_ms/)
-  for (const tool of ['browser_type', 'browser_press_key', 'browser_navigate', 'browser_wait_for', 'browser_batch', 'browser_select']) {
+  for (const tool of ['browser_type', 'browser_press_key', 'browser_navigate', 'browser_wait_for', 'browser_batch', 'browser_select', 'browser_clipboard']) {
     assert.match(guidance, new RegExp(tool), tool)
   }
+  // Clipboard guidance: virtual-first, system only on request, rich Ctrl+V.
+  assert.match(guidance, /virtual clipboard/i)
+  assert.match(guidance, /never read the system clipboard without a user request/)
+  assert.match(guidance, /trusted Ctrl\+V/)
+  assert.match(guidance, /rich text and images/)
+  assert.match(guidance, /select text with browser_select first/)
   assert.match(guidance, /detail:"fast"/)
   assert.match(guidance, /Ctrl\+Alt\+M/)
   assert.match(guidance, /view: "auto"/)
@@ -1898,6 +2087,155 @@ test('click reports when it scrolled the page and asks for a fresh view', async 
   assert.match(scrolled.content[0].text, /page scrolled 120px to reach the element; re-take a view before coordinate clicks/)
   const small = await definition.execute({ label: 9 }, exec)
   assert.doesNotMatch(small.content[0].text, /page scrolled/)
+})
+
+test('clipboard copy stores the selection or a label and reports a preview', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const tool = fake.tools.get('browser_clipboard')
+  const exec = { callId: 'c-copy', signal: new AbortController().signal }
+  const copy = await tool.execute({ action: 'copy' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'copy', target: 'virtual', source: 'selection' } })
+  assert.equal(copy.content.length, 1, 'copy is text only')
+  assert.match(copy.content[0].text, /copied 1234 chars from the page selection to the virtual clipboard/)
+  assert.match(copy.content[0].text, /preview: "Selected article opening sentence/)
+  assert.match(copy.content[0].text, /action:"paste"/)
+
+  const label = await tool.execute({ action: 'copy', label: 9 }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'copy', target: 'virtual', source: 'label', label: 9 } })
+  assert.match(label.content[0].text, /copied 24 chars from label 9 to the virtual clipboard/)
+
+  const system = await tool.execute({ action: 'copy', target: 'system' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'copy', target: 'system', source: 'selection' } })
+  assert.match(system.content[0].text, /to the system clipboard/)
+})
+
+test('clipboard read returns virtual text and reads the system clipboard only when asked', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const tool = fake.tools.get('browser_clipboard')
+  const exec = { callId: 'c-read', signal: new AbortController().signal }
+  const virtual = await tool.execute({ action: 'read' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'read', target: 'virtual' } })
+  assert.equal(virtual.content.length, 1, 'read is text only')
+  assert.match(virtual.content[0].text, /read 1234 chars from the virtual clipboard/)
+  assert.match(virtual.content[0].text, /returned the first 24 chars; the clipboard holds more/)
+  assert.match(virtual.content[0].text, /source: the page selection/)
+  assert.match(virtual.content[0].text, /ALPHA-MARKER\nBETA-MARKER/)
+
+  const system = await tool.execute({ action: 'read', target: 'system' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'read', target: 'system' } })
+  assert.match(system.content[0].text, /read 24 chars from the system clipboard/)
+  assert.match(system.content[0].text, /CLIPBOARD-SYSTEM-MARKER/)
+  assert.doesNotMatch(system.content[0].text, /the clipboard holds more/)
+})
+
+test('clipboard write stores text and clear empties the virtual clipboard', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const tool = fake.tools.get('browser_clipboard')
+  const exec = { callId: 'c-write', signal: new AbortController().signal }
+  const write = await tool.execute({ action: 'write', text: 'hello world' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'write', target: 'virtual', text: 'hello world' } })
+  assert.match(write.content[0].text, /wrote 11 chars to the virtual clipboard/)
+  assert.match(write.content[0].text, /preview: "hello world"/)
+
+  const clear = await tool.execute({ action: 'clear' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'clear', target: 'virtual' } })
+  assert.equal(clear.content[0].text, 'cleared the virtual clipboard')
+})
+
+test('clipboard paste reports text pastes and trusted system Ctrl+V pastes', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const tool = fake.tools.get('browser_clipboard')
+  const exec = { callId: 'c-paste', signal: new AbortController().signal }
+  const pasted = await tool.execute({ action: 'paste', label: 7, mode: 'append' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'paste', target: 'virtual', label: 7, mode: 'append' } })
+  assert.equal(pasted.content.length, 2, 'the full paste view includes the image')
+  assert.match(pasted.content[0].text, /pasted 16 chars from the virtual clipboard into \[7\] · append/)
+  assert.match(pasted.content[0].text, /value now "jane@example.com"/)
+
+  const compact = await tool.execute({ action: 'paste', view: 'compact' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'paste', target: 'virtual', view: 'compact' } })
+  assert.equal(compact.content.length, 1, 'compact paste is text only')
+  assert.match(compact.content[0].text, /view: compact/)
+
+  const rich = await tool.execute({ action: 'paste', target: 'system', label: 7 }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'paste', target: 'system', label: 7 } })
+  assert.equal(rich.content.length, 2)
+  assert.match(rich.content[0].text, /pasted the system clipboard into \[7\] via a trusted Ctrl\+V/)
+  assert.match(rich.content[0].text, /the page inserted the rich content/)
+
+  const systemText = await tool.execute({ action: 'paste', target: 'system', rich: false }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'clipboard', args: { action: 'paste', target: 'system', rich: false } })
+  assert.match(systemText.content[0].text, /pasted 24 chars from the system clipboard into \[7\] · append/)
+})
+
+test('clipboard validation rejects bad calls before the bridge', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const tool = fake.tools.get('browser_clipboard')
+  const exec = { callId: 'c-bad', signal: new AbortController().signal }
+  const rejected = [
+    [{}, /action must be one of/],
+    [{ action: 'cut' }, /action must be one of/],
+    [{ action: 'copy', target: 'disk' }, /target must be/],
+    [{ action: 'copy', source: 'clipboard' }, /source must be/],
+    [{ action: 'copy', source: 'label' }, /requires a label/],
+    [{ action: 'copy', source: 'selection', label: 3 }, /only valid with copy source/],
+    [{ action: 'read', source: 'label' }, /only valid with action "copy"/],
+    [{ action: 'read', label: 3 }, /label is only valid/],
+    [{ action: 'read', text: 'x' }, /text is only valid with action "write"/],
+    [{ action: 'write' }, /requires a string text/],
+    [{ action: 'write', text: 42 }, /requires a string text/],
+    [{ action: 'write', text: '' }, /non-empty text/],
+    [{ action: 'write', text: 'x'.repeat(100_001) }, /at most 100000/],
+    [{ action: 'paste', mode: 'overwrite' }, /mode must be/],
+    [{ action: 'read', mode: 'append' }, /mode is only valid/],
+    [{ action: 'paste', rich: 'yes' }, /rich must be true or false/],
+    [{ action: 'read', submit: true }, /submit is only valid/],
+    [{ action: 'clear', target: 'system' }, /only empties the virtual clipboard/],
+  ]
+  for (const [args, pattern] of rejected) {
+    await assert.rejects(() => tool.execute(args, exec), pattern, `expected ${JSON.stringify(args)} to be rejected`)
+  }
+  assert.equal(commands.length, 0, 'validation never reaches the bridge')
 })
 
 test('bridge failures keep the companion error code', async t => {

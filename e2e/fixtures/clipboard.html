@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CrazyAgent Clipboard Fixture</title>
+  <style>
+    body { font: 15px/1.5 system-ui, -apple-system, sans-serif; margin: 24px; max-width: 780px; color: #111; }
+    h1 { margin: 0 0 12px; }
+    label.field-label { display: block; margin: 10px 0 2px; font-weight: 700; }
+    textarea, input[type="text"] {
+      display: block; font: inherit; padding: 7px 9px; width: 360px;
+      border: 1px solid #888; border-radius: 6px; background: #fff;
+    }
+    textarea { height: 76px; resize: vertical; }
+    #source-paragraph {
+      display: block; margin: 14px 0; padding: 10px 12px;
+      font: 700 18px/1.4 ui-monospace, SFMono-Regular, monospace;
+      background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+    }
+    #copy-label { display: inline-block; margin: 10px 0; padding: 8px 10px; background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 8px; }
+    button { font: inherit; padding: 8px 16px; border: 1px solid #333; border-radius: 6px; background: #111; color: #fff; cursor: pointer; }
+    #status { margin-top: 14px; padding: 10px; min-height: 22px; font-family: ui-monospace, monospace; white-space: pre-wrap; color: #065f46; background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Clipboard fixture</h1>
+  <p>Select the marker paragraph or copy a labelled element, then paste into a field.</p>
+
+  <p id="source-paragraph" aria-label="Source paragraph">CLIPBOARD-MARKER one two three four five</p>
+
+  <span id="copy-label" role="button" tabindex="0" aria-label="COPY-LABEL-MARKER labelled span">COPY-LABEL-MARKER labelled span</span>
+
+  <button id="select-button" type="button">Select paragraph</button>
+
+  <label class="field-label" for="paste-target">Textarea target</label>
+  <textarea id="paste-target" aria-label="Textarea target" placeholder="paste here"></textarea>
+
+  <label class="field-label" for="paste-input">Input target</label>
+  <input id="paste-input" type="text" aria-label="Input target" />
+
+  <div id="status">status: idle</div>
+
+  <script>
+    const source = document.getElementById('source-paragraph')
+    const status = document.getElementById('status')
+    function selectParagraph() {
+      const range = document.createRange()
+      range.selectNodeContents(source)
+      const selection = window.getSelection()
+      selection.removeAllRanges()
+      selection.addRange(range)
+      status.textContent = `status: selected ${selection.toString().length} chars`
+    }
+    document.getElementById('select-button').addEventListener('click', selectParagraph)
+  </script>
+</body>
+</html>
