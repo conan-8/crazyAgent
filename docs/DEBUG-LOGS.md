@@ -72,9 +72,9 @@ Fields:
 
 | Source | Examples |
 |---|---|
-| `companion` | `run.start`, `turn.start`, `autoCapture.start/end`, `prompt.build`, `tool.call`, `tool.result`, `turn.end`, `dsh.session`, `log.export`, `signal`, `terminal`, `run.stop` |
+| `companion` | `run.start`, `turn.start`, `autoCapture.start/end`, `prompt.build`, `tool.call`, `tool.result`, `turn.end`, `turn.stop.request/duplicate/idle/duringCapture/interrupted/done/error`, `chat.stop` frames, `dsh.session`, `log.export`, `signal`, `terminal`, `run.stop` |
 | `plugin` | also `reasoning.policy` (classification, chosen effort, prompt size), `reasoning.escalated` (`off`→`low` after 3 no-progress results), `image.budget` / `image.budget.midturn` / `image.budget.error` (live images, offloaded count, keep budget, hysteresis threshold), `tool.budget.exceeded` and `tool.loop.detected` (per-turn call cap / repeated-call breaker) |
-| `bridge` | `frame.in`, `frame.out`, `frame.event`, `browser.command.in/out`, `browser.result`, `bridge.ui.wait` (side-panel reconnect grace: command, waitedMs, connected); inbound live `activity` frames from the provider plugin |
+| `bridge` | `frame.in`, `frame.out`, `frame.event`, `browser.command.in/out`, `browser.result`, `bridge.ui.wait` (side-panel reconnect grace: command, waitedMs, connected); chat control frames (`chat.send`, `chat.stop`, `chat.stopping`, `chat.stopped`); inbound live `activity` frames from the provider plugin |
 | `extension` | `app.boot`, `app.context`, `settings.loaded`, `settings.save`, `settings.pause`, `bridge.connect.start`, `bridge.open`, `bridge.connected`, `bridge.closed`, `chat.send`, `browser.command.start/result/error` (command id, call id, op, `durationMs`, `captureMs`/`encodeMs`, image metadata, tab and scroll state), `tab.active`, `testCapture.*`, `llm.models.request/result`, `llm.configure.request`, `llm.configured`, `log.modal.open`, `log.export.request/result` |
 | `plugin` | `provider.registered`, `bridge.connected`, `bridge.disconnect`, `bridge.command.send`, `bridge.command.result/error` |
 | `dsh` | `startup`, `ready`, `notification`, `assistant.text`, `session.resumed`, `session.resume.error` |
@@ -87,6 +87,8 @@ Reasoning policy decisions are logged once per turn as `reasoning.policy` from t
 
 Live model activity is separate from the durable DSH notifications. The provider plugin taps `agent/assistant-stream` and sends transient `activity` frames over the bridge. The bridge logs each inbound frame (with the current `turnId`) and forwards a `chat.activity` frame to the side panel. These frames carry reasoning/thinking deltas, visible text deltas, partial tool calls, usage, finish reasons, and attempt boundaries. The committed reasoning fallback is derived from the already-logged `assistant/message`; it is not logged a second time.
 
+A user **Stop** is a lifecycle frame, not a prompt: the panel sends `chat.stop`, the companion replies `chat.stopping` immediately and `chat.stopped` when the runtime is interrupted, and the aborted turn ends with `turn.end {ok:false, aborted:true, reason:'user'}` plus the informational `TURN_STOPPED` signal. The companion closes the DSH harness (no SDK cancel exists) and resumes the same session on the next message; `turn.stop.*` events record the request, interruption and session id.
+
 ## Signals
 
 Warnings and errors become **signals** shown in the Debug log dialog and in `summary.md`. Detection includes:
@@ -94,6 +96,7 @@ Warnings and errors become **signals** shown in the Debug log dialog and in `sum
 - severity `warn`/`error` on any event;
 - browser command failures (`PROTECTED_PAGE`, `CAPTURE_QUOTA`, `PAUSED`, `SIDE_PANEL_CLOSED`, script/capture errors);
 - tool failures (`TOOL_FAILED`);
+- user-stopped turns (`TURN_STOPPED`, informational; an aborted turn is not a failure);
 - failed turns (`TURN_FAILED`);
 - slow captures (>500 ms), slow tools (>5 s), slow turns (>15 s), slow first DSH event (>5 s);
 - large screenshots (>500 KiB);

@@ -1,6 +1,6 @@
 # CrazyAgent — continuation handoff
 
-Last updated: 2026-10-22 (evening). Repo is working, companion running, 15 tools, 129 tests. A 2026-10-22 hardening pass fixed the compaction treadmill, reasoning misclassification, click/key edge cases, and added run-time guardrails.
+Last updated: 2026-10-22 (late). Repo is working, companion running, 16 tools, 149 tests. A 2026-10-22 hardening pass fixed the compaction treadmill, reasoning misclassification, click/key edge cases, and added run-time guardrails; a second pass added clipboard copy/paste, a Stop button (runtime interrupt + session resume), and a full-height streaming pane.
 
 This file is the complete context transfer for a new conversation. Read it, then
 `README.md`, then the latest debug run if you need ground truth.
@@ -18,8 +18,8 @@ produced the current state) and README.md, then run:
 Do not re-derive the architecture invariants in HANDOFF.md §4.
 The companion is running (logs/companion.pid); restart it after companion or
 provider changes. The extension is loaded unpacked from extension/ and MUST be
-reloaded after extension changes. Current build: d1d9dd1 (2026-10-22 hardening
-pass), 15 browser tools, 129 tests. The model is OpenRouter deepseek/deepseek-v4.1-flash-1017 with
+reloaded after extension changes. Current build: the 2026-10-22 clipboard+stop
+pass on main, 16 browser tools, 149 tests. The model is OpenRouter deepseek/deepseek-v4.1-flash-1017 with
 reasoning effort "auto" (per-turn policy); the API key is stored in
 .dsh-home/browser-agent/api-key.
 Next task: <fill in>. If none is given, validate the current build in a real
@@ -61,7 +61,7 @@ modifications are:
 ┌───────────────┴───────────────────────────────────────────▼────────────────┐
 │  DSH runtime (sdk-minimal + patches)                                       │
 │    - agent loop, sessions, compaction, image offload                       │
-│    - provider plugin: 15 browser tools, guidance, reasoning policy          │
+│    - provider plugin: 16 browser tools, guidance, reasoning policy          │
 │    - WS role "tools"  ◄──── tool calls become browser commands ────────────┤
 └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -87,11 +87,11 @@ answers with `browser.result`.
 | Base URL | `https://openrouter.ai/api/v1` |
 | Reasoning | `auto` (per-turn policy, with mid-turn escalation after 3 no-progress results) |
 | API key | stored, 73 bytes, `.dsh-home/browser-agent/api-key` (0600) |
-| Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash); **reload after this pass** |
-| Permissions | sidePanel, tabs, scripting, storage, **debugger**, **webNavigation**, host `<all_urls>` |
-| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-22T06-08-35-217Z-a4c366` (clean restart after the hardening pass); the 11-turn real-user run analysed for the fixes is `run-2026-10-21T23-36-12-600Z-8f5493` |
-| Tests | 129/129 passing (companion 34, extension 25, provider 70) |
-| Git | `main` has the original rounds plus the 2026-10-22 hardening commits (compaction policy, provider guards, extension resilience, companion reconnect grace, docs); tree clean |
+| Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash); **reload after this pass** (new `clipboardRead`/`clipboardWrite` permissions) |
+| Permissions | sidePanel, tabs, scripting, storage, **debugger**, **webNavigation**, **clipboardRead**, **clipboardWrite**, host `<all_urls>` |
+| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-22T06-08-35-217Z-a4c366` (clean restart after the hardening pass; one real email/HTML turn, 320 s, 48 calls, 0 errors); the 11-turn real-user run analysed for the fixes is `run-2026-10-21T23-36-12-600Z-8f5493` |
+| Tests | 149/149 passing (companion 42, extension 32, provider 75) |
+| Git | `main` has the original rounds plus the 2026-10-22 hardening and clipboard/stop commits; tree clean |
 
 Historical validation (first real run, before the optimization rounds):
 
@@ -232,7 +232,7 @@ update them.
    generated model overlay, companion, and extension. DSH is pinned to
    `0.2.1-rc.2`.
 2. **The model never gets arbitrary DOM automation.** It has a fixed roster of
-   **fifteen** browser tools; every action is a labelled element, an explicit
+   **sixteen** browser tools; every action is a labelled element, an explicit
    coordinate, explicit text/keys, an explicit drag range, or an explicit
    http(s) URL. No JS evaluation, selector guessing, or unlabelled DOM
    manipulation.
@@ -281,7 +281,7 @@ update them.
 
 ---
 
-## 5. Capabilities (fifteen model-visible tools)
+## 5. Capabilities (sixteen model-visible tools)
 
 | Tool | What it does | Notes |
 |---|---|---|
@@ -291,6 +291,7 @@ update them.
 | `browser_batch` | Run an ordered sequence of 1-20 actions in one call | Allowed ops: click, click_at, hover, select_option, type, press_key, scroll, wait_for, navigate. One final view; compact per-action outcomes; `stop_on_error` default true; `view` default full; per-call timeout scales with action count |
 | `browser_type` | Type into a labelled editable field, or the focused element when unlabelled | DOM native setter + input/change for inputs/textarea, `execCommand` for contenteditable, trusted `Input.insertText` fallback and for canvas editors (Docs). `mode` replace/append; `submit` presses Enter; password values masked |
 | `browser_press_key` | One trusted key press with optional modifiers | Enter/Tab/Escape/Backspace/Delete/arrows/Home/End/PageUp/PageDown/Space/letters/digits; also accepts composite chords (`shift+Tab`, `ctrl+Shift+ArrowLeft`, `meta+Enter`); CDP `Input.dispatchKeyEvent` keyDown+keyUp, synthetic fallback |
+| `browser_clipboard` | Copy/read/write/paste/clear clipboard text | Two clipboards: virtual (`chrome.storage.session`, default, never on disk) and system (`target:"system"`, `clipboardRead`/`clipboardWrite` permissions). `copy` takes the page selection (up to 100k) or a labelled element's text (password fields refused); `paste` types into a labelled/focused element or sends trusted Ctrl+V for rich content/images from the system clipboard; `read` returns up to 20k chars; text capped at 100k with an explicit truncation marker |
 | `browser_hover` | Hover a labelled element | Reveals hover-only menus/tooltips |
 | `browser_select_option` | Choose a native `<select>` option | Sets value, fires `input`/`change` |
 | `browser_read_text` | Rendered text | `page`/`viewport`, `offset`, `max_chars`; ~4 ms on fixtures |
@@ -473,14 +474,14 @@ logs/<runId>/   events.jsonl, screenshots/, exports/, summary files
 
 ## 7. Test inventory
 
-`npm test` = 129 tests:
+`npm test` = 149 tests:
 
-- `companion/test/`: bridge + reconnect grace (16), prompt (9), log store (2),
-  credentials (2), openrouter (5).
+- `companion/test/`: bridge + reconnect grace (18), DSH runner stop/resume (5),
+  prompt (9), log store (3), credentials (2), openrouter (5).
 - `extension/test/`: helpers (3), logger (4), tab match (5), resilience
   (off-screen click_at, stale scroll, scroll policy, tab ambiguity, composite
-  keys, stale-label hint, 13).
-- `packages/dsh-browser-extension/test/`: tools (49), reasoning (14),
+  keys, stale-label hint, 13), clipboard validation/caps (7).
+- `packages/dsh-browser-extension/test/`: tools (54), reasoning (14),
   image budget (7).
 
 E2E suites (not in `npm test`): `edge-click-e2e.mjs` (9 behaviours),
@@ -561,6 +562,18 @@ live with `view:"full"`).
     (model/browser/compaction attribution, cache hit, duplicate calls, error
     table) and alert on budgets; the 2026-10-22 analysis was all derived from
     `events.jsonl` by hand.
+19. **Clipboard copy/paste — DONE (2026-10-22).** `browser_clipboard` with a
+    virtual clipboard (`chrome.storage.session`, default) and optional system
+    clipboard (`clipboardRead`/`clipboardWrite`); copy selection/label, read,
+    write, clear, paste (typed or trusted Ctrl+V for rich content).
+20. **Stop button — DONE (2026-10-22).** UI `■` sends `chat.stop`; the companion
+    interrupts the DSH runtime (no SDK cancel exists) and resumes the same
+    session on the next message. Aborted turns log `TURN_STOPPED` (not
+    `TURN_FAILED`). Remaining risk: resume of an interrupted real-DSH session is
+    unit-tested only; if resume fails the next turn starts a fresh session.
+21. **Full-height streaming pane — DONE (2026-10-22).** The live-activity pane
+    fills the top of the sidebar (no 190px cap), splits with the chat, and has
+    an expand-to-full-height toggle.
 
 ---
 
@@ -674,6 +687,23 @@ live with `view:"full"`).
   visible durable rewrites; instrument them (`reasoning.escalated`,
   `tool.budget.exceeded`, `tool.loop.detected`, `image.budget.midturn`,
   `bridge.ui.wait`) or their cost is invisible in the log.
+- **DSH has no turn-cancel RPC.** `@deepseek-ai/dsh-sdk-client` exposes only
+  session/prompt, session/resume, working-directory and shutdown. A Stop button
+  must tear down the harness (which rejects the pending `session.run`) and then
+  resume the persisted session on the next start; handle resume failure with a
+  logged fallback to a fresh session. Log user aborts as `TURN_STOPPED`, never
+  `TURN_FAILED`. The interrupted turn persists as a partial/aborted turn —
+  unit-tested with a fake harness, not yet exercised against a live DSH runtime.
+- **`chrome.storage.session` is the right home for an internal clipboard.**
+  Clipboard text must not be written to `chrome.storage.local` or disk; the
+  virtual clipboard is session-scoped by design. System clipboard access needs
+  `clipboardRead`/`clipboardWrite`, a focused side panel, and fails with
+  `CLIPBOARD_DENIED` otherwise. `ctrl+v` pastes whatever the *user* last copied
+  (once it pasted a screenshot of the chat UI) — prefer the typed virtual path
+  for text and say when a trusted paste is used.
+- **Never `pkill` by browser executable path.** An isolated-E2E cleanup once
+  matched a normally-running Edge with `pkill -f msedge` and closed it. Only
+  kill PIDs/PGIDs you started, and prefer `--user-data-dir`-scoped targeting.
 
 ---
 
@@ -717,6 +747,21 @@ Compaction policy (`compaction-basic` overlay): `thresholdRatio: 0.55`,
 `headroomTokens: 131072`, `retainTokens: 20000`, `maxTokens: 8192`, plus a
 `modelPolicies` entry for `openrouter/deepseek/deepseek-v4.1-flash-1017`.
 Effective trigger on the 1,048,576 window: **576,716 tokens**.
+
+Clipboard (`browser_clipboard`): virtual clipboard lives in
+`chrome.storage.session` key `crazyagent.clipboard` (session-scoped, never on
+disk; text capped at 100k) and is the default target. The system clipboard is
+opt-in with `target:"system"` and needs the `clipboardRead`/`clipboardWrite`
+extension permissions plus a focused side panel. Copy selection uses a dedicated
+100k-capped page read; typed paste is capped by the `browser_type` limit (20k);
+system-rich paste dispatches a trusted Ctrl+V and does not read the clipboard.
+
+Stop button: the side panel sends `chat.stop`; the companion has no SDK cancel
+(0.2.1-rc.2 exposes none), so it closes the DSH harness, which rejects the
+in-flight run, then resumes the persisted session on the next message. Frames:
+`chat.stopping` → `chat.stopped`; user aborts are recorded as `turn.end`
+`{aborted:true, reason:'user'}` and the `TURN_STOPPED` signal (not
+`TURN_FAILED`). Resume failure falls back to a fresh session and is logged.
 
 Reasoning auto policy (per turn, from the claimed prompt):
 
@@ -803,7 +848,7 @@ read it from `chrome://extensions`.
 
 1. `cd /home/conan/Documents/GitHub/crazyAgent`
 2. `curl -s http://127.0.0.1:17871/health` — expect `tools:true`.
-3. `npm test` — expect 129 passing.
+3. `npm test` — expect 149 passing.
 4. Read the latest run under `.dsh-home/browser-agent/logs/` if investigating a
    specific behaviour (`events.jsonl`, `summary.md`).
 5. Reload the extension if `extension/` changed since the last load.
@@ -832,6 +877,9 @@ read it from `chrome://extensions`.
 - “Select the first paragraph and make it bold.” (`browser_select` + Ctrl+B)
 - “Add a comment on this sentence.” (select → Ctrl+Alt+M → type → submit)
 - “Take a quick look at the page.” (`browser_screenshot` detail:"fast")
+- “Copy that paragraph, switch to the notes tab, and paste it into the notes field.” (`browser_clipboard` copy → switch_tab → paste; virtual clipboard)
+- “Read what's on my clipboard.” (`browser_clipboard` read target:"system" — only on explicit request)
+- “Stop this turn.” / press the ■ button during a long turn (chat.stop → chat.stopped; next message continues the session)
 
 ---
 
@@ -927,15 +975,35 @@ root causes, fix the architecture, verify with tests + Edge e2e, commit.
   dialogs, drag/slider/right-click, clipboard/IME, downloads/popups, and a
   skill/recipe layer (see §8).
 
+### Round 6 — 2026-10-22 clipboard, stop, and streaming layout
+- User requests: "add copy paste functionality, like have its own clipboard, or
+  perhaps use the computer one"; "add a stop button to the UI"; "make the top
+  half streaming things full height of the sidebar"; plus a request to inspect
+  and refine the system prompt.
+- Clipboard: new `browser_clipboard` tool (16th) with a virtual clipboard in
+  `chrome.storage.session` and an opt-in system clipboard; `clipboardRead`/
+  `clipboardWrite` permissions; copy selection/label, read, write, clear, paste
+  (typed or trusted Ctrl+V); provider formatter + guidance; 12 tests + real-Edge
+  e2e for the virtual path.
+- Stop: no SDK cancel exists, so `DshRunner.interrupt()` closes the harness and
+  auto-resumes the saved session on the next start. UI `■` sends `chat.stop`;
+  companion replies `chat.stopping`/`chat.stopped`; aborted turns log
+  `TURN_STOPPED` instead of `TURN_FAILED`; 7 companion tests.
+- Layout: live-activity pane fills the top of the sidebar (55/45 split with the
+  chat, no 190px cap), with an expand-to-full-height toggle; composer/footer
+  pinned; stale empty-state copy fixed.
+- Tests: 149 (+20 over Round 5). Docs: README/HANDOFF/DEBUG-LOGS/PRIVACY updated.
+
 ### State at handoff / not yet validated
-- 2026-10-22 hardening pass on `main`, clean tree, **129/129 tests**, companion
-  restarted (PID in `logs/companion.pid`), health `tools:true`, 15 tools,
-  effective compaction trigger 576,716 visible in `--dump-config`.
-- **The hardened extension has not been exercised in a real user session yet.**
-  Reload it in `chrome://extensions` and reopen the side panel first.
-- Expected but unverified: action turns stop compacting, T11-class turns drop
-  from 446 s toward ~150–180 s, fewer duplicate calls, no compaction-treadmill
-  cache collapse, and no forced-scroll mis-aim.
+- 2026-10-22 clipboard+stop pass on `main`, clean tree, **149/149 tests**,
+  companion restarted (PID in `logs/companion.pid`), health `tools:true`,
+  16 tools, effective compaction trigger 576,716 visible in `--dump-config`.
+- **Reload the extension in `chrome://extensions`** (new clipboard permissions)
+  and reopen the side panel before the first real turn.
+- Real-session validation still pending for: the Stop button's abort→resume path
+  (fake-harness tested only), system-clipboard rich paste (needs a focused OS
+  window; isolated Edge returns an empty clipboard), and the tall activity pane
+  in an actual side panel.
 - Open question: whether the dynamic `off→low` escalation is enough for hard GUI
   tasks, or whether "hard" action prompts (image/upload/format/Docs) should
   start at `low` instead of `off`.

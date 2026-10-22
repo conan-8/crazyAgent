@@ -21,6 +21,7 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
 | `browser_batch` | Runs an ordered sequence of up to 20 actions in **one call** (`click`, `type`, `press_key`, `click_at`, `hover`, `scroll`, `wait_for`, `navigate`) and returns compact per-action outcomes plus **one** final view. Only batch actions whose targets are already visible: an action that reveals new UI (menu, dialog, new page) needs a view before the next action |
 | `browser_type` | Types into a labelled input, textarea, or contenteditable (`mode: append|replace`, optional `submit`), or into the focused element when `label` is omitted — click a canvas editor caret first, then type through trusted `Input.insertText`. Returns a fresh view, the new value, and `changed`; password values are masked |
 | `browser_press_key` | Sends one real key press with optional `ctrl`/`alt`/`shift`/`meta`: Enter, Tab, Escape, Backspace, Delete, arrows, Home/End, PageUp/PageDown, Space, or a letter/digit. Accepts `key:"Tab"` + `modifiers:["shift"]` and also composite chords such as `shift+Tab`, `ctrl+Shift+ArrowLeft`, or `meta+Enter`. Used to submit, move focus, move a caret, and run shortcuts |
+| `browser_clipboard` | Copies, reads, writes, clears, and pastes clipboard text. The default **virtual clipboard** lives in `chrome.storage.session` (survives an extension reload within the browser session, never written to disk); `target:"system"` opts into the OS clipboard (read/write) when the user asks. Copy takes the current page selection or a labelled element's text; paste inserts into a labelled editable field or the focused element (or sends a trusted Ctrl+V for rich content/images from the system clipboard) |
 | `browser_hover` | Hovers a labelled element and returns a fresh view, so hover-only menus and tooltips become clickable |
 | `browser_select_option` | Chooses an option on a native `<select>` by label id and option text (a synthetic click cannot open the OS dropdown) |
 | `browser_read_text` | Rendered page text (or just the viewport) as text, with `offset`/`max_chars` pagination. No screenshot; typically a few milliseconds and far fewer tokens |
@@ -37,9 +38,9 @@ Chrome tab ── screenshot/scroll/tabs ──> side panel ──WS──> comp
 | Context control | DSH compaction is a safety net only: it triggers near **55% of the 1M window (~577 K prompt tokens)** and keeps a 20 K verbatim tail. The old 6%/2% policy was measured thrashing (79 passes, 27% of run wall) because provider-billed screenshot tokens were under-priced by the token meter; prompt size is now controlled by the image budget instead |
 | Runaway guard | A per-turn tool-call budget (`maxToolCallsPerTurn`, default 80) and a repeated-call breaker (`maxRepeatedCalls`, default 3) fail a loop with a normal tool error before it reaches the browser; a side-panel reconnect grace window (8 s) keeps a reload from killing a turn |
 | Persistence | DSH session log and screenshot attachments under `.dsh-home` |
-| UI | Side-panel chat, live activity feed, tool cards with text previews and screenshot thumbnails, pause, settings, new chat |
+| UI | Side-panel chat, live activity feed filling the top of the sidebar (expand-to-full-height toggle), tool cards with text previews and screenshot thumbnails, **Stop** button during a turn, pause, settings, new chat |
 
-**Not yet supported: drag/drop, file upload, downloads, native JavaScript dialogs, arbitrary JS, and full-page capture. DOM actions are limited to labelled, visible, hit-testable elements; canvas actions use explicit coordinates; typing goes only into labelled editable elements or the focused element; navigation is http(s) only.**
+**Not yet supported: drag/drop, file upload, downloads, native JavaScript dialogs, arbitrary JS, and full-page capture. DOM actions are limited to labelled, visible, hit-testable elements; canvas actions use explicit coordinates; typing goes only into labelled editable elements or the focused element; navigation is http(s) only. Clipboard is text-first; rich/system paste relies on the page's own Ctrl+V handling and the OS clipboard.**
 
 ### Canvas, video, and iframe surfaces
 
@@ -78,7 +79,7 @@ Shadow DOM and iframes are handled for DOM clicking:
 - Hover-only menus: `browser_hover` reveals the menu and returns a fresh labelled view; then click the new label.
 - Native selects: clicking cannot open the OS dropdown, so `browser_select_option` sets the value and fires `input`/`change`.
 
-**Permissions and warnings:** trusted input requires the `debugger` permission, plus `webNavigation` for the frame list. Chrome shows a "started debugging this browser" banner while a trusted click or wheel is being dispatched (attach → dispatch → detach, roughly 100 ms). If DevTools is open on that tab, the debugger cannot attach; DOM clicks still work, and `click_at` reports the conflict.
+**Permissions and warnings:** trusted input requires the `debugger` permission, plus `webNavigation` for the frame list; clipboard support adds `clipboardRead`/`clipboardWrite` (Chrome shows a "Read data you copy and paste" prompt). Chrome shows a "started debugging this browser" banner while a trusted click or wheel is being dispatched (attach → dispatch → detach, roughly 100 ms). If DevTools is open on that tab, the debugger cannot attach; DOM clicks still work, and `click_at` reports the conflict.
 
 ### How clicking stays accurate
 
@@ -177,7 +178,7 @@ Starts from `sdk-minimal` and:
 - sets a browser-agent persona, disables harness identity/runtime context, and serializes tool calls (`maxParallelToolCalls: 1`);
 - leaves attachments, compaction, image offload, and JSONL persistence in place.
 
-The result is fifteen model-visible tools and a small, stable request prefix.
+The result is sixteen model-visible tools and a small, stable request prefix. The side panel also has a **Stop** button while a turn is running (it interrupts the DSH runtime through a companion `chat.stop` request and resumes the same session on the next message) and a live-activity pane that fills the top of the sidebar, with an expand-to-full-height toggle.
 
 ## Configuration
 
@@ -296,7 +297,7 @@ Full schema, event types, `jq` recipes, and sharing instructions are in [`docs/D
 ## Development and tests
 
 ```sh
-npm test          # 129 unit/integration checks: bridge + side-panel reconnect grace, live activity, reasoning policy (incl. rapid/act, follow-ups, escalation), image budget (turn-end + mid-turn hysteresis), labels, click/burst/type/press_key (incl. composite chords)/navigate/wait_for/select/batch tools, view modes and label deltas, off-screen points and stale scroll, tab ambiguity, stale-label hints, surfaces, prompt, log store, OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
+npm test          # 149 unit/integration checks: bridge + side-panel reconnect grace + stop/abort session resume, live activity, reasoning policy (incl. rapid/act, follow-ups, escalation), image budget (turn-end + mid-turn hysteresis), labels, click/burst/type/press_key (incl. composite chords)/navigate/wait_for/select/batch/clipboard tools, view modes and label deltas, off-screen points and stale scroll, tab ambiguity, stale-label hints, clipboard validation/caps, surfaces, prompt, log store (incl. aborted turns), OpenRouter config, key resolution, tab matching, tool content, scroll math, URL guards
 npm run bench     # local bridge latency
 npm run setup     # idempotent profile/plugin verification
 ```
