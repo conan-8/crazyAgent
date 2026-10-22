@@ -12,6 +12,7 @@ import { PROTOCOL_VERSION, truncate, errorMessage, shortDuration, formatBytes } 
 
 const SETTINGS_KEY = 'crazyagent.settings'
 const RECONNECT_MS = 2_500
+const STOP_CONFIRM_TIMEOUT_MS = 15_000
 const DEFAULT_MODEL_BASE_URL = 'https://openrouter.ai/api/v1'
 const RECOMMENDED_MODEL_ID = 'deepseek/deepseek-v4.1-flash-1017'
 
@@ -24,6 +25,9 @@ let manualDisconnect = false
 let authFailed = false
 let connected = false
 let busy = false
+let stopAvailable = false
+let stopping = false
+let stopTimer = null
 let dshState = 'unknown'
 let lastAssistantText = ''
 let sessionId = ''
@@ -49,6 +53,7 @@ let pendingLlmConfig = null
 let setupPrompted = false
 let modelsTimer = null
 let activityExpanded = true
+let activityMaximized = false
 let activityTurnStart = 0
 /** @type {{entry: HTMLElement, textEl: HTMLElement, kind: string, id?: string} | null} */
 let lastStreamEntry = null
@@ -62,10 +67,12 @@ const cards = new Map()
 const $ = id => document.getElementById(id)
 
 const els = {
+  app: document.querySelector('.app'),
   chat: $('chat'),
   empty: $('empty'),
   input: $('input'),
   send: $('send'),
+  stop: $('stop'),
   statusDot: $('status-dot'),
   statusText: $('status-text'),
   activeTab: $('active-tab'),
@@ -74,6 +81,7 @@ const els = {
   activityPhase: $('activity-phase'),
   activityLatest: $('activity-latest'),
   activityToggle: $('activity-toggle'),
+  activityMaximize: $('activity-maximize'),
   activityLog: $('activity-log'),
   activityEmpty: $('activity-empty'),
   banner: $('banner'),
@@ -400,7 +408,7 @@ function sendLlmConfigure(update) {
     pendingLlmConfig = update
     return
   }
-  setBusy(true)
+  setBusy(true, { stoppable: false })
   setStatus('busy', 'Configuring OpenRouter…')
   pendingLlmConfig = update
   const frame = {
@@ -508,11 +516,27 @@ function toast(text) {
   toastTimer = setTimeout(() => els.toast.classList.add('hidden'), 2_600)
 }
 
-function setBusy(value) {
+function setBusy(value, options = {}) {
   busy = value
+  stopAvailable = value && options.stoppable !== false
   els.send.disabled = value
   els.send.textContent = value ? '·' : '↑'
+  updateStopButton()
   refreshStatus()
+}
+
+/** Reflect the stop affordance: visible whenever a stoppable turn is running. */
+function updateStopButton() {
+  if (!els.stop) return
+  const visible = stopAvailable
+  els.stop.classList.toggle('hidden', !visible)
+  els.stop.hidden = !visible
+  els.stop.disabled = stopping
+  els.stop.classList.toggle('stopping', stopping)
+  const label = stopping ? 'Stopping…' : 'Stop the current turn'
+  els.stop.title = label
+  els.stop.setAttribute('aria-label', label)
+  els.stop.setAttribute('aria-busy', String(stopping))
 }
 
 function setActivity(active) {
@@ -594,6 +618,9 @@ function connect() {
     if (ws !== socket) return
     ws = null
     connected = false
+    stopping = false
+    clearTimeout(stopTimer)
+    stopTimer = null
     setBusy(false)
     setActivity(false)
     setActivityPhase('Companion offline', 'offline')
@@ -777,8 +804,31 @@ function toggleActivity() {
   els.activity.classList.toggle('collapsed', !activityExpanded)
   els.activityToggle.textContent = activityExpanded ? '▴' : '▾'
   els.activityToggle.title = activityExpanded ? 'Collapse activity' : 'Expand activity'
+  els.activityToggle.setAttribute('aria-label', activityExpanded ? 'Collapse live activity' : 'Expand live activity')
+  els.activityToggle.setAttribute('aria-expanded', String(activityExpanded))
+  if (!activityExpanded && activityMaximized) setActivityMaximized(false)
   logger.log('ui.activity.toggle', { expanded: activityExpanded }, 'debug')
   if (activityExpanded) scrollActivity()
+}
+
+/** Expand the streaming pane over the chat area (the composer stays visible). */
+function setActivityMaximized(value) {
+  activityMaximized = value
+  els.app?.classList.toggle('activity-maximized', value)
+  els.activityMaximize.classList.toggle('active', value)
+  els.activityMaximize.setAttribute('aria-pressed', String(value))
+  els.activityMaximize.title = value ? 'Restore layout' : 'Expand activity'
+  els.activityMaximize.setAttribute('aria-label', value ? 'Restore split layout' : 'Expand live activity')
+  els.activityMaximize.textContent = value ? '⤡' : '⤢'
+  logger.log('ui.activity.maximize', { maximized: value }, 'debug')
+  if (value) {
+    if (!activityExpanded) toggleActivity()
+    scrollActivity()
+  }
+}
+
+function toggleMaximizeActivity() {
+  setActivityMaximized(!activityMaximized)
 }
 
 function formatTokenUsage(usage) {
@@ -945,6 +995,7 @@ function handleFrame(frame) {
       return
     case 'chat.activity':
       handleActivity(frame)
+      if (stopping) setActivityPhase('Stopping…', 'busy')
       return
     case 'chat.assistant':
       if (typeof frame.text === 'string' && frame.text.length > 0) {
@@ -963,6 +1014,12 @@ function handleFrame(frame) {
       return
     case 'chat.error':
       handleChatError(frame)
+      return
+    case 'chat.stopping':
+      handleStopping(frame)
+      return
+    case 'chat.stopped':
+      handleStopped(frame)
       return
     case 'chat.session':
       if (typeof frame.sessionId === 'string') {
@@ -1004,6 +1061,12 @@ function handleFrame(frame) {
 function handleStatus(frame) {
   const status = frame.status
   logger.log('bridge.status', { status: frame.status, tool: frame.tool }, 'debug')
+  if (stopping && status !== 'ready' && status !== 'idle' && status !== 'error') {
+    // The stop request owns the visible state until chat.stopped/chat.error lands.
+    setStatus('busy', 'Stopping…')
+    setActivityPhase('Stopping…', 'busy')
+    return
+  }
   if (status === 'ready' || status === 'idle') {
     connected = true
     if (dshState === 'unknown' || dshState === 'starting') dshState = 'ready'
@@ -1099,6 +1162,19 @@ function appendError(text) {
   scrollChat()
 }
 
+/** Small centered status note for turn-level events such as a user stop. */
+function appendSystemNote(text) {
+  const value = String(text ?? '').trim()
+  if (value.length === 0) return
+  hideEmpty()
+  const el = document.createElement('div')
+  el.className = 'bubble system'
+  el.setAttribute('role', 'status')
+  el.textContent = value
+  els.chat.appendChild(el)
+  scrollChat()
+}
+
 /** @param {string} name */
 function toolLabel(name) {
   switch (name) {
@@ -1108,6 +1184,7 @@ function toolLabel(name) {
     case 'browser_switch_tab': return 'switch tab'
     case 'browser_read_text': return 'read text'
     case 'browser_click': return 'click'
+    case 'browser_clipboard': return 'clipboard'
     case 'auto': return 'current view'
     default: return String(name ?? 'tool').replace(/^browser_/, '')
   }
@@ -1217,15 +1294,23 @@ function handleToolResult(frame) {
   scrollChat()
 }
 
+/** Shared terminal cleanup for a turn: clear busy, pending stop, streaming markers, labels. */
+function cleanupAfterTurn() {
+  stopping = false
+  clearTimeout(stopTimer)
+  stopTimer = null
+  setBusy(false)
+  void execute('labels.clear', {}, settings).catch(() => {})
+  finalizeStreamActivity()
+}
+
 /** @param {Record<string, any>} frame */
 function handleDone(frame) {
-  setBusy(false)
+  cleanupAfterTurn()
   dshState = 'ready'
-  void execute('labels.clear', {}, settings).catch(() => {})
   const total = frame.timings?.totalMs
   pushActivity('done', 'done', `turn complete${Number.isFinite(total) ? ` · ${shortDuration(total)}` : ''}${Number.isFinite(frame.timings?.toolCalls) ? ` · ${frame.timings.toolCalls} tools` : ''}`)
   setActivityPhase('Ready', 'online')
-  finalizeStreamActivity()
   logger.log('chat.done', {
     sessionId: frame.sessionId,
     timings: frame.timings,
@@ -1250,18 +1335,59 @@ function handleDone(frame) {
 
 /** @param {Record<string, any>} frame */
 function handleChatError(frame) {
-  setBusy(false)
-  void execute('labels.clear', {}, settings).catch(() => {})
+  if (stopping) {
+    // A stop can race an in-flight error; the user asked to stop, so report a stop.
+    logger.log('chat.error.after_stop', { message: frame.message }, 'info')
+    handleStopped({ turnId: frame.turnId, reason: 'user', message: frame.message })
+    return
+  }
+  cleanupAfterTurn()
   const message = typeof frame.message === 'string' ? frame.message : 'Unknown companion error'
   pushActivity('error', 'error', message)
   setActivityPhase('Error', 'error')
-  finalizeStreamActivity()
   logger.log('chat.error', { message, recoverable: frame.recoverable !== false }, 'error')
   appendError(message)
   setStatus('error', 'Error')
   if (/companion|not connected|script|invalid pairing|dsh/i.test(message)) {
     showBanner(message, 'Open settings', openSettings)
   }
+}
+
+/** @param {Record<string, any>} frame */
+function handleStopping(frame = {}) {
+  if (!busy && !stopping) return
+  stopping = true
+  updateStopButton()
+  setStatus('busy', 'Stopping…')
+  setActivityPhase('Stopping…', 'busy')
+  logger.log('chat.stopping', { turnId: frame.turnId }, 'info')
+}
+
+/** @param {Record<string, any>} frame */
+function handleStopped(frame = {}) {
+  const wasActive = busy || stopping
+  const reason = frame.reason === 'idle' ? 'idle' : 'user'
+  cleanupAfterTurn()
+  dshState = 'ready'
+  pushActivity('stopped', 'stop', reason === 'user' ? 'stopped by user' : 'stopped · companion idle')
+  setActivityPhase('Stopped', 'idle')
+  setStatus('idle', 'Stopped')
+  logger.log('chat.stopped', { turnId: frame.turnId, reason }, 'info')
+  if (wasActive) {
+    if (frame.local === true) {
+      appendSystemNote('⏹ Stop requested — the companion did not confirm. The turn was cleared locally.')
+      toast('Stop requested — no confirmation from the companion')
+    } else if (reason === 'user') {
+      appendSystemNote('⏹ Stopped by user.')
+      toast('Stopped')
+    } else {
+      appendSystemNote('⏹ Stopped.')
+      toast('No turn was running')
+    }
+  }
+  if (typeof frame.sessionId === 'string' && frame.sessionId.length > 0) sessionId = frame.sessionId
+  els.timing.textContent = ''
+  updateFooter()
 }
 
 function updateFooter() {
@@ -1291,7 +1417,8 @@ async function handleBrowserCommand(frame) {
         : op === 'scroll' ? 'Scrolling…'
           : op === 'click' ? 'Clicking…'
             : op === 'read_text' ? 'Reading text…'
-              : 'Capturing…',
+              : op === 'clipboard' ? 'Clipboard…'
+                : 'Capturing…',
     'busy',
   )
   pushActivity('browser', 'browser', `${op} ${truncate(JSON.stringify(args), 300)}`)
@@ -1309,7 +1436,8 @@ async function handleBrowserCommand(frame) {
         : op === 'scroll' ? 'browser_scroll'
           : op === 'read_text' ? 'browser_read_text'
             : op === 'click' ? 'browser_click'
-              : 'browser_screenshot'
+              : op === 'clipboard' ? 'browser_clipboard'
+                : 'browser_screenshot'
     card.nameEl.textContent = toolLabel(frame.callId === 'auto' ? 'auto' : card.name)
   }
 
@@ -1425,6 +1553,16 @@ function browserActivitySummary(op, result) {
   }
   if (result.selected) {
     parts.push(`selected ${result.selected.chars} chars${result.selected.collapsed ? ' · collapsed' : ''}`)
+    parts.push(result.changed ? 'changed' : 'no visible change')
+  }
+  if (result.clipboard) {
+    const clip = result.clipboard
+    parts.push(`clipboard ${result.action ?? ''} ${clip.target ?? 'virtual'}${Number.isFinite(clip.chars) ? ` · ${clip.chars} chars` : ''}${clip.truncated ? ` of ${clip.originalChars}` : ''}`)
+    if (typeof clip.preview === 'string' && clip.preview.length > 0) parts.push(truncate(clip.preview, 60))
+  }
+  if (result.pasted) {
+    const pasted = result.pasted
+    parts.push(`pasted ${pasted.via === 'keys' ? 'system clipboard (Ctrl+V)' : `${pasted.chars ?? '?'} chars from ${pasted.via ?? 'virtual'}`}${pasted.submitted ? ' · submitted' : ''}`)
     parts.push(result.changed ? 'changed' : 'no visible change')
   }
   if (result.batch) {
@@ -1575,6 +1713,9 @@ function sendMessage() {
     toast('Wait for the current turn to finish')
     return
   }
+  stopping = false
+  clearTimeout(stopTimer)
+  stopTimer = null
   if (sendFrame({ v: PROTOCOL_VERSION, type: 'chat.send', text, autoCapture: settings.autoCapture !== false })) {
     logger.log('chat.send', {
       textLength: text.length,
@@ -1590,12 +1731,43 @@ function sendMessage() {
   }
 }
 
+/** Ask the companion to stop the running turn; the UI waits for chat.stopping/chat.stopped. */
+function stopTurn() {
+  if (!busy || stopping) return
+  if (!connected) {
+    toast('Not connected to the companion')
+    return
+  }
+  if (!sendFrame({ v: PROTOCOL_VERSION, type: 'chat.stop' })) return
+  stopping = true
+  updateStopButton()
+  setStatus('busy', 'Stopping…')
+  setActivityPhase('Stopping…', 'busy')
+  pushActivity('user', 'stop', 'stop requested')
+  logger.log('chat.stop.request', { sessionId }, 'info')
+  clearTimeout(stopTimer)
+  stopTimer = setTimeout(() => {
+    stopTimer = null
+    if (!stopping) return
+    logger.log('chat.stop.timeout', {}, 'warn')
+    if (!busy) {
+      stopping = false
+      updateStopButton()
+      return
+    }
+    handleStopped({ reason: 'user', sessionId, local: true })
+  }, STOP_CONFIRM_TIMEOUT_MS)
+}
+
 function newChat() {
   logger.log('chat.new', {}, 'info')
   if (busy) {
     toast('Wait for the current turn to finish')
     return
   }
+  stopping = false
+  clearTimeout(stopTimer)
+  stopTimer = null
   sendFrame({ v: PROTOCOL_VERSION, type: 'chat.new' })
   clearChat()
   sessionId = ''
@@ -1988,6 +2160,8 @@ els.bannerAction.addEventListener('click', () => {
 els.pause.addEventListener('click', togglePause)
 els.newChat.addEventListener('click', newChat)
 els.activityToggle.addEventListener('click', toggleActivity)
+els.activityMaximize.addEventListener('click', toggleMaximizeActivity)
+els.stop.addEventListener('click', stopTurn)
 
 els.input.addEventListener('input', resizeInput)
 els.input.addEventListener('keydown', event => {

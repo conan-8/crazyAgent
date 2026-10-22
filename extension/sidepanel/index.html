@@ -33,7 +33,8 @@
           <span id="activity-dot" class="dot offline" aria-hidden="true"></span>
           <span id="activity-phase" class="activity-phase">Idle</span>
           <span id="activity-latest" class="activity-latest">Waiting for a turn</span>
-          <button id="activity-toggle" class="icon-btn activity-toggle" type="button" title="Collapse activity" aria-label="Toggle live activity">▴</button>
+          <button id="activity-maximize" class="icon-btn activity-toggle" type="button" title="Expand activity" aria-label="Expand live activity" aria-pressed="false">⤢</button>
+          <button id="activity-toggle" class="icon-btn activity-toggle" type="button" title="Collapse activity" aria-label="Collapse live activity" aria-expanded="true">▴</button>
         </div>
         <div id="activity-log" class="activity-log">
           <div class="activity-empty" id="activity-empty">Model thinking, streamed text, tool calls, and browser actions will appear here live.</div>
@@ -49,12 +50,13 @@
         <div class="empty" id="empty">
           <div class="empty-icon" aria-hidden="true">◉</div>
           <h1>See the page with me</h1>
-          <p>Ask what's on the current tab, tell me to scroll, or ask me to switch tabs. I can look and move around, but I can't click or type yet.</p>
+          <p>Ask about this page, or tell me to click, type, scroll, switch tabs, or handle a task.</p>
         </div>
       </main>
 
       <form id="composer" class="composer">
-        <textarea id="input" rows="1" placeholder="Ask about this page…" autocomplete="off" spellcheck="false"></textarea>
+        <textarea id="input" rows="1" placeholder="Ask or tell me what to do…" autocomplete="off" spellcheck="false"></textarea>
+        <button id="stop" class="stop hidden" type="button" title="Stop the current turn" aria-label="Stop the current turn" aria-busy="false">■</button>
         <button id="send" class="send" type="submit" title="Send" aria-label="Send">↑</button>
       </form>
 
