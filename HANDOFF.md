@@ -1,6 +1,6 @@
 # CrazyAgent — continuation handoff
 
-Last updated: 2026-10-21. Repo is working and the companion is running.
+Last updated: 2026-10-22. Repo is working, companion running, 15 tools, 88 tests.
 
 This file is the complete context transfer for a new conversation. Read it, then
 `README.md`, then the latest debug run if you need ground truth.
@@ -11,15 +11,20 @@ This file is the complete context transfer for a new conversation. Read it, then
 
 ```text
 We are continuing CrazyAgent at /home/conan/Documents/GitHub/crazyAgent.
-Read HANDOFF.md and README.md first, then run:
+Read HANDOFF.md (especially §15, the high-level log of the conversation that
+produced the current state) and README.md, then run:
   curl -s http://127.0.0.1:17871/health
   npm test
 Do not re-derive the architecture invariants in HANDOFF.md §4.
-The companion is probably already running (logs/companion.pid). The extension is
-loaded unpacked from extension/ and must be reloaded after extension changes.
-The model is OpenRouter deepseek/deepseek-v4.1-flash-1017 with reasoning effort
-"auto"; the API key is stored in .dsh-home/browser-agent/api-key.
-Next task: <fill in>.
+The companion is running (logs/companion.pid); restart it after companion or
+provider changes. The extension is loaded unpacked from extension/ and MUST be
+reloaded after extension changes. Current build: commit 145ca2b, 15 browser
+tools, 88 tests. The model is OpenRouter deepseek/deepseek-v4.1-flash-1017 with
+reasoning effort "auto" (per-turn policy); the API key is stored in
+.dsh-home/browser-agent/api-key.
+Next task: <fill in>. If none is given, validate the current build in a real
+session first (reload the extension, run a Docs/email work turn), then take the
+top item from §8.
 ```
 
 ---
@@ -88,7 +93,7 @@ answers with `browser.result`.
 | Tests | 88/88 passing |
 | Git | `main` has baseline, burst-click, work-foundation, B+C+E and A+B+C+D commits; tree clean |
 
-Latest real-world validation (from that run):
+Historical validation (first real run, before the optimization rounds):
 
 - A canvas whack-a-dot game (`mouseaccuracy.com/game`): 5 turns, 88 tool calls,
   **46 `browser_click_at` calls, zero errors, every one reported a pixel change**
@@ -139,6 +144,13 @@ batch-compatible), `detail:"fast"` 640 px screenshots, `NOT_EDITABLE`
 focus-fallback typing, named punctuation keys, and a `compaction-basic` overlay
 (thresholdRatio 0.06 / retainRatio 0.02, ~63 K-token trigger) for cross-turn
 context. Roster is now **fifteen** tools.
+
+Latest measured work session (pre-A+B+C+D, `run-2026-10-21T21-30-54-909Z-ac82d4`,
+5 turns, 764 s): email reply 25.6 s; add-comments 255 s / 123 actions / 106 steps;
+delete-all 217 s; "add comments, be faster" 92 s with 38 actions batched in 5
+calls but 6.96 s/step from reasoning; fix-comments 174 s with 72 actions batched
+in 11 calls. Prompts grew 45 K -> 140 K tokens/step; 14.6 M prompt tokens total.
+That run is the baseline the A+B+C+D change targets.
 
 ---
 
@@ -729,10 +741,91 @@ read it from `chrome://extensions`.
 
 ## 14. Open questions for the user
 
-- Which comes first now: file upload, native dialogs, downloads, or drag/drop?
-- Is effort `off` acceptable for complex action turns, or should some stay `low`?
+- Which breadth item comes first: file upload, native dialogs, downloads, or
+  drag/drop?
+- After real-session validation: is effort `off` good enough for complex action
+  turns, or should `act` map to `minimal`?
 - Is the debugger banner acceptable, or should trusted input be opt-in per tab?
-- Should reasoning `auto` be tuned (e.g. `off` for short inspect prompts) using
-  real `reasoning.policy` data?
 - Is the built-in PDF viewer / browser-internal pages worth supporting through a
   separate path, or explicitly out of scope?
+
+---
+
+## 15. Session log — 2026-10-21/22 conversation (high level)
+
+The repo began this session as a working phase-1 "vision + click" agent with no
+commits. Five rounds turned it into a work-capable, batching, low-reasoning agent.
+Each round used the same method: read a real debug run, attribute wall time to
+root causes, fix the architecture, verify with tests + Edge e2e, commit.
+
+### Round 1 — canvas game latency (commit `0f581fe`)
+- The canvas game worked but was only fast "after it learned".
+- Measured (`run-...T14-23-34-035Z-6c0408`): per click **2,122 ms model round
+  trip (~80%)**, 390 ms browser (13.6%), 120 ms image commit (5%). Per-click wall
+  fell 6,279 ms -> 2,474 ms because reasoning/output dropped (689 -> 154
+  reasoning chars/click) and setup round trips shrank — the click itself never
+  got faster. Slow first turn root cause: persona/GUIDANCE still said "you
+  cannot click or type in Phase 1", so the model debated its own capabilities.
+- Fixes: burst `click_at` points 1-8 (one attach, one capture, per-point diff),
+  adaptive paint settle replacing the fixed 160 ms pause, `view:"none"`, screenshot
+  `delay_ms`, `rapid` reasoning class (games -> off), corrected capability prose.
+- Result: game score 107 -> **612**, accuracy 94% -> **100%**, ~5.3 points/call,
+  46 -> 233 clicks across four 40 s turns.
+
+### Round 2 — work foundation (commit `afb3059`)
+- Goal clarified: real browser work, not games. Missing primitives: typing, keys,
+  URL navigation, deterministic waiting.
+- Added `browser_type`, `browser_press_key`, `browser_navigate`, `browser_wait_for`
+  (13 tools), with persona/GUIDANCE updated in the same change, a `form.html`
+  fixture and the `edge-work-e2e` suite. 71 tests.
+
+### Round 3 — serialization and context growth (commit `3b6224e`)
+- Work turns still took 90-420 s.
+- Measured (`run-...T19-11-58-370Z-0ea2f0`, 19 turns / 220 steps): **0 of 220
+  steps had more than one tool call** (0.96 average), and every action returned a
+  full view, so prompts averaged **134 K tokens/step** (245 K max) with 204
+  images re-sent per run; 7 calls were wasted on stale labels/keys/captures.
+- Fixes: `browser_batch` (1-20 ordered actions, one final view, per-action
+  outcomes), view modes `auto/full/compact/none` with label deltas (compact DOM
+  action 18-35 ms vs 360-1266 ms), cumulative per-tab label registry,
+  printable-ASCII keys, capture retries. 14 tools, 81 tests.
+
+### Round 4 — reasoning tokens and selection (commit `145ca2b`)
+- Question: "is it the tools? missing capabilities? make it fast".
+- Measured (`run-...T21-30-54-909Z-ac82d4`, 5 work turns): effort `off` turns ran
+  **0.87-1.94 s/step** with 54-75 output tokens; `low` turns ran **3.16-6.96
+  s/step** with 211-420 output tokens, **63-93% of them hidden reasoning**. Batch
+  adoption was good where possible. The Docs comment turn (123 actions / 106
+  steps, 15 Escapes, 8 Ctrl+Alt+M, 3 disabled Comment items, 2 NOT_EDITABLE)
+  proved text selection was missing. Prompts climbed 45 K -> 140 K tokens/step.
+- Fixes: `act` reasoning class (short imperative work prompts -> off; questions/
+  synthesis stay low), `browser_select` (trusted drag + selected-text readback,
+  batch-compatible, Docs comment recipe), `compaction-basic` thresholds
+  0.06/0.02 (~63 K trigger vs 80%), `detail:"fast"` 640 px screenshots,
+  NOT_EDITABLE focus-fallback typing, named punctuation keys. 15 tools, 88 tests.
+
+### State at handoff / not yet validated
+- Commit `145ca2b`, clean tree, **88/88 tests**, companion running (PID in
+  `logs/companion.pid`), health `tools:true`, 15 tools registered, compaction
+  visible in `--dump-config`.
+- **The 145ca2b extension has not been exercised in a real user session yet.**
+  Reload the extension in `chrome://extensions` and reopen the side panel first
+  (the companion is already restarted). The latest real measurement is the
+  pre-145ca2b run cited above.
+- Expected but unverified: action turns drop toward the off-turn rate (~2-4x),
+  Docs comment workflows collapse to a few actions per comment, later-turn
+  prompts stop near the 63 K compaction trigger.
+- If effort `off` degrades complex planning, route `act` to `minimal` instead.
+
+### Measurement recipes
+- Per-step model time / prompt tokens / cache: `notification` -> `session.event`
+  `assistant/message` usage; TTFT from `frame.in` activity `model-start` to the
+  first text/reasoning delta.
+- Per-action browser time: `browser.command.result` `durationMs`; attribution =
+  model gaps (`tool.result` -> next `tool.call`) vs browser vs commit.
+- Reasoning volume: activity `kind:"reasoning"` deltas, or
+  `outputTokens - (visible text + tool args)/4`.
+- Images: `image.budget` events (`live`/`offloaded`) + image blocks in tool
+  results; ~780 input tokens per 1280 px screenshot, ~195 for `detail:"fast"`.
+- The first deep attribution lives in
+  `.dsh-home/browser-agent/analysis/canvas-latency.md` (gitignored).
