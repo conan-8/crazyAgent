@@ -73,8 +73,8 @@ Fields:
 | Source | Examples |
 |---|---|
 | `companion` | `run.start`, `turn.start`, `autoCapture.start/end`, `prompt.build`, `tool.call`, `tool.result`, `turn.end`, `dsh.session`, `log.export`, `signal`, `terminal`, `run.stop` |
-| `plugin` | also `reasoning.policy` (classification, chosen effort, prompt size) and `image.budget` / `image.budget.error` (live images, offloaded count, keep budget) |
-| `bridge` | `frame.in`, `frame.out`, `frame.event`, `browser.command.in/out`, `browser.result`; inbound live `activity` frames from the provider plugin |
+| `plugin` | also `reasoning.policy` (classification, chosen effort, prompt size), `reasoning.escalated` (`off`→`low` after 3 no-progress results), `image.budget` / `image.budget.midturn` / `image.budget.error` (live images, offloaded count, keep budget, hysteresis threshold), `tool.budget.exceeded` and `tool.loop.detected` (per-turn call cap / repeated-call breaker) |
+| `bridge` | `frame.in`, `frame.out`, `frame.event`, `browser.command.in/out`, `browser.result`, `bridge.ui.wait` (side-panel reconnect grace: command, waitedMs, connected); inbound live `activity` frames from the provider plugin |
 | `extension` | `app.boot`, `app.context`, `settings.loaded`, `settings.save`, `settings.pause`, `bridge.connect.start`, `bridge.open`, `bridge.connected`, `bridge.closed`, `chat.send`, `browser.command.start/result/error` (command id, call id, op, `durationMs`, `captureMs`/`encodeMs`, image metadata, tab and scroll state), `tab.active`, `testCapture.*`, `llm.models.request/result`, `llm.configure.request`, `llm.configured`, `log.modal.open`, `log.export.request/result` |
 | `plugin` | `provider.registered`, `bridge.connected`, `bridge.disconnect`, `bridge.command.send`, `bridge.command.result/error` |
 | `dsh` | `startup`, `ready`, `notification`, `assistant.text`, `session.resumed`, `session.resume.error` |
@@ -83,7 +83,7 @@ The `dsh.notification` events carry the raw SDK `session.event`/`session.status`
 
 Action outcomes appear in the matching `tool.result` text. Structured fields on `browser.command.result` now include `typed`, `pressed`, `navigated`, `waited`, `selected`, `view`, `labelsDelta` and `batch`; click pixel outcomes (`changed`, `signals`, `pixelsChanged`, `points`) remain text-only; parse the tool result when you need them. Compact and `view:"none"` results legitimately carry no image, and `detail:"fast"` snapshots are 640 px.
 
-Reasoning policy decisions are logged once per turn as `reasoning.policy` from the provider plugin, with `policy`, `classification`, `effort`, and `promptChars`. The chosen effort is applied to every step of that turn. Image-history trimming is logged as `image.budget` with `live`, `offloaded`, `keep`, and `targets`; failures appear as `image.budget.error`.
+Reasoning policy decisions are logged once per turn as `reasoning.policy` from the provider plugin, with `policy`, `classification`, `effort`, and `promptChars`. The chosen effort is applied to every step of that turn; when an `auto` `off` turn hits three consecutive no-progress tool results, `reasoning.escalated` records the switch to `low` for the rest of the turn. Image-history trimming is logged as `image.budget` (turn end) and `image.budget.midturn` (batched mid-turn hysteresis) with `live`/`before`, `offloaded`, `after`, `keep`, and `targets`; failures appear as `image.budget.error`. Tool-call guard events are `tool.budget.exceeded` (per-turn `maxToolCallsPerTurn`) and `tool.loop.detected` (identical call repeated past `maxRepeatedCalls`).
 
 Live model activity is separate from the durable DSH notifications. The provider plugin taps `agent/assistant-stream` and sends transient `activity` frames over the bridge. The bridge logs each inbound frame (with the current `turnId`) and forwards a `chat.activity` frame to the side panel. These frames carry reasoning/thinking deltas, visible text deltas, partial tool calls, usage, finish reasons, and attempt boundaries. The committed reasoning fallback is derived from the already-logged `assistant/message`; it is not logged a second time.
 
@@ -92,7 +92,7 @@ Live model activity is separate from the durable DSH notifications. The provider
 Warnings and errors become **signals** shown in the Debug log dialog and in `summary.md`. Detection includes:
 
 - severity `warn`/`error` on any event;
-- browser command failures (`PROTECTED_PAGE`, `CAPTURE_QUOTA`, `PAUSED`, `NO_UI`, script/capture errors);
+- browser command failures (`PROTECTED_PAGE`, `CAPTURE_QUOTA`, `PAUSED`, `SIDE_PANEL_CLOSED`, script/capture errors);
 - tool failures (`TOOL_FAILED`);
 - failed turns (`TURN_FAILED`);
 - slow captures (>500 ms), slow tools (>5 s), slow turns (>15 s), slow first DSH event (>5 s);

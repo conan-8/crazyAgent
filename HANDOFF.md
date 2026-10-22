@@ -1,6 +1,6 @@
 # CrazyAgent — continuation handoff
 
-Last updated: 2026-10-22. Repo is working, companion running, 15 tools, 88 tests.
+Last updated: 2026-10-22 (evening). Repo is working, companion running, 15 tools, 129 tests. A 2026-10-22 hardening pass fixed the compaction treadmill, reasoning misclassification, click/key edge cases, and added run-time guardrails.
 
 This file is the complete context transfer for a new conversation. Read it, then
 `README.md`, then the latest debug run if you need ground truth.
@@ -18,8 +18,8 @@ produced the current state) and README.md, then run:
 Do not re-derive the architecture invariants in HANDOFF.md §4.
 The companion is running (logs/companion.pid); restart it after companion or
 provider changes. The extension is loaded unpacked from extension/ and MUST be
-reloaded after extension changes. Current build: commit 145ca2b, 15 browser
-tools, 88 tests. The model is OpenRouter deepseek/deepseek-v4.1-flash-1017 with
+reloaded after extension changes. Current build: d1d9dd1 (2026-10-22 hardening
+pass), 15 browser tools, 129 tests. The model is OpenRouter deepseek/deepseek-v4.1-flash-1017 with
 reasoning effort "auto" (per-turn policy); the API key is stored in
 .dsh-home/browser-agent/api-key.
 Next task: <fill in>. If none is given, validate the current build in a real
@@ -61,7 +61,7 @@ modifications are:
 ┌───────────────┴───────────────────────────────────────────▼────────────────┐
 │  DSH runtime (sdk-minimal + patches)                                       │
 │    - agent loop, sessions, compaction, image offload                       │
-│    - provider plugin: 9 browser tools, guidance, reasoning policy          │
+│    - provider plugin: 15 browser tools, guidance, reasoning policy          │
 │    - WS role "tools"  ◄──── tool calls become browser commands ────────────┤
 └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -79,19 +79,19 @@ answers with `browser.result`.
 | Repo | `/home/conan/Documents/GitHub/crazyAgent` |
 | Node | 26.8.1 (needs 22.19+) |
 | DSH | `0.2.1-rc.2` (`@deepseek-ai/dsh`) |
-| Companion | running, PID in `logs/companion.pid` (2171634 after the A+B+C+D restart) |
+| Companion | running, PID in `logs/companion.pid` (restarted after the 2026-10-22 hardening pass) |
 | Bridge | `ws://127.0.0.1:17871/bridge` |
 | Health | `{"ok":true,"ui":false,"tools":true,"port":17871}` |
 | Token | read `.dsh-home/browser-agent/token` (do not commit it) |
 | Model | OpenRouter `deepseek/deepseek-v4.1-flash-1017` |
 | Base URL | `https://openrouter.ai/api/v1` |
-| Reasoning | `auto` (per-turn policy) |
+| Reasoning | `auto` (per-turn policy, with mid-turn escalation after 3 no-progress results) |
 | API key | stored, 73 bytes, `.dsh-home/browser-agent/api-key` (0600) |
-| Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash) |
+| Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash); **reload after this pass** |
 | Permissions | sidePanel, tabs, scripting, storage, **debugger**, **webNavigation**, host `<all_urls>` |
-| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-21T23-36-12-600Z-8f5493` (post-restart); the post-batch work run is `run-2026-10-21T21-30-54-909Z-ac82d4` |
-| Tests | 88/88 passing |
-| Git | `main` has baseline, burst-click, work-foundation, B+C+E and A+B+C+D commits; tree clean |
+| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-22T06-08-35-217Z-a4c366` (clean restart after the hardening pass); the 11-turn real-user run analysed for the fixes is `run-2026-10-21T23-36-12-600Z-8f5493` |
+| Tests | 129/129 passing (companion 34, extension 25, provider 70) |
+| Git | `main` has the original rounds plus the 2026-10-22 hardening commits (compaction policy, provider guards, extension resilience, companion reconnect grace, docs); tree clean |
 
 Historical validation (first real run, before the optimization rounds):
 
@@ -287,10 +287,10 @@ update them.
 |---|---|---|
 | `browser_screenshot` | View with tab/viewport/scroll metadata, numbered labels, surface list | `detail:"high"` uses 2048 px width; `delay_ms` 0-5000 waits in the page before capturing |
 | `browser_click` | Click a labelled element | DOM, open shadow roots, iframes. Returns `changed` + signals + fresh view |
-| `browser_click_at` | Click screenshot pixels or CSS coordinates; `points` bursts up to 8 | Canvas/video/iframe. One debugger attach + one capture per burst, per-point pixel diff. `view:"none"` = text-only fast mode; `settle_ms` 0-400 |
+| `browser_click_at` | Click screenshot pixels or CSS coordinates; `points` bursts up to 20 | Canvas/video/iframe. One debugger attach + one capture per burst, per-point pixel diff. Points outside the viewport are reported as `offScreen` and never clicked; scroll drift since the stored view is reported as `staleScroll`. `view:"none"` = text-only fast mode; `settle_ms` 0-400 |
 | `browser_batch` | Run an ordered sequence of 1-20 actions in one call | Allowed ops: click, click_at, hover, select_option, type, press_key, scroll, wait_for, navigate. One final view; compact per-action outcomes; `stop_on_error` default true; `view` default full; per-call timeout scales with action count |
 | `browser_type` | Type into a labelled editable field, or the focused element when unlabelled | DOM native setter + input/change for inputs/textarea, `execCommand` for contenteditable, trusted `Input.insertText` fallback and for canvas editors (Docs). `mode` replace/append; `submit` presses Enter; password values masked |
-| `browser_press_key` | One trusted key press with optional modifiers | Enter/Tab/Escape/Backspace/Delete/arrows/Home/End/PageUp/PageDown/Space/letters/digits; CDP `Input.dispatchKeyEvent` keyDown+keyUp, synthetic fallback |
+| `browser_press_key` | One trusted key press with optional modifiers | Enter/Tab/Escape/Backspace/Delete/arrows/Home/End/PageUp/PageDown/Space/letters/digits; also accepts composite chords (`shift+Tab`, `ctrl+Shift+ArrowLeft`, `meta+Enter`); CDP `Input.dispatchKeyEvent` keyDown+keyUp, synthetic fallback |
 | `browser_hover` | Hover a labelled element | Reveals hover-only menus/tooltips |
 | `browser_select_option` | Choose a native `<select>` option | Sets value, fires `input`/`change` |
 | `browser_read_text` | Rendered text | `page`/`viewport`, `offset`, `max_chars`; ~4 ms on fixtures |
@@ -364,9 +364,29 @@ Behavioural layers:
 - **Change signals for DOM clicks:** `url-change`, `title-change`,
   `scroll-change`, `text-change`, `dialog-change`, `dom-mutations:N`, `checked`,
   `aria-expanded`, `aria-selected`. A no-op returns **NO VISIBLE CHANGE**.
-- **Reasoning auto policy:** navigation → `off`; rapid game/reactive bursts →
-  `off`; inspect/synthesis → `low`.
-  Manual Off/Low/Medium/High in Settings. Logged as `reasoning.policy`.
+### New behavioural layers from the 2026-10-22 hardening pass
+
+- **Reasoning auto policy:** navigation → `off`; rapid/reactive → `off`; inspect/synthesis → `low`;
+  manual Off/Low/Medium/High in Settings; logged as `reasoning.policy`.
+- **Reasoning escalation:** an `off` turn that produces 3 consecutive no-progress tool results
+  (failure or `NO VISIBLE CHANGE`) is switched to `low` for the rest of the turn (auto policy
+  only, logged as `reasoning.escalated`). Classifier also understands follow-up corrections
+  ("smaller", "try again", "scroll up") and more action verbs (change/insert/upload/format/...).
+- **Runaway guard:** `maxToolCallsPerTurn` (default 80) and `maxRepeatedCalls` (default 3) fail
+  the offending call before it reaches the bridge (`TURN_BUDGET_EXCEEDED` / `LOOP_DETECTED`);
+  logged as `tool.budget.exceeded` / `tool.loop.detected`.
+- **Click/aim guards:** off-screen points skipped and reported; a click that must scroll the
+  target into view reports `scroll`/`scrolledIntoView` and invalidates the stored screenshot;
+  stale-label failures (`DETACHED`/`NOT_VISIBLE`/`UNKNOWN_LABEL`) append a capped fresh
+  "Current labels:" hint so the model can re-aim without a whole extra view.
+- **Tabs:** `browser_switch_tab` throws `AMBIGUOUS_TAB` with candidates when a query matches
+  several tabs and no exact title/URL match exists (the old behavior silently picked Gmail for
+  "Cool Document").
+- **Image budget:** in addition to `turn/end`, images are offloaded mid-turn with hysteresis
+  (> `imageHistoryKeep` + 8 live images, then down to `imageHistoryKeep`), so each batch costs
+  at most one prompt-cache invalidation per 8+ new screenshots instead of unbounded growth.
+- **Side-panel reconnect:** the bridge holds a provider command up to 8 s (`CRAZYAGENT_UI_GRACE_MS`)
+  for the panel to reconnect, then fails with retryable `SIDE_PANEL_CLOSED` instead of `NO_UI`.
 - **Image budget:** after each `turn/end`, newest 2 images stay in the request;
   older ones become placeholders via `image/offload` (attachments remain on
   disk). Logged as `image.budget`.
@@ -453,19 +473,24 @@ logs/<runId>/   events.jsonl, screenshots/, exports/, summary files
 
 ## 7. Test inventory
 
-`npm test` = 88 tests:
+`npm test` = 129 tests:
 
-- `companion/test/`: bridge (7), prompt (9), log store (2), credentials (2),
-  openrouter (5).
-- `extension/test/`: helpers (3), logger (4), tab match (5).
-- `packages/dsh-browser-extension/test/`: tools (38), reasoning (9),
-  image budget (4).
+- `companion/test/`: bridge + reconnect grace (16), prompt (9), log store (2),
+  credentials (2), openrouter (5).
+- `extension/test/`: helpers (3), logger (4), tab match (5), resilience
+  (off-screen click_at, stale scroll, scroll policy, tab ambiguity, composite
+  keys, stale-label hint, 13).
+- `packages/dsh-browser-extension/test/`: tools (49), reasoning (14),
+  image budget (7).
 
 E2E suites (not in `npm test`): `edge-click-e2e.mjs` (9 behaviours),
 `edge-canvas-e2e.mjs` (surfaces, trusted click, image mapping, pixel diff,
 wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
 `edge-work-e2e.mjs` (typing, keys, navigation, waiting on `form.html`),
-`edge-advanced-e2e.mjs` (shadow DOM, same/cross-origin iframes, select, hover).
+`edge-advanced-e2e.mjs` (shadow DOM, same/cross-origin iframes, select, hover —
+its hover step is a pre-existing stale script: it expects a labels array from a
+compact `view:"auto"` hover; treat failures there as historical, verify hover
+live with `view:"full"`).
 
 ---
 
@@ -477,27 +502,30 @@ wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
    composition strings, file inputs, and drag/drop (mouse-button drag of
    elements, as opposed to text selection).
 2. **Fast/batch canvas clicking — DONE.** `browser_click_at` accepts `points`
-   (1-8) and clicks a whole burst with one debugger attach and one capture;
-   `view:"none"` skips the screenshot for text-only fast bursts; the fixed
-   160 ms settle became an adaptive paint wait. Verified by the extended canvas
-   e2e (5 points, +5 trusted clicks, one view).
+   (1-20 since 2026-10-22) and clicks a whole burst with one debugger attach and
+   one capture; `view:"none"` skips the screenshot for text-only fast bursts;
+   the fixed 160 ms settle became an adaptive paint wait. Off-screen points are
+   now reported and skipped instead of being clamped to the viewport edge.
+   Verified by the extended canvas e2e and an e2e 19-point burst.
 3. **Drag/drop, sliders, map panning** — trusted `Input.dispatchMouseEvent`
    with `mousePressed` → `mouseMoved` (buttons=1) → `mouseReleased`. Also
    right-click/context menu.
 4. **File upload** — `DOM.setFileInputFiles` via debugger, or a picker-free
-   assignment for `<input type=file>`.
+   pathless `DataTransfer` assignment for `<input type=file>`; no local paths
+   from the page/model, user-attached files only. Still the top capability gap.
 5. **Native dialogs** — `alert`/`confirm`/`prompt`/print block the tab; handle
    with `Page.javascriptDialogOpening` + `Page.handleJavaScriptDialog` while
    attached.
 6. **Downloads / new-window popups** — synthetic clicks cannot open them; with
    CDP, `Page.windowOpen` / `Target.createTarget` handling is possible.
-7. **Mid-turn image pruning** — image budget currently runs only at
-   `turn/end`; a 24-tool turn accumulates screenshots and token growth (one run
-   hit ~844 K total tokens). Prune after each `tool/result` (with care around
-   request building) and/or add a step cap.
-8. **Step/tool-call cap** — no hard cap exists. A scripted mock once ran ~150
-   scroll steps. Real models rarely do this, but a per-turn guard is prudent;
-   DSH exposes no cancel through the SDK, so this needs an agent-level guard.
+7. **Mid-turn image pruning — DONE (2026-10-22).** The provider appends batched
+   `image/offload` decisions on `tool/result` with hysteresis (> keep + 8 live
+   images, then down to keep), plus the existing `turn/end` pass; logged as
+   `image.budget.midturn`. One cache invalidation per 8+ new screenshots.
+8. **Step/tool-call cap — DONE (2026-10-22).** Provider-level
+   `maxToolCallsPerTurn` (80) and `maxRepeatedCalls` (3) with
+   `TURN_BUDGET_EXCEEDED` / `LOOP_DETECTED` tool errors. DSH still has no
+   cancel through the SDK, so this is a soft guard (the model is told to stop).
 9. **Click outcome logging** — the four new ops are structured in
    `browser.command.result` (`typed`, `pressed`, `navigated`, `waited`), but
    `changed`/`pixelsChanged`/`clicked`/`points` are still only in `tool.result`
@@ -512,6 +540,27 @@ wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
 13. **Form-fill batching — DONE.** `browser_batch` covers multi-field forms,
     table cells (type + Tab), shortcut sequences and multi-click sequences with
     one final view.
+14. **Name/role targeting and reveal-boundary batches** — the biggest remaining
+    round-trip cost on Docs-style apps: menus cost one model call per level and a
+    batch cannot cross a reveal boundary. Add a bounded name→label resolver
+    (fail-closed on ambiguity) and/or an auto-snapshot boundary inside a batch.
+15. **A skill/recipe layer** — named procedures (`docs_insert_image_from_url`,
+    `docs_fix_comment`, `docs_format_line`, `chimp_burst`, `form_fill_submit`)
+    expanded into `browser_batch` calls, recorded from successful sequences.
+    This is what "skills" means here: the agent has primitives but re-derives
+    every procedure each turn (T2 re-opened the same menu six times).
+16. **Verify-before-claim discipline** — the 2026-10-22 run contained false
+    claims ("all 30 targets", "level 19 / 19 passes", "I set zoom back to 100%")
+    and one misdiagnosis ("the board froze"). Require claims to cite the latest
+    read-back/screenshot, especially after destructive edits.
+17. **Observation primitives for animation** — reaction-time and
+    sequence-memory games cannot be played through a 0.9–1.5 s screenshot loop.
+    Add a page-side "wait for pixel/region change then click" primitive, burst
+    frame capture, or declare those games out of scope.
+18. **Context cost observability** — auto-write a per-run `summary.md`
+    (model/browser/compaction attribution, cache hit, duplicate calls, error
+    table) and alert on budgets; the 2026-10-22 analysis was all derived from
+    `events.jsonl` by hand.
 
 ---
 
@@ -587,13 +636,44 @@ wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
   of work at `low` ran **3.16–6.96 s/step** with 211–420 output tokens, of which
   63–93% were hidden reasoning (a 686-token step carried only 312 chars of tool
   arguments). Action prompts therefore classify as `act` → `off`.
-- **Never prune history mid-turn.** `image/offload` changes the request prefix,
-  so pruning during a turn would invalidate the prompt cache on every later
-  step. Prune at turn boundaries and configure `compaction-basic` for the
-  cross-turn growth instead.
+- **Never prune *compaction* history mid-turn.** A compaction rewrite changes the
+  request prefix and invalidates the prompt cache. The image budget is the
+  exception: batched `image/offload` on `tool/result` with hysteresis (keep + 8)
+  costs at most one cache miss per batch and is worth it, because screenshots are
+  the part of the prompt that grows monotonically.
 - **Native text selection needs trusted input.** Untrusted synthetic
   `mousemove` events do not extend a selection; `browser_select` must use CDP
   `Input.dispatchMouseEvent` with `buttons:1` between press and release.
+- **Compaction thresholds must be sized against *billed* tokens, not metered
+  ones.** Measured 2026-10-22: the OpenRouter/pi-ai route has no
+  `imageRequestPricing`, so the token meter priced each screenshot at ~53 tokens
+  while the provider billed 674–990. A 6%/2% trigger on a 1M window (~63 K) then
+  compacted 79 times in 11 turns: the "20.8 K retained tail" held 58–89 images
+  (~50 K real), each pass freed ~1–2.8 K, 15 passes failed the shrink check
+  *after* paying for a summary, and post-compaction requests had a 10.5% cache
+  hit vs 96.4% normally (27% of run wall, 60% of one turn). Fix: trigger at 55%
+  of the window (~577 K), `retainTokens: 20000`, `maxTokens: 8192`, and keep
+  prompts small with the image budget instead. If you change the model route,
+  check whether its adapter declares `imageRequestPricing` before lowering the
+  threshold again.
+- **Clamped coordinates are silent wrong clicks.** `click_at` used to clamp
+  every point into the viewport; a stale aim then clicked the viewport edge and
+  reported only "no visible change" (a chimp board looked "frozen" when it was
+  merely scrolled). Now off-screen points are reported and skipped, and
+  `staleScroll`/`scrolledIntoView` tell the model when its image coordinates no
+  longer map. Never silently clamp a coordinate again.
+- **A labelled click may scroll the page.** `scrollIntoView` was unconditional;
+  clicking Continue in a game moved the page 111 px and invalidated the model's
+  aim for the rest of the turn. Scroll only when the target is not fully visible,
+  report the delta, and invalidate the stored screenshot when it moves.
+- **Guard loops before they burn tokens.** The 11-turn run had 74 identical
+  tool calls (21%) and no cap of any kind; one turn used 104 calls / 6.06 M
+  prompt tokens. A per-turn call budget and repeated-call breaker are cheap and
+  fail the call before the browser is touched.
+- **Compaction and image offload are not free abstractions.** Both are model-
+  visible durable rewrites; instrument them (`reasoning.escalated`,
+  `tool.budget.exceeded`, `tool.loop.detected`, `image.budget.midturn`,
+  `bridge.ui.wait`) or their cost is invisible in the log.
 
 ---
 
@@ -624,7 +704,19 @@ Environment variables:
 | `CRAZYAGENT_REASONING_POLICY` | `auto`/`off`/`low`/`medium`/`high` passed to the plugin |
 | `CRAZYAGENT_CREDENTIALS_PATH` | DSH credential store path |
 | `CRAZYAGENT_PORT`, `CRAZYAGENT_DSH_HOME`, `CRAZYAGENT_PATCH`, `CRAZYAGENT_MAX_TOKENS`, `CRAZYAGENT_MODEL`, `CRAZYAGENT_BASE_URL`, `CRAZYAGENT_REASONING_EFFORT` | companion defaults |
+| `CRAZYAGENT_UI_GRACE_MS` | side-panel reconnect grace window before browser commands fail with `SIDE_PANEL_CLOSED` (default 8000; 0 = immediate old behavior) |
 | `DSH_BROWSER_BRIDGE_URL`, `DSH_BROWSER_BRIDGE_TOKEN` | injected into DSH for the provider plugin |
+
+Provider plugin config (keyed under the `browser-extension` insert in
+`config/browser.patch.yml`): `bridgeUrl`, `bridgeToken`, `requestTimeoutMs`,
+`reasoningPolicy`, `imageHistoryKeep` (newest live images kept at turn end and
+mid-turn; default 2), `maxToolCallsPerTurn` (default 80), `maxRepeatedCalls`
+(default 3). Mid-turn image offload hysteresis is fixed at keep + 8 live images.
+
+Compaction policy (`compaction-basic` overlay): `thresholdRatio: 0.55`,
+`headroomTokens: 131072`, `retainTokens: 20000`, `maxTokens: 8192`, plus a
+`modelPolicies` entry for `openrouter/deepseek/deepseek-v4.1-flash-1017`.
+Effective trigger on the 1,048,576 window: **576,716 tokens**.
 
 Reasoning auto policy (per turn, from the claimed prompt):
 
@@ -638,6 +730,10 @@ Reasoning auto policy (per turn, from the claimed prompt):
 
 Reasoning is held for all steps of a turn; decisions appear as
 `reasoning.policy` in `events.jsonl` and as `policy` entries in the live feed.
+In `auto` mode, an `off` turn that accumulates 3 consecutive no-progress tool
+results (failure or `NO VISIBLE CHANGE`) is escalated to `low` for the rest of
+that turn and logged as `reasoning.escalated`; a manual policy is never
+overridden.
 
 Generated model route (from `companion/openrouter.mjs`):
 
@@ -707,7 +803,7 @@ read it from `chrome://extensions`.
 
 1. `cd /home/conan/Documents/GitHub/crazyAgent`
 2. `curl -s http://127.0.0.1:17871/health` — expect `tools:true`.
-3. `npm test` — expect 88 passing.
+3. `npm test` — expect 129 passing.
 4. Read the latest run under `.dsh-home/browser-agent/logs/` if investigating a
    specific behaviour (`events.jsonl`, `summary.md`).
 5. Reload the extension if `extension/` changed since the last load.
@@ -804,18 +900,45 @@ root causes, fix the architecture, verify with tests + Edge e2e, commit.
   0.06/0.02 (~63 K trigger vs 80%), `detail:"fast"` 640 px screenshots,
   NOT_EDITABLE focus-fallback typing, named punctuation keys. 15 tools, 88 tests.
 
+### Round 5 — 2026-10-22 hardening pass (from the 11-turn real-user run)
+- Input: the first real session on the post-`145ca2b` build — Docs comment fixes,
+  a Google-Docs image insert, and four Human Benchmark games
+  (`run-2026-10-21T23-36-12-600Z-8f5493`, 11 turns, 364 steps, 354 tool calls,
+  1,911.7 s of turn wall).
+- Measured: **model round trips 60.0% of wall, compaction 27.0%, browser 12.7%**.
+  79 compactions freed ~2.8 K median each and re-fired (T11: 2 per step for 24
+  steps, 59.6% of that turn). Root cause: the pi-ai route under-prices images to
+  the token meter (53 metered vs 674–990 billed), so the 6%/2% threshold could
+  never converge. The hardest task ("add an image") ran `act/off` with 0
+  reasoning chars and 104 calls; 4 action turns were misclassified as
+  `inspect/low` and burned 165 K reasoning chars; 74 identical calls (21%) with
+  no cap; a mid-run side-panel reload killed a 446 s turn; a clipped viewport
+  made the chimp board look "frozen".
+- Fixes (this pass): compaction policy 0.55/0.20 K/8 K; screenshot image budget
+  mid-turn with hysteresis; classify more action verbs + follow-up corrections +
+  dynamic `off→low` escalation after 3 no-progress results; composite key
+  chords; click_at 8→20 points with off-screen/stale-scroll reporting; click no
+  longer force-scrolls; tab ambiguity error; stale-label hint in errors;
+  per-turn call budget + repeated-call breaker; side-panel reconnect grace +
+  `SIDE_PANEL_CLOSED`; GUIDANCE updates (no ctrl+W, prefer `browser_select`,
+  file-picker limitation). 129 tests (+41), click/canvas/work e2e green.
+- Not yet done: **real-session validation of this pass** (the extension must be
+  reloaded in `chrome://extensions` and the panel reopened), file upload,
+  dialogs, drag/slider/right-click, clipboard/IME, downloads/popups, and a
+  skill/recipe layer (see §8).
+
 ### State at handoff / not yet validated
-- Commit `145ca2b`, clean tree, **88/88 tests**, companion running (PID in
-  `logs/companion.pid`), health `tools:true`, 15 tools registered, compaction
-  visible in `--dump-config`.
-- **The 145ca2b extension has not been exercised in a real user session yet.**
-  Reload the extension in `chrome://extensions` and reopen the side panel first
-  (the companion is already restarted). The latest real measurement is the
-  pre-145ca2b run cited above.
-- Expected but unverified: action turns drop toward the off-turn rate (~2-4x),
-  Docs comment workflows collapse to a few actions per comment, later-turn
-  prompts stop near the 63 K compaction trigger.
-- If effort `off` degrades complex planning, route `act` to `minimal` instead.
+- 2026-10-22 hardening pass on `main`, clean tree, **129/129 tests**, companion
+  restarted (PID in `logs/companion.pid`), health `tools:true`, 15 tools,
+  effective compaction trigger 576,716 visible in `--dump-config`.
+- **The hardened extension has not been exercised in a real user session yet.**
+  Reload it in `chrome://extensions` and reopen the side panel first.
+- Expected but unverified: action turns stop compacting, T11-class turns drop
+  from 446 s toward ~150–180 s, fewer duplicate calls, no compaction-treadmill
+  cache collapse, and no forced-scroll mis-aim.
+- Open question: whether the dynamic `off→low` escalation is enough for hard GUI
+  tasks, or whether "hard" action prompts (image/upload/format/Docs) should
+  start at `low` instead of `off`.
 
 ### Measurement recipes
 - Per-step model time / prompt tokens / cache: `notification` -> `session.event`
