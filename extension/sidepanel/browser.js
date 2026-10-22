@@ -33,6 +33,18 @@ const lastViewByTab = new Map()
 const tabLabelsByTab = new Map()
 const MAX_LABEL_TABS = 20
 const lastScrollByTab = new Map()
+/** Upper bound for one click_at points burst (raised from 8 so a 19-point
+ * whack-a-dot burst is one attach, one capture). */
+const CLICK_AT_MAX_POINTS = 20
+/** Scroll drift (CSS px) that makes a stored screenshot's coordinates stale. */
+const STALE_SCROLL_THRESHOLD_PX = 40
+/** Margin (CSS px) that still counts as "fully inside" the viewport. */
+const SCROLL_VISIBLE_MARGIN_PX = 4
+/** Click failure codes that mean the label list moved on; the retry hint applies. */
+const STALE_LABEL_CODES = new Set(['DETACHED', 'NOT_VISIBLE', 'UNKNOWN_LABEL'])
+/** Caps for the stale-label retry hint appended to those errors. */
+const LABEL_HINT_MAX_LABELS = 25
+const LABEL_HINT_MAX_CHARS = 1_200
 /** >0 while batch actions run: inner actions must not build their own view. */
 let batchDepth = 0
 /** Named keys supported by press_key, with DOM and CDP keyboard data. */
@@ -941,6 +953,95 @@ function clearLabelsPage() {
 }
 
 /**
+ * True when an element's rect is fully inside the viewport, minus a small
+ * margin. This is the scroll policy for labelled clicks. It is a pure copy of
+ * the in-page check in clickLabelled because injected functions are serialized
+ * alone and cannot reference module helpers.
+ * @param {{top: number, left: number, bottom: number, right: number, width?: number, height?: number}} rect
+ * @param {{width: number, height: number}} viewport
+ * @param {number} [margin]
+ */
+export function isRectFullyVisible(rect, viewport, margin = SCROLL_VISIBLE_MARGIN_PX) {
+  if (!rect) return false
+  const width = Number(viewport?.width) || 0
+  const height = Number(viewport?.height) || 0
+  if (width <= 0 || height <= 0) return false
+  if (Number(rect.width) < 1 || Number(rect.height) < 1) return false
+  const inset = Math.max(0, Number(margin) || 0)
+  return Number(rect.top) >= inset
+    && Number(rect.left) >= inset
+    && Number(rect.bottom) <= height - inset
+    && Number(rect.right) <= width - inset
+}
+
+/**
+ * Compact retry hint for stale-label failures: the current label list, capped
+ * so the error message cannot balloon. Labels whose text matches the failed
+ * element's text are listed first so the model can re-aim without paying a
+ * fresh view round trip. Pure, so the cap behavior is testable without Chrome.
+ * @param {Array<Record<string, any>>} labels
+ * @param {{maxLabels?: number, maxChars?: number, preferText?: string}} [options]
+ */
+export function formatLabelsHint(labels, options = {}) {
+  const maxLabels = Math.max(1, Math.min(
+    LABEL_HINT_MAX_LABELS,
+    Number.isFinite(Number(options.maxLabels)) ? Math.floor(Number(options.maxLabels)) : LABEL_HINT_MAX_LABELS,
+  ))
+  const maxChars = Math.max(1, Number.isFinite(Number(options.maxChars)) ? Math.floor(Number(options.maxChars)) : LABEL_HINT_MAX_CHARS)
+  const prefer = String(options.preferText ?? '').replace(/\s+/gu, ' ').trim().toLowerCase()
+  const candidates = []
+  for (const label of Array.isArray(labels) ? labels : []) {
+    if (!label || !Number.isFinite(Number(label.id))) continue
+    const text = String(label.text ?? '').replace(/\s+/gu, ' ').trim()
+    const role = String(label.role || label.tag || 'element')
+    const haystack = text.toLowerCase()
+    let relevance = 0
+    if (prefer.length > 0 && haystack.length > 0) {
+      if (haystack === prefer) relevance = 2
+      else if (haystack.includes(prefer) || prefer.includes(haystack)) relevance = 1
+    }
+    candidates.push({ id: Number(label.id), role, text, disabled: label.disabled === true, relevance })
+  }
+  // Stable in modern JS: equal relevance keeps the view's (DOM) order.
+  candidates.sort((a, b) => b.relevance - a.relevance)
+  const parts = []
+  let used = 'Current labels: '.length
+  for (const label of candidates) {
+    if (parts.length >= maxLabels) break
+    const quoted = label.text.length > 0 ? ` ${JSON.stringify(label.text.slice(0, 60))}` : ''
+    const part = `[${label.id}] ${label.role}${quoted}${label.disabled ? ' (disabled)' : ''}`
+    if (parts.length > 0 && used + part.length + 2 > maxChars) break
+    parts.push(part)
+    used += part.length + 2
+  }
+  if (parts.length === 0) return 'Current labels: none visible on the page right now.'
+  const remaining = candidates.length - parts.length
+  return `Current labels: ${parts.join('; ')}${remaining > 0 ? `; … ${remaining} more` : ''}`
+}
+
+/**
+ * Append a fresh label list to a stale-label BrowserError before it is logged
+ * and forwarded, so the model can retry without paying a whole view round trip.
+ * Fail-closed: it never re-resolves or auto-clicks anything, and it only appends
+ * to the message — the original error code and message are preserved. Label
+ * collection is best effort; a failure here leaves the original error untouched.
+ * @param {chrome.tabs.Tab} tab
+ * @param {BrowserError} error
+ * @param {string} [preferText]
+ */
+async function decorateStaleLabelError(tab, error, preferText) {
+  if (!error || !STALE_LABEL_CODES.has(error.code)) return error
+  try {
+    const labelled = await labelOnly(tab)
+    const hint = formatLabelsHint(labelled.labels, { preferText })
+    if (typeof hint === 'string' && hint.length > 0) error.message = `${error.message} ${hint}`
+  } catch {
+    // Best effort only: never mask the original failure.
+  }
+  return error
+}
+
+/**
  * Click one labelled element by dispatching the pointer/mouse sequence a real
  * click produces, then report whether the page changed.
  * @param {number} label persistent label id
@@ -964,20 +1065,36 @@ async function clickLabelled(label) {
     return { ok: false, code: 'DISABLED', message: `Label ${label} (${tag} ${JSON.stringify(text)}) is disabled and cannot be clicked.`, clicked: { label, tag, role, text } }
   }
 
-  el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
+  // Scroll only when the target is not already fully inside the viewport: a
+  // click that scrolls invalidates the stored screenshot's image coordinates,
+  // so an already-visible target must never move the page.
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const margin = 4
+  const documentScrollTop = () => Math.round((document.scrollingElement || document.documentElement).scrollTop || 0)
+  const fullyVisible = box => box.width >= 1 && box.height >= 1
+    && box.top >= margin && box.left >= margin
+    && box.bottom <= vh - margin && box.right <= vw - margin
+  let rect = el.getBoundingClientRect()
+  const scrollFromY = documentScrollTop()
+  let scrolledIntoView = false
+  if (!fullyVisible(rect)) {
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
+    scrolledIntoView = true
+    await Promise.race([
+      new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      new Promise(resolve => setTimeout(resolve, 60)),
+    ])
+    rect = el.getBoundingClientRect()
+  }
   const __tScroll = performance.now()
-  await Promise.race([
-    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    new Promise(resolve => setTimeout(resolve, 60)),
-  ])
+  const scrollToY = documentScrollTop()
+  const scroll = { fromY: scrollFromY, toY: scrollToY, dy: scrollToY - scrollFromY }
 
   const __tRaf = performance.now()
-  const rect = el.getBoundingClientRect()
   if (rect.width < 1 || rect.height < 1) {
     return { ok: false, code: 'NOT_VISIBLE', message: `Label ${label} has no visible box. Take a fresh screenshot.` }
   }
-  const vw = window.innerWidth
-  const vh = window.innerHeight
   const cx = Math.max(0, Math.min(vw - 1, rect.left + rect.width / 2))
   const cy = Math.max(0, Math.min(vh - 1, rect.top + rect.height / 2))
   const rootNode = el.getRootNode()
@@ -1041,7 +1158,7 @@ async function clickLabelled(label) {
     || (tag === 'input' && (el.type === 'submit' || el.type === 'image'))
   if (navigationProne) {
     observer.disconnect()
-    return { ok: true, clicked: { label, tag, role, text }, changed: true, signals: ['navigation-possible'], mutations: 0, pendingNavigation: true }
+    return { ok: true, clicked: { label, tag, role, text }, changed: true, signals: ['navigation-possible'], mutations: 0, pendingNavigation: true, scroll, scrolledIntoView }
   }
 
   // Resolve as soon as the page reacts, with a short ceiling. A click that
@@ -1083,6 +1200,8 @@ async function clickLabelled(label) {
     changed: signals.length > 0,
     signals,
     mutations,
+    scroll,
+    scrolledIntoView,
     timings: {
       resolveMs: Math.round(__tScroll - __t0),
       rafMs: Math.round(__tRaf - __tScroll),
@@ -2289,7 +2408,8 @@ async function readText(settings, scope, offset, maxChars) {
 
 /**
  * Score tab title/URL matches for query-based switching. Pure helper so the
- * matching behavior is testable without Chrome.
+ * matching behavior is testable without Chrome. `candidates` lists the best
+ * matches (up to five) so an ambiguous query can name them in its error.
  * @param {Array<Record<string, any>>} tabs
  * @param {string} query
  */
@@ -2312,7 +2432,35 @@ export function matchTabQuery(tabs, query) {
   }
   scored.sort((a, b) => b.score - a.score || (Number(a.tab.index) || 0) - (Number(b.tab.index) || 0))
   const best = scored[0]
-  return best === undefined ? undefined : { tab: best.tab, score: best.score, matchCount: scored.length }
+  return best === undefined
+    ? undefined
+    : {
+        tab: best.tab,
+        score: best.score,
+        matchCount: scored.length,
+        candidates: scored.slice(0, 5).map(entry => entry.tab),
+      }
+}
+
+/**
+ * True when a query matched several tabs and none of them was an exact
+ * title/URL match. Such a query must not silently pick the best-scoring tab.
+ * @param {{matchCount?: number, score?: number} | undefined} match
+ */
+export function isAmbiguousTabMatch(match) {
+  return Boolean(match) && Number(match.matchCount) > 1 && Number(match.score) < 100
+}
+
+/**
+ * `id "title" url` lines for an AMBIGUOUS_TAB message.
+ * @param {Array<Record<string, any>>} tabs
+ * @param {number} [limit]
+ */
+export function formatTabCandidates(tabs, limit = 5) {
+  return (Array.isArray(tabs) ? tabs : [])
+    .slice(0, Math.max(0, Number(limit) || 0))
+    .map(tab => `${tab.id} ${JSON.stringify(String(tab.title ?? ''))} ${String(tab.url ?? '')}`)
+    .join('; ')
 }
 
 /**
@@ -2367,6 +2515,15 @@ async function activateTab(settings, tabId, query) {
     const match = matchTabQuery(list.tabs, text)
     if (match === undefined) {
       throw new BrowserError('TAB_NOT_FOUND', `No tab title or URL matched ${JSON.stringify(text)}. Current tabs: ${list.tabs.map(tab => `${tab.id} ${JSON.stringify(tab.title)}`).join('; ')}`)
+    }
+    // Several tabs can share a query prefix (e.g. "Cool Document" also matched a
+    // Gmail tab). Refuse to guess: the caller must pick a candidate or use
+    // tab_id, otherwise the agent acts on the wrong page.
+    if (isAmbiguousTabMatch(match)) {
+      throw new BrowserError(
+        'AMBIGUOUS_TAB',
+        `Query ${JSON.stringify(text)} matched ${match.matchCount} tabs and none exactly. Candidates: ${formatTabCandidates(match.candidates)}. Pass tab_id or a more specific query.`,
+      )
     }
     requestedQuery = text
     matchCount = match.matchCount
@@ -2425,11 +2582,11 @@ function parseSettleMs(value) {
 
 /**
  * Validate click_at arguments into a single burst request. A burst is either
- * one legacy `x`/`y` pair or a `points` array of 1..8 pairs, never both.
+ * one legacy `x`/`y` pair or a `points` array of 1..20 pairs, never both.
  * @param {Record<string, any>} args
  * @returns {{points: Array<{x: number, y: number}>, space: 'image'|'css', view: 'fresh'|'none', settleMs: number|undefined}}
  */
-function parseClickAtArgs(args) {
+export function parseClickAtArgs(args) {
   const hasPoints = args.points !== undefined
   const hasCoordinates = args.x !== undefined || args.y !== undefined
   if (hasPoints && hasCoordinates) {
@@ -2443,8 +2600,8 @@ function parseClickAtArgs(args) {
   const view = rawView === 'auto' ? 'full' : rawView
   const settleMs = parseSettleMs(args.settle_ms)
   if (hasPoints) {
-    if (!Array.isArray(args.points) || args.points.length === 0 || args.points.length > 8) {
-      throw new BrowserError('BAD_POINTS', 'points must be an array of 1 to 8 {x, y} coordinate objects.')
+    if (!Array.isArray(args.points) || args.points.length === 0 || args.points.length > CLICK_AT_MAX_POINTS) {
+      throw new BrowserError('BAD_POINTS', `points must be an array of 1 to ${CLICK_AT_MAX_POINTS} {x, y} coordinate objects.`)
     }
     const points = args.points.map((point, index) => {
       const x = Number(point?.x)
@@ -2465,13 +2622,62 @@ function parseClickAtArgs(args) {
 }
 
 /**
+ * Map burst points into viewport CSS coordinates. Off-screen points are marked
+ * and reported with their raw (unclamped) coordinates; only on-screen points
+ * are clamped for dispatch. Pure so the off-screen rule is testable.
+ * @param {Array<{x: number, y: number}>} points
+ * @param {'image'|'css'} space
+ * @param {{width: number, height: number}} viewport
+ * @param {number} [imageScale]
+ * @returns {Array<{space: 'image'|'css', x: number, y: number, cssX: number, cssY: number, offScreen: boolean}>}
+ */
+export function mapClickPoints(points, space, viewport, imageScale = 1) {
+  const width = Number(viewport?.width) || 0
+  const height = Number(viewport?.height) || 0
+  const scale = space === 'image' ? (Number.isFinite(Number(imageScale)) ? Number(imageScale) : 1) : 1
+  return points.map(point => {
+    const rawX = space === 'css' ? Number(point.x) : Number(point.x) * scale
+    const rawY = space === 'css' ? Number(point.y) : Number(point.y) * scale
+    // A 2px tolerance keeps edge-of-viewport targets clickable; beyond that the
+    // point cannot be aimed at the live page, so it must never be dispatched.
+    const offScreen = !Number.isFinite(rawX) || !Number.isFinite(rawY)
+      || rawX < -2 || rawX > width + 2 || rawY < -2 || rawY > height + 2
+    return {
+      space,
+      x: point.x,
+      y: point.y,
+      cssX: offScreen ? rawX : Math.max(0, Math.min(width - 1, rawX)),
+      cssY: offScreen ? rawY : Math.max(0, Math.min(height - 1, rawY)),
+      offScreen,
+    }
+  })
+}
+
+/**
+ * Compare the scroll position stored with a view against the current one. A
+ * drift larger than the threshold means the stored image's coordinates are
+ * stale. Returns undefined when the view scroll is unknown or still accurate.
+ * @param {{y?: number} | undefined} storedScroll
+ * @param {{y?: number} | undefined} currentScroll
+ * @param {number} [threshold]
+ */
+export function staleScrollInfo(storedScroll, currentScroll, threshold = STALE_SCROLL_THRESHOLD_PX) {
+  if (!storedScroll || !currentScroll) return undefined
+  const fromY = Math.round(Number(storedScroll.y) || 0)
+  const toY = Math.round(Number(currentScroll.y) || 0)
+  const dy = toY - fromY
+  return Math.abs(dy) > Math.max(0, Number(threshold) || 0) ? { fromY, toY, dy } : undefined
+}
+
+/**
  * Click one or more points in the current view. Used for canvas/video/iframe
  * surfaces where no DOM label exists. Coordinates default to screenshot pixels;
- * `space: "css"` is direct viewport CSS. A burst clicks up to 8 points with one
+ * `space: "css"` is direct viewport CSS. A burst clicks up to 20 points with one
  * debugger attach, one settle, and one capture; `view: "none"` skips the
- * capture entirely and reports changed: null. Uses trusted browser input when
- * possible and verifies with a pixel diff, which is the only change signal
- * those surfaces produce.
+ * capture entirely and reports changed: null. Points outside the viewport are
+ * reported with offScreen:true and are never dispatched. Uses trusted browser
+ * input when possible and verifies with a pixel diff, which is the only change
+ * signal those surfaces produce.
  * @param {import('./protocol.js').Settings} settings
  * @param {Record<string, any>} args
  */
@@ -2489,42 +2695,49 @@ async function clickAt(settings, args) {
     throw new BrowserError('NO_VIEW', 'Take a screenshot first so image coordinates can be mapped to the page.')
   }
   const imageScale = request.space === 'image' ? viewport.width / before.image.width : 1
-  const targets = request.points.map(point => ({
-    space: request.space,
-    x: point.x,
-    y: point.y,
-    cssX: Math.max(0, Math.min(viewport.width - 1, request.space === 'css' ? point.x : point.x * imageScale)),
-    cssY: Math.max(0, Math.min(viewport.height - 1, request.space === 'css' ? point.y : point.y * imageScale)),
-  }))
+  // An off-screen coordinate used to be clamped to a viewport edge and clicked
+  // silently, which is how a stale burst became a "frozen board". Off-screen
+  // points are marked and skipped instead; on-screen points keep the clamp.
+  const targets = mapClickPoints(request.points, request.space, viewport, imageScale)
+  const onScreen = targets.filter(target => target.offScreen !== true)
+  const offScreenCount = targets.length - onScreen.length
 
   let trusted = true
-  try {
-    // One attach for the whole burst: the debugger handshake is not paid per point.
-    await withDebugger(tab.id, async () => {
-      for (const target of targets) await trustedClick(tab.id, target.cssX, target.cssY)
-    })
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'DEBUGGER_BUSY') throw error
-    trusted = false
-    const dispatched = await runInTab(tab.id, syntheticClickBurst, [targets.map(target => ({ x: target.cssX, y: target.cssY }))], 4_000)
-    if (!Array.isArray(dispatched) || !dispatched.some(Boolean)) {
-      throw new BrowserError('CLICK_POINT_EMPTY', 'There is no element at that point.')
+  if (onScreen.length > 0) {
+    try {
+      // One attach for the whole burst: the debugger handshake is not paid per point.
+      await withDebugger(tab.id, async () => {
+        for (const target of onScreen) await trustedClick(tab.id, target.cssX, target.cssY)
+      })
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'DEBUGGER_BUSY') throw error
+      trusted = false
+      const dispatched = await runInTab(tab.id, syntheticClickBurst, [onScreen.map(target => ({ x: target.cssX, y: target.cssY }))], 4_000)
+      if (!Array.isArray(dispatched) || !dispatched.some(Boolean)) {
+        throw new BrowserError('CLICK_POINT_EMPTY', 'There is no element at that point.')
+      }
     }
   }
 
   const noCapture = request.view === 'none' || request.view === 'compact' || batchDepth > 0
+  const unclickedDiff = { changed: null, percent: null, mean: null }
   let shot
-  let diffs = targets.map(() => ({ changed: false, percent: 0, mean: 0 }))
+  let diffs = targets.map(target => target.offScreen === true ? { ...unclickedDiff } : { changed: false, percent: 0, mean: 0 })
   if (!noCapture) {
     await settleAfterInput(tab.id, request.settleMs)
     shot = await snapshot('normal', settings)
-    diffs = await Promise.all(targets.map(target => diffRegion(before, shot, target.cssX, target.cssY, 120)))
+    diffs = await Promise.all(targets.map(target => target.offScreen === true
+      ? { ...unclickedDiff }
+      : diffRegion(before, shot, target.cssX, target.cssY, 120)))
     // A canvas frame can occasionally miss the first capture; retry once
-    // before reporting no change. Never more than two captures per burst.
-    if (diffs.every(diff => !diff.changed) && before?.image?.data) {
+    // before reporting no change. Never more than two captures per burst, and
+    // never when there was nothing to click.
+    if (onScreen.length > 0 && diffs.every(diff => !diff.changed) && before?.image?.data) {
       await pauseInTab(tab.id, 120)
       shot = await snapshot('normal', settings)
-      diffs = await Promise.all(targets.map(target => diffRegion(before, shot, target.cssX, target.cssY, 120)))
+      diffs = await Promise.all(targets.map(target => target.offScreen === true
+        ? { ...unclickedDiff }
+        : diffRegion(before, shot, target.cssX, target.cssY, 120)))
     }
   }
   const noPixelDiff = request.view === 'none' || request.view === 'compact' || batchDepth > 0
@@ -2534,6 +2747,7 @@ async function clickAt(settings, args) {
     y: target.y,
     cssX: Math.round(target.cssX),
     cssY: Math.round(target.cssY),
+    offScreen: target.offScreen === true,
     changed: noPixelDiff ? null : diffs[index].changed,
     pixelsChanged: noPixelDiff ? null : diffs[index].percent,
     pixelMean: noPixelDiff ? null : diffs[index].mean,
@@ -2543,10 +2757,13 @@ async function clickAt(settings, args) {
     // cheap changed signal for the batch item.
     const metrics = await runInTab(tab.id, pageMetrics, [])
     const derived = deriveFingerprintOutcome(lastViewByTab.get(tab.id), metrics)
+    const staleScroll = staleScrollInfo(before?.scroll, metrics?.scroll)
     return {
       points,
       trusted,
+      offScreenCount,
       changed: derived.changed,
+      ...(staleScroll ? { staleScroll } : {}),
       clickMs: Math.round(performance.now() - started),
     }
   }
@@ -2562,12 +2779,17 @@ async function clickAt(settings, args) {
     payload = shot
     mode = 'full'
   }
+  // Report scroll drift even for view:"none": the model must know that the
+  // image its coordinates came from no longer matches the live page.
+  const staleScroll = staleScrollInfo(before?.scroll, payload?.scroll)
   const result = {
     ...payload,
     op: 'click_at',
     points,
     trusted,
+    offScreenCount,
     changedCount: points.filter(point => point.changed === true).length,
+    ...(staleScroll ? { staleScroll } : {}),
     clickMs: Math.round(performance.now() - started),
   }
   if (mode !== 'full') {
@@ -2576,7 +2798,14 @@ async function clickAt(settings, args) {
   }
   if (points.length === 1) {
     // Legacy single-point shape: existing consumers read point/changed directly.
-    result.point = { space: points[0].space, x: points[0].x, y: points[0].y, cssX: points[0].cssX, cssY: points[0].cssY }
+    result.point = {
+      space: points[0].space,
+      x: points[0].x,
+      y: points[0].y,
+      cssX: points[0].cssX,
+      cssY: points[0].cssY,
+      offScreen: points[0].offScreen,
+    }
     result.changed = points[0].changed
     result.pixelsChanged = points[0].pixelsChanged
     result.pixelMean = points[0].pixelMean
@@ -2605,7 +2834,12 @@ async function click(settings, args) {
   const beforeUrl = tab.url ?? ''
   const __afterLookup = performance.now()
   const target = resolveLabelTarget(tab, label)
-  if (!target) throw new BrowserError('UNKNOWN_LABEL', `Label ${label} is not in the current view. Take a fresh screenshot to get current labels.`)
+  if (!target) {
+    throw await decorateStaleLabelError(
+      tab,
+      new BrowserError('UNKNOWN_LABEL', `Label ${label} is not in the current view. Take a fresh screenshot to get current labels.`),
+    )
+  }
   let result
   try {
     result = await runInFrame(tab.id, target.frameId, clickLabelled, [target.localId], 1_200)
@@ -2627,7 +2861,23 @@ async function click(settings, args) {
     const code = typeof result.code === 'string' ? result.code : 'CLICK_FAILED'
     const error = new BrowserError(code, typeof result.message === 'string' ? result.message : 'Click failed')
     if (result.clicked) error.clicked = result.clicked
-    throw error
+    throw await decorateStaleLabelError(tab, error, result.clicked?.text)
+  }
+  // A click that had to scroll invalidates the stored screenshot: image-space
+  // coordinates from the old frame no longer map. Delete only the image (not the
+  // labels), reusing the compact-scroll rule, so image-space click_at fails
+  // NO_VIEW instead of clicking a stale screenshot.
+  const clickScroll = result.scroll && Number.isFinite(Number(result.scroll.dy))
+    ? {
+        fromY: Math.round(Number(result.scroll.fromY) || 0),
+        toY: Math.round(Number(result.scroll.toY) || 0),
+        dy: Math.round(Number(result.scroll.dy) || 0),
+      }
+    : undefined
+  const scrolledIntoView = result.scrolledIntoView === true
+  if (clickScroll && clickScroll.dy !== 0) {
+    const storedView = lastViewByTab.get(tab.id)
+    if (storedView) delete storedView.image
   }
   const __afterClick = performance.now()
   let current
@@ -2647,7 +2897,14 @@ async function click(settings, args) {
   const baseChanged = pendingNavigation ? navigated : result.changed === true
   const signals = Array.isArray(result.signals) ? result.signals : []
   if (batchDepth > 0) {
-    return { changed: baseChanged, signals, clicked: result.clicked, navigated }
+    return {
+      changed: baseChanged,
+      signals,
+      clicked: result.clicked,
+      navigated,
+      scrolledIntoView,
+      ...(clickScroll ? { scroll: clickScroll } : {}),
+    }
   }
   const activeTab = await getActiveTab(windowId).catch(() => tab)
   const __beforeView = performance.now()
@@ -2656,6 +2913,11 @@ async function click(settings, args) {
   const changed = mode === 'full' && pendingNavigation
     ? navigated || (payload.tab?.title ?? '') !== (tab.title ?? '')
     : (payload.changed ?? baseChanged)
+  // Keep the page-scroll metadata from the view and add the click's own scroll
+  // delta, so the provider can report fromY/toY/dy without losing y/maxY/atTop.
+  const resultScroll = clickScroll
+    ? { ...(payload?.scroll && typeof payload.scroll === 'object' ? payload.scroll : {}), ...clickScroll }
+    : undefined
   return {
     ...payload,
     op: 'click',
@@ -2663,6 +2925,8 @@ async function click(settings, args) {
     changed,
     signals: mode === 'full' ? signals : (Array.isArray(payload.signals) ? payload.signals : []),
     navigated,
+    ...(resultScroll ? { scroll: resultScroll } : {}),
+    scrolledIntoView,
     clickMs: Math.round(performance.now() - started),
     clickTimings: {
       ...result.timings,
@@ -2972,14 +3236,45 @@ function resolveKeySpec(raw, mask) {
 }
 
 /**
- * Validate press_key arguments into a dispatchable key request.
+ * Split an optional composite key string like "shift+Tab",
+ * "ctrl+Shift+ArrowLeft", or "meta+Enter" into modifiers and one key token.
+ * The later `modifiers` array path keeps working unchanged and is merged in.
+ * @param {string} raw
+ * @returns {{key: string, modifiers: string[]}}
+ */
+function splitCompositeKey(raw) {
+  if (raw === '+' || !raw.includes('+')) return { key: raw, modifiers: [] }
+  const parts = raw.split('+').map(part => part.trim())
+  if (parts.length < 2 || parts.some(part => part.length === 0)) {
+    throw new BrowserError('BAD_KEY', `Could not parse ${JSON.stringify(raw)}; use a form like shift+Tab or ctrl+Shift+ArrowLeft`)
+  }
+  const key = parts[parts.length - 1]
+  const modifiers = []
+  for (const token of parts.slice(0, -1)) {
+    const value = token.toLowerCase()
+    if (!(value in MODIFIER_BITS)) {
+      throw new BrowserError('BAD_KEY', `Unsupported modifier ${JSON.stringify(token)} in ${JSON.stringify(raw)}; use ctrl, alt, shift, meta`)
+    }
+    if (!modifiers.includes(value)) modifiers.push(value)
+  }
+  if (key.toLowerCase() in MODIFIER_BITS) {
+    throw new BrowserError('BAD_KEY', `${JSON.stringify(raw)} ends with a modifier; put the key last (e.g. shift+Tab)`)
+  }
+  return { key, modifiers }
+}
+
+/**
+ * Validate press_key arguments into a dispatchable key request. Accepts a
+ * composite key string (`"shift+Tab"`), the legacy `modifiers` array, or both.
  * @param {Record<string, any>} args
  */
-function parsePressKeyArgs(args) {
+export function parsePressKeyArgs(args) {
   if (typeof args.key !== 'string' || args.key.length === 0) {
     throw new BrowserError('BAD_KEY', 'key must be a named key, a single printable ASCII character, or a KeyA/Digit1 code name')
   }
-  const modifiers = []
+  const composite = splitCompositeKey(args.key)
+  const key = composite.key
+  const modifiers = [...composite.modifiers]
   if (args.modifiers !== undefined) {
     if (!Array.isArray(args.modifiers)) throw new BrowserError('BAD_KEY', 'modifiers must be an array')
     for (const item of args.modifiers) {
@@ -2992,14 +3287,14 @@ function parsePressKeyArgs(args) {
   for (const item of modifiers) mask |= MODIFIER_BITS[item]
   // Shifted characters (A, ?, !) and shifted named keys (Colon) imply shift for
   // dispatch; the echoed modifiers stay exactly as the caller supplied them.
-  const namedSpec = Object.keys(KEY_SPECS).find(name => name.toLowerCase() === args.key.toLowerCase())
+  const namedSpec = Object.keys(KEY_SPECS).find(name => name.toLowerCase() === key.toLowerCase())
   if (namedSpec && KEY_SPECS[namedSpec].shift === true && (mask & MODIFIER_BITS.shift) === 0) {
     mask |= MODIFIER_BITS.shift
   }
-  if (keyCharEntry(args.key)?.entry.needsShift === true && (mask & MODIFIER_BITS.shift) === 0) {
+  if (keyCharEntry(key)?.entry.needsShift === true && (mask & MODIFIER_BITS.shift) === 0) {
     mask |= MODIFIER_BITS.shift
   }
-  return { key: args.key, modifiers, mask, spec: resolveKeySpec(args.key, mask) }
+  return { key, modifiers, mask, spec: resolveKeySpec(key, mask) }
 }
 
 /**
@@ -3425,8 +3720,9 @@ async function trustedTypeIntoFallbackTarget(tabId, target, request) {
 const BATCH_OPS = new Set(['click', 'click_at', 'hover', 'select_option', 'type', 'press_key', 'scroll', 'wait_for', 'navigate', 'select'])
 const BATCH_ACTION_FIELDS = [
   'changed', 'signals', 'clicked', 'hovered', 'selected', 'selectedIndex',
-  'typed', 'pressed', 'points', 'trusted', 'changedCount', 'clickMs',
+  'typed', 'pressed', 'points', 'trusted', 'changedCount', 'offScreenCount', 'clickMs',
   'scroll', 'moved', 'wheel', 'requestedPixels', 'container', 'waited', 'navigated',
+  'staleScroll', 'scrolledIntoView',
 ]
 
 /**
