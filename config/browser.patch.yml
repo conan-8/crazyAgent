@@ -45,15 +45,34 @@
     agents: []
     maxParallelToolCalls: 1
 
-# Cross-turn context control. DSH compaction-basic defaults to 80% of the 1M
-# window (~160K tokens) before compacting. Compact far earlier so long browser
-# sessions keep a stable, smaller prompt: trigger near 6% (~63K) and retain
-# ~2% (~21K) verbatim. Image-offload history budgeting is unchanged, and no
-# mid-turn pruning is done because it would invalidate the prompt cache.
+# Cross-turn context control.
+#
+# Do NOT compact at a low fraction of the 1M window: measured 2026-10-22, the
+# old 6%/2% policy fired 79 times across 11 turns (517 s = 27% of turn wall,
+# 60% of one turn) and freed only ~2.8K tokens per pass, because the OpenRouter
+# route prices screenshots at ~53 tokens to the token meter while the provider
+# bills 674-990, so the retained tail was ~2.4x larger than budgeted and each
+# pass could not get back under the trigger. 79 compacted responses also threw
+# away the prompt cache (10.5% hit after compaction vs 96.4% normally).
+#
+# The window is 1,048,576 and real sessions stay well under 100K, so compact
+# only when genuinely large (55% = ~577K) and keep an explicit 20K tail. The
+# provider also caps retained screenshots mid-turn now, which keeps prompts
+# small without summarisation. The auto path remains the overflow safety net.
 - id: compaction-basic
   config:
-    thresholdRatio: 0.06
-    retainRatio: 0.02
+    auto: true
+    thresholdRatio: 0.55
+    headroomTokens: 131072
+    retainTokens: 20000
+    maxTokens: 8192
+    modelPolicies:
+      - provider: openrouter
+        model: deepseek/deepseek-v4.1-flash-1017
+        thresholdRatio: 0.55
+        headroomTokens: 131072
+        retainTokens: 20000
+        maxTokens: 8192
 
 # Browser-agent persona only. No harness identity, no runtime context (dates,
 # sandbox, cwd) in the fixed prefix.
