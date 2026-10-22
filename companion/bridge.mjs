@@ -28,6 +28,18 @@ import {
   send,
 } from './protocol.mjs'
 
+/** Default side-panel reconnect grace window before browser commands fail. */
+export const DEFAULT_UI_GRACE_MS = 8_000
+/** Environment override for the side-panel reconnect grace window. */
+export const UI_GRACE_ENV = 'CRAZYAGENT_UI_GRACE_MS'
+/** Retryable error code used when the side panel is gone or reloading. */
+export const SIDE_PANEL_CLOSED = 'SIDE_PANEL_CLOSED'
+
+/** Failure message for companion-issued commands (auto-capture). */
+const REQUEST_UI_CLOSED_MESSAGE = 'the CrazyAgent side panel is not connected; it may be reloading — retry this call (or ask the user to reopen the side panel)'
+/** Failure message returned to the provider when its command cannot reach the side panel. */
+const PROVIDER_UI_CLOSED_MESSAGE = 'the CrazyAgent side panel is disconnected or reloading; retry this call (or ask the user to reopen the side panel)'
+
 export class Bridge {
   /**
    * @param {{
@@ -40,6 +52,7 @@ export class Bridge {
    *   onConnectionChange?: () => void,
    *   onLog?: (entry: {direction: 'in'|'out'|'event', role?: string, frame: Record<string, any>}) => void,
    *   onControl?: (message: Record<string, any>, ui: import('ws').WebSocket) => void | Promise<void>,
+   *   uiGraceMs?: number,
    * }} options
    */
   constructor(options) {
@@ -52,6 +65,8 @@ export class Bridge {
     this.onConnectionChange = options.onConnectionChange
     this.onLog = options.onLog
     this.onControl = options.onControl
+    /** Reconnect grace window before browser commands fail with SIDE_PANEL_CLOSED. */
+    this.uiGraceMs = resolveUiGraceMs(options.uiGraceMs)
     /** @type {import('ws').WebSocket | undefined} */
     this.ui = undefined
     /** @type {import('ws').WebSocket | undefined} */
@@ -66,9 +81,14 @@ export class Bridge {
     this.http = undefined
     /** @type {WebSocketServer | undefined} */
     this.wss = undefined
+    /** @type {Set<{resolve: () => void, reject: (error: Error) => void, timer: NodeJS.Timeout}>} */
+    this.uiWaiters = new Set()
+    /** @type {boolean} */
+    this.stopped = false
   }
 
   async start() {
+    this.stopped = false
     const http = createServer((req, res) => {
       if (req.url === '/health') {
         res.writeHead(200, { 'content-type': 'application/json' })
@@ -102,6 +122,12 @@ export class Bridge {
   }
 
   async stop() {
+    this.stopped = true
+    for (const waiter of this.uiWaiters) {
+      clearTimeout(waiter.timer)
+      waiter.reject(new Error('bridge stopped'))
+    }
+    this.uiWaiters.clear()
     for (const request of this.uiRequests.values()) {
       clearTimeout(request.timer)
       request.reject(new Error('bridge stopped'))
@@ -123,6 +149,36 @@ export class Bridge {
 
   hasTools() {
     return this.tools !== undefined && this.tools.readyState === 1
+  }
+
+  /**
+   * Resolve once a side panel is connected (a `ui` hello was accepted), or
+   * immediately when one already is. Rejects after `timeoutMs`, when the
+   * bridge is stopped, or immediately for a non-positive timeout.
+   *
+   * This is a pre-send gate only: callers must not queue or replay a browser
+   * command that was already forwarded to a side panel (a click must not run
+   * twice).
+   * @param {number} [timeoutMs]
+   * @returns {Promise<void>}
+   */
+  waitForUi(timeoutMs = this.uiGraceMs) {
+    if (this.hasUi()) return Promise.resolve()
+    if (this.stopped) return Promise.reject(new Error('bridge stopped'))
+    const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 0
+    if (timeout === 0) {
+      return Promise.reject(sidePanelClosedError('the CrazyAgent side panel is not connected'))
+    }
+    return new Promise((resolve, reject) => {
+      const waiter = { resolve, reject, timer: undefined }
+      waiter.timer = setTimeout(() => {
+        // Deleting first makes stop() and the timeout mutually exclusive.
+        if (!this.uiWaiters.delete(waiter)) return
+        reject(sidePanelClosedError(`the CrazyAgent side panel did not reconnect within ${timeout}ms`))
+      }, timeout)
+      waiter.timer.unref?.()
+      this.uiWaiters.add(waiter)
+    })
   }
 
   /** @param {string | undefined} turnId */
@@ -147,17 +203,24 @@ export class Bridge {
 
   /**
    * Ask the side panel to execute one browser command (used for auto-capture).
+   * When the panel is absent, wait up to `uiGraceMs` for a reconnect before
+   * failing with the retryable SIDE_PANEL_CLOSED code. The per-command timeout
+   * only starts once the command has actually been sent.
    * @param {{op: string, args?: Record<string, unknown>}} command
    * @param {string} callId
    * @param {number} [timeoutMs]
    * @returns {Promise<Record<string, any>>}
    */
-  requestUi(command, callId, timeoutMs = UI_COMMAND_TIMEOUT_MS) {
-    return new Promise((resolve, reject) => {
-      if (!this.hasUi()) {
-        reject(new Error('the CrazyAgent side panel is not connected'))
-        return
+  async requestUi(command, callId, timeoutMs = UI_COMMAND_TIMEOUT_MS) {
+    if (!this.hasUi()) {
+      const { connected, error } = await this.#awaitUiGrace(command)
+      if (!connected) {
+        if (error?.code === SIDE_PANEL_CLOSED) throw sidePanelClosedError(REQUEST_UI_CLOSED_MESSAGE)
+        throw error ?? sidePanelClosedError(REQUEST_UI_CLOSED_MESSAGE)
       }
+    }
+    if (!this.hasUi()) throw sidePanelClosedError(REQUEST_UI_CLOSED_MESSAGE)
+    return new Promise((resolve, reject) => {
       const id = `auto-${randomUUID()}`
       const turnId = this.currentTurnId
       const timer = setTimeout(() => {
@@ -182,7 +245,7 @@ export class Bridge {
       if (!sent) {
         clearTimeout(timer)
         this.uiRequests.delete(id)
-        reject(new Error('the CrazyAgent side panel is not connected'))
+        reject(sidePanelClosedError(REQUEST_UI_CLOSED_MESSAGE))
       }
     })
   }
@@ -232,7 +295,7 @@ export class Bridge {
         this.#failUpstream(new Error('the CrazyAgent side panel disconnected'))
         for (const request of this.uiRequests.values()) {
           clearTimeout(request.timer)
-          request.reject(new Error('the CrazyAgent side panel disconnected'))
+          request.reject(sidePanelClosedError('the CrazyAgent side panel disconnected'))
         }
         this.uiRequests.clear()
         this.#emit({
@@ -271,8 +334,46 @@ export class Bridge {
       close(this.ui, 4000, 'replaced by a newer side panel')
     }
     this.ui = ws
+    this.#resolveUiWaiters()
     this.log(`bridge: side panel connected${origin === undefined ? '' : ` (${origin})`}`)
     this.#emit({ direction: 'event', role: 'companion', frame: { type: 'bridge.connected', role: 'ui', origin } })
+  }
+
+  /** Resolve every pending waitForUi() call after a `ui` hello was accepted. */
+  #resolveUiWaiters() {
+    if (this.uiWaiters.size === 0) return
+    const waiters = [...this.uiWaiters]
+    this.uiWaiters.clear()
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timer)
+      waiter.resolve()
+    }
+  }
+
+  /**
+   * Pre-send gate used by browser-command paths: wait up to `uiGraceMs` for a
+   * side panel and emit one `bridge.ui.wait` observability frame when a wait
+   * was needed. `connected` is false when the grace window elapsed or the
+   * bridge stopped first; `error` carries the waitForUi() rejection.
+   * @param {Record<string, unknown>} command
+   * @returns {Promise<{connected: boolean, error?: Error & {code?: string}}>}
+   */
+  async #awaitUiGrace(command) {
+    if (this.hasUi()) return { connected: true }
+    const started = Date.now()
+    let error
+    try {
+      await this.waitForUi(this.uiGraceMs)
+    } catch (failure) {
+      error = failure
+    }
+    const connected = error === undefined
+    this.#emit({
+      direction: 'event',
+      role: 'companion',
+      frame: { type: 'bridge.ui.wait', command, waitedMs: Date.now() - started, connected },
+    })
+    return connected ? { connected } : { connected, error }
   }
 
   /** @param {import('ws').WebSocket} ws */
@@ -344,45 +445,64 @@ export class Bridge {
         turnId: typeof message.turnId === 'string' ? message.turnId : this.currentTurnId,
       }
       this.#emit({ direction: 'in', role: 'tools', frame: enriched })
-      if (!this.hasUi()) {
-        this.#send(ws, role, {
-          v: PROTOCOL_VERSION,
-          type: 'browser.result',
-          id: message.id,
-          ok: false,
-          error: { code: 'NO_UI', message: 'the CrazyAgent side panel is not connected; open it and keep it open during a run' },
-        })
-        return
-      }
-      this.upstream.set(message.id, {
-        ws,
-        turnId: enriched.turnId,
-        callId: typeof enriched.callId === 'string' ? enriched.callId : undefined,
-        command: enriched.command,
+      this.#onToolsBrowserCommand(ws, role, message, enriched).catch(error => {
+        this.log(`bridge: browser.command ${message.id} failed: ${errorMessage(error)}`)
       })
-      const sent = this.sendToUi({
-        v: PROTOCOL_VERSION,
-        type: 'browser.command',
-        id: message.id,
-        callId: message.callId ?? null,
-        command: message.command,
-        turnId: enriched.turnId,
-      })
-      if (!sent) {
-        this.upstream.delete(message.id)
-        this.#send(ws, role, {
-          v: PROTOCOL_VERSION,
-          type: 'browser.result',
-          id: message.id,
-          ok: false,
-          error: { code: 'NO_UI', message: 'the CrazyAgent side panel disconnected' },
-        })
-      }
       return
     }
 
     this.#emit({ direction: 'in', role: 'tools', frame: message })
     if (message.type === 'ping') this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'pong' })
+  }
+
+  /**
+   * Forward one provider browser command to the side panel. When the panel is
+   * absent the command is held for the reconnect grace window before failing;
+   * it is never queued or replayed after it has been sent (a click must not
+   * double-execute).
+   * @param {import('ws').WebSocket} ws
+   * @param {'ui' | 'tools'} role
+   * @param {Record<string, any>} message
+   * @param {Record<string, any>} enriched
+   */
+  async #onToolsBrowserCommand(ws, role, message, enriched) {
+    if (!this.hasUi()) {
+      const { connected } = await this.#awaitUiGrace(message.command)
+      if (!connected) {
+        this.#send(ws, role, {
+          v: PROTOCOL_VERSION,
+          type: 'browser.result',
+          id: message.id,
+          ok: false,
+          error: { code: SIDE_PANEL_CLOSED, message: PROVIDER_UI_CLOSED_MESSAGE },
+        })
+        return
+      }
+    }
+    this.upstream.set(message.id, {
+      ws,
+      turnId: enriched.turnId,
+      callId: typeof enriched.callId === 'string' ? enriched.callId : undefined,
+      command: enriched.command,
+    })
+    const sent = this.sendToUi({
+      v: PROTOCOL_VERSION,
+      type: 'browser.command',
+      id: message.id,
+      callId: message.callId ?? null,
+      command: message.command,
+      turnId: enriched.turnId,
+    })
+    if (!sent) {
+      this.upstream.delete(message.id)
+      this.#send(ws, role, {
+        v: PROTOCOL_VERSION,
+        type: 'browser.result',
+        id: message.id,
+        ok: false,
+        error: { code: SIDE_PANEL_CLOSED, message: PROVIDER_UI_CLOSED_MESSAGE },
+      })
+    }
   }
 
   /** @param {Record<string, any>} message */
@@ -428,7 +548,7 @@ export class Bridge {
         type: 'browser.result',
         id,
         ok: false,
-        error: { code: 'UI_DISCONNECTED', message: error.message },
+        error: { code: SIDE_PANEL_CLOSED, message: error.message },
       })
     }
     this.upstream.clear()
@@ -462,6 +582,35 @@ export class Bridge {
     this.#emit({ direction: 'out', role, frame })
     return send(ws, frame)
   }
+}
+
+/** @param {string} message @returns {Error & {code: string}} */
+function sidePanelClosedError(message) {
+  const error = new Error(message)
+  error.code = SIDE_PANEL_CLOSED
+  return error
+}
+
+/**
+ * Resolve the reconnect grace window: explicit constructor option first, then
+ * the CRAZYAGENT_UI_GRACE_MS environment variable, then the default.
+ * @param {unknown} configured
+ * @returns {number}
+ */
+function resolveUiGraceMs(configured) {
+  const explicit = parseGraceMs(configured)
+  if (explicit !== undefined) return explicit
+  const fromEnv = parseGraceMs(process.env[UI_GRACE_ENV])
+  if (fromEnv !== undefined) return fromEnv
+  return DEFAULT_UI_GRACE_MS
+}
+
+/** @param {unknown} value @returns {number | undefined} */
+function parseGraceMs(value) {
+  if (value === undefined || value === null || value === '') return undefined
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) return undefined
+  return Math.floor(parsed)
 }
 
 /** @param {import('ws').WebSocket} ws @param {number} code @param {string} reason */
