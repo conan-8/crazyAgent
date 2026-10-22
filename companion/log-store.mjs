@@ -479,22 +479,28 @@ export class LogStore {
 
   /**
    * @param {string} turnId
-   * @param {{ok?: boolean, finalText?: string, timings?: Record<string, unknown>, usage?: Record<string, unknown>, error?: string}} end
+   * @param {{ok?: boolean, aborted?: boolean, reason?: string, finalText?: string, timings?: Record<string, unknown>, usage?: Record<string, unknown>, error?: string}} end
    */
   turnEnd(turnId, end = {}) {
     const turn = this.#ensureTurn(turnId)
+    const aborted = end.aborted === true
     turn.endedAt = isoNow()
-    turn.ok = end.ok !== false
+    turn.ok = end.ok !== false && !aborted
+    turn.aborted = aborted
     turn.timings = end.timings ?? turn.timings
     turn.usage = end.usage ?? turn.usage
     turn.finalText = end.finalText
     turn.error = end.error
     this.record('companion', 'turn.end', end, {
       turnId,
-      severity: turn.ok ? 'info' : 'error',
+      severity: turn.ok || aborted ? 'info' : 'error',
       noSignal: true,
     })
-    if (!turn.ok) {
+    if (aborted) {
+      // A user stop is a normal terminal state, not a failure: record it as an
+      // informational signal so summaries and triage do not flag it as an error.
+      this.signal('TURN_STOPPED', end.reason === 'user' ? 'turn stopped by user' : 'turn stopped', 'info', { turnId })
+    } else if (!turn.ok) {
       this.signal('TURN_FAILED', end.error ?? 'turn failed', 'error', { turnId })
     }
     if (Number(end.timings?.totalMs) > 15_000) {

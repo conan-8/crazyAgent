@@ -426,3 +426,32 @@ test('configures the UI grace window from option, CRAZYAGENT_UI_GRACE_MS, then t
     else process.env.CRAZYAGENT_UI_GRACE_MS = previous
   }
 })
+
+test('routes chat.stop to onStop exactly once without touching onChat', async t => {
+  const stops = []
+  const { url, chats } = await setup(t, {
+    onStop: (ws, message) => { stops.push({ ws, message }) },
+  })
+  const ui = await connect(url, 'ui')
+  t.after(() => ui.ws.close())
+
+  ui.ws.send(JSON.stringify({ v: 1, type: 'chat.stop' }))
+  await sleep(50)
+  assert.equal(stops.length, 1)
+  assert.equal(stops[0].message.type, 'chat.stop')
+  assert.ok(stops[0].ws !== undefined)
+  assert.equal(chats.length, 0, 'chat.stop must not be delivered as a prompt')
+})
+
+test('survives a failing onStop handler and keeps the bridge alive', async t => {
+  const { url } = await setup(t, {
+    onStop: () => { throw new Error('stop handler exploded') },
+  })
+  const ui = await connect(url, 'ui')
+  t.after(() => ui.ws.close())
+
+  ui.ws.send(JSON.stringify({ v: 1, type: 'chat.stop' }))
+  ui.ws.send(JSON.stringify({ v: 1, type: 'ping' }))
+  const pong = await ui.messages.next(message => message.type === 'pong')
+  assert.equal(pong.type, 'pong')
+})

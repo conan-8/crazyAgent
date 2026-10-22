@@ -231,6 +231,7 @@ let dshStatus = noDsh ? { state: 'disabled' } : { state: 'starting' }
 /** @type {DshRunner | undefined} */
 let runner
 let running = false
+let stopRequested = false
 
 /** @param {string} baseUrl @param {boolean} [force] */
 async function getModels(baseUrl, force = false) {
@@ -460,7 +461,14 @@ async function handleChat(text, ui, message) {
   const prompt = text.trim()
   if (prompt.length === 0) return
   if (running) {
-    bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.error', message: 'A turn is already running. Wait for it to finish.', recoverable: true })
+    bridge.sendToUi({
+      v: PROTOCOL_VERSION,
+      type: 'chat.error',
+      message: stopRequested
+        ? 'A turn is still stopping. Wait a moment, then send your message again.'
+        : 'A turn is already running. Wait for it to finish.',
+      recoverable: true,
+    })
     return
   }
   if (noDsh || runner === undefined) {
@@ -515,6 +523,17 @@ async function handleChat(text, ui, message) {
       }, { turnId, severity: 'info' })
     }
 
+    // The user may press Stop while the auto-capture round trip is in flight.
+    // The runtime was never asked to run, so there is nothing to interrupt;
+    // finish the turn as a user abort instead of starting the model.
+    if (stopRequested) {
+      logStore.record('companion', 'turn.stop.duringCapture', {
+        turnId,
+        autoCaptureMs: Math.round(autoCaptureMs),
+      }, { turnId, severity: 'info' })
+      throw new Error('turn stopped by user before the model run')
+    }
+
     const blocks = buildPromptBlocks(view, prompt)
     const stats = promptStats(blocks)
     promptTextBytes = stats.textBytes
@@ -565,13 +584,87 @@ async function handleChat(text, ui, message) {
       promptTextBytes,
       imageBytes,
     }
-    logStore.error(message, { turnId, code: 'TURN_ERROR' })
-    logStore.turnEnd(turnId, { ok: false, error: message, timings })
-    bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.error', message, recoverable: true })
-    sendStatus('error')
+    if (stopRequested) {
+      // A user stop tears the runtime down; the transport error is expected and
+      // must not surface as a tool failure to the model/user.
+      logStore.record('companion', 'turn.stop.done', {
+        turnId,
+        sessionId: runner?.resumeSessionId ?? runner?.sessionId,
+        elapsedMs: Math.round(performance.now() - turnStart),
+      }, { turnId, severity: 'info' })
+      // log-store.turnEnd() records the TURN_STOPPED signal for aborted turns.
+      logStore.turnEnd(turnId, { ok: false, aborted: true, reason: 'user', timings })
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'chat.stopped',
+        turnId,
+        reason: 'user',
+        sessionId: runner?.sessionId ?? runner?.resumeSessionId,
+        message: 'Stopped by user.',
+      })
+      sendStatus('idle')
+    } else {
+      logStore.error(message, { turnId, code: 'TURN_ERROR' })
+      logStore.turnEnd(turnId, { ok: false, error: message, timings })
+      bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.error', message, recoverable: true })
+      sendStatus('error')
+    }
   } finally {
     running = false
+    stopRequested = false
     bridge.setTurnId(undefined)
+  }
+}
+
+/**
+ * Stop the active turn. DSH has no turn-cancel RPC, so the runner interrupts
+ * the runtime subprocess and the companion reports the abort via chat.stopped
+ * when the in-flight run() rejects. The next turn resumes the same session.
+ * @param {import('ws').WebSocket} _ui
+ * @param {Record<string, unknown>} [_message]
+ */
+async function handleStop(_ui, _message) {
+  const turnId = bridge.currentTurnId
+  if (!running) {
+    logStore.record('companion', 'turn.stop.idle', { turnId }, { turnId, severity: 'info' })
+    bridge.sendToUi({
+      v: PROTOCOL_VERSION,
+      type: 'chat.stopped',
+      reason: 'idle',
+      message: 'No turn is running.',
+    })
+    return
+  }
+  if (stopRequested) {
+    // The first chat.stop already sent chat.stopping and owns the teardown;
+    // duplicate presses (double click) must not interrupt twice.
+    logStore.record('companion', 'turn.stop.duplicate', { turnId }, { turnId, severity: 'debug' })
+    return
+  }
+  stopRequested = true
+  logStore.record('companion', 'turn.stop.request', {
+    turnId,
+    sessionId: runner?.sessionId,
+  }, { turnId, severity: 'info' })
+  bridge.sendToUi({
+    v: PROTOCOL_VERSION,
+    type: 'chat.stopping',
+    turnId,
+    message: 'Stopping…',
+  })
+  try {
+    const result = await runner?.interrupt()
+    logStore.record('companion', 'turn.stop.interrupted', {
+      turnId,
+      sessionId: result?.sessionId,
+      interrupted: result?.interrupted === true,
+    }, { turnId, severity: 'info' })
+  } catch (error) {
+    logStore.record('companion', 'turn.stop.error', {
+      turnId,
+      message: errorMessage(error),
+    }, { turnId, severity: 'warn' })
+    log(`stop: ${errorMessage(error)}`)
   }
 }
 
@@ -801,6 +894,7 @@ const bridge = new Bridge({
   log,
   onChat: handleChat,
   onNewChat: handleNewChat,
+  onStop: handleStop,
   onLog: entry => logStore.recordBridge(entry),
   onControl: handleControl,
   onConnectionChange: () => {

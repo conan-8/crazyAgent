@@ -155,6 +155,20 @@ test('records, redacts, saves screenshots, and exports a bundle', async t => {
   assert.ok(finalEvents.includes('run.stop'))
 })
 
+test('a user-aborted turn records TURN_STOPPED, not TURN_FAILED', async t => {
+  const { store, sessionId } = await makeStore(t)
+  store.sessionStart(sessionId)
+  store.turnStart('turn-3', 'stop me', {})
+  store.turnEnd('turn-3', { ok: false, aborted: true, reason: 'user', timings: { totalMs: 42 } })
+  await store.flush()
+  const events = await readFile(store.eventsPath, 'utf8')
+  assert.ok(events.includes('TURN_STOPPED'), 'aborted turn should emit TURN_STOPPED')
+  assert.ok(!events.includes('TURN_FAILED'), 'aborted turn must not be reported as a failure')
+  const summary = store.summary()
+  assert.match(summary, /stopped by user/i)
+  await store.close()
+})
+
 test('omits screenshots and the DSH session when asked', async t => {
   const { store, sessionId } = await makeStore(t)
   store.sessionStart(sessionId)
