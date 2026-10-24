@@ -1,6 +1,6 @@
 # CrazyAgent — continuation handoff
 
-Last updated: 2026-10-22 (late). Repo is working, companion running, 16 tools, 149 tests. A 2026-10-22 hardening pass fixed the compaction treadmill, reasoning misclassification, click/key edge cases, and added run-time guardrails; a second pass added clipboard copy/paste, a Stop button (runtime interrupt + session resume), and a full-height streaming pane.
+Last updated: 2026-10-23 (Docs/canvas + live-thinking repair). Repo has 16 tools and 229 passing tests. This pass repaired false canvas typing/selection success, added strict Google Docs/Sheets/Slides single-action/full-view safeguards, removed broken `press_key.repeat`, made Auto request low reasoning from the first model step, and fixed later-step reasoning fallback. Earlier passes added hardening, clipboard, Stop/resume, and the full-height activity feed.
 
 This file is the complete context transfer for a new conversation. Read it, then
 `README.md`, then the latest debug run if you need ground truth.
@@ -21,9 +21,10 @@ produced the current state) and README.md, then run:
 Do not re-derive the architecture invariants in HANDOFF.md §4.
 The companion is running (logs/companion.pid); restart it after companion or
 provider changes. The extension is loaded unpacked from extension/ and MUST be
-reloaded after extension changes. Current build: the 2026-10-22 clipboard+stop
-pass on main, 16 browser tools, 149 tests. The model is OpenRouter deepseek/deepseek-v4.1-flash-1017 with
-reasoning effort "auto" (per-turn policy); the API key is stored in
+reloaded after extension changes. Current build: `7192b9e` plus the uncommitted
+2026-10-23 repair/UI work, 16 browser tools, 229 tests. The model is OpenRouter
+deepseek/deepseek-v4.1-flash-1017 with reasoning effort "auto" = low from step 1;
+the API key is stored in
 .dsh-home/browser-agent/api-key.
 Next task: <fill in>. If none is given, validate the current build in a real
 session first (reload the extension, run a Docs/email work turn), then take the
@@ -49,7 +50,7 @@ modifications are:
 ```text
 ┌──────────────────────────── Chrome/Edge window ────────────────────────────┐
 │  Side panel (extension/sidepanel)                                          │
-│    - chat UI, live activity, settings, debug-log export                    │
+│    - full-height live activity, settings, debug-log export                 │
 │    - executes browser ops with chrome.tabs / chrome.scripting /            │
 │      chrome.debugger / chrome.webNavigation                                │
 │    - WS role "ui"                                                          │
@@ -88,13 +89,14 @@ answers with `browser.result`.
 | Token | read `.dsh-home/browser-agent/token` (do not commit it) |
 | Model | OpenRouter `deepseek/deepseek-v4.1-flash-1017` |
 | Base URL | `https://openrouter.ai/api/v1` |
-| Reasoning | `auto` (per-turn policy, with mid-turn escalation after 3 no-progress results) |
+| Reasoning | `auto` requests `low` for every classification from the first model step; manual Off/Low/Medium/High overrides |
 | API key | stored, 73 bytes, `.dsh-home/browser-agent/api-key` (0600) |
-| Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash); **reload after this pass** (new `clipboardRead`/`clipboardWrite` permissions) |
+| Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash); **reload and reopen the panel after this pass** |
 | Permissions | sidePanel, tabs, scripting, storage, **debugger**, **webNavigation**, **clipboardRead**, **clipboardWrite**, host `<all_urls>` |
-| Latest run log | `.dsh-home/browser-agent/logs/run-2026-10-22T06-08-35-217Z-a4c366` (clean restart after the hardening pass; one real email/HTML turn, 320 s, 48 calls, 0 errors); the 11-turn real-user run analysed for the fixes is `run-2026-10-21T23-36-12-600Z-8f5493` |
-| Tests | 149/149 passing (companion 42, extension 32, provider 75) |
-| Git | `main` has the original rounds plus the 2026-10-22 hardening and clipboard/stop commits; tree clean |
+| Analysed run log | `.dsh-home/browser-agent/logs/run-2026-10-23T04-33-08-967Z-a09629` (latest Docs run: false batch/typing success, misapplied fonts, Auto initially reasoning-off) |
+| Tests | 229/229 passing (companion 42, extension 92, provider 95) |
+| UI | Single full-height activity feed with step clocks and finished-step collapse; Auto/low thinking streams from step 1; later-step committed fallback fixed; **uncommitted**, extension reload required |
+| Git | `main` at `7192b9e` plus the current uncommitted repair/UI work |
 
 Historical validation (first real run, before the optimization rounds):
 
@@ -268,16 +270,14 @@ update them.
 10. **The API key never touches `chrome.storage`.** It goes over loopback as a
     `llm.configure` frame, is passed to DSH as `CRAZYAGENT_API_KEY`, and is
     redacted from logs. The generated patch and `llm.json` contain no secret.
-11. **Speed rule:** never pay a model round trip per action, and never pay
-    reasoning tokens for acting. `browser_batch` runs an ordered sequence in one
-    call with one final view. DOM actions default to a compact confirmation (no
-    screenshot, label delta only) and auto-escalate to a full labelled view when
-    the page changes, when there is no previous view, after 5 compact actions,
-    or on `view:"full"`. Reasoning effort is per turn: navigation, rapid bursts
-    and short imperative work prompts run `off`; only reading/describing/
-    synthesizing keeps `low`. Context is compacted near 6% of the window (~63 K
-    tokens) so long sessions do not grow to 140 K+ prompts; images are offloaded
-    at turn boundaries, never mid-turn (that invalidates the prompt cache).
+11. **Speed never overrides edit correctness.** Ordinary pages use batches and
+    compact views to avoid model round trips and captures. Google
+    Docs/Sheets/Slides instead require one action plus a full fresh view;
+    dependent mutating batches/bursts and stale coordinates fail before input.
+    Auto requests `low` for every classification so thinking streams from the
+    first model step; manual Off is the latency opt-out. Compaction triggers near
+    55% of the window; image history is pruned at turn end and in batched
+    mid-turn passes with hysteresis.
 12. **Log redaction:** pairing token, API keys, `Bearer`, secret-named fields,
     sensitive query params, inline base64. Page text, screenshots, and reasoning
     are **not** redacted. Review bundles before sharing.
@@ -290,16 +290,16 @@ update them.
 |---|---|---|
 | `browser_screenshot` | View with tab/viewport/scroll metadata, numbered labels, surface list | `detail:"high"` uses 2048 px width; `delay_ms` 0-5000 waits in the page before capturing |
 | `browser_click` | Click a labelled element | DOM, open shadow roots, iframes. Returns `changed` + signals + fresh view |
-| `browser_click_at` | Click screenshot pixels or CSS coordinates; `points` bursts up to 20 | Canvas/video/iframe. One debugger attach + one capture per burst, per-point pixel diff. Points outside the viewport are reported as `offScreen` and never clicked; scroll drift since the stored view is reported as `staleScroll`. `view:"none"` = text-only fast mode; `settle_ms` 0-400 |
-| `browser_batch` | Run an ordered sequence of 1-20 actions in one call | Allowed ops: click, click_at, hover, select_option, type, press_key, scroll, wait_for, navigate. One final view; compact per-action outcomes; `stop_on_error` default true; `view` default full; per-call timeout scales with action count |
-| `browser_type` | Type into a labelled editable field, or the focused element when unlabelled | DOM native setter + input/change for inputs/textarea, `execCommand` for contenteditable, trusted `Input.insertText` fallback and for canvas editors (Docs). `mode` replace/append; `submit` presses Enter; password values masked |
-| `browser_press_key` | One trusted key press with optional modifiers | Enter/Tab/Escape/Backspace/Delete/arrows/Home/End/PageUp/PageDown/Space/letters/digits; also accepts composite chords (`shift+Tab`, `ctrl+Shift+ArrowLeft`, `meta+Enter`); CDP `Input.dispatchKeyEvent` keyDown+keyUp, synthetic fallback |
+| `browser_click_at` | Click screenshot pixels or CSS coordinates; ordinary pages allow `points` bursts up to 20 | Trusted input + pixel comparison. Known Docs/Sheets/Slides allow one point plus a full fresh view; stale/ambiguous/off-screen coordinates fail before dispatch. `view:"none"` remains for ordinary pages; `settle_ms` 0-400 |
+| `browser_batch` | Run an ordered sequence of 1-20 ordinary-page actions in one call | One final view and per-action execution/verification outcomes. Known document editors reject dependent mutating batches before the first action; `stop_on_error:false` is only for independent non-canvas edits |
+| `browser_type` | Type into a labelled editable field, or insert at the caret/current selection when unlabelled | DOM read-back verifies normal fields. Canvas input is dispatched with `changed:null` and verified visually in a full view, never inferred from DOM mutations. Canvas append/empty clearing is rejected; password values masked |
+| `browser_press_key` | One trusted key press with optional modifiers | Enter/Tab/Escape/Backspace/Delete/arrows/Home/End/PageUp/PageDown/Space/letters/digits; composite chords (`shift+Tab`, `ctrl+Shift+ArrowLeft`, `meta+Enter`); no `repeat` argument |
 | `browser_clipboard` | Copy/read/write/paste/clear clipboard text | Two clipboards: virtual (`chrome.storage.session`, default, never on disk) and system (`target:"system"`, `clipboardRead`/`clipboardWrite` permissions). `copy` takes the page selection (up to 100k) or a labelled element's text (password fields refused); `paste` types into a labelled/focused element or sends trusted Ctrl+V for rich content/images from the system clipboard; `read` returns up to 20k chars; text capped at 100k with an explicit truncation marker |
 | `browser_hover` | Hover a labelled element | Reveals hover-only menus/tooltips |
-| `browser_select_option` | Choose a native `<select>` option | Sets value, fires `input`/`change` |
-| `browser_read_text` | Rendered text | `page`/`viewport`, `offset`, `max_chars`; ~4 ms on fixtures |
+| `browser_select_option` | Choose a native `<select>` option | Sets value, fires `input`/`change`; not for Docs' ARIA div comboboxes |
+| `browser_read_text` | Rendered text | `page`/`viewport`, `offset`, `max_chars`; ~4 ms on fixtures; known canvas DOM text is explicitly unreliable |
 | `browser_scroll` | Scroll + fresh view | DOM scroll first, trusted wheel fallback (`wheel:true`), optional `at_x`/`at_y` |
-| `browser_select` | Drag-select a text range between two points | Trusted CDP drag (mouseMoved → mousePressed → interpolated moves → mouseReleased); returns `selected:{chars,textPreview,collapsed,from,to}`; `space` image/css; `view` auto/full/compact/none; usable inside `browser_batch` (the Docs recipe: select → Ctrl+Alt+M → label-less type → submit) |
+| `browser_select` | Drag-select a text range between two points | Trusted CDP drag. Ordinary pages return selection text; canvas selection is `verified:false` until confirmed visually. Off-screen endpoints and stale/ambiguous bases fail before the drag; known document editors require a full fresh view |
 | `browser_navigate` | Open an http(s) URL or move through history | Active or new tab, `back`/`forward`/`reload`, waits up to 15 s for load, reports `timedOut` |
 | `browser_wait_for` | Wait for page conditions, then return a fresh view | `text` substring, `url` substring, DOM `idle`, fixed `ms`; all supplied conditions must hold; `timeout_ms` default 10 s |
 | `browser_tabs` | List current-window tabs | id, title, URL, flags |
@@ -317,54 +317,50 @@ Behavioural layers:
 - **Surfaces:** visible `canvas`, `video`, `iframe` rects are listed in every
   view as `surfaces (no DOM labels; use browser_click_at): ...`.
 - **Pixel diff:** 240×240 CSS region sampled at 64×64; `pixelsChanged` percent;
-  threshold 0.4 %. This is the canvas success signal.
-- **Typing:** label path tries the DOM (`value` native setter + `input`/`change`
-  for inputs and textarea, `document.execCommand('insertText')` for
-  contenteditable) and verifies by read-back; on mismatch it focuses the element
-  and falls back to trusted `Input.insertText`. Label-less typing is always
-  trusted into the focused element (canvas editors).
+  threshold 0.4 %. This verifies a visual response, not which document text or
+  font changed.
+- **Typing:** labelled normal fields use DOM setters/events and read-back, with
+  trusted `Input.insertText` fallback. Unlabelled typing inserts at the caret or
+  current selection. Canvas typing is dispatched with `changed:null`; aggregate
+  DOM text and mutations are only hints, never delivery or character-count proof.
+  The full fresh view is the confirmation. Unsupported canvas append/empty
+  clearing is refused rather than silently doing something else.
 - **Keys:** named keys and single characters map to CDP keyCode/code/modifiers
   (alt=1, ctrl=2, meta=4, shift=8); `KeyA`/`Digit1` physical names are accepted.
+  There is no `repeat` argument.
 - **Navigation:** http(s) only; `chrome.tabs.create/update` plus `goBack`,
   `goForward`, `reload`, with a navigation-start pre-wait so the load wait cannot
   resolve against the old document.
 - **Waiting:** page-side poll + MutationObserver inside the tab; conditions are
   combined (text AND url AND idle), `ms` delays first and counts toward the
   timeout.
-- **View modes:** DOM actions (`click`, `hover`, `select_option`, `type`,
-  `press_key`) default to `auto`: a compact confirmation with no capture, no
-  image, no label list, plus `labelsDelta` (added/removed/unchanged counts and
-  up to 20 new labels). Auto escalates to a full labelled view when there is no
-  stored view, on URL/title change, after 5 compact actions, or on demand.
-  `view:"none"` drops even the delta. `click_at` defaults to `full` so canvas
-  re-aiming stays stable. A compact action that scrolls >40 px invalidates the
-  stored image, so image-space `click_at` fails `NO_VIEW` instead of using a
-  stale screenshot.
-- **Batch:** inner actions run with `batchDepth > 0`, so they skip their own
-  view/label work; the batch builds exactly one view at the end and records
-  per-action outcomes (`{index, op, ok, changed/signals, clicked/typed/pressed/
-  points/waited/navigated}` or `error{code,message}`). A reveal boundary (menu,
-  dialog, new page) cannot be crossed inside one batch: the next action cannot
-  know a label that only appears after the previous action.
+- **View modes:** ordinary DOM actions default to `auto` compact results with a
+  label delta, escalating on identity changes, after 5 compact actions, or on
+  demand. `view:"none"` drops the delta. Known document editors force full views
+  after each action. Compact/skipped views invalidate stored images after scroll,
+  resize, layout movement, or structural control changes.
+- **Batch:** ordinary-page inner actions run with `batchDepth > 0` and build one
+  final view. Results distinguish executed-without-tool-errors from UNVERIFIED
+  actions; earlier actions are not rolled back. A reveal boundary cannot be
+  crossed. Google Docs/Sheets/Slides reject dependent mutating batches before
+  the first side effect.
 - **Label registry:** labels are merged cumulatively per tab keyed by URL, so an
   id from an earlier view still resolves to the same element (or fails
-  `DETACHED`); a URL change clears the tab's registry. LRU keeps 20 tabs.
-- **Selection:** `browser_select` drives one trusted drag (mouseMoved →
-  mousePressed with buttons:1 → 4 interpolated moves → mouseReleased) and reads
-  `window.getSelection()` in the top frame (4 000-char cap, collapsed flag, range
-  rect). Untrusted synthetic mousemove cannot extend a native selection, so the
-  synthetic fallback may honestly report `collapsed`.
-- **Reasoning classes:** `navigate`, `rapid` (games) and `act` (short imperative
-  work prompts: add/delete/fill/click/reply/fix/select/...) map to `off`;
-  `inspect` and `synthesize` map to `low`. `act` is skipped when the prompt also
-  asks to report/summarize, so those stay `low`.
+  `DETACHED`); a URL change clears the tab's registry. LRU keeps 20 tabs. Click
+  and type do not automatically mutate a lookalike element recovered only by a
+  shared text/tag signature.
+- **Selection:** ordinary pages use trusted drag and top-frame selection readback.
+  Canvas editors report `selected.verified:false`, `collapsed:null`, and no
+  reliable text/chars; confirm the highlighted range in the full view before
+  formatting or deleting. Off-screen endpoints are never clamped and dragged.
+- **Reasoning classes:** `navigate`, `rapid`, `act`, `inspect`, and `synthesize`
+  remain activity/log classifications. Auto maps all of them to `low` from the
+  first model step so thinking streams during generation; manual policy wins.
 - **Fast screenshots:** `detail:"fast"` captures at 640 px / JPEG 50 with labels
   drawn (~195 image tokens) for quick visual checks; `normal` 1280 and `high`
   2048 are unchanged.
-- **Context compaction:** the profile patches `compaction-basic` to
-  `thresholdRatio: 0.06`, `retainRatio: 0.02` (~63 K trigger, ~21 K retained) so
-  long sessions stop growing. Never prune history mid-turn: it would invalidate
-  the prompt cache on every subsequent request.
+- **Context compaction:** `thresholdRatio: 0.55`, explicit 20 K retained tail.
+  Images offload at turn end and in batched mid-turn passes with hysteresis.
 - **Change signals for DOM clicks:** `url-change`, `title-change`,
   `scroll-change`, `text-change`, `dialog-change`, `dom-mutations:N`, `checked`,
   `aria-expanded`, `aria-selected`. A no-op returns **NO VISIBLE CHANGE**.
@@ -378,22 +374,23 @@ Behavioural layers:
   questions, verify only claims, and end with 1–3 short bullets. Reliability-only
   guardrails stay: no unrequested tab closes / formatting clears / deletes / undo,
   credentials only as provided, stop-and-ask when a login/CAPTCHA/payment/permission
-  prompt blocks progress, and a ~80-call turn budget. Upstream model policy is the
+  prompt blocks progress. Turns have no call limit. Upstream model policy is the
   only remaining refusal source; the prompt adds none.
 
-- **Reasoning auto policy:** navigation → `off`; rapid/reactive → `off`; inspect/synthesis → `low`;
-  manual Off/Low/Medium/High in Settings; logged as `reasoning.policy`.
-- **Reasoning escalation:** an `off` turn that produces 3 consecutive no-progress tool results
-  (failure or `NO VISIBLE CHANGE`) is switched to `low` for the rest of the turn (auto policy
-  only, logged as `reasoning.escalated`). Classifier also understands follow-up corrections
-  ("smaller", "try again", "scroll up") and more action verbs (change/insert/upload/format/...).
-- **Runaway guard:** `maxToolCallsPerTurn` (default 80) and `maxRepeatedCalls` (default 3) fail
-  the offending call before it reaches the bridge (`TURN_BUDGET_EXCEEDED` / `LOOP_DETECTED`);
-  logged as `tool.budget.exceeded` / `tool.loop.detected`.
-- **Click/aim guards:** off-screen points skipped and reported; a click that must scroll the
-  target into view reports `scroll`/`scrolledIntoView` and invalidates the stored screenshot;
-  stale-label failures (`DETACHED`/`NOT_VISIBLE`/`UNKNOWN_LABEL`) append a capped fresh
-  "Current labels:" hint so the model can re-aim without a whole extra view.
+- **Reasoning auto policy:** every classification → `low` from the first model step;
+  manual Off/Low/Medium/High in Settings; logged as `reasoning.policy`. There is
+  no delayed Auto `off`→`low` escalation. The classifier still understands
+  follow-up corrections and action verbs for activity labels.
+- **Runaway guard:** no per-turn call limit. Identical repeats are refused after
+  `maxRepeatedCalls` (3) for mutating tools and every modified chord, after
+  `maxObservationRepeats` (30) for read-only tools, and after
+  `maxNavigationRepeats` (10) only for unmodified navigation keys. The guard
+  fails before the bridge and logs `observation`/`navigation` flags.
+- **Click/aim guards:** ordinary off-screen points are skipped and reported;
+  known document editors reject off-screen, stale, and ambiguous coordinates
+  before input. A click that scrolls its target invalidates the old screenshot;
+  stale-label failures append a capped fresh-label hint without automatically
+  clicking a lookalike replacement.
 - **Tabs:** `browser_switch_tab` throws `AMBIGUOUS_TAB` with candidates when a query matches
   several tabs and no exact title/URL match exists (the old behavior silently picked Gmail for
   "Cool Document").
@@ -447,7 +444,7 @@ Behavioural layers:
 |---|---|
 | `manifest.json` | MV3, side panel, permissions above, `<all_urls>` |
 | `sidepanel/browser.js` (~3609 lines) | Browser executor. Key functions: `waitForPaint` (~192), `settleAfterInput` (~213), `withDebugger` (~231), `syntheticClickBurst` (~275), `diffRegion` (~336), `runInFrame` (~366), `labelAllFrames` (~406), `labelRegistryFor` (~517), `labelPage` (~560), `readSelection` (~1327), `snapshot` (~1692, incl. `detail:"fast"` 640 px), `autoEscalate` (~1778), `labelOnly` (~1790), `compactPayload` (~1804), `buildActionView` (~1863), `buildBatchView` (~1921), `clickAt` (~2478), `typeText` (~2871, incl. `trusted-focus` fallback), `pressKey` (~3033), `navigate` (~3127), `waitFor` (~3230), `trustedDrag` (~3286), `selectRange` (~3315), `batch` (~3438), `execute` (~3536) |
-| `sidepanel/app.js` | Chat UI, settings (key/base URL/model/effort), bridge lifecycle, live activity feed, tool cards, debug-log modal |
+| `sidepanel/app.js` | Full-height activity feed UI (single pane), settings (key/base URL/model/effort), bridge lifecycle, step-grouped live activity with per-step/per-tool timing, auto-collapsing finished steps, debug-log modal |
 | `sidepanel/index.html`, `style.css` | UI markup/styles |
 | `sidepanel/logger.js`, `protocol.js` | Client log batching, formatting helpers |
 | `background.js` | Opens the side panel on action click |
@@ -478,6 +475,11 @@ logs/<runId>/   events.jsonl, screenshots/, exports/, summary files
 - `PRIVACY.md` — what leaves the machine, key handling, debug logs, trusted input.
 - `docs/DEBUG-LOGS.md` — event schema, signals, export.
 - `docs/PHASE1-BENCH.md` — measured latencies.
+- `docs/ui/` — single-pane reference screenshots (finished/live/step-expanded/
+  narrow/empty, dark + light) plus a README; regenerate with
+  `node scripts/ui-preview.mjs --scenario ...`.
+- `scripts/ui-preview.mjs` — mocked-bridge UI preview harness (isolated Edge,
+  scripted frames, no companion/model tokens) for iterating on the side panel.
 - `e2e/checklist.md` — manual acceptance checks (click, canvas, shadow, iframes,
   select, hover, reasoning policy).
 - `e2e/fixtures/` — `click.html`, `canvas.html`, `advanced.html`, `form.html`
@@ -488,19 +490,20 @@ logs/<runId>/   events.jsonl, screenshots/, exports/, summary files
 
 ## 7. Test inventory
 
-`npm test` = 149 tests:
+`npm test` = 229 tests:
 
-- `companion/test/`: bridge + reconnect grace (18), DSH runner stop/resume (5),
-  prompt (9), log store (3), credentials (2), openrouter (5).
-- `extension/test/`: helpers (3), logger (4), tab match (5), resilience
-  (off-screen click_at, stale scroll, scroll policy, tab ambiguity, composite
-  keys, stale-label hint, 13), clipboard validation/caps (7).
-- `packages/dsh-browser-extension/test/`: tools (54), reasoning (14),
+- `companion/test/` (42): bridge/reconnect, DSH stop/resume, prompt, log store,
+  credentials, OpenRouter.
+- `extension/test/` (92): canvas typing/selection/coordinate policies, stale and
+  structural views, resilience, labels, composite keys, clipboard, logger,
+  helpers, and tab matching.
+- `packages/dsh-browser-extension/test/` (95): tools (65), reasoning (23),
   image budget (7).
 
 E2E suites (not in `npm test`): `edge-click-e2e.mjs` (9 behaviours),
-`edge-canvas-e2e.mjs` (surfaces, trusted click, image mapping, pixel diff,
-wheel, no-op, 5-point burst, view:none, delay_ms, single-point compatibility),
+`edge-canvas-e2e.mjs` (surfaces, trusted click/focus, image mapping, pixel diff,
+wheel, no-op, bursts, view:none, delay_ms, single-point compatibility, and
+exactly-once canvas-editor typing with UNVERIFIED reporting),
 `edge-work-e2e.mjs` (typing, keys, navigation, waiting on `form.html`),
 `edge-advanced-e2e.mjs` (shadow DOM, same/cross-origin iframes, select, hover —
 its hover step is a pre-existing stale script: it expects a labels array from a
@@ -537,10 +540,17 @@ live with `view:"full"`).
    `image/offload` decisions on `tool/result` with hysteresis (> keep + 8 live
    images, then down to keep), plus the existing `turn/end` pass; logged as
    `image.budget.midturn`. One cache invalidation per 8+ new screenshots.
-8. **Step/tool-call cap — DONE (2026-10-22).** Provider-level
-   `maxToolCallsPerTurn` (80) and `maxRepeatedCalls` (3) with
-   `TURN_BUDGET_EXCEEDED` / `LOOP_DETECTED` tool errors. DSH still has no
-   cancel through the SDK, so this is a soft guard (the model is told to stop).
+8. **Repeat guard only (no turn limit) — 2026-10-23.** The per-turn call budget
+   is gone. `maxToolCallsPerTurn` used to stop a turn at 80 calls; a real
+   10-university document task needed more, so the user had to say "continue"
+   five times, and each continuation began from a state the model could only
+   describe rather than verify — that is what corrupted the document. Turns are
+   now unlimited. The remaining guard is correctness-only: an identical call
+   repeated past `maxRepeatedCalls` (3) for a mutating tool or any modified
+   chord, past `maxObservationRepeats` (30) for read-only observation tools, or
+   past `maxNavigationRepeats` (10) only for unmodified navigation keys. The
+   short-lived `browser_press_key repeat` argument was removed: it exceeded the
+   20-action batch boundary and could over-report dispatch.
 9. **Click outcome logging** — the four new ops are structured in
    `browser.command.result` (`typed`, `pressed`, `navigated`, `waited`), but
    `changed`/`pixelsChanged`/`clicked`/`points` are still only in `tool.result`
@@ -588,6 +598,19 @@ live with `view:"full"`).
 21. **Full-height streaming pane — DONE (2026-10-22).** The live-activity pane
     fills the top of the sidebar (no 190px cap), splits with the chat, and has
     an expand-to-full-height toggle.
+22. **Per-step timing + single-pane sidebar — DONE (2026-10-22, uncommitted).**
+    The side panel is now one full-height activity feed: the chat pane and its
+    tool cards were removed, the feed groups events per DSH step, the running
+    step is expanded with a live clock (freezing into that step's own total),
+    each finished step **auto-collapses to a one-line header** (outcome
+    summary, model latency, step total; click to expand), the turn's final
+    answer is pinned as a highlighted block, and the footer keeps
+    `s1 1.4s · s2 2.1s … · total`. The activity header carries a live
+    `step N · X.Xs` pill. Validated with mocked-CDP screenshots plus real
+    companion/model turns and the click e2e suite; 149/149 tests still pass.
+    Inline screenshot thumbnails are gone with the removed chat cards (the
+    model still receives the images; Settings → Test capture still opens a
+    snapshot in the image modal).
 
 ---
 
@@ -764,8 +787,8 @@ Environment variables:
 Provider plugin config (keyed under the `browser-extension` insert in
 `config/browser.patch.yml`): `bridgeUrl`, `bridgeToken`, `requestTimeoutMs`,
 `reasoningPolicy`, `imageHistoryKeep` (newest live images kept at turn end and
-mid-turn; default 2), `maxToolCallsPerTurn` (default 80), `maxRepeatedCalls`
-(default 3). Mid-turn image offload hysteresis is fixed at keep + 8 live images.
+mid-turn; default 2), `maxRepeatedCalls` (default 3), `maxObservationRepeats`
+(default 30), `maxNavigationRepeats` (default 10). There is no `maxToolCallsPerTurn`. Mid-turn image offload hysteresis is fixed at keep + 8 live images.
 
 Compaction policy (`compaction-basic` overlay): `thresholdRatio: 0.55`,
 `headroomTokens: 131072`, `retainTokens: 20000`, `maxTokens: 8192`, plus a
@@ -789,20 +812,18 @@ in-flight run, then resumes the persisted session on the next message. Frames:
 
 Reasoning auto policy (per turn, from the claimed prompt):
 
-| Class | Examples | Effort |
+| Class | Examples | Auto effort |
 |---|---|---|
-| navigate | “scroll down”, “list my tabs”, “go to my emails” | `off` |
+| navigate | “scroll down”, “list my tabs”, “go to my emails” | `low` |
 | inspect | “what is on this page?”, “go to Docs and tell me what’s there” | `low` |
 | synthesize | “summarize”, “compare”, “why…”, long/multi-question prompts | `low` |
-| rapid | “play the game”, “click the dots as they appear”, “as fast as you can” | `off` |
-| act | “delete it all”, “add some comments”, “fill the form and submit” | `off` |
+| rapid | “play the game”, “click the dots as they appear”, “as fast as you can” | `low` |
+| act | “delete it all”, “add some comments”, “fill the form and submit” | `low` |
 
 Reasoning is held for all steps of a turn; decisions appear as
 `reasoning.policy` in `events.jsonl` and as `policy` entries in the live feed.
-In `auto` mode, an `off` turn that accumulates 3 consecutive no-progress tool
-results (failure or `NO VISIBLE CHANGE`) is escalated to `low` for the rest of
-that turn and logged as `reasoning.escalated`; a manual policy is never
-overridden.
+Auto always requests low from the first model step, so thinking can stream while
+generating. A manual policy is never overridden.
 
 Generated model route (from `companion/openrouter.mjs`):
 
@@ -1036,6 +1057,33 @@ root causes, fix the architecture, verify with tests + Edge e2e, commit.
 - No new tools/tests count change (149); README gains an "Operating stance"
   section; this section documents the stance. Provider/GUIDANCE is loaded by the
   companion on restart; no extension reload needed for prompt-only changes.
+
+### Round 8 — 2026-10-22 evening: sidebar redesign + per-step timing
+- Request: make the chatbot sidebar nicer and show **each step's own time**
+  during the run instead of only the total after it completes.
+- Implemented entirely in the side panel (no protocol/companion change):
+  activity events are grouped into numbered step blocks; a step header shows
+  `model 1.6s · 3.0s` (model latency and step total) with a live ticking clock
+  while it runs; `chat.tool_call` → `chat.tool_result` and browser-command rows
+  get measured durations; tool cards in the chat show a live clock and freeze
+  to the final duration; the footer renders `⏱ s1 1.4s · s2 2.1s · total …`
+  (title has the full breakdown) and the activity header has a live
+  `step 2 · 2.6s` pill. Turn dividers carry the turn total.
+- Streaming dedupe: tool-call delta rows are reused by the committed call, and
+  a browser-command row is adopted if it arrives before `chat.tool_call`.
+- UI: new design tokens (dark/light), brand header, status bar, step timeline,
+  empty-state prompt chips, rounded composer, restyled modals/footer. A second
+  pass removed the chat pane entirely at the user's request: the activity feed
+  is now the single full-height pane, finished steps auto-collapse to one line
+  (click to expand), and the turn's final answer is pinned as a highlighted
+  block so it stays readable after the last step collapses.
+- Validation: mocked-bridge CDP screenshots for empty/live/finished/expanded/
+  narrow/wide/light/settings states, one real companion+model turn
+  (rendered `step 1 1.6s · total 1.6s`, assistant "pong"), and
+  `scripts/edge-click-e2e.mjs` (all click checks passed). 149/149 tests pass.
+- Pitfall fixed while validating: flex children in `.activity-log` were
+  shrinking and clipping content; step/log children are now `flex: 0 0 auto`
+  and only the idle hero flexes.
 
 ### State at handoff / not yet validated
 - 2026-10-22 clipboard+stop prompt pass on `main`, clean tree, **149/149 tests**,

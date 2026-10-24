@@ -8,13 +8,24 @@
 
 import { DEFAULT_SETTINGS, execute, testCapture, imageDataUrl } from './browser.js'
 import { ClientLogger } from './logger.js'
-import { PROTOCOL_VERSION, truncate, errorMessage, shortDuration, formatBytes } from './protocol.js'
+import { renderMarkdown } from './markdown.js'
+import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protocol.js'
 
 const SETTINGS_KEY = 'crazyagent.settings'
 const RECONNECT_MS = 2_500
 const STOP_CONFIRM_TIMEOUT_MS = 15_000
 const DEFAULT_MODEL_BASE_URL = 'https://openrouter.ai/api/v1'
 const RECOMMENDED_MODEL_ID = 'deepseek/deepseek-v4.1-flash-1017'
+const HISTORY_KEY = 'crazyagent.history'
+const MAX_HISTORY = 12
+const MAX_FILE_BYTES = 100_000
+const MAX_ATTACHMENT_BYTES = 200_000
+const TEXT_FILE_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'jsonl', 'csv', 'tsv', 'xml', 'yaml', 'yml', 'html', 'htm', 'css', 'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'py', 'java', 'c', 'h', 'cpp', 'hpp', 'cs', 'go', 'rs', 'rb', 'php', 'sh', 'sql', 'toml', 'ini', 'cfg', 'log', 'svg'])
+let settingsDraftEffort = 'auto'
+let conversationHistory = []
+let currentConversationId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+let historySaveTimer = null
+let attachedFiles = []
 
 /** @type {import('./protocol.js').Settings} */
 let settings = { ...DEFAULT_SETTINGS }
@@ -30,8 +41,8 @@ let stopping = false
 let stopTimer = null
 let dshState = 'unknown'
 let lastAssistantText = ''
+let lastAnswerText = ''
 let sessionId = ''
-let localCardSeq = 0
 let bannerAction = () => {}
 let statusKind = 'offline'
 let statusLabel = 'Connecting…'
@@ -52,24 +63,34 @@ let modelsState = { baseUrl: '', models: [], loading: false, error: '' }
 let pendingLlmConfig = null
 let setupPrompted = false
 let modelsTimer = null
-let activityExpanded = true
-let activityMaximized = false
 let activityTurnStart = 0
 /** @type {{entry: HTMLElement, textEl: HTMLElement, kind: string, id?: string} | null} */
 let lastStreamEntry = null
 let lastReasoningStreamText = ''
 let sawReasoningStream = false
 let sawTextStream = false
-
-/** @type {Map<string, any>} */
-const cards = new Map()
+let liveClockTimer = null
+let turnNumber = 0
+/** @type {{number: number, startedAt: number, root: HTMLElement, divider: HTMLElement, durationEl: HTMLElement, stepCount: number, totalMs: number | null, done: boolean} | null} */
+let currentTurn = null
+let lastAgentTurn = null
+/** @type {{index: number, block: HTMLElement, head: HTMLElement, titleEl: HTMLElement, metaEl: HTMLElement, durationEl: HTMLElement, bodyEl: HTMLElement, startedAt: number, modelStartedAt: number, modelMs?: number, liveMs: number, open: boolean, collapsed: boolean, finish?: string, totalMs?: number} | null} */
+let currentStep = null
+/** Completed step durations for the current turn (ms), rendered in the footer. */
+let lastStepDurations = []
+/** Live footer chip element, updated without rebuilding the footer each tick. */
+let footerLiveEl = null
+/** In-flight tool activity rows by call id. */
+const toolRows = new Map()
+/** Streamed tool-call rows keyed by call id, reused when the call commits. */
+const streamToolEntries = new Map()
+/** Browser-command activity rows keyed by call id, reused if the tool call lands late. */
+const browserRows = new Map()
 
 const $ = id => document.getElementById(id)
 
 const els = {
   app: document.querySelector('.app'),
-  chat: $('chat'),
-  empty: $('empty'),
   input: $('input'),
   send: $('send'),
   stop: $('stop'),
@@ -80,10 +101,9 @@ const els = {
   activityDot: $('activity-dot'),
   activityPhase: $('activity-phase'),
   activityLatest: $('activity-latest'),
-  activityToggle: $('activity-toggle'),
-  activityMaximize: $('activity-maximize'),
   activityLog: $('activity-log'),
   activityEmpty: $('activity-empty'),
+  activityTimer: $('activity-timer'),
   banner: $('banner'),
   bannerText: $('banner-text'),
   bannerAction: $('banner-action'),
@@ -125,6 +145,23 @@ const els = {
   logCopySummary: $('log-copy-summary'),
   logCopyPath: $('log-copy-path'),
   logExport: $('log-export'),
+  history: $('history'),
+  historyModal: $('history-modal'),
+  historyClose: $('history-close'),
+  historySearch: $('history-search'),
+  historyList: $('history-list'),
+  historyCurrent: $('history-current'),
+  historyCurrentTitle: $('history-current-title'),
+  historyEmpty: $('history-empty'),
+  composerModel: $('composer-model'),
+  composerModelName: $('composer-model-name'),
+  modelMenu: $('model-menu'),
+  attach: $('attach'),
+  fileInput: $('file-input'),
+  fileChips: $('file-chips'),
+  promptRail: $('prompt-rail'),
+  promptRailList: $('prompt-rail-list'),
+  settingsStatus: $('settings-status'),
 }
 
 const logger = new ClientLogger({
@@ -183,8 +220,255 @@ function populateSettings() {
   els.settingAutoCapture.checked = settings.autoCapture !== false
 }
 
+function setEffortSelection(value) {
+  settingsDraftEffort = EFFORT_LABELS[value] ? value : 'auto'
+  for (const button of els.settingEffort.querySelectorAll('[data-effort]')) {
+    const selected = button.dataset.effort === settingsDraftEffort
+    button.classList.toggle('active', selected)
+    button.setAttribute('aria-pressed', String(selected))
+  }
+}
+
+function shortModelName(model) {
+  return model?.name || model?.id?.split('/').pop() || 'Select model'
+}
+
+function renderComposerModel() {
+  const model = llmState.model
+  els.composerModelName.textContent = shortModelName(model)
+  els.composerModelName.title = model?.id || 'Select a model in Settings'
+  els.composerModel.disabled = busy
+}
+
+function closeModelMenu() {
+  els.modelMenu.classList.add('hidden')
+  els.composerModel.setAttribute('aria-expanded', 'false')
+}
+
+function renderModelMenu() {
+  const models = [...modelsState.models]
+  if (llmState.model && !models.some(item => item.id === llmState.model.id)) models.unshift(llmState.model)
+  els.modelMenu.replaceChildren()
+  if (models.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'model-menu-empty'
+    empty.textContent = connected ? 'Loading models…' : 'Connect to load models'
+    els.modelMenu.appendChild(empty)
+    if (connected && !modelsState.loading) void refreshModels()
+  }
+  for (const model of models.slice(0, 80)) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'model-menu-item'
+    button.setAttribute('role', 'menuitemradio')
+    button.setAttribute('aria-checked', String(model.id === llmState.model?.id))
+    const copy = document.createElement('span')
+    const name = document.createElement('span')
+    name.textContent = shortModelName(model)
+    const id = document.createElement('small')
+    id.textContent = model.id
+    copy.append(name, id)
+    const check = document.createElement('span')
+    check.textContent = model.id === llmState.model?.id ? '✓' : ''
+    button.append(copy, check)
+    button.addEventListener('click', () => {
+      closeModelMenu()
+      if (model.id === llmState.model?.id || busy) return
+      sendLlmConfigure({
+        baseUrl: llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL,
+        model: model.id,
+        remember: true,
+        reasoningEffort: llmState.reasoningEffort ?? settings.reasoningEffort ?? 'auto',
+      })
+    })
+    els.modelMenu.appendChild(button)
+  }
+}
+
+function formatFileSize(bytes) {
+  return bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`
+}
+
+function renderFileChips() {
+  els.fileChips.replaceChildren()
+  els.fileChips.classList.toggle('hidden', attachedFiles.length === 0)
+  attachedFiles.forEach((file, index) => {
+    const chip = document.createElement('span')
+    chip.className = 'file-chip'
+    const name = document.createElement('span')
+    name.textContent = file.name
+    name.title = file.name
+    const size = document.createElement('small')
+    size.textContent = formatFileSize(file.size)
+    const remove = document.createElement('button')
+    remove.type = 'button'
+    remove.title = `Remove ${file.name}`
+    remove.setAttribute('aria-label', `Remove ${file.name}`)
+    remove.textContent = '×'
+    remove.addEventListener('click', () => {
+      attachedFiles.splice(index, 1)
+      renderFileChips()
+    })
+    chip.append(name, size, remove)
+    els.fileChips.appendChild(chip)
+  })
+}
+
+async function addFiles(fileList) {
+  const total = attachedFiles.reduce((sum, file) => sum + file.size, 0)
+  let used = total
+  for (const file of [...fileList].slice(0, Math.max(0, 5 - attachedFiles.length))) {
+    const extension = file.name.split('.').pop()?.toLowerCase() || ''
+    const textType = file.type.startsWith('text/') || TEXT_FILE_EXTENSIONS.has(extension)
+      || ['application/json', 'application/xml', 'application/javascript', 'image/svg+xml'].includes(file.type)
+    if (!textType) {
+      toast(`${file.name}: only text and source files are supported`)
+      continue
+    }
+    if (file.size > MAX_FILE_BYTES || used + file.size > MAX_ATTACHMENT_BYTES) {
+      toast(`${file.name}: attachments are limited to ${formatFileSize(MAX_FILE_BYTES)} each and ${formatFileSize(MAX_ATTACHMENT_BYTES)} total`)
+      continue
+    }
+    try {
+      const text = await file.text()
+      attachedFiles.push({ name: file.name, size: file.size, text })
+      used += file.size
+    } catch {
+      toast(`Could not read ${file.name}`)
+    }
+  }
+  if (fileList.length + attachedFiles.length > 5) toast('Up to 5 files can be attached')
+  renderFileChips()
+}
+
+async function loadHistory() {
+  try {
+    const stored = await chrome.storage.local.get(HISTORY_KEY)
+    conversationHistory = Array.isArray(stored?.[HISTORY_KEY])
+      ? stored[HISTORY_KEY].filter(item => item && typeof item.html === 'string').slice(0, MAX_HISTORY)
+      : []
+  } catch {
+    conversationHistory = []
+  }
+}
+
+function persistHistory() {
+  clearTimeout(historySaveTimer)
+  historySaveTimer = setTimeout(() => {
+    void chrome.storage.local.set({ [HISTORY_KEY]: conversationHistory }).catch(error => {
+      toast(`Could not save chat history: ${errorMessage(error)}`)
+    })
+  }, 100)
+}
+
+function conversationTitle() {
+  return els.activityLog.querySelector('.turn-prompt')?.textContent || 'Untitled chat'
+}
+
+function hasConversation() {
+  return Boolean(els.activityLog.querySelector('.activity-turn'))
+}
+
+function archiveCurrentConversation() {
+  if (!hasConversation()) return
+  const html = [...els.activityLog.children]
+    .filter(child => child !== els.activityEmpty)
+    .map(child => child.outerHTML)
+    .join('')
+  const record = {
+    id: currentConversationId,
+    title: conversationTitle(),
+    updatedAt: Date.now(),
+    turnNumber,
+    html,
+  }
+  conversationHistory = [record, ...conversationHistory.filter(item => item.id !== record.id)].slice(0, MAX_HISTORY)
+  persistHistory()
+}
+
+function renderHistory() {
+  const query = els.historySearch.value.trim().toLowerCase()
+  els.historyCurrent.classList.toggle('hidden', !hasConversation() || Boolean(query))
+  els.historyCurrentTitle.textContent = conversationTitle()
+  for (const row of els.historyList.querySelectorAll('.history-item')) row.remove()
+  const matches = conversationHistory.filter(item => item.title.toLowerCase().includes(query))
+  for (const item of matches) {
+    const row = document.createElement('div')
+    row.className = 'history-item'
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.className = 'history-open'
+    const title = document.createElement('span')
+    title.textContent = item.title
+    const when = document.createElement('small')
+    when.textContent = new Date(item.updatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    open.append(title, when)
+    open.addEventListener('click', () => restoreConversation(item.id))
+    const remove = document.createElement('button')
+    remove.type = 'button'
+    remove.className = 'history-delete'
+    remove.title = `Delete ${item.title}`
+    remove.setAttribute('aria-label', `Delete ${item.title}`)
+    remove.textContent = '×'
+    remove.addEventListener('click', () => {
+      conversationHistory = conversationHistory.filter(entry => entry.id !== item.id)
+      persistHistory()
+      renderHistory()
+    })
+    row.append(open, remove)
+    els.historyList.appendChild(row)
+  }
+  els.historyEmpty.classList.toggle('hidden', matches.length > 0 || (hasConversation() && !query))
+}
+
+function openHistory() {
+  closeModelMenu()
+  renderHistory()
+  els.historyModal.classList.remove('hidden')
+  setTimeout(() => els.historySearch.focus(), 10)
+}
+
+function closeHistory() {
+  els.historyModal.classList.add('hidden')
+  els.historySearch.value = ''
+}
+
+function restoreConversation(id) {
+  if (busy) {
+    toast('Wait for the current turn to finish')
+    return
+  }
+  const item = conversationHistory.find(entry => entry.id === id)
+  if (!item) return
+  archiveCurrentConversation()
+  clearChat()
+  els.activityEmpty?.classList.add('hidden')
+  els.activityLog.insertAdjacentHTML('beforeend', item.html)
+  for (const head of els.activityLog.querySelectorAll('.step-head')) {
+    head.addEventListener('click', () => {
+      const block = head.closest('.activity-step')
+      const collapsed = block.classList.toggle('collapsed')
+      head.setAttribute('aria-expanded', String(!collapsed))
+    })
+  }
+  for (const summary of els.activityLog.querySelectorAll('.agent-turn-summary')) {
+    summary.addEventListener('click', () => {
+      const collapsed = summary.closest('.agent-turn').classList.toggle('collapsed')
+      summary.setAttribute('aria-expanded', String(!collapsed))
+    })
+  }
+  lastAgentTurn = els.activityLog.querySelector('.agent-turn:last-of-type')
+  turnNumber = item.turnNumber || els.activityLog.querySelectorAll('.activity-turn').length
+  currentConversationId = item.id
+  sessionId = ''
+  sendFrame({ v: PROTOCOL_VERSION, type: 'chat.new' })
+  closeHistory()
+  renderPromptRail()
+  scrollActivity()
+}
+
 const EFFORT_LABELS = {
-  auto: 'Auto (off for navigation, low otherwise)',
+  auto: 'Auto (low for every turn)',
   off: 'Off',
   low: 'Low',
   medium: 'Medium',
@@ -207,7 +491,7 @@ function renderEffortStatus() {
     return
   }
   els.effortStatus.textContent = policy === 'auto'
-    ? 'Auto: navigation-only prompts use off; reading, describing, and synthesis use low.'
+    ? 'Auto: low reasoning from the first model step for every turn.'
     : `Every turn requests ${effortLabel(policy).toLowerCase()}.`
 }
 
@@ -275,15 +559,35 @@ function renderProviderStatus() {
   }
   els.modelStatus.textContent = text
   els.modelStatus.className = kind
+  renderComposerModel()
 }
 
 function fillModelOptions() {
+  const query = els.settingModel.value.trim().toLowerCase()
+  const matches = modelsState.models.filter(model => !query || model.id.toLowerCase().includes(query) || model.name?.toLowerCase().includes(query))
   els.modelOptions.replaceChildren()
-  for (const model of modelsState.models) {
-    const option = document.createElement('option')
-    option.value = model.id
-    option.label = modelLabel(model)
+  for (const model of matches.slice(0, 60)) {
+    const option = document.createElement('button')
+    option.type = 'button'
+    option.className = 'model-option'
+    const name = document.createElement('span')
+    name.textContent = model.name || model.id
+    const detail = document.createElement('small')
+    detail.textContent = modelLabel(model)
+    option.append(name, detail)
+    option.addEventListener('mousedown', event => event.preventDefault())
+    option.addEventListener('click', () => {
+      els.settingModel.value = model.id
+      els.modelOptions.classList.add('hidden')
+      renderProviderStatus()
+    })
     els.modelOptions.appendChild(option)
+  }
+  if (matches.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'model-menu-empty'
+    empty.textContent = 'No models match'
+    els.modelOptions.appendChild(empty)
   }
   if (els.settingModel.value.trim().length === 0) {
     const preferred = [RECOMMENDED_MODEL_ID, settings.modelId, llmState.model?.id]
@@ -366,7 +670,7 @@ function handleLlmConfigured(frame) {
   }
   if (llmState.reasoningEffort) {
     settings.reasoningEffort = llmState.reasoningEffort
-    els.settingEffort.value = llmState.reasoningEffort
+    setEffortSelection(llmState.reasoningEffort)
   }
   renderEffortStatus()
   if (frame.dsh?.state) dshState = frame.dsh.state
@@ -375,7 +679,6 @@ function handleLlmConfigured(frame) {
     hideBanner()
     void saveSettings()
     const name = llmState.model?.name ?? llmState.model?.id ?? 'model'
-    pushActivity('model', 'ready', `OpenRouter ready: ${name}${llmState.model?.reasoning ? ` · reasoning ${effortLabel(llmState.reasoningEffort ?? 'auto')}` : ' · no reasoning'}`)
     setActivityPhase('Ready', 'online')
     toast(`OpenRouter ready: ${name}`)
     logger.log('llm.configured', {
@@ -448,7 +751,7 @@ function openSettings() {
   els.settingBaseUrl.value = llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL
   els.settingModel.value = llmState.model?.id || settings.modelId || ''
   els.settingRememberKey.checked = true
-  els.settingEffort.value = llmState.reasoningEffort ?? 'auto'
+  setEffortSelection(llmState.reasoningEffort ?? 'auto')
   renderProviderStatus()
   els.settingsModal.classList.remove('hidden')
   setTimeout(() => els.settingToken.focus(), 10)
@@ -520,7 +823,7 @@ function setBusy(value, options = {}) {
   busy = value
   stopAvailable = value && options.stoppable !== false
   els.send.disabled = value
-  els.send.textContent = value ? '·' : '↑'
+  renderComposerModel()
   updateStopButton()
   refreshStatus()
 }
@@ -710,9 +1013,30 @@ function clientContext() {
 /* live activity feed                                                  */
 /* ------------------------------------------------------------------ */
 
-function activityTimeLabel() {
-  if (!activityTurnStart) return ''
-  return `+${((Date.now() - activityTurnStart) / 1000).toFixed(1)}s`
+const LIVE_TICK_MS = 100
+
+/** Monotonic clock used for every duration shown in the UI. */
+function now() {
+  return performance.now()
+}
+
+/** Compact duration for completed spans: 812ms / 1.4s / 1m 05s. */
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return ''
+  if (ms < 1000) return `${Math.max(1, Math.round(ms))}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.round((ms % 60_000) / 1000)
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`
+}
+
+/** Live clock with tenths of a second so running steps visibly tick. */
+function formatClock(ms) {
+  const value = Math.max(0, Number(ms) || 0)
+  if (value < 60_000) return `${(value / 1000).toFixed(1)}s`
+  const minutes = Math.floor(value / 60_000)
+  const seconds = Math.floor((value % 60_000) / 1000)
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`
 }
 
 function activityPreview(text, max = 190) {
@@ -729,49 +1053,456 @@ function setActivityPhase(phase, state = 'online', latest) {
 }
 
 function scrollActivity() {
-  if (!activityExpanded) return
   requestAnimationFrame(() => {
     els.activityLog.scrollTop = els.activityLog.scrollHeight
   })
 }
 
-function pushActivity(kind, label, text, options = {}) {
+function renderPromptRail() {
+  const prompts = [...els.activityLog.querySelectorAll('.activity-turn')]
+  els.promptRail.classList.toggle('hidden', prompts.length === 0)
+  els.promptRailList.replaceChildren()
+  prompts.forEach((prompt, index) => {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'prompt-rail-dot'
+    button.title = prompt.querySelector('.turn-prompt')?.textContent || `Message ${index + 1}`
+    button.setAttribute('aria-label', button.title)
+    const label = document.createElement('span')
+    label.className = 'prompt-rail-label'
+    label.textContent = button.title
+    label.setAttribute('aria-hidden', 'true')
+    button.appendChild(label)
+    button.addEventListener('click', () => prompt.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    els.promptRailList.appendChild(button)
+  })
+  updatePromptRail()
+}
+
+function updatePromptRail() {
+  const prompts = [...els.activityLog.querySelectorAll('.activity-turn')]
+  const dots = [...els.promptRailList.children]
+  const feedTop = els.activityLog.getBoundingClientRect().top
+  let active = 0
+  prompts.forEach((prompt, index) => {
+    if (prompt.getBoundingClientRect().top - feedTop < els.activityLog.clientHeight * 0.4) active = index
+  })
+  dots.forEach((dot, index) => dot.classList.toggle('active', index === active))
+}
+
+/** True while a turn is being rendered (used by the live footer). */
+function turnIsLive() {
+  return currentTurn !== null
+}
+
+/** Where new activity rows go: inside the live step, else the turn, else the log. */
+function activityContainer() {
+  return currentStep?.bodyEl ?? currentTurn?.root ?? els.activityLog
+}
+
+function trimActivity() {
+  const steps = [...els.activityLog.querySelectorAll('.activity-step')]
+  for (const step of steps.slice(0, Math.max(0, steps.length - 60))) step.remove()
+  const entries = [...els.activityLog.querySelectorAll('.activity-entry')]
+  for (const entry of entries.slice(0, Math.max(0, entries.length - 400))) entry.remove()
+}
+
+/* ----- live ticker ------------------------------------------------- */
+
+function startLiveClocks() {
+  if (liveClockTimer !== null) return
+  liveClockTimer = setInterval(refreshLiveClocks, LIVE_TICK_MS)
+  refreshLiveClocks()
+}
+
+function stopLiveClocks() {
+  if (liveClockTimer === null) return
+  clearInterval(liveClockTimer)
+  liveClockTimer = null
+}
+
+/** Tick every visible running clock: step header, tool cards, footer, activity head. */
+function refreshLiveClocks() {
+  const at = now()
+  const stepMs = currentStep?.open ? at - currentStep.startedAt : undefined
+  if (currentStep?.open && stepMs !== undefined) updateStepDuration(currentStep, stepMs)
+  if (currentTurn && !currentTurn.done) currentTurn.summaryEl.textContent = `Working… · ${formatClock(at - currentTurn.startedAt)}`
+  updateActivityTimer(stepMs)
+  updateFooterLive(stepMs)
+}
+
+function updateStepDuration(step, ms) {
+  step.liveMs = ms
+  step.durationEl.textContent = formatClock(ms)
+  step.durationEl.classList.add('live')
+}
+
+function updateActivityTimer(stepMs) {
+  if (!els.activityTimer) return
+  const show = currentStep?.open === true && Number.isFinite(stepMs)
+  els.activityTimer.classList.toggle('hidden', !show)
+  if (!show) {
+    els.activityTimer.textContent = ''
+    return
+  }
+  els.activityTimer.textContent = `step ${currentStep.index} · ${formatClock(stepMs)}`
+}
+
+/* ----- footer timing ------------------------------------------------- */
+
+/**
+ * Render the footer timing strip. During a turn the running step is shown
+ * live; when the turn ends every step keeps its own duration plus the total.
+ * @param {{steps?: number[], liveMs?: number, totalMs?: number}} [options]
+ */
+function renderTiming({ steps = [], liveMs, totalMs } = {}) {
+  footerLiveEl = null
+  if (steps.length === 0 && !Number.isFinite(liveMs) && !Number.isFinite(totalMs)) {
+    els.timing.replaceChildren()
+    els.timing.removeAttribute('title')
+    return
+  }
+  els.timing.replaceChildren()
+  const clock = document.createElement('span')
+  clock.className = 'timing-clock'
+  clock.textContent = '⏱'
+  els.timing.appendChild(clock)
+  steps.forEach((ms, index) => {
+    const chip = document.createElement('span')
+    chip.className = 'timing-step'
+    chip.textContent = `s${index + 1} ${formatDuration(ms)}`
+    chip.title = `Step ${index + 1}: ${formatDuration(ms)}`
+    els.timing.appendChild(chip)
+  })
+  if (Number.isFinite(liveMs)) {
+    const live = document.createElement('span')
+    live.className = 'timing-live'
+    live.textContent = `s${steps.length + 1} ${formatClock(liveMs)}`
+    els.timing.appendChild(live)
+    footerLiveEl = live
+  }
+  if (Number.isFinite(totalMs)) {
+    const total = document.createElement('span')
+    total.className = 'timing-total'
+    total.textContent = `total ${formatDuration(totalMs)}`
+    els.timing.appendChild(total)
+  }
+  if (Number.isFinite(totalMs) && steps.length > 0) {
+    els.timing.title = [
+      ...steps.map((ms, index) => `step ${index + 1} ${formatDuration(ms)}`),
+      `total ${formatDuration(totalMs)}`,
+    ].join(' · ')
+  }
+}
+
+function updateFooterLive(stepMs) {
+  if (!turnIsLive()) return
+  if (currentStep?.open && Number.isFinite(stepMs)) {
+    if (footerLiveEl !== null && footerLiveEl.isConnected) {
+      footerLiveEl.textContent = `s${lastStepDurations.length + 1} ${formatClock(stepMs)}`
+      return
+    }
+    renderTiming({ steps: lastStepDurations, liveMs: stepMs })
+    return
+  }
+  renderTiming({ steps: lastStepDurations })
+}
+
+/* ----- turns and steps ----------------------------------------------- */
+
+/**
+ * Start rendering a new turn: divider in the timeline, fresh step list and
+ * live clocks. Called when the user sends a message.
+ * @param {string} text
+ */
+function startTurn(text, attachments = []) {
+  closeStep()
+  turnNumber += 1
+  activityTurnStart = now()
+  lastStepDurations = []
+  footerLiveEl = null
+  toolRows.clear()
+  streamToolEntries.clear()
+  browserRows.clear()
   els.activityEmpty?.classList.add('hidden')
+
+  const divider = document.createElement('div')
+  divider.className = 'activity-turn'
+  const bubble = document.createElement('div')
+  bubble.className = 'user-bubble'
+  const label = document.createElement('span')
+  label.className = 'turn-label hidden'
+  label.textContent = `Turn ${turnNumber}`
+  const prompt = document.createElement('span')
+  prompt.className = 'turn-prompt'
+  prompt.textContent = text || 'Attached files'
+  prompt.title = String(text ?? '')
+  bubble.append(prompt)
+  if (attachments.length > 0) {
+    const files = document.createElement('span')
+    files.className = 'user-files'
+    files.textContent = attachments.map(file => file.name).join(' · ')
+    bubble.appendChild(files)
+  }
+  const duration = document.createElement('span')
+  duration.className = 'turn-duration hidden'
+  divider.append(label, bubble, duration)
+  els.activityLog.appendChild(divider)
+  renderPromptRail()
+
+  const agentTurn = document.createElement('section')
+  agentTurn.className = 'agent-turn running'
+  const summary = document.createElement('button')
+  summary.type = 'button'
+  summary.className = 'agent-turn-summary'
+  summary.setAttribute('aria-expanded', 'true')
+  summary.textContent = 'Working…'
+  summary.addEventListener('click', () => {
+    const collapsed = agentTurn.classList.toggle('collapsed')
+    summary.setAttribute('aria-expanded', String(!collapsed))
+  })
+  const steps = document.createElement('div')
+  steps.className = 'agent-turn-steps'
+  agentTurn.append(summary, steps)
+  els.activityLog.appendChild(agentTurn)
+  lastAgentTurn = agentTurn
+  currentTurn = {
+    number: turnNumber,
+    startedAt: activityTurnStart,
+    root: agentTurn,
+    stepsEl: steps,
+    summaryEl: summary,
+    divider,
+    durationEl: duration,
+    stepCount: 0,
+    totalMs: null,
+    done: false,
+  }
+  renderTiming({})
+  trimActivity()
+  startLiveClocks()
+  scrollActivity()
+}
+
+/**
+ * Open a new step group. The step header carries the step's own live and
+ * final duration, so every model step is measurable at a glance.
+ * @param {Record<string, any>} frame
+ */
+function beginStep(frame) {
+  const at = now()
+  closeStep(at)
+  footerLiveEl = null
+  const index = Number.isFinite(frame?.step) ? frame.step : (currentTurn?.stepCount ?? 0) + 1
+
+  const block = document.createElement('div')
+  block.className = 'activity-step running'
+  block.dataset.kind = 'think'
+  const head = document.createElement('button')
+  head.type = 'button'
+  head.className = 'step-head'
+  head.setAttribute('aria-expanded', 'true')
+  const caret = document.createElement('span')
+  caret.className = 'step-caret'
+  caret.textContent = '▾'
+  const title = document.createElement('span')
+  title.className = 'step-title'
+  title.textContent = 'thinking'
+  const meta = document.createElement('span')
+  meta.className = 'step-meta'
+  const duration = document.createElement('span')
+  duration.className = 'step-duration live'
+  duration.textContent = '0.0s'
+  head.append(caret, title, meta, duration)
+  const body = document.createElement('div')
+  body.className = 'step-body'
+  block.append(head, body)
+
+  const step = {
+    index,
+    block,
+    head,
+    titleEl: title,
+    metaEl: meta,
+    durationEl: duration,
+    bodyEl: body,
+    startedAt: at,
+    modelStartedAt: at,
+    modelMs: undefined,
+    liveMs: 0,
+    open: true,
+    collapsed: false,
+    finish: undefined,
+  }
+  head.addEventListener('click', () => {
+    step.collapsed = !step.collapsed
+    block.classList.toggle('collapsed', step.collapsed)
+    head.setAttribute('aria-expanded', String(!step.collapsed))
+    if (!step.collapsed) scrollActivity()
+  })
+
+  ;(currentTurn?.stepsEl ?? activityContainer()).appendChild(block)
+  currentStep = step
+  if (currentTurn) currentTurn.stepCount = Math.max(currentTurn.stepCount ?? 0, index)
+  refreshLiveClocks()
+  scrollActivity()
+}
+
+/** Mark the model portion of the live step as finished (tool execution follows). */
+function endModelStep(outcome) {
+  if (currentStep === null) return
+  currentStep.modelMs = Math.max(0, now() - currentStep.modelStartedAt)
+  currentStep.metaEl.textContent = `model ${formatDuration(currentStep.modelMs)}`
+  if (outcome?.kind === 'abandoned') currentStep.block.classList.add('abandoned')
+}
+
+/**
+ * Close the live step: freeze its total duration (model + tool round trip)
+ * and add it to the footer breakdown.
+ * @param {number} [at]
+ */
+function closeStep(at = now()) {
+  const step = currentStep
+  if (step === null) return null
+  currentStep = null
+  step.open = false
+  // Finished steps collapse to their header (title + own duration); the user can
+  // expand any step again by clicking it.
+  step.collapsed = true
+  step.block.classList.add('collapsed')
+  step.head.setAttribute('aria-expanded', 'false')
+  step.totalMs = Math.max(0, at - step.startedAt)
+  step.block.classList.remove('running')
+  step.durationEl.classList.remove('live')
+  step.durationEl.textContent = formatDuration(step.totalMs)
+  step.durationEl.title = [
+    `step ${step.index}: ${formatDuration(step.totalMs)}`,
+    Number.isFinite(step.modelMs) ? `model ${formatDuration(step.modelMs)}` : '',
+    step.finish ? `finish ${step.finish}` : '',
+  ].filter(Boolean).join(' · ')
+  lastStepDurations.push(step.totalMs)
+  renderTiming({ steps: lastStepDurations })
+  footerLiveEl = null
+  scrollActivity()
+  return step
+}
+
+/**
+ * Finish the turn: close the open step, stamp the turn divider with the total,
+ * and render the final per-step + total footer.
+ * @param {{totalMs?: number}} [options]
+ */
+function finishTurn({ totalMs } = {}) {
+  const at = now()
+  closeStep(at)
+  const total = Number.isFinite(totalMs) ? totalMs : (currentTurn ? at - currentTurn.startedAt : undefined)
+  if (currentTurn) {
+    currentTurn.done = true
+    currentTurn.totalMs = total
+    currentTurn.divider.classList.add('done')
+    currentTurn.durationEl.textContent = formatDuration(total)
+    currentTurn.durationEl.title = `turn ${currentTurn.number} total`
+    currentTurn.root.classList.remove('running')
+    currentTurn.root.classList.add('collapsed')
+    currentTurn.summaryEl.setAttribute('aria-expanded', 'false')
+    const actions = currentTurn.root.querySelectorAll('.activity-entry.tool, .activity-entry.browser').length
+    const failures = currentTurn.root.querySelectorAll('.activity-entry.fail').length
+    const summary = actions > 0 ? `${actions} action${actions === 1 ? '' : 's'}` : `${currentTurn.stepCount} step${currentTurn.stepCount === 1 ? '' : 's'}`
+    currentTurn.summaryEl.textContent = `${summary}${failures ? ` · ${failures} failed` : ''} · ${formatDuration(total)}`
+    currentTurn.summaryEl.setAttribute('aria-label', `${summary}, ${formatDuration(total)}. Toggle activity details`)
+  }
+  renderTiming({ steps: lastStepDurations, totalMs: total })
+  updateActivityTimer(undefined)
+  stopLiveClocks()
+  currentTurn = null
+  scrollActivity()
+}
+
+/**
+ * Append one activity row to the current step (or turn/log when no step is
+ * open). Returns a handle that lets callers finish the row with a duration.
+ * @param {string} kind
+ * @param {string} label
+ * @param {string} text
+ * @param {{durationMs?: number, running?: boolean, latest?: string}} [options]
+ */
+function pushActivity(kind, label, text, options = {}) {
+  if (kind === 'error' || currentTurn !== null) els.activityEmpty?.classList.add('hidden')
   const entry = document.createElement('div')
-  entry.className = `activity-entry ${kind}`
-  const time = document.createElement('span')
-  time.className = 'activity-time'
-  time.textContent = options.time ?? activityTimeLabel()
+  entry.className = `activity-entry ${kind}${options.running ? ' running' : ''}`
   const kindEl = document.createElement('span')
-  kindEl.className = 'activity-kind'
+  kindEl.className = 'act-kind'
   kindEl.textContent = label
   const textEl = document.createElement('span')
   textEl.className = 'activity-text'
   textEl.textContent = String(text ?? '')
-  entry.append(time, kindEl, textEl)
-  els.activityLog.appendChild(entry)
-  while (els.activityLog.querySelectorAll('.activity-entry').length > 300) {
-    els.activityLog.querySelector('.activity-entry')?.remove()
-  }
+  entry.append(kindEl, textEl)
+  const created = { entry, kindEl, textEl, kind, durationEl: null }
+  if (Number.isFinite(options.durationMs)) setEntryDuration(created, options.durationMs)
+  activityContainer().appendChild(entry)
+  trimActivity()
   const latest = options.latest ?? `${label}: ${text}`
   els.activityLatest.textContent = activityPreview(latest)
   els.activityLatest.title = String(latest ?? '')
   scrollActivity()
-  return { entry, textEl, kind }
+  return created
+}
+
+/** @param {{entry: HTMLElement, durationEl: HTMLElement | null}} created @param {number} ms */
+function setEntryDuration(created, ms) {
+  if (!Number.isFinite(ms)) return
+  if (created.durationEl === null) {
+    created.durationEl = document.createElement('span')
+    created.durationEl.className = 'act-time'
+    created.entry.appendChild(created.durationEl)
+  }
+  created.durationEl.textContent = formatDuration(ms)
+}
+
+/**
+ * Complete a running activity row with its measured duration.
+ * @param {any} created
+ * @param {{text?: string, ok?: boolean, durationMs?: number}} [result]
+ */
+function finishActivityEntry(created, result = {}) {
+  if (!created) return
+  created.entry.classList.remove('running')
+  if (result.ok === true) created.entry.classList.add('ok')
+  if (result.ok === false) created.entry.classList.add('fail')
+  if (typeof result.text === 'string') created.textEl.textContent = result.text
+  if (Number.isFinite(result.durationMs)) setEntryDuration(created, result.durationMs)
+}
+
+/** Reuse the in-progress streamed tool-call row for the committed tool call. */
+function takeStreamedToolEntry(id) {
+  /** @type {any} */
+  let entry = null
+  if (typeof id === 'string' && streamToolEntries.has(id)) {
+    entry = streamToolEntries.get(id)
+    streamToolEntries.delete(id)
+    if (lastStreamEntry === entry) lastStreamEntry = null
+  } else if (lastStreamEntry !== null && lastStreamEntry.kind === 'tool') {
+    if (typeof id === 'string' && lastStreamEntry.id !== id) return null
+    entry = lastStreamEntry
+    lastStreamEntry = null
+  }
+  if (entry !== null) entry.entry.classList.remove('streaming')
+  return entry
 }
 
 function appendStreamActivity(kind, text) {
   if (typeof text !== 'string' || text.length === 0) return
-  if (lastStreamEntry && lastStreamEntry.kind === kind) {
+  if (lastStreamEntry !== null && lastStreamEntry.kind === kind) {
     lastStreamEntry.textEl.textContent = truncate(lastStreamEntry.textEl.textContent + text, 40_000)
     lastStreamEntry.entry.classList.add('streaming')
   } else {
     finalizeStreamActivity()
-    const label = kind === 'reasoning' ? 'thinking' : 'assistant'
+    const label = kind === 'reasoning' ? 'thinking' : 'reply'
     const created = pushActivity(kind, label, text)
     created.kind = kind
     created.entry.classList.add('streaming')
     lastStreamEntry = created
+    if (currentStep) currentStep.titleEl.textContent = kind === 'reasoning' ? 'thinking' : 'responding'
   }
   if (kind === 'reasoning') {
     sawReasoningStream = true
@@ -789,46 +1520,27 @@ function finalizeStreamActivity() {
 }
 
 function clearActivity() {
-  for (const entry of [...els.activityLog.querySelectorAll('.activity-entry')]) entry.remove()
+  for (const child of [...els.activityLog.children]) {
+    if (child !== els.activityEmpty) child.remove()
+  }
   els.activityEmpty?.classList.remove('hidden')
   lastStreamEntry = null
   lastReasoningStreamText = ''
   sawReasoningStream = false
   sawTextStream = false
+  liveClockTimer !== null && stopLiveClocks()
+  currentTurn = null
+  lastAgentTurn = null
+  currentStep = null
+  lastStepDurations = []
+  footerLiveEl = null
+  toolRows.clear()
+  streamToolEntries.clear()
+  browserRows.clear()
+  els.activityTimer?.classList.add('hidden')
   els.activityLatest.textContent = 'Waiting for a turn'
   els.activityLatest.title = ''
-}
-
-function toggleActivity() {
-  activityExpanded = !activityExpanded
-  els.activity.classList.toggle('collapsed', !activityExpanded)
-  els.activityToggle.textContent = activityExpanded ? '▴' : '▾'
-  els.activityToggle.title = activityExpanded ? 'Collapse activity' : 'Expand activity'
-  els.activityToggle.setAttribute('aria-label', activityExpanded ? 'Collapse live activity' : 'Expand live activity')
-  els.activityToggle.setAttribute('aria-expanded', String(activityExpanded))
-  if (!activityExpanded && activityMaximized) setActivityMaximized(false)
-  logger.log('ui.activity.toggle', { expanded: activityExpanded }, 'debug')
-  if (activityExpanded) scrollActivity()
-}
-
-/** Expand the streaming pane over the chat area (the composer stays visible). */
-function setActivityMaximized(value) {
-  activityMaximized = value
-  els.app?.classList.toggle('activity-maximized', value)
-  els.activityMaximize.classList.toggle('active', value)
-  els.activityMaximize.setAttribute('aria-pressed', String(value))
-  els.activityMaximize.title = value ? 'Restore layout' : 'Expand activity'
-  els.activityMaximize.setAttribute('aria-label', value ? 'Restore split layout' : 'Expand live activity')
-  els.activityMaximize.textContent = value ? '⤡' : '⤢'
-  logger.log('ui.activity.maximize', { maximized: value }, 'debug')
-  if (value) {
-    if (!activityExpanded) toggleActivity()
-    scrollActivity()
-  }
-}
-
-function toggleMaximizeActivity() {
-  setActivityMaximized(!activityMaximized)
+  renderPromptRail()
 }
 
 function formatTokenUsage(usage) {
@@ -842,16 +1554,29 @@ function formatTokenUsage(usage) {
   return parts.join(' · ')
 }
 
+/** Compact one-line preview of a tool-call argument payload. */
+function argsPreview(raw) {
+  if (typeof raw !== 'string') return ''
+  const text = raw.trim()
+  if (text.length === 0) return ''
+  try {
+    return truncate(JSON.stringify(JSON.parse(text)), 170)
+  } catch {
+    return truncate(text, 170)
+  }
+}
+
 function handleActivity(frame) {
   switch (frame.kind) {
     case 'policy':
-      pushActivity('model', 'policy', `reasoning ${frame.effort} (${frame.classification}${frame.policy && frame.policy !== 'auto' ? `, ${frame.policy}` : ', auto'})`)
       return
     case 'model-start':
       finalizeStreamActivity()
+      sawReasoningStream = false
+      lastReasoningStreamText = ''
       sawTextStream = false
       setActivityPhase('Thinking…', 'busy')
-      pushActivity('model', 'model', `started · turn ${frame.turn ?? '?'} step ${frame.step ?? '?'}`)
+      beginStep(frame)
       return
     case 'reasoning':
       setActivityPhase('Thinking…', 'busy')
@@ -863,34 +1588,41 @@ function handleActivity(frame) {
       appendStreamActivity('text', frame.text)
       return
     case 'tool-call-delta': {
-      setActivityPhase(`Using ${frame.name ?? 'tool'}…`, 'busy')
-      if (lastStreamEntry && lastStreamEntry.kind === 'tool' && lastStreamEntry.id === frame.id) {
-        lastStreamEntry.textEl.textContent = truncate(lastStreamEntry.textEl.textContent + (frame.argumentsDelta ?? ''), 40_000)
+      const label = toolLabel(frame.name)
+      setActivityPhase(`Using ${label}…`, 'busy')
+      if (currentStep) {
+        currentStep.titleEl.textContent = label
+        currentStep.block.dataset.kind = toolKind(frame.name)
+      }
+      if (lastStreamEntry !== null && lastStreamEntry.kind === 'tool' && lastStreamEntry.id === frame.id) {
+        lastStreamEntry.textEl.textContent = truncate(lastStreamEntry.textEl.textContent + (frame.argumentsDelta ?? ''), 4_000)
       } else {
         finalizeStreamActivity()
-        const created = pushActivity('tool', 'tool', `${frame.name ?? 'tool'} ${frame.argumentsDelta ?? ''}`)
+        const created = pushActivity('tool', label, frame.argumentsDelta ?? '')
         created.kind = 'tool'
         created.id = frame.id
         lastStreamEntry = created
+        if (typeof frame.id === 'string') streamToolEntries.set(frame.id, created)
       }
+      scrollActivity()
       return
     }
-    case 'usage': {
-      const usage = formatTokenUsage(frame.usage)
-      if (usage) pushActivity('usage', 'tokens', usage)
+    case 'usage':
       return
-    }
     case 'finish': {
       const reason = frame.reason && typeof frame.reason === 'object'
         ? (frame.reason.kind ?? JSON.stringify(frame.reason))
         : (frame.reason ?? 'finished')
-      pushActivity('model', 'finish', String(reason))
+      if (currentStep) {
+        currentStep.finish = String(reason)
+        currentStep.titleEl.title = `finish: ${reason}`
+      }
       finalizeStreamActivity()
       return
     }
     case 'model-end':
       finalizeStreamActivity()
-      pushActivity('model', 'model', frame.outcome?.kind === 'committed' ? 'attempt committed' : 'attempt ended')
+      endModelStep(frame.outcome)
       return
     case 'reasoning-committed':
       if (sawReasoningStream) return
@@ -900,23 +1632,6 @@ function handleActivity(frame) {
     default:
       return
   }
-}
-
-function disconnect() {
-  manualDisconnect = true
-  clearTimeout(reconnectTimer)
-  reconnectTimer = null
-  if (ws) {
-    try {
-      ws.close()
-    } catch {
-      // ignore
-    }
-    ws = null
-  }
-  connected = false
-  setStatus('offline', 'Disconnected')
-  showBanner('Disconnected. Reconnect when you want the agent to use the page.', 'Reconnect', () => connect())
 }
 
 /* ------------------------------------------------------------------ */
@@ -968,9 +1683,6 @@ function handleFrame(frame) {
       if (!llmState.model || !credentialState.configured) setActivityPhase('Setup needed', 'error')
       else if (dshState === 'ready') setActivityPhase('Ready', 'online')
       else if (dshState === 'error') setActivityPhase('Model setup failed', 'error')
-      if (els.activityLog.querySelectorAll('.activity-entry').length === 0) {
-        pushActivity('model', 'ready', dshState === 'ready' ? 'Companion connected · OpenRouter ready' : 'Companion connected · setup needed')
-      }
       renderProviderStatus()
       if (!els.settingsModal.classList.contains('hidden')) {
         syncProviderInputs()
@@ -999,8 +1711,8 @@ function handleFrame(frame) {
       return
     case 'chat.assistant':
       if (typeof frame.text === 'string' && frame.text.length > 0) {
-        if (!sawTextStream) pushActivity('text', 'assistant', frame.text)
-        appendAssistant(frame.text)
+        lastAssistantText = frame.text.trim()
+        if (!sawTextStream) pushActivity('text', 'reply', frame.text)
       }
       return
     case 'chat.tool_call':
@@ -1105,193 +1817,137 @@ function handleStatus(frame) {
 }
 
 /* ------------------------------------------------------------------ */
-/* chat rendering                                                      */
+/* activity rendering                                                  */
 /* ------------------------------------------------------------------ */
-
-function hideEmpty() {
-  els.empty.classList.add('hidden')
-}
-
-function showEmpty() {
-  els.empty.classList.remove('hidden')
-}
-
-function scrollChat() {
-  requestAnimationFrame(() => {
-    els.chat.scrollTop = els.chat.scrollHeight
-  })
-}
-
-/** @param {string} text */
-function appendUser(text) {
-  activityTurnStart = Date.now()
-  sawReasoningStream = false
-  sawTextStream = false
-  lastReasoningStreamText = ''
-  finalizeStreamActivity()
-  setActivityPhase('Sending…', 'busy')
-  pushActivity('user', 'you', truncate(text, 2_000), { time: '+0.0s' })
-  hideEmpty()
-  const el = document.createElement('div')
-  el.className = 'bubble user'
-  el.textContent = text
-  els.chat.appendChild(el)
-  scrollChat()
-}
-
-/** @param {string} text */
-function appendAssistant(text) {
-  const value = text.trim()
-  if (value.length === 0) return
-  hideEmpty()
-  const el = document.createElement('div')
-  el.className = 'bubble assistant'
-  el.textContent = value
-  els.chat.appendChild(el)
-  lastAssistantText = value
-  scrollChat()
-}
-
-/** @param {string} text */
-function appendError(text) {
-  hideEmpty()
-  const el = document.createElement('div')
-  el.className = 'bubble error'
-  el.textContent = text
-  els.chat.appendChild(el)
-  scrollChat()
-}
-
-/** Small centered status note for turn-level events such as a user stop. */
-function appendSystemNote(text) {
-  const value = String(text ?? '').trim()
-  if (value.length === 0) return
-  hideEmpty()
-  const el = document.createElement('div')
-  el.className = 'bubble system'
-  el.setAttribute('role', 'status')
-  el.textContent = value
-  els.chat.appendChild(el)
-  scrollChat()
-}
 
 /** @param {string} name */
 function toolLabel(name) {
   switch (name) {
     case 'browser_screenshot': return 'screenshot'
+    case 'browser_click': return 'click'
+    case 'browser_click_at': return 'click at'
+    case 'browser_hover': return 'hover'
     case 'browser_scroll': return 'scroll'
     case 'browser_tabs': return 'tabs'
     case 'browser_switch_tab': return 'switch tab'
     case 'browser_read_text': return 'read text'
-    case 'browser_click': return 'click'
+    case 'browser_type': return 'type'
+    case 'browser_press_key': return 'press key'
+    case 'browser_navigate': return 'navigate'
+    case 'browser_wait_for': return 'wait'
+    case 'browser_select': return 'select'
+    case 'browser_select_option': return 'select option'
+    case 'browser_batch': return 'batch'
     case 'browser_clipboard': return 'clipboard'
     case 'auto': return 'current view'
     default: return String(name ?? 'tool').replace(/^browser_/, '')
   }
 }
 
-/**
- * @param {string | null | undefined} callId
- * @param {string} fallbackName
- */
-function ensureCard(callId, fallbackName) {
-  const key = typeof callId === 'string' && callId.length > 0 ? callId : `local-${++localCardSeq}`
-  const existing = cards.get(key)
-  if (existing) return existing
-
-  hideEmpty()
-  const root = document.createElement('div')
-  root.className = 'tool-card'
-  const head = document.createElement('div')
-  head.className = 'tool-head'
-  const name = document.createElement('span')
-  name.className = 'tool-name'
-  name.textContent = toolLabel(fallbackName)
-  const status = document.createElement('span')
-  status.className = 'tool-status'
-  status.textContent = 'running'
-  head.append(name, status)
-  const body = document.createElement('div')
-  body.className = 'tool-body'
-  const args = document.createElement('pre')
-  args.className = 'tool-args hidden'
-  const view = document.createElement('div')
-  view.className = 'view hidden'
-  const result = document.createElement('pre')
-  result.className = 'tool-result hidden'
-  body.append(args, view, result)
-  root.append(head, body)
-  els.chat.appendChild(root)
-
-  const card = {
-    key,
-    root,
-    nameEl: name,
-    statusEl: status,
-    argsEl: args,
-    viewEl: view,
-    resultEl: result,
-    view: null,
-    name: fallbackName,
-    callId: typeof callId === 'string' ? callId : undefined,
-  }
-  cards.set(key, card)
-  scrollChat()
-  return card
-}
-
-/** @param {any} card @param {string} text @param {'running'|'ok'|'fail'} kind */
-function setCardStatus(card, text, kind = 'running') {
-  card.statusEl.textContent = text
-  card.statusEl.className = `tool-status ${kind === 'ok' ? 'ok' : kind === 'fail' ? 'fail' : ''}`
-}
-
-/** @param {any} card @param {string} text */
-function setCardArgs(card, text) {
-  if (!text) return
-  card.argsEl.textContent = truncate(text, 1_200)
-  card.argsEl.classList.remove('hidden')
+function toolKind(name) {
+  if (/click|type|press_key/.test(name)) return 'click'
+  if (/scroll/.test(name)) return 'scroll'
+  if (/navigate|switch_tab/.test(name)) return 'open'
+  if (/read|tabs/.test(name)) return 'read'
+  if (/screenshot/.test(name)) return 'shot'
+  return 'tool'
 }
 
 /** @param {Record<string, any>} frame */
 function handleToolCall(frame) {
   logger.log('ui.tool_call', { callId: frame.callId, name: frame.name, args: truncate(frame.args, 500) }, 'debug')
   finalizeStreamActivity()
-  setActivityPhase(`Using ${toolLabel(frame.name)}…`, 'busy')
-  pushActivity('tool', 'call', `${toolLabel(frame.name)} ${truncate(frame.args ?? '{}', 500)}`)
-  const card = ensureCard(frame.callId, frame.name)
-  card.name = frame.name ?? card.name
-  card.nameEl.textContent = toolLabel(card.name)
-  if (typeof frame.args === 'string' && frame.args.length > 0) {
-    try {
-      setCardArgs(card, JSON.stringify(JSON.parse(frame.args), null, 2))
-    } catch {
-      setCardArgs(card, frame.args)
-    }
+  const label = toolLabel(frame.name)
+  setActivityPhase(`Using ${label}…`, 'busy')
+  let streamed = takeStreamedToolEntry(frame.callId)
+  let startedAtOverride
+  if (streamed === null && typeof frame.callId === 'string' && browserRows.has(frame.callId)) {
+    // The provider's browser.command can reach the UI before chat.tool_call;
+    // adopt the row (and clock) the browser command already opened.
+    const browserRow = browserRows.get(frame.callId)
+    browserRows.delete(frame.callId)
+    streamed = browserRow.row
+    startedAtOverride = browserRow.startedAt
   }
-  setCardStatus(card, 'running')
+  const row = streamed ?? pushActivity('tool', label, argsPreview(frame.args))
+  row.entry.classList.add('running')
+  row.textEl.textContent = argsPreview(frame.args) || 'running…'
+  if (typeof frame.callId === 'string') {
+    toolRows.set(frame.callId, { row, startedAt: startedAtOverride ?? now() })
+  }
+  if (currentStep) {
+    currentStep.titleEl.textContent = label
+    currentStep.block.dataset.kind = toolKind(frame.name)
+  }
   setBusy(true)
-  if (typeof frame.name === 'string') setStatus('busy', `Using ${toolLabel(frame.name)}…`)
+  setStatus('busy', `Using ${label}…`)
+  scrollActivity()
 }
 
 /** @param {Record<string, any>} frame */
 function handleToolResult(frame) {
   logger.log('ui.tool_result', { callId: frame.callId, ok: frame.ok !== false, text: truncate(frame.text, 500) }, 'debug')
   const ok = frame.ok !== false
-  pushActivity('tool', ok ? 'result' : 'failed', truncate(frame.text || (ok ? 'completed' : 'failed'), 700))
+  const at = now()
+  const summary = truncate(frame.text || (ok ? 'completed' : 'failed'), 320)
+  const record = typeof frame.callId === 'string' ? toolRows.get(frame.callId) : undefined
+  if (record) {
+    finishActivityEntry(record.row, {
+      text: record.uiMs === undefined ? summary : `${summary} · ui ${formatDuration(record.uiMs)}`,
+      ok,
+      durationMs: at - record.startedAt,
+    })
+    record.row.entry.title = String(frame.text ?? '')
+    toolRows.delete(frame.callId)
+  } else {
+    const created = pushActivity('tool', ok ? 'done' : 'failed', summary)
+    finishActivityEntry(created, { ok })
+  }
+  if (currentStep !== null) {
+    // The collapsed step header carries the latest outcome, so a finished step
+    // stays readable as a one-line summary without expanding it.
+    currentStep.titleEl.textContent = activityPreview(summary, 66)
+    currentStep.titleEl.title = summary
+  }
   setActivityPhase('Thinking…', 'busy')
   finalizeStreamActivity()
-  const card = ensureCard(frame.callId, 'tool')
-  setCardStatus(card, ok ? 'done' : 'failed', ok ? 'ok' : 'fail')
-  if (!card.view && typeof frame.text === 'string' && frame.text.length > 0) {
-    card.resultEl.textContent = truncate(frame.text, 2_000)
-    card.resultEl.classList.remove('hidden')
-  }
-  if (!ok && typeof frame.text === 'string' && frame.text.length > 0 && !card.view) {
-    card.resultEl.textContent = truncate(frame.text, 2_000)
-    card.resultEl.classList.remove('hidden')
-  }
-  scrollChat()
+  scrollActivity()
+}
+
+/**
+ * Append the turn's final answer as a highlighted block outside the step list,
+ * so it stays readable after every step collapses.
+ * @param {string} text
+ */
+function pushAnswer(text) {
+  const value = String(text ?? '').trim()
+  if (value.length === 0 || value === lastAnswerText) return
+  lastAnswerText = value
+  els.activityEmpty?.classList.add('hidden')
+  const block = document.createElement('div')
+  block.className = 'activity-answer'
+  const body = document.createElement('div')
+  body.className = 'answer-text'
+  renderMarkdown(body, value)
+  block.appendChild(body)
+  ;(lastAgentTurn ?? activityContainer()).appendChild(block)
+  trimActivity()
+  els.activityLatest.textContent = activityPreview(value)
+  els.activityLatest.title = value
+  scrollActivity()
+  return block
+}
+
+/** Reset per-turn state and open the turn divider when a message is sent. */
+function beginUserTurn(text, attachments = []) {
+  lastAssistantText = ''
+  lastAnswerText = ''
+  sawReasoningStream = false
+  sawTextStream = false
+  lastReasoningStreamText = ''
+  finalizeStreamActivity()
+  setActivityPhase('Sending…', 'busy')
+  startTurn(text, attachments)
 }
 
 /** Shared terminal cleanup for a turn: clear busy, pending stop, streaming markers, labels. */
@@ -1308,29 +1964,24 @@ function cleanupAfterTurn() {
 function handleDone(frame) {
   cleanupAfterTurn()
   dshState = 'ready'
-  const total = frame.timings?.totalMs
-  pushActivity('done', 'done', `turn complete${Number.isFinite(total) ? ` · ${shortDuration(total)}` : ''}${Number.isFinite(frame.timings?.toolCalls) ? ` · ${frame.timings.toolCalls} tools` : ''}`)
+  const timing = frame.timings
+  const totalMs = Number.isFinite(timing?.totalMs) ? timing.totalMs : undefined
+  finishTurn({ totalMs })
+  const finalText = typeof frame.text === 'string' ? frame.text.trim() : ''
+  if (finalText.length > 0) pushAnswer(finalText)
   setActivityPhase('Ready', 'online')
   logger.log('chat.done', {
     sessionId: frame.sessionId,
     timings: frame.timings,
+    stepDurations: lastStepDurations,
     textLength: typeof frame.text === 'string' ? frame.text.length : 0,
   }, 'info')
-  if (typeof frame.text === 'string' && frame.text.trim().length > 0 && frame.text.trim() !== lastAssistantText) {
-    appendAssistant(frame.text)
-  }
   if (typeof frame.sessionId === 'string' && frame.sessionId.length > 0) {
     sessionId = frame.sessionId
   }
-  const timing = frame.timings
-  if (timing && typeof timing === 'object') {
-    const parts = [shortDuration(timing.totalMs)]
-    if (Number.isFinite(timing.autoCaptureMs) && timing.autoCaptureMs > 0) parts.push(`look ${shortDuration(timing.autoCaptureMs)}`)
-    if (Number.isFinite(timing.toolCalls) && timing.toolCalls > 0) parts.push(`${timing.toolCalls} tool${timing.toolCalls === 1 ? '' : 's'}`)
-    els.timing.textContent = parts.filter(Boolean).join(' · ')
-  }
   updateFooter()
   refreshStatus()
+  archiveCurrentConversation()
 }
 
 /** @param {Record<string, any>} frame */
@@ -1343,10 +1994,10 @@ function handleChatError(frame) {
   }
   cleanupAfterTurn()
   const message = typeof frame.message === 'string' ? frame.message : 'Unknown companion error'
+  finishTurn({})
   pushActivity('error', 'error', message)
   setActivityPhase('Error', 'error')
   logger.log('chat.error', { message, recoverable: frame.recoverable !== false }, 'error')
-  appendError(message)
   setStatus('error', 'Error')
   if (/companion|not connected|script|invalid pairing|dsh/i.test(message)) {
     showBanner(message, 'Open settings', openSettings)
@@ -1369,24 +2020,24 @@ function handleStopped(frame = {}) {
   const reason = frame.reason === 'idle' ? 'idle' : 'user'
   cleanupAfterTurn()
   dshState = 'ready'
-  pushActivity('stopped', 'stop', reason === 'user' ? 'stopped by user' : 'stopped · companion idle')
+  finishTurn({})
+  if (lastAgentTurn) {
+    const summary = lastAgentTurn.querySelector('.agent-turn-summary')
+    if (summary && !summary.textContent.includes('Stopped')) summary.textContent += ' · Stopped'
+  }
   setActivityPhase('Stopped', 'idle')
   setStatus('idle', 'Stopped')
-  logger.log('chat.stopped', { turnId: frame.turnId, reason }, 'info')
+  logger.log('chat.stopped', { turnId: frame.turnId, reason, stepDurations: lastStepDurations }, 'info')
   if (wasActive) {
     if (frame.local === true) {
-      appendSystemNote('⏹ Stop requested — the companion did not confirm. The turn was cleared locally.')
       toast('Stop requested — no confirmation from the companion')
     } else if (reason === 'user') {
-      appendSystemNote('⏹ Stopped by user.')
       toast('Stopped')
     } else {
-      appendSystemNote('⏹ Stopped.')
       toast('No turn was running')
     }
   }
   if (typeof frame.sessionId === 'string' && frame.sessionId.length > 0) sessionId = frame.sessionId
-  els.timing.textContent = ''
   updateFooter()
 }
 
@@ -1405,12 +2056,11 @@ function updateFooter() {
 /* browser commands                                                    */
 /* ------------------------------------------------------------------ */
 
-/** @param {Record<string, any>} frame */
 async function handleBrowserCommand(frame) {
   const command = frame.command ?? {}
   const op = String(command.op ?? '')
   const args = command.args && typeof command.args === 'object' ? command.args : {}
-  const started = performance.now()
+  const started = now()
   setActivityPhase(
     op === 'tabs.list' ? 'Listing tabs…'
       : op === 'tabs.activate' ? 'Switching tabs…'
@@ -1421,7 +2071,17 @@ async function handleBrowserCommand(frame) {
                 : 'Capturing…',
     'busy',
   )
-  pushActivity('browser', 'browser', `${op} ${truncate(JSON.stringify(args), 300)}`)
+  // Tool-driven commands already have a row from chat.tool_call; auto-captures
+  // and other companion-requested commands get their own timed row.
+  const toolRecord = typeof frame.callId === 'string' ? toolRows.get(frame.callId) : undefined
+  const rowKey = typeof frame.callId === 'string' ? frame.callId : String(frame.id)
+  const ownRow = toolRecord === undefined
+    ? pushActivity('browser', op === 'tabs.list' ? 'tabs' : op, argsPreview(JSON.stringify(args)), { running: true })
+    : null
+  if (ownRow !== null) browserRows.set(rowKey, { row: ownRow, startedAt: started })
+  if (toolRecord !== undefined) {
+    toolRecord.row.textEl.textContent = argsPreview(JSON.stringify(args)) || 'running…'
+  }
   logger.log('browser.command.start', {
     commandId: frame.id,
     callId: frame.callId,
@@ -1429,37 +2089,33 @@ async function handleBrowserCommand(frame) {
     op,
     args,
   }, 'debug')
-  const card = ensureCard(frame.callId, frame.callId === 'auto' ? 'auto' : op)
-  if (card.name === 'browser' || card.name === op) {
-    card.name = op === 'tabs.list' ? 'browser_tabs'
-      : op === 'tabs.activate' ? 'browser_switch_tab'
-        : op === 'scroll' ? 'browser_scroll'
-          : op === 'read_text' ? 'browser_read_text'
-            : op === 'click' ? 'browser_click'
-              : op === 'clipboard' ? 'browser_clipboard'
-                : 'browser_screenshot'
-    card.nameEl.textContent = toolLabel(frame.callId === 'auto' ? 'auto' : card.name)
-  }
-
   if (settings.paused) {
     const error = { code: 'PAUSED', message: 'Browser access is paused in the side panel.' }
-    pushActivity('error', 'browser', error.message)
+    if (ownRow !== null) {
+      finishActivityEntry(ownRow, { text: error.message, ok: false, durationMs: now() - started })
+      browserRows.delete(rowKey)
+    } else {
+      pushActivity('error', 'browser', error.message)
+    }
     setActivityPhase('Paused', 'paused')
     logger.log('browser.command.error', { commandId: frame.id, callId: frame.callId, op, error, durationMs: Math.round(performance.now() - started) }, 'warn')
-    setCardStatus(card, 'paused', 'fail')
-    setCardArgs(card, JSON.stringify(args, null, 2))
     sendBrowserResult(frame.id, false, undefined, error)
     return
   }
 
-  setCardStatus(card, 'looking')
   setActivity(true)
   setStatus('busy', 'Seeing the page…')
   try {
     const result = await execute(op, args, settings)
-    attachView(card, result)
-    setCardStatus(card, 'captured', 'ok')
-    pushActivity('browser', op === 'tabs.list' ? 'tabs' : 'view', browserActivitySummary(op, result))
+    const uiMs = now() - started
+    const summary = browserActivitySummary(op, result)
+    if (ownRow !== null) {
+      finishActivityEntry(ownRow, { text: summary, ok: true, durationMs: uiMs })
+      browserRows.delete(rowKey)
+    } else if (toolRecord !== undefined) {
+      toolRecord.uiMs = uiMs
+      toolRecord.row.textEl.textContent = truncate(`${summary} · ui ${formatDuration(uiMs)}`, 340)
+    }
     setActivityPhase('Thinking…', 'busy')
     logger.log('browser.command.result', {
       commandId: frame.id,
@@ -1494,7 +2150,12 @@ async function handleBrowserCommand(frame) {
   } catch (error) {
     const message = errorMessage(error)
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'BROWSER_ERROR'
-    pushActivity('error', 'browser', `${op}: ${message}`)
+    if (ownRow !== null) {
+      finishActivityEntry(ownRow, { text: `${op}: ${message}`, ok: false, durationMs: now() - started })
+      browserRows.delete(rowKey)
+    } else {
+      pushActivity('error', 'browser', `${op}: ${message}`)
+    }
     setActivityPhase('Browser error', 'error')
     logger.log('browser.command.error', {
       commandId: frame.id,
@@ -1504,9 +2165,6 @@ async function handleBrowserCommand(frame) {
       durationMs: Math.round(performance.now() - started),
       error: { code, message },
     }, 'error')
-    setCardStatus(card, 'failed', 'fail')
-    card.resultEl.textContent = message
-    card.resultEl.classList.remove('hidden')
     sendBrowserResult(frame.id, false, undefined, { code, message })
   } finally {
     setActivity(false)
@@ -1591,93 +2249,6 @@ function sendBrowserResult(id, ok, result, error) {
   })
 }
 
-/** @param {any} card @param {Record<string, any>} result */
-function attachView(card, result) {
-  card.view = result
-  card.viewEl.replaceChildren()
-  card.viewEl.classList.remove('hidden')
-  card.resultEl.classList.add('hidden')
-
-  const meta = document.createElement('div')
-  meta.className = 'view-meta'
-  const addChip = (text, strong = false) => {
-    if (!text) return
-    const chip = document.createElement('span')
-    chip.className = `chip${strong ? ' strong' : ''}`
-    chip.textContent = text
-    chip.title = text
-    meta.appendChild(chip)
-  }
-
-  if (result?.tab) {
-    addChip(truncate(result.tab.title || result.tab.url || 'tab', 48), true)
-    addChip(`#${result.tab.id}`)
-  }
-  if (result?.viewport) addChip(`${result.viewport.width}×${result.viewport.height} css`)
-  if (result?.image) addChip(`${result.image.width}×${result.image.height} px`)
-  if (result?.scroll) {
-    addChip(`${result.scroll.container ?? 'document'} y=${Math.round(result.scroll.y ?? 0)}/${Math.round(result.scroll.maxY ?? 0)}`)
-    if (result.scroll.atTop) addChip('top')
-    if (result.scroll.atBottom) addChip('bottom')
-  }
-  if (result?.moved) addChip(`moved ${Math.round(result.moved.dx ?? 0)},${Math.round(result.moved.dy ?? 0)}`)
-  if (typeof result?.text === 'string') {
-    addChip(`${result.text.length} chars${result.truncated ? ` / ${result.totalChars}` : ''}`)
-    addChip(`read ${Math.round(result.totalMs ?? 0)}ms`)
-  }
-  if (result?.clicked) {
-    addChip(`clicked #${result.clicked.label}`, true)
-    addChip(truncate(result.clicked.text || result.clicked.tag || '', 40))
-    addChip(result.changed ? 'changed' : 'no change')
-    if (result.navigated) addChip('navigated')
-  }
-  if (Number.isFinite(result?.labelCount)) addChip(`${result.labelCount} labels`)
-  if (Number.isFinite(result?.captureMs)) addChip(`capture ${result.captureMs}ms`)
-  if (Number.isFinite(result?.encodeMs)) addChip(`encode ${result.encodeMs}ms`)
-  card.viewEl.appendChild(meta)
-
-  if (Array.isArray(result?.tabs)) {
-    const list = document.createElement('div')
-    list.className = 'tab-list'
-    for (const tab of result.tabs) {
-      const row = document.createElement('div')
-      row.className = `tab-row${tab.active ? ' active' : ''}`
-      const id = document.createElement('span')
-      id.className = 'id'
-      id.textContent = String(tab.id)
-      const title = document.createElement('span')
-      title.className = 'title'
-      title.textContent = tab.title || tab.url || '(untitled)'
-      title.title = tab.url || ''
-      const flags = document.createElement('span')
-      flags.className = 'flags'
-      flags.textContent = [tab.active ? 'active' : '', tab.pinned ? 'pinned' : '', tab.discarded ? 'discarded' : ''].filter(Boolean).join(' ')
-      row.append(id, title, flags)
-      list.appendChild(row)
-    }
-    card.viewEl.appendChild(list)
-  }
-
-  if (typeof result?.text === 'string') {
-    const preview = document.createElement('pre')
-    preview.className = 'text-preview'
-    preview.textContent = truncate(result.text, 4_000)
-    card.viewEl.appendChild(preview)
-  }
-
-  const src = imageDataUrl(result?.image)
-  if (src) {
-    const img = document.createElement('img')
-    img.className = 'thumb'
-    img.src = src
-    img.alt = result?.tab?.title ? `Screenshot of ${result.tab.title}` : 'Screenshot'
-    img.addEventListener('click', () => openImage(src))
-    card.viewEl.appendChild(img)
-  }
-
-  scrollChat()
-}
-
 function openImage(src) {
   els.imageModalImg.src = src
   els.imageModal.classList.remove('hidden')
@@ -1699,7 +2270,7 @@ function resizeInput() {
 
 function sendMessage() {
   const text = els.input.value.trim()
-  if (text.length === 0) return
+  if (text.length === 0 && attachedFiles.length === 0) return
   if (!connected) {
     showBanner('Not connected to the companion. Start it with npm run dev and reconnect.', 'Reconnect', () => connect())
     return
@@ -1716,16 +2287,21 @@ function sendMessage() {
   stopping = false
   clearTimeout(stopTimer)
   stopTimer = null
-  if (sendFrame({ v: PROTOCOL_VERSION, type: 'chat.send', text, autoCapture: settings.autoCapture !== false })) {
+  const files = attachedFiles
+  const attachmentContext = files.map(file => `\n\n<attached-file name=${JSON.stringify(file.name)}>\n${file.text}\n</attached-file>`).join('')
+  const prompt = `${text || 'Review the attached file(s).'}${attachmentContext}`
+  if (sendFrame({ v: PROTOCOL_VERSION, type: 'chat.send', text: prompt, autoCapture: settings.autoCapture !== false })) {
     logger.log('chat.send', {
-      textLength: text.length,
+      textLength: prompt.length,
       autoCapture: settings.autoCapture !== false,
+      attachments: files.map(file => ({ name: file.name, size: file.size })),
       preview: truncate(text, 300),
     }, 'info')
-    appendUser(text)
+    beginUserTurn(text, files)
+    attachedFiles = []
+    renderFileChips()
     els.input.value = ''
     resizeInput()
-    lastAssistantText = ''
     setBusy(true)
     setStatus('busy', 'Sending…')
   }
@@ -1743,7 +2319,6 @@ function stopTurn() {
   updateStopButton()
   setStatus('busy', 'Stopping…')
   setActivityPhase('Stopping…', 'busy')
-  pushActivity('user', 'stop', 'stop requested')
   logger.log('chat.stop.request', { sessionId }, 'info')
   clearTimeout(stopTimer)
   stopTimer = setTimeout(() => {
@@ -1768,23 +2343,34 @@ function newChat() {
   stopping = false
   clearTimeout(stopTimer)
   stopTimer = null
+  archiveCurrentConversation()
   sendFrame({ v: PROTOCOL_VERSION, type: 'chat.new' })
   clearChat()
+  currentConversationId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  attachedFiles = []
+  renderFileChips()
   sessionId = ''
   updateFooter()
   if (connected) setStatus('online', 'Connected')
 }
 
 function clearChat() {
-  for (const child of [...els.chat.children]) {
-    if (child !== els.empty) child.remove()
-  }
-  cards.clear()
+  toolRows.clear()
+  streamToolEntries.clear()
+  browserRows.clear()
   lastAssistantText = ''
-  els.timing.textContent = ''
+  lastAnswerText = ''
+  turnNumber = 0
+  currentTurn = null
+  lastAgentTurn = null
+  currentStep = null
+  lastStepDurations = []
+  footerLiveEl = null
+  stopLiveClocks()
+  els.timing.replaceChildren()
+  els.timing.removeAttribute('title')
   clearActivity()
   setActivityPhase('Ready', 'online')
-  showEmpty()
 }
 
 function togglePause() {
@@ -2025,7 +2611,7 @@ els.settingsSave.addEventListener('click', () => {
   const baseUrl = (els.settingBaseUrl.value.trim() || DEFAULT_MODEL_BASE_URL).replace(/\/+$/u, '')
   const model = els.settingModel.value.trim()
   const remember = els.settingRememberKey.checked
-  const reasoningEffort = els.settingEffort.value
+  const reasoningEffort = settingsDraftEffort
   const width = Number(els.settingWidth.value)
   const quality = Number(els.settingQuality.value)
   if (!/^wss?:\/\//u.test(url)) {
@@ -2142,7 +2728,57 @@ els.refreshModels.addEventListener('click', () => { void refreshModels() })
 els.settingBaseUrl.addEventListener('change', () => {
   if (connected) void refreshModels()
 })
-els.settingModel.addEventListener('input', renderProviderStatus)
+els.settingModel.addEventListener('input', () => {
+  fillModelOptions()
+  els.modelOptions.classList.remove('hidden')
+})
+els.settingModel.addEventListener('focus', () => {
+  els.settingModel.select()
+  fillModelOptions()
+  els.modelOptions.classList.remove('hidden')
+})
+els.settingModel.addEventListener('keydown', event => {
+  if (event.key === 'Enter') {
+    const first = els.modelOptions.querySelector('.model-option')
+    if (first && !els.modelOptions.classList.contains('hidden')) {
+      event.preventDefault()
+      first.click()
+    }
+  }
+})
+els.settingEffort.addEventListener('click', event => {
+  const button = event.target.closest('[data-effort]')
+  if (button) setEffortSelection(button.dataset.effort)
+})
+els.history.addEventListener('click', openHistory)
+els.historyClose.addEventListener('click', closeHistory)
+els.historyCurrent.addEventListener('click', closeHistory)
+els.historySearch.addEventListener('input', renderHistory)
+els.historyModal.addEventListener('click', event => {
+  if (event.target === els.historyModal) closeHistory()
+})
+els.composerModel.addEventListener('click', () => {
+  const opening = els.modelMenu.classList.contains('hidden')
+  if (opening) renderModelMenu()
+  els.modelMenu.classList.toggle('hidden', !opening)
+  els.composerModel.setAttribute('aria-expanded', String(opening))
+})
+els.attach.addEventListener('click', () => els.fileInput.click())
+els.fileInput.addEventListener('change', async () => {
+  await addFiles(els.fileInput.files)
+  els.fileInput.value = ''
+})
+els.activityLog.addEventListener('scroll', updatePromptRail, { passive: true })
+document.querySelector('.topbar').addEventListener('pointerenter', () => {
+  els.app.classList.add('utilities-open')
+})
+document.addEventListener('pointermove', event => {
+  if (event.clientX < window.innerWidth - 84) els.app.classList.remove('utilities-open')
+})
+document.addEventListener('click', event => {
+  if (!els.modelMenu.contains(event.target) && !els.composerModel.contains(event.target)) closeModelMenu()
+  if (!event.target.closest('.model-field')) els.modelOptions.classList.add('hidden')
+})
 els.imageClose.addEventListener('click', closeImage)
 els.imageModal.addEventListener('click', event => {
   if (event.target === els.imageModal) closeImage()
@@ -2159,9 +2795,18 @@ els.bannerAction.addEventListener('click', () => {
 
 els.pause.addEventListener('click', togglePause)
 els.newChat.addEventListener('click', newChat)
-els.activityToggle.addEventListener('click', toggleActivity)
-els.activityMaximize.addEventListener('click', toggleMaximizeActivity)
 els.stop.addEventListener('click', stopTurn)
+
+for (const chip of document.querySelectorAll('#activity-empty [data-prompt]')) {
+  chip.addEventListener('click', () => {
+    const prompt = chip.dataset.prompt ?? ''
+    if (prompt.length === 0) return
+    els.input.value = prompt
+    resizeInput()
+    els.input.focus()
+    logger.log('ui.suggestion', { prompt: truncate(prompt, 120) }, 'debug')
+  })
+}
 
 els.input.addEventListener('input', resizeInput)
 els.input.addEventListener('keydown', event => {
@@ -2177,7 +2822,10 @@ document.getElementById('composer').addEventListener('submit', event => {
 
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
-    if (!els.imageModal.classList.contains('hidden')) closeImage()
+    if (!els.modelMenu.classList.contains('hidden')) closeModelMenu()
+    else if (!els.modelOptions.classList.contains('hidden')) els.modelOptions.classList.add('hidden')
+    else if (!els.imageModal.classList.contains('hidden')) closeImage()
+    else if (!els.historyModal.classList.contains('hidden')) closeHistory()
     else if (!els.logModal.classList.contains('hidden')) closeLogModal()
     else if (!els.settingsModal.classList.contains('hidden')) closeSettings()
   }
@@ -2206,7 +2854,11 @@ chrome.windows.onFocusChanged.addListener(() => scheduleTabRefresh())
 async function boot() {
   logger.log('app.boot', { href: location.href, userAgent: navigator.userAgent }, 'info')
   await loadSettings()
+  await loadHistory()
   populateSettings()
+  setEffortSelection(settings.reasoningEffort ?? 'auto')
+  renderComposerModel()
+  renderFileChips()
   logger.log('settings.loaded', {
     hasToken: settings.token.length > 0,
     bridgeUrl: settings.bridgeUrl,

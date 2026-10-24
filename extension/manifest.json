@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "CrazyAgent Browser Vision",
+  "name": "crazyAgent",
   "version": "0.1.0",
   "description": "A DSH-powered browser agent that sees the active tab, clicks labelled elements or canvas coordinates, reads text, scrolls, and switches tabs.",
   "minimum_chrome_version": "116",
@@ -21,8 +21,20 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "icons": {
+    "16": "icons/cursor-16.png",
+    "32": "icons/cursor-32.png",
+    "48": "icons/cursor-48.png",
+    "128": "icons/cursor-128.png"
+  },
   "action": {
-    "default_title": "Open CrazyAgent"
+    "default_title": "Open crazyAgent",
+    "default_icon": {
+      "16": "icons/cursor-16.png",
+      "32": "icons/cursor-32.png",
+      "48": "icons/cursor-48.png",
+      "128": "icons/cursor-128.png"
+    }
   },
   "side_panel": {
     "default_path": "sidepanel/index.html"

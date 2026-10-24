@@ -5,10 +5,12 @@ import {
   formatTabCandidates,
   isAmbiguousTabMatch,
   isRectFullyVisible,
+  isRecoverableLabelCode,
   mapClickPoints,
   matchTabQuery,
   parseClickAtArgs,
   parsePressKeyArgs,
+  resolveLabelSignature,
   staleScrollInfo,
 } from '../sidepanel/browser.js'
 
@@ -237,4 +239,117 @@ test('formatLabelsHint puts the failed element first and handles empty lists', (
     formatLabelsHint([{ id: 1, role: 'button', text: 'Go' }], { maxLabels: 1, maxChars: 20 }).startsWith('Current labels:'),
     true,
   )
+})
+
+/* ---------------------------------------------------------------- */
+/* stale-label signature recovery                                    */
+/* ---------------------------------------------------------------- */
+
+const INBOX_SIGNATURE = { tag: 'a', role: 'link', text: 'Inbox 1,819 unread' }
+
+test('isRecoverableLabelCode recovers only codes whose element is gone', () => {
+  // DETACHED (re-rendered node) and UNKNOWN_LABEL (id pruned or context reset)
+  // both mean the old element is gone; a fresh pass may hold its replacement.
+  assert.equal(isRecoverableLabelCode('DETACHED'), true)
+  assert.equal(isRecoverableLabelCode('UNKNOWN_LABEL'), true)
+  // A box-less element still exists, so retrying there would be a lookalike.
+  assert.equal(isRecoverableLabelCode('NOT_VISIBLE'), false)
+  assert.equal(isRecoverableLabelCode('OBSCURED'), false, 'a covered element is still the same element')
+  assert.equal(isRecoverableLabelCode('DISABLED'), false)
+  assert.equal(isRecoverableLabelCode(undefined), false)
+  assert.equal(isRecoverableLabelCode('CLICK_FAILED'), false)
+})
+
+test('resolveLabelSignature recovers the one exact match from a fresh label pass', () => {
+  const labels = [
+    { id: 1, tag: 'button', role: 'button', text: 'Main menu' },
+    { id: 49, tag: 'a', role: 'link', text: 'Inbox 1,819 unread' },
+    { id: 117, tag: 'a', role: 'link', text: 'Starred' },
+  ]
+  const resolved = resolveLabelSignature(labels, INBOX_SIGNATURE)
+  assert.equal(resolved.matched, true)
+  assert.equal(resolved.label.id, 49, 'the replacement element is found by its signature, not its old id')
+  assert.equal(resolved.label.text, 'Inbox 1,819 unread')
+  assert.equal(resolved.candidateCount, 3)
+})
+
+test('resolveLabelSignature refuses duplicate signature candidates', () => {
+  const labels = [
+    { id: 12, tag: 'button', role: 'button', text: 'Compose' },
+    { id: 13, tag: 'button', role: 'button', text: 'Compose' },
+    { id: 14, tag: 'button', role: 'button', text: 'Archive' },
+  ]
+  const resolved = resolveLabelSignature(labels, { tag: 'button', role: 'button', text: 'Compose' })
+  assert.equal(resolved.matched, false, 'two identical controls cannot be told apart, so nothing is clicked')
+  assert.equal(resolved.reason, 'AMBIGUOUS')
+  assert.equal(resolved.matchCount, 2)
+  assert.equal(resolved.candidateCount, 3)
+})
+
+test('resolveLabelSignature refuses when the candidate is gone', () => {
+  const labels = [{ id: 3, tag: 'a', role: 'link', text: 'Starred' }]
+  const resolved = resolveLabelSignature(labels, INBOX_SIGNATURE)
+  assert.equal(resolved.matched, false)
+  assert.equal(resolved.reason, 'NO_MATCH')
+  assert.equal(resolved.matchCount, 0)
+
+  const empty = resolveLabelSignature([], INBOX_SIGNATURE)
+  assert.equal(empty.matched, false)
+  assert.equal(empty.reason, 'NO_MATCH')
+  assert.equal(empty.candidateCount, 0, 'a view with no labels can never recover a stale id')
+})
+
+test('resolveLabelSignature refuses a mismatched tag, role, or text', () => {
+  const labels = [{ id: 7, tag: 'button', role: 'button', text: 'Continue' }]
+  const mismatches = [
+    { tag: 'a', role: 'button', text: 'Continue' },
+    { tag: 'button', role: 'link', text: 'Continue' },
+    { tag: 'button', role: 'button', text: 'Continue to checkout' },
+    { tag: 'button', role: 'button', text: 'continue' },
+  ]
+  for (const signature of mismatches) {
+    const resolved = resolveLabelSignature(labels, signature)
+    assert.equal(resolved.matched, false, `${JSON.stringify(signature)} must not match`)
+    assert.equal(resolved.reason, 'NO_MATCH')
+  }
+})
+
+test('resolveLabelSignature matches the same text after re-reading collapsed whitespace', () => {
+  // A fresh label pass reads innerText again, so line breaks and padding can
+  // differ from the recorded signature without the element having changed.
+  const labels = [{ id: 8, tag: 'button', role: 'button', text: 'Continue to checkout' }]
+  const resolved = resolveLabelSignature(labels, { tag: 'Button', role: 'BUTTON', text: '  Continue\n to   checkout  ' })
+  assert.equal(resolved.matched, true)
+  assert.equal(resolved.label.id, 8)
+})
+
+test('resolveLabelSignature refuses a signature with no identifying text', () => {
+  // Tag+role alone would match any icon button of the same shape: a guess.
+  const labels = [{ id: 3, tag: 'button', role: 'button', text: '' }]
+  const resolved = resolveLabelSignature(labels, { tag: 'button', role: 'button', text: '' })
+  assert.equal(resolved.matched, false)
+  assert.equal(resolved.reason, 'WEAK_SIGNATURE')
+})
+
+test('resolveLabelSignature keeps recovery inside the recorded frame', () => {
+  const labels = [
+    { id: 5, tag: 'a', role: 'link', text: 'Home' },
+    { id: 100005, tag: 'a', role: 'link', text: 'Home', frame: 1 },
+  ]
+  const top = resolveLabelSignature(labels, { tag: 'a', role: 'link', text: 'Home', frame: 0 })
+  assert.equal(top.label.id, 5, 'a top-frame signature only matches top-frame labels')
+  const child = resolveLabelSignature(labels, { tag: 'a', role: 'link', text: 'Home', frame: 1 })
+  assert.equal(child.label.id, 100005, 'an iframe signature only matches that iframe')
+  const gone = resolveLabelSignature([labels[0]], { tag: 'a', role: 'link', text: 'Home', frame: 1 })
+  assert.equal(gone.matched, false, 'a same-text control in another frame is a different element')
+  assert.equal(gone.reason, 'NO_MATCH')
+})
+
+test('resolveLabelSignature ignores malformed candidate entries', () => {
+  const labels = [null, {}, { id: 'abc', tag: 'a', role: 'link', text: 'Inbox 1,819 unread' }]
+  const resolved = resolveLabelSignature(labels, INBOX_SIGNATURE)
+  assert.equal(resolved.matched, false)
+  assert.equal(resolved.reason, 'NO_MATCH')
+  assert.equal(resolved.candidateCount, 0, 'labels without a numeric id are not candidates')
+  assert.equal(resolveLabelSignature(undefined, INBOX_SIGNATURE).reason, 'NO_MATCH')
 })

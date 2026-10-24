@@ -38,6 +38,22 @@
         bridgeUrl: !!js process.env.DSH_BROWSER_BRIDGE_URL
         bridgeToken: !!js process.env.DSH_BROWSER_BRIDGE_TOKEN
         requestTimeoutMs: 10000
+        # There is deliberately NO per-turn call limit. Measured 2026-10-23: a
+        # 10-university document task needs 80+ calls, and cutting the turn at
+        # 80 threw away working state - the user had to say "continue" five
+        # times, and each restart began from a state the model could only
+        # describe in words rather than verify, which is what corrupted the doc.
+        # What remains is a correctness guard against identical repeats, tuned
+        # from the 2026-10-23 run. A mutating call repeated with the same args is
+        # a bug (double click, re-typed paragraph) and stays at 3; an observation
+        # call repeating (screenshot, read_text, wait_for, tabs) is how the agent
+        # watches async state — verification passes needed 12+ identical
+        # screenshots, so observation gets 30. Unmodified navigation keys
+        # (Escape, Tab, arrows, Home/End) get 10; committing keys and every
+        # modified chord, including Shift-selection, stay at the strict 3.
+        maxRepeatedCalls: 3
+        maxObservationRepeats: 30
+        maxNavigationRepeats: 10
 
 # One browser action at a time; parallel tool calls would race the viewport.
 - id: agent-loop

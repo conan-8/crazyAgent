@@ -29,17 +29,19 @@ python3 -m http.server 17872 --bind 127.0.0.1 --directory e2e/fixtures
 
 ### 1c. Reasoning policy
 
-- With **Auto** effort, ask **“scroll down”**: the activity feed should show `policy: reasoning off (navigate, auto)`.
-- Ask **“what is on this page?”**: the next `policy` line should show `reasoning low (inspect, auto)`.
-- Switch to **Off** in Settings and save; every later turn should show `reasoning off`.
-- **Pass:** one `policy` line per turn, matching the table in the README.
+- With **Auto** effort, ask **“scroll down”**: the activity feed should show `policy: reasoning low (navigate, auto)` and stream thinking from the first model step.
+- Ask **“what is on this page?”**: the next `policy` line should also show `reasoning low (inspect, auto)`.
+- Switch to **Off** in Settings and save; every later turn should show `reasoning off` and no model reasoning content (provider-supplied summaries may still appear).
+- **Pass:** one `policy` line per turn; Auto always requests low, while manual Off is respected.
 
-### 1b. Live activity
+### 1b. Live activity and per-step timing (single full-height pane)
 
 - Ask a question on a normal page and keep the side panel visible.
-- Expect the **Live activity** feed to update while the turn runs: a **thinking** entry with reasoning/thinking deltas (when the provider exposes them), **assistant** text, `tool` partial/committed calls, browser actions, token usage, finish reason, and a final `done` entry.
-- Click the activity chevron to collapse/expand; the header keeps the current phase and latest line.
-- **Pass:** activity appears before the turn completes, not only after the final answer; the reasoning text is visible for reasoning-capable models; no UI errors.
+- The side panel is one **full-height activity feed** — there is no separate chat pane. Expect the feed to update while the turn runs: numbered **Step** blocks, each with a **thinking** row with reasoning/thinking deltas (when the provider exposes them), **assistant** text, tool rows with their own duration, browser actions, and token usage.
+- While a step runs it stays expanded and its header clock ticks; the activity header shows `step N · X.Xs`; the footer shows the completed steps so far plus the live one.
+- **As soon as the next step starts, the finished step collapses to a single header line** (`Step 1 clicked #12 Increment · changed … model 1.7s 2.8s`). Click a collapsed header to expand it again; click it once more to collapse.
+- After the turn, every step is collapsed, the turn's final answer is pinned below the steps as an `ANSWER` block, and the footer shows every step's own time plus the turn total (`⏱ s1 1.4s · s2 2.1s · total 5.6s`); hover it for the full breakdown. Expand the step to read its reasoning and tool rows.
+- **Pass:** each step's own time is visible during the run, not only the total after it finishes; finished steps collapse automatically; the final answer stays visible; activity appears before the turn completes; the reasoning text is available for reasoning-capable models; no UI errors.
 
 ### 2. See the page
 
@@ -144,21 +146,22 @@ Use `e2e/fixtures/form.html`.
 
 ### 9d. Selection, fast views, reasoning speed
 
-Use `e2e/fixtures/form.html` and a Google Doc.
+Use `e2e/fixtures/form.html` and a disposable Google Doc.
 
 - Ask: **“Select the paragraph that says SELECT-ME-ALPHA and tell me what is selected.”** Expect a `select` card with the character count and a text preview; the page selection is highlighted.
 - Ask a select with identical start/end (or “click without selecting”): expect `selection collapsed (nothing selected)`.
-- On Google Docs: **“Comment on the second sentence.”** The agent should select the sentence with `browser_select`, press Ctrl+Alt+M, type the comment into the focused box (label-less `browser_type`, possibly `trusted-focus`), and submit — not fight the menu with dozens of Escapes.
-- Ask: **“Select this paragraph and make it bold.”** Expect select + Ctrl+B.
+- On Google Docs: **“Comment on the second sentence.”** The agent should select with `browser_select`, confirm the highlighted range in the returned full view, then use separate full-view actions for Ctrl+Alt+M, comment typing, and submit. Canvas selection must be labelled UNVERIFIED until the view confirms it.
+- Ask: **“Select this paragraph and make it bold.”** Expect select + visual confirmation + Ctrl+B as separate full-view actions.
+- On a line that is not already Playfair Display, ask: **“Set only this line to Playfair Display.”** Expect the labelled font toolbar, a full fresh view, then the exact `menuitemcheckbox` (or labelled More fonts search). It must not use a mutating batch, guess font-menu coordinates, or type the font name into the document.
 - Ask: **“Take a quick look at the page.”** Expect `browser_screenshot` with `detail:"fast"`; card metadata shows a 640 px image.
-- Reasoning speed: with **Auto** effort, ask **“delete the extra paragraph”** or **“add a comment here”** — the policy line should say `reasoning off (act, auto)`. Ask **“what does this page say?”** — `reasoning low (inspect, auto)`.
-- **Pass:** selection text is reported honestly, the Docs comment flow completes in a handful of actions, and action prompts run with reasoning off.
+- With **Auto** effort, ask **“delete the extra paragraph”** or **“add a comment here”** — the policy line should say `reasoning low (act, auto)` and thinking should stream from the first step. Ask **“what does this page say?”** — `reasoning low (inspect, auto)`.
+- **Pass:** selection and typing outcomes are honest, only the intended Docs line changes, every Docs mutation is followed by a full fresh view, and no dependent Docs actions are batched.
 
 ### 9c. Batching and view modes
 
 Use `e2e/fixtures/form.html`.
 
-- Ask: **“Fill in the name and notes and submit.”** Expect a single `batch` card listing several actions, a header like `batch: N actions · S succeeded · Xms`, and **one** final view; the form records the values.
+- Ask: **“Fill in the name and notes and submit.”** Expect a single `batch` card listing several actions, a header like `batch: N actions · S executed without tool errors · Xms`, and **one** final view; the form records the values. Any `changed:null` action is separately counted as UNVERIFIED, not called successful.
 - Ask for a sequence with a deliberately wrong label (or use a batch with one bad action) and check the card shows `FAILED at [i]` and, with `stop_on_error:false`, continues after the failure.
 - Do several actions in a row on the same page: after the first (full) view, later cards should say **compact** and carry no screenshot thumbnail, only a label delta like `labels +1/-1, 39 unchanged`.
 - Ask **“show me the page”**: the next action should return a full view (a thumbnail) because the model asked for `view:"full"`.

@@ -3,178 +3,246 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CrazyAgent</title>
+    <title>crazyAgent</title>
+    <link rel="icon" href="../icons/cursor-32.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;display=swap" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <svg class="svg-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="icon-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></symbol>
+      <symbol id="icon-log" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8M8 17h6" /></symbol>
+      <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08a1.7 1.7 0 0 0 1.06 1.52 1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z" /></symbol>
+      <symbol id="icon-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" /></symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5" /><path d="M18.5 9A7 7 0 0 0 6 6.5L4 9M5.5 15A7 7 0 0 0 18 17.5l2-2.5" /></symbol>
+      <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></symbol>
+      <symbol id="icon-attach" viewBox="0 0 24 24"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 0 1-2.8-2.8l8.9-8.9" /></symbol>
+      <symbol id="icon-arrow-up" viewBox="0 0 24 24"><path d="m6 11 6-6 6 6M12 5v14" /></symbol>
+      <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 21h14" /></symbol>
+      <symbol id="icon-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></symbol>
+    </svg>
+
     <div class="app">
-      <header class="topbar">
-        <div class="brand">
-          <span class="logo" aria-hidden="true">◎</span>
-          <span class="brand-name">CrazyAgent</span>
-          <span class="phase">vision</span>
-        </div>
+      <header class="topbar" aria-label="Chat utilities">
         <div class="top-actions">
-          <button id="pause" class="icon-btn" type="button" title="Pause browser access" aria-label="Pause browser access">⏸</button>
-          <button id="new-chat" class="icon-btn" type="button" title="New chat" aria-label="New chat">＋</button>
-          <button id="debug-log" class="icon-btn" type="button" title="Export debug log" aria-label="Export debug log">▤</button>
-          <button id="settings" class="icon-btn" type="button" title="Settings" aria-label="Settings">⚙</button>
+          <button id="pause" class="icon-btn" type="button" title="Pause browser access" aria-label="Pause browser access"><svg class="icon"><use href="#icon-pause" /></svg></button>
+          <span class="top-sep" aria-hidden="true"></span>
+          <button id="new-chat" class="icon-btn" type="button" title="New chat" aria-label="New chat"><svg class="icon"><use href="#icon-plus" /></svg></button>
+          <button id="history" class="icon-btn" type="button" title="Chat history" aria-label="Chat history"><svg class="icon"><use href="#icon-history" /></svg></button>
+          <button id="debug-log" class="icon-btn" type="button" title="Debug log" aria-label="Debug log"><svg class="icon"><use href="#icon-log" /></svg></button>
+          <button id="settings" class="icon-btn" type="button" title="Settings" aria-label="Settings"><svg class="icon"><use href="#icon-settings" /></svg></button>
         </div>
       </header>
 
-      <div class="tabline">
+      <div class="statusbar" role="status">
         <span id="status-dot" class="dot offline" aria-hidden="true"></span>
         <span id="status-text" class="status-text">Connecting…</span>
+        <span class="statusbar-sep" aria-hidden="true"></span>
         <span id="active-tab" class="active-tab">No active tab</span>
       </div>
 
-      <section id="activity" class="activity" aria-live="polite">
+      <section id="activity" class="activity" aria-live="polite" aria-label="Conversation">
         <div class="activity-head">
+          <span class="activity-label">Live activity</span>
           <span id="activity-dot" class="dot offline" aria-hidden="true"></span>
           <span id="activity-phase" class="activity-phase">Idle</span>
+          <span id="activity-timer" class="activity-timer hidden" aria-hidden="true"></span>
           <span id="activity-latest" class="activity-latest">Waiting for a turn</span>
-          <button id="activity-maximize" class="icon-btn activity-toggle" type="button" title="Expand activity" aria-label="Expand live activity" aria-pressed="false">⤢</button>
-          <button id="activity-toggle" class="icon-btn activity-toggle" type="button" title="Collapse activity" aria-label="Collapse live activity" aria-expanded="true">▴</button>
         </div>
-        <div id="activity-log" class="activity-log">
-          <div class="activity-empty" id="activity-empty">Model thinking, streamed text, tool calls, and browser actions will appear here live.</div>
+        <div id="activity-log" class="activity-log" role="log" aria-label="Activity timeline">
+          <div class="activity-empty" id="activity-empty">
+            <h1 class="visually-hidden">See the page with CrazyAgent</h1>
+          </div>
         </div>
       </section>
+
+      <aside id="prompt-rail" class="prompt-rail hidden" aria-label="Prompt navigation">
+        <div id="prompt-rail-list" class="prompt-rail-list"></div>
+      </aside>
 
       <div id="banner" class="banner hidden" role="status">
         <span id="banner-text"></span>
         <button id="banner-action" class="link" type="button">Reconnect</button>
       </div>
 
-      <main id="chat" class="chat" aria-live="polite">
-        <div class="empty" id="empty">
-          <div class="empty-icon" aria-hidden="true">◉</div>
-          <h1>See the page with me</h1>
-          <p>Ask about this page, or tell me to click, type, scroll, switch tabs, or handle a task.</p>
-        </div>
-      </main>
-
       <form id="composer" class="composer">
-        <textarea id="input" rows="1" placeholder="Ask or tell me what to do…" autocomplete="off" spellcheck="false"></textarea>
-        <button id="stop" class="stop hidden" type="button" title="Stop the current turn" aria-label="Stop the current turn" aria-busy="false">■</button>
-        <button id="send" class="send" type="submit" title="Send" aria-label="Send">↑</button>
+        <div class="composer-field">
+          <input id="file-input" class="hidden" type="file" multiple />
+          <div id="file-chips" class="file-chips" aria-live="polite"></div>
+          <textarea id="input" rows="2" placeholder="Ask or tell me what to do…" autocomplete="off" spellcheck="false" aria-label="Message"></textarea>
+          <div class="composer-controls">
+            <button id="attach" class="attach" type="button" title="Add file" aria-label="Add file"><svg class="icon"><use href="#icon-attach" /></svg></button>
+            <span class="composer-spacer"></span>
+            <button id="composer-model" class="composer-model" type="button" aria-haspopup="listbox" aria-expanded="false" title="Choose model">
+              <span id="composer-model-name">Select model</span>
+              <svg class="icon"><use href="#icon-chevron" /></svg>
+            </button>
+            <button id="stop" class="stop hidden" type="button" title="Stop the current turn" aria-label="Stop the current turn" aria-busy="false"><span aria-hidden="true"></span></button>
+            <button id="send" class="send" type="submit" title="Send" aria-label="Send"><svg class="icon"><use href="#icon-arrow-up" /></svg></button>
+          </div>
+        </div>
+        <div id="model-menu" class="model-menu hidden" role="listbox" aria-label="Models"></div>
       </form>
 
       <footer class="footer">
-        <span id="session-info"></span>
-        <span id="timing"></span>
+        <span id="session-info" class="session-info"></span>
+        <span id="timing" class="timing" aria-label="Step timings"></span>
       </footer>
     </div>
 
-    <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div id="settings-modal" class="modal panel-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div class="modal-card">
         <div class="modal-head">
-          <h2 id="settings-title">Connection</h2>
-          <button id="settings-close" class="icon-btn" type="button" aria-label="Close">✕</button>
+          <h2 id="settings-title">Settings</h2>
+          <button id="settings-close" class="icon-btn close-btn" type="button" title="Close" aria-label="Close settings"><svg class="icon"><use href="#icon-close" /></svg></button>
         </div>
-        <label class="field">
-          <span>Bridge URL</span>
-          <input id="setting-url" type="text" spellcheck="false" />
-        </label>
-        <label class="field">
-          <span>Pairing token</span>
-          <input id="setting-token" type="password" spellcheck="false" placeholder="Printed by npm run dev" />
-        </label>
+        <div class="modal-body settings-body">
+          <section class="settings-section" aria-labelledby="connection-label">
+            <h3 id="connection-label">Connection</h3>
+            <label class="field">
+              <span>Bridge URL</span>
+              <input id="setting-url" type="text" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>Pairing token</span>
+              <input id="setting-token" type="password" spellcheck="false" placeholder="Printed by npm run dev" />
+            </label>
+          </section>
 
-        <label class="field">
-          <span>OpenRouter API key</span>
-          <input id="setting-apikey" type="password" spellcheck="false" autocomplete="new-password" placeholder="sk-or-v1-…" />
-        </label>
-        <label class="field">
-          <span>Model base URL</span>
-          <input id="setting-base-url" type="url" spellcheck="false" placeholder="https://openrouter.ai/api/v1" />
-        </label>
-        <label class="field">
-          <span>Model</span>
-          <div class="model-row">
-            <input id="setting-model" type="text" list="model-options" spellcheck="false" placeholder="Refresh and search image-capable models…" />
-            <button id="refresh-models" class="secondary" type="button">Refresh</button>
-          </div>
-          <datalist id="model-options"></datalist>
-        </label>
-        <label class="field">
-          <span>Reasoning effort</span>
-          <select id="setting-effort">
-            <option value="auto">Auto — off for navigation, low for reading and analysis (recommended)</option>
-            <option value="off">Off — fastest, terser answers</option>
-            <option value="low">Low — always think briefly</option>
-            <option value="medium">Medium</option>
-            <option value="high">High — slowest, deepest</option>
-          </select>
-        </label>
-        <p class="hint" id="effort-status">Auto picks the effort per turn from your prompt.</p>
+          <section class="settings-section" aria-labelledby="model-label">
+            <h3 id="model-label">Model</h3>
+            <label class="field">
+              <span>OpenRouter API key</span>
+              <input id="setting-apikey" type="password" spellcheck="false" autocomplete="new-password" placeholder="sk-or-v1-…" />
+            </label>
+            <p class="hint status-hint" id="key-status">No OpenRouter API key configured.</p>
+            <label class="field">
+              <span>Model base URL</span>
+              <input id="setting-base-url" type="url" spellcheck="false" placeholder="https://openrouter.ai/api/v1" />
+            </label>
+            <div class="field model-field">
+              <span>Model</span>
+              <div class="model-row">
+                <div class="model-picker">
+                  <svg class="icon input-icon"><use href="#icon-search" /></svg>
+                  <input id="setting-model" type="text" spellcheck="false" placeholder="Search OpenRouter models…" autocomplete="off" aria-controls="model-options" />
+                  <svg class="icon picker-chevron"><use href="#icon-chevron" /></svg>
+                  <div id="model-options" class="model-options hidden" role="listbox" aria-label="Available models"></div>
+                </div>
+                <button id="refresh-models" class="secondary refresh-models" type="button"><svg class="icon"><use href="#icon-refresh" /></svg><span>Refresh</span></button>
+              </div>
+            </div>
+            <p class="hint status-hint" id="model-status">OpenRouter models have not been loaded yet.</p>
+            <div class="field">
+              <span>Reasoning effort</span>
+              <div id="setting-effort" class="effort-options" role="group" aria-label="Reasoning effort">
+                <button class="active" type="button" data-effort="auto" aria-pressed="true">Auto</button>
+                <button type="button" data-effort="off" aria-pressed="false">Off</button>
+                <button type="button" data-effort="low" aria-pressed="false">Low</button>
+                <button type="button" data-effort="medium" aria-pressed="false">Medium</button>
+                <button type="button" data-effort="high" aria-pressed="false">High</button>
+              </div>
+              <span id="effort-hint" class="hint">Low for every turn (recommended)</span>
+              <p class="hint status-hint" id="effort-status">Auto requests low reasoning from the first model step.</p>
+            </div>
+            <label class="check">
+              <span>Remember the API key on this machine</span>
+              <input id="setting-remember-key" type="checkbox" checked />
+            </label>
+          </section>
 
-        <p class="hint" id="key-status">No OpenRouter API key configured.</p>
-        <p class="hint" id="model-status">OpenRouter models have not been loaded yet.</p>
-        <label class="check">
-          <input id="setting-remember-key" type="checkbox" checked />
-          <span>Remember the API key on this machine (mode 0600)</span>
-        </label>
-
-        <div class="field-row">
-          <label class="field">
-            <span>Capture width</span>
-            <input id="setting-width" type="number" min="640" max="2048" step="64" />
-          </label>
-          <label class="field">
-            <span>JPEG quality</span>
-            <input id="setting-quality" type="number" min="40" max="90" step="1" />
-          </label>
+          <section class="settings-section" aria-labelledby="capture-label">
+            <h3 id="capture-label">Capture</h3>
+            <div class="field-row">
+              <label class="field">
+                <span>Capture width</span>
+                <input id="setting-width" type="number" min="640" max="2048" step="64" />
+              </label>
+              <label class="field">
+                <span>JPEG quality</span>
+                <input id="setting-quality" type="number" min="40" max="90" step="1" />
+              </label>
+            </div>
+            <label class="check">
+              <span>Attach a fresh view to every message</span>
+              <input id="setting-autocapture" type="checkbox" />
+            </label>
+            <p class="hint">The token is stored only in this browser profile. Screenshots go to your configured model provider through the local DSH runtime. Keep the side panel open while the agent runs.</p>
+          </section>
         </div>
-        <label class="check">
-          <input id="setting-autocapture" type="checkbox" />
-          <span>Attach a fresh view to every message</span>
-        </label>
-        <p class="hint">
-          The token is stored only in this browser profile. Screenshots go to your configured
-          model provider through the local DSH runtime. Keep the side panel open while the agent runs.
-        </p>
         <div class="modal-actions">
+          <span id="settings-status" class="settings-status" role="status"></span>
           <button id="test-capture" class="secondary" type="button">Test capture</button>
           <button id="settings-save" class="primary" type="button">Save</button>
         </div>
       </div>
     </div>
 
+    <div id="history-modal" class="modal panel-modal hidden" role="dialog" aria-modal="true" aria-labelledby="history-title">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2 id="history-title">History</h2>
+          <button id="history-close" class="icon-btn close-btn" type="button" title="Close" aria-label="Close history"><svg class="icon"><use href="#icon-close" /></svg></button>
+        </div>
+        <div class="history-search">
+          <svg class="icon"><use href="#icon-search" /></svg>
+          <input id="history-search" type="search" placeholder="Search chats…" spellcheck="false" autocomplete="off" aria-label="Search chats" />
+        </div>
+        <div id="history-list" class="history-list">
+          <button id="history-current" class="history-current hidden" type="button">
+            <span class="history-dot current" aria-hidden="true"></span>
+            <span class="history-copy"><span id="history-current-title">Current chat</span><span>Current chat</span></span>
+          </button>
+          <div id="history-empty" class="history-empty">No chats found</div>
+        </div>
+      </div>
+    </div>
 
-    <div id="log-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="log-title">
+    <div id="log-modal" class="modal panel-modal hidden" role="dialog" aria-modal="true" aria-labelledby="log-title">
       <div class="modal-card">
         <div class="modal-head">
           <h2 id="log-title">Debug log</h2>
-          <button id="log-close" class="icon-btn" type="button" aria-label="Close">✕</button>
+          <button id="log-close" class="icon-btn close-btn" type="button" title="Close" aria-label="Close debug log"><svg class="icon"><use href="#icon-close" /></svg></button>
         </div>
-        <div id="log-stats" class="log-stats">Connecting…</div>
-        <div id="log-signals" class="log-signals"></div>
-        <label class="check">
-          <input id="log-include-screenshots" type="checkbox" checked />
-          <span>Include screenshots</span>
-        </label>
-        <label class="check">
-          <input id="log-include-session" type="checkbox" checked />
-          <span>Include raw DSH session log</span>
-        </label>
-        <p class="hint">
-          The ZIP contains events.jsonl, summary.md, environment.json, and optionally screenshots and the
-          DSH session log. Pairing tokens, API keys, authorization headers, and secret-named fields are
-          redacted from JSONL. Screenshots may contain page content. Share the ZIP when a run looks
-          interesting.
-        </p>
-        <div class="modal-actions">
+        <div class="modal-body log-body">
+          <section class="settings-section" aria-labelledby="session-label">
+            <h3 id="session-label">Session</h3>
+            <div id="log-stats" class="log-stats">Connecting…</div>
+          </section>
+          <section class="settings-section" aria-labelledby="signals-label">
+            <h3 id="signals-label">Signals</h3>
+            <div id="log-signals" class="log-signals"></div>
+          </section>
+          <section class="settings-section" aria-labelledby="bundle-label">
+            <h3 id="bundle-label">Bundle</h3>
+            <label class="check">
+              <span>Include screenshots</span>
+              <input id="log-include-screenshots" type="checkbox" checked />
+            </label>
+            <label class="check">
+              <span>Include raw DSH session log</span>
+              <input id="log-include-session" type="checkbox" checked />
+            </label>
+            <p class="hint">The ZIP contains events.jsonl, summary.md, environment.json, and optionally screenshots and the DSH session log. Pairing tokens, API keys, authorization headers, and secret-named fields are redacted from JSONL. Screenshots may contain page content.</p>
+          </section>
+        </div>
+        <div class="modal-actions log-actions">
           <button id="log-copy-summary" class="secondary" type="button">Copy summary</button>
-          <button id="log-copy-path" class="secondary" type="button">Copy logs path</button>
-          <button id="log-export" class="primary" type="button">Download bundle</button>
+          <button id="log-copy-path" class="secondary" type="button">Copy path</button>
+          <span class="action-spacer"></span>
+          <button id="log-export" class="primary" type="button"><svg class="icon"><use href="#icon-download" /></svg><span>Download</span></button>
         </div>
       </div>
     </div>
 
     <div id="image-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Screenshot">
       <div class="image-card">
-        <button id="image-close" class="icon-btn image-close" type="button" aria-label="Close">✕</button>
+        <button id="image-close" class="icon-btn image-close" type="button" aria-label="Close screenshot"><svg class="icon"><use href="#icon-close" /></svg></button>
         <img id="image-modal-img" alt="Screenshot" />
       </div>
     </div>

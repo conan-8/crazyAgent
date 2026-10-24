@@ -39,14 +39,33 @@ const LABEL_LIMIT = 120
  */
 const lastViewByTab = new Map()
 /**
- * Cumulative label registry per tab: global label id -> owning frame. Labels
- * merge across views so an id from an earlier view on the same page still
- * resolves. A URL change invalidates the whole entry.
- * @type {Map<number, {url: string, labels: Map<number, {frameId: number, localId: number}>, at: number}>}
+ * Cumulative label registry per tab: global label id -> owning frame + the
+ * signature (tag/role/text) recorded when the id was handed out. Labels merge
+ * across views so an id from an earlier view on the same page still resolves,
+ * and the signature lets a re-rendered element be recovered under its new id.
+ * A URL change invalidates the whole entry.
+ * @type {Map<number, {url: string, labels: Map<number, {frameId: number, localId: number, tag?: string, role?: string, text?: string}>, at: number}>}
  */
 const tabLabelsByTab = new Map()
 const MAX_LABEL_TABS = 20
 const lastScrollByTab = new Map()
+/**
+ * Captured views per tab, newest first, kept as coordinate bases for image-space
+ * actions. A `detail:"fast"` capture is a 640px image on the same viewport, so
+ * its css/imagePx scale is half the normal view's; without a record of which
+ * image a coordinate was measured on, a click measured against the old basis
+ * silently maps through the new one (2026-10-23 run: 0.817 → 1.021 → 2.042 px
+ * scales while the model reused (247, 514)). Every capture gets a monotonic
+ * viewId, and click_at can name the basis it measured on.
+ * @type {Map<number, Array<{viewId: number, url: string, imageWidth: number, imageHeight: number, viewport: {width: number, height: number}, at: number}>>}
+ */
+const imageBasesByTab = new Map()
+/** Recent bases per tab; enough to name the view a stale coordinate fits. */
+const MAX_IMAGE_BASES = 8
+/** Monotonic across the browser session so a viewId is unique in a transcript. */
+let nextViewId = 1
+/** Layout drift (CSS px) that makes a previous view's coordinates stale. */
+const LAYOUT_SHIFT_THRESHOLD_PX = 8
 /** Upper bound for one click_at points burst (raised from 8 so a 19-point
  * whack-a-dot burst is one attach, one capture). */
 const CLICK_AT_MAX_POINTS = 20
@@ -56,6 +75,13 @@ const STALE_SCROLL_THRESHOLD_PX = 40
 const SCROLL_VISIBLE_MARGIN_PX = 4
 /** Click failure codes that mean the label list moved on; the retry hint applies. */
 const STALE_LABEL_CODES = new Set(['DETACHED', 'NOT_VISIBLE', 'UNKNOWN_LABEL'])
+/**
+ * Stale codes that mean the id no longer names a live labelled element, so the
+ * same logical element can only be found again by its recorded signature.
+ * NOT_VISIBLE is deliberately excluded: that element still exists, it just has
+ * no box right now, and a text lookalike would be a different element.
+ */
+const RECOVERABLE_LABEL_CODES = new Set(['DETACHED', 'UNKNOWN_LABEL'])
 /** Caps for the stale-label retry hint appended to those errors. */
 const LABEL_HINT_MAX_LABELS = 25
 const LABEL_HINT_MAX_CHARS = 1_200
@@ -275,6 +301,48 @@ async function runInTab(tabId, func, args, timeoutMs = 4_000) {
   const result = results?.[0]?.result
   if (result === undefined) throw new BrowserError('SCRIPT_EMPTY', 'The page script returned no result')
   return result
+}
+
+/**
+ * Run one page function in every frame of the tab and return the per-frame
+ * results. Canvas apps keep the real editor (or the hidden event-target) in a
+ * subframe, so a top-frame-only probe cannot see what happened there; one
+ * scripting call covers all frames, which keeps the round-trip count the same as
+ * the old top-frame calls. Frames that refuse injection are skipped; when the
+ * whole call fails it falls back to the top frame.
+ * @param {number} tabId
+ * @param {Function} func
+ * @param {unknown[]} [args]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<Array<{frameId: number, result: any}>>}
+ */
+async function runInAllFrames(tabId, func, args = [], timeoutMs = 3_000) {
+  let results
+  try {
+    results = await Promise.race([
+      chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        world: 'ISOLATED',
+        func,
+        args,
+      }),
+      new Promise((_, reject) => setTimeout(
+        () => reject(new BrowserError('SCRIPT_TIMEOUT', `The page script did not finish within ${timeoutMs}ms`)),
+        timeoutMs,
+      )),
+    ])
+  } catch (error) {
+    if (error instanceof BrowserError) throw error
+    try {
+      const result = await runInTab(tabId, func, args, timeoutMs)
+      return [{ frameId: 0, result }]
+    } catch {
+      throw new BrowserError('SCRIPT_FAILED', `Chrome could not run in this tab: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  return (Array.isArray(results) ? results : [])
+    .filter(item => item && item.result !== undefined)
+    .map(item => ({ frameId: Number(item.frameId) || 0, result: item.result }))
 }
 
 /** Page-side timer: the active tab is not throttled like a hidden side panel. */
@@ -537,7 +605,13 @@ async function labelAllFrames(tabId, limit, options = {}) {
     if (!data || data.__labelError) continue
     for (const label of data.labels) {
       const globalId = item.frameId === 0 ? label.id : item.frameId * 100_000 + label.id
-      registry.labels.set(globalId, { frameId: item.frameId, localId: label.id })
+      registry.labels.set(globalId, {
+        frameId: item.frameId,
+        localId: label.id,
+        tag: label.tag,
+        role: label.role,
+        text: label.text,
+      })
       labels.push({ ...label, id: globalId, ...item.frameId === 0 ? {} : { frame: item.frameId } })
     }
   }
@@ -594,6 +668,98 @@ function resolveLabelTarget(tab, label) {
   return registry.labels.get(label)
 }
 
+/**
+ * Inspect an id the registry cannot resolve against the ids this page ever
+ * handed out. Label ids are assigned sequentially per frame (frame 0 gets
+ * `id`, a subframe gets `frameId * 100000 + id`), so the highest recorded local
+ * id in a frame is exactly the range of ids that can ever have existed there:
+ * an id above it was never assigned and can never resolve, no matter how many
+ * fresh views are taken. Pure, so the "hallucinated vs stale" distinction is
+ * testable without Chrome.
+ * @param {number} label
+ * @param {{labels?: Map<number, {frameId?: number, localId?: number}>} | undefined} registry
+ * @returns {{frameId: number, localId: number, maxLocalId: number, frameLabels: number, everAssigned: boolean, hasAnyLabels: boolean}}
+ */
+export function inspectLabelAssignment(label, registry) {
+  const id = Math.max(0, Math.floor(Number(label) || 0))
+  const frameId = Math.floor(id / 100_000)
+  const localId = id - frameId * 100_000
+  let maxLocalId = 0
+  let frameLabels = 0
+  const labels = registry?.labels
+  if (labels instanceof Map) {
+    for (const entry of labels.values()) {
+      if ((Number(entry?.frameId) || 0) !== frameId) continue
+      frameLabels += 1
+      const local = Number(entry?.localId) || 0
+      if (local > maxLocalId) maxLocalId = local
+    }
+  }
+  return {
+    frameId,
+    localId,
+    maxLocalId,
+    frameLabels,
+    everAssigned: localId >= 1 && localId <= maxLocalId,
+    hasAnyLabels: labels instanceof Map && labels.size > 0,
+  }
+}
+
+/**
+ * Error text for a label id the registry cannot resolve. The old wording ("is
+ * not in the current view") was identical for two very different mistakes: a
+ * real id that went stale (a fresh view helps) and an id that was never handed
+ * out at all (in the 2026-10-23 run the model clicked label 999, which no view
+ * ever contained; no amount of re-viewing can resolve it, and the honest answer
+ * is the valid range plus the coordinate alternative). Pure.
+ * @param {number} label
+ * @param {ReturnType<typeof inspectLabelAssignment>} assignment
+ * @returns {{kind: 'never-assigned'|'stale'|'no-labels', message: string}}
+ */
+export function formatMissingLabelMessage(label, assignment) {
+  const frameId = Number(assignment?.frameId) || 0
+  const maxLocalId = Number(assignment?.maxLocalId) || 0
+  if (!assignment || assignment.hasAnyLabels !== true) {
+    return {
+      kind: 'no-labels',
+      message: `Label ${label} was never assigned: no labels have been handed out on this page yet. Take a fresh view (browser_screenshot) so the page is labelled, or use browser_click_at with coordinates.`,
+    }
+  }
+  if (assignment.everAssigned === true) {
+    return {
+      kind: 'stale',
+      message: `Label ${label} is not in the current view. Take a fresh screenshot to get current labels.`,
+    }
+  }
+  const where = frameId === 0 ? '' : ` in frame ${frameId}`
+  // Subframe ids are global ids (`frameId * 100000 + localId`), so the range is
+  // reported in the same numbering the model saw in the label list.
+  const range = maxLocalId > 0
+    ? frameId === 0
+      ? `1..${maxLocalId}`
+      : `${frameId * 100_000 + 1}..${frameId * 100_000 + maxLocalId} (frame ${frameId})`
+    : 'none yet'
+  return {
+    kind: 'never-assigned',
+    message: `Label ${label} was never assigned${where}; labels assigned on this page are ${range}. The target may be unlabelled — use browser_click_at with screenshot coordinates, or take a fresh view and use one of its labels.`,
+  }
+}
+
+/**
+ * Describe a label id the registry cannot resolve, using the cumulative label
+ * registry of this page. A registry recorded for a different URL is ignored:
+ * those ids belong to the previous page and cannot resolve here.
+ * @param {chrome.tabs.Tab} tab
+ * @param {number} label
+ */
+function missingLabelError(tab, label) {
+  const registry = tabLabelsByTab.get(tab.id)
+  const samePage = registry !== undefined && registry.url === (tab.url ?? '')
+  const assignment = inspectLabelAssignment(label, samePage ? registry : undefined)
+  const described = formatMissingLabelMessage(label, assignment)
+  return new BrowserError('UNKNOWN_LABEL', described.message)
+}
+
 /** Remove overlays from every frame. */
 async function clearAllFrames(tabId) {
   const frames = await listFrames(tabId)
@@ -602,6 +768,12 @@ async function clearAllFrames(tabId) {
 
 /**
  * Collect title, URL, viewport, and document scroll information.
+ *
+ * The fingerprint also carries a compact layout signature (up to 40 visible
+ * controls with their rounded viewport rects). A skipped-view action compares
+ * it before/after so an expanding row cannot silently move every coordinate the
+ * model is holding; see compareLayoutFingerprints. The signature is duplicated
+ * in labelPage because page functions are serialized independently.
  * @returns {Record<string, any>}
  */
 function pageMetrics() {
@@ -609,6 +781,33 @@ function pageMetrics() {
   const maxY = Math.max(0, root.scrollHeight - root.clientHeight)
   const maxX = Math.max(0, root.scrollWidth - root.clientWidth)
   const active = document.activeElement
+  const layout = (() => {
+    const items = []
+    const nodes = document.querySelectorAll('a[href],button,input,select,textarea,summary,[role],[onclick],[tabindex]:not([tabindex="-1"]),canvas,iframe')
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    let reads = 0
+    for (const node of nodes) {
+      if (reads >= 600 || items.length >= 40) break
+      reads += 1
+      const rect = node.getBoundingClientRect()
+      if (rect.width < 6 || rect.height < 6) continue
+      if (rect.bottom < 1 || rect.right < 1 || rect.top > vh - 1 || rect.left > vw - 1) continue
+      // textContent (not innerText) keeps this cheap: no layout/style pass per
+      // control, and the key only has to be stable across two views.
+      const raw = String(node.textContent ?? '').trim() || String(node.getAttribute?.('aria-label') ?? '')
+      const text = raw.slice(0, 256).replace(/\s+/gu, ' ').trim().slice(0, 64)
+      items.push({
+        tag: node.tagName.toLowerCase(),
+        text,
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        w: Math.round(rect.width),
+        h: Math.round(rect.height),
+      })
+    }
+    return items
+  })()
   return {
     title: document.title,
     url: location.href,
@@ -620,6 +819,7 @@ function pageMetrics() {
       scrollY: Math.round(root.scrollTop || 0),
       textLen: String(document.body?.innerText ?? '').length,
       active: active ? `${active.tagName.toLowerCase()}${active.id ? `#${active.id}` : ''}` : '',
+      layout,
     },
     viewport: { width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1 },
     scroll: {
@@ -641,6 +841,17 @@ function pageMetrics() {
  * not reference module state. Label ids are persistent for the lifetime of the
  * page (WeakMap element -> id), so a stale id either resolves to the same
  * element or fails; it never silently lands on a different element.
+ *
+ * Ids go stale when the page re-renders rather than updates: Gmail-style lists
+ * replace list rows and nav links with new nodes, so the labelled element
+ * detaches while the replacement is only labelled by the next pass (and gets a
+ * new id). The failure shows up as DETACHED while the detached element is still
+ * in `byId`; the periodic prune of detached entries above 800 labels drops it,
+ * after which the same condition surfaces as UNKNOWN_LABEL from this page
+ * context. UNKNOWN_LABEL also covers an id this context never produced (frame
+ * navigated, or the registry was reset/pruned). read_text and screenshot do not
+ * clear labels themselves — they only give a virtualized page time to re-render.
+ * Both codes are recoverable by signature; see resolveLabelSignature below.
  */
 
 
@@ -855,6 +1066,34 @@ async function labelPage(limit, paint = true) {
   }
 
   const activeElement = document.activeElement
+  // Same layout signature as pageMetrics: page functions are serialized one at
+  // a time, so it cannot share a module helper. A full view stores it as the
+  // baseline every skipped-view action is compared against.
+  const layout = (() => {
+    const items = []
+    const nodes = document.querySelectorAll('a[href],button,input,select,textarea,summary,[role],[onclick],[tabindex]:not([tabindex="-1"]),canvas,iframe')
+    let reads = 0
+    for (const node of nodes) {
+      if (reads >= 600 || items.length >= 40) break
+      reads += 1
+      const box = node.getBoundingClientRect()
+      if (box.width < 6 || box.height < 6) continue
+      if (box.bottom < 1 || box.right < 1 || box.top > vh - 1 || box.left > vw - 1) continue
+      // textContent (not innerText) keeps this cheap: no layout/style pass per
+      // control, and the key only has to be stable across two views.
+      const raw = String(node.textContent ?? '').trim() || String(node.getAttribute?.('aria-label') ?? '')
+      const text = raw.slice(0, 256).replace(/\s+/gu, ' ').trim().slice(0, 64)
+      items.push({
+        tag: node.tagName.toLowerCase(),
+        text,
+        x: Math.round(box.left),
+        y: Math.round(box.top),
+        w: Math.round(box.width),
+        h: Math.round(box.height),
+      })
+    }
+    return items
+  })()
   return {
     title: document.title,
     url: location.href,
@@ -866,6 +1105,7 @@ async function labelPage(limit, paint = true) {
       scrollY: Math.round(root.scrollTop || 0),
       textLen: String(document.body?.innerText ?? '').length,
       active: activeElement ? `${activeElement.tagName.toLowerCase()}${activeElement.id ? `#${activeElement.id}` : ''}` : '',
+      layout,
     },
     viewport: { width: vw, height: vh, dpr: window.devicePixelRatio || 1 },
     scroll: {
@@ -1034,6 +1274,142 @@ export function formatLabelsHint(labels, options = {}) {
 }
 
 /**
+ * Normalize one signature source (a recorded label signature or a fresh label)
+ * into the comparable {tag, role, text, frame} shape. Inner whitespace is
+ * collapsed because a fresh labelling pass reads the text off the live DOM
+ * again, and an optional frame keeps recovery inside the frame the label came
+ * from. Pure helper.
+ * @param {{tag?: unknown, role?: unknown, text?: unknown, frame?: unknown, frameId?: unknown}} [source]
+ * @returns {{tag: string, role: string, text: string, frame: number | undefined}}
+ */
+function normalizeLabelSignature(source) {
+  const read = value => String(value ?? '').replace(/\s+/gu, ' ').trim()
+  const frameValue = source?.frame ?? source?.frameId
+  return {
+    tag: read(source?.tag).toLowerCase(),
+    role: read(source?.role).toLowerCase(),
+    text: read(source?.text),
+    frame: Number.isFinite(Number(frameValue)) ? Number(frameValue) : undefined,
+  }
+}
+
+/**
+ * Frame a label belongs to; labels from the top frame carry no frame marker.
+ * @param {Record<string, any>} label
+ */
+function labelFrame(label) {
+  return Number.isFinite(Number(label?.frame)) ? Number(label.frame) : 0
+}
+
+/**
+ * Recover a stale label id by matching its recorded signature against a fresh
+ * label list. Label ids are keyed on element identity, so a re-render (Gmail
+ * replaces virtualized list rows instead of updating them) detaches the old
+ * element and the replacement gets a new id. The only safe recovery is an
+ * exact, unique match on tag, role, and text: zero matches or more than one
+ * candidate means any pick would be a guess, and a wrong click is worse than a
+ * stale-label error. A signature with no text carries no identifying value and
+ * is refused too. Pure, so the refusal behavior is testable without Chrome.
+ * @param {Array<Record<string, any>>} candidateLabels labels from a fresh pass
+ * @param {{tag?: string, role?: string, text?: string, frame?: number, frameId?: number}} signature recorded tag/role/text
+ * @returns {{matched: true, label: Record<string, any>, candidateCount: number}
+ *   | {matched: false, reason: 'WEAK_SIGNATURE'|'NO_MATCH'|'AMBIGUOUS', candidateCount: number, matchCount: number}}
+ */
+export function resolveLabelSignature(candidateLabels, signature) {
+  const wanted = normalizeLabelSignature(signature)
+  const candidates = (Array.isArray(candidateLabels) ? candidateLabels : [])
+    .filter(label => label && Number.isFinite(Number(label.id)))
+  const candidateCount = candidates.length
+  if (wanted.text.length === 0) {
+    return { matched: false, reason: 'WEAK_SIGNATURE', candidateCount, matchCount: 0 }
+  }
+  const matches = candidates.filter(label => {
+    if (wanted.frame !== undefined && labelFrame(label) !== wanted.frame) return false
+    const candidate = normalizeLabelSignature(label)
+    return candidate.tag === wanted.tag
+      && candidate.role === wanted.role
+      && candidate.text === wanted.text
+  })
+  if (matches.length === 1) return { matched: true, label: matches[0], candidateCount }
+  return {
+    matched: false,
+    reason: matches.length === 0 ? 'NO_MATCH' : 'AMBIGUOUS',
+    candidateCount,
+    matchCount: matches.length,
+  }
+}
+
+/**
+ * A recovery is only safe while the tab is still on the page the label was
+ * recorded for: an identical control on a different page is a different
+ * element. Unknown URLs do not block, matching how the registry resolves ids.
+ * @param {chrome.tabs.Tab} tab
+ * @param {string} url
+ */
+async function isSamePage(tab, url) {
+  if (typeof url !== 'string' || url.length === 0) return true
+  const current = await chrome.tabs.get(tab.id).catch(() => undefined)
+  return current !== undefined && (current.url ?? '') === url
+}
+
+/**
+ * True when a stale-label failure code means the labelled element itself is
+ * gone, so the id may be recoverable by signature. NOT_VISIBLE is deliberately
+ * not recoverable: that element still exists, it just has no box right now, so
+ * a same-text control would be a different element. Pure, so the recovery
+ * policy is testable without Chrome.
+ * @param {unknown} code
+ */
+export function isRecoverableLabelCode(code) {
+  return RECOVERABLE_LABEL_CODES.has(String(code ?? ''))
+}
+
+/**
+ * Re-label the active page and try to recover a stale label id by the
+ * signature recorded in the label registry. Returns the fresh label list even
+ * when recovery is refused, so the retry hint can reuse it instead of paying a
+ * second labelling pass. Best effort: any labelling failure means no recovery
+ * and the caller keeps its original stale-label error. Refused when the tab has
+ * left the page the labels came from, because a lookalike elsewhere is a
+ * different element.
+ * @param {chrome.tabs.Tab} tab
+ * @param {{frameId?: number, tag?: string, role?: string, text?: string}} [recorded] registry entry for the stale id
+ * @param {string} [pageUrl] URL the labels were recorded for
+ * @returns {Promise<{labels?: Array<Record<string, any>>, recovered?: {label: number, frameId: number, localId: number, signature: {tag: string, role: string, text: string, frame: number | undefined}}}>}
+ */
+async function recoverStaleLabel(tab, recorded, pageUrl) {
+  const signature = {
+    tag: recorded?.tag,
+    role: recorded?.role,
+    text: recorded?.text,
+    frame: recorded?.frameId,
+  }
+  // A signature with no text can never match, so do not pay a label pass for
+  // it; the caller's stale-label error path gets its own hint pass instead.
+  if (normalizeLabelSignature(signature).text.length === 0) return {}
+  if (!(await isSamePage(tab, pageUrl))) return {}
+  let labelled
+  try {
+    labelled = await labelOnly(tab)
+  } catch {
+    return {}
+  }
+  const resolved = resolveLabelSignature(labelled.labels, signature)
+  if (!resolved.matched) return { labels: labelled.labels }
+  const fresh = resolveLabelTarget(tab, resolved.label.id)
+  if (!fresh) return { labels: labelled.labels }
+  return {
+    labels: labelled.labels,
+    recovered: {
+      label: resolved.label.id,
+      frameId: fresh.frameId,
+      localId: fresh.localId,
+      signature: normalizeLabelSignature(signature),
+    },
+  }
+}
+
+/**
  * Append a fresh label list to a stale-label BrowserError before it is logged
  * and forwarded, so the model can retry without paying a whole view round trip.
  * Fail-closed: it never re-resolves or auto-clicks anything, and it only appends
@@ -1042,12 +1418,13 @@ export function formatLabelsHint(labels, options = {}) {
  * @param {chrome.tabs.Tab} tab
  * @param {BrowserError} error
  * @param {string} [preferText]
+ * @param {Array<Record<string, any>>} [freshLabels] labels already fetched by a recovery attempt
  */
-async function decorateStaleLabelError(tab, error, preferText) {
+async function decorateStaleLabelError(tab, error, preferText, freshLabels) {
   if (!error || !STALE_LABEL_CODES.has(error.code)) return error
   try {
-    const labelled = await labelOnly(tab)
-    const hint = formatLabelsHint(labelled.labels, { preferText })
+    const labels = Array.isArray(freshLabels) ? freshLabels : (await labelOnly(tab)).labels
+    const hint = formatLabelsHint(labels, { preferText })
     if (typeof hint === 'string' && hint.length > 0) error.message = `${error.message} ${hint}`
   } catch {
     // Best effort only: never mask the original failure.
@@ -1388,6 +1765,92 @@ function readFocusedField() {
     isPassword,
     tag: `${tag}${type ? `:${type}` : ''}`,
   }
+}
+
+/**
+ * Page-level content probe for label-less trusted typing. `start` installs a
+ * short-lived MutationObserver and snapshots the frame's rendered text and its
+ * focused element; `end` disconnects the observer and returns the same shape
+ * plus the accumulated mutation count. Self-contained page function.
+ *
+ * A visible input/textarea/contenteditable can verify its own value. Aggregate
+ * text length and mutations are only hints: they cannot establish that input
+ * landed in a canvas document. Known canvas editors skip this probe entirely and
+ * use the full fresh view instead.
+ * @param {'start'|'end'} phase
+ */
+function contentProbePage(phase) {
+  const KEY = '__crazyagentContentProbe'
+  const state = globalThis[KEY] ?? { mutations: 0, startedAt: 0, observer: undefined }
+  globalThis[KEY] = state
+  const readFocus = () => {
+    const el = document.activeElement
+    if (!el) return undefined
+    const tag = el.tagName.toLowerCase()
+    const type = (el.type || '').toLowerCase()
+    const isField = tag === 'input' || tag === 'textarea'
+    const editable = el.isContentEditable === true || el.getAttribute?.('contenteditable') === 'true'
+    const readable = isField || editable
+    const isPassword = isField && type === 'password'
+    const value = isField ? String(el.value ?? '') : String(el.innerText ?? el.textContent ?? '')
+    let rect
+    try {
+      rect = el.getBoundingClientRect()
+    } catch {
+      rect = undefined
+    }
+    // A contenteditable body inside a 1px event-target iframe is not the editor
+    // and its text is not a measurement of what landed; require a real box.
+    const measurable = readable && Boolean(rect) && rect.width >= 8 && rect.height >= 8
+    const path = []
+    for (let node = el, depth = 0; node && depth < 8; node = node.parentElement, depth += 1) {
+      const nodeTag = node.tagName.toLowerCase()
+      if (node.id) {
+        path.unshift(`${nodeTag}#${node.id}`)
+        break
+      }
+      const siblings = node.parentElement
+        ? [...node.parentElement.children].filter(sibling => sibling.tagName === node.tagName)
+        : [node]
+      path.unshift(`${nodeTag}[${siblings.indexOf(node)}]`)
+    }
+    return {
+      tag,
+      type,
+      identity: path.join('/'),
+      isField,
+      editable,
+      readable,
+      measurable,
+      hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : false,
+      chars: readable ? value.length : 0,
+      // Passwords are masked exactly like readFocusedField did, so a preview
+      // never leaks one; the length still distinguishes empty from filled.
+      preview: !readable ? '' : isPassword ? `[password ${value.length} chars]` : value.slice(0, 120),
+      isPassword,
+    }
+  }
+  const snapshot = () => ({
+    url: location.href,
+    title: document.title,
+    textLen: String(document.body?.innerText ?? '').length,
+    focus: readFocus(),
+    mutations: Math.max(0, Math.round(Number(state.mutations) || 0)),
+  })
+  if (phase === 'start') {
+    state.observer?.disconnect()
+    state.mutations = 0
+    state.startedAt = performance.now()
+    state.observer = new MutationObserver(records => { state.mutations += records.length })
+    state.observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true })
+    return { ...snapshot(), startedAt: state.startedAt }
+  }
+  const snapshotAfter = snapshot()
+  const elapsedMs = Math.max(0, Math.round(performance.now() - (Number(state.startedAt) || performance.now())))
+  state.observer?.disconnect()
+  state.observer = undefined
+  state.mutations = 0
+  return { ...snapshotAfter, elapsedMs }
 }
 
 /**
@@ -1922,8 +2385,25 @@ async function snapshot(detail, settings, retried = false, delayMs = 0) {
   const image = await compressDataUrl(captured.dataUrl, maxWidth, quality)
   const cssPerImagePixel = metrics.viewport.width / image.width
   const scroll = lastScrollFor(tab.id, metrics.url) ?? metrics.scroll
+  // Every capture is a coordinate basis: it records the image size its pixels
+  // map through, so a later image-space click can name the view it measured on
+  // instead of silently inheriting whatever image happens to be latest (a
+  // detail:"fast" capture is 640px wide on the same viewport, half the normal
+  // view's scale).
+  const basis = {
+    viewId: nextViewId++,
+    url: metrics.url,
+    imageWidth: image.width,
+    imageHeight: image.height,
+    viewport: metrics.viewport,
+    scroll,
+    fingerprint: metrics.fingerprint,
+    at: Date.now(),
+  }
+  recordImageBasis(tab.id, basis)
   lastViewByTab.set(tab.id, {
     image: { data: image.data, mimeType: image.mimeType, width: image.width, height: image.height },
+    viewId: basis.viewId,
     viewport: metrics.viewport,
     tab: { id: tab.id, title: metrics.title, url: metrics.url },
     labels: metrics.labels,
@@ -1935,6 +2415,7 @@ async function snapshot(detail, settings, retried = false, delayMs = 0) {
       scrollY: Math.round(scroll?.y ?? 0),
       textLen: null,
       active: '',
+      layout: [],
     },
     compactStreak: 0,
     at: Date.now(),
@@ -1946,6 +2427,7 @@ async function snapshot(detail, settings, retried = false, delayMs = 0) {
   return {
     op: 'snapshot',
     view: 'full',
+    viewId: basis.viewId,
     labels: metrics.labels,
     surfaces: metrics.surfaces,
     tab: {
@@ -2021,6 +2503,100 @@ function scrollFor(tab, metrics) {
 }
 
 /**
+ * Compare layout signatures from two views. A row expanding moves every control
+ * below it, so the previous view's pixel coordinates aim at different controls
+ * even though nothing the model can read says so. Controls are matched by
+ * (tag, text) so a re-rendered row that keeps its text still counts as the same
+ * control; changed/added/removed text is structural change and is deliberately
+ * not reported as drift (that would warn on every normal page change). Pure, so
+ * the "warn, but do not cry wolf" rule is testable without Chrome.
+ * @param {Array<{tag?: string, text?: string, x?: number, y?: number, w?: number, h?: number}>} [before]
+ * @param {Array<{tag?: string, text?: string, x?: number, y?: number, w?: number, h?: number}>} [after]
+ * @param {number} [threshold] px of movement that counts as a shift
+ * @returns {{layoutChanged: boolean, movedCount: number, maxDx: number, maxDy: number, structural: boolean, moved: Array<{tag: string, text: string, dx: number, dy: number}>}}
+ */
+export function compareLayoutFingerprints(before, after, threshold = LAYOUT_SHIFT_THRESHOLD_PX) {
+  const unchanged = { layoutChanged: false, movedCount: 0, maxDx: 0, maxDy: 0, structural: false, moved: [] }
+  if (!Array.isArray(before) || !Array.isArray(after)) return unchanged
+  const limit = Math.max(1, Number(threshold) || LAYOUT_SHIFT_THRESHOLD_PX)
+  const keyOf = item => `${String(item?.tag ?? '')}\u0000${String(item?.text ?? '')}`
+  const group = items => {
+    /** @type {Map<string, Array<Record<string, any>>>} */
+    const groups = new Map()
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue
+      const key = keyOf(item)
+      const bucket = groups.get(key)
+      if (bucket) bucket.push(item)
+      else groups.set(key, [item])
+    }
+    for (const bucket of groups.values()) {
+      bucket.sort((a, b) => (Number(a?.y) || 0) - (Number(b?.y) || 0) || (Number(a?.x) || 0) - (Number(b?.x) || 0))
+    }
+    return groups
+  }
+  const beforeGroups = group(before)
+  const afterGroups = group(after)
+  let movedCount = 0
+  let maxDx = 0
+  let maxDy = 0
+  const moved = []
+  for (const [key, fromItems] of beforeGroups) {
+    const toItems = afterGroups.get(key)
+    // A different count means controls were added or removed around this one;
+    // their own positions cannot be attributed to a shift, so skip the group.
+    if (!toItems || toItems.length !== fromItems.length) continue
+    for (let index = 0; index < fromItems.length; index += 1) {
+      const from = fromItems[index]
+      const to = toItems[index]
+      const dx = Math.round((Number(to?.x) || 0) - (Number(from?.x) || 0))
+      const dy = Math.round((Number(to?.y) || 0) - (Number(from?.y) || 0))
+      if (Math.abs(dx) < limit && Math.abs(dy) < limit) continue
+      movedCount += 1
+      if (Math.abs(dy) > Math.abs(maxDy)) maxDy = dy
+      if (Math.abs(dx) > Math.abs(maxDx)) maxDx = dx
+      if (moved.length < 5) {
+        const separator = key.indexOf('\u0000')
+        moved.push({ tag: key.slice(0, separator), text: key.slice(separator + 1), dx, dy })
+      }
+    }
+  }
+  const structural = before.length !== after.length
+    || beforeGroups.size !== afterGroups.size
+    || [...beforeGroups].some(([key, fromItems]) => (afterGroups.get(key)?.length ?? 0) !== fromItems.length)
+  return { layoutChanged: movedCount > 0, movedCount, maxDx, maxDy, structural, moved }
+}
+
+/**
+ * Layout-drift outcome for an action whose view was skipped (view:"none" or
+ * compact, where no fresh image is returned): the stored view's layout is
+ * compared with the live one, and a shift names itself in the result so the
+ * model cannot keep clicking coordinates from a view that no longer matches.
+ * Cheap: both signatures were already collected for the fingerprint.
+ * @param {Record<string, any> | undefined} stored
+ * @param {Record<string, any>} metrics
+ * @returns {{layoutChanged: boolean, layoutShift?: Record<string, any>, layoutNote?: string}}
+ */
+export function deriveLayoutShiftOutcome(stored, metrics) {
+  const shift = compareLayoutFingerprints(stored?.fingerprint?.layout, metrics?.fingerprint?.layout)
+  if (!shift.layoutChanged && !shift.structural) return { layoutChanged: false }
+  const px = Math.max(Math.abs(shift.maxDy), Math.abs(shift.maxDx))
+  const detail = shift.layoutChanged
+    ? `${shift.movedCount} control(s) moved up to ${px}px`
+    : 'controls were added, removed, or renamed'
+  return {
+    layoutChanged: true,
+    layoutShift: {
+      maxDx: shift.maxDx,
+      maxDy: shift.maxDy,
+      movedCount: shift.movedCount,
+      structural: shift.structural,
+    },
+    layoutNote: `layout changed since your last view (${detail}): screenshot coordinates from that view are stale — take a fresh view before the next coordinate action.`,
+  }
+}
+
+/**
  * Cheap page fingerprint comparison used when no capture was taken.
  * @param {Record<string, any> | undefined} before
  * @param {Record<string, any> | undefined} after
@@ -2032,6 +2608,7 @@ function fingerprintChanged(before, after) {
     || Math.abs((Number(before.scrollY) || 0) - (Number(after.scrollY) || 0)) > 2
     || before.textLen !== after.textLen
     || before.active !== after.active
+    || compareLayoutFingerprints(before.layout, after.layout).layoutChanged
 }
 
 /**
@@ -2054,6 +2631,89 @@ function deriveLabelDeltaOutcome(delta) {
   if (delta.addedCount > 0) signals.push('labels-added')
   if (delta.removedCount > 0) signals.push('labels-removed')
   return { changed: signals.length > 0, signals }
+}
+
+/**
+ * Collapse per-frame content probes into one page-level snapshot. Rendered text
+ * lengths add up across frames (an iframe's text is not part of its parent's
+ * innerText), mutations add up, and the focused element is chosen from whichever
+ * frame actually has an element in focus, preferring a readable editor over a
+ * parent frame that only reports the iframe element itself. Pure.
+ * @param {Array<{frameId: number, result: Record<string, any>}>} [frames]
+ * @returns {{textLen: number, mutations: number, focus: Record<string, any> | undefined, frameCount: number}}
+ */
+export function summarizeContentProbe(frames) {
+  const list = (Array.isArray(frames) ? frames : []).filter(frame => frame && frame.result && typeof frame.result === 'object')
+  let textLen = 0
+  let mutations = 0
+  const focuses = []
+  for (const frame of list) {
+    textLen += Math.max(0, Number(frame.result.textLen) || 0)
+    mutations += Math.max(0, Number(frame.result.mutations) || 0)
+    if (frame.result.focus && typeof frame.result.focus === 'object') {
+      focuses.push({ frameId: Number(frame.frameId) || 0, ...frame.result.focus })
+    }
+  }
+  const focused = focuses.filter(entry => entry.hasFocus === true)
+  const ranked = [...(focused.length > 0 ? focused : focuses)].sort((a, b) =>
+    Number(b.readable === true) - Number(a.readable === true)
+    || Number(b.measurable === true) - Number(a.measurable === true)
+    || Number(a.frameId) - Number(b.frameId))
+  const focus = ranked[0]
+  return { textLen, mutations, focus, frameCount: list.length }
+}
+
+/**
+ * Verify a normal focused field from its own value. Canvas and missing-probe
+ * outcomes stay unknown: unrelated DOM mutations are not evidence that text
+ * landed in the document. Pure.
+ * @param {ReturnType<typeof summarizeContentProbe> | undefined} before
+ * @param {ReturnType<typeof summarizeContentProbe> | undefined} after
+ * @returns {{changed: boolean|null, charsAdded: number|null, measured: 'field'|'none', canvasEditor: boolean, fieldChanged: boolean|null, pageChanged: boolean, targetKind: string}}
+ */
+export function deriveTypeVerdict(before, after) {
+  const focus = after?.focus ?? before?.focus
+  const targetKind = focus === undefined
+    ? 'none'
+    : `${focus.tag ?? 'unknown'}${focus.type ? `:${focus.type}` : ''}`
+  const pageChanged = Boolean(before && after)
+    && (Math.max(0, Number(after.textLen) || 0) !== Math.max(0, Number(before.textLen) || 0)
+      || Math.max(0, Number(after.mutations) || 0) > 0)
+  const sameIdentity = before?.focus?.identity !== undefined && after?.focus?.identity !== undefined
+    ? String(before.focus.identity) === String(after.focus.identity)
+    : String(before?.focus?.tag) === String(after?.focus?.tag)
+      && String(before?.focus?.type ?? '') === String(after?.focus?.type ?? '')
+  const sameField = Boolean(before?.focus && after?.focus)
+    && before.focus.measurable === true
+    && after.focus.measurable === true
+    && sameIdentity
+    && String(before.focus.tag) === String(after.focus.tag)
+    && String(before.focus.type ?? '') === String(after.focus.type ?? '')
+    && Number(before.focus.frameId ?? -1) === Number(after.focus.frameId ?? -1)
+  const fieldChanged = sameField
+    ? (Number(before.focus.chars) || 0) !== (Number(after.focus.chars) || 0)
+      || String(before.focus.preview ?? '') !== String(after.focus.preview ?? '')
+    : null
+  if (sameField) {
+    return {
+      changed: fieldChanged === true ? true : pageChanged ? null : false,
+      charsAdded: (Number(after.focus.chars) || 0) - (Number(before.focus.chars) || 0),
+      measured: 'field',
+      canvasEditor: false,
+      fieldChanged,
+      pageChanged,
+      targetKind,
+    }
+  }
+  return {
+    changed: null,
+    charsAdded: null,
+    measured: 'none',
+    canvasEditor: true,
+    fieldChanged: null,
+    pageChanged,
+    targetKind,
+  }
 }
 
 /**
@@ -2100,10 +2760,9 @@ function labelDelta(previousLabels, currentLabels) {
 
 /**
  * AUTO POLICY: stay compact unless we have no usable image, the page changed
- * identity, or we have been compact for a while. Scroll changes do not force a
- * full view (every DOM click centres its element); instead storeCompactView
- * invalidates the stale image when the page scrolls, so image-space clicks fail
- * with NO_VIEW rather than mapping from an old screenshot.
+ * identity, or we have been compact for a while. storeCompactView invalidates
+ * the old image after scroll, resize, layout movement, or structural control
+ * changes, so a later image-space action cannot use stale coordinates.
  * @param {Record<string, any> | undefined} stored
  * @param {Record<string, any>} metrics
  */
@@ -2147,9 +2806,9 @@ function compactPayload(tab, metrics, labels, labelMs, delta) {
 }
 
 /**
- * Store a compact view: refresh labels/scroll/fingerprint, keep the previous
- * image only while the page has not scrolled (a scrolled screenshot is stale
- * for image-space coordinate mapping).
+ * Store compact metadata while retaining the previous image only when scroll,
+ * viewport, and layout still match it. Any mismatch invalidates the image and
+ * every retained coordinate basis.
  * @param {chrome.tabs.Tab} tab
  * @param {Record<string, any>} metrics
  * @param {Array<Record<string, any>>} labels
@@ -2170,6 +2829,8 @@ function storeCompactView(tab, metrics, labels) {
     return
   }
   const before = stored.scroll ?? {}
+  const beforeViewport = stored.viewport ?? {}
+  const layout = compareLayoutFingerprints(stored.fingerprint?.layout, metrics.fingerprint?.layout)
   const after = scrollFor(tab, metrics)
   stored.tab = { id: tab.id, title: metrics.title, url: metrics.url }
   stored.viewport = metrics.viewport
@@ -2178,8 +2839,12 @@ function storeCompactView(tab, metrics, labels) {
   stored.fingerprint = metrics.fingerprint
   stored.compactStreak = (stored.compactStreak ?? 0) + 1
   stored.at = Date.now()
-  if (Math.abs((after?.y ?? 0) - (before?.y ?? 0)) > 40 || Math.abs((after?.x ?? 0) - (before?.x ?? 0)) > 40) {
+  const scrolled = Math.abs((after?.y ?? 0) - (before?.y ?? 0)) > 40 || Math.abs((after?.x ?? 0) - (before?.x ?? 0)) > 40
+  const resized = Math.abs((beforeViewport.width ?? 0) - (metrics.viewport?.width ?? 0)) > 1
+    || Math.abs((beforeViewport.height ?? 0) - (metrics.viewport?.height ?? 0)) > 1
+  if (scrolled || resized || layout.layoutChanged || layout.structural) {
     delete stored.image
+    imageBasesByTab.delete(tab.id)
   }
 }
 
@@ -2193,16 +2858,31 @@ function storeCompactView(tab, metrics, labels) {
  * @returns {Promise<{payload: Record<string, any>, mode: 'full'|'compact'|'none'}>}
  */
 async function buildActionView(tab, settings, requested, options = {}) {
-  const baseChanged = options.changed === true
+  // null is a real value: "the action ran but its effect could not be measured"
+  // (canvas-editor typing). It must reach the payload unchanged so the provider
+  // never renders it as NO VISIBLE CHANGE; only an explicit false is a verdict.
+  const baseChanged = options.changed === undefined ? false : options.changed
   const baseSignals = Array.isArray(options.signals) ? options.signals : []
   if (requested === 'none') {
+    const stored = lastViewByTab.get(tab.id)
     const metrics = await runInTab(tab.id, pageMetrics, [])
+    const shift = deriveLayoutShiftOutcome(stored, metrics)
+    const basisViewId = stored?.image?.data ? stored.viewId : undefined
+    if (shift.layoutChanged && stored) {
+      delete stored.image
+      imageBasesByTab.delete(tab.id)
+    }
     let changed = baseChanged
     let signals = baseSignals
     if (typeof options.derive === 'function') {
-      const derived = options.derive({ stored: lastViewByTab.get(tab.id), metrics, labels: undefined, delta: undefined }) ?? {}
-      changed = derived.changed === true
+      const derived = options.derive({ stored, metrics, labels: undefined, delta: undefined }) ?? {}
+      changed = derived.changed === true ? true : baseChanged === null || derived.changed === null ? null : false
       signals = Array.isArray(derived.signals) ? derived.signals : []
+    } else if (changed === false && shift.layoutChanged) {
+      // The page did not report a change, but controls moved: that is a state
+      // change the old signal missed, and saying otherwise would be a lie.
+      changed = true
+      signals = [...signals, 'layout-changed']
     }
     return {
       mode: 'none',
@@ -2214,6 +2894,8 @@ async function buildActionView(tab, settings, requested, options = {}) {
         scroll: scrollFor(tab, metrics),
         changed,
         signals,
+        ...(basisViewId === undefined ? {} : { basisViewId }),
+        ...shift,
       },
     }
   }
@@ -2229,16 +2911,26 @@ async function buildActionView(tab, settings, requested, options = {}) {
     return { mode: 'full', payload: shot }
   }
   const delta = labelDelta(stored?.labels ?? [], labelled.labels)
+  const shift = deriveLayoutShiftOutcome(stored, labelled.metrics)
   let changed = baseChanged
   let signals = baseSignals
   if (typeof options.derive === 'function') {
     const derived = options.derive({ stored, metrics: labelled.metrics, labels: labelled.labels, delta }) ?? {}
-    changed = derived.changed === true
+    changed = derived.changed === true ? true : baseChanged === null || derived.changed === null ? null : false
     signals = Array.isArray(derived.signals) ? derived.signals : []
+  } else if (changed === false && shift.layoutChanged) {
+    changed = true
+    signals = [...signals, 'layout-changed']
   }
   const payload = compactPayload(tab, labelled.metrics, labelled.labels, labelled.labelMs, delta)
   payload.changed = changed
   payload.signals = signals
+  payload.layoutChanged = shift.layoutChanged
+  if (shift.layoutNote !== undefined) {
+    payload.layoutShift = shift.layoutShift
+    payload.layoutNote = shift.layoutNote
+  }
+  if (stored?.image?.data) payload.basisViewId = stored.viewId
   storeCompactView(tab, labelled.metrics, labelled.labels)
   return { mode: 'compact', payload }
 }
@@ -2252,7 +2944,14 @@ async function buildActionView(tab, settings, requested, options = {}) {
  */
 async function buildBatchView(tab, settings, requested) {
   if (requested === 'none') {
+    const stored = lastViewByTab.get(tab.id)
     const metrics = await runInTab(tab.id, pageMetrics, [])
+    const shift = deriveLayoutShiftOutcome(stored, metrics)
+    const basisViewId = stored?.image?.data ? stored.viewId : undefined
+    if (shift.layoutChanged && stored) {
+      delete stored.image
+      imageBasesByTab.delete(tab.id)
+    }
     return {
       mode: 'none',
       payload: {
@@ -2261,6 +2960,8 @@ async function buildBatchView(tab, settings, requested) {
         tab: tabSummary(tab, metrics),
         viewport: metrics.viewport,
         scroll: scrollFor(tab, metrics),
+        ...(basisViewId === undefined ? {} : { basisViewId }),
+        ...shift,
       },
     }
   }
@@ -2275,7 +2976,14 @@ async function buildBatchView(tab, settings, requested) {
     return { mode: 'full', payload: shot }
   }
   const delta = labelDelta(stored?.labels ?? [], labelled.labels)
+  const shift = deriveLayoutShiftOutcome(stored, labelled.metrics)
   const payload = compactPayload(tab, labelled.metrics, labelled.labels, labelled.labelMs, delta)
+  payload.layoutChanged = shift.layoutChanged
+  if (shift.layoutNote !== undefined) {
+    payload.layoutShift = shift.layoutShift
+    payload.layoutNote = shift.layoutNote
+  }
+  if (stored?.image?.data) payload.basisViewId = stored.viewId
   storeCompactView(tab, labelled.metrics, labelled.labels)
   return { mode: 'compact', payload }
 }
@@ -2360,13 +3068,128 @@ async function scroll(settings, direction, pages, amountPx, atX, atY) {
 }
 
 /**
+ * Known canvas editors: apps that paint their document and expose at most an
+ * accessibility copy as DOM text, so read_text must not present DOM text as the
+ * page. Patterns are kept as strings because the detector runs inside the page,
+ * where a module constant cannot be referenced; the list is passed to the page
+ * function, and the same list backs the pure matcher below (testable in Node).
+ */
+const CANVAS_EDITOR_PATTERNS = [
+  { name: 'Google Docs', pattern: '^https://docs\\.google\\.com/document(?:/|$|\\?)' },
+  { name: 'Google Sheets', pattern: '^https://docs\\.google\\.com/spreadsheets(?:/|$|\\?)' },
+  { name: 'Google Slides', pattern: '^https://docs\\.google\\.com/presentation(?:/|$|\\?)' },
+]
+
+/**
+ * Name of the canvas editor a URL belongs to, if any. Pure, so the known-editor
+ * list is testable without a browser; the regex strings are shared with the
+ * in-page detector above.
+ * @param {string} [url]
+ * @param {Array<{name: string, pattern: string}>} [editors]
+ * @returns {string|undefined}
+ */
+export function canvasEditorForUrl(url, editors = CANVAS_EDITOR_PATTERNS) {
+  const value = String(url ?? '')
+  for (const editor of Array.isArray(editors) ? editors : []) {
+    try {
+      if (new RegExp(editor.pattern, 'u').test(value)) return editor.name
+    } catch {
+      // A malformed pattern must not break read_text.
+    }
+  }
+  return undefined
+}
+
+/** @param {chrome.tabs.Tab | undefined} tab @param {'auto'|'full'|'compact'|'none'} requested */
+function actionViewForTab(tab, requested) {
+  return canvasEditorForUrl(tab?.url) ? 'full' : requested
+}
+
+/** Invalidate future coordinates as soon as canvas input may change the page. */
+function invalidateCanvasImageBases(tabId) {
+  imageBasesByTab.delete(tabId)
+}
+
+/**
+ * Reject dependent action sequences on canvas editors before their first side effect.
+ * @param {string} url
+ * @param {Array<{op?: unknown}>} actions
+ */
+export function canvasBatchError(url, actions) {
+  const editor = canvasEditorForUrl(url)
+  if (!editor || !Array.isArray(actions) || actions.length <= 1) return undefined
+  if (actions.every(action => action?.op === 'wait_for')) return undefined
+  return {
+    code: 'CANVAS_BATCH_UNSUPPORTED',
+    message: `${editor} requires one browser action and a full fresh view at a time. Do not batch document, menu, selection, or formatting actions; continue with the next single action instead.`,
+  }
+}
+
+/** @param {string} url @param {number} pointCount */
+export function canvasBurstError(url, pointCount) {
+  const editor = canvasEditorForUrl(url)
+  if (!editor || pointCount <= 1) return undefined
+  return {
+    code: 'CANVAS_BURST_UNSUPPORTED',
+    message: `${editor} coordinate actions are limited to one point followed by a full fresh view. Use a labelled control when possible; otherwise click one point and re-read the page.`,
+  }
+}
+
+/**
+ * Canvas coordinates may use only the newest retained view.
+ * @param {number|undefined} viewId
+ * @param {Array<Record<string, any>>} history
+ */
+export function resolveCanvasImageBasis(viewId, history) {
+  const basis = (Array.isArray(history) ? history : []).find(item => item && Number(item.imageWidth) > 0)
+  if (!basis) {
+    return { error: { code: 'NO_VIEW', message: 'Take a full fresh view before using coordinates in this canvas editor.' } }
+  }
+  if (viewId !== undefined && Number(viewId) !== Number(basis.viewId)) {
+    return {
+      error: {
+        code: 'STALE_VIEW',
+        message: `View #${viewId} is not the newest usable canvas view (#${basis.viewId}). Take a full fresh view and measure the point again.`,
+      },
+    }
+  }
+  return { basis }
+}
+
+/**
+ * Validate the live page against a canvas coordinate basis before dispatch.
+ * @param {Record<string, any>} basis
+ * @param {Record<string, any>} metrics
+ * @param {Record<string, any>} scroll
+ */
+export function canvasBasisError(basis, metrics, scroll) {
+  const stale = reason => ({ code: 'STALE_VIEW', message: `${reason} Take a full fresh view and measure the coordinates again.` })
+  if (!basis || !metrics) return { code: 'NO_VIEW', message: 'Take a full fresh view before using coordinates in this canvas editor.' }
+  if (String(basis.url ?? '') !== String(metrics.url ?? '')) return stale('The page URL changed since the canvas view was captured.')
+  const before = basis.viewport ?? {}
+  const after = metrics.viewport ?? {}
+  if (Math.abs((Number(before.width) || 0) - (Number(after.width) || 0)) > 1
+    || Math.abs((Number(before.height) || 0) - (Number(after.height) || 0)) > 1) {
+    return stale('The viewport changed since the canvas view was captured.')
+  }
+  if (Math.abs((Number(basis.scroll?.x) || 0) - (Number(scroll?.x) || 0)) > 2
+    || Math.abs((Number(basis.scroll?.y) || 0) - (Number(scroll?.y) || 0)) > 2) {
+    return stale('The page scrolled since the canvas view was captured.')
+  }
+  const layout = compareLayoutFingerprints(basis.fingerprint?.layout, metrics.fingerprint?.layout)
+  if (layout.layoutChanged || layout.structural) return stale('The page controls or layout changed since the canvas view was captured.')
+  return undefined
+}
+
+/**
  * Read rendered page text without a screenshot. Runs inside the tab, so it must
  * not reference module state.
  * @param {'page'|'viewport'} scope
  * @param {number} offset
  * @param {number} maxChars
+ * @param {Array<{name: string, pattern: string}>} [canvasEditors] known canvas editors, passed in for serialization
  */
-function readPageText(scope, offset, maxChars) {
+function readPageText(scope, offset, maxChars, canvasEditors) {
   const start = Math.max(0, Math.floor(Number(offset) || 0))
   const limit = Math.max(500, Math.min(30_000, Math.floor(Number(maxChars) || 12_000)))
   const root = document.scrollingElement || document.documentElement
@@ -2445,6 +3268,56 @@ function readPageText(scope, offset, maxChars) {
   const totalChars = full.length
   const text = full.slice(start, start + limit)
   const truncated = start + text.length < totalChars
+
+  // Canvas editors paint their content into a canvas, so the DOM text is not a
+  // copy of the screen: for Google Docs it is browser chrome plus duplicated
+  // accessibility text, and it does not say which document tab is active. The
+  // 2026-10-23 run used it as the document's content and to "verify" tab names,
+  // which corrupted a multi-tab doc. Detection runs in the page so the honest
+  // answer costs no extra round trip.
+  const detectCanvasApp = () => {
+    for (const editor of Array.isArray(canvasEditors) ? canvasEditors : []) {
+      try {
+        if (new RegExp(editor.pattern, 'u').test(location.href)) return editor.name
+      } catch {
+        // Ignore a malformed pattern; the generic heuristic still runs.
+      }
+    }
+    // Generic heuristic: a canvas that dominates the viewport inside an
+    // explicitly non-editable (contenteditable="false") or application-role
+    // shell is an app painting its own editor, not a decorative image.
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight)
+    for (const candidate of document.querySelectorAll('canvas')) {
+      const box = candidate.getBoundingClientRect()
+      if (box.width < 320 || box.height < 200) continue
+      if (box.width * box.height < viewportArea * 0.25) continue
+      const shell = candidate.closest('[contenteditable="false"],[role="application"],[role="textbox"],[role="document"]')
+      if (!shell) continue
+      return String(document.title || '').trim().slice(0, 60) || 'this app'
+    }
+    return undefined
+  }
+  const canvasApp = detectCanvasApp()
+  if (canvasApp !== undefined) {
+    return {
+      // No misleading `text` and no pagination for a canvas app: the provider
+      // renders the note instead, and offers the raw DOM text only as a hint.
+      text: '',
+      totalChars: 0,
+      offset: start,
+      maxChars: limit,
+      truncated: false,
+      nextOffset: null,
+      textUnreliable: true,
+      canvasApp,
+      note: `This page renders its content to canvas (${canvasApp}), so DOM text is not a reliable copy of what is on screen: it can duplicate, omit, or lag the visible content. Use browser_screenshot (with its labels) to see the page and browser_click_at for targets with no label; for Google Docs the document tabs are page UI — use the tab sidebar labels to switch and confirm the active tab.`,
+      domText: totalChars >= 400 ? full.slice(0, 2_000) : undefined,
+      viewport,
+      scroll,
+      title: document.title,
+      url: location.href,
+    }
+  }
   return {
     text,
     totalChars,
@@ -2472,7 +3345,7 @@ async function readText(settings, scope, offset, maxChars) {
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
-  const result = await runInTab(tab.id, readPageText, [scope, offset, maxChars])
+  const result = await runInTab(tab.id, readPageText, [scope, offset, maxChars, CANVAS_EDITOR_PATTERNS])
   return {
     op: 'read_text',
     tab: {
@@ -2491,6 +3364,14 @@ async function readText(settings, scope, offset, maxChars) {
     maxChars: result.maxChars,
     truncated: result.truncated,
     nextOffset: result.nextOffset,
+    ...(result.textUnreliable === true
+      ? {
+          textUnreliable: true,
+          canvasApp: result.canvasApp,
+          note: result.note,
+          ...(typeof result.domText === 'string' ? { domText: result.domText } : {}),
+        }
+      : {}),
     totalMs: Math.round(performance.now() - started),
   }
 }
@@ -2670,10 +3551,161 @@ function parseSettleMs(value) {
 }
 
 /**
+ * Validate an optional `view_id` argument naming the view whose screenshot the
+ * coordinates were measured on. The provider validates too, but the executor
+ * must not trust the wire.
+ * @param {unknown} value
+ * @returns {number|undefined}
+ */
+function parseViewId(value) {
+  if (value === undefined || value === null) return undefined
+  const id = Number(value)
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new BrowserError('BAD_VIEW', 'view_id must be a positive integer view id from a previous view')
+  }
+  return id
+}
+
+/**
+ * Keep the most recent captures of a tab as coordinate bases, newest first.
+ * @param {number} tabId
+ * @param {{viewId: number}} basis
+ */
+function recordImageBasis(tabId, basis) {
+  const history = imageBasesByTab.get(tabId) ?? []
+  history.unshift(basis)
+  if (history.length > MAX_IMAGE_BASES) history.length = MAX_IMAGE_BASES
+  imageBasesByTab.set(tabId, history)
+}
+
+/**
+ * Resolve which captured view an image-space action maps through. An explicit
+ * view_id wins (the model says which screenshot it measured on) and must be one
+ * of the recent bases; without one the newest capture is used and reported in
+ * the result, so a mismatch is visible rather than silent. CSS coordinates do
+ * not depend on an image scale and resolve to no basis. Pure, so the selection
+ * and refusal rules are testable without Chrome.
+ * @param {{space?: 'image'|'css', viewId?: number, points?: Array<{x: number, y: number}>}} request
+ * @param {Array<{viewId: number, imageWidth: number, imageHeight: number, viewport: {width: number, height: number}}>} history newest first
+ * @returns {{basis?: Record<string, any>, error?: {code: string, message: string}}}
+ */
+export function resolveImageBasis(request, history) {
+  if (request?.space === 'css') return {}
+  const bases = (Array.isArray(history) ? history : [])
+    .filter(basis => basis && Number.isSafeInteger(Number(basis.viewId)) && Number(basis.imageWidth) > 0)
+  if (bases.length === 0) {
+    return { error: { code: 'NO_VIEW', message: 'Take a screenshot first so image coordinates can be mapped to the page.' } }
+  }
+  if (request?.viewId !== undefined && request?.viewId !== null) {
+    const wanted = Number(request.viewId)
+    const basis = bases.find(item => Number(item.viewId) === wanted)
+    if (!basis) {
+      return {
+        error: {
+          code: 'NO_VIEW',
+          message: `View ${wanted} is not a recent view of this page, so its image scale is unknown. Take a fresh view and use coordinates measured on that screenshot.`,
+        },
+      }
+    }
+    return { basis }
+  }
+  return { basis: bases[0] }
+}
+
+/**
+ * Detect coordinates measured on a different captured view. Off-screen under
+ * the selected basis but valid under another is stale evidence; materially
+ * different mappings that fit two bases are ambiguous. Callers reject both
+ * before input. Same-scale bases are ignored because they map identically. Pure.
+ * @param {Array<{x: number, y: number}>} points
+ * @param {{viewId: number, imageWidth: number, imageHeight: number, viewport: {width: number, height: number}}} basis
+ * @param {Array<Record<string, any>>} history newest first
+ * @param {number} [margin] px inside a basis that still counts as reachable
+ * @returns {{stale: Array<Record<string, any>>, ambiguous: Array<Record<string, any>>}}
+ */
+export function findCoordinateBasisMismatch(points, basis, history, margin = 2) {
+  const result = { stale: [], ambiguous: [] }
+  if (!basis || !Array.isArray(points)) return result
+  const scaleOf = item => (Number(item?.viewport?.width) || 0) / (Number(item?.imageWidth) || 1)
+  const mapPoint = (point, item) => {
+    const scale = scaleOf(item)
+    return { x: (Number(point?.x) || 0) * scale, y: (Number(point?.y) || 0) * scale }
+  }
+  const inside = (mapped, item) => mapped.x >= -margin && mapped.y >= -margin
+    && mapped.x <= (Number(item?.viewport?.width) || 0) + margin
+    && mapped.y <= (Number(item?.viewport?.height) || 0) + margin
+  const baseScale = scaleOf(basis)
+  const others = (Array.isArray(history) ? history : [])
+    .filter(item => item && Number(item.viewId) !== Number(basis.viewId) && Number(item.imageWidth) > 0)
+    .filter(item => Math.abs(scaleOf(item) - baseScale) >= baseScale * 0.01)
+  for (const [index, point] of points.entries()) {
+    if (!Number.isFinite(Number(point?.x)) || !Number.isFinite(Number(point?.y))) continue
+    const mapped = mapPoint(point, basis)
+    const onScreen = inside(mapped, basis)
+    const alternatives = []
+    for (const other of others) {
+      const mappedOther = mapPoint(point, other)
+      if (!inside(mappedOther, other)) continue
+      alternatives.push({
+        viewId: Number(other.viewId),
+        imageWidth: Number(other.imageWidth),
+        imageHeight: Number(other.imageHeight),
+        cssX: Math.round(mappedOther.x),
+        cssY: Math.round(mappedOther.y),
+        dx: Math.round(mappedOther.x - mapped.x),
+        dy: Math.round(mappedOther.y - mapped.y),
+      })
+    }
+    if (alternatives.length === 0) continue
+    if (!onScreen) {
+      result.stale.push({
+        index,
+        x: point.x,
+        y: point.y,
+        cssX: Math.round(mapped.x),
+        cssY: Math.round(mapped.y),
+        from: alternatives[0],
+      })
+      continue
+    }
+    // Both bases put the point on screen: only report the ones that differ
+    // enough that the click would land on a visibly different target.
+    const differing = alternatives.filter(item => Math.abs(item.dx) >= 8 || Math.abs(item.dy) >= 8)
+    if (differing.length === 0) continue
+    result.ambiguous.push({
+      index,
+      x: point.x,
+      y: point.y,
+      cssX: Math.round(mapped.x),
+      cssY: Math.round(mapped.y),
+      alternatives: differing.slice(0, 3),
+    })
+  }
+  return result
+}
+
+/**
+ * The result-facing coordinate basis: which view the pixels were mapped through
+ * and its scale, so the model can tell when a coordinate is not from the view it
+ * thinks it is.
+ * @param {Record<string, any>} basis
+ */
+function basisSummary(basis) {
+  const width = Number(basis?.imageWidth) || 0
+  const viewportWidth = Number(basis?.viewport?.width) || 0
+  return {
+    viewId: Number(basis?.viewId),
+    imageWidth: width,
+    imageHeight: Number(basis?.imageHeight) || 0,
+    cssPerImagePx: width > 0 ? Number((viewportWidth / width).toFixed(3)) : 0,
+  }
+}
+
+/**
  * Validate click_at arguments into a single burst request. A burst is either
  * one legacy `x`/`y` pair or a `points` array of 1..20 pairs, never both.
  * @param {Record<string, any>} args
- * @returns {{points: Array<{x: number, y: number}>, space: 'image'|'css', view: 'fresh'|'none', settleMs: number|undefined}}
+ * @returns {{points: Array<{x: number, y: number}>, space: 'image'|'css', view: 'fresh'|'none', settleMs: number|undefined, viewId: number|undefined}}
  */
 export function parseClickAtArgs(args) {
   const hasPoints = args.points !== undefined
@@ -2688,6 +3720,7 @@ export function parseClickAtArgs(args) {
   const rawView = parseViewArg(args, 'full')
   const view = rawView === 'auto' ? 'full' : rawView
   const settleMs = parseSettleMs(args.settle_ms)
+  const viewId = parseViewId(args.view_id)
   if (hasPoints) {
     if (!Array.isArray(args.points) || args.points.length === 0 || args.points.length > CLICK_AT_MAX_POINTS) {
       throw new BrowserError('BAD_POINTS', `points must be an array of 1 to ${CLICK_AT_MAX_POINTS} {x, y} coordinate objects.`)
@@ -2700,14 +3733,14 @@ export function parseClickAtArgs(args) {
       }
       return { x, y }
     })
-    return { points, space, view, settleMs }
+    return { points, space, view, settleMs, viewId }
   }
   const x = Number(args.x)
   const y = Number(args.y)
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
     throw new BrowserError('BAD_POINT', 'x and y must be finite numbers from the current view')
   }
-  return { points: [{ x, y }], space, view, settleMs }
+  return { points: [{ x, y }], space, view, settleMs, viewId }
 }
 
 /**
@@ -2759,14 +3792,12 @@ export function staleScrollInfo(storedScroll, currentScroll, threshold = STALE_S
 }
 
 /**
- * Click one or more points in the current view. Used for canvas/video/iframe
- * surfaces where no DOM label exists. Coordinates default to screenshot pixels;
- * `space: "css"` is direct viewport CSS. A burst clicks up to 20 points with one
- * debugger attach, one settle, and one capture; `view: "none"` skips the
- * capture entirely and reports changed: null. Points outside the viewport are
- * reported with offScreen:true and are never dispatched. Uses trusted browser
- * input when possible and verifies with a pixel diff, which is the only change
- * signal those surfaces produce.
+ * Click points in the current view on canvas/video/iframe or unlabelled targets.
+ * Ordinary pages allow 20-point bursts and skipped captures. Known document
+ * editors allow one point plus a full fresh view, and every coordinate basis is
+ * validated before input. Off-screen ordinary points are skipped; canvas-editor
+ * off-screen points are rejected. Pixel diffs report visual response, not proof
+ * of a particular document edit.
  * @param {import('./protocol.js').Settings} settings
  * @param {Record<string, any>} args
  */
@@ -2776,20 +3807,57 @@ async function clickAt(settings, args) {
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
   const request = parseClickAtArgs(args)
+  const canvasEditor = canvasEditorForUrl(tab.url)
+  const burstError = canvasBurstError(tab.url ?? '', request.points.length)
+  if (burstError) throw new BrowserError(burstError.code, burstError.message)
+  request.view = actionViewForTab(tab, request.view)
   const before = lastViewByTab.get(tab.id)
-  const viewport = before?.viewport ?? await runInTab(tab.id, pageMetrics, [])
-  // Every image-space point shares the scale of the same previous view, so a
-  // whole burst maps consistently instead of drifting point by point.
-  if (request.space === 'image' && (!before?.image?.data || !Number.isFinite(before.image.width))) {
+  const history = (imageBasesByTab.get(tab.id) ?? []).filter(basis => basis.url === (tab.url ?? ''))
+  const resolved = canvasEditor
+    ? resolveCanvasImageBasis(request.viewId, history)
+    : request.space === 'image'
+      ? resolveImageBasis({ space: request.space, viewId: request.viewId, points: request.points }, history)
+      : {}
+  if (resolved.error) throw new BrowserError(resolved.error.code, resolved.error.message)
+  const basis = resolved.basis
+  const liveMetrics = canvasEditor ? await runInTab(tab.id, pageMetrics, []) : undefined
+  if (canvasEditor) {
+    if (!before?.image?.data || Number(before.viewId) !== Number(basis?.viewId)) {
+      throw new BrowserError('NO_VIEW', 'Take a full fresh view before using coordinates in this canvas editor.')
+    }
+    const basisError = canvasBasisError(basis, liveMetrics, scrollFor(tab, liveMetrics))
+    if (basisError) throw new BrowserError(basisError.code, basisError.message)
+  }
+  const viewport = liveMetrics?.viewport ?? before?.viewport ?? await runInTab(tab.id, pageMetrics, [])
+  if (!canvasEditor && request.space === 'image' && (!before?.image?.data || !basis)) {
     throw new BrowserError('NO_VIEW', 'Take a screenshot first so image coordinates can be mapped to the page.')
   }
-  const imageScale = request.space === 'image' ? viewport.width / before.image.width : 1
-  // An off-screen coordinate used to be clamped to a viewport edge and clicked
-  // silently, which is how a stale burst became a "frozen board". Off-screen
-  // points are marked and skipped instead; on-screen points keep the clamp.
+  const imageScale = request.space === 'image' ? basis.viewport.width / basis.imageWidth : 1
+  const mismatch = request.space === 'image'
+    ? findCoordinateBasisMismatch(request.points, basis, history)
+    : { stale: [], ambiguous: [] }
+  if (request.viewId !== undefined) mismatch.ambiguous = []
+  const stalePoint = mismatch.stale[0]
+  if (stalePoint) {
+    const current = basisSummary(basis)
+    throw new BrowserError(
+      'STALE_VIEW',
+      `These image coordinates look like they came from view #${stalePoint.from.viewId} (${stalePoint.from.imageWidth}x${stalePoint.from.imageHeight} image), but the current coordinate basis is view #${current.viewId} (${current.imageWidth}x${current.imageHeight}). Take a fresh view and measure the point again.`,
+    )
+  }
+  if (mismatch.ambiguous.length > 0) {
+    const other = mismatch.ambiguous[0].alternatives[0]
+    throw new BrowserError(
+      'AMBIGUOUS_VIEW',
+      `These image coordinates also fit view #${other.viewId} at a different scale. Take a fresh view, measure the point again, and pass its view_id; no click was dispatched.`,
+    )
+  }
   const targets = mapClickPoints(request.points, request.space, viewport, imageScale)
   const onScreen = targets.filter(target => target.offScreen !== true)
   const offScreenCount = targets.length - onScreen.length
+  if (canvasEditor && offScreenCount > 0) {
+    throw new BrowserError('OFF_SCREEN', 'A canvas coordinate is outside the current viewport. Take a full fresh view and measure it again; no click was dispatched.')
+  }
 
   let trusted = true
   if (onScreen.length > 0) {
@@ -2805,6 +3873,8 @@ async function clickAt(settings, args) {
       if (!Array.isArray(dispatched) || !dispatched.some(Boolean)) {
         throw new BrowserError('CLICK_POINT_EMPTY', 'There is no element at that point.')
       }
+    } finally {
+      if (canvasEditor) invalidateCanvasImageBases(tab.id)
     }
   }
 
@@ -2843,16 +3913,20 @@ async function clickAt(settings, args) {
   }))
   if (batchDepth > 0) {
     // Inner click_at: no capture at all. A fingerprint comparison still gives a
-    // cheap changed signal for the batch item.
+    // cheap changed signal and catches a layout shift for the batch item.
+    const stored = lastViewByTab.get(tab.id)
     const metrics = await runInTab(tab.id, pageMetrics, [])
-    const derived = deriveFingerprintOutcome(lastViewByTab.get(tab.id), metrics)
+    const derived = deriveFingerprintOutcome(stored, metrics)
+    const shift = deriveLayoutShiftOutcome(stored, metrics)
     const staleScroll = staleScrollInfo(before?.scroll, metrics?.scroll)
     return {
       points,
       trusted,
       offScreenCount,
       changed: derived.changed,
+      ...(basis ? { basis: basisSummary(basis) } : {}),
       ...(staleScroll ? { staleScroll } : {}),
+      ...shift,
       clickMs: Math.round(performance.now() - started),
     }
   }
@@ -2878,6 +3952,18 @@ async function clickAt(settings, args) {
     trusted,
     offScreenCount,
     changedCount: points.filter(point => point.changed === true).length,
+    ...(basis ? { basis: basisSummary(basis) } : {}),
+    // Points that are plausible on two different image scales: the click still
+    // uses the current basis, but the result names the other basis it also fits
+    // so a mismatched scale is visible instead of silent.
+    ...(mismatch.ambiguous.length > 0
+      ? {
+          basisAmbiguousWith: mismatch.ambiguous.flatMap(item => item.alternatives.map(other => ({
+            pointIndex: item.index,
+            ...other,
+          }))),
+        }
+      : {}),
     ...(staleScroll ? { staleScroll } : {}),
     clickMs: Math.round(performance.now() - started),
   }
@@ -2915,37 +4001,37 @@ async function click(settings, args) {
   if (!Number.isSafeInteger(label) || label <= 0) {
     throw new BrowserError('BAD_LABEL', 'label must be a positive integer shown on the current view')
   }
-  const viewMode = parseViewArg(args, 'auto')
+  let viewMode = parseViewArg(args, 'auto')
   const started = performance.now()
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
+  const canvasEditor = canvasEditorForUrl(tab.url)
+  viewMode = actionViewForTab(tab, viewMode)
   const beforeUrl = tab.url ?? ''
   const __afterLookup = performance.now()
   const target = resolveLabelTarget(tab, label)
-  if (!target) {
-    throw await decorateStaleLabelError(
-      tab,
-      new BrowserError('UNKNOWN_LABEL', `Label ${label} is not in the current view. Take a fresh screenshot to get current labels.`),
-    )
-  }
-  let result
-  try {
-    result = await runInFrame(tab.id, target.frameId, clickLabelled, [target.localId], 1_200)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
-    // A navigation can destroy the frame mid-dispatch; that is a successful click.
-    const current = await chrome.tabs.get(tab.id).catch(() => undefined)
-    const navigated = current !== undefined && (current.url ?? '') !== beforeUrl
-    if (navigated || /frame.*(removed|gone)|cannot access contents|no frame|tab was closed/i.test(message)) {
-      result = { ok: true, clicked: { label, tag: '', role: '', text: '' }, changed: true, signals: ['navigation'], navigated: true }
-    } else if (code === 'SCRIPT_TIMEOUT') {
-      throw new BrowserError('CLICK_TIMEOUT', 'The click did not complete. Take a fresh view before trying again.')
-    } else {
+  if (!target) throw await decorateStaleLabelError(tab, missingLabelError(tab, label))
+  const clickOnce = async labelTarget => {
+    try {
+      return await runInFrame(tab.id, labelTarget.frameId, clickLabelled, [labelTarget.localId], 1_200)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+      const current = await chrome.tabs.get(tab.id).catch(() => undefined)
+      const navigated = current !== undefined && (current.url ?? '') !== beforeUrl
+      if (navigated || /frame.*(removed|gone)|cannot access contents|no frame|tab was closed/i.test(message)) {
+        return { ok: true, clicked: { label, tag: '', role: '', text: '' }, changed: true, signals: ['navigation'], navigated: true }
+      }
+      if (code === 'SCRIPT_TIMEOUT') {
+        throw new BrowserError('CLICK_TIMEOUT', 'The click did not complete. Take a fresh view before trying again.')
+      }
       throw error
+    } finally {
+      if (canvasEditor) invalidateCanvasImageBases(tab.id)
     }
   }
+  const result = await clickOnce(target)
   if (result?.ok === false) {
     const code = typeof result.code === 'string' ? result.code : 'CLICK_FAILED'
     const error = new BrowserError(code, typeof result.message === 'string' ? result.message : 'Click failed')
@@ -3007,12 +4093,15 @@ async function click(settings, args) {
   const resultScroll = clickScroll
     ? { ...(payload?.scroll && typeof payload.scroll === 'object' ? payload.scroll : {}), ...clickScroll }
     : undefined
+  const reportedSignals = mode === 'full'
+    ? signals
+    : (Array.isArray(payload.signals) ? payload.signals : [])
   return {
     ...payload,
     op: 'click',
     clicked: result.clicked,
     changed,
-    signals: mode === 'full' ? signals : (Array.isArray(payload.signals) ? payload.signals : []),
+    signals: reportedSignals,
     navigated,
     ...(resultScroll ? { scroll: resultScroll } : {}),
     scrolledIntoView,
@@ -3043,15 +4132,42 @@ async function hover(settings, args) {
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
+  const pageUrl = tab.url ?? ''
   const target = resolveLabelTarget(tab, label)
-  if (!target) throw new BrowserError('UNKNOWN_LABEL', `Label ${label} is not in the current view. Take a fresh screenshot.`)
-  const hovered = await runInFrame(tab.id, target.frameId, hoverLabelled, [target.localId], 3_000)
+  if (!target) throw await decorateStaleLabelError(tab, missingLabelError(tab, label))
+  let hovered = await runInFrame(tab.id, target.frameId, hoverLabelled, [target.localId], 3_000)
+  // Recover a re-rendered target once by its recorded signature; a failed
+  // recovery keeps the original stale-label error.
+  let staleRecovery
+  if (hovered?.ok === false && isRecoverableLabelCode(hovered.code)) {
+    staleRecovery = await recoverStaleLabel(tab, target, pageUrl)
+    if (staleRecovery.recovered) {
+      const retried = await runInFrame(
+        tab.id,
+        staleRecovery.recovered.frameId,
+        hoverLabelled,
+        [staleRecovery.recovered.localId],
+        3_000,
+      ).catch(() => undefined)
+      if (retried?.ok === true) hovered = retried
+    }
+  }
   if (hovered?.ok === false) throw new BrowserError(hovered.code ?? 'HOVER_FAILED', hovered.message ?? 'Could not hover')
+  const reResolved = staleRecovery?.recovered && staleRecovery.recovered.label !== label
+    ? { from: label, to: staleRecovery.recovered.label, ...staleRecovery.recovered.signature }
+    : undefined
   await pauseInTab(tab.id, 80)
   if (batchDepth > 0) {
+    const stored = lastViewByTab.get(tab.id)
     const metrics = await runInTab(tab.id, pageMetrics, [])
-    const derived = deriveFingerprintOutcome(lastViewByTab.get(tab.id), metrics)
-    return { changed: derived.changed, signals: derived.signals, hovered: hovered.hovered }
+    const derived = deriveFingerprintOutcome(stored, metrics)
+    return {
+      changed: derived.changed,
+      signals: derived.signals,
+      hovered: hovered.hovered,
+      ...(reResolved ? { reResolved } : {}),
+      ...deriveLayoutShiftOutcome(stored, metrics),
+    }
   }
   const activeTab = await getActiveTab(windowId).catch(() => tab)
   const { payload } = await buildActionView(activeTab, settings, viewMode, {
@@ -3059,7 +4175,7 @@ async function hover(settings, args) {
       ? deriveLabelDeltaOutcome(delta)
       : deriveFingerprintOutcome(stored, metrics),
   })
-  return { ...payload, op: 'hover', hovered: hovered.hovered }
+  return { ...payload, op: 'hover', hovered: hovered.hovered, ...(reResolved ? { reResolved } : {}) }
 }
 
 /**
@@ -3077,7 +4193,7 @@ async function selectOptionOp(settings, args) {
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
   const target = resolveLabelTarget(tab, label)
-  if (!target) throw new BrowserError('UNKNOWN_LABEL', `Label ${label} is not in the current view. Take a fresh screenshot.`)
+  if (!target) throw await decorateStaleLabelError(tab, missingLabelError(tab, label))
   const picked = await runInFrame(tab.id, target.frameId, selectOption, [target.localId, String(args.option ?? '')], 3_000)
   if (picked?.ok === false) throw new BrowserError(picked.code ?? 'SELECT_FAILED', picked.message ?? 'Could not select the option')
   await pauseInTab(tab.id, 90)
@@ -3172,29 +4288,61 @@ async function trustedTypeIntoLabel(tabId, target, request, domResult) {
  * focus (the canvas-editor case, where a caret click put it there).
  * @param {number} tabId
  * @param {{text: string}} request
+ * @param {string|undefined} canvasEditor
  */
-async function trustedTypeIntoFocus(tabId, request) {
+async function trustedTypeIntoFocus(tabId, request, canvasEditor) {
+  if (canvasEditor) {
+    await withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: request.text }))
+    await settleAfterInput(tabId, undefined)
+    return {
+      method: 'trusted',
+      beforeChars: 0,
+      beforePreview: '',
+      afterChars: 0,
+      valuePreview: undefined,
+      verdict: {
+        changed: null,
+        charsAdded: null,
+        measured: 'none',
+        canvasEditor: true,
+        fieldChanged: null,
+        pageChanged: null,
+        targetKind: 'canvas',
+      },
+    }
+  }
   let before
   try {
-    before = await runInTab(tabId, readFocusedField, [], 2_000)
+    before = summarizeContentProbe(await runInAllFrames(tabId, contentProbePage, ['start'], 2_500))
   } catch {
     before = undefined
   }
-  await withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: request.text }))
+  try {
+    await withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: request.text }))
+  } catch (error) {
+    // Never leave a MutationObserver running in every frame of the page.
+    if (before) await runInAllFrames(tabId, contentProbePage, ['end'], 1_000).catch(() => {})
+    throw error
+  }
   await settleAfterInput(tabId, undefined)
   let after
   try {
-    after = await runInTab(tabId, readFocusedField, [], 2_000)
+    after = summarizeContentProbe(await runInAllFrames(tabId, contentProbePage, ['end'], 2_500))
   } catch {
     after = undefined
   }
+  const verdict = deriveTypeVerdict(before, after)
+  const measurable = verdict.measured === 'field'
   return {
     method: 'trusted',
-    isPassword: before?.isPassword === true || after?.isPassword === true,
-    beforeChars: before?.chars ?? 0,
-    beforePreview: before?.preview ?? '',
-    afterChars: after?.chars ?? 0,
-    valuePreview: after?.preview ?? '',
+    isPassword: before?.focus?.isPassword === true || after?.focus?.isPassword === true,
+    beforeChars: measurable ? Number(before?.focus?.chars) || 0 : 0,
+    beforePreview: measurable ? String(before?.focus?.preview ?? '') : '',
+    afterChars: measurable ? Number(after?.focus?.chars) || 0 : 0,
+    // A canvas-like editor has no readable value to quote; "value now" must not
+    // be printed from the page text of the previous view.
+    valuePreview: measurable ? String(after?.focus?.preview ?? '') : undefined,
+    verdict,
   }
 }
 
@@ -3226,34 +4374,46 @@ async function typeText(settings, args) {
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
   const request = parseTypeArgs(args)
+  const canvasEditor = canvasEditorForUrl(tab.url)
+  if (canvasEditor && request.label === undefined && (request.mode === 'append' || request.text.length === 0)) {
+    throw new BrowserError(
+      'CANVAS_TYPE_UNSUPPORTED',
+      `${canvasEditor} unlabelled typing inserts at the caret or replaces the current selection. Append and empty-text clearing are not verifiable here; use a labelled field, or select the intended range and use Backspace/Delete in a separate action.`,
+    )
+  }
   let outcome
-  if (request.label !== undefined) {
-    const target = resolveLabelTarget(tab, request.label)
-    if (!target) throw new BrowserError('UNKNOWN_LABEL', `Label ${request.label} is not in the current view. Take a fresh screenshot.`)
-    let domResult
-    try {
-      domResult = await runInFrame(tab.id, target.frameId, typeLabelled, [target.localId, request.text, request.mode], 5_000)
-    } catch (error) {
-      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
-      if (code === 'SCRIPT_TIMEOUT') throw new BrowserError('TYPE_TIMEOUT', 'Typing into this field did not complete. Take a fresh view and try again.')
-      throw error
-    }
-    if (domResult?.ok === false) {
-      if (domResult.code === 'NOT_EDITABLE') {
-        // Docs-style cards: the labelled surface is a div that wraps an editable
-        // child. Focus that child and use trusted input.
-        outcome = await trustedTypeIntoFallbackTarget(tab.id, target, request)
+  try {
+    if (request.label !== undefined) {
+      const target = resolveLabelTarget(tab, request.label)
+      if (!target) throw await decorateStaleLabelError(tab, missingLabelError(tab, request.label))
+      let domResult
+      try {
+        domResult = await runInFrame(tab.id, target.frameId, typeLabelled, [target.localId, request.text, request.mode], 5_000)
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+        if (code === 'SCRIPT_TIMEOUT') throw new BrowserError('TYPE_TIMEOUT', 'Typing into this field did not complete. Take a fresh view and try again.')
+        throw error
+      }
+      if (domResult?.ok === false) {
+        if (domResult.code === 'NOT_EDITABLE') {
+          outcome = await trustedTypeIntoFallbackTarget(tab.id, target, request)
+        } else {
+          const error = new BrowserError(domResult.code ?? 'TYPE_FAILED', domResult.message ?? 'Could not type into this field.')
+          throw await decorateStaleLabelError(tab, error, domResult.valuePreview)
+        }
       } else {
-        throw new BrowserError(domResult.code ?? 'TYPE_FAILED', domResult.message ?? 'Could not type into this field.')
+        outcome = domResult.verified
+          ? { method: 'dom', ...domResult }
+          : await trustedTypeIntoLabel(tab.id, target, request, domResult)
       }
     } else {
-      outcome = domResult.verified
-        ? { method: 'dom', ...domResult }
-        : await trustedTypeIntoLabel(tab.id, target, request, domResult)
+      outcome = await trustedTypeIntoFocus(tab.id, request, canvasEditor)
     }
-  } else {
-    outcome = await trustedTypeIntoFocus(tab.id, request)
+  } catch (error) {
+    if (canvasEditor) invalidateCanvasImageBases(tab.id)
+    throw error
   }
+  if (canvasEditor) invalidateCanvasImageBases(tab.id)
   let submitted = false
   if (request.submit) {
     await pressEnter(tab.id)
@@ -3262,9 +4422,12 @@ async function typeText(settings, args) {
   const beforeChars = outcome.beforeChars ?? 0
   const afterChars = outcome.afterChars ?? 0
   const beforePreview = outcome.beforePreview ?? ''
-  const valuePreview = outcome.valuePreview ?? ''
-  const changed = afterChars !== beforeChars || valuePreview !== beforePreview
-  const signals = changed ? ['text-changed'] : []
+  const valuePreview = outcome.valuePreview
+  const verdict = outcome.verdict
+  const changed = verdict === undefined
+    ? afterChars !== beforeChars || valuePreview !== beforePreview
+    : verdict.changed
+  const signals = changed === true ? ['text-changed'] : []
   const typed = {
     ...(request.label === undefined ? {} : { label: request.label }),
     chars: request.text.length,
@@ -3273,11 +4436,20 @@ async function typeText(settings, args) {
     method: outcome.method,
     beforeChars,
     afterChars,
-    valuePreview,
+    charsAdded: verdict === undefined ? afterChars - beforeChars : verdict.charsAdded,
+    ...(verdict === undefined
+      ? { valuePreview: valuePreview ?? '' }
+      : {
+          measured: verdict.measured,
+          canvasEditor: verdict.canvasEditor,
+          pageChanged: verdict.pageChanged,
+          ...(verdict.canvasEditor ? { dispatched: true, verified: false } : { verified: changed === true }),
+          ...(valuePreview === undefined ? {} : { valuePreview }),
+        }),
   }
   if (batchDepth > 0) return { changed, signals, typed }
-  const viewMode = parseViewArg(args, 'auto')
   const activeTab = await getActiveTab(windowId).catch(() => tab)
+  const viewMode = actionViewForTab(activeTab, parseViewArg(args, 'auto'))
   const { payload } = await buildActionView(activeTab, settings, viewMode, { changed, signals })
   return { ...payload, op: 'type', typed, changed, signals }
 }
@@ -3419,7 +4591,8 @@ async function pressKey(settings, args) {
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
   const request = parsePressKeyArgs(args)
-  const viewMode = parseViewArg(args, 'auto')
+  const canvasEditor = canvasEditorForUrl(tab.url)
+  const viewMode = actionViewForTab(tab, parseViewArg(args, 'auto'))
   const before = lastViewByTab.get(tab.id)
   const pressed = { key: request.key, modifiers: request.modifiers, trusted: true }
   try {
@@ -3428,6 +4601,8 @@ async function pressKey(settings, args) {
     if (isDebuggerBusy(error)) throw error
     pressed.trusted = false
     await runInTab(tab.id, syntheticKeyPage, [request.spec.key, request.spec.code, request.spec.keyCode, request.mask], 2_000)
+  } finally {
+    if (canvasEditor) invalidateCanvasImageBases(tab.id)
   }
   await settleAfterInput(tab.id, undefined)
   if (batchDepth > 0) {
@@ -3656,7 +4831,8 @@ function parseSelectArgs(args) {
   const to = parseSelectPoint(args.to, 'to')
   const space = args.space === 'css' ? 'css' : 'image'
   const view = parseViewArg(args, 'auto')
-  return { from, to, space, view }
+  const viewId = parseViewId(args.view_id)
+  return { from, to, space, view, viewId }
 }
 
 /**
@@ -3701,19 +4877,51 @@ async function selectRange(settings, args) {
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
+  const canvasEditor = canvasEditorForUrl(tab.url)
+  request.view = actionViewForTab(tab, request.view)
   const before = lastViewByTab.get(tab.id)
-  const viewport = before?.viewport ?? await runInTab(tab.id, pageMetrics, [])
-  // Image space maps through the stored view exactly like click_at.
-  if (request.space === 'image' && (!before?.image?.data || !Number.isFinite(before.image.width))) {
+  const history = (imageBasesByTab.get(tab.id) ?? []).filter(basis => basis.url === (tab.url ?? ''))
+  const resolved = canvasEditor
+    ? resolveCanvasImageBasis(request.viewId, history)
+    : request.space === 'image'
+      ? resolveImageBasis({ space: request.space, viewId: request.viewId, points: [request.from, request.to] }, history)
+      : {}
+  if (resolved.error) throw new BrowserError(resolved.error.code, resolved.error.message)
+  const basis = resolved.basis
+  const liveMetrics = canvasEditor ? await runInTab(tab.id, pageMetrics, []) : undefined
+  if (canvasEditor) {
+    if (!before?.image?.data || Number(before.viewId) !== Number(basis?.viewId)) {
+      throw new BrowserError('NO_VIEW', 'Take a full fresh view before using coordinates in this canvas editor.')
+    }
+    const basisError = canvasBasisError(basis, liveMetrics, scrollFor(tab, liveMetrics))
+    if (basisError) throw new BrowserError(basisError.code, basisError.message)
+  }
+  const viewport = liveMetrics?.viewport ?? before?.viewport ?? await runInTab(tab.id, pageMetrics, [])
+  if (!canvasEditor && request.space === 'image' && (!before?.image?.data || !basis)) {
     throw new BrowserError('NO_VIEW', 'Take a screenshot first so image coordinates can be mapped to the page.')
   }
-  const scale = request.space === 'image' ? viewport.width / before.image.width : 1
-  const cssPoint = point => ({
-    x: Math.max(0, Math.min(viewport.width - 1, request.space === 'css' ? point.x : point.x * scale)),
-    y: Math.max(0, Math.min(viewport.height - 1, request.space === 'css' ? point.y : point.y * scale)),
-  })
-  const fromCss = cssPoint(request.from)
-  const toCss = cssPoint(request.to)
+  const mismatch = request.space === 'image'
+    ? findCoordinateBasisMismatch([request.from, request.to], basis, history)
+    : { stale: [], ambiguous: [] }
+  if (request.viewId !== undefined) mismatch.ambiguous = []
+  if (mismatch.stale.length > 0) {
+    const current = basisSummary(basis)
+    const stale = mismatch.stale[0].from
+    throw new BrowserError(
+      'STALE_VIEW',
+      `These image coordinates look like they came from view #${stale.viewId} (${stale.imageWidth}x${stale.imageHeight} image), but the current coordinate basis is view #${current.viewId} (${current.imageWidth}x${current.imageHeight}). Take a fresh view and measure the points again.`,
+    )
+  }
+  if (mismatch.ambiguous.length > 0) {
+    throw new BrowserError('AMBIGUOUS_VIEW', 'These selection coordinates fit more than one image scale. Take a fresh view and pass its view_id; no drag was dispatched.')
+  }
+  const scale = request.space === 'image' ? basis.viewport.width / basis.imageWidth : 1
+  const mapped = mapClickPoints([request.from, request.to], request.space, viewport, scale)
+  if (mapped.some(point => point.offScreen)) {
+    throw new BrowserError('OFF_SCREEN_SELECTION', 'A selection endpoint is outside the current viewport. Take a fresh view and measure both endpoints again; no drag was dispatched.')
+  }
+  const fromCss = { x: mapped[0].cssX, y: mapped[0].cssY }
+  const toCss = { x: mapped[1].cssX, y: mapped[1].cssY }
   try {
     await withDebugger(tab.id, () => trustedDrag(tab.id, fromCss.x, fromCss.y, toCss.x, toCss.y))
   } catch (error) {
@@ -3721,30 +4929,39 @@ async function selectRange(settings, args) {
     try {
       await runInTab(tab.id, syntheticDrag, [fromCss.x, fromCss.y, toCss.x, toCss.y], 2_000)
     } catch {
-      // Fall through: the selection read below reports the real outcome.
+      // The result below reports the selection as unknown or collapsed.
     }
+  } finally {
+    if (canvasEditor) invalidateCanvasImageBases(tab.id)
   }
   let selection
-  try {
-    selection = await runInTab(tab.id, readSelection, [], 2_000)
-  } catch (error) {
-    throw new BrowserError('SELECT_FAILED', `Could not read the selection: ${error instanceof Error ? error.message : String(error)}`)
+  if (!canvasEditor) {
+    try {
+      selection = await runInTab(tab.id, readSelection, [], 2_000)
+    } catch (error) {
+      throw new BrowserError('SELECT_FAILED', `Could not read the selection: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
   const text = typeof selection?.text === 'string' ? selection.text : ''
-  const chars = Number.isFinite(Number(selection?.chars)) ? Number(selection.chars) : text.length
+  const chars = canvasEditor
+    ? null
+    : Number.isFinite(Number(selection?.chars)) ? Number(selection.chars) : text.length
   const selected = {
     chars,
-    textPreview: text.slice(0, 200),
-    collapsed: selection?.collapsed !== false,
+    textPreview: canvasEditor ? '' : text.slice(0, 200),
+    collapsed: canvasEditor ? null : selection?.collapsed !== false,
+    verified: canvasEditor ? false : Number(chars) > 0,
+    ...(canvasEditor ? { dispatched: true } : {}),
     from: { space: request.space, x: request.from.x, y: request.from.y, cssX: Math.round(fromCss.x), cssY: Math.round(fromCss.y) },
     to: { space: request.space, x: request.to.x, y: request.to.y, cssX: Math.round(toCss.x), cssY: Math.round(toCss.y) },
   }
-  const changed = chars > 0
-  const signals = changed ? ['selection-changed'] : []
-  if (batchDepth > 0) return { changed, signals, selected }
+  const changed = canvasEditor ? null : Number(chars) > 0
+  const signals = changed === true ? ['selection-changed'] : []
+  const basisFields = basis ? { basis: basisSummary(basis) } : {}
+  if (batchDepth > 0) return { changed, signals, selected, ...basisFields }
   const activeTab = await getActiveTab(windowId).catch(() => tab)
-  const { payload } = await buildActionView(activeTab, settings, request.view, { changed, signals })
-  return { ...payload, op: 'select', selected, changed, signals }
+  const { payload } = await buildActionView(activeTab, settings, actionViewForTab(activeTab, request.view), { changed, signals })
+  return { ...payload, op: 'select', selected, changed, signals, ...basisFields }
 }
 
 /**
@@ -4005,9 +5222,7 @@ async function clipboardCopy(request) {
   let totalChars = 0
   if (request.source === 'label') {
     const target = resolveLabelTarget(tab, request.label)
-    if (!target) {
-      throw new BrowserError('UNKNOWN_LABEL', `Label ${request.label} is not in the current view. Take a fresh screenshot to get current labels.`)
-    }
+    if (!target) throw missingLabelError(tab, request.label)
     let read
     try {
       read = await runInFrame(tab.id, target.frameId, readLabelClipboardText, [target.localId], 3_000)
@@ -4271,7 +5486,7 @@ const BATCH_ACTION_FIELDS = [
   'changed', 'signals', 'clicked', 'hovered', 'selected', 'selectedIndex',
   'typed', 'pressed', 'points', 'trusted', 'changedCount', 'offScreenCount', 'clickMs',
   'scroll', 'moved', 'wheel', 'requestedPixels', 'container', 'waited', 'navigated',
-  'staleScroll', 'scrolledIntoView',
+  'staleScroll', 'scrolledIntoView', 'reResolved',
 ]
 
 /**
@@ -4299,7 +5514,10 @@ async function batch(settings, args) {
     }
   }
   const stopOnError = args.stop_on_error !== false
-  const requestedView = parseViewArg(args, 'full')
+  const initialTab = await getActiveTab(await getWindowId())
+  const canvasError = canvasBatchError(initialTab.url ?? '', rawActions)
+  if (canvasError) throw new BrowserError(canvasError.code, canvasError.message)
+  const requestedView = actionViewForTab(initialTab, parseViewArg(args, 'full'))
   /** @type {Array<Record<string, any>>} */
   const actions = []
   let ok = true
@@ -4335,7 +5553,7 @@ async function batch(settings, args) {
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   const viewStarted = performance.now()
-  const built = await buildBatchView(tab, settings, requestedView)
+  const built = await buildBatchView(tab, settings, actionViewForTab(tab, requestedView))
   const viewMs = Math.round(performance.now() - viewStarted)
   const viewPayload = { ...built.payload }
   // The frozen batch payload flattens the view on the root but drops the

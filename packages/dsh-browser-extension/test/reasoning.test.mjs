@@ -42,7 +42,7 @@ test('classifies short imperative work prompts as act', () => {
   ]
   for (const text of prompts) {
     assert.equal(classifyPrompt(text), 'act', text)
-    assert.equal(autoEffort(classifyPrompt(text)), 'off', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
   }
 })
 
@@ -51,14 +51,11 @@ test('synthesize still wins over act for question and report prompts', () => {
   assert.equal(classifyPrompt('why should I delete it all?'), 'synthesize')
 })
 
-test('auto effort is off for navigation, action, and rapid turns', () => {
-  assert.equal(autoEffort('navigate'), 'off')
-  assert.equal(autoEffort('act'), 'off')
-  assert.equal(autoEffort('rapid'), 'off')
-  assert.equal(autoEffort('inspect'), 'low')
-  assert.equal(autoEffort('synthesize'), 'low')
-  assert.equal(effortFor('auto', 'rapid'), 'off')
-  assert.equal(effortFor('auto', 'act'), 'off')
+test('auto effort is low for every classification', () => {
+  for (const classification of ['navigate', 'inspect', 'synthesize', 'rapid', 'act']) {
+    assert.equal(autoEffort(classification), 'low', classification)
+    assert.equal(effortFor('auto', classification), 'low', classification)
+  }
 })
 
 test('act classification does not slow down reading or synthesis', () => {
@@ -69,18 +66,11 @@ test('act classification does not slow down reading or synthesis', () => {
 })
 
 test('explicit policy overrides classification', () => {
-  assert.equal(effortFor('off', 'synthesize'), 'off')
-  assert.equal(effortFor('high', 'navigate'), 'high')
-  assert.equal(effortFor('medium', 'inspect'), 'medium')
-  assert.equal(effortFor('auto', 'navigate'), 'off')
-  assert.equal(effortFor('high', 'rapid'), 'high')
-  assert.equal(effortFor('medium', 'rapid'), 'medium')
-  assert.equal(effortFor('low', 'rapid'), 'low')
-  assert.equal(effortFor('off', 'rapid'), 'off')
-  assert.equal(effortFor('high', 'act'), 'high')
-  assert.equal(effortFor('medium', 'act'), 'medium')
-  assert.equal(effortFor('low', 'act'), 'low')
-  assert.equal(effortFor('off', 'act'), 'off')
+  for (const classification of ['navigate', 'inspect', 'synthesize', 'rapid', 'act']) {
+    for (const policy of ['off', 'low', 'medium', 'high']) {
+      assert.equal(effortFor(policy, classification), policy, `${policy}/${classification}`)
+    }
+  }
 })
 
 test('classifies common editing and formatting verbs as act', () => {
@@ -111,7 +101,34 @@ test('classifies common editing and formatting verbs as act', () => {
   ]
   for (const text of prompts) {
     assert.equal(classifyPrompt(text), 'act', text)
-    assert.equal(autoEffort(classifyPrompt(text)), 'off', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+  }
+})
+
+test('classifies short work prompts whose verb is not first as act', () => {
+  // 2026-10-23 run: these ran at low and cost 286-467 output tokens per call
+  // against 101-176 on browser-work turns under the former off policy.
+  for (const text of [
+    'its a bit cramped, format it nicely',
+    'format the entire document nicely. each question should be spaced apart.',
+    'im doing engineering so remove the stuff i dont need to do',
+    'unify the formatting. some is small some is bold some is serif',
+    'make it nice serif font, bold necessary stuff',
+    'do it and do it fast',
+    'do that for the other tabs too',
+  ]) {
+    assert.equal(classifyPrompt(text), 'act', text)
+  }
+  // Short prompts that only ask for information stay inspectable.
+  for (const text of [
+    'list my tabs',
+    'find the super matt email',
+    'go to my email and see the newest one',
+    'whats your name',
+    'go to my emails and check what there is to respond to',
+  ]) {
+    const classified = classifyPrompt(text)
+    assert.ok(classified === 'inspect' || classified === 'navigate', `${text} -> ${classified}`)
   }
 })
 
@@ -144,6 +161,131 @@ test('questions and report prompts still win over follow-up detection', () => {
   assert.equal(classifyPrompt('scroll down and tell me which marker is visible'), 'inspect')
   // A long prompt that mentions "again" is not a short correction.
   assert.equal(classifyPrompt('read the page and explain the whole flow again so I understand it'), 'synthesize')
+})
+
+// The prompts below are verbatim `turn.start` events from
+// .dsh-home/browser-agent/logs/*/events.jsonl (65 logged turns). They are the
+// evidence for the classification changes documented in lib/reasoning.js.
+
+test('logged manipulation turns are act/low even with an observational side verb', () => {
+  // A read word used to cancel `act` wherever it appeared. Here "check it" is a
+  // side remark on top of the leading imperative, not a request for a report.
+  const prompts = [
+    'add a few paragraphs',
+    'add a few paragraphs to the doc and check it',
+    'write a title and subtite too. be quick and hasty with it',
+    'write a title',
+    'type the heading',
+    'open each tab procedurally',
+    'click the Bold button and check it worked',
+    'export part studio. id you dont know how, use google in a new tab',
+    'export it for me',
+    'you can do it. please try.',
+    'Reply with exactly one word: pong',
+  ]
+  for (const text of prompts) {
+    assert.equal(classifyPrompt(text), 'act', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+  }
+})
+
+test('logged retry nudges stay act with low reasoning', () => {
+  const prompts = [
+    'alright one last try',
+    'yo one more time\\',
+    'ok try again =, see if you can do better!',
+    'alright one last try! good luck',
+    'ok ill give you one more try. lets beat it',
+    'ok try again!',
+  ]
+  for (const text of prompts) {
+    assert.equal(classifyPrompt(text), 'act', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+  }
+})
+
+test('logged reading turns stay inspect with low reasoning', () => {
+  // These turns need the page contents read and turned into an answer, so the
+  // inner "check"/"see"/"find" must not make them action turns.
+  const prompts = [
+    'go to my emails and check what there is to respond to',
+    'go to my emails and see',
+    'go to my email and see the newest one',
+    'check each courses calendar to see',
+    'ok can you go to my schoology and check what homewoerk i have',
+    'find the super matt email.',
+    'go to my emails, find the email i sent myself, then add an html email as a reply. Make sure it looks nice.',
+    'click the link and tell me where it goes',
+    'add a few paragraphs and tell me what you wrote',
+    // "scroll"/"open" only reach the content here; the reading is the task.
+    'scroll and see everything',
+    'open the dashboard and check the numbers',
+    'whats your name',
+  ]
+  for (const text of prompts) {
+    assert.equal(classifyPrompt(text), 'inspect', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+  }
+})
+
+test('logged navigation and game turns request low reasoning', () => {
+  for (const text of ['go to a google doc and click through the menus.', 'go to a new tab google docs']) {
+    assert.equal(classifyPrompt(text), 'navigate', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+  }
+  // Typing a title after navigating is browser work whichever side of the
+  // act/navigate line it lands on.
+  const titleInNewDoc = 'go to a new doc and make a title. do it quickly.'
+  assert.ok(['act', 'navigate'].includes(classifyPrompt(titleInNewDoc)), titleInNewDoc)
+  assert.equal(autoEffort(classifyPrompt(titleInNewDoc)), 'low', titleInNewDoc)
+  // "first 20" is a quantity, not a synthesis request; opening the emails is
+  // browser manipulation.
+  const openEmails = 'go to email and click open each email, first 20'
+  assert.notEqual(classifyPrompt(openEmails), 'synthesize', openEmails)
+  assert.equal(autoEffort(classifyPrompt(openEmails)), 'low', openEmails)
+  const game = 'do it as quickly as possible, the game'
+  assert.equal(classifyPrompt(game), 'rapid')
+  assert.equal(autoEffort(classifyPrompt(game)), 'low')
+})
+
+test('long-form writing is synthesize/low, short page authoring is act/low', () => {
+  const prompts = [
+    'write a paragraph about my summer and explain the theme',
+    'write a paragraph about the museum trip',
+    'draft an email to my boss',
+    'compose a cover letter',
+    'write me a list of steps',
+  ]
+  for (const text of prompts) {
+    assert.equal(classifyPrompt(text), 'synthesize', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+  }
+  // Short typing into a page is an edit, not content synthesis.
+  for (const text of ['write a title', 'type the heading', 'write a title and subtitle']) {
+    assert.equal(classifyPrompt(text), 'act', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+  }
+})
+
+test('speed adjectives do not push a non-game prompt to rapid', () => {
+  assert.equal(classifyPrompt('read the page as fast as you can and tell me the title'), 'inspect')
+  assert.equal(classifyPrompt('be quick and hasty with it'), 'inspect')
+})
+
+test('browsing and observing prompts are not mistaken for navigation', () => {
+  // "browse the headlines" reads page content even though it opens with "go".
+  assert.equal(classifyPrompt('go to the news site and browse the headlines'), 'inspect')
+  assert.equal(classifyPrompt('go to my email and find the latest invoice'), 'inspect')
+  assert.equal(classifyPrompt('open the dashboard and check the numbers'), 'inspect')
+})
+
+test('ambiguous short continuations stay inspect (conservative)', () => {
+  // "more", "wrong", "hi" could continue a reading turn or an action turn; the
+  // classifier is stateless, so it keeps them inspectable when unsure.
+  for (const text of ['more', 'wrong', 'hi', 'what else can you do']) {
+    assert.equal(classifyPrompt(text), 'inspect', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+  }
 })
 
 test('escalateEffort turns off into low and leaves other efforts alone', () => {

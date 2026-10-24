@@ -67,7 +67,9 @@ const prefix = `const mod = await import('./browser.js')
 const view = await evaluate(`(async () => { ${prefix}
   await chrome.tabs.update(tab.id, { active: true })
   await chrome.tabs.update(tab.id, { url: 'http://127.0.0.1:17872/canvas.html' })
+  await chrome.tabs.reload(tab.id, { bypassCache: true })
   await new Promise(resolve => setTimeout(resolve, 800))
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.scrollTo(0, 0) })
   const snapshot = await mod.execute('snapshot', {}, settings)
   return {
     surfaces: snapshot.surfaces,
@@ -242,6 +244,45 @@ assert.equal(legacy.changedCount, legacy.changed ? 1 : 0, 'changedCount matches 
 assert.equal(legacy.trusted, true, 'single-point click stays trusted')
 assert.ok(legacy.hasImage, 'single-point click still returns the image')
 console.log(`PASS single-point legacy fields — changed=${legacy.changed}, ${legacy.pixelsChanged}% pixels`)
+
+const editorBox = await evaluate(`(async () => { ${prefix} return await rect('editor') })()`)
+const editorClick = await evaluate(`(async () => { ${prefix}
+  const result = await mod.execute('click_at', {
+    space: 'css', x: ${editorBox.x + 36}, y: ${editorBox.y + 44}, view: 'full',
+  }, settings)
+  return { trusted: result.trusted, changed: result.changed, state: await read('editor-state') }
+})()`)
+assert.equal(editorClick.trusted, true, 'canvas editor is focused by trusted coordinate input')
+assert.equal(editorClick.changed, true, 'focusing the canvas editor visibly changes its frame')
+assert.equal(editorClick.state, 'Ready: ', 'focusing does not change editor content')
+console.log('PASS canvas editor receives trusted focus')
+
+const canvasType = await evaluate(`(async () => { ${prefix}
+  const before = await read('editor-state')
+  const result = await mod.execute('type', { text: 'Canvas edit exactly once.', view: 'full' }, settings)
+  const after = await read('editor-state')
+  return {
+    before,
+    after,
+    changed: result.changed,
+    typed: result.typed,
+    view: result.view,
+    hasImage: typeof result.image?.data === 'string',
+  }
+})()`)
+assert.equal(canvasType.before, 'Ready: ')
+assert.equal(canvasType.after, 'Ready: Canvas edit exactly once.', 'trusted text reaches the canvas model exactly once')
+assert.equal(canvasType.after.split('Canvas edit exactly once.').length - 1, 1, 'no duplicate insertion')
+assert.equal(canvasType.changed, null, 'DOM mutations cannot prove a canvas document edit')
+assert.equal(canvasType.typed.canvasEditor, true)
+assert.equal(canvasType.typed.measured, 'none')
+assert.equal(canvasType.typed.charsAdded, null, 'no fabricated page-level character measurement')
+assert.equal(canvasType.typed.dispatched, true)
+assert.equal(canvasType.typed.verified, false)
+assert.equal(canvasType.typed.delivered, undefined, 'never claim delivery from a DOM hint')
+assert.equal(canvasType.view, 'full', 'the caller receives a fresh visual confirmation')
+assert.equal(canvasType.hasImage, true)
+console.log('PASS canvas typing lands exactly once and stays explicitly UNVERIFIED')
 
 console.log('\nALL CANVAS CHECKS PASSED')
 panel.close()

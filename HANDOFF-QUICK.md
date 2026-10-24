@@ -1,6 +1,6 @@
 # CrazyAgent — quick handoff
 
-**2026-10-22 evening.** Working, committed, tested. Long-form history: `HANDOFF.md`
+**2026-10-23 Docs/canvas + live-thinking repair.** Long-form history: `HANDOFF.md`
 (§4 invariants, §15 session log). This file is the 2-minute version.
 
 ## 60-second resume
@@ -8,33 +8,45 @@
 ```sh
 cd /home/conan/Documents/GitHub/crazyAgent
 curl -s http://127.0.0.1:17871/health   # expect {"ok":true,"tools":true,...}
-npm test                                 # expect 149/149
-npm run system-prompt                    # exact current prompt (9,992 chars)
+npm test                                 # expect 229/229
+npm run system-prompt                    # exact current prompt (14,199 chars)
 ```
 
 Then read `HANDOFF.md` §4 (invariants) before changing anything. The companion is
-already running; the extension is loaded unpacked and needs a reload only if
-`extension/` changed since the last reload (the clipboard pass added
-`clipboardRead`/`clipboardWrite` — reload once for that).
+running; restart it after provider/config changes. The unpacked extension MUST be
+reloaded and the panel reopened after `extension/` changes.
 
 ## Current build
 
 | Item | Value |
 |---|---|
-| Commit | `de4271d` (tree clean) |
-| Tests | **149/149** (companion 42, extension 32, provider 75) |
+| Commit | `7192b9e` plus the current uncommitted repair/UI work |
+| Tests | **229/229** (companion 42, extension 92, provider 95) |
 | Tools | **16** (15 + `browser_clipboard`) |
 | Companion | running, PID in `logs/companion.pid`, health `tools:true` |
-| Extension | unpacked `extension/`, ID `kmipadgipilkdidennbhcgmoolfedgph`; reload after extension changes |
-| Model | OpenRouter `deepseek/deepseek-v4.1-flash-1017`, reasoning `auto` |
-| Prompt | persona (`config/browser.patch.yml`) + provider `GUIDANCE`; 9,992 chars ≈ 2.5K tokens |
+| Extension | unpacked `extension/`, ID `kmipadgipilkdidennbhcgmoolfedgph`; reload required |
+| Model | OpenRouter `deepseek/deepseek-v4.1-flash-1017`, reasoning `auto` = low from step 1 |
+| Prompt | persona (`config/browser.patch.yml`) + provider `GUIDANCE`; 14,199 chars |
 | Compaction | `thresholdRatio 0.55`, `headroomTokens 131072`, `retainTokens 20000`, `maxTokens 8192` → fires ~577K |
-| Limits | 80 tool calls/turn, 3 repeated calls max, 8 s side-panel reconnect grace, image keep 2 + mid-turn batch at +8 |
-| Latest run | `.dsh-home/browser-agent/logs/run-2026-10-22T15-21-12-940Z-4fcc93` |
+| Limits | no per-turn cap; 3 mutating/modified repeats, 30 observation, 10 unmodified navigation; 8 s reconnect grace |
+| Analysed run | `.dsh-home/browser-agent/logs/run-2026-10-23T04-33-08-967Z-a09629` |
 | Token / key | `.dsh-home/browser-agent/token`, `.dsh-home/browser-agent/api-key` (0600; never commit) |
 | Ports | bridge 17871, fixtures 17872, Edge e2e 9228 click / 9230 canvas / 9231 advanced / 9233 work |
 
-## What shipped most recently (2026-10-22)
+## This repair (2026-10-23)
+
+- **Google Docs/Sheets/Slides:** one action + full fresh view; no dependent mutating
+  batches or coordinate bursts; newest-view/pre-dispatch coordinate guards; labelled
+  ARIA font menus; no lookalike stale-label click/type retry; `press_key.repeat` removed.
+- **Honest canvas outcomes:** typing is dispatched, not delivered; selection is
+  unverified until seen. Aggregate DOM text/mutations cannot invent success or chars.
+- **Sidebar thinking:** Auto requests low for every classification from the first step;
+  manual Off remains available. Later-step committed-reasoning fallback is fixed.
+- **Verified:** 229/229 unit tests, profile composition, live + states UI previews,
+  real Edge canvas suite (including exactly-once canvas typing), and form/work suite.
+  Real Google Docs still needs the user's manual acceptance test.
+
+## Earlier work (2026-10-22)
 
 - **Hardening:** compaction trigger 6%→55%, reasoning classifier + mid-turn escalation,
   loop/step guardrails, mid-turn image cap, off-screen/stale-scroll reporting,

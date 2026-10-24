@@ -968,7 +968,33 @@ test('registers the provider, guidance, and the sixteen browser tools', async t 
   assert.match(guidance, /clear formatting, delete text, or undo\/redo/)
   assert.match(guidance, /login, CAPTCHA\/2FA, payment/)
   assert.match(guidance, /only use credentials the user provided/)
-  assert.match(guidance, /turn budget is about 80/)
+  assert.match(guidance, /no per-turn call limit/)
+  assert.match(guidance, /never split work across turns/)
+  // Canvas editors require visual confirmation between single actions.
+  assert.match(guidance, /render their chrome themselves/)
+  assert.match(guidance, /one action \+ full fresh view/)
+  assert.match(guidance, /No mutating batches or multi-point bursts/)
+  assert.match(guidance, /executor will reject them/)
+  assert.match(guidance, /Never reuse coordinates measured in an earlier view/)
+  assert.match(guidance, /labelled ARIA toolbar\/menu controls/)
+  assert.match(guidance, /Docs' div comboboxes are not native selects/)
+  assert.match(guidance, /never use browser_select_option on them/)
+  assert.match(guidance, /exact labelled menuitemcheckbox/)
+  assert.match(guidance, /More fonts control and its labelled search field/)
+  assert.match(guidance, /Ctrl\+F, make selection a separate visually confirmed step before formatting/)
+  assert.match(guidance, /never use stop_on_error:false for dependent edits/)
+  assert.match(guidance, /Unlabelled browser_type inserts at the caret\/current selection, not a whole-document replace/)
+  assert.match(guidance, /Canvas append\/empty operations may be rejected/)
+  assert.match(guidance, /never retry unverified input blindly/)
+  assert.match(guidance, /selection is UNVERIFIED/)
+  assert.doesNotMatch(guidance, /cannot select a neighbour/)
+  assert.doesNotMatch(guidance, /That whole sequence is one batch/)
+  assert.doesNotMatch(guidance, /browser_press_key takes repeat/)
+  assert.doesNotMatch(guidance, /One big paste/)
+  assert.doesNotMatch(guidance, /Measured 2026-10-23/)
+  assert.match(guidance, /leaves the earlier actions APPLIED/)
+  assert.match(guidance, /document tabs/)
+  assert.match(guidance, /only see real Chrome tabs/)
   assert.match(guidance, /Never paste secrets or passwords/)
   assert.match(guidance, /read the system clipboard only when the user asks/)
   assert.match(guidance, /points:\[\{x,y\}, \.\.\.\]/)
@@ -1158,6 +1184,32 @@ test('screenshot forwards delay_ms to the bridge', async t => {
   assert.deepEqual(commands.at(-1), { op: 'snapshot', args: { detail: 'fast' } })
 })
 
+test('a re-resolved stale label is reported to the model', async t => {
+  const reResolved = { from: 3, to: 117, tag: 'button', role: 'button', text: 'Sign in', frame: 0 }
+  const { server, url } = await startFakeBridge({
+    respond: (op, args) => op === 'click' && args.label === 3 ? { ...CLICK, clicked: { ...CLICK.clicked, label: 117 }, reResolved, signals: ['dom-mutations:2', 'label-re-resolved:3->117'] } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const value = await fake.tools.get('browser_click').execute({ label: 3 }, { callId: 'c-reresolve', signal: new AbortController().signal })
+  const text = value.content.map(block => block.text ?? '').join('\n')
+  // The model must learn that its label map moved, or it keeps re-aiming at the
+  // id that no longer exists.
+  assert.match(text, /note: label 3 was stale/)
+  assert.match(text, /button "Sign in"/)
+  assert.match(text, /re-resolved it to label 117/)
+  assert.match(text, /use 117 from here/)
+  // The ordinary path carries no note.
+  const plain = await fake.tools.get('browser_click').execute({ label: 117 }, { callId: 'c-plain', signal: new AbortController().signal })
+  assert.doesNotMatch(plain.content.map(block => block.text ?? '').join('\n'), /re-resolved/)
+})
+
 test('click tool reports the target and the resulting view', async t => {
   const { server, url } = await startFakeBridge()
   t.after(() => {
@@ -1231,6 +1283,11 @@ test('click_at multi-point content lists every point and the changed count', asy
   const definition = fake.tools.get('browser_click_at')
   assert.equal(definition.parameters.properties.points.maxItems, 20)
   assert.match(definition.parameters.properties.points.description, /several targets/)
+  // The advertised schema must make a target non-optional at generation time:
+  // x/y and points are each individually optional, so without anyOf a decoder
+  // can emit {"space":"css"} alone (seen 7 times in the 2026-10-22 runs).
+  assert.deepEqual(definition.parameters.anyOf, [{ required: ['x', 'y'] }, { required: ['points'] }])
+  assert.equal(definition.parameters.additionalProperties, false)
   assert.match(definition.description, /up to 20/)
   const value = await definition.execute({
     points: [{ x: 100, y: 200 }, { x: 300, y: 400 }, { x: 500, y: 500 }],
@@ -1288,7 +1345,18 @@ test('click_at rejects ambiguous, empty, and oversized point sets', async t => {
 
   const definition = fake.tools.get('browser_click_at')
   const exec = { callId: 'c-invalid', signal: new AbortController().signal }
-  await assert.rejects(() => definition.execute({}, exec), /requires x and y, or a non-empty points array/)
+  await assert.rejects(() => definition.execute({}, exec), /requires a target/)
+  // A coordinate-free call used to pass schema validation and burn a round trip
+  // on a plain error; the message now names the fix and forbids a bare retry.
+  await assert.rejects(
+    () => definition.execute({ space: 'css', view: 'none', settle_ms: 300 }, exec),
+    error => {
+      assert.match(error.message, /requires a target/)
+      assert.match(error.message, /\{"x":640,"y":360,"space":"css"\}/)
+      assert.match(error.message, /do not retry without coordinates/)
+      return true
+    },
+  )
   await assert.rejects(() => definition.execute({ y: 2 }, exec), /requires both x and y/)
   await assert.rejects(
     () => definition.execute({ x: 1, y: 2, points: [{ x: 3, y: 4 }] }, exec),
@@ -1651,7 +1719,7 @@ test('batch runs a sequence and returns one full view', async t => {
     { callId: 'c-batch', signal: new AbortController().signal },
   )
   const text = value.content[0].text
-  assert.match(text, /batch: 3 actions · 3 succeeded · 1240ms/)
+  assert.match(text, /batch: 3 actions · 3 executed without tool errors · 1240ms/)
   assert.match(text, /  \[1\] click · changed/)
   assert.match(text, /  \[2\] type "hello" · 5 chars · dom · changed/)
   assert.match(text, /  \[3\] press_key Enter · changed/)
@@ -1677,7 +1745,7 @@ test('batch runs a sequence and returns one full view', async t => {
       { op: 'press_key', args: { key: 'Enter' } },
     ],
   }, { callId: 'c-batch-nested', signal: new AbortController().signal })
-  assert.match(nested.content[0].text, /batch: 3 actions · 3 succeeded · 1240ms/)
+  assert.match(nested.content[0].text, /batch: 3 actions · 3 executed without tool errors · 1240ms/)
   assert.deepEqual(commands.at(-1), normalized)
 })
 
@@ -1706,6 +1774,10 @@ test('batch stopped early reports the failure and stays text only', async t => {
   assert.equal(value.content.length, 1)
   const text = value.content[0].text
   assert.match(text, /batch: 3\/6 executed · FAILED at \[3\] · 850ms/)
+  // Actions 1-2 already ran and are not rolled back; the model needs to know
+  // that so it continues instead of replaying the whole batch.
+  assert.match(text, /the first 2 action\(s\) already ran and were not rolled back/)
+  assert.match(text, /continue from action \[3\]; do not re-run the whole batch/)
   assert.match(text, /  \[1\] click · changed/)
   assert.match(text, /  \[2\] type "Jane" · 5 chars · dom · changed/)
   assert.match(text, /  \[3\] FAILED UNKNOWN_LABEL — Label 99 is not in the current view\./)
@@ -1736,7 +1808,7 @@ test('batch stop_on_error false continues and skips the view', async t => {
   )
   assert.equal(value.content.length, 1)
   const text = value.content[0].text
-  assert.match(text, /batch: 4 actions · 3 succeeded · 400ms/)
+  assert.match(text, /batch: 4 actions · 3 executed without tool errors · 400ms/)
   assert.match(text, /  \[1\] click · changed/)
   assert.match(text, /  \[2\] FAILED DETACHED — Label 9 no longer exists\./)
   assert.match(text, /  \[3\] click · no visible change/)
@@ -1772,9 +1844,10 @@ test('batch click_at reports dispatch instead of no visible change', async t => 
     { callId: 'c-batch-at', signal: new AbortController().signal },
   )
   const text = value.content[0].text
-  assert.match(text, /batch: 2 actions · 2 succeeded · 480ms/)
+  assert.match(text, /batch: 2 actions · 2 executed without tool errors · 480ms/)
   assert.match(text, /  \[1\] click_at 2 points · dispatched/)
   assert.match(text, /  \[2\] wait_for text "READY" · found/)
+  assert.match(text, /verification: 1 action\(s\) are UNVERIFIED/)
   assert.doesNotMatch(text, /NO VISIBLE CHANGE/)
 })
 
@@ -1828,11 +1901,187 @@ test('batch uses a per-call timeout without changing other tools', async t => {
     { actions: [{ op: 'click', label: 3 }] },
     { callId: 'c-batch-timeout', signal: new AbortController().signal },
   )
-  assert.match(batch.content[0].text, /batch: 1 actions · 1 succeeded · 640ms/)
+  assert.match(batch.content[0].text, /batch: 1 actions · 1 executed without tool errors · 640ms/)
 
   await assert.rejects(
     () => fake.tools.get('browser_click').execute({ label: 3 }, { callId: 'c-click-timeout', signal: new AbortController().signal }),
-    /browser command timed out after 250ms/,
+    /click timed out after 250ms/,
+  )
+})
+
+test('per-op timeouts cover navigate, wait_for, and delayed snapshots', async t => {
+  const { server, url, commands } = await startFakeBridge({ delays: { batch: 0, navigate: 600, click: 600, wait_for: 600, snapshot: 600 } })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 250 })
+  t.after(() => fake.dispose())
+
+  await waitFor(() => server.clients.size > 0)
+  const exec = { callId: 'c-op-timeout', signal: new AbortController().signal }
+  // A flat timeout killed slow loads mid-flight (2026-10-23: three navigate
+  // attempts to a slow university site plus a wait_for that asked for 15s and
+  // was cut at 10s). navigate and wait_for get their own deadlines.
+  const navigated = await fake.tools.get('browser_navigate').execute({ url: 'https://example.test/admissions' }, exec)
+  assert.match(navigated.content[0].text, /navigated to/)
+  const waited = await fake.tools.get('browser_wait_for').execute({ text: 'Stanford', timeout_ms: 15_000 }, exec)
+  assert.ok(waited.content.length >= 1)
+  // browser_screenshot sends the snapshot op, whose delay needs the same kind of
+  // extended deadline rather than the 250ms base.
+  const snapshot = await fake.tools.get('browser_screenshot').execute({ delay_ms: 5_000 }, exec)
+  assert.ok(snapshot.content.length >= 1)
+  assert.deepEqual(commands.at(-1), { op: 'snapshot', args: { detail: 'normal', delay_ms: 5_000 } })
+  // Everything else keeps the configured deadline.
+  await assert.rejects(
+    () => fake.tools.get('browser_click').execute({ label: 3 }, exec),
+    /click timed out after 250ms/,
+  )
+})
+
+test('views are numbered and skipped views name their coordinate basis', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: (op, args) => op === 'snapshot' ? { ...SNAPSHOT, viewId: 7 }
+      : op === 'click' ? { ...CLICK, view: 'none', changed: null, basisViewId: 7 }
+        : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const exec = { callId: 'c-view-id', signal: new AbortController().signal }
+  const shot = await fake.tools.get('browser_screenshot').execute({}, exec)
+  // The view number is the argument `view_id` takes, so it must be visible.
+  assert.match(shot.content[0].text, /; view #7/)
+
+  const skipped = await fake.tools.get('browser_click').execute({ label: 3, view: 'none' }, exec)
+  assert.match(skipped.content[0].text, /image coordinates map to view #7/)
+})
+
+test('a canvas-editor type result reports dispatched input as UNVERIFIED', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: op => op === 'type' ? {
+      ...TYPE,
+      changed: null,
+      signals: [],
+      typed: {
+        dispatched: true,
+        chars: 749,
+        mode: 'replace',
+        submitted: false,
+        method: 'trusted',
+        canvasEditor: true,
+        measured: 'none',
+        pageChanged: true,
+      },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const value = await fake.tools.get('browser_type').execute(
+    { text: 'COLLEGE APPLICATION ESSAY PROMPTS' },
+    { callId: 'c-canvas-type', signal: new AbortController().signal },
+  )
+  const text = value.content.map(block => block.text ?? '').join('\n')
+  assert.match(text, /result: input dispatched to the canvas editor; document change is UNVERIFIED/)
+  assert.match(text, /pageChanged=true is only a hint, not confirmation/)
+  assert.match(text, /Use the returned fresh view for visual confirmation/)
+  assert.match(text, /never retry unverified input blindly/)
+  assert.doesNotMatch(text, /the field value did not change/)
+  assert.doesNotMatch(text, /delivered|applied|value now|measured \+749 chars at page level/)
+})
+
+test('read_text on a canvas app explains itself instead of printing chrome text', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: op => op === 'read_text' ? {
+      ...READ_TEXT,
+      text: '',
+      totalChars: 0,
+      textUnreliable: true,
+      canvasApp: 'Google Docs',
+      note: 'Google Docs renders its content to a canvas, so DOM text is unreliable here. Use browser_screenshot and the tab sidebar labels instead.',
+      domText: 'Skip to content Inbox 1 visible tab named Tab 1',
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const value = await fake.tools.get('browser_read_text').execute({}, { callId: 'c-canvas-text', signal: new AbortController().signal })
+  const text = value.content.map(block => block.text ?? '').join('\n')
+  assert.match(text, /text unavailable — Google Docs renders its content to a canvas/)
+  assert.match(text, /DOM text \(unreliable/)
+  assert.doesNotMatch(text, /\[no rendered text found\]/)
+  assert.doesNotMatch(text, /next_offset/)
+})
+
+test('a skipped-view action with a moved layout warns that coordinates are stale', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: op => op === 'click' ? {
+      ...CLICK,
+      view: 'none',
+      changed: null,
+      layoutChanged: true,
+      layoutShift: { maxDx: 0, maxDy: 75, movedCount: 7, structural: false },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const value = await fake.tools.get('browser_click').execute({ label: 3, view: 'none' }, { callId: 'c-layout', signal: new AbortController().signal })
+  const text = value.content.map(block => block.text ?? '').join('\n')
+  assert.match(text, /layout moved since your last view \(7 elements\)/)
+  assert.match(text, /up to 75px vertically/)
+  assert.match(text, /coordinates you have are stale/)
+})
+
+test('click_at forwards view_id and reports the basis it mapped through', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    respond: op => op === 'click_at' ? {
+      ...CLICK_AT,
+      basis: { viewId: 18, imageWidth: 640, imageHeight: 453, cssPerImagePx: 2.042 },
+      basisAmbiguousWith: [{ viewId: 12, imageWidth: 1280, imageHeight: 906, cssX: 504, cssY: 1048, dx: 302, dy: 0 }],
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const exec = { callId: 'c-basis', signal: new AbortController().signal }
+  const value = await fake.tools.get('browser_click_at').execute({ x: 100, y: 200, view_id: 18 }, exec)
+  const forwarded = commands.find(command => command.op === 'click_at')
+  assert.equal(forwarded.args.view_id, 18)
+  const text = value.content.map(block => block.text ?? '').join('\n')
+  assert.match(text, /mapped through view #18 \(640x453 image, css\/imagePx 2.042\)/)
+  assert.match(text, /if you measured on view #12 \(1280x906 image\), this point lands about 302px away/)
+
+  await assert.rejects(
+    () => fake.tools.get('browser_click_at').execute({ x: 100, y: 200, view_id: 0 }, exec),
+    /view_id must be a positive integer/,
   )
 })
 
@@ -1856,6 +2105,40 @@ test('select tool reports the range and its preview', async t => {
   assert.match(value.content[0].text, /selected 128 chars from \(100, 100\) to \(500, 200\) · "Bold heading text and more content"/)
   assert.equal(value.content[1].type, 'image')
   assert.deepEqual(commands.at(-1), { op: 'select', args: { from: { x: 100, y: 100 }, to: { x: 500, y: 200 } } })
+})
+
+test('canvas selection reports drag dispatch as UNVERIFIED', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: op => op === 'select' ? {
+      ...SELECT_RANGE,
+      changed: null,
+      signals: [],
+      selected: {
+        from: SELECT_RANGE.selected.from,
+        to: SELECT_RANGE.selected.to,
+        verified: false,
+        collapsed: null,
+      },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const value = await fake.tools.get('browser_select').execute({
+    from: { x: 100, y: 100 },
+    to: { x: 500, y: 200 },
+  }, { callId: 'c-sel-canvas', signal: new AbortController().signal })
+  const text = value.content.map(block => block.text ?? '').join('\n')
+  assert.match(text, /selection drag dispatched from \(100, 100\) to \(500, 200\); selection UNVERIFIED/)
+  assert.match(text, /Before formatting or deleting, use the returned full fresh view to visually confirm the intended range/)
+  assert.match(text, /Do not retry the drag blindly/)
+  assert.doesNotMatch(text, /selection changed|selection collapsed|selected \d+ chars|NO VISIBLE CHANGE/)
+  assert.equal(value.content[1].type, 'image')
 })
 
 test('select tool reports a collapsed selection', async t => {
@@ -1962,7 +2245,7 @@ test('batch accepts select and formats range and collapsed lines', async t => {
   )
   assert.equal(value.content.length, 1)
   const text = value.content[0].text
-  assert.match(text, /batch: 3 actions · 3 succeeded · 580ms/)
+  assert.match(text, /batch: 3 actions · 3 executed without tool errors · 580ms/)
   assert.match(text, /  \[1\] select 128 chars · changed/)
   assert.match(text, /  \[2\] select · collapsed/)
   assert.match(text, /  \[3\] press_key KeyB · changed/)
@@ -2036,7 +2319,7 @@ test('batch normalizes composite press_key chords before forwarding', async t =>
       { op: 'press_key', args: { key: 'ctrl+Shift+ArrowLeft', modifiers: ['shift'] } },
     ],
   }, { callId: 'c-batch-chord', signal: new AbortController().signal })
-  assert.match(value.content[0].text, /batch: 2 actions · 2 succeeded/)
+  assert.match(value.content[0].text, /batch: 2 actions · 2 executed without tool errors/)
   assert.deepEqual(commands.at(-1), {
     op: 'batch',
     args: {
@@ -2279,32 +2562,139 @@ test('bridge failures keep the companion error code', async t => {
   )
 })
 
-test('tool budget stops a turn and resets for a new turn', async t => {
+test('there is no per-turn call limit', async t => {
   const { server, url, commands, logEvents } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
     server.close()
   })
   const fake = makeContext()
+  // A legacy config value must be ignored: turns are unlimited by design. One
+  // real task (ten university prompts, ten renamed document tabs) needs 80+
+  // calls, and refusing call 81 discarded the working state.
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000, maxToolCallsPerTurn: 2 })
   t.after(() => fake.dispose())
 
   await waitFor(() => server.clients.size > 0)
-  const tabs = fake.tools.get('browser_tabs')
-  const exec = { callId: 'c-budget', signal: new AbortController().signal }
-  await tabs.execute({}, exec)
-  await tabs.execute({}, exec)
-  await assert.rejects(() => tabs.execute({}, exec), /TURN_BUDGET_EXCEEDED/)
-  assert.equal(commands.filter(command => command.op === 'tabs.list').length, 2)
-  await waitFor(() => logEvents.some(event => event.type === 'tool.budget.exceeded'))
-  assert.equal(logEvents.find(event => event.type === 'tool.budget.exceeded').data.max, 2)
+  const click = fake.tools.get('browser_click')
+  const exec = { callId: 'c-unlimited', signal: new AbortController().signal }
+  for (let label = 1; label <= 60; label++) {
+    const result = await click.execute({ label, view: 'none' }, exec)
+    assert.ok(result.content.length >= 1)
+  }
+  assert.equal(commands.filter(command => command.op === 'click').length, 60)
+  assert.equal(logEvents.filter(event => /^tool\.budget/.test(event.type)).length, 0)
+  assert.equal(logEvents.filter(event => event.type === 'tool.loop.detected').length, 0)
+})
 
-  // Claiming a new turn resets the budget and the repeat fingerprints.
+test('observation repeats are allowed far past the mutating limit', async t => {
+  const { server, url, logEvents } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000, maxRepeatedCalls: 3, maxObservationRepeats: 5 })
+  t.after(() => fake.dispose())
+
+  await waitFor(() => server.clients.size > 0)
+  const screenshot = fake.tools.get('browser_screenshot')
+  const exec = { callId: 'c-observe', signal: new AbortController().signal }
+  // Watching asynchronous page state is normal usage: identical screenshots are
+  // how the agent verifies a render, so they must not trip the 3-call breaker
+  // that protects mutating actions (2026-10-23: a Docs rename could not be
+  // verified because the third identical screenshot was refused).
+  for (let index = 0; index < 5; index++) {
+    assert.ok((await screenshot.execute({ detail: 'fast' }, exec)).content.length >= 1)
+  }
+  await assert.rejects(() => screenshot.execute({ detail: 'fast' }, exec), /LOOP_DETECTED/)
+  await waitFor(() => logEvents.some(event => event.type === 'tool.loop.detected'))
+  const loop = logEvents.find(event => event.type === 'tool.loop.detected')
+  assert.equal(loop.data.observation, true)
+  assert.equal(loop.data.max, 5)
+})
+
+test('only unmodified navigation keys get the relaxed repeat allowance', async t => {
+  const { server, url, logEvents } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000, maxRepeatedCalls: 2, maxNavigationRepeats: 4 })
+  t.after(() => fake.dispose())
+
+  await waitFor(() => server.clients.size > 0)
+  const press = fake.tools.get('browser_press_key')
+  assert.equal(press.parameters.properties.repeat, undefined)
+  const exec = { callId: 'c-keys', signal: new AbortController().signal }
+  const safeForms = [
+    { key: 'ArrowDown' },
+    { key: 'ArrowDown', modifiers: [] },
+  ]
+  for (const args of safeForms) {
+    for (let index = 0; index < 4; index++) {
+      assert.ok((await press.execute({ ...args }, exec)).content.length >= 1)
+    }
+    await assert.rejects(() => press.execute({ ...args }, exec), /LOOP_DETECTED/)
+  }
+
+  // Composite chords and modifier arrays must normalize to the same strict
+  // classification. Shift selection is not navigation-safe.
+  const strictForms = [
+    { key: 'shift+ArrowDown' },
+    { key: 'ArrowDown', modifiers: ['shift'] },
+    { key: 'shift+Home' },
+    { key: 'End', modifiers: ['SHIFT'] },
+    { key: 'ctrl+ArrowDown' },
+    { key: 'Home', modifiers: ['alt'] },
+    { key: 'End', modifiers: ['meta'] },
+    { key: 'Enter' },
+  ]
+  for (const args of strictForms) {
+    for (let index = 0; index < 2; index++) {
+      assert.ok((await press.execute({ ...args }, exec)).content.length >= 1)
+    }
+    await assert.rejects(() => press.execute({ ...args }, exec), /LOOP_DETECTED/)
+  }
+
+  const expectedLoops = safeForms.length + strictForms.length
+  await waitFor(() => logEvents.filter(event => event.type === 'tool.loop.detected').length >= expectedLoops)
+  const loops = logEvents.filter(event => event.type === 'tool.loop.detected')
+  assert.equal(loops.length, expectedLoops)
+  assert.deepEqual(loops.map(event => event.data.navigation), [
+    ...safeForms.map(() => true),
+    ...strictForms.map(() => false),
+  ])
+  assert.deepEqual(loops.map(event => event.data.max), [
+    ...safeForms.map(() => 4),
+    ...strictForms.map(() => 2),
+  ])
+})
+
+test('a new turn resets the repeat fingerprints', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  await waitFor(() => server.clients.size > 0)
+  const click = fake.tools.get('browser_click')
+  const exec = { callId: 'c-reset', signal: new AbortController().signal }
+  await click.execute({ label: 3 }, exec)
+  await click.execute({ label: 3 }, exec)
+  await click.execute({ label: 3 }, exec)
+  await assert.rejects(() => click.execute({ label: 3 }, exec), /LOOP_DETECTED/)
+
+  // Claiming a new turn clears the fingerprints, so the same call is fine again.
   const claimed = fake.listeners.get('agent/inbox/claimed')
-  claimed({ message: { content: [{ type: 'text', text: 'list the tabs again' }] }, turn: 2 })
-  const afterReset = await tabs.execute({}, exec)
-  assert.match(afterReset.content[0].text, /tab\(s\)/)
-  assert.equal(commands.filter(command => command.op === 'tabs.list').length, 3)
+  claimed({ message: { content: [{ type: 'text', text: 'click it again' }] }, turn: 2 })
+  assert.ok((await click.execute({ label: 3 }, exec)).content.length >= 1)
+  assert.equal(commands.filter(command => command.op === 'click').length, 4)
 })
 
 test('repeated identical calls fail with LOOP_DETECTED', async t => {
@@ -2331,7 +2721,7 @@ test('repeated identical calls fail with LOOP_DETECTED', async t => {
   assert.ok((await click.execute({ label: 9 }, exec)).content.length >= 1)
 })
 
-test('reasoning escalates after three consecutive no-progress results', async t => {
+test('Auto reasoning stays low after consecutive no-progress results', async t => {
   const { server, url, logEvents } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -2347,28 +2737,21 @@ test('reasoning escalates after three consecutive no-progress results', async t 
   const request = fake.listeners.get('agent/request')
   const next = async () => ({ reasoningEffort: 'medium' })
   const payload = { agent: { session: { id: 'session-escalate' } }, turn: 1 }
-  const first = await request(payload, next)
-  assert.equal(first.reasoningEffort, 'off')
+  assert.equal((await request(payload, next)).reasoningEffort, 'low')
 
   const session = { id: 'session-escalate', surface: { nodes: [] } }
   const result = data => fake.listeners.get('session/event')(session, { type: 'tool/result', data })
   result({ turn: 1, message: { content: [{ type: 'text', text: 'Error: no such label' }], isError: true } })
   result({ turn: 1, message: { content: [{ type: 'text', text: 'result: NO VISIBLE CHANGE — the pixels did not change.' }] } })
-  assert.equal((await request(payload, next)).reasoningEffort, 'off')
+  assert.equal((await request(payload, next)).reasoningEffort, 'low')
 
   result({ turn: 1, message: { content: [{ type: 'text', text: 'Error: still stuck' }], isError: true } })
   assert.equal((await request(payload, next)).reasoningEffort, 'low')
-  await waitFor(() => logEvents.some(event => event.type === 'reasoning.escalated'))
-  assert.deepEqual(logEvents.find(event => event.type === 'reasoning.escalated').data, {
-    turn: 1,
-    from: 'off',
-    to: 'low',
-    noProgress: 3,
-  })
+  assert.ok(!logEvents.some(event => event.type === 'reasoning.escalated'))
 })
 
-test('a successful result resets the no-progress escalation run', async t => {
-  const { server, url } = await startFakeBridge()
+test('Auto reasoning stays low across successful and failed results', async t => {
+  const { server, url, logEvents } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
     server.close()
@@ -2385,16 +2768,16 @@ test('a successful result resets the no-progress escalation run', async t => {
   const session = { id: 'session-reset', surface: { nodes: [] } }
   const result = data => fake.listeners.get('session/event')(session, { type: 'tool/result', data })
 
-  assert.equal((await request(payload, next)).reasoningEffort, 'off')
+  assert.equal((await request(payload, next)).reasoningEffort, 'low')
   result({ turn: 1, message: { content: [{ type: 'text', text: 'Error: no such label' }], isError: true } })
   result({ turn: 1, message: { content: [{ type: 'text', text: 'Error: no such label again' }], isError: true } })
-  // A successful tool result resets the consecutive run.
   result({ turn: 1, message: { content: [{ type: 'text', text: 'clicked label 3: button "Bold"' }] } })
   result({ turn: 1, message: { content: [{ type: 'text', text: 'Error: still stuck' }], isError: true } })
   result({ turn: 1, message: { content: [{ type: 'text', text: 'Error: still stuck' }], isError: true } })
-  assert.equal((await request(payload, next)).reasoningEffort, 'off')
+  assert.equal((await request(payload, next)).reasoningEffort, 'low')
   result({ turn: 1, message: { content: [{ type: 'text', text: 'Error: now three in a row' }], isError: true } })
   assert.equal((await request(payload, next)).reasoningEffort, 'low')
+  assert.ok(!logEvents.some(event => event.type === 'reasoning.escalated'))
 })
 
 test('a manual reasoning policy is never escalated', async t => {

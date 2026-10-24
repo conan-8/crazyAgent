@@ -8,6 +8,11 @@
     #board { display: block; width: 800px; height: 420px; border: 1px solid #333; background: #fff; }
     #state { margin-top: 8px; font-family: ui-monospace, monospace; }
     #dom-button { margin-top: 8px; padding: 8px 12px; font: inherit; }
+    #editor-panel { position: absolute; left: 850px; top: 78px; width: 450px; }
+    #editor-panel h2 { margin-top: 0; }
+    #editor { display: block; width: 450px; height: 300px; border: 1px solid #333; background: #fff; }
+    #editor-input { position: fixed; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    #editor-state { margin-top: 8px; font-family: ui-monospace, monospace; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -15,6 +20,12 @@
   <canvas id="board" width="800" height="420"></canvas>
   <div id="state">trusted 0 · synthetic 0 · offset 0</div>
   <button id="dom-button" type="button">DOM button</button>
+  <div id="editor-panel">
+    <h2>Canvas text editor</h2>
+    <canvas id="editor" width="450" height="300"></canvas>
+    <textarea id="editor-input" aria-label="Canvas editor event target"></textarea>
+    <div id="editor-state">Ready: </div>
+  </div>
   <script>
     const canvas = document.getElementById('board')
     const context = canvas.getContext('2d')
@@ -69,7 +80,41 @@
       draw()
     })
 
+    const editor = document.getElementById('editor')
+    const editorContext = editor.getContext('2d')
+    const editorInput = document.getElementById('editor-input')
+    const editorState = document.getElementById('editor-state')
+    let editorText = 'Ready: '
+
+    function drawEditor() {
+      editorContext.fillStyle = '#ffffff'
+      editorContext.fillRect(0, 0, editor.width, editor.height)
+      editorContext.strokeStyle = document.activeElement === editorInput ? '#2563eb' : '#333333'
+      editorContext.lineWidth = document.activeElement === editorInput ? 4 : 1
+      editorContext.strokeRect(2, 2, editor.width - 4, editor.height - 4)
+      editorContext.fillStyle = '#111111'
+      editorContext.font = '18px ui-monospace, monospace'
+      editorContext.fillText(editorText, 18, 48)
+      editorContext.font = '13px ui-sans-serif, system-ui, sans-serif'
+      editorContext.fillStyle = '#555555'
+      editorContext.fillText('Text is painted on this canvas; the DOM textarea is only an event target.', 18, 82)
+    }
+
+    editor.addEventListener('pointerdown', event => {
+      event.preventDefault()
+      editorInput.focus({ preventScroll: true })
+      drawEditor()
+    })
+    editorInput.addEventListener('blur', drawEditor)
+    editorInput.addEventListener('input', () => {
+      editorText += editorInput.value
+      editorInput.value = ''
+      editorState.textContent = editorText
+      drawEditor()
+    })
+
     draw()
+    drawEditor()
   </script>
 </body>
 </html>
