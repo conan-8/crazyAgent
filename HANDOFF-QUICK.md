@@ -1,6 +1,6 @@
 # CrazyAgent — quick handoff
 
-**2026-10-23 Docs/canvas + live-thinking repair.** Long-form history: `HANDOFF.md`
+**2026-10-27 Feature-document reliability.** Long-form history: `HANDOFF.md`
 (§4 invariants, §15 session log). This file is the 2-minute version.
 
 ## 60-second resume
@@ -8,8 +8,8 @@
 ```sh
 cd /home/conan/Documents/GitHub/crazyAgent
 curl -s http://127.0.0.1:17871/health   # expect {"ok":true,"tools":true,...}
-npm test                                 # expect 229/229
-npm run system-prompt                    # exact current prompt (14,199 chars)
+npm test                                 # expect 339/339
+npm run system-prompt                    # exact current prompt
 ```
 
 Then read `HANDOFF.md` §4 (invariants) before changing anything. The companion is
@@ -20,20 +20,114 @@ reloaded and the panel reopened after `extension/` changes.
 
 | Item | Value |
 |---|---|
-| Commit | `7192b9e` plus the current uncommitted repair/UI work |
-| Tests | **229/229** (companion 42, extension 92, provider 95) |
-| Tools | **16** (15 + `browser_clipboard`) |
+| Commit | `95b7d5b` plus the current uncommitted Docs/speed/reliability work |
+| Tests | **339/339** including page-setup/checklist/page-break coverage; real-Docs acceptance still pending |
+| Tools | **24 model-facing** (16 general + guarded `browser_docs`, `browser_docs_format`, `browser_docs_page_setup`, `browser_docs_read`, `browser_docs_rename`, `browser_docs_replace_text`, `browser_docs_replace_many`, `browser_docs_write`) |
 | Companion | running, PID in `logs/companion.pid`, health `tools:true` |
 | Extension | unpacked `extension/`, ID `kmipadgipilkdidennbhcgmoolfedgph`; reload required |
 | Model | OpenRouter `deepseek/deepseek-v4.1-flash-1017`, reasoning `auto` = low from step 1 |
-| Prompt | persona (`config/browser.patch.yml`) + provider `GUIDANCE`; 14,199 chars |
+| Prompt | persona (`config/browser.patch.yml`) + provider `GUIDANCE`; print the current text with `npm run system-prompt` |
 | Compaction | `thresholdRatio 0.55`, `headroomTokens 131072`, `retainTokens 20000`, `maxTokens 8192` → fires ~577K |
-| Limits | no per-turn cap; 3 mutating/modified repeats, 30 observation, 10 unmodified navigation; 8 s reconnect grace |
-| Analysed run | `.dsh-home/browser-agent/logs/run-2026-10-23T04-33-08-967Z-a09629` |
+| Limits | no per-turn cap; 3 consecutive mutating repeats, 30 observation, 10 unmodified navigation; session/user-message reset; 8 s reconnect grace |
+| Analysed runs | `turn-mvq5svlp-9082` (459.401 s/87 calls/17 failures), `turn-mvq767wv-db2f` (716.410 s/149 calls/41 failures) |
 | Token / key | `.dsh-home/browser-agent/token`, `.dsh-home/browser-agent/api-key` (0600; never commit) |
 | Ports | bridge 17871, fixtures 17872, Edge e2e 9228 click / 9230 canvas / 9231 advanced / 9233 work |
 
-## This repair (2026-10-23)
+## Feature-document root fixes (2026-10-27)
+
+- Both analysed runs failed valid initial writes at the second color operation because hidden stale custom-color dialogs were counted as active Hex fields. The probe now selects one usable visible field and still rejects genuine ambiguity.
+- Repeat fingerprints leaked across same-numbered turns in separate chats and across unrelated successful actions. They now reset by session/user message and after a different successful mutation; consecutive repeats remain blocked.
+- Export divergence polling uses bounded increasing delays and at most six verification reads in the tested worst case, rather than about 32 in eight seconds. Per-document/format exports are serialized with a 250 ms successive-request gap and shared 429/503 cooldown, including after final failure.
+- The Brag Sheets run also proved collapsed More controls can be absent even when list shortcuts work. The executor now reveals and reads exact pressed state before list insertion, including controls in the overflow popup outside the main toolbar.
+- The newest Feature Test attempts hit Page setup orientation verification and left the dialog open. It now detects label-linked radio inputs, resumes an existing dialog, and makes one fresh bounded OK retry after a close timeout.
+- A later bad run also produced many malformed write blocks. The schema now uses `const:true` for standalone `blank`/`page_break`, forbids blank/formatting combinations, and requires every `items` array to pair with `list` and vice versa.
+- `browser_docs_write` adds verified page breaks and checked checklists. New `browser_docs_page_setup` verifies paper, orientation, and margins before OK. The target live path is rename + page setup + one write, not manual recovery.
+- First capture timeout focuses the window once and retries; only a second timeout opens the 30-second circuit. Full tests are **339/339** and profile composition passes. Real acceptance remains unclaimed until fresh independent runs.
+
+## Guarded compound Docs formatter (2026-10-26)
+
+- **`browser_docs_format`:** first call for supported exact-range formatting; forwards
+  `op:'docs', action:'format'`. Requires exact unique `text` plus at least one of
+  `paragraph_style` (Normal text, Title, Subtitle, Heading 1–6), integer `font_size`
+  1–400, desired-state `bold`/`italic`/`underline` (`false` removes emphasis), or exact
+  visible `font` (maximum 100 chars). Paragraph style affects the containing paragraph.
+- **Execution:** one Find selection, per-tab lock and stale-tab checks, fixed order
+  paragraph style → size → bold → italic → underline → font, dependency rereads,
+  no-op skipping, per-attribute verification, and one final view. Font-size Enter
+  requires verified field focus/value. Missing/duplicate text fails before formatting.
+  Missing font never deletes; earlier changes produce `partial` with `results`/`failure`.
+  Other failures stop and name earlier verified changes and the current unverified attribute.
+- **Scope:** `browser_docs` remains font-only; replacements are unchanged. No generic
+  Docs batch unlocking or replacement+format combo. Guidance also uses one `browser_type`
+  for contiguous prose/newlines once the caret is known.
+- **Verification:** full `npm test` passes **289/289**, composed-prompt validation
+  includes the new tool, and the real-extension canvas suite passes. Real-Docs acceptance
+  is still pending. Pre-change real-log baselines (Title/Subtitle compound: 43 model
+  steps/111.7 s; one font size: 5 steps/13.2 s) motivate the tool but do not prove improvement.
+
+## Compound Docs writing and safe composition (2026-10-26)
+
+- **Model steps:** `maxParallelToolCalls:4`, but only `browser_tabs`, `browser_read_text`,
+  and `browser_docs_read` are parallel-safe. All mutations remain exclusive in model order.
+  Guidance emits already-known calls for one logical unit in one assistant response and
+  does not re-check evidence already returned. Registration logs derive the actual tool list.
+- **`browser_docs_write`:** appends at document end (fresh docs included), never arbitrary
+  caret/top insertion. Accepts up to 50 blocks/20,000 chars: formatted single-line
+  paragraphs, mixed inline `runs` (1–100 per paragraph), flat numbered/bulleted groups
+  of 1–100 items, or `{blank:true}`. Validates every block/run first, resets inherited
+  formatting, and sets font, size, emphasis, six-digit hex color, and highlight before
+  each text run. Numbered/Ctrl+Shift+7, bulleted/Ctrl+Shift+8, and checklist/Ctrl+Shift+9
+  modes verify exact pressed state; two Enters exit and list mode must be off. Checklist
+  items support `{text,checked}`, with Ctrl+Shift+Enter on the intended new item.
+  `{page_break:true}` inserts a verified page break. No nesting, existing-list conversion,
+  or blind retry.
+- **Verification:** baseline color state comes from the document-end run, avoiding
+  unnecessary default color dialogs. List shortcuts verify `aria-pressed` even for
+  overflow-hidden controls, without clicking them. Frame-aware editor focus plus an export
+  position check runs before any formatting; `DOCS_WRITE_POSITION` stops before collateral
+  edits. Baseline + bounded increasing-delay export convergence then checks the preserved
+  prefix and every appended block/run (exact text, styles, list order/type, checked state,
+  page breaks, emphasis, font/size, color, highlight). Divergent appended content gets up
+  to 8 seconds of read-only export retries (six reads in the tested worst case); persistent
+  divergence, empty list items, and collateral prefix changes are partial/failed.
+  Font menus deduplicate only usable equivalent same-menu rows; conflicting menus still fail.
+  Returned outline covers appended content. Full `npm test` is **339/339** and profile
+  composition passes.
+  The first live writer run reached a **correct final document but was not accepted**:
+  **81.545 s/23 model steps/22 tool calls**, three failed calls (duplicate Playfair rows
+  and two malformed writes), one partial rewrite, and manual font/size recovery. A
+  post-run HTML export passed **9/9** independent checks, including the unchanged sentinel;
+  no collateral edits were detected. Run `run-2026-10-26T15-27-12-284Z-8e546f`, turn
+  `turn-mvpg78n0-97ba`, medium effort, `deepseek/deepseek-v4.1-flash`. The pre-change run
+  was **19.5 min/230 steps/137 key presses**; one recovered run is not repeated proof of
+  one-call reliability or speedup. Follow-ups also remained unaccepted:
+  `turn-mvpt4xjj-48c1` **146.149 s/43 steps/42 calls** hit default-color and list failures;
+  `turn-mvptd4bw-6062` **100.566 s/37 steps/36 calls** hit overflow-hidden list controls;
+  `turn-mvptzvus-61a8` **211.834 s/28 steps/27 calls** merged the sentinel with Release
+  heading, later repaired. Those motivated baseline color init, overflow-aware pressed state,
+  frame-aware focus, and the pre-mutation position check. A later setup
+  (`turn-mvpuldri-6329`, **167.951 s/58 steps/65 calls**) hit focus/capture failures with
+  an empty doc. The newest build has no clean acceptance: the panel is connected but stuck
+  at 0 px, blocking both five-block and mixed-inline runs. Unit/canvas green is not proof.
+- **`browser_docs_read`:** authenticated export without navigation/page JS/debugger or a
+  screenshot; `outline` (default), `text`, or bounded `html`. Strict current-doc URLs,
+  bounded timeout, at most two 429/503 retries, explicit truncation. It is read-only,
+  parallel-safe, and in the observation-tool repeat category.
+
+## Speed and reliability pass
+
+- **`browser_docs.set_font`:** unique find + exact role/name controls + direct or
+  More fonts add→close→reopen→apply + toolbar verification, all inside the
+  extension. One model call and one final view per line, not blind batching.
+- **Capture circuit:** 5 s watchdog on every Chrome capture; the first timeout
+  focuses the owning window and retries once. A persistent second timeout opens
+  the 30 s fail-fast cooldown; normal captures do not change OS focus.
+- **Wait rule:** explicit `timeout_ms < ms` rejected before sleep; omitted
+  timeout expands to cover `ms` and the bridge adds 10 s.
+- **Quiet UI:** successful auto-captures no longer append the verbose telemetry
+  row. Tool screenshots, thumbnails, errors, and debug metadata remain.
+
+## Earlier repair (2026-10-23)
 
 - **Google Docs/Sheets/Slides:** one action + full fresh view; no dependent mutating
   batches or coordinate bursts; newest-view/pre-dispatch coordinate guards; labelled
@@ -42,8 +136,8 @@ reloaded and the panel reopened after `extension/` changes.
   unverified until seen. Aggregate DOM text/mutations cannot invent success or chars.
 - **Sidebar thinking:** Auto requests low for every classification from the first step;
   manual Off remains available. Later-step committed-reasoning fallback is fixed.
-- **Verified:** 229/229 unit tests, profile composition, live + states UI previews,
-  real Edge canvas suite (including exactly-once canvas typing), and form/work suite.
+- **Verified:** 252/252 unit tests, profile composition, tools + live + states UI
+  previews (including hidden auto-capture telemetry), and real Edge canvas/form suites.
   Real Google Docs still needs the user's manual acceptance test.
 
 ## Earlier work (2026-10-22)
@@ -82,6 +176,8 @@ disconnects (>8 s), expected `PROTECTED_PAGE` on a Chrome-blocked tab, 1 page-la
 - System prompt is ~2.5K tokens; keep an eye on total prompt size.
 
 ## Suggested next work order
+
+Before further formatter optimization, repeat the focused real-Docs scenarios in `e2e/checklist.md`; neither unit/fake-driver tests, the real-extension canvas suite, nor the pre-change baselines establish live Docs acceptance.
 
 1. **Fix `click_at` empty-args failures** (6 in the latest run): require exactly one of
    `x/y` or `points` at the schema level/serializer, normalize/repair in batch, clearer error,

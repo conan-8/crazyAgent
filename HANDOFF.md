@@ -1,6 +1,6 @@
 # CrazyAgent — continuation handoff
 
-Last updated: 2026-10-23 (Docs/canvas + live-thinking repair). Repo has 16 tools and 229 passing tests. This pass repaired false canvas typing/selection success, added strict Google Docs/Sheets/Slides single-action/full-view safeguards, removed broken `press_key.repeat`, made Auto request low reasoning from the first model step, and fixed later-step reasoning fallback. Earlier passes added hardening, clipboard, Stop/resume, and the full-height activity feed.
+Last updated: 2026-10-27 (Feature-document reliability). Repo has **24 model-facing tools**. The latest work fixes hidden-stale color-dialog ambiguity, session/user-message repeat resets, Page setup resume/orientation/close recovery, overflow list-control verification, and export polling; tightens standalone write-block schemas; adds per-document export serialization/cooldown plus verified checklists/page breaks to `browser_docs_write`; and adds guarded `browser_docs_page_setup`. The full suite passes **339/339** and profile composition passes, but fresh real-Docs acceptance is still pending. `maxParallelToolCalls` is 4, with only `browser_tabs`, `browser_read_text`, and `browser_docs_read` parallel-safe; browser mutations remain exclusive in model order. Existing `browser_docs` remains font-only and replacement behavior is unchanged. The two latest baseline Feature Test turns took **459.401 s/87 calls/17 failures** and **716.410 s/149 calls/41 failures**; their recovered final documents are not acceptance evidence. Earlier work added guarded `browser_docs.set_font` and `browser_docs_format`, a capture watchdog/circuit breaker, stricter fixed-wait validation, quieter successful auto-captures, canvas typing/selection honesty, strict Docs safeguards, Auto/low thinking from step 1, clipboard, Stop/resume, and the activity feed.
 
 This file is the complete context transfer for a new conversation. Read it, then
 `README.md`, then the latest debug run if you need ground truth.
@@ -21,8 +21,8 @@ produced the current state) and README.md, then run:
 Do not re-derive the architecture invariants in HANDOFF.md §4.
 The companion is running (logs/companion.pid); restart it after companion or
 provider changes. The extension is loaded unpacked from extension/ and MUST be
-reloaded after extension changes. Current build: `7192b9e` plus the uncommitted
-2026-10-23 repair/UI work, 16 browser tools, 229 tests. The model is OpenRouter
+reloaded after extension changes. Current build: `95b7d5b` plus the uncommitted
+speed/reliability work, 23 browser tools. The model is OpenRouter
 deepseek/deepseek-v4.1-flash-1017 with reasoning effort "auto" = low from step 1;
 the API key is stored in
 .dsh-home/browser-agent/api-key.
@@ -65,7 +65,7 @@ modifications are:
 ┌───────────────┴───────────────────────────────────────────▼────────────────┐
 │  DSH runtime (sdk-minimal + patches)                                       │
 │    - agent loop, sessions, compaction, image offload                       │
-│    - provider plugin: 16 browser tools, guidance, reasoning policy          │
+│    - provider plugin: 23 browser tools, guidance, reasoning policy          │
 │    - WS role "tools"  ◄──── tool calls become browser commands ────────────┤
 └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -93,10 +93,12 @@ answers with `browser.result`.
 | API key | stored, 73 bytes, `.dsh-home/browser-agent/api-key` (0600) |
 | Extension | unpacked from `extension/`; ID `kmipadgipilkdidennbhcgmoolfedgph` (path hash); **reload and reopen the panel after this pass** |
 | Permissions | sidePanel, tabs, scripting, storage, **debugger**, **webNavigation**, **clipboardRead**, **clipboardWrite**, host `<all_urls>` |
-| Analysed run log | `.dsh-home/browser-agent/logs/run-2026-10-23T04-33-08-967Z-a09629` (latest Docs run: false batch/typing success, misapplied fonts, Auto initially reasoning-off) |
-| Tests | 229/229 passing (companion 42, extension 92, provider 95) |
-| UI | Single full-height activity feed with step clocks and finished-step collapse; Auto/low thinking streams from step 1; later-step committed fallback fixed; **uncommitted**, extension reload required |
-| Git | `main` at `7192b9e` plus the current uncommitted repair/UI work |
+| Analysed run log | `.dsh-home/browser-agent/logs/run-2026-10-23T23-27-24-129Z-accc41` (latest Docs run: small edits correct; long font task incomplete after 122–133 s captures and queued stalls) |
+| Tests | **339/339** including Docs writer/read/export, page setup, checklist/page-break, and concurrency coverage; real-extension canvas suite passes; real-Docs acceptance still pending |
+| UI | Single full-height activity feed with step clocks and finished-step collapse; Auto/low thinking streams from step 1; later-step committed fallback fixed; successful auto-capture rows hidden; **uncommitted**, extension reload required |
+| Git | `main` at `95b7d5b` plus the current uncommitted Docs/speed/reliability work |
+
+Pre-change real-log motivation for the formatter: a Title/Subtitle compound task took 43 model steps/111.7 s, and one font-size task took 5 steps/13.2 s. These are baselines, not proof of improvement; no real-Docs formatter acceptance has been claimed.
 
 Historical validation (first real run, before the optimization rounds):
 
@@ -175,7 +177,7 @@ echo $! > logs/companion.pid
 # Or foreground (prints token + config)
 npm run dev
 
-# Full test suite (57 tests)
+# Full test suite (see §7 for current verification status)
 npm test
 
 # Setup/verify profile + plugin links (idempotent)
@@ -237,10 +239,10 @@ update them.
    generated model overlay, companion, and extension. DSH is pinned to
    `0.2.1-rc.2`.
 2. **The model never gets arbitrary DOM automation.** It has a fixed roster of
-   **sixteen** browser tools; every action is a labelled element, an explicit
-   coordinate, explicit text/keys, an explicit drag range, or an explicit
-   http(s) URL. No JS evaluation, selector guessing, or unlabelled DOM
-   manipulation.
+   **twenty-four** browser tools; every action is a labelled element, an explicit
+   coordinate, explicit text/keys, an explicit drag range, an explicit http(s)
+   URL, or a bounded semantic Docs operation. No JS evaluation, selector
+   guessing, or unlabelled DOM manipulation.
 3. **All browser execution lives in the side panel page.** No content script is
    installed; page code runs only for the duration of one `chrome.scripting`
    call in the `ISOLATED` world.
@@ -248,10 +250,12 @@ update them.
    serializes the function source only. Module constants and outer helper
    functions are not available in the page. This already caused two bugs
    (`LABEL_SELECTOR` and `labelPageInner` were not defined in the page).
-5. **DOM clicks are label-only.** Never let the model pass guessed coordinates
-   for DOM controls. Persistent label ids (`WeakMap` element → id, `Map` id →
-   element) mean a stale id either resolves to the same element or fails. It
-   never silently lands on a different element.
+5. **Primitive DOM clicks are label-only.** Never let the model pass guessed
+   coordinates for DOM controls. Persistent label ids (`WeakMap` element → id,
+   `Map` id → element) mean a stale id either resolves to the same element or
+   fails. The guarded Docs font operation instead resolves exact visible
+   role/name targets and clicks freshly measured live centers; ambiguity,
+   duplicates, hidden controls, and stale tab state fail closed.
 6. **Coordinates are only for surfaces.** `browser_click_at` is for
    canvas/video/iframe regions and unlabelled targets. It uses trusted CDP input
    and verifies with a pixel diff.
@@ -271,20 +275,20 @@ update them.
     `llm.configure` frame, is passed to DSH as `CRAZYAGENT_API_KEY`, and is
     redacted from logs. The generated patch and `llm.json` contain no secret.
 11. **Speed never overrides edit correctness.** Ordinary pages use batches and
-    compact views to avoid model round trips and captures. Google
-    Docs/Sheets/Slides instead require one action plus a full fresh view;
-    dependent mutating batches/bursts and stale coordinates fail before input.
-    Auto requests `low` for every classification so thinking streams from the
-    first model step; manual Off is the latency opt-out. Compaction triggers near
-    55% of the window; image history is pruned at turn end and in batched
-    mid-turn passes with hysteresis.
+    compact views. Primitive Docs actions require one action plus a full fresh
+    view; dependent mutating batches/bursts and stale coordinates fail before
+    input. `browser_docs.set_font` performs its bounded verification internally
+    and returns one final view instead of exposing every micro-step to the model.
+    Capture calls have a 5 s watchdog and a 30 s failure circuit. Auto requests
+    `low`; manual Off is the latency opt-out. Compaction triggers near 55%;
+    images prune at turn end and in batched mid-turn passes with hysteresis.
 12. **Log redaction:** pairing token, API keys, `Bearer`, secret-named fields,
     sensitive query params, inline base64. Page text, screenshots, and reasoning
     are **not** redacted. Review bundles before sharing.
 
 ---
 
-## 5. Capabilities (sixteen model-visible tools)
+## 5. Capabilities (twenty-four model-visible tools)
 
 | Tool | What it does | Notes |
 |---|---|---|
@@ -292,16 +296,24 @@ update them.
 | `browser_click` | Click a labelled element | DOM, open shadow roots, iframes. Returns `changed` + signals + fresh view |
 | `browser_click_at` | Click screenshot pixels or CSS coordinates; ordinary pages allow `points` bursts up to 20 | Trusted input + pixel comparison. Known Docs/Sheets/Slides allow one point plus a full fresh view; stale/ambiguous/off-screen coordinates fail before dispatch. `view:"none"` remains for ordinary pages; `settle_ms` 0-400 |
 | `browser_batch` | Run an ordered sequence of 1-20 ordinary-page actions in one call | One final view and per-action execution/verification outcomes. Known document editors reject dependent mutating batches before the first action; `stop_on_error:false` is only for independent non-canvas edits |
-| `browser_type` | Type into a labelled editable field, or insert at the caret/current selection when unlabelled | DOM read-back verifies normal fields. Canvas input is dispatched with `changed:null` and verified visually in a full view, never inferred from DOM mutations. Canvas append/empty clearing is rejected; password values masked |
+| `browser_type` | Type into a labelled editable field, or insert at the caret/current selection when unlabelled | DOM read-back verifies normal fields. Once the caret is known, guidance puts contiguous prose and intended newlines in one call. Canvas input is dispatched with `changed:null` and verified visually in a full view, never inferred from DOM mutations. Canvas append/empty clearing is rejected; password values masked |
 | `browser_press_key` | One trusted key press with optional modifiers | Enter/Tab/Escape/Backspace/Delete/arrows/Home/End/PageUp/PageDown/Space/letters/digits; composite chords (`shift+Tab`, `ctrl+Shift+ArrowLeft`, `meta+Enter`); no `repeat` argument |
 | `browser_clipboard` | Copy/read/write/paste/clear clipboard text | Two clipboards: virtual (`chrome.storage.session`, default, never on disk) and system (`target:"system"`, `clipboardRead`/`clipboardWrite` permissions). `copy` takes the page selection (up to 100k) or a labelled element's text (password fields refused); `paste` types into a labelled/focused element or sends trusted Ctrl+V for rich content/images from the system clipboard; `read` returns up to 20k chars; text capped at 100k with an explicit truncation marker |
 | `browser_hover` | Hover a labelled element | Reveals hover-only menus/tooltips |
 | `browser_select_option` | Choose a native `<select>` option | Sets value, fires `input`/`change`; not for Docs' ARIA div comboboxes |
 | `browser_read_text` | Rendered text | `page`/`viewport`, `offset`, `max_chars`; ~4 ms on fixtures; known canvas DOM text is explicitly unreliable |
 | `browser_scroll` | Scroll + fresh view | DOM scroll first, trusted wheel fallback (`wheel:true`), optional `at_x`/`at_y` |
-| `browser_select` | Drag-select a text range between two points | Trusted CDP drag. Ordinary pages return selection text; canvas selection is `verified:false` until confirmed visually. Off-screen endpoints and stale/ambiguous bases fail before the drag; known document editors require a full fresh view |
+| `browser_select` | Drag-select a text range between two points outside Google Docs | Trusted CDP drag. Ordinary pages return selection text; other canvas selection is `verified:false` until confirmed visually. Off-screen endpoints and stale/ambiguous bases fail before the drag; Google Docs rejects the drag before input |
+| `browser_docs` | Font-only guarded Google Docs operation | `set_font`: unique `1 of 1` find, exact visible role/name controls, direct or More fonts add→close→reopen→apply, toolbar verification, one final view. Missing font returns `font_missing` or deletes matched text only when explicitly requested |
+| `browser_docs_format` | Format one exact unique text match in one guarded call; forwards `op:'docs', action:'format'` | Requires `text` plus at least one of exact visible `font` (max 100), integer `font_size` 1–400, desired-state `bold`/`italic`/`underline`, or `paragraph_style` (Normal text, Title, Subtitle, Heading 1–6). One Find selection, per-attribute verification, one final view; first call for supported exact-range formatting |
+| `browser_docs_page_setup` | Set Letter paper, portrait/landscape orientation, and requested inch margins | Changes only mismatched fields, verifies every requested value before OK, one final view |
+| `browser_docs_write` | Append formatted paragraphs, blanks, page breaks, and flat numbered/bulleted/checklist groups at document end | Up to 50 blocks/20,000 chars. Style-first input, pressed-list checks, exact checked-state insertion, two-Enter list exit, and export verification of preserved prefix, appended blocks, checked states, and page breaks. Checklist items accept `{text,checked}`. No existing-list conversion, nesting, arbitrary caret insertion, or blind retry |
+| `browser_docs_read` | Read the current Doc through authenticated export without navigation/page JS/debugger | `outline` (default), `text`, or bounded `html`; explicit truncation, bounded timeout, at most two 429/503 retries. Read-only, parallel-safe, and in the observation repeat category |
+| `browser_docs_rename` | Rename a document | Verifies Rename-field value/focus before Enter and the committed document title afterward; one final view |
+| `browser_docs_replace_text` | Delete or replace one exact unique match | One native Replace click, match-counter verification, one final view; missing/duplicate text fails before mutation |
+| `browser_docs_replace_many` | Apply up to 200 ordered exact replacements | Rechecks uniqueness/counters after earlier edits; reports applied, failed, and unattempted edits explicitly |
 | `browser_navigate` | Open an http(s) URL or move through history | Active or new tab, `back`/`forward`/`reload`, waits up to 15 s for load, reports `timedOut` |
-| `browser_wait_for` | Wait for page conditions, then return a fresh view | `text` substring, `url` substring, DOM `idle`, fixed `ms`; all supplied conditions must hold; `timeout_ms` default 10 s |
+| `browser_wait_for` | Wait for page conditions, then return a fresh view | `text`, non-empty `url`, boolean `idle`, integer `ms` 0-30000; explicit `timeout_ms < ms` rejected before sleeping, omitted timeout expands to cover `ms` |
 | `browser_tabs` | List current-window tabs | id, title, URL, flags |
 | `browser_switch_tab` | Activate by `tab_id` or `query` | Query is case-insensitive title/URL substring |
 
@@ -391,6 +403,98 @@ Behavioural layers:
   before input. A click that scrolls its target invalidates the old screenshot;
   stale-label failures append a capped fresh-label hint without automatically
   clicking a lookalike replacement.
+- **Docs semantic actions:** `browser_docs.set_font` uses a per-tab lock and
+  tab/URL checks before every mutation, exact visible role/name targets, unique
+  find counts, stable More fonts results, dialog-closure checks, and final
+  toolbar verification. It never treats adding a font as applying it and returns
+  one final view. Missing-font removal deletes matched text only.
+- **Docs compound formatting (2026-10-26):** `browser_docs_format` is the first
+  call for supported exact-range formatting. It uses one exact unique Find
+  selection under a per-tab lock and stale-tab checks, then applies paragraph
+  style → size → bold → italic → underline → font. It rereads dependent state,
+  skips already-correct values, verifies every attribute, and returns one final
+  view. Font size requires verified field focus/value before Enter. Missing or
+  duplicate text fails before formatting. Missing font never deletes; earlier
+  changes produce `partial` with per-attribute `results`/`failure`. Other failures
+  stop and name verified earlier changes plus the current unverified attribute.
+  `browser_docs` stays font-only, replacements are unchanged, and neither generic
+  Docs batches nor replacement+format combos are unlocked. Real-Docs acceptance
+  remains pending.
+- **Docs writer/export and safe composition (2026-10-26):** `browser_docs_write`
+  appends formatted single-line paragraphs, mixed inline `runs` (1–100 per paragraph),
+  intentional blank Normal paragraphs, and flat numbered/bulleted groups at document end
+  (fresh documents included), never arbitrary caret/top insertion. It validates up to
+  50 blocks/20,000 chars before tab access, establishes an export baseline and preserved
+  prefix, resets inherited formatting, and sets font, size, emphasis, six-digit hex color,
+  and highlight before each text run. Ctrl+Shift+7/8 must read pressed before each group
+  is inserted together; two Enters exit and list mode must be off. Baseline color state
+  comes from the document-end run instead of an unconditional custom-color dialog. List
+  shortcuts verify `aria-pressed` on exact toolbar controls even when overflow-hidden,
+  without clicking hidden controls. Editor focus is discovered across frames, and an export
+  position check runs before any formatting: a missing end paragraph or moved prefix fails
+  `DOCS_WRITE_POSITION` before collateral edits. A bounded eight-second export-convergence
+  loop then verifies the untouched prefix and every appended block/run, including exact run
+  text, styles, list order/type, emphasis, font/size, color, and highlight, without retyping
+  or extra screenshots. Persistent divergence, empty list items, and collateral prefix edits
+  are partial/failed, never success. Font menus filter
+  unusable rows and deduplicate only equivalent exact-name rows in the same active menu;
+  conflicting menus still fail and toolbar verification remains mandatory. It does not
+  create checklists/nested lists, convert existing lists, or blindly retry input.
+  `browser_docs_read` returns independent `outline` (default), `text`, or bounded `html`
+  through authenticated extension-side export without navigation/page JS/debugger or a
+  redundant screenshot, with bounded timeouts and at most two 429/503 retries. The parser
+  preserves color/highlight evidence and explicit normal overrides, without treating page
+  backgrounds as text highlights. The appended outline rides successful write results so
+  no extra verification call is needed. `maxParallelToolCalls` is 4, but only
+  `browser_tabs`, `browser_read_text`, and `browser_docs_read` are parallel-safe;
+  mutations remain exclusive in model order. Known calls for one logical unit go in
+  one assistant response. Provider registration derives its logged tool list from
+  actual registrations. Real mixed-inline acceptance remains pending; the pre-change
+  compound run took 19.5 minutes/230 steps/137 key presses, a baseline rather than a
+  speed claim.
+- **First real compound-writer run (2026-10-26):** after companion restart, unpacked-extension
+  reload, and panel reopen, a fresh document was prepared with exactly one exported
+  `H1: Sentinel: keep me unchanged` paragraph. The checklist instruction was given once
+  in a fresh chat at manual medium effort with `deepseek/deepseek-v4.1-flash`. Run
+  `run-2026-10-26T15-27-12-284Z-8e546f`, turn `turn-mvpg78n0-97ba`. **Final-state
+  classification: correct; milestone acceptance: not passed.** The initial five-block
+  `browser_docs_write` omitted both requested font sizes and failed with
+  `DOCS_DUPLICATE_FONT` for Playfair Display. After read/screenshot recovery, two
+  schema-invalid write calls failed, then a modified rewrite returned `partial` at 3/5.
+  Manual Find/menu actions repaired Playfair Display 28 pt on the Title and Roboto on the
+  closing paragraph. Totals: **81.545 seconds, 23 model steps, 22 tool calls**, comprising
+  four writes, four reads, one screenshot, five key presses, three type calls, and five
+  clicks. Three calls failed; one valid rewrite followed inspection. The final tool call
+  was an HTML export after the last mutation. Independent parsing passed **9/9** checks:
+  exact sentinel and unchanged inline formatting, Title paragraph in bold Playfair Display
+  28 pt, exactly one blank Normal paragraph, `<ol start="1">` with Alpha/Beta/Gamma,
+  three nonempty bullets Red/Green/Blue, a clean Normal-paragraph exit with no empty list
+  item, and Roboto 11 closing text. No collateral edits or extra final content were
+  detected. The wall/step counts are below the pre-change baseline, but this recovered
+  single run is neither one-call acceptance nor a reliable repeated speedup.
+- **Follow-up Docs attempts and remaining blocker (2026-10-26):** subsequent runs also
+  remained unaccepted. `turn-mvpt4xjj-48c1` took **146.149 seconds/43 steps/42 calls** and
+  hit an unnecessary default custom-color failure followed by list failure and recovery.
+  `turn-mvptd4bw-6062` took **100.566 seconds/37 steps/36 calls** and hit overflow-hidden
+  list controls and recovery. `turn-mvptzvus-61a8` took **211.834 seconds/28 steps/27 calls**
+  and merged the sentinel with `Release heading`, which was later repaired; this was real
+  collateral damage, not merely an export mismatch. These led to baseline color initialization,
+  overflow-aware `aria-pressed` reads (never hidden-control clicks), frame-aware editor focus,
+  and a pre-mutation export position check (`DOCS_WRITE_POSITION`). A later setup
+  (`turn-mvpuldri-6329`, **167.951 seconds/58 steps/65 calls**) hit focus/capture failures
+  with an empty document. The newest frame-aware build has **not** received a clean
+  acceptance run: the CrazyAgent pane is connected but stuck at 0 px width, blocking both
+  the original five-block and mixed-inline scenarios. Full unit/profile/canvas results remain
+  green but do not establish live acceptance.
+- **Capture reliability:** every Chrome capture has a 5 s watchdog inside the
+  serialized capture queue. `CAPTURE_TIMEOUT` opens a 30 s circuit; queued/new
+  captures fail immediately with `CAPTURE_COOLDOWN` instead of piling up behind
+  the stalled Chrome promise. Cooldown expiry permits a fresh attempt.
+- **Wait validation:** explicit `timeout_ms < ms` fails before sleeping; omitted
+  timeout expands to cover `ms`, and the provider bridge budget adds 10 s.
+- **Quiet auto-capture:** successful companion auto-captures remove their
+  redundant telemetry row. Tool-driven screenshots/thumbnails and all errors and
+  debug-log metadata remain unchanged.
 - **Tabs:** `browser_switch_tab` throws `AMBIGUOUS_TAB` with candidates when a query matches
   several tabs and no exact title/URL match exists (the old behavior silently picked Gmail for
   "Cool Document").
@@ -436,7 +540,7 @@ Behavioural layers:
 | `lib/index.js` (~1826 lines) | Plugin: bridge client (`tools` role, now with a per-request timeout for batches), `registerTools` (~1101), guidance, `apply` (~1647), activity frames (`activityFromFrame` ~343), `formatView` (~443), shared view helpers (`actionContent` ~589, `selectContent` ~609, `typeMethod` ~735), coordinate/type/press/navigate/wait content formatters (`clickAtContent` ~647 and siblings), `batchContent` (~1021), select/type/press/navigate/wait/select_option content, reasoning policy + image budget hooks, `llm/stream` is intentionally **not** used |
 | `lib/reasoning.js` | `classifyPrompt`, `autoEffort`, `effortFor` (navigate/inspect/synthesize/**rapid**) |
 | `lib/image-budget.js` | `planImageOffload` pure planner |
-| `test/*.test.mjs` | 15 tools, view modes/label deltas, batch, select, label prompts, activity forwarding, reasoning, image budget |
+| `test/*.test.mjs` | 24 model-facing tool contracts (including `browser_docs_format`, `browser_docs_page_setup`, `browser_docs_write`, and `browser_docs_read`), view modes/label deltas, batch, select, label prompts, activity forwarding, read-only concurrency, reasoning, image budget |
 
 ### Extension (`extension/`)
 
@@ -454,8 +558,9 @@ Behavioural layers:
 - Inserts `credentials-local`, a **dormant** `llm-pi-ai` (providers `{}`; the
   generated overlay fills the OpenRouter route), `browser-use`, and
   `browser-extension` (bridge URL/token from env, 10 s timeout).
-- Overrides `agent-loop` (`maxParallelToolCalls: 1`) and `system-prompt`
-  (no harness identity/runtime context, browser persona).
+- Overrides `agent-loop` (`maxParallelToolCalls: 4`; only `browser_tabs`,
+  `browser_read_text`, and `browser_docs_read` parallel-safe, mutations exclusive in
+  model order) and `system-prompt` (no harness identity/runtime context, browser persona).
 - Disables filesystem, working-directory, shell, and DeepSeek adapters.
 
 ### Generated state (`.dsh-home/browser-agent/`, gitignored)
@@ -490,15 +595,18 @@ logs/<runId>/   events.jsonl, screenshots/, exports/, summary files
 
 ## 7. Test inventory
 
-`npm test` = 229 tests:
+The recorded pre-formatter full-suite baseline was **278/278**, and the formatter suite reached **289/289**. The current full suite passes **339/339** after adding Docs writer/read/export, page setup, checklist/page-break, hidden-dialog, repeat-reset, and focused-capture coverage. The real-extension canvas suite, composed-prompt check, and DSH profile composition also pass. These results do not establish real-Docs acceptance.
 
-- `companion/test/` (42): bridge/reconnect, DSH stop/resume, prompt, log store,
+- `companion/test/`: bridge/reconnect, DSH stop/resume, prompt, log store,
   credentials, OpenRouter.
-- `extension/test/` (92): canvas typing/selection/coordinate policies, stale and
-  structural views, resilience, labels, composite keys, clipboard, logger,
-  helpers, and tab matching.
-- `packages/dsh-browser-extension/test/` (95): tools (65), reasoning (23),
-  image budget (7).
+- `extension/test/`: guarded Docs font/format/replacement/rename/page-setup flows,
+  compound writing, checklist/page breaks and list exits, export retry/timeout,
+  structure parsing and export reads, canvas typing/selection/coordinates, capture
+  watchdog/focus retry/cooldown, wait validation, resilience, labels, composite keys,
+  clipboard, logger, helpers, and tab matching.
+- `packages/dsh-browser-extension/test/`: model-facing tool contracts, including
+  formatter/writer/read/page-setup schema/forwarding/results, the 24-tool roster
+  and actual registration log, read-only concurrency declarations, reasoning, and image budget.
 
 E2E suites (not in `npm test`): `edge-click-e2e.mjs` (9 behaviours),
 `edge-canvas-e2e.mjs` (surfaces, trusted click/focus, image mapping, pixel diff,
@@ -893,12 +1001,12 @@ read it from `chrome://extensions`.
 
 1. `cd /home/conan/Documents/GitHub/crazyAgent`
 2. `curl -s http://127.0.0.1:17871/health` — expect `tools:true`.
-3. `npm test` — expect 149 passing.
+3. `npm test` — run the full suite; the formatter's updated full-suite result is still pending (see §7).
 4. Read the latest run under `.dsh-home/browser-agent/logs/` if investigating a
    specific behaviour (`events.jsonl`, `summary.md`).
 5. Reload the extension if `extension/` changed since the last load.
-6. Pick the next task from §8; start with **typing** unless the user asks
-   otherwise.
+6. For the Docs formatter, repeat the focused real scenarios in `e2e/checklist.md`
+   and inspect final state independently; otherwise pick the next task from §8.
 7. Before shipping any change: `npm test`, at least the relevant Edge e2e suite,
    reload the extension, restart the companion if `companion/` or the provider
    changed, and verify health.

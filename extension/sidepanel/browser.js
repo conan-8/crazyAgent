@@ -19,6 +19,8 @@ import {
   makeClipboardEntry,
   normalizeClipboardEntry,
 } from './clipboard.js'
+import { docsFetchExport } from './docs-export.js'
+import { formatOutline, parseDocStructure } from './docs-structure.js'
 
 export const DEFAULT_SETTINGS = {
   bridgeUrl: 'ws://127.0.0.1:17871/bridge',
@@ -26,6 +28,7 @@ export const DEFAULT_SETTINGS = {
   captureWidth: 1280,
   quality: 72,
   autoCapture: true,
+  showHitboxes: true,
   paused: false,
   modelBaseUrl: 'https://openrouter.ai/api/v1',
   modelId: '',
@@ -421,8 +424,53 @@ async function withDebugger(tabId, fn) {
   }
 }
 
+export function showClickRipple(x, y) {
+  const id = '__crazyagent_click_ripple_style'
+  const style = document.getElementById(id) ?? document.createElement('style')
+  style.id = id
+  style.textContent = '@keyframes __crazyagent_click_ripple{0%{transform:scale(.65);opacity:.7}65%{opacity:.35}100%{transform:scale(2.1);opacity:0}}@keyframes __crazyagent_click_crosshair{0%{transform:scale(.85);opacity:1}55%{opacity:.8}100%{transform:scale(1);opacity:0}}'
+  if (!style.isConnected) (document.head || document.documentElement).appendChild(style)
+  const ripple = document.createElement('div')
+  ripple.setAttribute('aria-hidden', 'true')
+  ripple.setAttribute('data-crazyagent-click-ripple', '')
+  ripple.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:2147483647;pointer-events:none;`
+  for (let index = 0; index < 2; index += 1) {
+    const ring = document.createElement('div')
+    ring.setAttribute('data-crazyagent-click-ring', '')
+    ring.style.cssText = `position:absolute;left:-9px;top:-9px;width:18px;height:18px;box-sizing:border-box;border:1px solid rgba(255,195,0,.85);border-radius:50%;background:transparent;box-shadow:0 0 6px rgba(255,195,0,.12);animation:__crazyagent_click_ripple .65s cubic-bezier(.2,.55,.3,1) ${index * 0.12}s forwards;`
+    ripple.appendChild(ring)
+  }
+  const crosshair = document.createElement('div')
+  crosshair.setAttribute('data-crazyagent-click-crosshair', '')
+  crosshair.style.cssText = 'position:absolute;left:-7px;top:-7px;width:14px;height:14px;animation:__crazyagent_click_crosshair .6s ease-out forwards;'
+  const parts = [
+    'left:6px;top:0;width:2px;height:4px',
+    'left:6px;bottom:0;width:2px;height:4px',
+    'left:0;top:6px;width:4px;height:2px',
+    'right:0;top:6px;width:4px;height:2px',
+    'left:6px;top:6px;width:2px;height:2px;border-radius:50%',
+  ]
+  for (const part of parts) {
+    const tick = document.createElement('div')
+    tick.style.cssText = `position:absolute;${part};background:#ffc300;box-shadow:0 0 4px rgba(255,195,0,.2);`
+    crosshair.appendChild(tick)
+  }
+  ripple.appendChild(crosshair)
+  ;(document.body || document.documentElement).appendChild(ripple)
+  setTimeout(() => ripple.remove(), 900)
+}
+
 /** Dispatch a trusted left click at CSS viewport coordinates. */
 async function trustedClick(tabId, x, y) {
+  await runInTab(tabId, showClickRipple, [x, y], 500).catch(() => {})
+  const base = { x, y, button: 'left', clickCount: 1 }
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', clickCount: 0 })
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...base })
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...base })
+}
+
+/** Dispatch a trusted left click without adding overlays to the document. */
+async function docsTrustedClick(tabId, x, y) {
   const base = { x, y, button: 'left', clickCount: 1 }
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', clickCount: 0 })
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...base })
@@ -1503,6 +1551,40 @@ async function clickLabelled(label) {
     }
   }
 
+  const rippleStyleId = '__crazyagent_click_ripple_style'
+  const style = document.getElementById(rippleStyleId) ?? document.createElement('style')
+  style.id = rippleStyleId
+  style.textContent = '@keyframes __crazyagent_click_ripple{0%{transform:scale(.65);opacity:.7}65%{opacity:.35}100%{transform:scale(2.1);opacity:0}}@keyframes __crazyagent_click_crosshair{0%{transform:scale(.85);opacity:1}55%{opacity:.8}100%{transform:scale(1);opacity:0}}'
+  if (!style.isConnected) (document.head || document.documentElement).appendChild(style)
+  const ripple = document.createElement('div')
+  ripple.setAttribute('aria-hidden', 'true')
+  ripple.setAttribute('data-crazyagent-click-ripple', '')
+  ripple.style.cssText = `position:fixed;left:${cx}px;top:${cy}px;z-index:2147483647;pointer-events:none;`
+  for (let index = 0; index < 2; index += 1) {
+    const ring = document.createElement('div')
+    ring.setAttribute('data-crazyagent-click-ring', '')
+    ring.style.cssText = `position:absolute;left:-9px;top:-9px;width:18px;height:18px;box-sizing:border-box;border:1px solid rgba(255,195,0,.85);border-radius:50%;background:transparent;box-shadow:0 0 6px rgba(255,195,0,.12);animation:__crazyagent_click_ripple .65s cubic-bezier(.2,.55,.3,1) ${index * 0.12}s forwards;`
+    ripple.appendChild(ring)
+  }
+  const crosshair = document.createElement('div')
+  crosshair.setAttribute('data-crazyagent-click-crosshair', '')
+  crosshair.style.cssText = 'position:absolute;left:-7px;top:-7px;width:14px;height:14px;animation:__crazyagent_click_crosshair .6s ease-out forwards;'
+  const parts = [
+    'left:6px;top:0;width:2px;height:4px',
+    'left:6px;bottom:0;width:2px;height:4px',
+    'left:0;top:6px;width:4px;height:2px',
+    'right:0;top:6px;width:4px;height:2px',
+    'left:6px;top:6px;width:2px;height:2px;border-radius:50%',
+  ]
+  for (const part of parts) {
+    const tick = document.createElement('div')
+    tick.style.cssText = `position:absolute;${part};background:#ffc300;box-shadow:0 0 4px rgba(255,195,0,.2);`
+    crosshair.appendChild(tick)
+  }
+  ripple.appendChild(crosshair)
+  ;(document.body || document.documentElement).appendChild(ripple)
+  setTimeout(() => ripple.remove(), 900)
+
   const fingerprint = () => ({
     url: location.href,
     title: document.title,
@@ -2209,45 +2291,92 @@ async function scrollPage(direction, pages, amountPx) {
 
 let captureGate = Promise.resolve()
 let lastCaptureAt = 0
+let captureCooldownUntil = 0
+const CAPTURE_WATCHDOG_MS = 5_000
+const CAPTURE_COOLDOWN_MS = 30_000
+
+/** @param {number} windowId @param {number} quality */
+async function captureChromeWithWatchdog(windowId, quality) {
+  let timer
+  let timedOut = false
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality })),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true
+          reject(new BrowserError('CAPTURE_TIMEOUT', `Chrome did not return a screenshot within ${CAPTURE_WATCHDOG_MS}ms; captures are paused for ${CAPTURE_COOLDOWN_MS / 1000}s`))
+        }, CAPTURE_WATCHDOG_MS)
+      }),
+    ])
+  } catch (error) {
+    if (timedOut) throw error
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /**
  * @param {number} windowId
  * @param {number} quality
  * @returns {Promise<{dataUrl: string, captureMs: number}>}
  */
-async function captureVisibleTab(windowId, quality) {
+export async function captureVisibleTab(windowId, quality) {
   const run = async () => {
+    const cooldown = captureCooldownUntil - Date.now()
+    if (cooldown > 0) {
+      throw new BrowserError('CAPTURE_COOLDOWN', `Screenshots are paused for ${Math.ceil(cooldown / 1000)}s after a Chrome capture timeout`)
+    }
     const wait = Math.max(0, CAPTURE_INTERVAL_MS - (Date.now() - lastCaptureAt))
     if (wait > 0) await sleep(wait)
     lastCaptureAt = Date.now()
     const started = performance.now()
     let dataUrl
     try {
-      dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality })
+      dataUrl = await captureChromeWithWatchdog(windowId, quality)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const quotaFailure = /quota|MAX_CAPTURE_VISIBLE_TAB/i.test(message)
-      const transientFailure = /image readback failed|failed to capture tab/i.test(message)
-      if (quotaFailure || transientFailure) {
-        let retryError
-        for (const delay of quotaFailure ? [650, 900] : [150, 400]) {
-          await sleep(delay)
-          lastCaptureAt = Date.now()
-          try {
-            dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality })
-            retryError = undefined
-            break
-          } catch (error) {
-            retryError = error
-          }
-        }
-        if (dataUrl === undefined) {
-          throw new BrowserError('CAPTURE_QUOTA', `Chrome refused the screenshot after retries (${retryError instanceof Error ? retryError.message : String(retryError)})`)
+      if (error instanceof BrowserError && error.code === 'CAPTURE_TIMEOUT') {
+        try {
+          await chrome.windows?.update?.(windowId, { focused: true })
+        } catch {}
+        lastCaptureAt = Date.now()
+        try {
+          dataUrl = await captureChromeWithWatchdog(windowId, quality)
+        } catch (focusedError) {
+          if (focusedError instanceof BrowserError && focusedError.code === 'CAPTURE_TIMEOUT') captureCooldownUntil = Date.now() + CAPTURE_COOLDOWN_MS
+          throw focusedError
         }
       } else {
-        throw new BrowserError('CAPTURE_FAILED', `Chrome could not capture this tab: ${message}`)
+        const message = error instanceof Error ? error.message : String(error)
+        const quotaFailure = /quota|MAX_CAPTURE_VISIBLE_TAB/i.test(message)
+        const transientFailure = /image readback failed|failed to capture tab/i.test(message)
+        if (quotaFailure || transientFailure) {
+          let retryError
+          for (const delay of quotaFailure ? [650, 900] : [150, 400]) {
+            await sleep(delay)
+            lastCaptureAt = Date.now()
+            try {
+              dataUrl = await captureChromeWithWatchdog(windowId, quality)
+              retryError = undefined
+              break
+            } catch (error) {
+              if (error instanceof BrowserError && error.code === 'CAPTURE_TIMEOUT') {
+                captureCooldownUntil = Date.now() + CAPTURE_COOLDOWN_MS
+                throw error
+              }
+              retryError = error
+            }
+          }
+          if (dataUrl === undefined) {
+            throw new BrowserError('CAPTURE_QUOTA', `Chrome refused the screenshot after retries (${retryError instanceof Error ? retryError.message : String(retryError)})`)
+          }
+        } else {
+          throw new BrowserError('CAPTURE_FAILED', `Chrome could not capture this tab: ${message}`)
+        }
       }
     }
+    captureCooldownUntil = 0
     return { dataUrl, captureMs: Math.round(performance.now() - started) }
   }
   const next = captureGate.then(run, run)
@@ -2378,6 +2507,7 @@ async function snapshot(detail, settings, retried = false, delayMs = 0) {
   metrics.labels = labelled.labels
   const labelMs = Math.round(performance.now() - labelStarted)
   const captured = await captureVisibleTab(windowId, quality)
+  if (settings.showHitboxes === false) await clearAllFrames(tab.id)
 
   const tabAfter = await getActiveTab(windowId)
   if (tabAfter.id !== tab.id && !retried) return snapshot(detail, settings, true)
@@ -2778,9 +2908,10 @@ function autoEscalate(stored, metrics) {
  * Labels-only view pass: no capture, no re-encode.
  * @param {chrome.tabs.Tab} tab
  */
-async function labelOnly(tab) {
+async function labelOnly(tab, showHitboxes = true) {
   const started = performance.now()
   const labelled = await labelAllFrames(tab.id, LABEL_LIMIT, { paint: false })
+  if (!showHitboxes) await clearAllFrames(tab.id)
   return { metrics: labelled.metrics, labels: labelled.labels, labelMs: Math.round(performance.now() - started) }
 }
 
@@ -2904,7 +3035,7 @@ async function buildActionView(tab, settings, requested, options = {}) {
     return { mode: 'full', payload: shot }
   }
   // compact or auto: one labels-only pass decides and feeds the delta
-  const labelled = await labelOnly(tab)
+  const labelled = await labelOnly(tab, settings.showHitboxes !== false)
   const stored = lastViewByTab.get(tab.id)
   if (requested === 'auto' && autoEscalate(stored, labelled.metrics)) {
     const shot = await snapshot('normal', settings)
@@ -2969,7 +3100,7 @@ async function buildBatchView(tab, settings, requested) {
     const shot = await snapshot('normal', settings)
     return { mode: 'full', payload: shot }
   }
-  const labelled = await labelOnly(tab)
+  const labelled = await labelOnly(tab, settings.showHitboxes !== false)
   const stored = lastViewByTab.get(tab.id)
   if (requested === 'auto' && autoEscalate(stored, labelled.metrics)) {
     const shot = await snapshot('normal', settings)
@@ -3132,6 +3263,15 @@ export function canvasBurstError(url, pointCount) {
   return {
     code: 'CANVAS_BURST_UNSUPPORTED',
     message: `${editor} coordinate actions are limited to one point followed by a full fresh view. Use a labelled control when possible; otherwise click one point and re-read the page.`,
+  }
+}
+
+/** @param {string} url */
+export function canvasSelectionError(url) {
+  if (canvasEditorForUrl(url) !== 'Google Docs') return undefined
+  return {
+    code: 'DOCS_CANVAS_SELECT_UNSUPPORTED',
+    message: 'Google Docs drag selection is disabled because it can move text instead of selecting. Use browser_docs_replace_text, browser_docs_replace_many, or an exact Find selection instead.',
   }
 }
 
@@ -4747,7 +4887,7 @@ async function navigate(settings, args) {
  * @param {Record<string, any>} args
  * @returns {{conditions: {text?: string, url?: string, idle?: boolean, ms?: number}, timeoutMs: number}}
  */
-function parseWaitForArgs(args) {
+export function parseWaitForArgs(args) {
   const conditions = {}
   if (args.text !== undefined) {
     if (typeof args.text !== 'string' || args.text.length === 0) {
@@ -4756,25 +4896,32 @@ function parseWaitForArgs(args) {
     conditions.text = args.text
   }
   if (args.url !== undefined) {
-    if (typeof args.url !== 'string') throw new BrowserError('BAD_WAIT', 'url must be a string')
+    if (typeof args.url !== 'string' || args.url.length === 0) {
+      throw new BrowserError('BAD_WAIT', 'url must be a non-empty string')
+    }
     conditions.url = args.url
   }
-  if (args.idle === true) conditions.idle = true
+  if (args.idle !== undefined) {
+    if (typeof args.idle !== 'boolean') throw new BrowserError('BAD_WAIT', 'idle must be a boolean')
+    if (args.idle) conditions.idle = true
+  }
   if (args.ms !== undefined) {
-    const ms = Number(args.ms)
-    if (!Number.isFinite(ms) || ms < 0 || ms > 30_000) {
-      throw new BrowserError('BAD_WAIT', 'ms must be an integer from 0 to 30000')
+    if (!Number.isSafeInteger(args.ms) || args.ms < 0 || args.ms > 30_000) {
+      throw new BrowserError('BAD_WAIT', 'ms must be a safe integer from 0 to 30000')
     }
-    conditions.ms = Math.round(ms)
+    conditions.ms = args.ms
   }
   if (Object.keys(conditions).length === 0) {
     throw new BrowserError('BAD_WAIT', 'wait_for needs at least one of text, url, idle, or ms')
   }
-  let timeoutMs = 10_000
+  let timeoutMs = Math.max(10_000, conditions.ms ?? 0)
   if (args.timeout_ms !== undefined) {
     const value = Number(args.timeout_ms)
     if (!Number.isInteger(value) || value < 1_000 || value > 30_000) {
       throw new BrowserError('BAD_TIMEOUT', 'timeout_ms must be an integer from 1000 to 30000')
+    }
+    if (value < (conditions.ms ?? 0)) {
+      throw new BrowserError('BAD_WAIT', 'timeout_ms must be greater than or equal to ms')
     }
     timeoutMs = value
   }
@@ -4878,6 +5025,8 @@ async function selectRange(settings, args) {
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
   const canvasEditor = canvasEditorForUrl(tab.url)
+  const selectionError = canvasSelectionError(tab.url ?? '')
+  if (selectionError) throw new BrowserError(selectionError.code, selectionError.message)
   request.view = actionViewForTab(tab, request.view)
   const before = lastViewByTab.get(tab.id)
   const history = (imageBasesByTab.get(tab.id) ?? []).filter(basis => basis.url === (tab.url ?? ''))
@@ -5481,6 +5630,2065 @@ async function clipboardOp(settings, args) {
   }
 }
 
+const DOCS_DEADLINE_MS = 55_000
+const DOCS_FORMAT_DEADLINE_MS = 120_000
+const DOCS_PARAGRAPH_STYLES = ['Normal text', 'Title', 'Subtitle', 'Heading 1', 'Heading 2', 'Heading 3', 'Heading 4', 'Heading 5', 'Heading 6']
+const DOCS_FORMAT_ATTRIBUTES = ['paragraph_style', 'font_size', 'bold', 'italic', 'underline', 'font']
+const docsTabLocks = new Map()
+
+/** @param {unknown} value */
+export function parseDocsMatchCounter(value) {
+  const text = String(value ?? '').replace(/\s+/gu, ' ').trim()
+  const matches = [...text.matchAll(/(?:^|\D)(\d+)\s+of\s+(\d+)(?!\d)/giu)]
+  if (matches.length !== 1) return undefined
+  const current = Number(matches[0][1])
+  const total = Number(matches[0][2])
+  if (!Number.isSafeInteger(current) || !Number.isSafeInteger(total)) return undefined
+  return { current, total, text: `${current} of ${total}` }
+}
+
+/** Strip only the accessible-name suffix used to advertise a submenu. */
+export function docsFontName(value) {
+  return String(value ?? '').replace(/\s+/gu, ' ').trim().replace(/\s+(?:▸|›|»|▶|►)$/u, '')
+}
+
+/** @param {unknown} value */
+export function docsToolbarFont(value) {
+  const text = String(value ?? '').replace(/\s+/gu, ' ').trim()
+  const match = /^Font list\.\s+(.+?)\s+selected\.$/u.exec(text)
+  if (match) return docsFontName(match[1])
+  return text && !text.startsWith('Font list.') ? docsFontName(text) : undefined
+}
+
+function docsFailure(stage, code, message) {
+  const error = new BrowserError(code.startsWith('DOCS_') ? code : `DOCS_${code}`, `[${stage}] ${message}`)
+  error.stage = stage
+  return error
+}
+
+function docsUrl(value) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 'docs.google.com' && /^\/document(?:\/|$)/u.test(url.pathname)
+  } catch {
+    return false
+  }
+}
+
+export function docsSameDocumentUrl(before, after) {
+  try {
+    const left = new URL(before)
+    const right = new URL(after)
+    return left.origin === right.origin && left.pathname === right.pathname && left.search === right.search && docsUrl(right.href)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Self-contained Docs probes. All targets are resolved by role and accessible
+ * name; coordinates exist only long enough for the next trusted click.
+ */
+export function docsPageProbe(command, args = {}) {
+  const normalize = value => String(value ?? '').replace(/\s+/gu, ' ').trim()
+  const fontName = value => normalize(value).replace(/\s+(?:▸|›|»|▶|►)$/u, '')
+  const visible = element => {
+    if (!(element instanceof Element) || !element.isConnected) return false
+    if (element.closest('[aria-hidden="true"],[inert]')) return false
+    const style = getComputedStyle(element)
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false
+    const rect = element.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0
+  }
+  const hitVisible = element => {
+    if (!(element instanceof Element) || !element.isConnected || element.closest('[aria-hidden="true"],[inert]')) return false
+    const rect = element.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return false
+    const x = rect.left + rect.width / 2
+    const y = rect.top + rect.height / 2
+    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return false
+    const hit = document.elementFromPoint(x, y)
+    return hit === element || element.contains(hit)
+  }
+  const role = element => {
+    const explicit = element.getAttribute('role')
+    if (explicit) return explicit
+    if (element.matches('input,textarea')) return 'textbox'
+    if (element.matches('button')) return 'button'
+    return ''
+  }
+  const name = element => {
+    const labelledBy = element.getAttribute('aria-labelledby')
+    if (labelledBy) return normalize(labelledBy.split(/\s+/u).map(id => document.getElementById(id)?.textContent ?? '').join(' '))
+    return normalize(element.getAttribute('aria-label') || element.innerText || element.textContent || element.getAttribute('title'))
+  }
+  const nodes = (wanted, root = document, includeHidden = false) => {
+    const selector = wanted === 'textbox'
+      ? '[role="textbox"],input,textarea'
+      : wanted === 'button' ? '[role="button"],button' : `[role="${wanted}"]`
+    return [...root.querySelectorAll(selector)].filter(element => role(element) === wanted && (includeHidden || visible(element)))
+  }
+  const exact = (wanted, wantedName, root = document, includeHidden = false) => nodes(wanted, root, includeHidden).filter(element => name(element) === wantedName)
+  const disabled = element => element.disabled === true || element.getAttribute('aria-disabled') === 'true' || element.matches(':disabled')
+  const selected = element => element.getAttribute('aria-checked') === 'true'
+    || element.getAttribute('aria-selected') === 'true'
+    || Boolean(element.querySelector('input[type="checkbox"]:checked,[role="checkbox"][aria-checked="true"]'))
+  const point = element => {
+    const rect = element.getBoundingClientRect()
+    return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
+  }
+  const failure = (code, message) => ({ ok: false, code, message })
+  const one = (elements, description) => {
+    if (elements.length !== 1) return { error: failure(elements.length > 1 ? 'AMBIGUOUS_CONTROL' : 'CONTROL_NOT_FOUND', `${description}: expected one exact control, found ${elements.length}`) }
+    return { element: elements[0] }
+  }
+  const findBoxes = () => exact('textbox', 'Find in document')
+  const counterText = box => {
+    let container = box.parentElement
+    for (let depth = 0; container && depth < 8; depth += 1, container = container.parentElement) {
+      const text = normalize(container.textContent)
+      if (/\d+\s+of\s+\d+/iu.test(text)) return text
+    }
+    return ''
+  }
+  const readFind = () => {
+    const boxes = findBoxes()
+    if (boxes.length === 0) return { ok: true, open: false }
+    if (boxes.length !== 1) return failure('AMBIGUOUS_FIND', `Expected one Find in document textbox, found ${boxes.length}`)
+    const box = boxes[0]
+    const raw = counterText(box)
+    const matches = [...raw.matchAll(/(?:^|\D)(\d+)\s+of\s+(\d+)(?!\d)/giu)]
+    const match = matches.length === 1 ? matches[0] : undefined
+    return {
+      ok: true,
+      open: true,
+      enabled: !disabled(box),
+      value: String(box.value ?? ''),
+      counterText: raw,
+      match: match ? { current: Number(match[1]), total: Number(match[2]), text: `${Number(match[1])} of ${Number(match[2])}` } : undefined,
+    }
+  }
+  const replaceControls = () => {
+    const replacements = exact('textbox', 'Replace with', document, true)
+    if (replacements.length !== 1) return { error: failure('AMBIGUOUS_REPLACE', `Expected one Replace with textbox, found ${replacements.length}`) }
+    const replacement = replacements[0]
+    let container = replacement.parentElement
+    for (let depth = 0; container && depth < 10; depth += 1, container = container.parentElement) {
+      const replace = exact('button', 'Replace', container, true)
+      const replaceAll = exact('button', 'Replace all', container, true)
+      const close = exact('button', 'Close', container, true)
+      if (replace.length === 1 && replaceAll.length === 1 && close.length === 1) {
+        return { replacement, replace: replace[0], close: close[0] }
+      }
+    }
+    return { error: failure('REPLACE_CONTROLS', 'The scoped Replace, Replace all, and Close controls are missing or ambiguous') }
+  }
+  const readReplace = () => {
+    const finds = exact('textbox', 'Find', document, true)
+    const replacements = exact('textbox', 'Replace with', document, true)
+    if (finds.length === 0 && replacements.length === 0) return { ok: true, open: false }
+    if (finds.length !== 1 || replacements.length !== 1) {
+      return failure('AMBIGUOUS_REPLACE', `Expected one Find and one Replace with textbox, found ${finds.length} and ${replacements.length}`)
+    }
+    const find = finds[0]
+    const controls = replaceControls()
+    if (controls.error) return controls.error
+    const { replacement, replace, close } = controls
+    const raw = counterText(find)
+    const matches = [...raw.matchAll(/(?:^|\D)(\d+)\s+of\s+(\d+)(?!\d)/giu)]
+    const match = matches.length === 1 ? matches[0] : undefined
+    return {
+      ok: true,
+      open: finds.some(hitVisible) || replacements.some(hitVisible),
+      findEnabled: !disabled(find),
+      replacementEnabled: !disabled(replacement),
+      findValue: String(find.value ?? ''),
+      replacementValue: String(replacement.value ?? ''),
+      counterText: raw,
+      match: match ? { current: Number(match[1]), total: Number(match[2]), text: `${Number(match[1])} of ${Number(match[2])}` } : undefined,
+      replace: disabled(replace) ? undefined : point(replace),
+      close: disabled(close) ? undefined : point(close),
+    }
+  }
+  const menuControl = wantedName => {
+    const controls = exact('menuitem', wantedName)
+    if (controls.length === 0) return { ok: true, present: false }
+    if (controls.length !== 1) return failure('AMBIGUOUS_CONTROL', `Expected one ${wantedName} menu item, found ${controls.length}`)
+    return { ok: true, present: true, point: point(controls[0]), disabled: disabled(controls[0]) }
+  }
+  const renameState = () => {
+    const renames = exact('textbox', 'Rename')
+    if (renames.length === 0) return { ok: true, present: false }
+    if (renames.length !== 1) return failure('RENAME_CONTROLS', `Expected one Rename textbox, found ${renames.length}`)
+    const input = renames[0]
+    return {
+      ok: true,
+      present: true,
+      enabled: !disabled(input),
+      value: String(input.value ?? ''),
+      focused: document.activeElement === input,
+      point: point(input),
+      title: document.title,
+    }
+  }
+  const pageSetupState = () => {
+    const papers = exact('combobox', 'Paper size').filter(hitVisible)
+    if (papers.length === 0) return { ok: true, open: false }
+    if (papers.length !== 1) return failure('AMBIGUOUS_DIALOG', `Expected one Paper size control, found ${papers.length}`)
+    const paper = papers[0]
+    const margins = {}
+    for (const side of ['Top', 'Bottom', 'Left', 'Right']) {
+      const boxes = exact('textbox', side).filter(hitVisible)
+      if (boxes.length !== 1) return failure('AMBIGUOUS_DIALOG', `Expected one ${side} margin textbox, found ${boxes.length}`)
+      const box = boxes[0]
+      margins[side] = {
+        value: String(box.value ?? '').trim(),
+        focused: document.activeElement === box,
+        point: disabled(box) ? undefined : point(box),
+      }
+    }
+    const orientation = wanted => {
+      const labels = [...document.querySelectorAll('label,[role="radio"]')]
+        .filter(element => normalize(element.innerText || element.textContent || element.getAttribute('aria-label')) === wanted)
+        .filter(hitVisible)
+      if (labels.length !== 1) return { error: failure('AMBIGUOUS_CONTROL', `Expected one ${wanted} orientation control, found ${labels.length}`) }
+      const element = labels[0]
+      const linked = element.htmlFor ? document.getElementById(element.htmlFor) : undefined
+      const input = element.matches('input[type="radio"]') ? element : element.querySelector('input[type="radio"]') ?? linked
+      const selected = element.getAttribute('aria-checked') === 'true' || input?.checked === true
+      return { ok: true, selected, point: disabled(element) ? undefined : point(element) }
+    }
+    const portrait = orientation('Portrait')
+    if (portrait.error) return portrait.error
+    const landscape = orientation('Landscape')
+    if (landscape.error) return landscape.error
+    const ok = one(exact('button', 'OK').filter(hitVisible), 'Page setup OK')
+    if (ok.error) return ok.error
+    return {
+      ok: true,
+      open: true,
+      paperSize: normalize(paper.querySelector('input')?.value ?? paper.innerText ?? paper.textContent),
+      paperPoint: disabled(paper) ? undefined : point(paper),
+      portrait: portrait.selected,
+      portraitPoint: portrait.point,
+      landscape: landscape.selected,
+      landscapePoint: landscape.point,
+      margins,
+      okPoint: disabled(ok.element) ? undefined : point(ok.element),
+    }
+  }
+  const pagePaperMenu = () => {
+    const rows = [...nodes('option'), ...nodes('menuitem')].filter(hitVisible)
+      .filter(element => /^Letter(?:\s*\(|\s*$)/u.test(name(element)))
+    if (rows.length !== 1) return failure('AMBIGUOUS_CONTROL', `Expected one Letter paper-size row, found ${rows.length}`)
+    return { ok: true, point: point(rows[0]) }
+  }
+  const mainToolbar = () => one([...exact('toolbar', 'Main'), ...exact('toolbar', 'Main toolbar')], 'Main toolbar')
+  const fontControl = () => {
+    const toolbar = mainToolbar()
+    if (toolbar.error) return toolbar
+    const options = nodes('option', toolbar.element)
+    const controls = [...nodes('button', toolbar.element), ...nodes('combobox', toolbar.element), ...options]
+      .filter(element => /^Font list(?:\.\s+.+?\s+selected\.)?$/u.test(name(element)))
+    if (controls.length > 0) return one(controls, 'Main toolbar Font list')
+    const styles = options.findIndex(element => /^Styles list\./u.test(name(element)))
+    return one(styles >= 0 ? options.slice(styles + 1, styles + 2) : [], 'Main toolbar Font list')
+  }
+  const toolbarState = () => {
+    const control = fontControl()
+    if (control.error) return control.error
+    const controlName = name(control.element)
+    const match = /^Font list\.\s+(.+?)\s+selected\.$/u.exec(controlName)
+    return { ok: true, controlName, font: match ? fontName(match[1]) : fontName(controlName) }
+  }
+  const paragraphStyles = ['Normal text', 'Title', 'Subtitle', 'Heading 1', 'Heading 2', 'Heading 3', 'Heading 4', 'Heading 5', 'Heading 6']
+  const paragraphStyleControl = () => {
+    const toolbar = mainToolbar()
+    if (toolbar.error) return toolbar
+    const controls = nodes('option', toolbar.element).filter(element => {
+      const controlName = name(element)
+      return /^Styles list\./u.test(controlName) || paragraphStyles.includes(fontName(controlName))
+    })
+    return one(controls, 'Main toolbar Styles list')
+  }
+  const paragraphStyleState = () => {
+    const control = paragraphStyleControl()
+    if (control.error) return control.error
+    const controlName = name(control.element)
+    const match = /^Styles list\.\s+(.+?)\s+selected\.$/u.exec(controlName)
+    const plainName = fontName(controlName)
+    return {
+      ok: true,
+      paragraphStyle: match ? fontName(match[1]) : paragraphStyles.includes(plainName) ? plainName : undefined,
+      paragraphStylePoint: disabled(control.element) ? undefined : point(control.element),
+    }
+  }
+  const paragraphStyleMenu = wanted => {
+    const rows = nodes('menuitemradio').filter(element => fontName(name(element)) === wanted)
+    if (rows.length > 1) return failure('AMBIGUOUS_CONTROL', `Expected one ${wanted} paragraph-style row, found ${rows.length}`)
+    const row = rows[0]
+    if (row && disabled(row)) return failure('CONTROL_DISABLED', `${wanted} paragraph style is disabled`)
+    return { ok: true, open: Boolean(row), point: row ? point(row) : undefined }
+  }
+  const fontSizeState = () => {
+    const toolbar = mainToolbar()
+    if (toolbar.error) return toolbar
+    const control = one(exact('textbox', 'Font size', toolbar.element), 'Main toolbar Font size')
+    if (control.error) return control.error
+    const options = nodes('option', toolbar.element).filter(element => /^Font size list\./u.test(name(element)))
+    if (options.length > 1) return failure('AMBIGUOUS_CONTROL', `Expected at most one Font size list option, found ${options.length}`)
+    const match = options.length === 1 ? /^Font size list\.\s+(\d+(?:\.\d+)?)\s+selected\.$/u.exec(name(options[0])) : undefined
+    const value = String(control.element.value ?? '').trim()
+    return {
+      ok: true,
+      fontSize: match ? Number(match[1]) : /^\d+(?:\.\d+)?$/u.test(value) ? Number(value) : undefined,
+      fontSizeValue: value,
+      fontSizeFocused: document.activeElement === control.element,
+      fontSizePoint: disabled(control.element) ? undefined : point(control.element),
+    }
+  }
+  const toggleState = attribute => {
+    const toolbar = mainToolbar()
+    if (toolbar.error) return toolbar
+    const names = {
+      bold: ['Bold', 'Bold (Ctrl+B)'],
+      italic: ['Italic', 'Italic (Ctrl+I)'],
+      underline: ['Underline', 'Underline (Ctrl+U)'],
+      numbered: ['Numbered list', 'Numbered list (Ctrl+Shift+7)'],
+      bulleted: ['Bulleted list', 'Bulleted list (Ctrl+Shift+8)'],
+      checklist: ['Checklist', 'Checklist (Ctrl+Shift+9)'],
+    }
+    const localControls = nodes('button', toolbar.element, true).filter(element => names[attribute].includes(name(element)))
+    const controls = localControls.length === 0 && ['numbered', 'bulleted', 'checklist'].includes(attribute)
+      ? nodes('button', document).filter(hitVisible).filter(element => names[attribute].includes(name(element)))
+      : localControls
+    if (controls.length === 0 && ['numbered', 'bulleted', 'checklist'].includes(attribute)) {
+      const more = one(exact('button', 'More', toolbar.element).filter(hitVisible), 'Main toolbar More')
+      if (!more.error && !disabled(more.element)) return { ok: true, pressed: undefined, revealPoint: point(more.element) }
+    }
+    const control = one(controls, `Main toolbar ${attribute}`)
+    if (control.error) return control.error
+    if (disabled(control.element)) return failure('CONTROL_DISABLED', `${attribute} is disabled`)
+    const pressed = control.element.getAttribute('aria-pressed')
+    if (pressed !== 'true' && pressed !== 'false') return failure('FORMAT_STATE_UNKNOWN', `${attribute} does not expose an exact aria-pressed state`)
+    return { ok: true, pressed: pressed === 'true' }
+  }
+  const formatState = attributes => {
+    if (!Array.isArray(attributes) || attributes.length === 0 || new Set(attributes).size !== attributes.length) {
+      return failure('BAD_PROBE', 'format requires a non-empty list of distinct attributes')
+    }
+    const result = { ok: true }
+    for (const attribute of attributes) {
+      if (attribute === 'font') {
+        const state = toolbarState()
+        if (!state.ok) return state
+        result.font = state.font
+      } else if (attribute === 'paragraph_style') {
+        const state = paragraphStyleState()
+        if (!state.ok) return state
+        Object.assign(result, state)
+      } else if (attribute === 'font_size') {
+        const state = fontSizeState()
+        if (!state.ok) return state
+        Object.assign(result, state)
+      } else if (['bold', 'italic', 'underline', 'numbered', 'bulleted', 'checklist'].includes(attribute)) {
+        const state = toggleState(attribute)
+        if (!state.ok) return state
+        result[attribute] = state.pressed
+        if (state.revealPoint) result.revealPoint = state.revealPoint
+      } else {
+        return failure('BAD_PROBE', `Unknown format attribute ${String(attribute)}`)
+      }
+    }
+    return result
+  }
+  const menuState = wanted => {
+    const matches = nodes('menuitemcheckbox').filter(hitVisible).filter(element => fontName(name(element)) === wanted)
+    const menus = new Set(matches.map(element => element.closest('[role="menu"]')))
+    if (menus.size > 1 || matches.length > 1 && matches.some(element => element.closest('[role="menu"]') === null)) {
+      return failure('DUPLICATE_FONT', `Font menu contains ${matches.length} conflicting exact ${wanted} rows`)
+    }
+    if (matches.some(disabled)) return failure('FONT_DISABLED', `Font ${wanted} has a disabled exact row`)
+    const checked = matches.filter(selected)
+    const exactRow = checked[0] ?? matches[0]
+    const more = exact('menuitem', 'More fonts').filter(hitVisible)
+    if (more.length > 1) return failure('AMBIGUOUS_CONTROL', 'More fonts is ambiguous')
+    return {
+      ok: true,
+      found: Boolean(exactRow),
+      checked: checked.length > 0,
+      point: exactRow ? point(exactRow) : undefined,
+      moreFonts: more.length === 1 && !disabled(more[0]) ? point(more[0]) : undefined,
+    }
+  }
+  const dialogParts = () => {
+    const searches = exact('textbox', 'Search')
+    const lists = exact('listbox', 'List of fonts')
+    if (searches.length > 1 || lists.length > 1) return { error: failure('AMBIGUOUS_DIALOG', 'The Fonts dialog controls are ambiguous') }
+    const search = searches[0]
+    const list = lists[0]
+    const anchor = list || search
+    const dialog = anchor?.closest('[role="dialog"]') || (anchor ? anchor.parentElement : undefined)
+    return { search, list, dialog: dialog || document }
+  }
+  const dialogState = wanted => {
+    const parts = dialogParts()
+    if (parts.error) return parts.error
+    if (!parts.search && !parts.list) return { ok: true, open: false }
+    const root = parts.dialog
+    const noFonts = [...root.querySelectorAll('*')].some(element => visible(element) && normalize(element.innerText) === 'No fonts found.')
+    const options = parts.list ? nodes('option', parts.list, true) : []
+    const visibleOptions = options.filter(visible)
+    const matches = options.filter(element => fontName(element.innerText) === wanted)
+    if (matches.length > 1) return failure('DUPLICATE_FONT', `Fonts list contains ${matches.length} exact ${wanted} rows`)
+    const row = matches[0]
+    if (row && !visible(row)) return failure('FONT_HIDDEN', `Font ${wanted} has a hidden exact row`)
+    if (row && disabled(row)) return failure('FONT_DISABLED', `Font ${wanted} is disabled`)
+    const done = one(exact('button', 'Done', root), 'Done')
+    const cancel = one(exact('button', 'Cancel', root), 'Cancel')
+    if (done.error || cancel.error) return failure('DIALOG_CONTROLS', 'Done or Cancel is missing or ambiguous')
+    return {
+      ok: true,
+      open: true,
+      searchEnabled: parts.search ? !disabled(parts.search) : false,
+      searchValue: parts.search ? String(parts.search.value ?? '') : undefined,
+      noFonts,
+      signature: visibleOptions.map(element => `${fontName(element.innerText)}:${selected(element)}`).join('|') + `:empty=${noFonts}`,
+      found: Boolean(row),
+      checked: row ? selected(row) : false,
+      point: row ? point(row) : undefined,
+      done: !disabled(done.element) ? point(done.element) : undefined,
+      cancel: !disabled(cancel.element) ? point(cancel.element) : undefined,
+    }
+  }
+  const setText = (wantedRole, wantedName, value, includeHidden = false) => {
+    const found = one(exact(wantedRole, wantedName, document, includeHidden), wantedName)
+    if (found.error) return found.error
+    const element = found.element
+    if (disabled(element)) return failure('CONTROL_DISABLED', `${wantedName} is disabled`)
+    const prototype = element.matches('textarea') ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+    if (setter) setter.call(element, value)
+    else element.value = value
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+    return { ok: true, value: String(element.value ?? ''), readback: String(element.value ?? '') === value }
+  }
+
+  const documentContent = () => {
+    const boxes = exact('textbox', 'Document content', document, true)
+    if (boxes.length !== 1) return failure('DOC_CONTENT_AMBIGUOUS', `Expected one Document content editor, found ${boxes.length}`)
+    return { ok: true, present: true, focused: document.activeElement === boxes[0] }
+  }
+  const focusDocument = () => {
+    const boxes = exact('textbox', 'Document content', document, true)
+    if (boxes.length !== 1) return failure('DOC_CONTENT_AMBIGUOUS', `Expected one Document content editor, found ${boxes.length}`)
+    boxes[0].focus({ preventScroll: true })
+    return { ok: true, focused: document.activeElement === boxes[0] }
+  }
+
+  const colorControl = attribute => {
+    if (!['color', 'highlight'].includes(attribute)) return failure('BAD_PROBE', `Unknown color attribute ${String(attribute)}`)
+    const toolbar = mainToolbar()
+    if (toolbar.error) return toolbar
+    const wantedName = attribute === 'color' ? 'Text color' : 'Highlight color'
+    const control = one(exact('button', wantedName, toolbar.element).filter(hitVisible), `Main toolbar ${wantedName}`)
+    return control.error || { ok: true, point: point(control.element) }
+  }
+  const colorMenuState = attribute => {
+    if (!['color', 'highlight'].includes(attribute)) return failure('BAD_PROBE', `Unknown color attribute ${String(attribute)}`)
+    const custom = exact('button', 'Add a custom color').filter(hitVisible)
+    const none = attribute === 'highlight' ? exact('button', 'None').filter(hitVisible) : []
+    if (custom.length > 1 || none.length > 1) return failure('AMBIGUOUS_CONTROL', `${attribute} menu controls are ambiguous`)
+    return {
+      ok: true,
+      open: custom.length > 0 || none.length > 0,
+      customPoint: custom.length === 1 ? point(custom[0]) : undefined,
+      nonePoint: none.length === 1 ? point(none[0]) : undefined,
+    }
+  }
+  const colorDialogState = () => {
+    const boxes = exact('textbox', 'Hex color', document, true).filter(hitVisible)
+    if (boxes.length === 0) return { ok: true, open: false }
+    if (boxes.length !== 1) return failure('AMBIGUOUS_DIALOG', 'Expected one visible Hex color textbox')
+    const box = boxes[0]
+    return {
+      ok: true,
+      open: true,
+      enabled: !disabled(box),
+      focused: document.activeElement === box,
+      value: String(box.value ?? ''),
+      point: disabled(box) ? undefined : point(box),
+    }
+  }
+
+  switch (command) {
+    case 'find': return readFind()
+    case 'setFind': return setText('textbox', 'Find in document', args.value)
+    case 'replace': return readReplace()
+    case 'rename': return renameState()
+    case 'fileMenu': return menuControl('File')
+    case 'pageSetupMenuItem': return menuControl('Page setup')
+    case 'pageSetup': return pageSetupState()
+    case 'pagePaperMenu': return pagePaperMenu()
+    case 'setPageMargin': {
+      if (!['Top', 'Bottom', 'Left', 'Right'].includes(args.side)) return failure('BAD_PROBE', 'Unknown page margin')
+      return setText('textbox', args.side, args.value)
+    }
+    case 'editMenu': return menuControl('Edit')
+    case 'replaceMenuItem': return menuControl('Find and replace')
+    case 'setReplaceFind': return setText('textbox', 'Find', args.value, true)
+    case 'setReplaceWith': return setText('textbox', 'Replace with', args.value, true)
+    case 'toolbar': return toolbarState()
+    case 'fontControl': {
+      const control = fontControl()
+      return control.error || { ok: true, point: point(control.element), disabled: disabled(control.element) }
+    }
+    case 'fontMenu': return menuState(args.font)
+    case 'fontDialog': return dialogState(args.font)
+    case 'colorControl': return colorControl(args.attribute)
+    case 'colorMenu': return colorMenuState(args.attribute)
+    case 'colorDialog': return colorDialogState()
+    case 'documentContent': return documentContent()
+    case 'focusDocument': return focusDocument()
+    case 'setSearch': return setText('textbox', 'Search', args.value)
+    case 'format': return formatState(args.attributes)
+    case 'formatStyleMenu': return paragraphStyleMenu(args.style)
+    default: return failure('BAD_PROBE', `Unknown Docs probe ${command}`)
+  }
+}
+
+function docsDriver(io) {
+  const source = io.driver ?? io
+  return {
+    getWindowId: source.getWindowId ?? getWindowId,
+    getActiveTab: source.getActiveTab ?? getActiveTab,
+    getTab: source.getTab ?? (tabId => chrome.tabs.get(tabId)),
+    fetchExport: source.fetchExport ?? docsFetchExport,
+    runInTab: source.runInTab ?? runInTab,
+    withDebugger: source.withDebugger ?? withDebugger,
+    dispatchTrustedKey: source.dispatchTrustedKey ?? dispatchTrustedKey,
+    insertTrustedText: source.insertTrustedText ?? ((tabId, text) => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text })),
+    trustedClick: source.trustedClick ?? docsTrustedClick,
+    snapshot: source.snapshot ?? (settings => snapshot('normal', settings)),
+    sleep: source.sleep ?? sleep,
+    now: source.now ?? (() => Date.now()),
+  }
+}
+
+function docsCheckDeadline(context, stage) {
+  if (context.driver.now() >= context.deadline) throw docsFailure(stage, 'DOCS_DEADLINE', `The Docs operation exceeded ${(context.deadlineMs ?? DOCS_DEADLINE_MS) / 1000}s`)
+}
+
+function docsDriverError(stage, code, error) {
+  if (error instanceof BrowserError && error.code.startsWith('DOCS_')) return error
+  return docsFailure(stage, code, error instanceof Error ? error.message : String(error))
+}
+
+async function docsCurrent(context, stage) {
+  docsCheckDeadline(context, stage)
+  let current
+  try {
+    current = await context.driver.getTab(context.tab.id)
+  } catch (error) {
+    throw docsDriverError(stage, 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (!current || current.id !== context.tab.id || !docsSameDocumentUrl(context.initialUrl, current.url)) {
+    throw docsFailure(stage, 'DOCS_STALE_TAB', 'The tab or document URL changed; no further mutation was attempted')
+  }
+  docsCheckDeadline(context, stage)
+  return current
+}
+
+async function docsProbe(context, stage, command, args = {}) {
+  docsCheckDeadline(context, stage)
+  let result
+  try {
+    result = await context.driver.runInTab(context.tab.id, docsPageProbe, [command, args], 4_000)
+  } catch (error) {
+    throw docsDriverError(stage, 'DOCS_PROBE_FAILED', error)
+  }
+  if (!result?.ok) throw docsFailure(stage, result?.code ?? 'DOCS_PROBE_FAILED', result?.message ?? 'The Docs page probe returned no result')
+  docsCheckDeadline(context, stage)
+  return result
+}
+
+async function docsExport(context, stage, format) {
+  await docsCurrent(context, stage)
+  try {
+    const result = await context.driver.fetchExport(context.initialUrl, format)
+    await docsCurrent(context, stage)
+    return typeof result === 'string' ? result : result.body
+  } catch (error) {
+    throw docsDriverError(stage, error?.code ?? 'DOCS_EXPORT_FAILED', error)
+  }
+}
+
+async function docsKey(context, stage, spec, mask = 0) {
+  await docsCurrent(context, stage)
+  try {
+    await context.driver.withDebugger(context.tab.id, () => context.driver.dispatchTrustedKey(context.tab.id, spec, mask))
+  } catch (error) {
+    throw docsDriverError(stage, 'DOCS_INPUT_FAILED', error)
+  }
+  docsCheckDeadline(context, stage)
+}
+
+async function docsInsertText(context, stage, text) {
+  await docsCurrent(context, stage)
+  try {
+    await context.driver.withDebugger(context.tab.id, () => context.driver.insertTrustedText(context.tab.id, text))
+  } catch (error) {
+    throw docsDriverError(stage, 'DOCS_INPUT_FAILED', error)
+  }
+  docsCheckDeadline(context, stage)
+}
+
+async function docsNativeText(context, stage, command, value) {
+  await docsCurrent(context, stage)
+  const result = await docsProbe(context, stage, command, { value })
+  if (!result.readback) throw docsFailure(stage, 'DOCS_QUERY_MISMATCH', `The ${command} field did not retain the exact value`)
+  docsCheckDeadline(context, stage)
+}
+
+async function docsClick(context, stage, target) {
+  if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y)) {
+    throw docsFailure(stage, 'DOCS_CONTROL_UNAVAILABLE', 'The exact Docs control is missing or disabled')
+  }
+  await docsCurrent(context, stage)
+  try {
+    await context.driver.withDebugger(context.tab.id, () => context.driver.trustedClick(context.tab.id, target.x, target.y))
+  } catch (error) {
+    throw docsDriverError(stage, 'DOCS_INPUT_FAILED', error)
+  }
+  docsCheckDeadline(context, stage)
+}
+
+async function docsWait(context, stage, command, args, predicate, timeoutMs = 3_000) {
+  const end = Math.min(context.deadline, context.driver.now() + timeoutMs)
+  let latest
+  while (context.driver.now() < end) {
+    latest = await docsProbe(context, stage, command, args)
+    if (predicate(latest)) return latest
+    await context.driver.sleep(60)
+  }
+  const observed = latest ? ` (open=${latest.open}, match=${latest.match?.text ?? 'unknown'})` : ''
+  throw docsFailure(stage, 'DOCS_WAIT_TIMEOUT', `Docs did not reach the required ${stage} state${observed}`)
+}
+
+async function docsCloseFind(context, stage) {
+  await docsKey(context, stage, KEY_SPECS.Escape)
+  await docsWait(context, stage, 'find', {}, state => !state.open)
+}
+
+async function docsOpenFind(context, text) {
+  await docsKey(context, 'open-find', { key: 'f', code: 'KeyF', keyCode: 70 }, MODIFIER_BITS.ctrl)
+  await docsWait(context, 'open-find', 'find', {}, state => state.open && state.enabled)
+  await docsNativeText(context, 'find-query', 'setFind', text)
+  return docsWait(context, 'find-query', 'find', {}, state => state.value === text && state.match !== undefined)
+}
+
+async function docsVerifyFont(context, font, fontAdded) {
+  const end = Math.min(context.deadline, context.driver.now() + 4_000)
+  let toolbar
+  while (context.driver.now() < end) {
+    toolbar = await docsProbe(context, 'verify-toolbar', 'toolbar')
+    if (toolbar.font === font) {
+      return { status: 'applied', matchCount: 1, fontAdded, verifiedBy: 'toolbar' }
+    }
+    const menu = await docsProbe(context, 'verify-toolbar', 'fontMenu', { font })
+    if (menu.found && menu.checked) {
+      return { status: 'applied', matchCount: 1, fontAdded, verifiedBy: 'current-font-option' }
+    }
+    await context.driver.sleep(80)
+  }
+  throw docsFailure('verify-toolbar', 'DOCS_TOOLBAR_MISMATCH', `Main toolbar reports ${JSON.stringify(toolbar?.font ?? toolbar?.controlName ?? 'unknown')} instead of ${JSON.stringify(font)}`)
+}
+
+async function docsFinish(context, details) {
+  docsCheckDeadline(context, 'final-snapshot')
+  let shot
+  try {
+    shot = await context.driver.snapshot(context.settings, context.tab)
+  } catch (error) {
+    throw docsDriverError('final-snapshot', 'DOCS_SNAPSHOT_FAILED', error)
+  }
+  return { ...shot, op: 'docs', docs: { action: context.action ?? 'set_font', ...details } }
+}
+
+async function docsRemoveMatchedText(context, text) {
+  await docsKey(context, 'remove-text', KEY_SPECS.Delete)
+  const found = await docsOpenFind(context, text)
+  if (found.match.total !== 0) throw docsFailure('verify-removal', 'DOCS_TEXT_STILL_PRESENT', `Expected zero matches after deletion, found ${found.match.text}`)
+  await docsCloseFind(context, 'verify-removal')
+  return { status: 'removed_text', matchCount: 0, fontAdded: false, verifiedBy: 'find-counter', removedText: true }
+}
+
+async function docsMissingFont(context, text, removeIfMissing) {
+  const dialog = await docsProbe(context, 'missing-font', 'fontDialog', { font: context.font })
+  if (!dialog.noFonts) throw docsFailure('missing-font', 'DOCS_FONT_RESULTS_UNKNOWN', 'The exact font is absent but the scoped no-results message is not visible')
+  await docsClick(context, 'missing-font-cancel', dialog.cancel)
+  await docsWait(context, 'missing-font-cancel', 'fontDialog', { font: context.font }, state => !state.open)
+  if (removeIfMissing) return docsRemoveMatchedText(context, text)
+  return { status: 'font_missing', matchCount: 1, fontAdded: false, verifiedBy: 'find-counter' }
+}
+
+async function docsAddAndApply(context, text) {
+  const font = context.font
+  await docsNativeText(context, 'font-search', 'setSearch', font)
+  const end = Math.min(context.deadline, context.driver.now() + 8_000)
+  let stableSignature
+  let stableSince = 0
+  while (context.driver.now() < end) {
+    const state = await docsProbe(context, 'font-results', 'fontDialog', { font })
+    if (state.searchValue !== font) throw docsFailure('font-search', 'DOCS_QUERY_MISMATCH', 'The Fonts search field changed from the exact requested query')
+    const now = context.driver.now()
+    if (state.signature !== stableSignature) {
+      stableSignature = state.signature
+      stableSince = now
+    } else if (now - stableSince >= 100) {
+      if (state.found) {
+        if (!state.checked) {
+          await docsClick(context, 'font-add', state.point)
+          await docsWait(context, 'font-add', 'fontDialog', { font }, next => next.found && next.checked)
+        }
+        const ready = await docsWait(context, 'font-done', 'fontDialog', { font }, next => next.done)
+        await docsClick(context, 'font-done', ready.done)
+        await docsWait(context, 'font-done', 'fontDialog', { font }, next => !next.open)
+        const control = await docsProbe(context, 'reopen-font-menu', 'fontControl')
+        await docsClick(context, 'reopen-font-menu', control.point)
+        const menu = await docsWait(context, 'reopen-font-menu', 'fontMenu', { font }, next => next.found)
+        await docsClick(context, 'apply-added-font', menu.point)
+        return docsVerifyFont(context, font, true)
+      }
+      if (state.noFonts) return docsMissingFont(context, text, context.removeIfMissing)
+    }
+    await context.driver.sleep(80)
+  }
+  throw docsFailure('font-results', 'DOCS_FONT_RESULTS_UNKNOWN', 'Font search results did not stabilize with an exact row or a scoped no-results message')
+}
+
+async function docsSelectUnique(context, text) {
+  const found = await docsOpenFind(context, text)
+  if (found.match.total !== 1 || found.match.current !== 1) {
+    throw docsFailure('find-match', 'DOCS_MATCH_NOT_UNIQUE', `Expected normalized 1 of 1, found ${found.match.text}`)
+  }
+  await docsCloseFind(context, 'close-find')
+}
+
+async function docsApplyFont(context, text) {
+  const toolbar = await docsProbe(context, 'read-toolbar', 'toolbar')
+  if (toolbar.font === context.font) {
+    return { status: 'already_applied', matchCount: 1, fontAdded: false, verifiedBy: 'toolbar' }
+  }
+  const control = await docsProbe(context, 'open-font-menu', 'fontControl')
+  await docsClick(context, 'open-font-menu', control.point)
+  const menu = await docsWait(context, 'open-font-menu', 'fontMenu', { font: context.font }, next => next.found || next.moreFonts)
+  if (menu.found) {
+    await docsClick(context, 'apply-font', menu.point)
+    return docsVerifyFont(context, context.font, false)
+  }
+  if (!menu.moreFonts) throw docsFailure('open-font-menu', 'DOCS_FONT_MISSING', `Font ${context.font} is absent and More fonts is unavailable`)
+  await docsClick(context, 'more-fonts', menu.moreFonts)
+  await docsWait(context, 'more-fonts', 'fontDialog', { font: context.font }, state => state.open && state.searchEnabled)
+  return docsAddAndApply(context, text)
+}
+
+async function docsSetFontFlow(context, text) {
+  await docsSelectUnique(context, text)
+  const result = await docsApplyFont(context, text)
+  return docsFinish(context, result)
+}
+
+async function docsSetFontLocked(settings, args, tab, driver) {
+  const context = {
+    settings,
+    tab,
+    driver,
+    initialUrl: tab.url,
+    font: args.font.trim(),
+    removeIfMissing: args.remove_if_missing === true,
+    deadline: driver.now() + DOCS_DEADLINE_MS,
+  }
+  let timer
+  try {
+    return await Promise.race([
+      docsSetFontFlow(context, args.text),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(docsFailure('deadline', 'DOCS_DEADLINE', `The Docs operation exceeded ${DOCS_DEADLINE_MS / 1000}s`)), DOCS_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Apply a font to one uniquely matched Docs selection without model-facing
+ * intermediate views. The optional io object is a low-level fake driver seam.
+ */
+export async function docsSetFont(settings, args, io = {}) {
+  if (args?.action !== 'set_font') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be set_font')
+  if (typeof args.text !== 'string' || args.text.trim().length === 0 || args.text.length > 1000) {
+    throw docsFailure('validate', 'BAD_DOCS_TEXT', 'text must be a non-empty string of at most 1000 characters')
+  }
+  if (typeof args.font !== 'string' || args.font.trim().length === 0 || args.font.length > 100) {
+    throw docsFailure('validate', 'BAD_DOCS_FONT', 'font must be a non-empty string of at most 100 characters')
+  }
+  if (args.remove_if_missing !== undefined && typeof args.remove_if_missing !== 'boolean') {
+    throw docsFailure('validate', 'BAD_DOCS_REMOVE', 'remove_if_missing must be a boolean')
+  }
+  const driver = docsDriver(io)
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsSetFontLocked(settings, args, tab, driver))
+  const gate = run.catch(() => {})
+  docsTabLocks.set(tab.id, gate)
+  try {
+    return await run
+  } finally {
+    if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
+}
+
+function docsFormatValue(args, attribute) {
+  return attribute === 'font' ? args.font.trim() : args[attribute]
+}
+
+function docsFormatObservation(state, attribute) {
+  if (attribute === 'paragraph_style') return state.paragraphStyle
+  if (attribute === 'font_size') return state.fontSize
+  return state[attribute]
+}
+
+function docsFormatObservations(state, attributes) {
+  return Object.fromEntries(attributes.map(attribute => [attribute, docsFormatObservation(state, attribute)]))
+}
+
+function docsFormatResult(attribute, value, status, verifiedBy = 'toolbar') {
+  return { attribute, value, status, verifiedBy }
+}
+
+async function docsWaitFormat(context, stage, attributes, wanted, timeoutMs = 4_000) {
+  const end = Math.min(context.deadline, context.driver.now() + timeoutMs)
+  let latest
+  while (context.driver.now() < end) {
+    latest = await docsProbe(context, stage, 'format', { attributes })
+    if (attributes.every(attribute => docsFormatObservation(latest, attribute) === wanted[attribute])) return latest
+    if (latest.revealPoint) {
+      await docsClick(context, `${stage}-reveal`, latest.revealPoint)
+      continue
+    }
+    await context.driver.sleep(80)
+  }
+  throw docsFailure(stage, 'DOCS_FORMAT_MISMATCH', `Expected ${JSON.stringify(wanted)}, observed ${JSON.stringify(latest ? docsFormatObservations(latest, attributes) : {})}`)
+}
+
+async function docsApplyParagraphStyle(context, value) {
+  const control = await docsProbe(context, 'format-style-open', 'format', { attributes: ['paragraph_style'] })
+  await docsClick(context, 'format-style-open', control.paragraphStylePoint)
+  const menu = await docsWait(context, 'format-style-menu', 'formatStyleMenu', { style: value }, state => state.open && state.point)
+  await docsClick(context, 'format-style-apply', menu.point)
+  await docsWaitFormat(context, 'format-style-verify', ['paragraph_style'], { paragraph_style: value })
+  return docsFormatResult('paragraph_style', value, 'applied')
+}
+
+async function docsApplyFontSize(context, value) {
+  const control = await docsProbe(context, 'format-size-focus', 'format', { attributes: ['font_size'] })
+  await docsClick(context, 'format-size-focus', control.fontSizePoint)
+  await docsWait(context, 'format-size-focus', 'format', { attributes: ['font_size'] }, state => state.fontSizeFocused)
+  await docsKey(context, 'format-size-select', { key: 'a', code: 'KeyA', keyCode: 65 }, MODIFIER_BITS.ctrl)
+  const wanted = String(value)
+  await docsInsertText(context, 'format-size-input', wanted)
+  await docsWait(context, 'format-size-input', 'format', { attributes: ['font_size'] }, state => state.fontSizeFocused && state.fontSizeValue === wanted)
+  await docsKey(context, 'format-size-commit', KEY_SPECS.Enter)
+  await docsWaitFormat(context, 'format-size-verify', ['font_size'], { font_size: value })
+  return docsFormatResult('font_size', value, 'applied')
+}
+
+async function docsApplyToggle(context, attribute, value) {
+  const specs = {
+    bold: { key: 'b', code: 'KeyB', keyCode: 66 },
+    italic: { key: 'i', code: 'KeyI', keyCode: 73 },
+    underline: { key: 'u', code: 'KeyU', keyCode: 85 },
+  }
+  await docsKey(context, `format-${attribute}`, specs[attribute], MODIFIER_BITS.ctrl)
+  await docsWaitFormat(context, `format-${attribute}-verify`, [attribute], { [attribute]: value })
+  return docsFormatResult(attribute, value, 'applied', 'toolbar-pressed')
+}
+
+function docsFormatError(error, attribute, results) {
+  if (error instanceof Error) {
+    const verified = results.map(result => `${result.attribute}=${JSON.stringify(result.value)} (${result.status})`).join(', ') || 'none'
+    error.message += `; formatting stopped at ${attribute}; attributes verified before the failure: ${verified}; ${attribute} is unverified; do not retry the whole format blindly`
+  }
+  return error
+}
+
+async function docsApplyFormatStates(context, wanted, text) {
+  const attributes = DOCS_FORMAT_ATTRIBUTES.filter(attribute => wanted[attribute] !== undefined)
+  const initial = await docsProbe(context, 'read-format', 'format', { attributes })
+  const results = []
+  let fontAdded = false
+  for (const [index, attribute] of attributes.entries()) {
+    const value = wanted[attribute]
+    try {
+      const current = index === 0 ? initial : await docsProbe(context, 'read-format', 'format', { attributes: [attribute] })
+      if (docsFormatObservation(current, attribute) === value) {
+        results.push(docsFormatResult(attribute, value, 'already_applied'))
+        continue
+      }
+      if (attribute === 'paragraph_style') results.push(await docsApplyParagraphStyle(context, value))
+      else if (attribute === 'font_size') results.push(await docsApplyFontSize(context, value))
+      else if (attribute === 'font') {
+        context.font = value
+        const applied = await docsApplyFont(context, text)
+        fontAdded = applied.fontAdded
+        if (applied.status === 'font_missing') {
+          results.push(docsFormatResult('font', value, 'font_missing', 'font-dialog'))
+          return { results, fontAdded, fontMissing: true }
+        }
+        results.push(docsFormatResult('font', value, applied.status, applied.verifiedBy))
+      } else results.push(await docsApplyToggle(context, attribute, value))
+    } catch (error) {
+      throw docsFormatError(error, attribute, results)
+    }
+  }
+  try {
+    await docsWaitFormat(context, 'format-final-verify', attributes, wanted)
+  } catch (error) {
+    throw docsFormatError(error, 'final verification', results)
+  }
+  return { results, fontAdded, fontMissing: false }
+}
+
+async function docsFormatFlow(context, args) {
+  const attributes = DOCS_FORMAT_ATTRIBUTES.filter(attribute => args[attribute] !== undefined)
+  const wanted = Object.fromEntries(attributes.map(attribute => [attribute, docsFormatValue(args, attribute)]))
+  await docsSelectUnique(context, args.text)
+  const { results, fontAdded, fontMissing } = await docsApplyFormatStates(context, wanted, args.text)
+  const appliedCount = results.filter(result => result.status === 'applied').length
+  const alreadyAppliedCount = results.filter(result => result.status === 'already_applied').length
+  if (fontMissing) {
+    return docsFinish(context, {
+      status: appliedCount > 0 ? 'partial' : 'font_missing',
+      matchCount: 1,
+      attributeCount: attributes.length,
+      appliedCount,
+      alreadyAppliedCount,
+      fontAdded,
+      verifiedBy: 'toolbar',
+      results,
+      failure: { attribute: 'font', code: 'DOCS_FONT_MISSING', message: `Font ${JSON.stringify(wanted.font)} is unavailable; no text was deleted` },
+    })
+  }
+  return docsFinish(context, {
+    status: appliedCount > 0 ? 'completed' : 'already_applied',
+    matchCount: 1,
+    attributeCount: attributes.length,
+    appliedCount,
+    alreadyAppliedCount,
+    fontAdded,
+    verifiedBy: 'toolbar',
+    results,
+  })
+}
+
+async function docsFormatLocked(settings, args, tab, driver) {
+  const context = {
+    settings,
+    tab,
+    driver,
+    action: 'format',
+    initialUrl: tab.url,
+    font: typeof args.font === 'string' ? args.font.trim() : undefined,
+    removeIfMissing: false,
+    deadline: driver.now() + DOCS_FORMAT_DEADLINE_MS,
+    deadlineMs: DOCS_FORMAT_DEADLINE_MS,
+  }
+  let timer
+  try {
+    return await Promise.race([
+      docsFormatFlow(context, args),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(docsFailure('deadline', 'DOCS_DEADLINE', `The Docs format operation exceeded ${DOCS_FORMAT_DEADLINE_MS / 1000}s`)), DOCS_FORMAT_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function docsFormat(settings, args, io = {}) {
+  if (args?.action !== 'format') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be format')
+  if (typeof args.text !== 'string' || args.text.trim().length === 0 || args.text.length > 1000) {
+    throw docsFailure('validate', 'BAD_DOCS_TEXT', 'text must be a non-empty string of at most 1000 characters')
+  }
+  const allowed = new Set(['action', 'text', ...DOCS_FORMAT_ATTRIBUTES])
+  if (Object.keys(args).some(key => !allowed.has(key))) throw docsFailure('validate', 'BAD_DOCS_FORMAT', 'unknown Docs format argument')
+  const attributes = DOCS_FORMAT_ATTRIBUTES.filter(attribute => args[attribute] !== undefined)
+  if (attributes.length === 0) throw docsFailure('validate', 'BAD_DOCS_FORMAT', 'provide at least one Docs format attribute')
+  if (args.font !== undefined && (typeof args.font !== 'string' || args.font.trim().length === 0 || args.font.length > 100)) {
+    throw docsFailure('validate', 'BAD_DOCS_FONT', 'font must be a non-empty string of at most 100 characters')
+  }
+  if (args.font_size !== undefined && (!Number.isInteger(args.font_size) || args.font_size < 1 || args.font_size > 400)) {
+    throw docsFailure('validate', 'BAD_DOCS_FONT_SIZE', 'font_size must be an integer from 1 to 400')
+  }
+  if (args.paragraph_style !== undefined && !DOCS_PARAGRAPH_STYLES.includes(args.paragraph_style)) {
+    throw docsFailure('validate', 'BAD_DOCS_PARAGRAPH_STYLE', `paragraph_style must be one of: ${DOCS_PARAGRAPH_STYLES.join(', ')}`)
+  }
+  for (const attribute of ['bold', 'italic', 'underline']) {
+    if (args[attribute] !== undefined && typeof args[attribute] !== 'boolean') throw docsFailure('validate', 'BAD_DOCS_FORMAT', `${attribute} must be a boolean`)
+  }
+  const driver = docsDriver(io)
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsFormatLocked(settings, args, tab, driver))
+  const gate = run.catch(() => {})
+  docsTabLocks.set(tab.id, gate)
+  try {
+    return await run
+  } finally {
+    if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
+}
+
+const DOCS_READ_DEADLINE_MS = 45_000
+
+async function docsReadFlow(context, args) {
+  const format = args.format ?? 'outline'
+  const maxChars = args.max_chars ?? 16_000
+  const exported = await docsExport(context, 'read-export', format === 'text' ? 'txt' : 'html')
+  const full = format === 'outline' ? formatOutline(parseDocStructure(exported)) : exported
+  const truncated = full.length > maxChars
+  const content = truncated ? `${full.slice(0, maxChars)}\n… [truncated ${full.length - maxChars} characters]` : full
+  return {
+    op: 'docs',
+    docs: {
+      action: 'read',
+      status: 'completed',
+      format,
+      chars: full.length,
+      returned: content.length,
+      truncated,
+      content,
+      verifiedBy: 'export',
+    },
+  }
+}
+
+async function docsReadLocked(settings, args, tab, driver) {
+  const context = {
+    settings,
+    tab,
+    driver,
+    action: 'read',
+    initialUrl: tab.url,
+    deadline: driver.now() + DOCS_READ_DEADLINE_MS,
+    deadlineMs: DOCS_READ_DEADLINE_MS,
+  }
+  let timer
+  try {
+    return await Promise.race([
+      docsReadFlow(context, args),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(docsFailure('deadline', 'DOCS_DEADLINE', `The Docs read operation exceeded ${DOCS_READ_DEADLINE_MS / 1000}s`)), DOCS_READ_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function docsRead(settings, args, io = {}) {
+  if (args?.action !== 'read') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be read')
+  if (!['outline', 'text', 'html'].includes(args.format ?? 'outline')) throw docsFailure('validate', 'BAD_DOCS_READ_FORMAT', 'format must be outline, text, or html')
+  if (args.max_chars !== undefined && (!Number.isInteger(args.max_chars) || args.max_chars < 100 || args.max_chars > 100_000)) {
+    throw docsFailure('validate', 'BAD_DOCS_READ_CHARS', 'max_chars must be an integer from 100 to 100000')
+  }
+  const driver = docsDriver(io)
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsReadLocked(settings, args, tab, driver))
+  const gate = run.catch(() => {})
+  docsTabLocks.set(tab.id, gate)
+  try {
+    return await run
+  } finally {
+    if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
+}
+
+const DOCS_WRITE_DEADLINE_MS = 300_000
+const DOCS_WRITE_MAX_BLOCKS = 50
+const DOCS_WRITE_MAX_CHARS = 20_000
+const DOCS_WRITE_FORMAT_FIELDS = ['paragraph_style', 'font_size', 'font', 'bold', 'italic', 'underline', 'color', 'highlight']
+const DOCS_WRITE_INLINE_FIELDS = ['font_size', 'font', 'bold', 'italic', 'underline', 'color', 'highlight']
+
+function docsWriteValidateColor(value, allowNone, path) {
+  if (!(allowNone && value === 'none') && (typeof value !== 'string' || !/^#[0-9a-f]{6}$/iu.test(value))) {
+    throw docsFailure('validate', 'BAD_DOCS_COLOR', `${path} must be ${allowNone ? '"none" or ' : ''}a six-digit hex color`)
+  }
+}
+
+function docsWriteValidateBlocks(blocks) {
+  if (!Array.isArray(blocks) || blocks.length === 0 || blocks.length > DOCS_WRITE_MAX_BLOCKS) {
+    throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks must be an array of 1 to ${DOCS_WRITE_MAX_BLOCKS} blocks`)
+  }
+  const validateFormat = (entry, path, allowParagraph = true) => {
+    if (entry.font !== undefined && (typeof entry.font !== 'string' || entry.font.trim().length === 0 || entry.font.length > 100)) {
+      throw docsFailure('validate', 'BAD_DOCS_FONT', `${path}.font must be a non-empty string of at most 100 characters`)
+    }
+    if (entry.font_size !== undefined && (!Number.isInteger(entry.font_size) || entry.font_size < 1 || entry.font_size > 400)) {
+      throw docsFailure('validate', 'BAD_DOCS_FONT_SIZE', `${path}.font_size must be an integer from 1 to 400`)
+    }
+    for (const attribute of ['bold', 'italic', 'underline']) {
+      if (entry[attribute] !== undefined && typeof entry[attribute] !== 'boolean') throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `${path}.${attribute} must be a boolean`)
+    }
+    if (allowParagraph && entry.paragraph_style !== undefined && !DOCS_PARAGRAPH_STYLES.includes(entry.paragraph_style)) {
+      throw docsFailure('validate', 'BAD_DOCS_PARAGRAPH_STYLE', `${path}.paragraph_style is unsupported`)
+    }
+    if (entry.color !== undefined) docsWriteValidateColor(entry.color, false, `${path}.color`)
+    if (entry.highlight !== undefined) docsWriteValidateColor(entry.highlight, true, `${path}.highlight`)
+  }
+  const normalize = entry => ({
+    ...entry,
+    ...entry.font ? { font: entry.font.trim() } : {},
+    ...entry.color ? { color: entry.color.toLowerCase() } : {},
+    ...entry.highlight && entry.highlight !== 'none' ? { highlight: entry.highlight.toLowerCase() } : {},
+  })
+  const normalized = []
+  let totalChars = 0
+  for (const [index, block] of blocks.entries()) {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] must be an object`)
+    const allowed = new Set(['text', 'runs', 'items', 'list', 'blank', 'page_break', ...DOCS_WRITE_FORMAT_FIELDS])
+    if (Object.keys(block).some(key => !allowed.has(key))) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] has an unknown argument`)
+    if (block.blank !== undefined && block.blank !== true) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}].blank must be true when present`)
+    if (block.page_break !== undefined && block.page_break !== true) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}].page_break must be true when present`)
+    const kinds = [block.text !== undefined, block.runs !== undefined, block.items !== undefined, block.blank === true, block.page_break === true].filter(Boolean).length
+    if (kinds !== 1) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] must contain exactly one of text, runs, items, blank:true, or page_break:true`)
+    if (block.blank === true || block.page_break === true) {
+      const kind = block.blank === true ? 'blank' : 'page_break'
+      if (Object.keys(block).some(key => key !== kind)) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] ${kind} cannot have text, list, or formatting attributes`)
+      normalized.push(block)
+      continue
+    }
+    validateFormat(block, `blocks[${index}]`)
+    if (block.text !== undefined) {
+      if (typeof block.text !== 'string' || block.text.trim().length === 0 || /[\r\n]/u.test(block.text)) {
+        throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}].text must be one non-empty single-line paragraph`)
+      }
+      if (block.list !== undefined) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] paragraph text cannot have a list type`)
+      totalChars += block.text.length
+    } else if (block.runs !== undefined) {
+      if (block.list !== undefined) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] inline runs cannot have a list type`)
+      if (!Array.isArray(block.runs) || block.runs.length === 0 || block.runs.length > 100) {
+        throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}].runs must contain 1 to 100 runs`)
+      }
+      for (const [runIndex, run] of block.runs.entries()) {
+        const path = `blocks[${index}].runs[${runIndex}]`
+        if (!run || typeof run !== 'object' || Array.isArray(run)) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `${path} must be an object`)
+        const runAllowed = new Set(['text', ...DOCS_WRITE_INLINE_FIELDS])
+        if (Object.keys(run).some(key => !runAllowed.has(key))) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `${path} has an unknown argument`)
+        if (typeof run.text !== 'string' || run.text.trim().length === 0 || /[\r\n]/u.test(run.text)) {
+          throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `${path}.text must be one non-empty single-line string`)
+        }
+        validateFormat(run, path, false)
+        totalChars += run.text.length
+      }
+    } else {
+      if (!['numbered', 'bulleted', 'checklist'].includes(block.list)) throw docsFailure('validate', 'BAD_DOCS_LIST', `blocks[${index}].list must be numbered, bulleted, or checklist`)
+      if (block.paragraph_style !== undefined) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] list groups cannot set paragraph_style`)
+      if (!Array.isArray(block.items) || block.items.length === 0 || block.items.length > 100) {
+        throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}].items must contain 1 to 100 items`)
+      }
+      for (const [itemIndex, item] of block.items.entries()) {
+        const path = `blocks[${index}].items[${itemIndex}]`
+        const structured = block.list === 'checklist' && item && typeof item === 'object' && !Array.isArray(item)
+        if (structured && (Object.keys(item).some(key => !['text', 'checked'].includes(key)) || (item.checked !== undefined && typeof item.checked !== 'boolean'))) {
+          throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `${path} accepts only text and an optional boolean checked state`)
+        }
+        const text = structured ? item.text : item
+        if (typeof text !== 'string' || text.trim().length === 0 || text.length > 1000 || /[\r\n]/u.test(text)) {
+          throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `${path} must be one non-empty single-line string of at most 1000 characters${block.list === 'checklist' ? ' or a {text,checked} object' : ''}`)
+        }
+        totalChars += text.length
+      }
+      totalChars += block.items.length - 1
+    }
+    normalized.push({
+      ...normalize(block),
+      ...block.list === 'checklist' ? {
+        items: block.items.map(item => typeof item === 'string' ? { text: item, checked: false } : { text: item.text, checked: item.checked ?? false }),
+      } : {},
+      ...block.runs ? { runs: block.runs.map(normalize) } : {},
+    })
+  }
+  if (totalChars > DOCS_WRITE_MAX_CHARS) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks contain more than ${DOCS_WRITE_MAX_CHARS} characters`)
+  return normalized
+}
+
+async function docsApplyWriteColor(context, attribute, value) {
+  const control = await docsProbe(context, `write-${attribute}-open`, 'colorControl', { attribute })
+  await docsClick(context, `write-${attribute}-open`, control.point)
+  if (attribute === 'highlight' && value === 'none') {
+    const menu = await docsWait(context, 'write-highlight-none', 'colorMenu', { attribute }, state => state.nonePoint)
+    await docsClick(context, 'write-highlight-none', menu.nonePoint)
+    await docsWait(context, 'write-highlight-none-close', 'colorMenu', { attribute }, state => !state.open)
+  } else {
+    const menu = await docsWait(context, `write-${attribute}-custom`, 'colorMenu', { attribute }, state => state.customPoint)
+    await docsClick(context, `write-${attribute}-custom`, menu.customPoint)
+    const dialog = await docsWait(context, `write-${attribute}-dialog`, 'colorDialog', {}, state => state.open && state.enabled && state.point)
+    await docsClick(context, `write-${attribute}-focus`, dialog.point)
+    await docsWait(context, `write-${attribute}-focus`, 'colorDialog', {}, state => state.focused)
+    await docsKey(context, `write-${attribute}-select`, { key: 'a', code: 'KeyA', keyCode: 65 }, MODIFIER_BITS.ctrl)
+    await docsInsertText(context, `write-${attribute}-input`, value)
+    await docsWait(context, `write-${attribute}-input`, 'colorDialog', {}, state => state.focused && state.value === value)
+    await docsKey(context, `write-${attribute}-commit`, KEY_SPECS.Enter)
+    await docsWait(context, `write-${attribute}-close`, 'colorDialog', {}, state => !state.open)
+  }
+  context.writeColors[attribute] = value
+}
+
+async function docsWriteApplyColors(context, wanted) {
+  context.writeColors ??= {}
+  for (const attribute of ['color', 'highlight']) {
+    const value = wanted[attribute]
+    if (context.writeColors[attribute] !== value) await docsApplyWriteColor(context, attribute, value)
+  }
+}
+
+function docsWriteBlockFormat(block, normal) {
+  return {
+    paragraph_style: block.list ? 'Normal text' : block.paragraph_style ?? 'Normal text',
+    font_size: block.font_size ?? normal.fontSize,
+    font: block.font ?? normal.font,
+    bold: block.bold ?? false,
+    italic: block.italic ?? false,
+    underline: block.underline ?? false,
+    color: block.color ?? '#000000',
+    highlight: block.highlight ?? 'none',
+  }
+}
+
+function docsWriteRunFormat(run, base) {
+  const overrides = Object.fromEntries(DOCS_WRITE_INLINE_FIELDS.filter(field => run[field] !== undefined).map(field => [field, run[field]]))
+  return { ...base, ...overrides, paragraph_style: base.paragraph_style }
+}
+
+function docsWriteExpectedRuns(text, format) {
+  if (!text) return []
+  return [{
+    text,
+    bold: format.bold,
+    italic: format.italic,
+    underline: format.underline,
+    strike: false,
+    ...(format.font ? { font: format.font } : {}),
+    ...(format.font_size !== undefined ? { fontSize: format.font_size } : {}),
+    color: format.color,
+    highlight: format.highlight,
+  }]
+}
+
+function docsWriteExpectedBlocks(blocks, normal) {
+  const expected = []
+  for (const [owner, block] of blocks.entries()) {
+    const format = docsWriteBlockFormat(block, normal)
+    if (block.page_break === true) {
+      expected.push({ kind: 'pagebreak', owner })
+    } else if (block.blank === true) {
+      expected.push({ kind: 'para', style: 'P', text: '', runs: [], owner })
+    } else if (block.list) {
+      for (const [index, item] of block.items.entries()) {
+        const text = block.list === 'checklist' ? item.text : item
+        expected.push({
+          kind: 'para',
+          style: 'LI',
+          text,
+          listLevel: 0,
+          ordered: block.list === 'numbered',
+          ...block.list === 'numbered' ? { number: index + 1 } : {},
+          ...block.list === 'checklist' ? { checklist: true, checked: item.checked === true } : {},
+          runs: docsWriteExpectedRuns(text, format),
+          owner,
+        })
+      }
+    } else {
+      const style = format.paragraph_style === 'Normal text' ? 'P'
+        : format.paragraph_style === 'Title' ? 'TITLE'
+          : format.paragraph_style === 'Subtitle' ? 'SUBTITLE' : `H${format.paragraph_style.slice(-1)}`
+      const runs = block.runs
+        ? block.runs.map(run => docsWriteExpectedRuns(run.text, docsWriteRunFormat(run, format))[0])
+        : docsWriteExpectedRuns(block.text, format)
+      const text = block.runs ? block.runs.map(run => run.text).join('') : block.text
+      expected.push({ kind: 'para', style, text, runs, owner })
+    }
+  }
+  if (blocks.at(-1)?.list || blocks.at(-1)?.page_break) expected.push({ kind: 'para', style: 'P', text: '', runs: [], owner: blocks.length - 1 })
+  return expected
+}
+
+const DOCS_WRITE_RUN_MARK_FIELDS = ['bold', 'italic', 'underline', 'strike', 'font', 'fontSize', 'color', 'highlight']
+
+function docsWriteComparableRuns(runs) {
+  const merged = []
+  for (const run of runs) {
+    const current = { ...run, highlight: run.highlight ?? 'none' }
+    const previous = merged.at(-1)
+    if (previous && DOCS_WRITE_RUN_MARK_FIELDS.every(field => previous[field] === current[field])) previous.text += current.text
+    else merged.push(current)
+  }
+  return merged
+}
+
+function docsWriteBlockMatches(actual, expected) {
+  for (const field of ['kind', 'style', 'text', 'listLevel', 'ordered', 'number', 'checklist', 'checked']) {
+    if (actual?.[field] !== expected[field]) return false
+  }
+  if (expected.kind !== 'para') return true
+  const wanted = docsWriteComparableRuns(expected.runs ?? [])
+  const runs = docsWriteComparableRuns(actual?.runs ?? [])
+  if (wanted.length === 0) return runs.length === 0
+  if (runs.length !== wanted.length) return false
+  return wanted.every((format, index) => (
+    runs[index].text === format.text
+      && DOCS_WRITE_RUN_MARK_FIELDS.every(field => runs[index][field] === format[field])
+  ))
+}
+
+function docsWriteVerify(prefix, expected, actual, blockCount) {
+  if (actual.length < prefix.length || prefix.some((block, index) => JSON.stringify(block) !== JSON.stringify(actual[index]))) {
+    return { ok: false, code: 'DOCS_WRITE_COLLATERAL', index: -1, verifiedCount: 0, message: 'Content before the append position changed unexpectedly' }
+  }
+  const appended = actual.slice(prefix.length)
+  for (const [index, block] of appended.entries()) {
+    if (block.kind === 'para' && block.style === 'LI' && !block.text.trim()) {
+      const owner = expected[index]?.owner ?? blockCount
+      return { ok: false, code: 'DOCS_WRITE_EMPTY_LIST_ITEM', index: owner, verifiedCount: owner, message: `An empty list item remains at appended block ${index}` }
+    }
+  }
+  for (const [index, block] of expected.entries()) {
+    if (!docsWriteBlockMatches(appended[index], block)) {
+      return {
+        ok: false,
+        code: 'DOCS_WRITE_VERIFY_FAILED',
+        index: block.owner,
+        verifiedCount: block.owner,
+        message: `Appended content diverged at user block ${block.owner}`,
+        expected: { style: block.style, text: block.text },
+        actual: appended[index] ? { style: appended[index].style, text: appended[index].text } : undefined,
+      }
+    }
+  }
+  if (appended.length !== expected.length) {
+    return { ok: false, code: 'DOCS_WRITE_COLLATERAL', index: blockCount, verifiedCount: blockCount, message: 'Unexpected extra content followed the appended blocks' }
+  }
+  return { ok: true, verifiedCount: blockCount }
+}
+
+async function docsFrameProbe(context, frameId, stage, command) {
+  await docsCurrent(context, stage)
+  try {
+    const result = await runInFrame(context.tab.id, frameId, docsPageProbe, [command, {}])
+    await docsCurrent(context, stage)
+    return result
+  } catch (error) {
+    await docsCurrent(context, stage)
+    throw error
+  }
+}
+
+async function docsFocusDocument(context) {
+  const frames = await listFrames(context.tab.id).catch(() => [{ frameId: 0 }])
+  for (const frame of frames) {
+    const probe = frame.frameId === 0
+      ? command => docsProbe(context, 'write-focus-document', command)
+      : command => docsFrameProbe(context, frame.frameId, 'write-focus-document', command)
+    try {
+      const current = await probe('documentContent')
+      if (!current.present) continue
+      if (!current.focused) {
+        const focused = await probe('focusDocument')
+        if (!focused.focused) continue
+      }
+      const verified = await probe('documentContent')
+      if (verified.focused) return
+    } catch {}
+  }
+  throw docsFailure('write-focus-document', 'DOCS_FOCUS_FAILED', `Document content editor was not found or could not be focused in ${frames.length} frame(s)`)
+}
+
+function docsWritePositionMatches(baseline, positioned, reused) {
+  if (reused) return JSON.stringify(positioned) === JSON.stringify(baseline)
+  if (baseline.length === 0) return positioned.length === 0
+  if (positioned.length !== baseline.length + 1) return false
+  const last = positioned.at(-1)
+  if (last?.kind !== 'para' || last.text.trim()) return false
+  return baseline.every((block, index) => JSON.stringify(block) === JSON.stringify(positioned[index]))
+}
+
+async function docsWriteStart(context, baseline) {
+  const last = baseline.at(-1)
+  let reused = false
+  await docsKey(context, 'write-document-end', { ...KEY_SPECS.End }, MODIFIER_BITS.ctrl)
+  if (last?.kind === 'para' && last.style === 'LI') {
+    if (last.text.trim()) {
+      await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
+      await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
+    } else {
+      await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
+      reused = true
+    }
+  } else if (last?.kind === 'para' && !last.text.trim()) reused = true
+  else if (last) await docsKey(context, 'write-next-paragraph', KEY_SPECS.Enter)
+  return { prefix: reused ? baseline.slice(0, -1) : baseline, reused }
+}
+
+async function docsWriteFlow(context, args) {
+  context.attemptedCount = 0
+  try {
+    const baseline = parseDocStructure(await docsExport(context, 'write-baseline', 'html'))
+    const lastRun = baseline.findLast(block => block.runs?.length)?.runs.at(-1)
+    context.writeColors = {
+      color: lastRun?.color ?? '#000000',
+      highlight: lastRun?.highlight ?? 'none',
+    }
+    await docsFocusDocument(context)
+    const { prefix, reused } = await docsWriteStart(context, baseline)
+    const positioned = parseDocStructure(await docsExport(context, 'write-position', 'html'))
+    if (!docsWritePositionMatches(baseline, positioned, reused)) {
+      throw docsFailure('write-position', 'DOCS_WRITE_POSITION', 'Document end was not established before formatting; no blocks were typed')
+    }
+    await docsApplyFormatStates(context, { paragraph_style: 'Normal text' }, '')
+    const normal = await docsProbe(context, 'write-normal-defaults', 'format', { attributes: DOCS_FORMAT_ATTRIBUTES })
+    const expected = docsWriteExpectedBlocks(args.blocks, normal)
+    const apply = async (wanted, index, runIndex) => {
+      const { fontMissing } = await docsApplyFormatStates(context, wanted, '')
+      if (fontMissing) throw docsFailure('write-font', 'DOCS_FONT_MISSING', `Font ${JSON.stringify(wanted.font)} is unavailable; block ${index}${runIndex === undefined ? '' : ` run ${runIndex}`} was not typed`)
+      await docsWriteApplyColors(context, wanted)
+    }
+    for (const [index, block] of args.blocks.entries()) {
+      context.attemptedCount = index + 1
+      const wanted = docsWriteBlockFormat(block, normal)
+      if (block.page_break === true) {
+        await docsKey(context, 'write-page-break', KEY_SPECS.Enter, MODIFIER_BITS.ctrl)
+        continue
+      }
+      if (block.list) {
+        await apply(wanted, index)
+        const key = { numbered: '7', bulleted: '8', checklist: '9' }[block.list]
+        await docsKey(context, 'write-list-start', {
+          key,
+          code: `Digit${key}`,
+          keyCode: Number(key) + 48,
+        }, MODIFIER_BITS.ctrl | MODIFIER_BITS.shift)
+        await docsWaitFormat(context, 'write-list-start-verify', [block.list], { [block.list]: true })
+        if (block.list === 'checklist') {
+          for (const [itemIndex, item] of block.items.entries()) {
+            await docsInsertText(context, 'write-checklist-item', item.text)
+            if (item.checked) await docsKey(context, 'write-checklist-checked', KEY_SPECS.Enter, MODIFIER_BITS.ctrl | MODIFIER_BITS.shift)
+            if (itemIndex < block.items.length - 1) await docsKey(context, 'write-checklist-next', KEY_SPECS.Enter)
+          }
+        } else {
+          await docsInsertText(context, 'write-list-items', block.items.join('\n'))
+        }
+        await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
+        await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
+        await docsWaitFormat(context, 'write-list-exit-verify', ['numbered', 'bulleted', 'checklist'], { numbered: false, bulleted: false, checklist: false })
+      } else {
+        if (block.runs) {
+          for (const [runIndex, run] of block.runs.entries()) {
+            await apply(docsWriteRunFormat(run, wanted), index, runIndex)
+            await docsInsertText(context, 'write-inline-run', run.text)
+          }
+        } else {
+          await apply(wanted, index)
+          if (!block.blank) await docsInsertText(context, 'write-paragraph', block.text)
+        }
+        if (index < args.blocks.length - 1 && args.blocks[index + 1].page_break !== true) {
+          await docsKey(context, 'write-next-paragraph', KEY_SPECS.Enter)
+        }
+      }
+    }
+    const verificationEnd = Math.min(context.deadline, context.driver.now() + 8_000)
+    let actual
+    let verification
+    let retryDelay = 500
+    while (true) {
+      actual = parseDocStructure(await docsExport(context, 'write-verify', 'html'))
+      verification = docsWriteVerify(prefix, expected, actual, args.blocks.length)
+      if (verification.ok || verification.code !== 'DOCS_WRITE_VERIFY_FAILED' || context.driver.now() + retryDelay > verificationEnd) break
+      await context.driver.sleep(retryDelay)
+      retryDelay = Math.min(2_000, retryDelay * 2)
+    }
+    const outline = formatOutline(actual.slice(prefix.length))
+    if (!verification.ok) {
+      return await docsFinish(context, {
+        status: verification.verifiedCount > 0 ? 'partial' : 'failed',
+        blockCount: args.blocks.length,
+        attemptedCount: context.attemptedCount,
+        verifiedCount: verification.verifiedCount,
+        verifiedBy: 'export',
+        results: args.blocks.map((_, index) => ({
+          index,
+          status: index < verification.verifiedCount ? 'verified' : index === verification.index ? 'failed' : 'unverified',
+        })),
+        failure: {
+          index: verification.index,
+          code: verification.code,
+          message: verification.message,
+          ...verification.expected ? { expected: verification.expected } : {},
+          ...verification.actual ? { actual: verification.actual } : {},
+        },
+        outline,
+      })
+    }
+    return await docsFinish(context, {
+      status: 'completed',
+      blockCount: args.blocks.length,
+      attemptedCount: context.attemptedCount,
+      verifiedCount: verification.verifiedCount,
+      verifiedBy: 'export',
+      results: args.blocks.map((_, index) => ({ index, status: 'verified' })),
+      outline,
+    })
+  } catch (error) {
+    if (error instanceof Error) error.message += `; ${context.attemptedCount} block(s) were attempted; export verification is incomplete; use browser_docs_read before any retry`
+    throw error
+  }
+}
+
+async function docsWriteLocked(settings, args, tab, driver) {
+  const context = {
+    settings,
+    tab,
+    driver,
+    action: 'write',
+    initialUrl: tab.url,
+    deadline: driver.now() + DOCS_WRITE_DEADLINE_MS,
+    deadlineMs: DOCS_WRITE_DEADLINE_MS,
+  }
+  let timer
+  try {
+    return await Promise.race([
+      docsWriteFlow(context, args),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(docsFailure('deadline', 'DOCS_DEADLINE', `The Docs write operation exceeded ${DOCS_WRITE_DEADLINE_MS / 1000}s`)), DOCS_WRITE_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function docsWrite(settings, args, io = {}) {
+  if (args?.action !== 'write') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be write')
+  if (Object.keys(args).some(key => !['action', 'blocks'].includes(key))) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', 'unknown Docs write argument')
+  const blocks = docsWriteValidateBlocks(args.blocks)
+  const normalizedArgs = { ...args, blocks }
+  const driver = docsDriver(io)
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsWriteLocked(settings, normalizedArgs, tab, driver))
+  const gate = run.catch(() => {})
+  docsTabLocks.set(tab.id, gate)
+  try {
+    return await run
+  } finally {
+    if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
+}
+
+function docsTextOccurrences(haystack, needle) {
+  const source = String(haystack).toLowerCase()
+  const wanted = String(needle).toLowerCase()
+  return wanted ? source.split(wanted).length - 1 : 0
+}
+
+const DOCS_REPLACE_WAIT_MS = 8_000
+
+async function docsApplyReplacement(context, text, replacement) {
+  await docsNativeText(context, 'replace-query', 'setReplaceFind', text)
+  const found = await docsWait(context, 'replace-query', 'replace', {}, state => state.findValue === text && state.match !== undefined, DOCS_REPLACE_WAIT_MS)
+  if (found.match.total !== 1 || found.match.current !== 1) {
+    throw docsFailure('replace-match', 'DOCS_MATCH_NOT_UNIQUE', `Expected normalized 1 of 1, found ${found.match.text}`)
+  }
+  let replacementBaseline = 0
+  if (replacement) {
+    await docsNativeText(context, 'replacement-baseline', 'setReplaceFind', replacement)
+    const baseline = await docsWait(context, 'replacement-baseline', 'replace', {}, state => (
+      state.findValue === replacement && state.match !== undefined
+    ), DOCS_REPLACE_WAIT_MS)
+    replacementBaseline = baseline.match.total
+    await docsNativeText(context, 'replace-query-restore', 'setReplaceFind', text)
+    await docsWait(context, 'replace-query-restore', 'replace', {}, state => (
+      state.findValue === text && state.match?.current === 1 && state.match.total === 1
+    ), DOCS_REPLACE_WAIT_MS)
+  }
+  await docsNativeText(context, 'replacement-value', 'setReplaceWith', replacement)
+  const ready = await docsWait(context, 'replace-input', 'replace', {}, state => (
+    state.findValue === text && state.replacementValue === replacement && state.match?.total === 1 && state.replace
+  ), DOCS_REPLACE_WAIT_MS)
+  await docsClick(context, 'replace-text', ready.replace)
+  const expectedOldMatches = docsTextOccurrences(replacement, text)
+  const expectedNewMatches = replacementBaseline - docsTextOccurrences(text, replacement) + 1
+  if (replacement && expectedNewMatches < 0) {
+    throw docsFailure('verify-replacement', 'DOCS_COUNTER_MISMATCH', 'The replacement counter baseline became inconsistent')
+  }
+  const verified = await docsWait(context, 'verify-replacement', 'replace', {}, state => (
+    (state.findValue === text && state.match?.total === expectedOldMatches)
+      || (replacement && state.findValue === replacement && state.match.total === expectedNewMatches)
+  ), DOCS_REPLACE_WAIT_MS)
+  if (!replacement) return { matchCount: 0 }
+  if (verified.findValue === replacement) {
+    if (expectedNewMatches !== replacementBaseline) return { matchCount: verified.match.total }
+    await docsCloseReplace(context)
+    const oldText = await docsOpenFind(context, text)
+    if (oldText.match.total !== expectedOldMatches) {
+      throw docsFailure('verify-replacement', 'DOCS_VERIFY_FAILED', `Expected ${expectedOldMatches} old-text matches, found ${oldText.match.text}`)
+    }
+    await docsCloseFind(context, 'verify-replacement')
+    return { matchCount: expectedNewMatches }
+  }
+  await docsCloseReplace(context)
+  const replacementState = await docsOpenFind(context, replacement)
+  if (replacementState.match.total !== expectedNewMatches) {
+    throw docsFailure('verify-replacement', 'DOCS_VERIFY_FAILED', `Expected ${expectedNewMatches} replacement matches, found ${replacementState.match.text}`)
+  }
+  await docsCloseFind(context, 'verify-replacement')
+  return { matchCount: replacementState.match.total }
+}
+
+async function docsOpenReplace(context) {
+  const existing = await docsProbe(context, 'open-replace', 'replace')
+  if (existing.open) return
+  await docsKey(context, 'open-replace', { key: 'h', code: 'KeyH', keyCode: 72 }, MODIFIER_BITS.ctrl)
+  try {
+    await docsWait(context, 'open-replace', 'replace', {}, state => state.open && state.findEnabled && state.replacementEnabled, DOCS_REPLACE_WAIT_MS)
+    return
+  } catch (error) {
+    if (error?.code !== 'DOCS_WAIT_TIMEOUT') throw error
+    const edit = await docsProbe(context, 'open-replace-menu', 'editMenu')
+    if (!edit.present || edit.disabled) throw error
+    await docsClick(context, 'open-replace-menu', edit.point)
+    const item = await docsWait(context, 'open-replace-menu', 'replaceMenuItem', {}, state => state.point && !state.disabled, DOCS_REPLACE_WAIT_MS)
+    await docsClick(context, 'open-replace-menu', item.point)
+    await docsWait(context, 'open-replace', 'replace', {}, state => state.open && state.findEnabled && state.replacementEnabled, DOCS_REPLACE_WAIT_MS)
+  }
+}
+
+const DOCS_CLOSE_WAIT_MS = 30_000
+
+async function docsCloseReplace(context) {
+  const state = await docsProbe(context, 'close-replace', 'replace')
+  if (!state.open) return
+  if (state.close) await docsClick(context, 'close-replace', state.close)
+  else await docsKey(context, 'close-replace', KEY_SPECS.Escape)
+  await docsWait(context, 'close-replace', 'replace', {}, next => !next.open, DOCS_CLOSE_WAIT_MS)
+}
+
+async function docsReplaceTextFlow(context, text, replacement) {
+  await docsOpenReplace(context)
+  const applied = await docsApplyReplacement(context, text, replacement)
+  await docsCloseReplace(context)
+  return docsFinish(context, {
+    status: replacement ? 'replaced_text' : 'removed_text',
+    matchCount: applied.matchCount,
+    verifiedBy: 'find-counter',
+    ...replacement ? {} : { removedText: text },
+  })
+}
+
+async function docsReplaceTextLocked(settings, args, tab, driver) {
+  const context = {
+    settings,
+    tab,
+    driver,
+    action: 'replace_text',
+    initialUrl: tab.url,
+    deadline: driver.now() + DOCS_DEADLINE_MS,
+  }
+  let timer
+  try {
+    return await Promise.race([
+      docsReplaceTextFlow(context, args.text, args.replacement),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(docsFailure('deadline', 'DOCS_DEADLINE', `The Docs operation exceeded ${DOCS_DEADLINE_MS / 1000}s`)), DOCS_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function docsReplaceText(settings, args, io = {}) {
+  if (args?.action !== 'replace_text') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be replace_text')
+  if (typeof args.text !== 'string' || args.text.trim().length === 0 || args.text.length > 1000) {
+    throw docsFailure('validate', 'BAD_DOCS_TEXT', 'text must be a non-empty string of at most 1000 characters')
+  }
+  if (typeof args.replacement !== 'string' || args.replacement.length > 1000) {
+    throw docsFailure('validate', 'BAD_DOCS_REPLACEMENT', 'replacement must be a string of at most 1000 characters')
+  }
+  if (args.replacement === args.text) throw docsFailure('validate', 'BAD_DOCS_REPLACEMENT', 'replacement must differ from text')
+  const driver = docsDriver(io)
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsReplaceTextLocked(settings, args, tab, driver))
+  const gate = run.catch(() => {})
+  docsTabLocks.set(tab.id, gate)
+  try {
+    return await run
+  } finally {
+    if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
+}
+
+const DOCS_REPLACE_MANY_MAX_EDITS = 200
+const DOCS_REPLACE_MANY_DEADLINE_MS = 600_000
+
+async function docsReplaceManyFlow(context, edits) {
+  const results = []
+  let appliedCount = 0
+  try {
+    let failure
+    for (const [index, edit] of edits.entries()) {
+      let applied
+      try {
+        await docsOpenReplace(context)
+        applied = await docsApplyReplacement(context, edit.text, edit.replacement)
+      } catch (error) {
+        if (error?.code !== 'DOCS_MATCH_NOT_UNIQUE') throw error
+        failure = {
+          index,
+          text: edit.text,
+          code: error.code,
+          stage: error.stage,
+          message: error.message,
+        }
+        results.push({ index, status: 'failed', code: error.code })
+        break
+      }
+      appliedCount += 1
+      results.push({
+        index,
+        status: edit.replacement ? 'replaced_text' : 'removed_text',
+        matchCount: applied.matchCount,
+      })
+    }
+    await docsCloseReplace(context)
+    const status = failure ? appliedCount > 0 ? 'partial' : 'failed' : 'completed'
+    return await docsFinish(context, {
+      status,
+      editCount: edits.length,
+      appliedCount,
+      remainingCount: edits.length - results.length,
+      verifiedBy: 'find-counter',
+      results,
+      ...failure ? { failure } : {},
+    })
+  } catch (error) {
+    if (appliedCount > 0 && error instanceof Error) {
+      error.message += `; ${appliedCount} earlier edit${appliedCount === 1 ? ' was' : 's were'} applied before this failure`
+    }
+    throw error
+  }
+}
+
+async function docsReplaceManyLocked(settings, args, tab, driver) {
+  const context = {
+    settings,
+    tab,
+    driver,
+    action: 'replace_many',
+    initialUrl: tab.url,
+    deadline: driver.now() + DOCS_REPLACE_MANY_DEADLINE_MS,
+  }
+  let timer
+  try {
+    return await Promise.race([
+      docsReplaceManyFlow(context, args.edits),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(docsFailure('deadline', 'DOCS_DEADLINE', `The Docs batch operation exceeded ${DOCS_REPLACE_MANY_DEADLINE_MS / 1000}s`)), DOCS_REPLACE_MANY_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function docsReplaceMany(settings, args, io = {}) {
+  if (args?.action !== 'replace_many') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be replace_many')
+  if (!Array.isArray(args.edits) || args.edits.length === 0 || args.edits.length > DOCS_REPLACE_MANY_MAX_EDITS) {
+    throw docsFailure('validate', 'BAD_DOCS_EDITS', `edits must be an array of 1 to ${DOCS_REPLACE_MANY_MAX_EDITS} replacement objects`)
+  }
+  for (const [index, edit] of args.edits.entries()) {
+    if (!edit || typeof edit !== 'object' || Array.isArray(edit)) {
+      throw docsFailure('validate', 'BAD_DOCS_EDITS', `edits[${index}] must be an object`)
+    }
+    if (typeof edit.text !== 'string' || edit.text.trim().length === 0 || edit.text.length > 1000) {
+      throw docsFailure('validate', 'BAD_DOCS_TEXT', `edits[${index}].text must be a non-empty string of at most 1000 characters`)
+    }
+    if (typeof edit.replacement !== 'string' || edit.replacement.length > 1000) {
+      throw docsFailure('validate', 'BAD_DOCS_REPLACEMENT', `edits[${index}].replacement must be a string of at most 1000 characters`)
+    }
+    if (edit.replacement === edit.text) throw docsFailure('validate', 'BAD_DOCS_REPLACEMENT', `edits[${index}] replacement must differ from text`)
+  }
+  const driver = docsDriver(io)
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsReplaceManyLocked(settings, args, tab, driver))
+  const gate = run.catch(() => {})
+  docsTabLocks.set(tab.id, gate)
+  try {
+    return await run
+  } finally {
+    if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
+}
+
+async function docsRenameFlow(context, title) {
+  const control = await docsWait(context, 'rename-target', 'rename', {}, state => state.present && state.enabled && state.point, DOCS_REPLACE_WAIT_MS)
+  await docsClick(context, 'rename-focus', control.point)
+  await docsWait(context, 'rename-focus', 'rename', {}, state => state.focused, DOCS_REPLACE_WAIT_MS)
+  await docsKey(context, 'rename-select', { key: 'a', code: 'KeyA', keyCode: 65 }, MODIFIER_BITS.ctrl)
+  await docsInsertText(context, 'rename-input', title)
+  await docsWait(context, 'rename-input', 'rename', {}, state => state.value === title && state.focused, DOCS_REPLACE_WAIT_MS)
+  await docsKey(context, 'rename-commit', KEY_SPECS.Enter)
+  await docsWait(context, 'rename-commit', 'rename', {}, state => (
+    state.title === title || state.title === `${title} - Google Docs`
+  ), DOCS_REPLACE_WAIT_MS)
+  return docsFinish(context, { status: 'renamed', verifiedBy: 'document-title', title })
+}
+
+async function docsRenameLocked(settings, args, tab, driver) {
+  const context = {
+    settings,
+    tab,
+    driver,
+    action: 'rename',
+    initialUrl: tab.url,
+    deadline: driver.now() + DOCS_DEADLINE_MS,
+  }
+  let timer
+  try {
+    return await Promise.race([
+      docsRenameFlow(context, args.title.trim()),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(docsFailure('deadline', 'DOCS_DEADLINE', `The Docs operation exceeded ${DOCS_DEADLINE_MS / 1000}s`)), DOCS_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function docsRename(settings, args, io = {}) {
+  if (args?.action !== 'rename') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be rename')
+  if (typeof args.title !== 'string' || args.title.trim().length === 0 || args.title.length > 200) {
+    throw docsFailure('validate', 'BAD_DOCS_TITLE', 'title must be a non-empty string of at most 200 characters')
+  }
+  const driver = docsDriver(io)
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsRenameLocked(settings, args, tab, driver))
+  const gate = run.catch(() => {})
+  docsTabLocks.set(tab.id, gate)
+  try {
+    return await run
+  } finally {
+    if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
+}
+
+function docsPageSetupMatches(state, args) {
+  if (!state.open) return false
+  if (args.paper_size !== undefined && !state.paperSize.includes(args.paper_size)) return false
+  if (args.orientation !== undefined && state[args.orientation] !== true) return false
+  for (const side of ['Top', 'Bottom', 'Left', 'Right']) {
+    const wanted = args.margins?.[side]
+    if (wanted !== undefined && Number(state.margins[side]?.value) !== wanted) return false
+  }
+  return true
+}
+
+async function docsPageSetupFlow(context, args) {
+  let state = await docsProbe(context, 'page-setup-resume', 'pageSetup')
+  if (!state.open) {
+    const file = await docsWait(context, 'page-setup-file', 'fileMenu', {}, current => current.present && !current.disabled && current.point)
+    await docsClick(context, 'page-setup-file', file.point)
+    const item = await docsWait(context, 'page-setup-open', 'pageSetupMenuItem', {}, current => current.present && !current.disabled && current.point)
+    await docsClick(context, 'page-setup-open', item.point)
+    state = await docsWait(context, 'page-setup-dialog', 'pageSetup', {}, current => current.open)
+  }
+  if (args.paper_size !== undefined && !state.paperSize.includes(args.paper_size)) {
+    await docsClick(context, 'page-setup-paper-open', state.paperPoint)
+    const row = await docsWait(context, 'page-setup-paper', 'pagePaperMenu', {}, current => current.point)
+    await docsClick(context, 'page-setup-paper', row.point)
+    state = await docsWait(context, 'page-setup-paper-verify', 'pageSetup', {}, current => current.open && current.paperSize.includes(args.paper_size))
+  }
+  if (args.orientation !== undefined && state[args.orientation] !== true) {
+    const point = args.orientation === 'portrait' ? state.portraitPoint : state.landscapePoint
+    await docsClick(context, 'page-setup-orientation', point)
+    state = await docsWait(context, 'page-setup-orientation-verify', 'pageSetup', {}, current => current.open && current[args.orientation] === true)
+  }
+  for (const side of ['Top', 'Bottom', 'Left', 'Right']) {
+    const wanted = args.margins?.[side]
+    if (wanted === undefined || Number(state.margins[side].value) === wanted) continue
+    const changed = await docsProbe(context, 'page-setup-margin', 'setPageMargin', { side, value: String(wanted) })
+    if (!changed.readback) throw docsFailure('page-setup-margin', 'DOCS_QUERY_MISMATCH', `${side} margin did not retain ${wanted}`)
+    state = await docsWait(context, 'page-setup-margin-verify', 'pageSetup', {}, current => current.open && Number(current.margins[side]?.value) === wanted)
+  }
+  state = await docsWait(context, 'page-setup-verify', 'pageSetup', {}, current => docsPageSetupMatches(current, args))
+  await docsClick(context, 'page-setup-ok', state.okPoint)
+  try {
+    await docsWait(context, 'page-setup-close', 'pageSetup', {}, current => !current.open)
+  } catch (error) {
+    if (error?.code !== 'DOCS_WAIT_TIMEOUT') throw error
+    const latest = await docsProbe(context, 'page-setup-close-recheck', 'pageSetup')
+    if (latest.open) {
+      await docsClick(context, 'page-setup-ok-retry', latest.okPoint)
+      await docsWait(context, 'page-setup-close', 'pageSetup', {}, current => !current.open)
+    }
+  }
+  return docsFinish(context, {
+    status: 'completed',
+    ...args.paper_size !== undefined ? { paperSize: args.paper_size } : {},
+    ...args.orientation !== undefined ? { orientation: args.orientation } : {},
+    ...args.margins !== undefined ? { margins: args.margins } : {},
+    verifiedBy: 'page-setup-dialog',
+  })
+}
+
+async function docsPageSetupLocked(settings, args, tab, driver) {
+  const context = {
+    settings,
+    tab,
+    driver,
+    action: 'page_setup',
+    initialUrl: tab.url,
+    deadline: driver.now() + DOCS_DEADLINE_MS,
+  }
+  let timer
+  try {
+    return await Promise.race([
+      docsPageSetupFlow(context, args),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(docsFailure('deadline', 'DOCS_DEADLINE', `The Docs operation exceeded ${DOCS_DEADLINE_MS / 1000}s`)), DOCS_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function docsPageSetup(settings, args, io = {}) {
+  if (args?.action !== 'page_setup') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be page_setup')
+  const allowed = new Set(['action', 'paper_size', 'orientation', 'margins'])
+  if (Object.keys(args).some(key => !allowed.has(key))) throw docsFailure('validate', 'BAD_DOCS_PAGE_SETUP', 'unknown Docs page setup argument')
+  if (args.paper_size === undefined && args.orientation === undefined && args.margins === undefined) {
+    throw docsFailure('validate', 'BAD_DOCS_PAGE_SETUP', 'page setup requires paper_size, orientation, or margins')
+  }
+  if (args.paper_size !== undefined && args.paper_size !== 'Letter') throw docsFailure('validate', 'BAD_DOCS_PAGE_SETUP', 'paper_size must be Letter')
+  if (args.orientation !== undefined && !['portrait', 'landscape'].includes(args.orientation)) {
+    throw docsFailure('validate', 'BAD_DOCS_PAGE_SETUP', 'orientation must be portrait or landscape')
+  }
+  if (args.margins !== undefined) {
+    if (!args.margins || typeof args.margins !== 'object' || Array.isArray(args.margins) || Object.keys(args.margins).length === 0
+      || Object.keys(args.margins).some(key => !['Top', 'Bottom', 'Left', 'Right'].includes(key))) {
+      throw docsFailure('validate', 'BAD_DOCS_PAGE_SETUP', 'margins must name at least one of Top, Bottom, Left, Right')
+    }
+    for (const value of Object.values(args.margins)) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 10) {
+        throw docsFailure('validate', 'BAD_DOCS_PAGE_SETUP', 'margin values must be numbers from 0 to 10 inches')
+      }
+    }
+  }
+  const driver = docsDriver(io)
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsPageSetupLocked(settings, args, tab, driver))
+  const gate = run.catch(() => {})
+  docsTabLocks.set(tab.id, gate)
+  try {
+    return await run
+  } finally {
+    if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
+}
+
 const BATCH_OPS = new Set(['click', 'click_at', 'hover', 'select_option', 'type', 'press_key', 'scroll', 'wait_for', 'navigate', 'select'])
 const BATCH_ACTION_FIELDS = [
   'changed', 'signals', 'clicked', 'hovered', 'selected', 'selectedIndex',
@@ -5623,6 +7831,16 @@ export async function execute(op, args = {}, settings) {
   }
   if (op === 'batch') {
     return batch(normalized, args)
+  }
+  if (op === 'docs') {
+    if (args.action === 'replace_text') return docsReplaceText(normalized, args)
+    if (args.action === 'replace_many') return docsReplaceMany(normalized, args)
+    if (args.action === 'rename') return docsRename(normalized, args)
+    if (args.action === 'format') return docsFormat(normalized, args)
+    if (args.action === 'read') return docsRead(normalized, args)
+    if (args.action === 'write') return docsWrite(normalized, args)
+    if (args.action === 'page_setup') return docsPageSetup(normalized, args)
+    return docsSetFont(normalized, args)
   }
   if (op === 'type') {
     return typeText(normalized, args)

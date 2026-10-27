@@ -41,17 +41,30 @@ export function formatViewText(view) {
   return lines.join('\n')
 }
 
+function formatTimeContext(now) {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'
+  return [
+    '<current_time>',
+    `local ${now.toString()}`,
+    `utc ${now.toISOString()}`,
+    `timezone ${timezone}`,
+    'Use this snapshot for “today”, “now”, and relative date/time requests; no web lookup is needed.',
+    '</current_time>',
+  ].join('\n')
+}
+
 /**
  * @param {Record<string, any> | null | undefined} view
  * @param {string} text
+ * @param {Date} now
  * @returns {Array<Record<string, unknown>>}
  */
-export function buildPromptBlocks(view, text) {
+export function buildPromptBlocks(view, text, now = new Date()) {
   const header = view?.image?.data === undefined
     ? `${formatViewText(view)}\n(No screenshot is attached for this turn. Use browser_screenshot if you need to see the page.)`
     : formatViewText(view)
   /** @type {Array<Record<string, unknown>>} */
-  const blocks = [{ type: 'text', text: `${header}\n\n${text}` }]
+  const blocks = [{ type: 'text', text: `${header}\n\n${formatTimeContext(now)}\n\n${text}` }]
   if (typeof view?.image?.data === 'string' && view.image.data.length > 0 && typeof view.image.mimeType === 'string') {
     blocks.push({ type: 'image', data: view.image.data, mimeType: view.image.mimeType })
   }

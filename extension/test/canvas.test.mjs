@@ -5,6 +5,7 @@ import {
   canvasBatchError,
   canvasBurstError,
   canvasEditorForUrl,
+  canvasSelectionError,
   compareLayoutFingerprints,
   deriveLayoutShiftOutcome,
   deriveTypeVerdict,
@@ -378,6 +379,14 @@ test('canvasBurstError rejects multi-point Docs clicks but not game bursts', () 
   assert.equal(canvasBurstError(url, 2).code, 'CANVAS_BURST_UNSUPPORTED')
   assert.equal(canvasBurstError(url, 1), undefined)
   assert.equal(canvasBurstError('https://example.com/game', 20), undefined)
+})
+
+test('canvasSelectionError blocks Google Docs drags before they can move text', () => {
+  const url = 'https://docs.google.com/document/d/abc/edit'
+  assert.equal(canvasSelectionError(url).code, 'DOCS_CANVAS_SELECT_UNSUPPORTED')
+  assert.match(canvasSelectionError(url).message, /can move text instead of selecting/)
+  assert.equal(canvasSelectionError('https://docs.google.com/spreadsheets/d/abc/edit'), undefined)
+  assert.equal(canvasSelectionError('https://example.com/game'), undefined)
 })
 
 test('resolveCanvasImageBasis accepts only the newest usable canvas view', () => {

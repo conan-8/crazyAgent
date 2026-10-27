@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  captureVisibleTab,
   formatLabelsHint,
   formatTabCandidates,
   isAmbiguousTabMatch,
@@ -10,6 +11,7 @@ import {
   matchTabQuery,
   parseClickAtArgs,
   parsePressKeyArgs,
+  parseWaitForArgs,
   resolveLabelSignature,
   staleScrollInfo,
 } from '../sidepanel/browser.js'
@@ -352,4 +354,137 @@ test('resolveLabelSignature ignores malformed candidate entries', () => {
   assert.equal(resolved.reason, 'NO_MATCH')
   assert.equal(resolved.candidateCount, 0, 'labels without a numeric id are not candidates')
   assert.equal(resolveLabelSignature(undefined, INBOX_SIGNATURE).reason, 'NO_MATCH')
+})
+
+/* ---------------------------------------------------------------- */
+/* capture watchdog and cooldown circuit                             */
+/* ---------------------------------------------------------------- */
+
+test('capture timeout focuses the window once and retries before opening the circuit', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 })
+  const previousChrome = globalThis.chrome
+  let resolveHung
+  let calls = 0
+  let focusCalls = 0
+  globalThis.chrome = {
+    tabs: {
+      captureVisibleTab: () => {
+        calls += 1
+        if (calls === 1) return new Promise(resolve => { resolveHung = resolve })
+        return Promise.resolve(`data:image/jpeg;base64,capture-${calls}`)
+      },
+    },
+    windows: { update: async () => { focusCalls += 1 } },
+  }
+  t.after(() => { globalThis.chrome = previousChrome })
+
+  const result = captureVisibleTab(1, 72)
+  await Promise.resolve()
+  await Promise.resolve()
+  t.mock.timers.tick(5_000)
+  assert.equal((await result).dataUrl, 'data:image/jpeg;base64,capture-2')
+  assert.equal(focusCalls, 1)
+  assert.equal(calls, 2)
+  assert.equal((await captureVisibleTab(1, 72)).dataUrl, 'data:image/jpeg;base64,capture-3')
+  assert.equal(focusCalls, 1, 'normal captures never steal focus')
+  resolveHung('data:image/jpeg;base64,late')
+})
+
+test('persistent capture timeout releases the queue, blocks retries during cooldown, and ignores late settlement', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 100_000 })
+  const previousChrome = globalThis.chrome
+  const hung = []
+  let calls = 0
+  let focusCalls = 0
+  globalThis.chrome = {
+    tabs: {
+      captureVisibleTab: () => {
+        calls += 1
+        if (calls <= 2) return new Promise(resolve => hung.push(resolve))
+        return Promise.resolve(`data:image/jpeg;base64,capture-${calls}`)
+      },
+    },
+    windows: { update: async () => { focusCalls += 1 } },
+  }
+  t.after(() => { globalThis.chrome = previousChrome })
+
+  const first = captureVisibleTab(1, 72)
+  const firstRejection = assert.rejects(first, error => error.code === 'CAPTURE_TIMEOUT')
+  const queued = captureVisibleTab(1, 72)
+  const queuedRejection = assert.rejects(queued, error => error.code === 'CAPTURE_COOLDOWN')
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(calls, 1, 'the first Chrome call and its watchdog have started')
+  t.mock.timers.tick(5_000)
+  for (let turn = 0; turn < 5; turn += 1) await Promise.resolve()
+  assert.equal(calls, 2, 'the focused retry has started')
+  t.mock.timers.tick(5_000)
+  await firstRejection
+  await queuedRejection
+  assert.equal(focusCalls, 1)
+  assert.equal(calls, 2, 'the queued capture fails without another Chrome call')
+
+  t.mock.timers.tick(30_000)
+  const recovered = await captureVisibleTab(1, 72)
+  assert.equal(recovered.dataUrl, 'data:image/jpeg;base64,capture-3')
+  assert.equal(calls, 3, 'recovery proceeds while the original Chrome promises are still pending')
+
+  for (const resolve of hung) resolve('data:image/jpeg;base64,late')
+  await Promise.resolve()
+  await Promise.resolve()
+  const afterLateSettlement = await captureVisibleTab(1, 72)
+  assert.equal(afterLateSettlement.dataUrl, 'data:image/jpeg;base64,capture-4')
+  assert.equal(calls, 4, 'late settlement neither rejects nor blocks later captures')
+})
+
+test('capture keeps transient readback retry under the watchdog', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 200_000 })
+  const previousChrome = globalThis.chrome
+  let calls = 0
+  globalThis.chrome = {
+    tabs: {
+      captureVisibleTab: () => {
+        calls += 1
+        return calls === 1
+          ? Promise.reject(new Error('image readback failed'))
+          : Promise.resolve('data:image/jpeg;base64,retry-ok')
+      },
+    },
+  }
+  t.after(() => { globalThis.chrome = previousChrome })
+
+  const result = captureVisibleTab(1, 72)
+  for (let turn = 0; turn < 5; turn += 1) await Promise.resolve()
+  assert.equal(calls, 1)
+  for (let turn = 0; turn < 20; turn += 1) await Promise.resolve()
+  t.mock.timers.tick(150)
+  assert.equal((await result).dataUrl, 'data:image/jpeg;base64,retry-ok')
+  assert.equal(calls, 2)
+})
+
+/* ---------------------------------------------------------------- */
+/* wait_for validation                                               */
+/* ---------------------------------------------------------------- */
+
+test('parseWaitForArgs validates URL, idle, and exact safe-integer delays', () => {
+  assert.deepEqual(parseWaitForArgs({ url: '/ready', idle: false, ms: 0 }), {
+    conditions: { url: '/ready', ms: 0 },
+    timeoutMs: 10_000,
+  })
+  assert.throws(() => parseWaitForArgs({ idle: false }), error => error.code === 'BAD_WAIT')
+  assert.throws(() => parseWaitForArgs({ url: '' }), error => error.code === 'BAD_WAIT')
+  assert.throws(() => parseWaitForArgs({ idle: 'false' }), error => error.code === 'BAD_WAIT')
+  for (const ms of [1.2, '100', Number.NaN, Number.MAX_SAFE_INTEGER + 1, -1, 30_001]) {
+    assert.throws(() => parseWaitForArgs({ ms }), error => error.code === 'BAD_WAIT', `ms=${String(ms)}`)
+  }
+  assert.equal(parseWaitForArgs({ ms: 30_000 }).conditions.ms, 30_000)
+})
+
+test('parseWaitForArgs expands only omitted timeouts and rejects explicit timeout before ms', () => {
+  assert.equal(parseWaitForArgs({ ms: 20_000 }).timeoutMs, 20_000)
+  assert.equal(parseWaitForArgs({ ms: 20_000, timeout_ms: 20_000 }).timeoutMs, 20_000)
+  assert.throws(
+    () => parseWaitForArgs({ ms: 20_000, timeout_ms: 19_999 }),
+    error => error.code === 'BAD_WAIT',
+  )
 })

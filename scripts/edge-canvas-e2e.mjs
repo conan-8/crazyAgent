@@ -284,5 +284,51 @@ assert.equal(canvasType.view, 'full', 'the caller receives a fresh visual confir
 assert.equal(canvasType.hasImage, true)
 console.log('PASS canvas typing lands exactly once and stays explicitly UNVERIFIED')
 
+const clickAnimation = await evaluate(`(async () => { ${prefix}
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: mod.showClickRipple, args: [120, 120] })
+  const result = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      const ripple = document.querySelector('[data-crazyagent-click-ripple]')
+      const crosshair = document.querySelector('[data-crazyagent-click-crosshair]')
+      const rings = [...document.querySelectorAll('[data-crazyagent-click-ring]')]
+      const crossStyle = getComputedStyle(crosshair)
+      const ringStyle = getComputedStyle(rings[0])
+      return {
+        ripples: document.querySelectorAll('[data-crazyagent-click-ripple]').length,
+        crosshairs: document.querySelectorAll('[data-crazyagent-click-crosshair]').length,
+        rings: rings.length,
+        crosshairWidth: crossStyle.width,
+        crosshairAnimation: crossStyle.animationName,
+        ringWidth: ringStyle.width,
+        ringBorder: ringStyle.borderTopWidth,
+        ringAnimation: ringStyle.animationName,
+        ringDuration: ringStyle.animationDuration,
+      }
+    },
+  })
+  return result[0].result
+})()`)
+assert.deepEqual(clickAnimation, {
+  ripples: 1,
+  crosshairs: 1,
+  rings: 2,
+  crosshairWidth: '14px',
+  crosshairAnimation: '__crazyagent_click_crosshair',
+  ringWidth: '18px',
+  ringBorder: '1px',
+  ringAnimation: '__crazyagent_click_ripple',
+  ringDuration: '0.65s',
+})
+await new Promise(resolve => setTimeout(resolve, 1_000))
+const animationRemoved = await evaluate(`(async () => { ${prefix}
+  return (await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => document.querySelectorAll('[data-crazyagent-click-ripple]').length === 0,
+  }))[0].result
+})()`)
+assert.equal(animationRemoved, true, 'click animation cleans up after itself')
+console.log('PASS subtle crosshair click animation — two thin ripples and cleanup')
+
 console.log('\nALL CANVAS CHECKS PASSED')
 panel.close()

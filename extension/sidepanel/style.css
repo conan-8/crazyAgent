@@ -164,6 +164,16 @@ textarea {
   pointer-events: none;
 }
 
+.topbar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 100%;
+  pointer-events: auto;
+}
+
 .top-actions {
   position: absolute;
   top: 14px;
@@ -188,13 +198,6 @@ textarea {
 .app.utilities-open .top-actions {
   transform: translateX(0);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 10px 28px rgba(0, 0, 0, 0.4);
-}
-
-.top-sep {
-  width: 20px;
-  height: 1px;
-  margin: 2px auto;
-  background: rgba(255, 255, 255, 0.08);
 }
 
 .icon-btn {
@@ -882,10 +885,11 @@ input::placeholder {
 
 .composer-model {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 5px;
   min-width: 0;
-  max-width: 55%;
+  max-width: none;
   height: 32px;
   padding: 0 8px;
   border: 0;
@@ -896,9 +900,105 @@ input::placeholder {
   white-space: nowrap;
 }
 
+.composer-controls .composer-spacer {
+  flex: 0 0 auto;
+}
+
 .composer-model > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#composer-model-name {
+  flex: 0 1 auto;
+}
+
+.composer-model-effort,
+.composer-model-context {
+  flex: 0 0 auto;
+}
+
+.composer-model-effort {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.composer-model-effort.muted {
+  color: var(--muted);
+}
+
+.composer-model-context {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.composer-model-context[hidden] {
+  display: none;
+}
+
+.composer-context-ring {
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+}
+
+.context-ring-track,
+.context-ring-progress {
+  fill: none;
+  stroke-width: 2;
+}
+
+.context-ring-track {
+  stroke: rgba(255, 195, 0, 0.18);
+}
+
+.context-ring-progress {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+}
+
+.composer-context-tooltip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: max-content;
+  padding: 6px 8px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #1f1f1f;
+  box-shadow: var(--shadow);
+  color: #d0d0d0;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(3px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+  pointer-events: none;
+}
+
+.composer-model-context:hover .composer-context-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+.composer-context-tooltip strong {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .composer-model .icon {
@@ -1827,7 +1927,8 @@ input::placeholder {
   }
 
   .composer-model {
-    max-width: 46%;
+    max-width: none;
+    gap: 4px;
   }
 
   .modal-body,
@@ -1927,23 +2028,17 @@ input::placeholder {
   min-height: 0;
 }
 
-.activity-step .step-head::before {
-  display: grid;
-  width: 18px;
-  height: 18px;
+.step-icon {
+  width: 17px;
+  height: 17px;
   flex: 0 0 auto;
-  place-items: center;
   color: #8a8a8a;
-  content: "✦";
-  font-size: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
-
-.activity-step[data-kind="click"] .step-head::before { content: "◉"; }
-.activity-step[data-kind="scroll"] .step-head::before { content: "↕"; }
-.activity-step[data-kind="open"] .step-head::before { content: "◎"; }
-.activity-step[data-kind="read"] .step-head::before { content: "▤"; }
-.activity-step[data-kind="shot"] .step-head::before { content: "▣"; }
-.activity-step[data-kind="tool"] .step-head::before { content: "◇"; }
 
 .activity-step .step-caret {
   order: 4;
@@ -2013,6 +2108,37 @@ input::placeholder {
 .activity-answer {
   margin-top: 6px;
   margin-bottom: 0;
+}
+
+.activity-screenshot {
+  display: block;
+  width: 100%;
+  margin: 6px 0 10px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #303030;
+  border-radius: 10px;
+  background: #0b0b0b;
+  color: var(--muted);
+  text-align: left;
+}
+
+.activity-screenshot:hover {
+  border-color: rgba(255, 195, 0, 0.55);
+}
+
+.activity-screenshot img {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+}
+
+.activity-screenshot > span {
+  display: block;
+  padding: 5px 8px;
+  border-top: 1px solid #262626;
+  font-size: 11px;
 }
 
 .markdown-body > :first-child {

@@ -59,6 +59,7 @@ let llmState = { provider: 'openrouter', baseUrl: DEFAULT_MODEL_BASE_URL, model:
 let credentialState = { configured: false, source: 'none' }
 /** @type {{baseUrl: string, models: Array<Record<string, any>>, loading: boolean, error: string}} */
 let modelsState = { baseUrl: '', models: [], loading: false, error: '' }
+let latestContextTokens = 0
 /** @type {Record<string, any> | null} */
 let pendingLlmConfig = null
 let setupPrompted = false
@@ -109,7 +110,6 @@ const els = {
   bannerAction: $('banner-action'),
   sessionInfo: $('session-info'),
   timing: $('timing'),
-  pause: $('pause'),
   newChat: $('new-chat'),
   settings: $('settings'),
   settingsModal: $('settings-modal'),
@@ -129,6 +129,7 @@ const els = {
   settingWidth: $('setting-width'),
   settingQuality: $('setting-quality'),
   settingAutoCapture: $('setting-autocapture'),
+  settingHitboxes: $('setting-hitboxes'),
   settingsSave: $('settings-save'),
   testCapture: $('test-capture'),
   imageModal: $('image-modal'),
@@ -155,6 +156,11 @@ const els = {
   historyEmpty: $('history-empty'),
   composerModel: $('composer-model'),
   composerModelName: $('composer-model-name'),
+  composerModelEffort: $('composer-model-effort'),
+  composerModelContext: $('composer-model-context'),
+  composerContextProgress: $('composer-context-progress'),
+  composerContextUsage: $('composer-context-usage'),
+  composerContextPercent: $('composer-context-percent'),
   modelMenu: $('model-menu'),
   attach: $('attach'),
   fileInput: $('file-input'),
@@ -218,6 +224,7 @@ function populateSettings() {
   els.settingWidth.value = String(settings.captureWidth)
   els.settingQuality.value = String(settings.quality)
   els.settingAutoCapture.checked = settings.autoCapture !== false
+  els.settingHitboxes.checked = settings.showHitboxes !== false
 }
 
 function setEffortSelection(value) {
@@ -230,13 +237,48 @@ function setEffortSelection(value) {
 }
 
 function shortModelName(model) {
-  return model?.name || model?.id?.split('/').pop() || 'Select model'
+  const raw = model?.name || model?.id?.split('/').pop() || 'Select model'
+  const withoutPath = raw.includes('/') ? raw.split('/').pop() : raw
+  return withoutPath.replace(/^[^:]+:\s*/u, '') || withoutPath
+}
+
+function contextWindowBadge(model) {
+  const tokens = Number(model?.contextWindow)
+  return {
+    tokens: Number.isFinite(tokens) && tokens > 0 ? tokens : 0,
+    title: tokens > 0 ? `${tokens.toLocaleString('en-US')} token context window` : '',
+  }
 }
 
 function renderComposerModel() {
-  const model = llmState.model
+  const model = modelsState.models.find(item => item.id === llmState.model?.id) ?? llmState.model
+  const policy = llmState.reasoningEffort ?? settings.reasoningEffort ?? 'auto'
+  const context = contextWindowBadge(model)
+  const effortText = model?.reasoning === false ? 'no CoT' : policy === 'auto' ? 'low' : policy
+  const effortTitle = model?.reasoning === false
+    ? 'This model does not support reasoning'
+    : `Reasoning effort: ${policy === 'auto' ? 'Auto (low from the first step)' : effortLabel(policy)}`
+  const used = Number.isFinite(latestContextTokens) ? Math.max(0, latestContextTokens) : 0
+  const ratio = context.tokens > 0 ? used / context.tokens : 0
+  const percentage = ratio * 100
+  const percentText = percentage > 0 && percentage < 0.1 ? '<0.1' : percentage.toFixed(1)
+  const circumference = 2 * Math.PI * 7
+  const progressRatio = Math.min(1, Math.max(0, ratio))
   els.composerModelName.textContent = shortModelName(model)
   els.composerModelName.title = model?.id || 'Select a model in Settings'
+  els.composerModelEffort.textContent = model ? `· ${effortText}` : ''
+  els.composerModelEffort.hidden = !model
+  els.composerModelEffort.title = effortTitle
+  els.composerModelEffort.classList.toggle('muted', model?.reasoning === false)
+  els.composerContextProgress.style.strokeDasharray = circumference.toFixed(2)
+  els.composerContextProgress.style.strokeDashoffset = (circumference * (1 - progressRatio)).toFixed(2)
+  els.composerContextUsage.textContent = `${used.toLocaleString('en-US')} / ${context.tokens.toLocaleString('en-US')} tokens`
+  els.composerContextPercent.textContent = `${percentText}%`
+  els.composerModelContext.hidden = !context.tokens
+  els.composerModelContext.setAttribute('aria-label', `${used.toLocaleString('en-US')} of ${context.tokens.toLocaleString('en-US')} tokens used, ${percentText}%`)
+  els.composerModel.title = model
+    ? `${model.id} · ${effortTitle}${context.title ? ` · ${context.title}` : ''}`
+    : 'Choose a model in Settings'
   els.composerModel.disabled = busy
 }
 
@@ -1284,6 +1326,21 @@ function startTurn(text, attachments = []) {
   scrollActivity()
 }
 
+function createStepIcon() {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  icon.setAttribute('class', 'step-icon')
+  icon.setAttribute('aria-hidden', 'true')
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use')
+  use.setAttribute('href', '#icon-step-think')
+  icon.appendChild(use)
+  return icon
+}
+
+function setStepKind(step, kind) {
+  step.block.dataset.kind = kind
+  step.block.querySelector('.step-icon use').setAttribute('href', `#icon-step-${kind}`)
+}
+
 /**
  * Open a new step group. The step header carries the step's own live and
  * final duration, so every model step is measurable at a glance.
@@ -1313,7 +1370,7 @@ function beginStep(frame) {
   const duration = document.createElement('span')
   duration.className = 'step-duration live'
   duration.textContent = '0.0s'
-  head.append(caret, title, meta, duration)
+  head.append(createStepIcon(), caret, title, meta, duration)
   const body = document.createElement('div')
   body.className = 'step-body'
   block.append(head, body)
@@ -1540,6 +1597,8 @@ function clearActivity() {
   els.activityTimer?.classList.add('hidden')
   els.activityLatest.textContent = 'Waiting for a turn'
   els.activityLatest.title = ''
+  latestContextTokens = 0
+  renderComposerModel()
   renderPromptRail()
 }
 
@@ -1592,7 +1651,7 @@ function handleActivity(frame) {
       setActivityPhase(`Using ${label}…`, 'busy')
       if (currentStep) {
         currentStep.titleEl.textContent = label
-        currentStep.block.dataset.kind = toolKind(frame.name)
+        setStepKind(currentStep, toolKind(frame.name))
       }
       if (lastStreamEntry !== null && lastStreamEntry.kind === 'tool' && lastStreamEntry.id === frame.id) {
         lastStreamEntry.textEl.textContent = truncate(lastStreamEntry.textEl.textContent + (frame.argumentsDelta ?? ''), 4_000)
@@ -1607,8 +1666,12 @@ function handleActivity(frame) {
       scrollActivity()
       return
     }
-    case 'usage':
+    case 'usage': {
+      const tokens = Number(frame.usage?.totalTokens ?? frame.usage?.inputTokens ?? 0)
+      latestContextTokens = Number.isFinite(tokens) ? Math.max(0, tokens) : 0
+      renderComposerModel()
       return
+    }
     case 'finish': {
       const reason = frame.reason && typeof frame.reason === 'object'
         ? (frame.reason.kind ?? JSON.stringify(frame.reason))
@@ -1845,7 +1908,8 @@ function toolLabel(name) {
 }
 
 function toolKind(name) {
-  if (/click|type|press_key/.test(name)) return 'click'
+  if (/click/.test(name)) return 'click'
+  if (/type|press_key/.test(name)) return 'type'
   if (/scroll/.test(name)) return 'scroll'
   if (/navigate|switch_tab/.test(name)) return 'open'
   if (/read|tabs/.test(name)) return 'read'
@@ -1877,7 +1941,7 @@ function handleToolCall(frame) {
   }
   if (currentStep) {
     currentStep.titleEl.textContent = label
-    currentStep.block.dataset.kind = toolKind(frame.name)
+    setStepKind(currentStep, toolKind(frame.name))
   }
   setBusy(true)
   setStatus('busy', `Using ${label}…`)
@@ -2110,12 +2174,14 @@ async function handleBrowserCommand(frame) {
     const uiMs = now() - started
     const summary = browserActivitySummary(op, result)
     if (ownRow !== null) {
-      finishActivityEntry(ownRow, { text: summary, ok: true, durationMs: uiMs })
+      if (op === 'snapshot' && frame.callId === 'auto') ownRow.entry.remove()
+      else finishActivityEntry(ownRow, { text: summary, ok: true, durationMs: uiMs })
       browserRows.delete(rowKey)
     } else if (toolRecord !== undefined) {
       toolRecord.uiMs = uiMs
       toolRecord.row.textEl.textContent = truncate(`${summary} · ui ${formatDuration(uiMs)}`, 340)
     }
+    if (op === 'snapshot' && toolRecord !== undefined) showStepScreenshot(result.image)
     setActivityPhase('Thinking…', 'busy')
     logger.log('browser.command.result', {
       commandId: frame.id,
@@ -2213,6 +2279,12 @@ function browserActivitySummary(op, result) {
     parts.push(`selected ${result.selected.chars} chars${result.selected.collapsed ? ' · collapsed' : ''}`)
     parts.push(result.changed ? 'changed' : 'no visible change')
   }
+  if (result.docs) {
+    parts.push(`docs ${result.docs.action ?? 'set_font'} · ${result.docs.status ?? 'unverified'}`)
+    if (result.docs.fontAdded === true) parts.push('added to font list')
+    if (result.docs.verifiedBy) parts.push(`verified by ${result.docs.verifiedBy}`)
+    if (result.docs.removedText === true) parts.push('matched text removed')
+  }
   if (result.clipboard) {
     const clip = result.clipboard
     parts.push(`clipboard ${result.action ?? ''} ${clip.target ?? 'virtual'}${Number.isFinite(clip.chars) ? ` · ${clip.chars} chars` : ''}${clip.truncated ? ` of ${clip.originalChars}` : ''}`)
@@ -2236,6 +2308,27 @@ function browserActivitySummary(op, result) {
   if (Number.isFinite(result.captureMs)) parts.push(`capture ${result.captureMs}ms`)
   if (Number.isFinite(result.encodeMs)) parts.push(`encode ${result.encodeMs}ms`)
   return parts.join(' · ') || op
+}
+
+function showStepScreenshot(image) {
+  const src = imageDataUrl(image)
+  const container = currentStep?.bodyEl
+  if (!src || !container) return
+  container.querySelectorAll('.activity-screenshot').forEach(element => element.remove())
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'activity-screenshot'
+  button.title = 'Open screenshot'
+  button.setAttribute('aria-label', `Open screenshot ${image.width} by ${image.height}`)
+  const img = document.createElement('img')
+  img.src = src
+  img.alt = `Screenshot captured at ${image.width} by ${image.height}`
+  const caption = document.createElement('span')
+  caption.textContent = `${image.width}×${image.height} · click to expand`
+  button.append(img, caption)
+  button.addEventListener('click', () => openImage(src))
+  container.appendChild(button)
+  scrollActivity()
 }
 
 function sendBrowserResult(id, ok, result, error) {
@@ -2371,21 +2464,6 @@ function clearChat() {
   els.timing.removeAttribute('title')
   clearActivity()
   setActivityPhase('Ready', 'online')
-}
-
-function togglePause() {
-  settings.paused = !settings.paused
-  logger.log('settings.pause', { paused: settings.paused }, 'info')
-  els.pause.classList.toggle('active', settings.paused)
-  els.pause.title = settings.paused ? 'Resume browser access' : 'Pause browser access'
-  void saveSettings()
-  if (settings.paused) {
-    setStatus('paused', 'Paused')
-    toast('Browser access paused. The agent can still chat but cannot see the page.')
-  } else {
-    refreshStatus()
-    toast('Browser access resumed')
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2656,6 +2734,7 @@ els.settingsSave.addEventListener('click', () => {
     captureWidth: Math.round(width),
     quality: Math.round(quality),
     autoCapture: els.settingAutoCapture.checked,
+    showHitboxes: els.settingHitboxes.checked,
     modelBaseUrl: baseUrl,
     modelId: model,
   }
@@ -2675,6 +2754,7 @@ els.settingsSave.addEventListener('click', () => {
   }, 'info')
   logger.setContext(clientContext())
   void saveSettings()
+  if (!settings.showHitboxes) void execute('labels.clear', {}, settings).catch(() => {})
   els.settingApiKey.value = ''
   closeSettings()
   if (reconnectNeeded || !connected) {
@@ -2793,7 +2873,6 @@ els.bannerAction.addEventListener('click', () => {
   action()
 })
 
-els.pause.addEventListener('click', togglePause)
 els.newChat.addEventListener('click', newChat)
 els.stop.addEventListener('click', stopTurn)
 
@@ -2868,8 +2947,6 @@ async function boot() {
     paused: settings.paused,
   }, 'debug')
   logger.setContext(clientContext())
-  els.pause.classList.toggle('active', settings.paused)
-  els.pause.title = settings.paused ? 'Resume browser access' : 'Pause browser access'
   await refreshActiveTab()
   updateFooter()
   setStatus('offline', 'Connecting…')

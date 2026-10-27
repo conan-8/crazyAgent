@@ -55,11 +55,12 @@
         maxObservationRepeats: 30
         maxNavigationRepeats: 10
 
-# One browser action at a time; parallel tool calls would race the viewport.
+# Browser mutations remain exclusive and run in model order. Only explicitly
+# declared read-only tools may overlap; all other calls remain ordering barriers.
 - id: agent-loop
   config:
     agents: []
-    maxParallelToolCalls: 1
+    maxParallelToolCalls: 4
 
 # Cross-turn context control.
 #
@@ -90,8 +91,8 @@
         retainTokens: 20000
         maxTokens: 8192
 
-# Browser-agent persona only. No harness identity, no runtime context (dates,
-# sandbox, cwd) in the fixed prefix.
+# Browser-agent persona only. No harness identity or runtime context in the fixed
+# prefix; the companion supplies fresh local/UTC date, time, and timezone per turn.
 - id: system-prompt
   config:
     includeHarnessIdentity: false

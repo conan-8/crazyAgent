@@ -41,6 +41,22 @@ test('buildPromptBlocks falls back to text when no image is available', () => {
   assert.match(blocks[0].text, /No screenshot is attached/)
 })
 
+test('buildPromptBlocks supplies fresh local, UTC, and timezone context on every turn', () => {
+  const first = new Date('2026-10-26T21:04:17.000Z')
+  const second = new Date('2026-10-27T12:30:00.000Z')
+  const firstText = buildPromptBlocks(view(), 'Use today', first)[0].text
+  const secondText = buildPromptBlocks(view(), 'Use today again', second)[0].text
+  assert.ok(firstText.includes('<current_time>\n'))
+  assert.ok(firstText.includes(`local ${first.toString()}`))
+  assert.ok(firstText.includes('utc 2026-10-26T21:04:17.000Z'))
+  assert.match(firstText, /timezone \S+/)
+  assert.match(firstText, /no web lookup is needed/)
+  assert.ok(firstText.endsWith('Use today'))
+  assert.ok(secondText.includes(`local ${second.toString()}`))
+  assert.ok(secondText.includes('utc 2026-10-27T12:30:00.000Z'))
+  assert.notEqual(firstText, secondText)
+})
+
 test('promptStats reports text and decoded image bytes', () => {
   const stats = promptStats(buildPromptBlocks(view(), 'Hi'))
   assert.ok(stats.textBytes > 0)

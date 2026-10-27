@@ -21,6 +21,7 @@
  */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { createServer } from 'node:http'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -38,6 +39,8 @@ const CDP_PORT = Number(process.env.CDP_PORT ?? (10_000 + process.pid % 20_000))
 const CDP = `http://127.0.0.1:${CDP_PORT}`
 const USER_DIR = process.env.UI_PREVIEW_PROFILE ?? `/tmp/crazyagent-ui-preview-profile-${process.pid}`
 const EDGE_BIN = process.env.EDGE_BIN ?? 'microsoft-edge'
+let fixtureUrl = ''
+let fixtureServer = null
 
 mkdirSync(OUT, { recursive: true })
 
@@ -143,7 +146,7 @@ const HELLO_FRAMES = [
     llm: {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
-      model: { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek V4.1 Flash', reasoning: true, imageInput: true },
+      model: { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, imageInput: true },
       reasoningEffort: 'auto',
     },
     credentials: { configured: true, source: 'stored' },
@@ -157,7 +160,7 @@ const HELLO_FRAMES = [
     ok: true,
     baseUrl: 'https://openrouter.ai/api/v1',
     models: [
-      { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek V4.1 Flash', reasoning: true, imageInput: true, contextWindow: 1000000 },
+      { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, imageInput: true, contextWindow: 1000000 },
       { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, imageInput: true, contextWindow: 1000000 },
       { id: 'openai/gpt-5', name: 'GPT-5', reasoning: true, imageInput: true, contextWindow: 400000 },
     ],
@@ -291,12 +294,78 @@ async function playTurn(page, options = {}) {
 async function playToolScenario(page) {
   const { recv, batch } = makePage(page)
   await batch(HELLO_FRAMES)
-  await sleep(300)
+  await page.send('Target.createTarget', { url: fixtureUrl })
+  await sleep(800)
+  const modelMeta = await page.evaluate(`(() => {
+    const button = document.getElementById('composer-model')
+    const effort = document.getElementById('composer-model-effort')
+    return {
+      flexGrow: getComputedStyle(button).flexGrow,
+      maxWidth: getComputedStyle(button).maxWidth,
+      width: button.getBoundingClientRect().width,
+      buttonTitle: button.title,
+      modelName: document.getElementById('composer-model-name').textContent,
+      effortText: effort.textContent,
+      effortTitle: effort.title,
+      effortColor: getComputedStyle(effort).color,
+    }
+  })()`)
+  assert.equal(modelMeta.flexGrow, '1')
+  assert.equal(modelMeta.maxWidth, 'none')
+  assert.ok(modelMeta.width > 200, `model selector uses available width (${modelMeta.width}px)`)
+  assert.equal(modelMeta.modelName, 'DeepSeek V4.1 Flash 1017')
+  assert.equal(modelMeta.effortText, '· low')
+  assert.equal(modelMeta.effortTitle, 'Reasoning effort: Auto (low from the first step)')
+  assert.equal(modelMeta.effortColor, 'rgb(255, 195, 0)')
+  assert.match(modelMeta.buttonTitle, /deepseek\/deepseek-v4\.1-flash-1017/)
+  await recv({ v: 1, type: 'chat.activity', kind: 'usage', usage: { totalTokens: 250000, inputTokens: 250000 } })
+  const contextMeta = await page.evaluate(`(() => {
+    const progress = document.getElementById('composer-context-progress')
+    const percent = document.getElementById('composer-context-percent')
+    const context = document.getElementById('composer-model-context')
+    const rect = context.getBoundingClientRect()
+    return {
+      progressStroke: getComputedStyle(progress).stroke,
+      progressOffset: progress.style.strokeDashoffset,
+      usage: document.getElementById('composer-context-usage').textContent,
+      percent: percent.textContent,
+      percentColor: getComputedStyle(percent).color,
+      centerX: rect.x + rect.width / 2,
+      centerY: rect.y + rect.height / 2,
+    }
+  })()`)
+  assert.equal(contextMeta.progressStroke, 'rgb(255, 195, 0)')
+  assert.equal(contextMeta.progressOffset, '32.99')
+  assert.equal(contextMeta.usage, '250,000 / 1,000,000 tokens')
+  assert.equal(contextMeta.percent, '25.0%')
+  assert.equal(contextMeta.percentColor, 'rgb(255, 195, 0)')
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: contextMeta.centerX, y: contextMeta.centerY })
+  await sleep(200)
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('composer-context-tooltip')).visibility`), 'visible')
   await sendPrompt(page, 'List the open tabs and pick the fixture page.')
   await recv({ v: 1, type: 'browser.command', id: 'cmd-auto', callId: 'auto', turnId: 'turn-1', command: { op: 'tabs.list', args: {} } })
   await sleep(1200)
   await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 1, attemptId: 'a1' })
   await sleep(400)
+  await recv({ v: 1, type: 'chat.tool_call', callId: 'call-shot', name: 'browser_screenshot', args: '{}' })
+  await recv({ v: 1, type: 'browser.command', id: 'cmd-shot', callId: 'call-shot', turnId: 'turn-1', command: { op: 'snapshot', args: {} } })
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (await page.evaluate(`Boolean(document.querySelector('.activity-step:not(.collapsed) .activity-screenshot img')?.src.startsWith('data:image/'))`)) break
+    await sleep(150)
+  }
+  const shotResult = await page.evaluate(`window.__frames.filter(frame => frame.type === 'browser.result' && frame.id === 'cmd-shot').at(-1)`)
+  assert.equal(shotResult?.ok, true, JSON.stringify(shotResult))
+  assert.ok(shotResult.result?.image?.data, 'snapshot result should include image data')
+  assert.equal(await page.evaluate(`Boolean(document.querySelector('.activity-step:not(.collapsed) .activity-screenshot img')?.src.startsWith('data:image/'))`), true)
+  await recv({ v: 1, type: 'browser.command', id: 'cmd-auto-shot', callId: 'auto', turnId: 'turn-1', command: { op: 'snapshot', args: {} } })
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (await page.evaluate(`window.__frames.some(frame => frame.type === 'browser.result' && frame.id === 'cmd-auto-shot')`)) break
+    await sleep(150)
+  }
+  const autoShotResult = await page.evaluate(`window.__frames.filter(frame => frame.type === 'browser.result' && frame.id === 'cmd-auto-shot').at(-1)`)
+  assert.equal(autoShotResult?.ok, true, JSON.stringify(autoShotResult))
+  assert.equal(await page.evaluate(`[...document.querySelectorAll('.activity-entry.browser')].some(entry => /capture \\d+ms|encode \\d+ms|KiB|scroll document/.test(entry.textContent))`), false, 'successful auto-capture leaves no telemetry row')
+  await recv({ v: 1, type: 'chat.tool_result', callId: 'call-shot', ok: true, text: 'screenshot captured' })
   await recv({ v: 1, type: 'chat.tool_call', callId: 'call-tabs', name: 'browser_tabs', args: '{}' })
   await sleep(300)
   await recv({ v: 1, type: 'browser.command', id: 'cmd-tabs', callId: 'call-tabs', turnId: 'turn-1', command: { op: 'tabs.list', args: {} } })
@@ -304,6 +373,7 @@ async function playToolScenario(page) {
   await recv({ v: 1, type: 'chat.tool_result', callId: 'call-tabs', ok: true, text: 'tabs listed · current window' })
   await recv({ v: 1, type: 'chat.activity', kind: 'model-end', outcome: { kind: 'committed' } })
   await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 2, attemptId: 'a2' })
+  assert.equal(await page.evaluate(`document.querySelector('.activity-screenshot').getClientRects().length`), 0)
   await sleep(500)
   await recv({ v: 1, type: 'chat.activity', kind: 'text', text: 'I can see the fixture page in the tab list.' })
   await recv({ v: 1, type: 'chat.activity', kind: 'model-end', outcome: { kind: 'committed' } })
@@ -321,6 +391,14 @@ async function playToolScenario(page) {
 
 async function main() {
   if (!existsSync(join(ROOT, 'extension', 'manifest.json'))) throw new Error(`extension/ not found under ${ROOT}`)
+  if (SCENARIO === 'tools') {
+    fixtureServer = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/html' })
+      response.end('<!doctype html><title>UI preview fixture</title><button>Increment</button><p>Fixture page</p>')
+    })
+    await new Promise(resolve => fixtureServer.listen(0, '127.0.0.1', resolve))
+    fixtureUrl = `http://127.0.0.1:${fixtureServer.address().port}/`
+  }
   spawn(EDGE_BIN, [
     `--user-data-dir=${USER_DIR}`,
     `--load-extension=${join(ROOT, 'extension')}`,
@@ -476,6 +554,7 @@ async function main() {
   const version = await (await fetch(`${CDP}/json/version`)).json()
   const browser = await connect(version.webSocketDebuggerUrl)
   await browser.send('Browser.close')
+  fixtureServer?.close()
 }
 
 main().then(() => process.exit(0)).catch(error => {
