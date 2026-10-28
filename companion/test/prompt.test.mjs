@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildPromptBlocks, formatViewText, promptStats } from '../prompt.mjs'
+import { buildPromptBlocks, formatViewText, normalizeImageAttachments, promptStats } from '../prompt.mjs'
 
 function view(overrides = {}) {
   return {
@@ -109,4 +109,30 @@ test('formatViewText marks controls that live in iframes', () => {
     labels: [{ id: 3000003, tag: 'button', role: 'button', text: 'Frame action', disabled: false, frame: 3 }],
   }))
   assert.match(text, /\[3000003\] button \(iframe\) "Frame action"/)
+})
+
+test('buildPromptBlocks places pasted images before the current viewport image', () => {
+  const images = normalizeImageAttachments([{ name: 'paste.png', mimeType: 'image/png', data: 'AQID' }])
+  const blocks = buildPromptBlocks(view(), 'Compare these images', new Date('2026-10-27T12:30:00.000Z'), images)
+  assert.equal(blocks.length, 3)
+  assert.deepEqual(blocks[1], { type: 'image', data: 'AQID', mimeType: 'image/png' })
+  assert.equal(blocks[2].data, 'AAAA')
+  const stats = promptStats(blocks)
+  assert.equal(stats.images, 2)
+  assert.equal(stats.imageBytes, 6)
+})
+
+test('normalizeImageAttachments rejects malformed types, base64, and counts', () => {
+  assert.throws(() => normalizeImageAttachments(null), /must be an array/)
+  assert.throws(() => normalizeImageAttachments([{ mimeType: 'image/svg+xml', data: 'AQID' }]), /PNG, JPEG, WebP, or GIF/)
+  assert.throws(() => normalizeImageAttachments([{ mimeType: 'image/png', data: 'not base64' }]), /invalid base64/)
+  assert.throws(
+    () => normalizeImageAttachments(Array.from({ length: 5 }, () => ({ mimeType: 'image/png', data: 'AQID' }))),
+    /up to 4 images/,
+  )
+})
+
+test('normalizeImageAttachments enforces decoded byte limits', () => {
+  const data = Buffer.alloc(5_000_001, 1).toString('base64')
+  assert.throws(() => normalizeImageAttachments([{ mimeType: 'image/png', data }]), /exceeds the 5000000-byte limit/)
 })

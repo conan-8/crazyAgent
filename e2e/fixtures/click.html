@@ -47,6 +47,29 @@
     </script>
   </div>
 
+  <div id="semantic-fixture" class="row" hidden>
+    <button id="semantic" type="button" aria-label="Semantic action"><span>Visible semantic label</span></button>
+    <button id="semantic-decoy" type="button">Semantic action extended</button>
+    <strong>semantic count: <span id="semantic-count">0</span></strong>
+    <button id="semantic-duplicate-a" type="button">Duplicate semantic action</button>
+    <button id="semantic-duplicate-b" type="button">Duplicate semantic action</button>
+    <span>duplicate counts: <span id="semantic-duplicate-a-count">0</span>/<span id="semantic-duplicate-b-count">0</span></span>
+    <button id="semantic-disabled" type="button" disabled>Disabled semantic action</button>
+    <span>disabled count: <span id="semantic-disabled-count">0</span></span>
+    <script>
+      const bumpSemantic = id => {
+        const el = document.getElementById(id)
+        el.textContent = String(Number(el.textContent) + 1)
+      }
+      document.getElementById('semantic').addEventListener('click', () => bumpSemantic('semantic-count'))
+      document.getElementById('semantic-decoy').addEventListener('click', () => bumpSemantic('semantic-decoy-count'))
+      document.getElementById('semantic-duplicate-a').addEventListener('click', () => bumpSemantic('semantic-duplicate-a-count'))
+      document.getElementById('semantic-duplicate-b').addEventListener('click', () => bumpSemantic('semantic-duplicate-b-count'))
+      document.getElementById('semantic-disabled').addEventListener('click', () => bumpSemantic('semantic-disabled-count'))
+    </script>
+    <span id="semantic-decoy-count" hidden>0</span>
+  </div>
+
   <div class="row">
     <label><input id="check" type="checkbox" /> Toggle me</label>
     <span id="check-state">unchecked</span>
@@ -67,6 +90,36 @@
 
   <div class="row">
     <a id="next" href="./second.html">Go to second page</a>
+  </div>
+
+  <div id="role-review-fixture" class="row" hidden>
+    <div id="semantic-outer" role="button" aria-label="Outer semantic action" style="display:inline-block">
+      <button id="semantic-inner" type="button" aria-label="Inner semantic action" style="display:block;width:100%;margin:0">Nested interactive label</button>
+    </div>
+    <span>outer/inner counts: <span id="semantic-outer-count">0</span>/<span id="semantic-inner-count">0</span></span>
+    <button id="hover-moving" type="button">Hover moving action</button>
+    <span>hover count: <span id="hover-moving-count">0</span></span>
+    <a id="delayed-role" href="./second.html">Delayed role navigation</a>
+    <script>
+      const reviewInner = document.getElementById('semantic-inner')
+      reviewInner.addEventListener('click', event => {
+        event.stopPropagation()
+        bumpSemantic('semantic-inner-count')
+      })
+      document.getElementById('semantic-outer').addEventListener('click', () => bumpSemantic('semantic-outer-count'))
+      const hoverMoving = document.getElementById('hover-moving')
+      hoverMoving.addEventListener('mouseenter', () => {
+        if (!hoverMoving.dataset.moved) {
+          hoverMoving.dataset.moved = 'true'
+          hoverMoving.style.marginLeft = '90px'
+        }
+      })
+      hoverMoving.addEventListener('click', () => bumpSemantic('hover-moving-count'))
+      document.getElementById('delayed-role').addEventListener('click', event => {
+        event.preventDefault()
+        setTimeout(() => { window.location.href = './second.html?delayed=role' }, 75)
+      })
+    </script>
   </div>
 
   <p><button id="nested" type="button"><span>Nested label</span></button></p>

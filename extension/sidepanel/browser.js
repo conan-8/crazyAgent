@@ -20,7 +20,9 @@ import {
   normalizeClipboardEntry,
 } from './clipboard.js'
 import { docsFetchExport } from './docs-export.js'
+import { planDocsFormatEdits, validateDocsFormatEdits, verifyDocsFormatEdits } from './docs-format.js'
 import { formatOutline, parseDocStructure } from './docs-structure.js'
+import { clickRole } from './role-click.js'
 
 export const DEFAULT_SETTINGS = {
   bridgeUrl: 'ws://127.0.0.1:17871/bridge',
@@ -477,6 +479,33 @@ async function docsTrustedClick(tabId, x, y) {
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...base })
 }
 
+/** Revalidate after hover, then dispatch or settle the complete trusted click. */
+async function roleTrustedClick(tabId, x, y, hooks = {}) {
+  const base = { x, y, button: 'left', clickCount: 1 }
+  const release = () => chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...base })
+  let pressed = false
+  let released = false
+  try {
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', clickCount: 0 })
+    if (await hooks.beforePress?.() === false) throw new BrowserError('ROLE_CLICK_STALE_TARGET', 'The role target changed after hover')
+    pressed = true
+    hooks.onPress?.()
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...base })
+    await release()
+    released = true
+  } catch (error) {
+    if (pressed && !released) {
+      try {
+        await release()
+        released = true
+      } catch (settleError) {
+        throw new BrowserError('ROLE_CLICK_UNSETTLED', `Trusted mouse input could not be settled: ${settleError instanceof Error ? settleError.message : String(settleError)}`)
+      }
+    }
+    throw error
+  }
+}
+
 /** Dispatch a trusted wheel event at CSS viewport coordinates. */
 async function trustedWheel(tabId, x, y, deltaX, deltaY) {
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
@@ -607,16 +636,191 @@ async function runInFrame(tabId, frameId, func, args, timeoutMs = 4_000) {
 }
 
 /**
- * List frames for a tab. Cross-origin frames are included because the
- * extension has <all_urls> host access.
+ * List every frame without dropping errors or substituting a top-only view.
  * @param {number} tabId
  */
 async function listFrames(tabId) {
+  let frames
   try {
-    const frames = await chrome.webNavigation.getAllFrames({ tabId })
-    return Array.isArray(frames) ? frames.filter(frame => frame.errorOccurred !== true).slice(0, 10) : [{ frameId: 0 }]
-  } catch {
-    return [{ frameId: 0 }]
+    frames = await chrome.webNavigation.getAllFrames({ tabId })
+  } catch (error) {
+    throw new BrowserError('FRAME_LIST_FAILED', `Chrome could not list this tab's frames: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (!Array.isArray(frames) || frames.length === 0) {
+    throw new BrowserError('FRAME_LIST_FAILED', 'Chrome returned no frames for this tab')
+  }
+  const ids = new Set()
+  for (const frame of frames) {
+    if (!Number.isSafeInteger(frame?.frameId) || frame.frameId < 0 || ids.has(frame.frameId)) {
+      throw new BrowserError('FRAME_LIST_FAILED', 'Chrome returned an invalid or duplicate frame id')
+    }
+    ids.add(frame.frameId)
+  }
+  if (!ids.has(0)) throw new BrowserError('FRAME_LIST_FAILED', 'Chrome did not include top frame 0')
+  return frames
+}
+
+/** Source-check and relay direct-child geometry up to the top frame. */
+function roleClickFrameOriginProbe(request) {
+  const KEY = '__crazyagentRoleClickFrameOrigins'
+  const states = globalThis[KEY] ??= {}
+  const token = String(request.token)
+  if (request.phase === 'collect') {
+    const state = states[token]
+    return {
+      ok: true,
+      origins: { ...(state?.origins ?? {}) },
+      conflicts: [...(state?.conflicts ?? [])],
+    }
+  }
+  if (request.phase === 'clear') {
+    const state = states[token]
+    if (state) {
+      window.removeEventListener('message', state.listener)
+      clearInterval(state.interval)
+      clearTimeout(state.timer)
+      delete states[token]
+    }
+    return { ok: true }
+  }
+
+  const state = { origins: {}, conflicts: [], listener: undefined, interval: undefined, timer: undefined }
+  states[token] = state
+  const directChildren = source => {
+    const found = []
+    const collect = root => {
+      for (const element of root.querySelectorAll('iframe,frame')) {
+        if (element.contentWindow === source) found.push(element)
+      }
+      for (const element of root.querySelectorAll('*')) {
+        if (element.shadowRoot) collect(element.shadowRoot)
+      }
+    }
+    collect(document)
+    return found
+  }
+  const finish = () => {
+    window.removeEventListener('message', state.listener)
+    clearInterval(state.interval)
+    if (states[token] === state) delete states[token]
+  }
+  state.listener = event => {
+    const data = event.data
+    if (!data || data.__crazyagentRoleClickFrame !== token
+      || !Number.isSafeInteger(data.frameId) || data.frameId <= 0
+      || !Number.isFinite(data.x) || !Number.isFinite(data.y)
+      || !Number.isSafeInteger(data.hops) || data.hops < 0 || data.hops >= request.frameCount) return
+    const children = directChildren(event.source)
+    if (children.length !== 1) return
+    const child = children[0]
+    const rect = child.getBoundingClientRect()
+    const x = Number(data.x) + rect.left + (Number(child.clientLeft) || 0)
+    const y = Number(data.y) + rect.top + (Number(child.clientTop) || 0)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return
+    child.__crazyagentRoleClickFrameOwnership = { token, frameId: data.frameId, x, y }
+    if (window !== window.top) {
+      window.parent.postMessage({
+        __crazyagentRoleClickFrame: token,
+        frameId: data.frameId,
+        x,
+        y,
+        hops: data.hops + 1,
+      }, '*')
+      return
+    }
+    const previous = state.origins[data.frameId]
+    if (previous && (previous.viewportX !== x || previous.viewportY !== y)) {
+      if (!state.conflicts.includes(data.frameId)) state.conflicts.push(data.frameId)
+      return
+    }
+    state.origins[data.frameId] = { viewportX: x, viewportY: y }
+  }
+  window.addEventListener('message', state.listener)
+  if (window !== window.top) {
+    const announce = () => {
+      window.parent.postMessage({
+        __crazyagentRoleClickFrame: token,
+        frameId: request.frameId,
+        x: 0,
+        y: 0,
+        hops: 0,
+      }, '*')
+    }
+    state.interval = setInterval(announce, 25)
+    announce()
+  }
+  state.timer = setTimeout(finish, 1_000)
+  return { ok: true }
+}
+
+/** Resolve verified top-level CSS offsets for every child frame. */
+async function listRoleClickFrames(tabId) {
+  const frames = await listFrames(tabId)
+  if (frames.length === 1) return frames
+  const token = crypto.randomUUID()
+  const expected = frames.filter(frame => frame.frameId !== 0).map(frame => frame.frameId)
+  const request = { token, frameCount: frames.length }
+  try {
+    await Promise.all(frames.map(frame => runInFrame(
+      tabId,
+      frame.frameId,
+      roleClickFrameOriginProbe,
+      [{ ...request, phase: 'listen', frameId: frame.frameId }],
+      1_000,
+    )))
+    const deadline = Date.now() + 900
+    for (;;) {
+      const collected = await runInFrame(tabId, 0, roleClickFrameOriginProbe, [{ ...request, phase: 'collect' }], 500)
+      if (!collected?.ok || !collected.origins || typeof collected.origins !== 'object' || !Array.isArray(collected.conflicts)) {
+        throw new BrowserError('FRAME_ORIGIN_FAILED', 'The top frame returned malformed frame-origin evidence')
+      }
+      if (collected.conflicts.length > 0) {
+        throw new BrowserError('FRAME_ORIGIN_FAILED', `Conflicting top-viewport offsets were reported for frame ${collected.conflicts[0]}`)
+      }
+      const missing = expected.filter(frameId => {
+        const origin = collected.origins[frameId]
+        return !origin || !Number.isFinite(origin.viewportX) || !Number.isFinite(origin.viewportY)
+      })
+      if (missing.length === 0) {
+        return frames.map(frame => frame.frameId === 0 ? frame : {
+          ...frame,
+          viewportX: collected.origins[frame.frameId].viewportX,
+          viewportY: collected.origins[frame.frameId].viewportY,
+          ownershipToken: token,
+        })
+      }
+      if (Date.now() >= deadline) {
+        throw new BrowserError('FRAME_ORIGIN_FAILED', `No verified top-viewport offset was available for frame ${missing[0]}`)
+      }
+      await sleep(20)
+    }
+  } catch (error) {
+    if (error instanceof BrowserError) throw error
+    throw new BrowserError('FRAME_ORIGIN_FAILED', `Could not verify child-frame coordinates: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    await runInFrame(tabId, 0, roleClickFrameOriginProbe, [{ ...request, phase: 'clear' }], 250).catch(() => {})
+  }
+}
+
+function invalidateRoleClickTab(tabId) {
+  lastViewByTab.delete(tabId)
+  tabLabelsByTab.delete(tabId)
+  imageBasesByTab.delete(tabId)
+  lastScrollByTab.delete(tabId)
+}
+
+function roleClickDriver() {
+  return {
+    getWindowId,
+    getActiveTab,
+    getTab: tabId => chrome.tabs.get(tabId),
+    listFrames: listRoleClickFrames,
+    runInFrame,
+    withDebugger,
+    trustedClick: roleTrustedClick,
+    snapshot: settings => snapshot('normal', settings),
+    assertCapturable,
+    invalidateTab: invalidateRoleClickTab,
   }
 }
 
@@ -651,7 +855,7 @@ async function labelAllFrames(tabId, limit, options = {}) {
   for (const item of outcomes) {
     const data = item.result
     if (!data || data.__labelError) continue
-    for (const label of data.labels) {
+    for (const label of data.knownLabels ?? data.labels) {
       const globalId = item.frameId === 0 ? label.id : item.frameId * 100_000 + label.id
       registry.labels.set(globalId, {
         frameId: item.frameId,
@@ -660,6 +864,9 @@ async function labelAllFrames(tabId, limit, options = {}) {
         role: label.role,
         text: label.text,
       })
+    }
+    for (const label of data.labels) {
+      const globalId = item.frameId === 0 ? label.id : item.frameId * 100_000 + label.id
       labels.push({ ...label, id: globalId, ...item.frameId === 0 ? {} : { frame: item.frameId } })
     }
   }
@@ -1142,6 +1349,18 @@ async function labelPage(limit, paint = true) {
     }
     return items
   })()
+  const knownLabels = []
+  for (const [id, element] of state.byId) {
+    if (!element.isConnected) continue
+    const info = state.infoById.get(id) ?? {}
+    knownLabels.push({
+      id,
+      tag: info.tag ?? element.tagName.toLowerCase(),
+      role: info.role ?? labelRole(element),
+      text: info.text ?? labelText(element),
+      disabled: info.disabled === true || element.disabled === true || element.getAttribute('aria-disabled') === 'true',
+    })
+  }
   return {
     title: document.title,
     url: location.href,
@@ -1168,6 +1387,7 @@ async function labelPage(limit, paint = true) {
       atBottom: (root.scrollTop || 0) >= maxY - 1,
     },
     labels,
+    knownLabels,
     surfaces,
   }
     })()
@@ -4310,12 +4530,15 @@ async function hover(settings, args) {
     }
   }
   const activeTab = await getActiveTab(windowId).catch(() => tab)
-  const { payload } = await buildActionView(activeTab, settings, viewMode, {
+  let view = await buildActionView(activeTab, settings, viewMode, {
     derive: ({ stored, metrics, delta }) => delta
       ? deriveLabelDeltaOutcome(delta)
       : deriveFingerprintOutcome(stored, metrics),
   })
-  return { ...payload, op: 'hover', hovered: hovered.hovered, ...(reResolved ? { reResolved } : {}) }
+  if (viewMode === 'auto' && view.mode === 'compact' && view.payload.labelsDelta?.addedCount > 0) {
+    view = await buildActionView(activeTab, settings, 'full')
+  }
+  return { ...view.payload, op: 'hover', hovered: hovered.hovered, ...(reResolved ? { reResolved } : {}) }
 }
 
 /**
@@ -5763,6 +5986,7 @@ export function docsPageProbe(command, args = {}) {
       ok: true,
       open: true,
       enabled: !disabled(box),
+      focused: document.activeElement === box,
       value: String(box.value ?? ''),
       counterText: raw,
       match: match ? { current: Number(match[1]), total: Number(match[2]), text: `${Number(match[1])} of ${Number(match[2])}` } : undefined,
@@ -6281,11 +6505,19 @@ async function docsCloseFind(context, stage) {
   await docsWait(context, stage, 'find', {}, state => !state.open)
 }
 
+function docsFindReady(state, text) {
+  return state.open && state.enabled && state.focused === true && state.value === text && state.match !== undefined
+}
+
+async function docsFindQuery(context, stage, text) {
+  await docsNativeText(context, stage, 'setFind', text)
+  return docsWait(context, stage, 'find', {}, state => docsFindReady(state, text))
+}
+
 async function docsOpenFind(context, text) {
   await docsKey(context, 'open-find', { key: 'f', code: 'KeyF', keyCode: 70 }, MODIFIER_BITS.ctrl)
-  await docsWait(context, 'open-find', 'find', {}, state => state.open && state.enabled)
-  await docsNativeText(context, 'find-query', 'setFind', text)
-  return docsWait(context, 'find-query', 'find', {}, state => state.value === text && state.match !== undefined)
+  await docsWait(context, 'open-find', 'find', {}, state => state.open && state.enabled && state.focused === true)
+  return docsFindQuery(context, 'find-query', text)
 }
 
 async function docsVerifyFont(context, font, fontAdded) {
@@ -6368,12 +6600,195 @@ async function docsAddAndApply(context, text) {
   throw docsFailure('font-results', 'DOCS_FONT_RESULTS_UNKNOWN', 'Font search results did not stabilize with an exact row or a scoped no-results message')
 }
 
-async function docsSelectUnique(context, text) {
-  const found = await docsOpenFind(context, text)
-  if (found.match.total !== 1 || found.match.current !== 1) {
+function docsResolveOccurrence(occurrence, total, stage = 'find-match') {
+  if (occurrence === undefined) {
+    if (total !== 1) throw docsFailure(stage, 'DOCS_MATCH_NOT_UNIQUE', `Expected normalized 1 of 1, found ${total} matches`)
+    return 1
+  }
+  const resolved = occurrence === 'first' ? 1 : occurrence === 'last' ? total : occurrence
+  if (!Number.isSafeInteger(total) || total < 1 || resolved > total) {
+    throw docsFailure(stage, 'DOCS_MATCH_OUT_OF_RANGE', `Requested occurrence ${JSON.stringify(occurrence)} is unavailable in ${total} matches`)
+  }
+  return resolved
+}
+
+function docsLiteralPositions(haystack, needle) {
+  const source = String(haystack).toLowerCase()
+  const wanted = String(needle).toLowerCase()
+  if (!wanted) return []
+  const positions = []
+  for (let index = source.indexOf(wanted); index >= 0; index = source.indexOf(wanted, index + wanted.length)) {
+    positions.push(index)
+  }
+  return positions
+}
+
+function docsParagraphPlan(blocks, text, occurrence, nativeCount) {
+  for (const block of blocks) {
+    if (block.kind !== 'table') continue
+    const tableText = block.rows.flatMap(row => row.map(cell => cell.text)).join('\n')
+    if (docsLiteralPositions(tableText, text).length > 0) {
+      throw docsFailure('select-paragraph-map', 'DOCS_PARAGRAPH_UNMAPPABLE', 'The anchor occurs in a table, which cannot be mapped to one exported paragraph')
+    }
+  }
+  const exported = blocks.filter(block => block.kind === 'para')
+  let offset = 0
+  const paragraphs = exported.map((block, index) => {
+    const folded = block.text.toLowerCase()
+    const paragraph = { text: block.text, start: offset, end: offset + folded.length, index: index + 1 }
+    offset += folded.length + 1
+    return paragraph
+  })
+  const source = exported.map(block => block.text).join('\n')
+  const anchors = docsLiteralPositions(source, text)
+  if (nativeCount !== anchors.length) {
+    throw docsFailure('select-paragraph-map', 'DOCS_EXPORT_COUNT_MISMATCH', `Native Find reported ${nativeCount} anchor matches but export contained ${anchors.length}`)
+  }
+  const anchorOccurrence = docsResolveOccurrence(occurrence, anchors.length, 'select-paragraph-map')
+  const anchorStart = anchors[anchorOccurrence - 1]
+  const anchorEnd = anchorStart + text.toLowerCase().length
+  const paragraph = paragraphs.find(item => anchorStart >= item.start && anchorEnd <= item.end)
+  if (!paragraph) {
+    throw docsFailure('select-paragraph-map', 'DOCS_PARAGRAPH_UNMAPPABLE', 'The requested anchor does not map to exactly one exported paragraph')
+  }
+  if (paragraph.text.length > 1000 || /[\r\n]/u.test(paragraph.text)) {
+    throw docsFailure('select-paragraph-map', 'DOCS_PARAGRAPH_UNMAPPABLE', 'The containing paragraph has an internal newline or exceeds the 1000-character Find query limit')
+  }
+  const matches = docsLiteralPositions(source, paragraph.text)
+  const paragraphOccurrence = matches.findIndex(index => index === paragraph.start) + 1
+  if (paragraphOccurrence === 0) {
+    throw docsFailure('select-paragraph-map', 'DOCS_PARAGRAPH_UNMAPPABLE', 'The exported paragraph occurrence could not be reconstructed')
+  }
+  return {
+    text: paragraph.text,
+    occurrence: paragraphOccurrence,
+    matchCount: matches.length,
+    paragraphIndex: paragraph.index,
+  }
+}
+
+async function docsSelectFoundOccurrence(context, text, occurrence, found) {
+  if (occurrence === undefined && (found.match.total !== 1 || found.match.current !== 1)) {
     throw docsFailure('find-match', 'DOCS_MATCH_NOT_UNIQUE', `Expected normalized 1 of 1, found ${found.match.text}`)
   }
+  const target = docsResolveOccurrence(occurrence, found.match.total)
+  const total = found.match.total
+  if (!Number.isSafeInteger(found.match.current) || found.match.current < 1 || found.match.current > total) {
+    throw docsFailure('find-match', 'DOCS_COUNTER_MISMATCH', `The initial Find counter is inconsistent: ${found.match.text}`)
+  }
+  const forward = (target - found.match.current + total) % total
+  const backward = (found.match.current - target + total) % total
+  const backwards = backward < forward
+  const steps = backwards ? backward : forward
+  let current = found.match.current
+  for (let index = 0; index < steps; index += 1) {
+    await docsKey(context, 'find-navigate', KEY_SPECS.Enter, backwards ? MODIFIER_BITS.shift : 0)
+    current = backwards ? (current - 2 + total) % total + 1 : current % total + 1
+    found = await docsWait(context, 'find-navigate', 'find', {}, state => (
+      docsFindReady(state, text) && state.match.current === current && state.match.total === total
+    ))
+  }
   await docsCloseFind(context, 'close-find')
+  return {
+    text,
+    occurrence: target,
+    current: found.match.current,
+    matchCount: total,
+    verifiedBy: 'find-counter',
+    findFocused: found.focused === true,
+  }
+}
+
+async function docsSelectOccurrence(context, text, occurrence) {
+  const found = await docsOpenFind(context, text)
+  return docsSelectFoundOccurrence(context, text, occurrence, found)
+}
+
+async function docsSelectUnique(context, text) {
+  return docsSelectOccurrence(context, text, undefined)
+}
+
+async function docsSelectParagraph(context, text, occurrence) {
+  const exported = await docsExport(context, 'select-paragraph-export', 'html')
+  const blocks = parseDocStructure(exported)
+  const anchor = await docsOpenFind(context, text)
+  const plan = docsParagraphPlan(blocks, text, occurrence, anchor.match.total)
+  const found = await docsFindQuery(context, 'select-paragraph-query', plan.text)
+  if (found.match.total !== plan.matchCount) {
+    throw docsFailure('select-paragraph-query', 'DOCS_EXPORT_COUNT_MISMATCH', `Native Find reported ${found.match.total} paragraph matches but export contained ${plan.matchCount}`)
+  }
+  const selected = await docsSelectFoundOccurrence(context, plan.text, plan.occurrence, found)
+  return { ...selected, anchorText: text, paragraphIndex: plan.paragraphIndex }
+}
+
+async function docsSelectTextFlow(context, args) {
+  const scope = args.scope ?? 'text'
+  const selected = scope === 'paragraph'
+    ? await docsSelectParagraph(context, args.text, args.occurrence)
+    : await docsSelectOccurrence(context, args.text, args.occurrence)
+  return { op: 'docs', docs: { action: 'select_text', status: 'selected', scope, ...selected } }
+}
+
+async function docsSelectTextLocked(settings, args, tab, driver) {
+  const context = {
+    settings,
+    tab,
+    driver,
+    action: 'select_text',
+    initialUrl: tab.url,
+    deadline: driver.now() + DOCS_DEADLINE_MS,
+    deadlineMs: DOCS_DEADLINE_MS,
+  }
+  let timer
+  try {
+    return await Promise.race([
+      docsSelectTextFlow(context, args),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(docsFailure('deadline', 'DOCS_DEADLINE', `The Docs selection operation exceeded ${DOCS_DEADLINE_MS / 1000}s`)), DOCS_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function docsSelectText(settings, args, io = {}) {
+  if (args?.action !== 'select_text') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be select_text')
+  if (typeof args.text !== 'string' || args.text.trim().length === 0 || args.text.length > 1000) {
+    throw docsFailure('validate', 'BAD_DOCS_TEXT', 'text must be a non-empty string of at most 1000 characters')
+  }
+  const allowed = new Set(['action', 'text', 'occurrence', 'scope'])
+  if (Object.keys(args).some(key => !allowed.has(key))) throw docsFailure('validate', 'BAD_DOCS_SELECT', 'unknown Docs selection argument')
+  if (args.scope !== undefined && !['text', 'paragraph'].includes(args.scope)) {
+    throw docsFailure('validate', 'BAD_DOCS_SCOPE', 'scope must be text or paragraph')
+  }
+  if (args.scope === 'paragraph' && /[\r\n]/u.test(args.text)) {
+    throw docsFailure('validate', 'BAD_DOCS_TEXT', 'paragraph anchor text must not contain an internal newline')
+  }
+  if (args.occurrence !== undefined && args.occurrence !== 'first' && args.occurrence !== 'last'
+    && (!Number.isInteger(args.occurrence) || args.occurrence < 1)) {
+    throw docsFailure('validate', 'BAD_DOCS_OCCURRENCE', 'occurrence must be first, last, or a positive 1-based integer')
+  }
+  const driver = docsDriver(io)
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsSelectTextLocked(settings, args, tab, driver))
+  const gate = run.catch(() => {})
+  docsTabLocks.set(tab.id, gate)
+  try {
+    return await run
+  } finally {
+    if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
 }
 
 async function docsApplyFont(context, text) {
@@ -6528,6 +6943,8 @@ async function docsApplyToggle(context, attribute, value) {
 
 function docsFormatError(error, attribute, results) {
   if (error instanceof Error) {
+    error.failedAttribute = attribute
+    error.priorResults = results.map(result => ({ ...result }))
     const verified = results.map(result => `${result.attribute}=${JSON.stringify(result.value)} (${result.status})`).join(', ') || 'none'
     error.message += `; formatting stopped at ${attribute}; attributes verified before the failure: ${verified}; ${attribute} is unverified; do not retry the whole format blindly`
   }
@@ -6553,6 +6970,7 @@ async function docsApplyFormatStates(context, wanted, text) {
         context.font = value
         const applied = await docsApplyFont(context, text)
         fontAdded = applied.fontAdded
+        context.fontAdded = context.fontAdded === true || fontAdded
         if (applied.status === 'font_missing') {
           results.push(docsFormatResult('font', value, 'font_missing', 'font-dialog'))
           return { results, fontAdded, fontMissing: true }
@@ -6668,6 +7086,324 @@ export async function docsFormat(settings, args, io = {}) {
     return await run
   } finally {
     if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
+}
+
+const DOCS_FORMAT_MANY_DEADLINE_MS = 600_000
+const DOCS_FORMAT_MANY_ATTRIBUTES = [...DOCS_FORMAT_ATTRIBUTES, 'color', 'highlight']
+const DOCS_FORMAT_MANY_INFRASTRUCTURE_ERRORS = new Set([
+  'DOCS_STALE_TAB',
+  'DOCS_DEADLINE',
+  'DOCS_TAB_CHECK_FAILED',
+  'DOCS_PROBE_FAILED',
+  'DOCS_INPUT_FAILED',
+  'DOCS_EXPORT_FAILED',
+  'DOCS_EXPORT_PERMISSION',
+  'DOCS_SNAPSHOT_FAILED',
+])
+
+function docsFormatManyAttributes(edit) {
+  return DOCS_FORMAT_MANY_ATTRIBUTES.filter(attribute => edit[attribute] !== undefined)
+}
+
+function docsFormatManyAttributeResults(edit, results, failedAttribute) {
+  return docsFormatManyAttributes(edit).map(attribute => {
+    const existing = results.find(result => result.attribute === attribute)
+    if (existing) return { ...existing }
+    return {
+      attribute,
+      value: edit[attribute],
+      status: attribute === failedAttribute ? 'failed' : 'unattempted',
+    }
+  })
+}
+
+function docsFormatManyEditStatus(results, failed = false) {
+  const applied = results.some(result => result.status === 'applied')
+  if (failed) return applied ? 'partial' : 'failed'
+  return applied ? 'completed' : 'already_applied'
+}
+
+function docsFormatManyFailure(index, edit, error, attribute) {
+  return {
+    index,
+    text: edit.text,
+    code: error?.code ?? 'DOCS_FORMAT_FAILED',
+    ...error?.stage ? { stage: error.stage } : {},
+    ...attribute ? { attribute } : {},
+    message: error?.message ?? String(error),
+    ...error?.priorResults ? { priorResults: error.priorResults.map(result => ({ ...result })) } : {},
+    ...error?.expected !== undefined ? { expected: error.expected } : {},
+    ...error?.actual !== undefined ? { actual: error.actual } : {},
+  }
+}
+
+async function docsFormatManyFlow(context, edits) {
+  let plans = []
+  let attemptedCount = 0
+  let mutationPossible = false
+  let fontAdded = false
+  let failure
+  const results = edits.map((edit, index) => ({
+    index,
+    occurrence: undefined,
+    status: 'unattempted',
+    results: docsFormatManyAttributeResults(edit, []),
+  }))
+  try {
+    const baseline = parseDocStructure(await docsExport(context, 'format-many-baseline', 'html'))
+    plans = planDocsFormatEdits(baseline, edits)
+    for (const [index, plan] of plans.entries()) results[index].occurrence = plan.occurrence
+
+    for (const [index, edit] of edits.entries()) {
+      attemptedCount = index + 1
+      context.attemptedCount = attemptedCount
+      const editResult = results[index]
+      const plan = plans[index]
+      let attributeResults = []
+      let editFailure
+      let failedAttribute
+      try {
+        const selected = await docsSelectOccurrence(context, edit.text, edit.occurrence)
+        if (selected.occurrence !== plan.occurrence || selected.matchCount !== plan.matchCount) {
+          const error = docsFailure(
+            'format-many-select',
+            'DOCS_FORMAT_SELECTION_MISMATCH',
+            `Native Find selected occurrence ${selected.occurrence} of ${selected.matchCount}; the baseline plan requires occurrence ${plan.occurrence} of ${plan.matchCount}`,
+          )
+          error.expected = { occurrence: plan.occurrence, matchCount: plan.matchCount }
+          error.actual = { occurrence: selected.occurrence, matchCount: selected.matchCount }
+          throw error
+        }
+        const wanted = Object.fromEntries(DOCS_FORMAT_ATTRIBUTES
+          .filter(attribute => edit[attribute] !== undefined)
+          .map(attribute => [attribute, docsFormatValue(edit, attribute)]))
+        if (Object.keys(wanted).length > 0) {
+          const applied = await docsApplyFormatStates(context, wanted, edit.text)
+          attributeResults = applied.results
+          fontAdded = fontAdded || applied.fontAdded
+          if (applied.fontMissing) {
+            failedAttribute = 'font'
+            editFailure = {
+              index,
+              text: edit.text,
+              code: 'DOCS_FONT_MISSING',
+              attribute: 'font',
+              message: `Font ${JSON.stringify(wanted.font)} is unavailable; no text was deleted`,
+              priorResults: attributeResults.map(result => ({ ...result })),
+            }
+          }
+        }
+        if (!editFailure) {
+          for (const attribute of ['color', 'highlight']) {
+            if (edit[attribute] === undefined) continue
+            try {
+              await docsApplyWriteColor(context, attribute, edit[attribute], { prefix: 'format', cache: false })
+            } catch (error) {
+              throw docsFormatError(error, attribute, attributeResults)
+            }
+            attributeResults.push(docsFormatResult(attribute, edit[attribute], 'applied', 'color-dialog'))
+          }
+        }
+      } catch (error) {
+        fontAdded = fontAdded || context.fontAdded === true
+        failedAttribute = error?.failedAttribute
+        if (failedAttribute) {
+          attributeResults = error.priorResults ?? attributeResults
+          mutationPossible = true
+          context.mutationPossible = true
+        }
+        if (DOCS_FORMAT_MANY_INFRASTRUCTURE_ERRORS.has(error?.code)) throw error
+        editFailure = docsFormatManyFailure(index, edit, error, failedAttribute)
+      }
+      mutationPossible = mutationPossible || attributeResults.some(result => result.status === 'applied')
+      context.mutationPossible = mutationPossible
+      editResult.results = docsFormatManyAttributeResults(edit, attributeResults, failedAttribute)
+      editResult.status = docsFormatManyEditStatus(editResult.results, Boolean(editFailure))
+      if (editFailure) {
+        failure = editFailure
+        break
+      }
+    }
+
+    let verification
+    if (mutationPossible) {
+      const verificationEnd = Math.min(context.deadline, context.driver.now() + 8_000)
+      let retryDelay = 500
+      while (true) {
+        const actual = parseDocStructure(await docsExport(context, 'format-many-verify', 'html'))
+        verification = verifyDocsFormatEdits(baseline, actual, plans, edits, attemptedCount)
+        if (verification.ok || failure || verification.failure?.code !== 'DOCS_FORMAT_VERIFY_FAILED'
+          || context.driver.now() + retryDelay > verificationEnd) break
+        await context.driver.sleep(retryDelay)
+        retryDelay = Math.min(2_000, retryDelay * 2)
+      }
+    }
+
+    let finalFailure = failure
+    if (verification && !verification.ok && (!finalFailure || verification.failure?.collateral)) {
+      finalFailure = {
+        ...verification.failure,
+        ...finalFailure ? { priorFailure: finalFailure } : {},
+      }
+    }
+    let verifiedCount = 0
+    let alreadyAppliedCount = 0
+    for (const [index, editResult] of results.entries()) {
+      const successful = editResult.status === 'completed' || editResult.status === 'already_applied'
+      const evidence = mutationPossible
+        ? verification?.results[index]?.status
+        : successful ? 'verified' : 'unverified'
+      if (successful && evidence === 'verified') {
+        verifiedCount += 1
+        if (editResult.status === 'already_applied') alreadyAppliedCount += 1
+        if (mutationPossible) {
+          editResult.results = editResult.results.map(result => ({ ...result, verifiedBy: 'export' }))
+        }
+      } else if (successful && index < attemptedCount) {
+        editResult.status = 'partial'
+      }
+    }
+    const allVerified = attemptedCount === edits.length && (!mutationPossible || verification?.ok === true)
+    const hasApplied = results.some(editResult => editResult.results.some(result => result.status === 'applied'))
+    const status = !finalFailure && allVerified
+      ? mutationPossible ? 'completed' : 'already_applied'
+      : verifiedCount > 0 || hasApplied ? 'partial' : 'failed'
+    return await docsFinish(context, {
+      status,
+      editCount: edits.length,
+      attemptedCount,
+      verifiedCount,
+      remainingCount: edits.length - attemptedCount,
+      appliedCount: verifiedCount,
+      alreadyAppliedCount,
+      fontAdded,
+      verifiedBy: mutationPossible ? 'export' : 'toolbar',
+      results,
+      ...finalFailure ? { failure: finalFailure } : {},
+    })
+  } catch (error) {
+    if (error instanceof Error && !error.formatMany) {
+      error.formatMany = {
+        action: 'format_many',
+        editCount: edits.length,
+        attemptedCount,
+        mutationPossible,
+        results: results.map(editResult => ({
+          ...editResult,
+          results: editResult.results.map(result => ({ ...result })),
+        })),
+      }
+      error.message += `; format_many attempted ${attemptedCount}/${edits.length} edit(s); ${mutationPossible
+        ? 'formatting may have changed an earlier prefix and final export verification is incomplete; use browser_docs_read before any retry'
+        : 'no formatting mutation was confirmed before this failure'}`
+    }
+    throw error
+  }
+}
+
+const DOCS_FORMAT_MANY_UNSETTLED_GRACE_MS = 250
+
+async function docsFormatManyLocked(settings, args, tab, driver, deadline) {
+  const remaining = deadline - driver.now()
+  if (remaining <= 0) {
+    throw docsFailure('deadline', 'DOCS_DEADLINE', `The Docs batch format operation exceeded ${DOCS_FORMAT_MANY_DEADLINE_MS / 1000}s before acquiring the tab lock; no export, Find, or mutation was attempted`)
+  }
+  const context = {
+    settings,
+    tab,
+    driver,
+    action: 'format_many',
+    initialUrl: tab.url,
+    removeIfMissing: false,
+    deadline,
+    deadlineMs: DOCS_FORMAT_MANY_DEADLINE_MS,
+    attemptedCount: 0,
+    mutationPossible: false,
+  }
+  const deadlineSignal = Symbol('format-many-deadline')
+  const graceSignal = Symbol('format-many-unsettled')
+  let deadlineTimer
+  let graceTimer
+  try {
+    const settled = docsFormatManyFlow(context, args.edits).then(
+      value => ({ status: 'fulfilled', value }),
+      error => ({ status: 'rejected', error }),
+    )
+    const timeout = new Promise(resolve => {
+      deadlineTimer = setTimeout(() => resolve(deadlineSignal), remaining)
+    })
+    let outcome = await Promise.race([settled, timeout])
+    if (outcome === deadlineSignal) {
+      const grace = new Promise(resolve => {
+        graceTimer = setTimeout(() => resolve(graceSignal), DOCS_FORMAT_MANY_UNSETTLED_GRACE_MS)
+      })
+      outcome = await Promise.race([settled, grace])
+      if (outcome === graceSignal) {
+        const error = docsFailure(
+          'deadline',
+          'DOCS_UNSETTLED',
+          `The Docs batch format operation exceeded ${DOCS_FORMAT_MANY_DEADLINE_MS / 1000}s and did not settle within ${DOCS_FORMAT_MANY_UNSETTLED_GRACE_MS}ms; an in-flight mutation may still be running; do not retry or issue further mutations; inspect the document with browser_docs_read after the tab is stable`,
+        )
+        error.unsettled = true
+        error.doNotRetry = true
+        error.retryable = false
+        error.flowSettled = settled
+        error.formatMany = {
+          action: 'format_many',
+          editCount: args.edits.length,
+          attemptedCount: context.attemptedCount,
+          mutationPossible: context.mutationPossible,
+          unsettled: true,
+          doNotRetry: true,
+        }
+        throw error
+      }
+    }
+    if (outcome.status === 'rejected') throw outcome.error
+    return outcome.value
+  } finally {
+    clearTimeout(deadlineTimer)
+    clearTimeout(graceTimer)
+  }
+}
+
+export async function docsFormatMany(settings, args, io = {}) {
+  if (args?.action !== 'format_many') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be format_many')
+  if (Object.keys(args).some(key => !['action', 'edits'].includes(key))) throw docsFailure('validate', 'BAD_DOCS_EDITS', 'unknown Docs batch format argument')
+  const edits = validateDocsFormatEdits(args.edits)
+  const normalizedArgs = { action: 'format_many', edits }
+  const driver = docsDriver(io)
+  const deadline = driver.now() + DOCS_FORMAT_MANY_DEADLINE_MS
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsFormatManyLocked(settings, normalizedArgs, tab, driver, deadline))
+  const gate = run.catch(async error => {
+    if (error?.code === 'DOCS_UNSETTLED' && error.flowSettled) await error.flowSettled
+  })
+  docsTabLocks.set(tab.id, gate)
+  let unsettled = false
+  try {
+    return await run
+  } catch (error) {
+    if (error?.code === 'DOCS_UNSETTLED') {
+      unsettled = true
+      gate.then(() => {
+        if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+      })
+    }
+    throw error
+  } finally {
+    if (!unsettled && docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
   }
 }
 
@@ -6855,26 +7591,28 @@ function docsWriteValidateBlocks(blocks) {
   return normalized
 }
 
-async function docsApplyWriteColor(context, attribute, value) {
-  const control = await docsProbe(context, `write-${attribute}-open`, 'colorControl', { attribute })
-  await docsClick(context, `write-${attribute}-open`, control.point)
+async function docsApplyWriteColor(context, attribute, value, options = {}) {
+  const prefix = options.prefix ?? 'write'
+  const cache = options.cache !== false
+  const control = await docsProbe(context, `${prefix}-${attribute}-open`, 'colorControl', { attribute })
+  await docsClick(context, `${prefix}-${attribute}-open`, control.point)
   if (attribute === 'highlight' && value === 'none') {
-    const menu = await docsWait(context, 'write-highlight-none', 'colorMenu', { attribute }, state => state.nonePoint)
-    await docsClick(context, 'write-highlight-none', menu.nonePoint)
-    await docsWait(context, 'write-highlight-none-close', 'colorMenu', { attribute }, state => !state.open)
+    const menu = await docsWait(context, `${prefix}-highlight-none`, 'colorMenu', { attribute }, state => state.nonePoint)
+    await docsClick(context, `${prefix}-highlight-none`, menu.nonePoint)
+    await docsWait(context, `${prefix}-highlight-none-close`, 'colorMenu', { attribute }, state => !state.open)
   } else {
-    const menu = await docsWait(context, `write-${attribute}-custom`, 'colorMenu', { attribute }, state => state.customPoint)
-    await docsClick(context, `write-${attribute}-custom`, menu.customPoint)
-    const dialog = await docsWait(context, `write-${attribute}-dialog`, 'colorDialog', {}, state => state.open && state.enabled && state.point)
-    await docsClick(context, `write-${attribute}-focus`, dialog.point)
-    await docsWait(context, `write-${attribute}-focus`, 'colorDialog', {}, state => state.focused)
-    await docsKey(context, `write-${attribute}-select`, { key: 'a', code: 'KeyA', keyCode: 65 }, MODIFIER_BITS.ctrl)
-    await docsInsertText(context, `write-${attribute}-input`, value)
-    await docsWait(context, `write-${attribute}-input`, 'colorDialog', {}, state => state.focused && state.value === value)
-    await docsKey(context, `write-${attribute}-commit`, KEY_SPECS.Enter)
-    await docsWait(context, `write-${attribute}-close`, 'colorDialog', {}, state => !state.open)
+    const menu = await docsWait(context, `${prefix}-${attribute}-custom`, 'colorMenu', { attribute }, state => state.customPoint)
+    await docsClick(context, `${prefix}-${attribute}-custom`, menu.customPoint)
+    const dialog = await docsWait(context, `${prefix}-${attribute}-dialog`, 'colorDialog', {}, state => state.open && state.enabled && state.point)
+    await docsClick(context, `${prefix}-${attribute}-focus`, dialog.point)
+    await docsWait(context, `${prefix}-${attribute}-focus`, 'colorDialog', {}, state => state.focused)
+    await docsKey(context, `${prefix}-${attribute}-select`, { key: 'a', code: 'KeyA', keyCode: 65 }, MODIFIER_BITS.ctrl)
+    await docsInsertText(context, `${prefix}-${attribute}-input`, value)
+    await docsWait(context, `${prefix}-${attribute}-input`, 'colorDialog', {}, state => state.focused && state.value === value)
+    await docsKey(context, `${prefix}-${attribute}-commit`, KEY_SPECS.Enter)
+    await docsWait(context, `${prefix}-${attribute}-close`, 'colorDialog', {}, state => !state.open)
   }
-  context.writeColors[attribute] = value
+  if (cache) context.writeColors[attribute] = value
 }
 
 async function docsWriteApplyColors(context, wanted) {
@@ -7823,6 +8561,9 @@ export async function execute(op, args = {}, settings) {
   if (op === 'click') {
     return click(normalized, args)
   }
+  if (op === 'click_role') {
+    return clickRole(normalized, args, { driver: roleClickDriver() })
+  }
   if (op === 'click_at') {
     return clickAt(normalized, args)
   }
@@ -7837,6 +8578,8 @@ export async function execute(op, args = {}, settings) {
     if (args.action === 'replace_many') return docsReplaceMany(normalized, args)
     if (args.action === 'rename') return docsRename(normalized, args)
     if (args.action === 'format') return docsFormat(normalized, args)
+    if (args.action === 'format_many') return docsFormatMany(normalized, args)
+    if (args.action === 'select_text') return docsSelectText(normalized, args)
     if (args.action === 'read') return docsRead(normalized, args)
     if (args.action === 'write') return docsWrite(normalized, args)
     if (args.action === 'page_setup') return docsPageSetup(normalized, args)

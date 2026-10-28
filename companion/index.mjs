@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 import { Bridge } from './bridge.mjs'
 import { DshRunner } from './dsh.mjs'
 import { LogStore } from './log-store.mjs'
-import { buildPromptBlocks, promptStats } from './prompt.mjs'
+import { buildPromptBlocks, normalizeImageAttachments, promptStats } from './prompt.mjs'
 import { PROTOCOL_VERSION, errorMessage, isRecord } from './protocol.mjs'
 import { clearKeyFile, resolveApiKey, writeKeyFile } from './credentials.mjs'
 import {
@@ -460,6 +460,7 @@ async function configureLlm(input) {
 async function handleChat(text, ui, message) {
   const prompt = text.trim()
   if (prompt.length === 0) return
+  const images = normalizeImageAttachments(message?.images)
   if (running) {
     bridge.sendToUi({
       v: PROTOCOL_VERSION,
@@ -534,7 +535,7 @@ async function handleChat(text, ui, message) {
       throw new Error('turn stopped by user before the model run')
     }
 
-    const blocks = buildPromptBlocks(view, prompt)
+    const blocks = buildPromptBlocks(view, prompt, new Date(), images)
     const stats = promptStats(blocks)
     promptTextBytes = stats.textBytes
     imageBytes = stats.imageBytes

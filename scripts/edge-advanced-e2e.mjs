@@ -91,6 +91,14 @@ const shadow = await evaluate(`(async () => { ${prefix}
 assert.equal(shadow.state, '1', 'shadow DOM button ran')
 console.log('PASS shadow DOM click')
 
+const shadowRole = await evaluate(`(async () => { ${prefix}
+  await mod.execute('click_role', { path: [{ role: 'button', name: 'Shadow action' }] }, settings)
+  const state = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.querySelector('my-widget').shadowRoot.getElementById('shadow-state').textContent }))[0].result
+  return { state }
+})()`)
+assert.equal(shadowRole.state, '2', 'accessible role/name traverses the open shadow root')
+console.log('PASS shadow DOM role/name click')
+
 const frameLabels = view.labels.filter(label => label.frame).map(label => label.id)
 const frameClicks = await evaluate(`(async () => { ${prefix}
   const ids = ${JSON.stringify(frameLabels)}
@@ -100,6 +108,68 @@ const frameClicks = await evaluate(`(async () => { ${prefix}
 })()`)
 assert.ok(frameClicks.states.some(item => item.state === '1'), 'an iframe button received the click')
 console.log('PASS iframe click (same/cross origin)')
+
+await evaluate(`(async () => { ${prefix}
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id, allFrames: true },
+    func: () => {
+      const button = document.getElementById('inner-button')
+      if (button) button.setAttribute('aria-label', location.hostname === 'localhost' ? 'Cross frame action' : 'Same frame action')
+    },
+  })
+})()`)
+for (const kind of ['same', 'cross']) {
+  const name = kind === 'same' ? 'Same frame action' : 'Cross frame action'
+  const host = kind === 'same' ? '127.0.0.1' : 'localhost'
+  const baseline = await evaluate(`(async () => { ${prefix}
+    await mod.execute('click_role', { path: [{ role: 'button', name: ${JSON.stringify(name)} }] }, settings)
+    return (await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: () => ({ host: location.hostname, state: document.getElementById('inner-state')?.textContent ?? null }) }))
+      .map(result => result.result)
+  })()`)
+  assert.equal(baseline.find(item => item.host === host && item.state !== null)?.state, '2', `${kind}-origin target accepts an uncovered click`)
+  for (const mode of ['overlay', 'clipped']) {
+    const blocked = await evaluate(`(async () => { ${prefix}
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: ({ kind, mode }) => {
+          document.getElementById('role-frame-overlay')?.remove()
+          document.getElementById('same-clip').classList.remove('clipped')
+          document.getElementById('cross-clip').classList.remove('clipped')
+          if (mode === 'clipped') {
+            document.getElementById(kind + '-clip').classList.add('clipped')
+            return
+          }
+          const rect = document.getElementById(kind).getBoundingClientRect()
+          const overlay = document.createElement('div')
+          overlay.id = 'role-frame-overlay'
+          overlay.style.cssText = 'position:fixed;z-index:2147483646;background:rgba(255,255,255,.01);'
+          overlay.style.left = rect.left + 'px'
+          overlay.style.top = rect.top + 'px'
+          overlay.style.width = rect.width + 'px'
+          overlay.style.height = rect.height + 'px'
+          document.body.appendChild(overlay)
+        },
+        args: [{ kind: ${JSON.stringify(kind)}, mode: ${JSON.stringify(mode)} }],
+      })
+      let failure
+      try { await mod.execute('click_role', { path: [{ role: 'button', name: ${JSON.stringify(name)} }] }, settings) }
+      catch (error) { failure = { code: error.code || 'ERROR', message: error.message } }
+      const states = (await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: () => ({ host: location.hostname, state: document.getElementById('inner-state')?.textContent ?? null }) }))
+        .map(result => result.result)
+      return { failure, states }
+    })()`)
+    assert.equal(blocked.failure?.code, 'ROLE_CLICK_COVERED', `${kind}-origin ${mode} is refused`)
+    assert.equal(blocked.states.find(item => item.host === host && item.state !== null)?.state, '2', `${kind}-origin ${mode} sends no click`)
+  }
+  console.log(`PASS ${kind}-origin iframe top-overlay and ancestor-clipping refusal`)
+}
+await evaluate(`(async () => { ${prefix}
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => {
+    document.getElementById('role-frame-overlay')?.remove()
+    document.getElementById('same-clip').classList.remove('clipped')
+    document.getElementById('cross-clip').classList.remove('clipped')
+  } })
+})()`)
 
 const select = await evaluate(`(async () => { ${prefix}
   const result = await mod.execute('select_option', { label: ${view.select}, option: 'Canada' }, settings)
@@ -120,6 +190,24 @@ const hover = await evaluate(`(async () => { ${prefix}
 assert.equal(hover.item, true, 'hover revealed the menu item')
 assert.equal(hover.state, '1', 'menu item click ran')
 console.log('PASS hover menu')
+
+const roleMenu = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tab.id, { url: 'http://127.0.0.1:17872/advanced.html' })
+  await new Promise(resolve => setTimeout(resolve, 1000))
+  await mod.execute('click_role', { path: [{ role: 'button', name: 'File' }, { role: 'menuitem', name: 'Page setup' }] }, settings)
+  const state = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => ({
+    count: document.getElementById('page-setup-count').textContent,
+    dialogOpen: !document.getElementById('page-setup-dialog').hidden,
+    expanded: document.getElementById('file-menu').getAttribute('aria-expanded'),
+    popupHidden: document.getElementById('file-popup').hidden,
+  }) }))[0].result
+  return { state }
+})()`)
+assert.equal(roleMenu.state.count, '1', 'asynchronous File → Page setup item activated once')
+assert.equal(roleMenu.state.dialogOpen, true, 'Page setup dialog opened')
+assert.equal(roleMenu.state.expanded, 'false', 'File menu collapsed after item activation')
+assert.equal(roleMenu.state.popupHidden, true, 'File popup closed after item activation')
+console.log('PASS click-open asynchronous ARIA menu path')
 
 console.log('\nALL ADVANCED CHECKS PASSED')
 panel.close()

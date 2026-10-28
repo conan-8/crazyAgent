@@ -559,6 +559,25 @@ test('Docs write rejects collateral changes during final verification', async ()
   assert.equal(fake.snapshots(), 1)
 })
 
+test('Docs write prefix verification rejects link removal and destination changes', async () => {
+  for (const mutatedHref of [undefined, 'https://changed.test']) {
+    const fake = fakeWrite()
+    const fetchExport = fake.io.fetchExport
+    fake.io.fetchExport = async () => {
+      const exported = await fetchExport()
+      const href = fake.exports.length > 2 ? mutatedHref : 'https://sentinel.test'
+      return {
+        ...exported,
+        body: exported.body.replace(/<span[^>]*>Sentinel<\/span>/u, span => href ? `<a href="${href}">${span}</a>` : span),
+      }
+    }
+    const result = await runWrite(fake, [{ text: 'New content' }])
+    assert.equal(result.docs.status, 'failed', JSON.stringify(result.docs))
+    assert.equal(result.docs.failure.index, -1)
+    assert.equal(result.docs.failure.code, 'DOCS_WRITE_COLLATERAL')
+  }
+})
+
 test('Docs write never inserts items when list mode does not become active', async () => {
   const fake = fakeWrite({ numberedStartFails: true })
   await assert.rejects(runWrite(fake, [{ items: ['one', 'two'], list: 'numbered' }]), error => (

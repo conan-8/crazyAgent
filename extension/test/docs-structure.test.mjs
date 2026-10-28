@@ -102,3 +102,16 @@ test('Docs structure honors explicit normal formatting over inherited emphasis',
     { text: 'fancy', bold: true, italic: true, underline: true },
   ])
 })
+
+test('Docs structure preserves per-run link identity and does not merge different links', () => {
+  const blocks = parseDocStructure(doc(
+    '<p><span><a href="https://www.google.com/url?q=https://ex.com/a&amp;sa=D">same</a></span>'
+      + '<span><a href="https://other.test">same</a></span><span>plain</span></p>',
+  ))
+  assert.deepEqual(blocks[0].runs.map(run => ({ text: run.text, href: run.href })), [
+    { text: 'same', href: 'https://ex.com/a' },
+    { text: 'same', href: 'https://other.test' },
+    { text: 'plain', href: undefined },
+  ])
+  assert.equal(blocks[0].marked, '[same](https://ex.com/a)[same](https://other.test)plain')
+})

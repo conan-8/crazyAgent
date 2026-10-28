@@ -81,7 +81,7 @@ function wrap(text, marks, href) {
   return lead + core + trail
 }
 
-function runMarks(marks) {
+function runMarks(marks, href) {
   return {
     bold: marks.bold === true,
     italic: marks.italic === true,
@@ -91,13 +91,14 @@ function runMarks(marks) {
     ...(marks.fontSize !== undefined ? { fontSize: marks.fontSize } : {}),
     ...(marks.color ? { color: marks.color } : {}),
     ...(marks.highlight ? { highlight: marks.highlight } : {}),
+    ...(href ? { href } : {}),
   }
 }
 
 function sameRunMarks(left, right) {
   return left.bold === right.bold && left.italic === right.italic && left.underline === right.underline
     && left.strike === right.strike && left.font === right.font && left.fontSize === right.fontSize
-    && left.color === right.color && left.highlight === right.highlight
+    && left.color === right.color && left.highlight === right.highlight && left.href === right.href
 }
 
 export function parseDocStructure(html) {
@@ -118,7 +119,7 @@ export function parseDocStructure(html) {
     if (!para) para = { style: 'P', text: '', marked: '', runs: [], marks: {} }
     para.text += raw
     para.marked += wrap(raw, currentMarks(), href)
-    const marks = runMarks(currentMarks())
+    const marks = runMarks(currentMarks(), href)
     const previous = para.runs.at(-1)
     if (previous && sameRunMarks(previous, marks)) previous.text += raw
     else para.runs.push({ text: raw, ...marks })

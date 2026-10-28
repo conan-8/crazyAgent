@@ -12,6 +12,12 @@ When a turn runs, the side panel can capture:
 
 It does **not** capture other windows, background tabs, the side panel itself, or a full-page image in Phase 1. There is no persistent content script and no background screenshot loop: a capture happens only for a user message or a model tool call.
 
+## Pasted images and dictation
+
+Pasting a PNG, JPEG, WebP, or GIF into the composer reads that clipboard image into extension memory and shows a thumbnail. It is sent through the local companion to DSH and the configured model provider only when you send or queue-then-dispatch its message. Like viewport screenshots, sent images become DSH attachments and may remain in session logs under `.dsh-home`.
+
+The microphone button uses the browser's `SpeechRecognition` implementation when available. Recognition starts only after you click the mic and stops when you click it again, edit manually, send, reset the chat, or close the panel. Audio is handled by the browser and its speech service, which may be online and governed by the browser vendor's privacy policy; audio is not sent through the CrazyAgent companion. Final and interim text appears only in the local composer draft and is sent to the model only if you send that draft.
+
 ## Where it goes
 
 ```text
@@ -22,9 +28,9 @@ Chrome tab
   → your configured model provider (HTTPS)
 ```
 
-- **Model provider:** screenshots, interactive-element labels (tag, role, visible text, and position), rendered page text read with `browser_read_text`, tab titles/URLs, your prompts, and the conversation are sent to **OpenRouter** (or the base URL you configure) and the selected model's upstream provider. If the model exposes reasoning, its thinking deltas are returned and shown in the side panel. Those providers' data policies apply. Do not use this on pages whose content you are not willing to send to them.
+- **Model provider:** viewport screenshots, explicitly pasted images, interactive-element labels (tag, role, visible text, and position), rendered page text read with `browser_read_text`, tab titles/URLs, your prompts, and the conversation are sent to **OpenRouter** (or the base URL you configure) and the selected model's upstream provider. If the model exposes reasoning, its thinking deltas are returned and shown in the side panel. Those providers' data policies apply. Do not use this on pages whose content you are not willing to send to them.
 - **Local bridge:** the companion listens only on `127.0.0.1`. It is not reachable from your network. The WebSocket requires a random token.
-- **Extension network access:** Phase 1 makes no direct network requests other than the loopback WebSocket. The model calls originate from DSH.
+- **Extension network access:** model calls originate from DSH. Browser speech recognition may contact the browser vendor's speech service as described above; recognition audio does not pass through the companion.
 
 ## Clipboard
 
@@ -33,7 +39,7 @@ The agent has two clipboards:
 - **Virtual clipboard (default):** an internal clipboard stored under the `crazyagent.clipboard` key in `chrome.storage.session`. It holds text only, survives an extension reload within the same browser session, and is never written to `chrome.storage.local` or to disk; it disappears when the browser session ends. `browser_clipboard` actions `copy`, `read`, `write`, `paste`, and `clear` use this clipboard unless `target:"system"` is passed explicitly. Text is capped at 100,000 characters and truncation adds a visible marker.
 - **System clipboard (opt-in):** used only when a tool call explicitly sets `target:"system"`. Copy and write call `navigator.clipboard.writeText`; read and text-only paste call `navigator.clipboard.readText`; a rich paste focuses the target and sends one trusted Ctrl+V so the page itself pastes the computer clipboard, including rich text and images. This uses the `clipboardRead` and `clipboardWrite` permissions and can still fail with `CLIPBOARD_DENIED` when the side panel is unfocused or the browser blocks clipboard access.
 
-Clipboard access happens only on an explicit model tool call: neither clipboard is read at startup, on a turn, or in the background. Clipboard text returned by `read` is sent to the model provider like other page text, and text the model copies or writes can contain page content. Treat text copied from the system clipboard as sensitive: it may hold passwords or other data from outside the page.
+Agent clipboard access happens only on an explicit model tool call. Composer image pasting happens only on your explicit paste gesture. Otherwise, neither clipboard is read at startup, on a turn, or in the background. Clipboard text returned by `read` is sent to the model provider like other page text, and text the model copies or writes can contain page content. Treat text copied from the system clipboard as sensitive: it may hold passwords or other data from outside the page.
 
 ## What is stored locally
 

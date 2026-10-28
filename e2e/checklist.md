@@ -13,9 +13,11 @@ python3 -m http.server 17872 --bind 127.0.0.1 --directory e2e/fixtures
 ```
 
 - Chrome/Edge 116+; extension loaded unpacked from `extension/`.
+- **Before live Google Docs acceptance, reload the normal unpacked extension at `chrome://extensions` or `edge://extensions` and reopen the side panel.** Do not run these scenarios against a stale cached executor or the extension page opened as a tab.
 - Side panel token pasted in Settings; OpenRouter API key entered; **Refresh models** used and an image-capable model selected; Save clicked; status says **Connected**.
 - Every view shows yellow numbered badges on visible controls.
 - A normal tab is active. `chrome://` and extension pages are expected to fail.
+- The new `browser_click_role`, `browser_docs_select_text`, and `browser_docs_format_many` scenarios below have **no live Google Docs acceptance yet**. Unit/profile results and isolated Edge click/advanced/canvas suites do not check them off.
 
 ## Checks
 
@@ -171,6 +173,35 @@ Use `e2e/fixtures/form.html` and a disposable Google Doc.
 - Ask: **“Take a quick look at the page.”** Expect `browser_screenshot` with `detail:"fast"`; card metadata shows a 640 px image.
 - With **Auto** effort, ask **“delete the extra paragraph”** or **“add a comment here”** — the policy line should say `reasoning low (act, auto)` and thinking should stream from the first step. Ask **“what does this page say?”** — `reasoning low (inspect, auto)`.
 - **Pass:** selection and typing outcomes are honest, only the intended Docs range/paragraph changes, each semantic font/format operation returns one final view, and no dependent Docs actions are batched. Tool statuses and the agent's final answer are diagnostic only: independently inspect final text and formatting after every scenario, and record collateral or recovery edits even when repaired.
+
+### 9e. Semantic role paths and exact Docs ranges (live acceptance pending)
+
+Run these scenarios at **medium effort** in fresh chats, each from a newly created disposable document in the stated initial state. Reload the normal unpacked extension and reopen the panel before starting. None of the three new tools has live Google Docs acceptance yet; a green unit/fake-driver or isolated-fixture suite is not a pass here.
+
+#### A. Ordinal selection and one harmless primitive
+
+- Start with three separate paragraphs containing exactly `Duplicate target`, followed by a differently formatted `Sentinel: unchanged` paragraph. Give one instruction: **“Select only the second occurrence of the exact text ‘Duplicate target’ and make just that selected text bold with one keyboard formatting action. Do not change anything else.”**
+- Expect `browser_docs_select_text` with `occurrence:2`, `scope:"text"`, then exactly one `browser_press_key` Ctrl+B primitive with a full fresh view. Selection must return `status:"selected"`, `matchCount:3`, `current:2`, `occurrence:2`, and `verifiedBy:"find-counter"` as a text-only result with no screenshot. No manual Find, drag selection, generic Docs batch, or formatting before the verified selection.
+- Independently inspect an HTML export: only the second exact duplicate is bold; the first, third, sentinel, all text, links, and other formatting are unchanged. The selection result and final answer are not acceptance evidence.
+- Repeat separately from the same fresh three-duplicate state for `occurrence:"first"` and `occurrence:"last"`, applying the same single bold primitive and independently proving that only the requested occurrence changed.
+- Separately test wrapped containing-paragraph selection in a fresh document with a unique paragraph such as `Prefix anchor suffix` and sentinels. Request the exact anchor with `scope:"paragraph"`, then apply one harmless bold primitive. Expect the result to identify the full selected paragraph, `anchorText:"anchor"`, and its `paragraphIndex`; export must prove the whole intended paragraph—not merely the anchor or another paragraph—changed, with no collateral edits.
+- On duplicate text, omitting `occurrence` must fail rather than silently choosing first. There is no `occurrence:"all"` or persistent multi-select mode.
+
+#### B. One multi-range format call, then an exact second-edit failure
+
+- Fresh setup: a Normal-text `Release heading`; three separate `Duplicate target` paragraphs; a bulleted `List sentinel`; a `Link sentinel` pointing to `https://example.com/keep`; and a differently formatted `Plain sentinel`. Give one medium-effort instruction: **“Make ‘Release heading’ Heading 1, Playfair Display, 28 pt, bold, #0000FF with a #FFFF00 highlight. Make only the second ‘Duplicate target’ Roboto, 12 pt, italic, and underlined. Leave every other character, format, list, and link unchanged.”**
+- The first formatting call must be one `browser_docs_format_many` containing two ordered edits, with `occurrence:2` on the duplicate. Across the edits this exercises all eight attributes: paragraph style, font, size, bold, italic, underline, color, and highlight. Expect `completed`, `editCount:2`, `attemptedCount:2`, `verifiedCount:2`, `appliedCount:2`, `remainingCount:0`, `verifiedBy:"export"`, per-edit results, and one final view—no preliminary selection/menu calls or generic Docs mutation batch.
+- Independently inspect exported HTML for every requested run and paragraph property, only the second duplicate changed, and unchanged sentinels, list type/metadata, link text, and a structured link destination that still resolves to `https://example.com/keep` (including when Docs exports a redirecting `href`). Account for legitimate paragraph-style inheritance only inside the styled paragraph; any unrequested font/size/bold change elsewhere is collateral.
+- **Second-edit failure:** restore the same fresh initial state and add unique `First range`, `Second range`, and `Third range` paragraphs. Request one `browser_docs_format_many` with three ordered edits: bold `First range`; bold `Second range` and set a definitely unavailable font on that same second edit; italicize `Third range`. Expect the operation to stop at edit index 1. Exact result: overall `partial`, `editCount:3`, `attemptedCount:2`, `verifiedCount:1`, `appliedCount:1`, `remainingCount:1`; result 0 `completed` and export-verified, result 1 `partial` with bold applied and font failed, result 2 `unattempted` with its attributes unattempted; `failure.index:1`, `failure.attribute:"font"`, and `failure.code:"DOCS_FONT_MISSING"`. Do not retry the whole call or claim the third edit ran. Independently export-check the first two ranges' exact partial state, an unchanged third range, and no collateral edits.
+- Separate negative checks must fail before mutation: overlapping ranges (`DOCS_FORMAT_OVERLAPPING_EDITS`), conflicting paragraph-style edits, `paragraph_style` on an `LI`, and opaque structures such as tables (`DOCS_FORMAT_UNSUPPORTED_STRUCTURE`). Generic Docs mutation batches remain blocked.
+
+#### C. Combined exact selection, menu path, and multi-range formatting
+
+- Fresh setup: three separate `Menu target` paragraphs, unique `Batch heading` and `Batch accent` paragraphs, and differently formatted text/list/link sentinels. In a fresh chat at medium effort, give this instruction **once, with no guidance or continuation**: **“Make only the second ‘Menu target’ strikethrough using the Format → Text menu. Then make ‘Batch heading’ Heading 2 and 18 pt, and make ‘Batch accent’ bold and #008000. Leave all other text, formatting, lists, and links unchanged.”**
+- Target one `browser_docs_select_text` for ordinal 2, one `browser_click_role` for the exact role/name Format → Text → Strikethrough page-chrome menu path, then one `browser_docs_format_many` with the two supported edits, all executed exclusively in order. Menu reveal/wait/revalidation belongs inside `click_role`; do not use editor-content role clicks, guessed coordinates, manual Find, or a generic Docs mutation batch.
+- `roleClick.status:"completed"` proves path dispatch, not strikethrough or the requested document outcome. `ROLE_CLICK_UNSETTLED` and `DOCS_UNSETTLED` are not safe to retry; after `DOCS_UNSETTLED`, issue no further mutation and inspect only after the tab is stable.
+- Allow **at most one independent `browser_docs_read` with `format:"html"`** after the final mutation. Verify strikethrough only on the second duplicate, both multi-range edits, unchanged sentinels and structured link destinations, and no extra content or collateral formatting.
+- For every scenario and repetition, record wall time, model steps, tool calls, failed calls, retries, wrong-target actions, recovery edits, and collateral edits even if repaired. Repeat from the same fresh initial state to distinguish a lucky run from reliability. A recovered final document is not acceptance; **do not mark live Docs acceptance done until these normal-unpacked-extension runs pass independently.**
 
 ### 9c. Batching and view modes
 

@@ -6,6 +6,35 @@
  * DSH admits it to durable attachment storage before the prompt is accepted.
  */
 
+const MAX_PROMPT_IMAGES = 4
+const MAX_PROMPT_IMAGE_BYTES = 5_000_000
+const MAX_PROMPT_TOTAL_IMAGE_BYTES = 12_000_000
+const PROMPT_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+
+export function normalizeImageAttachments(value) {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw new Error('images must be an array')
+  if (value.length > MAX_PROMPT_IMAGES) throw new Error(`up to ${MAX_PROMPT_IMAGES} images are allowed`)
+  let totalBytes = 0
+  return value.map((image, index) => {
+    if (!image || typeof image !== 'object' || Array.isArray(image)) throw new Error(`image ${index + 1} must be an object`)
+    if (!PROMPT_IMAGE_TYPES.has(image.mimeType)) throw new Error(`image ${index + 1} must be PNG, JPEG, WebP, or GIF`)
+    if (typeof image.data !== 'string' || image.data.length === 0 || image.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(image.data)) {
+      throw new Error(`image ${index + 1} has invalid base64 data`)
+    }
+    const bytes = Buffer.from(image.data, 'base64')
+    if (bytes.length === 0 || bytes.toString('base64') !== image.data) throw new Error(`image ${index + 1} has invalid base64 data`)
+    if (bytes.length > MAX_PROMPT_IMAGE_BYTES) throw new Error(`image ${index + 1} exceeds the ${MAX_PROMPT_IMAGE_BYTES}-byte limit`)
+    totalBytes += bytes.length
+    if (totalBytes > MAX_PROMPT_TOTAL_IMAGE_BYTES) throw new Error(`images exceed the ${MAX_PROMPT_TOTAL_IMAGE_BYTES}-byte total limit`)
+    return {
+      name: typeof image.name === 'string' && image.name.length > 0 ? image.name.slice(0, 200) : `image-${index + 1}`,
+      mimeType: image.mimeType,
+      data: image.data,
+    }
+  })
+}
+
 /** @param {Record<string, any> | null | undefined} view */
 export function formatViewText(view) {
   if (!view || !view.tab) return '<current_view unavailable="no snapshot was captured"/>'
@@ -57,14 +86,16 @@ function formatTimeContext(now) {
  * @param {Record<string, any> | null | undefined} view
  * @param {string} text
  * @param {Date} now
+ * @param {Array<{mimeType: string, data: string}>} images
  * @returns {Array<Record<string, unknown>>}
  */
-export function buildPromptBlocks(view, text, now = new Date()) {
+export function buildPromptBlocks(view, text, now = new Date(), images = []) {
   const header = view?.image?.data === undefined
     ? `${formatViewText(view)}\n(No screenshot is attached for this turn. Use browser_screenshot if you need to see the page.)`
     : formatViewText(view)
   /** @type {Array<Record<string, unknown>>} */
   const blocks = [{ type: 'text', text: `${header}\n\n${formatTimeContext(now)}\n\n${text}` }]
+  for (const image of images) blocks.push({ type: 'image', data: image.data, mimeType: image.mimeType })
   if (typeof view?.image?.data === 'string' && view.image.data.length > 0 && typeof view.image.mimeType === 'string') {
     blocks.push({ type: 'image', data: view.image.data, mimeType: view.image.mimeType })
   }

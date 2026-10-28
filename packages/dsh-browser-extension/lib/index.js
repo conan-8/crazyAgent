@@ -36,6 +36,16 @@ const CLIPBOARD_TARGET_LABELS = { virtual: 'virtual clipboard', system: 'system 
 const DOCS_TEXT_MAX_CHARS = 1_000
 const DOCS_FONT_MAX_CHARS = 100
 const DOCS_PARAGRAPH_STYLES = ['Normal text', 'Title', 'Subtitle', 'Heading 1', 'Heading 2', 'Heading 3', 'Heading 4', 'Heading 5', 'Heading 6']
+const DOCS_FORMAT_ATTRIBUTES = ['paragraph_style', 'font_size', 'bold', 'italic', 'underline', 'font']
+const DOCS_FORMAT_MANY_ATTRIBUTES = [...DOCS_FORMAT_ATTRIBUTES, 'color', 'highlight']
+const CLICK_ROLES = ['button', 'link', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'checkbox', 'radio', 'switch', 'option', 'combobox']
+const DOCS_OCCURRENCE_SCHEMA = {
+  anyOf: [
+    { type: 'string', enum: ['first', 'last'] },
+    { type: 'integer', minimum: 1 },
+  ],
+  description: 'Optional explicit occurrence: first, last, or a one-based positive integer. Omit to require one unique match; there is no all mode.',
+}
 
 const GUIDANCE = `The browser tools operate the user's current Chrome window from the side panel.
 Operating rules (highest priority):
@@ -53,18 +63,20 @@ Operating rules (highest priority):
 - Never paste secrets or passwords into a page, and read the system clipboard only when the user asks.
 - Each screenshot shows only the current viewport plus tab, scroll, and scale metadata.
 - Most actions accept view: "auto" (default) | "full" | "compact" | "none". auto returns a compact confirmation with a label delta and no screenshot, escalating to a full view when the page changes, after 5 actions, or when you pass view:"full"; ask for view:"full" when you need to see. view:"none" only when you do not need any confirmation of structure.
-- Every full view includes yellow numbered badges on interactive elements and a "labels" list. Click by number with browser_click, never by guessed coordinates. Labels are stable for the page: a label either resolves to the same element or fails as stale.
+- Every full view includes yellow numbered badges on interactive elements and a "labels" list. Click by number with browser_click, never by guessed coordinates. Labels are stable for the page: a label either resolves to the same element or fails as stale. For an exact role/name path, especially a menu path, prefer browser_click_role with path:[{role,name}, ...] (1-4 steps) instead of labels or guessed coordinates; it follows that exact path and returns one final full view. Dedicated Docs mutation tools retain precedence over browser_click_role for every operation they support.
 - A view also lists its surfaces: canvas, video, and iframe regions with no DOM targets. Use browser_click_at with screenshot pixel coordinates for targets inside those regions or when no label covers the target. It uses trusted browser input and reports pixels_changed, so it works where DOM events never fire.
 - Apps that render their chrome themselves (Google Docs/Sheets/Slides, Figma, drawing apps) are known canvas editors. Use one action + full fresh view in these apps: perform exactly one action, then inspect the full fresh view before any next action. No mutating batches or multi-point bursts are allowed there; the executor will reject them. Never reuse coordinates measured in an earlier view. Use labelled ARIA toolbar/menu controls instead of guessed coordinates.
 - In a canvas editor browser_read_text is unreliable (it returns page chrome or duplicated text), and typing or selection dispatch does not verify a document change. Use the returned full fresh view to confirm what landed; never retry unverified input blindly because retyping can duplicate content.
-- For exact Google Docs formatting, make browser_docs_format your FIRST tool call when the target text is known: pass text plus any of paragraph_style, font_size, bold, italic, underline, or font in one call, with no preliminary screenshot, Ctrl+F, or menu actions. It uses one unique selection and one final view, skips already-correct states, and verifies every requested attribute. Booleans are desired states, so false removes that emphasis. Paragraph style affects the whole containing paragraph. Missing or duplicate text is left untouched. If the result is partial or failed, do not claim every attribute applied or repeat already verified changes blindly. For unsupported attributes or ordinal/duplicate targets, use the primitive one-action + full fresh view workflow instead.
+- For one exact unique Google Docs formatting target, make browser_docs_format your FIRST tool call when the target text is known: pass text plus any of paragraph_style, font_size, bold, italic, underline, or font in one call, with no preliminary screenshot, Ctrl+F, or menu actions. It uses one unique selection and one final view, skips already-correct states, and verifies every requested attribute. Booleans are desired states, so false removes that emphasis. Paragraph style affects the whole containing paragraph. Missing or duplicate text is left untouched. If the result is partial or failed, do not claim every attribute applied or repeat already verified changes blindly.
+- For multiple exact Google Docs formatting ranges, or for color, highlight, or an explicit ordinal target, make browser_docs_format_many your FIRST formatting tool call with 1-50 edits. Each edit takes exact text, at least one of paragraph_style, font_size, bold, italic, underline, font, color, or highlight, and an optional occurrence:"first"|"last"|positive integer. Omitting occurrence always requires a unique match; it never picks first, and there is no all mode. Dedicated Docs mutation tools retain precedence over manual selection and menu workflows. Read per-edit results after partial or failed status: only verified edits are confirmed; never claim failed or unverified edits completed.
+- For an explicit ordinal Google Docs selection, use browser_docs_select_text with exact text and occurrence:"first"|"last" or a positive one-based integer; optional scope:"text"|"paragraph" selects the match or its containing paragraph. Omitted occurrence remains unique-only and never defaults to first. The text-only result reports the verified selection without an empty screenshot. Use it when selection itself is requested or needed for an unsupported following formatting action, not instead of browser_docs_format or browser_docs_format_many for supported formatting.
 - For compound Google Docs creation or appending at document end, make browser_docs_write your FIRST content tool call with blocks instead of typing the whole document and repairing formatting afterward. Each block is one single-line {text,...formatting}, one mixed inline paragraph {runs:[{text,...formatting}, ...], ...defaults}, one flat {items:[...],list:"numbered"|"bulleted"|"checklist",...formatting}, {blank:true}, or {page_break:true}. Checklist items are strings or {text,checked} objects; checked state and page breaks are verified by export. blank and page_break are standalone block kinds, never formatting flags: omit them unless they are the only field in that block, never send blank:false, and always pair every items array with list and every list with items. It formats every run ahead of the caret—including font, size, emphasis, color, and highlight—before insertion, exits lists with Enter twice, and verifies exported content plus the preserved prefix. Include every explicitly requested attribute, including font_size, color, and highlight, and include every block in the first call. If the result is partial or failed, inspect actual state and continue only the unapplied operation; never retype content or drop requested attributes to make a retry pass. Do not manually recreate supported paragraphs, lists, checklists, or page breaks, convert existing lists, or claim insertion anywhere except document end. For page setup, use browser_docs_page_setup with paper_size, orientation, and inch margins instead of the File menu; it verifies every value before OK. For a whole-document task, compose already-known rename, page-setup, and write calls in one response with mutations executed exclusively in order. Returned results are enough verification; use browser_docs_read only for needed independent evidence, not as a redundant check or preliminary step.
-- For other canvas formatting or Docs attributes not covered by browser_docs_format: never click to place a caret at a specific line — a click lands wherever the pixels are and then Home/Shift+End selects the wrong paragraph, which is how a formatting pass ends up mixed across the document. To anchor on unique text with Ctrl+F, make selection a separate visually confirmed step before formatting: press ctrl+f, type the unique exact text, and press Escape as separate actions with a full fresh view after each; in the final view, visually confirm that the intended match is selected. Only then apply the style as a separate action: ctrl+alt+1/2/3 for Heading 1/2/3, ctrl+alt+0 for Normal text, ctrl+b/i/u for bold/italic/underline. Never combine finding, selecting, and formatting in a mutating batch.
+- For other canvas formatting or Google Docs formatting attributes not covered by browser_docs_format or browser_docs_format_many: never click to place a caret at a specific line — a click lands wherever the pixels are and then Home/Shift+End selects the wrong paragraph, which is how a formatting pass ends up mixed across the document. In Docs, use browser_docs_select_text with exact text and the requested occurrence (first, last, or a one-based integer); omit occurrence to require a unique match. Do not drive Ctrl+F/Find yourself. After the verified selection result, perform exactly one guarded primitive action — browser_click_role for an exact menu path or browser_press_key/browser_click with view:"full" — and inspect the returned full fresh view before any next action. Dedicated replacement and formatting tools keep precedence; this selection workflow does not give replacement tools ordinal or multi-match support. Never combine selection and formatting in a mutating batch.
 - In Google Docs, prefer browser_docs with action:"set_font" for font-only changes; browser_docs_format also accepts font alongside other attributes. It internally requires a unique 1-of-1 exact text find and exact visible role/name controls, and handles More fonts add → close → reopen → apply before returning one final view. Duplicate text is left untouched. Font matching is exact: Syne must not match Syne Mono. font_missing means the requested font is unavailable and the matched text was left unchanged; remove_if_missing:true instead deletes the matched text only, never its paragraph break. The guarded Docs action is not a license for dependent batches: keep the primitive one-action + full fresh view safeguards for other Docs actions.
 - In Google Docs, use the actual tool browser_docs_replace_text for one exact text deletion or replacement. For a short request such as "remove X", call it immediately with text:"X" and replacement:""; do not read page text first or substitute a target from chat history, images, or reasoning. It requires a unique 1-of-1 match, clicks Replace once internally, verifies counters, and returns one final view. A 0-of-0 result means the requested text was not found: report that and do not choose another target. For several exact edits, collect them into one actual browser_docs_replace_many call with edits:[{text,replacement}, ...] (up to 200), not one model call per edit. It applies edits in order, rechecks uniqueness after earlier edits, stops at a missing or duplicate match, and reports appliedCount plus the zero-based failure index; never claim unattempted edits completed. Do not manually operate Find and Replace for these cases or switch tool names to bypass an error. Duplicate or missing text is left untouched; use the primitive one-action + full fresh view workflow instead when an ordinal or multiple matches are intended.
 - For a Google Docs title change, use browser_docs_rename. Never type a title and press Enter based on assumed focus: it verifies title-field focus before Enter and the committed document title afterward.
 - Three consecutive Docs replacement failures trip DOCS_FAILURE_CIRCUIT. Stop and report the requested edit as blocked; do not try another target, tool name, speculative replacement, or canvas workaround.
-- In Google Docs, use labelled ARIA toolbar/menu controls; Docs' div comboboxes are not native selects, so never use browser_select_option on them. For other font-toolbar interactions, click the labelled font toolbar control, take a full fresh view, and click the exact labelled menuitemcheckbox; or use the labelled More fonts control and its labelled search field, with a full fresh view between actions.
+- In Google Docs, use browser_click_role for exact role/name menu paths when no dedicated Docs mutation tool covers the operation; otherwise use labelled ARIA toolbar/menu controls. Docs' div comboboxes are not native selects, so never use browser_select_option on them. For other font-toolbar interactions, click the labelled font toolbar control, take a full fresh view, and click the exact labelled menuitemcheckbox; or use the labelled More fonts control and its labelled search field, with a full fresh view between actions.
 - Never run clear formatting (ctrl+\) over content that has links: it strips the hyperlinks. To unify typography, set the document's Normal text style (or select a range and set font/size) and restyle per paragraph instead of resetting everything.
 - Outside known canvas editors, click several targets with one browser_click_at call: pass points:[{x,y}, ...] (up to 20) instead of one call per click. A burst returns one confirmation with a per-point changed report, so one attach and one view cover the whole burst.
 - Outside known canvas editors, add view:"none" to browser_click_at for rapid repeated bursts that do not need to see the result: it returns text only and skips the screenshot. Image coordinates still map to the previous view, so keep clicking without paying for another image; ask for a fresh view when the layout may have moved or you need to re-aim.
@@ -666,6 +678,9 @@ function createCallGuard(options) {
     if ((toolName === 'browser_docs_replace_many' || oldMany) && Array.isArray(record.edits) && record.edits.length === 1 && isRecord(record.edits[0])) {
       return { toolName: 'browser_docs_replace_text', args: { text: record.edits[0].text, replacement: record.edits[0].replacement } }
     }
+    if (toolName === 'browser_docs_format_many' && Array.isArray(record.edits) && record.edits.length === 1 && isRecord(record.edits[0])) {
+      return { toolName: 'browser_docs_format', args: record.edits[0] }
+    }
     return { toolName, args }
   }
 
@@ -705,7 +720,12 @@ function createCallGuard(options) {
   }
 
   const endCall = (toolName, args, error, result) => {
-    const incompleteBatch = result?.docs?.action === 'replace_many' && result.docs.status !== 'completed'
+    const legacyAction = toolName === 'browser_docs' && isRecord(args) ? args.action : undefined
+    const docsAction = result?.docs?.action ?? (toolName === 'browser_docs_format_many' ? 'format_many'
+      : toolName === 'browser_docs_replace_many' || legacyAction === 'replace_many' ? 'replace_many' : undefined)
+    const docsStatus = result?.docs?.status ?? /(?:^|\n)docs\.status=([^\s]+)/u.exec(toolResultText(result))?.[1]
+    const incompleteBatch = (docsAction === 'replace_many' && docsStatus !== 'completed')
+      || (docsAction === 'format_many' && docsStatus !== 'completed' && docsStatus !== 'already_applied')
     if (!isObservationCall(toolName)) lastMutationSucceeded = !error && !incompleteBatch
     if (!docsReplacementCall(toolName, args)) return
     if (!error && !incompleteBatch) {
@@ -1272,6 +1292,21 @@ function clickContent(result) {
 }
 
 /**
+ * Model-facing exact role-path click result with the executor's final full view.
+ * @param {Record<string, any>} result
+ * @returns {{content: Array<Record<string, unknown>>}}
+ */
+function roleClickContent(result) {
+  const roleClick = isRecord(result?.roleClick) ? result.roleClick : {}
+  const path = Array.isArray(roleClick.path) ? roleClick.path : []
+  const lines = [`roleClick.status=${roleClick.status ?? '?'} roleClick.completed=${roleClick.completed ?? '?'} roleClick.path=${JSON.stringify(path)}`]
+  if (roleClick.status === 'completed') lines.push('result: exact role path completed; one final full view returned.')
+  else if (roleClick.status === 'partial') lines.push(`result: role path incomplete; only the ${roleClick.completed ?? path.length} reported step(s) are confirmed. Do not claim later steps were clicked.`)
+  if (isRecord(roleClick.failure)) lines.push(`roleClick.failure=${JSON.stringify(roleClick.failure)}`)
+  return viewContent(result, lines.join('\n'))
+}
+
+/**
  * Resolve the element shown in a type result. The result may not repeat the
  * element's role or text, so fall back to the snapshot labels.
  * @param {Record<string, any>} result
@@ -1495,24 +1530,28 @@ function docsContent(result) {
   const lines = [
     docs.action === 'write'
       ? `docs.status=${docs.status ?? '?'} docs.verifiedCount=${docs.verifiedCount ?? '?'}/${docs.blockCount ?? '?'} docs.attemptedCount=${docs.attemptedCount ?? '?'} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
-      : docs.action === 'format'
-        ? `docs.status=${docs.status ?? '?'} docs.appliedCount=${docs.appliedCount ?? '?'}/${docs.attributeCount ?? '?'} docs.alreadyAppliedCount=${docs.alreadyAppliedCount ?? '?'} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
-        : docs.action === 'page_setup'
-          ? `docs.status=${docs.status ?? '?'} docs.paperSize=${JSON.stringify(docs.paperSize)} docs.orientation=${JSON.stringify(docs.orientation)} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
-          : docs.action === 'rename'
-            ? `docs.status=${docs.status ?? '?'} docs.title=${JSON.stringify(docs.title)} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
-          : docs.action === 'replace_many'
-            ? `docs.status=${docs.status ?? '?'} docs.appliedCount=${docs.appliedCount ?? '?'}/${docs.editCount ?? '?'} docs.remainingCount=${docs.remainingCount ?? '?'} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
-            : docs.action === 'replace_text'
-              ? `docs.status=${docs.status ?? '?'} docs.matchCount=${docs.matchCount ?? '?'} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
-              : `docs.status=${docs.status ?? '?'} docs.matchCount=${docs.matchCount ?? '?'} docs.fontAdded=${docs.fontAdded ?? '?'} docs.verifiedBy=${docs.verifiedBy ?? '?'}`,
+      : docs.action === 'format_many'
+        ? `docs.status=${docs.status ?? '?'} docs.appliedCount=${docs.appliedCount ?? '?'}/${docs.editCount ?? '?'} docs.attemptedCount=${docs.attemptedCount ?? '?'} docs.verifiedCount=${docs.verifiedCount ?? '?'} docs.remainingCount=${docs.remainingCount ?? '?'} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
+        : docs.action === 'format'
+          ? `docs.status=${docs.status ?? '?'} docs.appliedCount=${docs.appliedCount ?? '?'}/${docs.attributeCount ?? '?'} docs.alreadyAppliedCount=${docs.alreadyAppliedCount ?? '?'} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
+          : docs.action === 'page_setup'
+            ? `docs.status=${docs.status ?? '?'} docs.paperSize=${JSON.stringify(docs.paperSize)} docs.orientation=${JSON.stringify(docs.orientation)} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
+            : docs.action === 'rename'
+              ? `docs.status=${docs.status ?? '?'} docs.title=${JSON.stringify(docs.title)} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
+              : docs.action === 'replace_many'
+                ? `docs.status=${docs.status ?? '?'} docs.appliedCount=${docs.appliedCount ?? '?'}/${docs.editCount ?? '?'} docs.remainingCount=${docs.remainingCount ?? '?'} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
+                : docs.action === 'replace_text'
+                  ? `docs.status=${docs.status ?? '?'} docs.matchCount=${docs.matchCount ?? '?'} docs.verifiedBy=${docs.verifiedBy ?? '?'}`
+                  : `docs.status=${docs.status ?? '?'} docs.matchCount=${docs.matchCount ?? '?'} docs.fontAdded=${docs.fontAdded ?? '?'} docs.verifiedBy=${docs.verifiedBy ?? '?'}`,
   ]
   if (docs.status === 'applied') {
     lines.push('result: font applied to the unique matched text; toolbar verification passed.')
   } else if (docs.status === 'already_applied') {
     lines.push(docs.action === 'format'
       ? 'result: every requested formatting state was already present; final toolbar verification passed.'
-      : 'result: font was already applied to the unique matched text; toolbar verification passed.')
+      : docs.action === 'format_many'
+        ? 'result: every requested formatting state was already present; final per-edit verification passed.'
+        : 'result: font was already applied to the unique matched text; toolbar verification passed.')
   } else if (docs.status === 'font_missing') {
     lines.push(docs.action === 'format'
       ? 'result: requested font is missing; no text was deleted and no formatting changes were applied.'
@@ -1528,23 +1567,48 @@ function docsContent(result) {
         ? 'result: every requested paper-size, orientation, and margin value was verified before the dialog closed.'
         : docs.action === 'format'
           ? 'result: every requested formatting state was verified on one unique text selection.'
-          : 'result: applied every requested edit in order; find-counter verification passed for each edit.')
+          : docs.action === 'format_many'
+            ? 'result: every requested formatting edit reached its requested state and passed final per-edit verification.'
+            : 'result: applied every requested edit in order; find-counter verification passed for each edit.')
   } else if (docs.status === 'partial' || docs.status === 'failed') {
     lines.push(docs.action === 'write'
       ? 'result: write incomplete; only blocks marked verified are confirmed. Inspect the returned outline or browser_docs_read before any retry; never retype the request blindly.'
       : docs.action === 'format'
         ? 'result: formatting incomplete; inspect the per-attribute results and do not repeat verified changes or claim the failed attribute applied.'
-        : 'result: batch incomplete; do not claim failed or unattempted edits completed.')
+        : docs.action === 'format_many'
+          ? 'result: formatting batch incomplete; only per-edit results marked verified are confirmed. Do not repeat verified edits or claim failed or unverified edits completed.'
+          : 'result: batch incomplete; do not claim failed or unattempted edits completed.')
   } else if (docs.status === 'renamed') {
     lines.push('result: title-field focus was verified before Enter; the committed document title was verified afterward.')
   }
-  if (['format', 'write'].includes(docs.action) && Array.isArray(docs.results)) lines.push(`docs.results=${JSON.stringify(docs.results)}`)
+  if (['format', 'format_many', 'write'].includes(docs.action) && Array.isArray(docs.results)) lines.push(`docs.results=${JSON.stringify(docs.results)}`)
   if (docs.action === 'page_setup' && isRecord(docs.margins)) lines.push(`docs.margins=${JSON.stringify(docs.margins)}`)
   if (docs.action === 'write' && typeof docs.outline === 'string') lines.push(`docs.outline=\n${docs.outline}`)
   if (isRecord(docs.failure)) lines.push(`docs.failure=${JSON.stringify(docs.failure)}`)
   if (docs.removedText === true) lines.push('docs.removedText=true')
   else if (typeof docs.removedText === 'string') lines.push(`docs.removedText=${JSON.stringify(docs.removedText)}`)
   return viewContent(result, lines.join('\n'))
+}
+
+function docsSelectTextContent(result) {
+  const docs = isRecord(result?.docs) ? result.docs : {}
+  const selection = isRecord(docs.selection) ? docs.selection
+    : isRecord(docs.selected) ? docs.selected
+      : isRecord(result?.selection) ? result.selection
+        : isRecord(result?.selected) ? result.selected : undefined
+  const selectedText = typeof docs.selectedText === 'string' ? docs.selectedText : typeof docs.text === 'string' ? docs.text : undefined
+  const lines = [
+    `docs.status=${docs.status ?? '?'} docs.matchCount=${docs.matchCount ?? '?'} docs.occurrence=${JSON.stringify(docs.occurrence)} docs.current=${docs.current ?? '?'} docs.scope=${JSON.stringify(docs.scope ?? 'text')} docs.verifiedBy=${docs.verifiedBy ?? '?'}`,
+  ]
+  if (docs.status === 'selected' || docs.status === 'completed') lines.push('result: exact text selection verified; text-only result, no screenshot returned.')
+  else if (docs.status === 'partial' || docs.status === 'failed') lines.push('result: selection incomplete; do not treat an unverified or different match as selected.')
+  if (selectedText !== undefined) lines.push(`docs.selectedText=${JSON.stringify(selectedText)}`)
+  if (selection !== undefined) lines.push(`docs.selection=${JSON.stringify(selection)}`)
+  if (docs.findFocused !== undefined) lines.push(`docs.findFocused=${docs.findFocused}`)
+  if (docs.anchorText !== undefined) lines.push(`docs.anchorText=${JSON.stringify(docs.anchorText)}`)
+  if (docs.paragraphIndex !== undefined) lines.push(`docs.paragraphIndex=${docs.paragraphIndex}`)
+  if (isRecord(docs.failure)) lines.push(`docs.failure=${JSON.stringify(docs.failure)}`)
+  return { content: [{ type: 'text', text: lines.join('\n') }] }
 }
 
 function docsReadContent(result) {
@@ -1557,6 +1621,36 @@ function validateDocsWriteColor(value, allowNone, path) {
   if (!(allowNone && value === 'none') && (typeof value !== 'string' || !/^#[0-9a-f]{6}$/iu.test(value))) {
     throw new Error(`${path} must be ${allowNone ? '"none" or ' : ''}a six-digit hex color`)
   }
+}
+
+function checkedDocsOccurrence(value, path) {
+  if (value === undefined) return undefined
+  if (value === 'first' || value === 'last' || (Number.isInteger(value) && value > 0)) return value
+  throw new Error(`${path} occurrence must be "first", "last", or a positive integer`)
+}
+
+function normalizeDocsFormatAttributes(entry, path, requested) {
+  if (entry.paragraph_style !== undefined && !DOCS_PARAGRAPH_STYLES.includes(entry.paragraph_style)) {
+    throw new Error(`${path} paragraph_style must be one of: ${DOCS_PARAGRAPH_STYLES.join(', ')}`)
+  }
+  if (entry.font_size !== undefined && (!Number.isInteger(entry.font_size) || entry.font_size < 1 || entry.font_size > 400)) {
+    throw new Error(`${path} font_size must be an integer from 1 to 400`)
+  }
+  for (const attribute of ['bold', 'italic', 'underline']) {
+    if (entry[attribute] !== undefined && typeof entry[attribute] !== 'boolean') throw new Error(`${path} ${attribute} must be a boolean`)
+  }
+  if (entry.font !== undefined && (typeof entry.font !== 'string' || entry.font.trim().length === 0 || entry.font.length > DOCS_FONT_MAX_CHARS)) {
+    throw new Error(`${path} font must be a non-empty string of at most ${DOCS_FONT_MAX_CHARS} characters`)
+  }
+  if (entry.color !== undefined) validateDocsWriteColor(entry.color, false, `${path} color`)
+  if (entry.highlight !== undefined) validateDocsWriteColor(entry.highlight, true, `${path} highlight`)
+  const normalized = {}
+  for (const attribute of requested) {
+    normalized[attribute] = attribute === 'font' ? entry.font.trim()
+      : attribute === 'color' || attribute === 'highlight' ? entry[attribute].toLowerCase()
+        : entry[attribute]
+  }
+  return normalized
 }
 
 function validateDocsWriteBlocks(blocks) {
@@ -2066,6 +2160,51 @@ function registerTools(ctx, bridge, guard) {
         args: { label, ...view === undefined ? {} : { view } },
       }, exec.callId, exec.signal)
       return clickContent(result)
+    },
+  }))
+
+  ctx.tools.register(define({
+    name: 'browser_click_role',
+    rawName: 'browser_click_role',
+    description: 'Click an exact 1-4 step ARIA role/name path in one guarded call, especially for menus. Each path entry is {role,name}; every role and exact accessible name must match at that step. Prefer this over numeric labels or coordinates when the exact path is known. Dedicated Docs mutation tools retain precedence. The executor returns one final full view.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['path'],
+      properties: {
+        path: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 4,
+          description: 'Exact role/name path from the outer control to the final target.',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['role', 'name'],
+            properties: {
+              role: { type: 'string', enum: CLICK_ROLES },
+              name: { type: 'string', minLength: 1, description: 'Exact accessible name at this path step.' },
+            },
+          },
+        },
+      },
+    },
+    async call(args, exec) {
+      if (!Array.isArray(args.path) || args.path.length === 0 || args.path.length > 4) {
+        throw new Error('browser_click_role path must be an array of 1 to 4 role/name entries')
+      }
+      const path = args.path.map((entry, index) => {
+        if (!isRecord(entry) || Object.keys(entry).some(key => key !== 'role' && key !== 'name')) {
+          throw new Error(`browser_click_role path[${index}] must contain only role and name`)
+        }
+        if (!CLICK_ROLES.includes(entry.role)) throw new Error(`browser_click_role path[${index}].role is unsupported`)
+        if (typeof entry.name !== 'string' || entry.name.trim().length === 0) {
+          throw new Error(`browser_click_role path[${index}].name must be a non-empty exact accessible name`)
+        }
+        return { role: entry.role, name: entry.name }
+      })
+      const result = await bridge.request({ op: 'click_role', args: { path } }, exec.callId, exec.signal, 30_000)
+      return roleClickContent(result)
     },
   }))
 
@@ -2790,6 +2929,35 @@ function registerTools(ctx, bridge, guard) {
   }))
 
   ctx.tools.register(define({
+    name: 'browser_docs_select_text',
+    rawName: 'browser_docs_select_text',
+    description: 'Select exact Google Docs text in one guarded call and return a text-only structured result. occurrence is optional: first, last, or a positive one-based integer selects that explicit match; omitting it requires one unique match and never defaults to first. There is no all mode. Optional scope:"text" selects only the match; scope:"paragraph" selects its containing paragraph. Missing or unrequested duplicate matches are left unselected. Use browser_docs_format or browser_docs_format_many instead for supported formatting.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['text'],
+      properties: {
+        text: { type: 'string', minLength: 1, maxLength: DOCS_TEXT_MAX_CHARS, description: 'Exact text to select. Without occurrence, selection proceeds only for one unique match.' },
+        occurrence: DOCS_OCCURRENCE_SCHEMA,
+        scope: { type: 'string', enum: ['text', 'paragraph'], description: 'Select only the exact match (text, default) or its containing paragraph.' },
+      },
+    },
+    async call(args, exec) {
+      if (typeof args.text !== 'string' || args.text.trim().length === 0 || args.text.length > DOCS_TEXT_MAX_CHARS) {
+        throw new Error(`browser_docs_select_text text must be a non-empty string of at most ${DOCS_TEXT_MAX_CHARS} characters`)
+      }
+      if (Object.keys(args).some(key => !['text', 'occurrence', 'scope'].includes(key))) throw new Error('browser_docs_select_text received an unknown argument')
+      if (args.scope !== undefined && args.scope !== 'text' && args.scope !== 'paragraph') throw new Error('browser_docs_select_text scope must be "text" or "paragraph"')
+      const forward = { action: 'select_text', text: args.text }
+      const occurrence = checkedDocsOccurrence(args.occurrence, 'browser_docs_select_text')
+      if (occurrence !== undefined) forward.occurrence = occurrence
+      if (args.scope !== undefined) forward.scope = args.scope
+      const result = await bridge.request({ op: 'docs', args: forward }, exec.callId, exec.signal, 60_000)
+      return docsSelectTextContent(result)
+    },
+  }))
+
+  ctx.tools.register(define({
     name: 'browser_docs_format',
     rawName: 'browser_docs_format',
     description: 'Format one exact unique Google Docs text match in one guarded call. For a known exact target, make this your FIRST tool call without screenshots or manual Find/menu actions. Pass text and at least one desired attribute: paragraph_style, font_size, bold, italic, underline, or font. Uses one selection and one final view; verifies every requested state and skips attributes already correct. Boolean attributes are desired states, not blind toggles. Paragraph style affects the containing paragraph. Missing or duplicate text is left untouched. Partial results identify verified changes and the failed attribute; never claim everything applied.',
@@ -2811,26 +2979,78 @@ function registerTools(ctx, bridge, guard) {
       if (typeof args.text !== 'string' || args.text.trim().length === 0 || args.text.length > DOCS_TEXT_MAX_CHARS) {
         throw new Error(`browser_docs_format text must be a non-empty string of at most ${DOCS_TEXT_MAX_CHARS} characters`)
       }
-      const attributes = ['paragraph_style', 'font_size', 'bold', 'italic', 'underline', 'font']
-      const allowed = new Set(['text', ...attributes])
+      const allowed = new Set(['text', ...DOCS_FORMAT_ATTRIBUTES])
       if (Object.keys(args).some(key => !allowed.has(key))) throw new Error('browser_docs_format received an unknown argument')
-      const requested = attributes.filter(attribute => args[attribute] !== undefined)
+      const requested = DOCS_FORMAT_ATTRIBUTES.filter(attribute => args[attribute] !== undefined)
       if (requested.length === 0) throw new Error('browser_docs_format requires at least one formatting attribute')
-      if (args.paragraph_style !== undefined && !DOCS_PARAGRAPH_STYLES.includes(args.paragraph_style)) {
-        throw new Error(`browser_docs_format paragraph_style must be one of: ${DOCS_PARAGRAPH_STYLES.join(', ')}`)
-      }
-      if (args.font_size !== undefined && (!Number.isInteger(args.font_size) || args.font_size < 1 || args.font_size > 400)) {
-        throw new Error('browser_docs_format font_size must be an integer from 1 to 400')
-      }
-      for (const attribute of ['bold', 'italic', 'underline']) {
-        if (args[attribute] !== undefined && typeof args[attribute] !== 'boolean') throw new Error(`browser_docs_format ${attribute} must be a boolean`)
-      }
-      if (args.font !== undefined && (typeof args.font !== 'string' || args.font.trim().length === 0 || args.font.length > DOCS_FONT_MAX_CHARS)) {
-        throw new Error(`browser_docs_format font must be a non-empty string of at most ${DOCS_FONT_MAX_CHARS} characters`)
-      }
-      const forward = { action: 'format', text: args.text }
-      for (const attribute of requested) forward[attribute] = attribute === 'font' ? args.font.trim() : args[attribute]
+      const normalized = normalizeDocsFormatAttributes(args, 'browser_docs_format', requested)
+      const forward = { action: 'format', text: args.text, ...normalized }
       const result = await bridge.request({ op: 'docs', args: forward }, exec.callId, exec.signal, 120_000)
+      return docsContent(result)
+    },
+  }))
+
+  ctx.tools.register(define({
+    name: 'browser_docs_format_many',
+    rawName: 'browser_docs_format_many',
+    description: 'Format 1-50 exact Google Docs text ranges in order in one guarded call. Each edit requires exact text and at least one desired attribute: paragraph_style, font_size, bold, italic, underline, font, color, or highlight. occurrence is optional per edit: first, last, or a positive one-based integer; omitting it requires a unique current match after earlier edits and never defaults to first. There is no all mode. Boolean attributes are desired states, colors are normalized #RRGGBB values, and highlight also accepts none. Returns one final view, fully verified appliedCount/verifiedCount, attemptedCount, remainingCount, and per-edit results; partial or failed results do not confirm failed or unverified edits.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['edits'],
+      properties: {
+        edits: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 50,
+          description: 'Exact formatting edits applied in order. Every edit must request at least one formatting attribute.',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['text'],
+            anyOf: DOCS_FORMAT_MANY_ATTRIBUTES.map(attribute => ({ required: [attribute] })),
+            properties: {
+              text: { type: 'string', minLength: 1, maxLength: DOCS_TEXT_MAX_CHARS, description: 'Exact text to format. Without occurrence, the current match must be unique.' },
+              occurrence: DOCS_OCCURRENCE_SCHEMA,
+              paragraph_style: { type: 'string', enum: DOCS_PARAGRAPH_STYLES, description: 'Desired paragraph style for the containing paragraph.' },
+              font_size: { type: 'integer', minimum: 1, maximum: 400, description: 'Desired whole-point font size.' },
+              bold: { type: 'boolean', description: 'Desired bold state; false removes bold.' },
+              italic: { type: 'boolean', description: 'Desired italic state; false removes italic.' },
+              underline: { type: 'boolean', description: 'Desired underline state; false removes underline.' },
+              font: { type: 'string', minLength: 1, maxLength: DOCS_FONT_MAX_CHARS, description: 'Exact visible font name; partial names do not match.' },
+              color: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$', description: 'Desired six-digit text color; normalized to lowercase.' },
+              highlight: {
+                anyOf: [
+                  { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' },
+                  { type: 'string', const: 'none' },
+                ],
+                description: 'Desired six-digit highlight color or none to remove highlighting.',
+              },
+            },
+          },
+        },
+      },
+    },
+    async call(args, exec) {
+      if (Object.keys(args).some(key => key !== 'edits')) throw new Error('browser_docs_format_many received an unknown argument')
+      if (!Array.isArray(args.edits) || args.edits.length === 0 || args.edits.length > 50) {
+        throw new Error('browser_docs_format_many edits must be an array of 1 to 50 formatting objects')
+      }
+      const edits = args.edits.map((edit, index) => {
+        const path = `browser_docs_format_many edits[${index}]`
+        if (!isRecord(edit)) throw new Error(`${path} must be an object`)
+        if (typeof edit.text !== 'string' || edit.text.trim().length === 0 || edit.text.length > DOCS_TEXT_MAX_CHARS) {
+          throw new Error(`${path}.text must be a non-empty string of at most ${DOCS_TEXT_MAX_CHARS} characters`)
+        }
+        const allowed = new Set(['text', 'occurrence', ...DOCS_FORMAT_MANY_ATTRIBUTES])
+        if (Object.keys(edit).some(key => !allowed.has(key))) throw new Error(`${path} has an unknown argument`)
+        const requested = DOCS_FORMAT_MANY_ATTRIBUTES.filter(attribute => edit[attribute] !== undefined)
+        if (requested.length === 0) throw new Error(`${path} requires at least one formatting attribute`)
+        const occurrence = checkedDocsOccurrence(edit.occurrence, path)
+        const normalized = normalizeDocsFormatAttributes(edit, path, requested)
+        return { text: edit.text, ...occurrence === undefined ? {} : { occurrence }, ...normalized }
+      })
+      const result = await bridge.request({ op: 'docs', args: { action: 'format_many', edits } }, exec.callId, exec.signal, 660_000)
       return docsContent(result)
     },
   }))

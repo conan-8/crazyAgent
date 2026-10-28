@@ -13,6 +13,8 @@
  *   node scripts/ui-preview.mjs --scenario states     # finished feed / expanded step / new chat
  *   node scripts/ui-preview.mjs --scenario tools      # browser-command rows + tab-list card
  *   node scripts/ui-preview.mjs --scenario modals     # settings + debug log modals
+ *   node scripts/ui-preview.mjs --scenario queue      # queued messages + steer/cancel actions
+ *   node scripts/ui-preview.mjs --scenario composer   # image paste + model search + dictation
  *
  * Options: --out DIR (default /tmp/crazyagent-ui-preview) and SHOT_FORMAT=jpeg.
  * Needs Node >= 22 (global WebSocket) and microsoft-edge or (set EDGE_BIN) on PATH.
@@ -120,6 +122,22 @@ const MOCK_BRIDGE = `(() => {
     if (socket && socket.onmessage) socket.onmessage({ data: JSON.stringify(frame) });
   };
   window.__mockBatch = frames => { for (const frame of frames) window.__mockReceive(frame); };
+  class MockSpeechRecognition {
+    constructor() { window.__mockSpeech = this; }
+    start() { this.started = true; }
+    stop() { this.started = false; setTimeout(() => { try { this.onend && this.onend({}) } catch (e) {} }, 0); }
+  }
+  Object.defineProperty(window, 'SpeechRecognition', { value: MockSpeechRecognition, configurable: true, writable: true });
+  Object.defineProperty(window, 'webkitSpeechRecognition', { value: MockSpeechRecognition, configurable: true, writable: true });
+  window.__mockSpeechResults = results => {
+    const recognition = window.__mockSpeech;
+    if (!recognition || !recognition.onresult) return;
+    recognition.onresult({ results: results.map(([transcript, isFinal]) => {
+      const result = [{ transcript }];
+      result.isFinal = isFinal;
+      return result;
+    }) });
+  };
 })();`
 
 const settings = {
@@ -180,6 +198,18 @@ async function sendPrompt(page, text) {
     input.value = ${JSON.stringify(text)};
     input.dispatchEvent(new Event('input'));
     document.getElementById('composer').requestSubmit();
+  })()`)
+  await sleep(250)
+}
+
+async function pasteImage(page, name = 'screenshot.png') {
+  await page.evaluate(`(() => {
+    const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], ${JSON.stringify(name)}, { type: 'image/png' }));
+    const event = new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true });
+    document.getElementById('input').dispatchEvent(event);
   })()`)
   await sleep(250)
 }
@@ -389,6 +419,140 @@ async function playToolScenario(page) {
   await recv({ v: 1, type: 'chat.status', status: 'idle' })
 }
 
+async function playQueueScenario(page, capture) {
+  const { recv, batch } = makePage(page)
+  await batch(HELLO_FRAMES)
+  await sleep(300)
+  await sendPrompt(page, 'Start the first task')
+
+  await pasteImage(page, 'notes.png')
+  await sendPrompt(page, 'Queue this direction')
+
+  await pasteImage(page, 'later.png')
+  await sendPrompt(page, 'A second queued note')
+
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').length`), 1)
+  assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.queued-message-preview')].map(node => node.textContent)`), [
+    'Queue this direction',
+    'A second queued note',
+  ])
+  assert.equal(await page.evaluate(`document.getElementById('send').disabled`), false)
+  assert.equal(await page.evaluate(`document.getElementById('send').getAttribute('aria-label')`), 'Queue message')
+  assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.queued-message-steer')).backgroundColor`), 'rgb(255, 195, 0)')
+  assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.queued-message-cancel')).opacity`), '0')
+  await capture('stack')
+
+  await page.evaluate(`document.querySelector('.queued-message-cancel').focus()`)
+  await sleep(200)
+  assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.queued-message-cancel')).opacity`), '1')
+  await recv({ v: 1, type: 'chat.tool_call', callId: 'queue-focus-check', name: 'browser_read_text', args: '{}' })
+  assert.equal(await page.evaluate(`document.activeElement.classList.contains('queued-message-cancel')`), true)
+  await page.evaluate(`document.getElementById('input').value = 'Draft in progress'`)
+  await page.evaluate(`document.querySelectorAll('.queued-message-cancel')[1].click()`)
+  assert.equal(await page.evaluate(`document.getElementById('input').value`), 'A second queued note\n\nDraft in progress')
+  assert.equal(await page.evaluate(`document.querySelector('.image-chip').textContent.includes('later.png')`), true)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.queued-message').length`), 1)
+  await page.evaluate(`(() => {
+    document.querySelector('.image-chip button').click();
+    const input = document.getElementById('input');
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+
+  await page.evaluate(`document.querySelector('.queued-message-steer').click()`)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.stop').length`), 1)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').length`), 1)
+  assert.equal(await page.evaluate(`document.querySelector('.queued-message-steer').disabled`), true)
+  await recv({ v: 1, type: 'chat.stopping', turnId: 'turn-preview-1' })
+  await recv({ v: 1, type: 'chat.stopped', turnId: 'turn-preview-1', reason: 'user', sessionId: 'session-preview0001' })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(250)
+  const steered = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1)`)
+  assert.match(steered.text, /^Queue this direction/)
+  assert.equal(steered.images.length, 1)
+  assert.equal(steered.images[0].name, 'notes.png')
+  assert.equal(steered.images[0].mimeType, 'image/png')
+  assert.ok(steered.images[0].data.length > 0)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.queued-message').length`), 0)
+
+  await sendPrompt(page, 'FIFO one')
+  await sendPrompt(page, 'FIFO two')
+  assert.equal(await page.evaluate(`document.querySelectorAll('.queued-message').length`), 2)
+  await recv({ v: 1, type: 'chat.done', sessionId: 'session-preview0001', text: '', timings: { totalMs: 1 } })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(250)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1).text`), 'FIFO one')
+  assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.queued-message-preview')].map(node => node.textContent)`), ['FIFO two'])
+
+  await recv({ v: 1, type: 'chat.done', sessionId: 'session-preview0001', text: '', timings: { totalMs: 1 } })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(250)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1).text`), 'FIFO two')
+  assert.equal(await page.evaluate(`document.querySelectorAll('.queued-message').length`), 0)
+  assert.equal(await page.evaluate(`document.getElementById('message-queue').classList.contains('hidden')`), true)
+}
+
+async function playComposerScenario(page, capture) {
+  const { recv, batch } = makePage(page)
+  await batch(HELLO_FRAMES)
+  await sleep(300)
+
+  await page.evaluate(`document.getElementById('composer-model').click()`)
+  await sleep(100)
+  assert.equal(await page.evaluate(`document.activeElement.id`), 'model-search')
+  await page.evaluate(`(() => {
+    const search = document.getElementById('model-search');
+    search.value = 'claude';
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.model-menu-item').length`), 1)
+  assert.match(await page.evaluate(`document.querySelector('.model-menu-item').textContent`), /anthropic\/claude-sonnet-4\.5/)
+  await capture('model-search')
+  await page.evaluate(`(() => {
+    const search = document.getElementById('model-search');
+    search.value = 'not-a-model';
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  assert.equal(await page.evaluate(`document.querySelector('.model-menu-empty').textContent`), 'No models match your search')
+  await page.evaluate(`(() => {
+    const search = document.getElementById('model-search');
+    search.value = 'claude';
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  })()`)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1).model`), 'anthropic/claude-sonnet-4.5')
+  await recv({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'auto' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })
+
+  await page.evaluate(`(() => {
+    const input = document.getElementById('input');
+    input.value = 'Hello world';
+    input.setSelectionRange(5, 5);
+    document.getElementById('mic').click();
+  })()`)
+  assert.equal(await page.evaluate(`document.getElementById('mic').classList.contains('recording')`), true)
+  assert.equal(await page.evaluate(`document.getElementById('mic').getAttribute('aria-pressed')`), 'true')
+  await sleep(200)
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('mic')).color`), 'rgb(255, 195, 0)')
+  await page.evaluate(`window.__mockSpeechResults([['team', false]])`)
+  assert.equal(await page.evaluate(`document.getElementById('input').value`), 'Hello team world')
+  await page.evaluate(`window.__mockSpeechResults([['team', true], [' mates', false]])`)
+  assert.equal(await page.evaluate(`document.getElementById('input').value`), 'Hello team mates world')
+  await pasteImage(page, 'screenshot.png')
+  assert.equal(await page.evaluate(`document.querySelector('.image-chip').textContent.includes('screenshot.png')`), true)
+  assert.equal(await page.evaluate(`document.querySelector('.image-chip img').src.startsWith('data:image/png;base64,')`), true)
+  await sleep(2_700)
+  await capture('composer')
+  await page.evaluate(`document.getElementById('mic').click()`)
+  assert.equal(await page.evaluate(`document.getElementById('mic').classList.contains('recording')`), false)
+  assert.equal(await page.evaluate(`document.getElementById('mic').getAttribute('aria-pressed')`), 'false')
+  await page.evaluate(`document.getElementById('composer').requestSubmit()`)
+  await sleep(250)
+  const sent = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1)`)
+  assert.equal(sent.text, 'Hello team mates world')
+  assert.equal(sent.images.length, 1)
+  assert.equal(sent.images[0].name, 'screenshot.png')
+}
+
 async function main() {
   if (!existsSync(join(ROOT, 'extension', 'manifest.json'))) throw new Error(`extension/ not found under ${ROOT}`)
   if (SCENARIO === 'tools') {
@@ -489,19 +653,23 @@ async function main() {
   } else if (SCENARIO === 'interactions') {
     await page.evaluate(`window.__mockBatch(${JSON.stringify(HELLO_FRAMES)})`)
     await sleep(400)
-    await page.evaluate(`(() => {
-      const transfer = new DataTransfer();
-      transfer.items.add(new File(['alpha\\nbeta'], 'notes.txt', { type: 'text/plain' }));
-      const picker = document.getElementById('file-input');
-      picker.files = transfer.files;
-      picker.dispatchEvent(new Event('change', { bubbles: true }));
-    })()`)
-    await sleep(200)
+    assert.equal(await page.evaluate(`document.getElementById('attach')`), null)
+    assert.equal(await page.evaluate(`document.getElementById('file-input')`), null)
+    assert.equal(await page.evaluate(`document.getElementById('mic') !== null`), true)
+    await pasteImage(page, 'notes.png')
     await sendPrompt(page, 'Review the notes')
     const sent = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1)`)
     assert.match(sent.text, /Review the notes/)
-    assert.match(sent.text, /<attached-file name="notes.txt">/)
-    assert.match(sent.text, /alpha\nbeta/)
+    assert.equal(sent.images.length, 1)
+    assert.equal(sent.images[0].name, 'notes.png')
+    assert.equal(sent.images[0].mimeType, 'image/png')
+    const controlRects = await page.evaluate(`(() => {
+      const stop = document.getElementById('stop').getBoundingClientRect();
+      const send = document.getElementById('send').getBoundingClientRect();
+      return { stopBottom: stop.bottom, sendTop: send.top, stopX: stop.x + stop.width / 2, sendX: send.x + send.width / 2 };
+    })()`)
+    assert.ok(controlRects.stopBottom <= controlRects.sendTop)
+    assert.equal(controlRects.stopX, controlRects.sendX)
     await page.evaluate(`document.getElementById('stop').click()`)
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.stop').length`), 1)
     await page.evaluate(`window.__mockReceive({ v: 1, type: 'chat.stopped', reason: 'user', sessionId: 'session-preview0001' })`)
@@ -537,6 +705,10 @@ async function main() {
     await page.evaluate(`document.getElementById('log-copy-summary').click()`)
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'log.summary').length`), 1)
     await shot('debug-actions')
+  } else if (SCENARIO === 'queue') {
+    await playQueueScenario(page, shot)
+  } else if (SCENARIO === 'composer') {
+    await playComposerScenario(page, shot)
   } else {
     await playTurn(page)
     await sleep(400)

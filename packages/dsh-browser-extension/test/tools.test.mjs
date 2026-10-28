@@ -939,7 +939,7 @@ async function waitFor(predicate, timeoutMs = 2_000) {
   throw new Error('timed out waiting for condition')
 }
 
-test('registers the provider, guidance, and the twenty-four browser tools', async t => {
+test('registers the provider, guidance, and the twenty-seven browser tools', async t => {
   const { server, url, logEvents } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -955,14 +955,17 @@ test('registers the provider, guidance, and the twenty-four browser tools', asyn
     'browser_batch',
     'browser_click',
     'browser_click_at',
+    'browser_click_role',
     'browser_clipboard',
     'browser_docs',
     'browser_docs_format',
+    'browser_docs_format_many',
     'browser_docs_page_setup',
     'browser_docs_read',
     'browser_docs_rename',
     'browser_docs_replace_many',
     'browser_docs_replace_text',
+    'browser_docs_select_text',
     'browser_docs_write',
     'browser_hover',
     'browser_navigate',
@@ -1027,6 +1030,14 @@ test('registers the provider, guidance, and the twenty-four browser tools', asyn
   assert.match(guidance, /paragraph_style, font_size, bold, italic, underline, or font/)
   assert.match(guidance, /one unique selection and one final view/)
   assert.match(guidance, /Booleans are desired states/)
+  assert.match(guidance, /prefer browser_click_role with path:\[\{role,name\}/)
+  assert.match(guidance, /Dedicated Docs mutation tools retain precedence over browser_click_role/)
+  assert.match(guidance, /make browser_docs_format_many your FIRST formatting tool call/)
+  assert.match(guidance, /paragraph_style, font_size, bold, italic, underline, font, color, or highlight/)
+  assert.match(guidance, /Omitting occurrence always requires a unique match; it never picks first/)
+  assert.match(guidance, /browser_docs_select_text with exact text and occurrence:"first"\|"last" or a positive one-based integer/)
+  assert.match(guidance, /Omitted occurrence remains unique-only and never defaults to first/)
+  assert.match(guidance, /text-only result reports the verified selection/)
   assert.match(guidance, /Compose one logical unit in ONE assistant response/)
   assert.match(guidance, /Browser mutations execute exclusively in model order/)
   assert.match(guidance, /make browser_docs_write your FIRST content tool call/)
@@ -1066,7 +1077,13 @@ test('registers the provider, guidance, and the twenty-four browser tools', asyn
   assert.match(guidance, /Google Docs drag selection is rejected because it can move text/)
   assert.doesNotMatch(guidance, /browser_docs\.(?:set_font|replace_text|replace_many)/)
   assert.doesNotMatch(guidance, /update_normal_style/)
-  assert.match(guidance, /Ctrl\+F, make selection a separate visually confirmed step before formatting/)
+  assert.match(guidance, /only verified edits are confirmed/)
+  assert.match(guidance, /use browser_docs_select_text with exact text and the requested occurrence/)
+  assert.match(guidance, /Do not drive Ctrl\+F\/Find yourself/)
+  assert.match(guidance, /exactly one guarded primitive action/)
+  assert.match(guidance, /browser_press_key\/browser_click with view:"full"/)
+  assert.match(guidance, /does not give replacement tools ordinal or multi-match support/)
+  assert.doesNotMatch(guidance, /Ctrl\+F, make selection a separate visually confirmed step before formatting/)
   assert.match(guidance, /never use stop_on_error:false for dependent edits/)
   assert.match(guidance, /Unlabelled browser_type inserts at the caret\/current selection, not a whole-document replace/)
   assert.match(guidance, /Canvas append\/empty operations may be rejected/)
@@ -1319,6 +1336,65 @@ test('click tool reports the target and the resulting view', async t => {
   )
 })
 
+test('browser_click_role validates and forwards an exact role path with one final view', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    delays: { click_role: 150 },
+    respond: (op, args) => op === 'click_role' ? {
+      ...CLICK,
+      op: 'click_role',
+      clicked: undefined,
+      changed: undefined,
+      roleClick: args.path.at(-1)?.name === 'Missing' ? {
+        status: 'partial', completed: 1, path: args.path.slice(0, 1),
+        failure: { index: 1, code: 'ROLE_CLICK_NOT_FOUND', message: 'No exact match' },
+      } : { status: 'completed', completed: args.path.length, path: args.path },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 100 })
+  t.after(() => fake.dispose())
+
+  const tool = fake.tools.get('browser_click_role')
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.deepEqual(tool.parameters.required, ['path'])
+  assert.equal(tool.parameters.properties.path.minItems, 1)
+  assert.equal(tool.parameters.properties.path.maxItems, 4)
+  assert.equal(tool.parameters.properties.path.items.additionalProperties, false)
+  assert.deepEqual(tool.parameters.properties.path.items.required, ['role', 'name'])
+  assert.deepEqual(tool.parameters.properties.path.items.properties.role.enum, [
+    'button', 'link', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'checkbox', 'radio', 'switch', 'option', 'combobox',
+  ])
+  assert.equal(tool.parameters.properties.view, undefined)
+  const path = [{ role: 'menuitem', name: 'File' }, { role: 'menuitem', name: 'Download' }]
+  const exec = { callId: 'c-click-role', signal: new AbortController().signal }
+  const result = await tool.execute({ path }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'click_role', args: { path } })
+  assert.match(result.content[0].text, /roleClick.status=completed roleClick.completed=2 roleClick.path=\[\{"role":"menuitem","name":"File"\},\{"role":"menuitem","name":"Download"\}\]/)
+  assert.match(result.content[0].text, /result: exact role path completed; one final full view returned/)
+  assert.equal(result.content.filter(block => block.type === 'image').length, 1)
+  assert.equal(commands.length, 1, 'the executor returns the only final view')
+
+  const partial = await tool.execute({ path: [path[0], { role: 'menuitem', name: 'Missing' }] }, exec)
+  assert.match(partial.content[0].text, /roleClick.status=partial roleClick.completed=1/)
+  assert.match(partial.content[0].text, /only the 1 reported step\(s\) are confirmed/)
+  assert.match(partial.content[0].text, /roleClick.failure=.*"index":1.*"code":"ROLE_CLICK_NOT_FOUND"/)
+  assert.doesNotMatch(partial.content[0].text, /exact role path completed/)
+
+  const rejected = [
+    [{}, /path must be an array of 1 to 4/],
+    [{ path: [] }, /path must be an array of 1 to 4/],
+    [{ path: Array.from({ length: 5 }, () => ({ role: 'button', name: 'Go' })) }, /path must be an array of 1 to 4/],
+    [{ path: [{ role: 'textbox', name: 'File' }] }, /role is unsupported/],
+    [{ path: [{ role: 'button', name: ' ' }] }, /name must be a non-empty exact accessible name/],
+    [{ path: [{ role: 'button', name: 'Go', label: 3 }] }, /only role and name/],
+  ]
+  for (const [args, pattern] of rejected) await assert.rejects(() => tool.execute(args, exec), pattern)
+  assert.equal(commands.length, 2, 'invalid paths never reach the bridge')
+})
 
 test('screenshot content reports canvas surfaces', async t => {
   const { server, url } = await startFakeBridge()
@@ -1905,6 +1981,177 @@ test('browser_docs_format validates its schema, forwards desired states, and for
   assert.doesNotMatch(partial.content[0].text, /batch incomplete/)
 })
 
+test('browser_docs_select_text forwards explicit ordinals and returns text-only selection evidence', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    delays: { docs: 150 },
+    respond: (op, args) => op === 'docs' && args.action === 'select_text' ? {
+      ...DOCS_SET_FONT,
+      docs: {
+        action: 'select_text',
+        status: 'selected',
+        matchCount: args.occurrence === undefined ? 1 : 3,
+        occurrence: args.occurrence ?? 1,
+        current: args.occurrence ?? 1,
+        scope: args.scope ?? 'text',
+        text: args.text,
+        verifiedBy: 'find-counter',
+        findFocused: true,
+      },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 100 })
+  t.after(() => fake.dispose())
+  const tool = fake.tools.get('browser_docs_select_text')
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.deepEqual(tool.parameters.required, ['text'])
+  assert.equal(tool.parameters.properties.text.maxLength, 1000)
+  assert.deepEqual(tool.parameters.properties.occurrence.anyOf, [
+    { type: 'string', enum: ['first', 'last'] },
+    { type: 'integer', minimum: 1 },
+  ])
+  assert.deepEqual(tool.parameters.properties.scope.enum, ['text', 'paragraph'])
+  const exec = { callId: 'c-docs-select-text', signal: new AbortController().signal }
+
+  const ordinal = await tool.execute({ text: 'Repeated phrase', occurrence: 2, scope: 'paragraph' }, exec)
+  assert.deepEqual(commands.at(-1), {
+    op: 'docs',
+    args: { action: 'select_text', text: 'Repeated phrase', occurrence: 2, scope: 'paragraph' },
+  })
+  assert.equal(ordinal.content.length, 1)
+  assert.equal(ordinal.content[0].type, 'text')
+  assert.match(ordinal.content[0].text, /docs.status=selected docs.matchCount=3 docs.occurrence=2 docs.current=2 docs.scope="paragraph" docs.verifiedBy=find-counter/)
+  assert.match(ordinal.content[0].text, /docs.selectedText="Repeated phrase"/)
+  assert.match(ordinal.content[0].text, /docs.findFocused=true/)
+  assert.match(ordinal.content[0].text, /text-only result, no screenshot returned/)
+  assert.doesNotMatch(ordinal.content[0].text, /image unavailable|viewport|image 1x1/)
+
+  const unique = await tool.execute({ text: 'Unique phrase' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'docs', args: { action: 'select_text', text: 'Unique phrase' } })
+  assert.equal(unique.content.filter(block => block.type === 'image').length, 0)
+  assert.match(unique.content[0].text, /docs.matchCount=1/)
+
+  const rejected = [
+    [{ text: 'x', occurrence: 'all' }, /occurrence must be "first", "last", or a positive integer/],
+    [{ text: 'x', occurrence: 0 }, /occurrence must be "first", "last", or a positive integer/],
+    [{ text: 'x', occurrence: '2' }, /occurrence must be "first", "last", or a positive integer/],
+    [{ text: 'x', scope: 'document' }, /scope must be "text" or "paragraph"/],
+  ]
+  for (const [args, pattern] of rejected) await assert.rejects(() => tool.execute(args, exec), pattern)
+  assert.equal(commands.length, 2, 'invalid selection requests never reach the bridge')
+})
+
+test('browser_docs_format_many validates closed edits, normalizes forwarding, and formats every status', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    delays: { docs: 150 },
+    respond: (op, args) => {
+      if (op !== 'docs' || args.action !== 'format_many') return undefined
+      const failedIndex = args.edits.findIndex(edit => edit.text === 'missing')
+      const already = args.edits.every(edit => edit.text === 'already')
+      const status = already ? 'already_applied' : failedIndex === 0 ? 'failed' : failedIndex > 0 ? 'partial' : 'completed'
+      const attemptedCount = failedIndex < 0 ? args.edits.length : failedIndex + 1
+      const verifiedCount = failedIndex < 0 ? args.edits.length : failedIndex
+      const results = args.edits.map((edit, index) => ({
+        index,
+        text: edit.text,
+        status: index < verifiedCount ? 'verified' : index === failedIndex ? 'failed' : 'unverified',
+      }))
+      return {
+        ...DOCS_SET_FONT,
+        docs: {
+          action: 'format_many',
+          status,
+          editCount: args.edits.length,
+          appliedCount: verifiedCount,
+          attemptedCount,
+          verifiedCount,
+          remainingCount: args.edits.length - attemptedCount,
+          verifiedBy: 'export',
+          results,
+          ...failedIndex < 0 ? {} : {
+            failure: { index: failedIndex, text: 'missing', code: 'DOCS_FORMAT_MATCH_NOT_FOUND', message: 'No exact match' },
+          },
+        },
+      }
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 100 })
+  t.after(() => fake.dispose())
+  const tool = fake.tools.get('browser_docs_format_many')
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.deepEqual(tool.parameters.required, ['edits'])
+  assert.equal(tool.parameters.properties.edits.minItems, 1)
+  assert.equal(tool.parameters.properties.edits.maxItems, 50)
+  const editSchema = tool.parameters.properties.edits.items
+  assert.equal(editSchema.additionalProperties, false)
+  assert.deepEqual(editSchema.required, ['text'])
+  assert.deepEqual(editSchema.anyOf, [
+    { required: ['paragraph_style'] }, { required: ['font_size'] }, { required: ['bold'] }, { required: ['italic'] },
+    { required: ['underline'] }, { required: ['font'] }, { required: ['color'] }, { required: ['highlight'] },
+  ])
+  assert.equal(editSchema.properties.text.maxLength, 1000)
+  assert.equal(editSchema.properties.font.maxLength, 100)
+  assert.equal(editSchema.properties.font_size.minimum, 1)
+  assert.equal(editSchema.properties.font_size.maximum, 400)
+  assert.equal(editSchema.properties.color.pattern, '^#[0-9a-fA-F]{6}$')
+  assert.deepEqual(editSchema.properties.occurrence.anyOf, [
+    { type: 'string', enum: ['first', 'last'] },
+    { type: 'integer', minimum: 1 },
+  ])
+  const exec = { callId: 'c-docs-format-many', signal: new AbortController().signal }
+
+  const edits = [
+    { text: 'First range', occurrence: 'first', paragraph_style: 'Heading 2', font: ' Syne ', color: '#A1B2C3' },
+    { text: 'Second range', occurrence: 3, font_size: 14, bold: false, italic: true, underline: false, highlight: '#FFFF00' },
+    { text: 'Third range', highlight: 'none' },
+  ]
+  const completed = await tool.execute({ edits }, exec)
+  assert.deepEqual(commands.at(-1), {
+    op: 'docs',
+    args: {
+      action: 'format_many',
+      edits: [
+        { text: 'First range', occurrence: 'first', paragraph_style: 'Heading 2', font: 'Syne', color: '#a1b2c3' },
+        { text: 'Second range', occurrence: 3, font_size: 14, bold: false, italic: true, underline: false, highlight: '#ffff00' },
+        { text: 'Third range', highlight: 'none' },
+      ],
+    },
+  })
+  assert.match(completed.content[0].text, /docs.status=completed docs.appliedCount=3\/3 docs.attemptedCount=3 docs.verifiedCount=3 docs.remainingCount=0 docs.verifiedBy=export/)
+  assert.match(completed.content[0].text, /every requested formatting edit reached its requested state and passed final per-edit verification/)
+  assert.match(completed.content[0].text, /docs.results=.*"index":2.*"text":"Third range"/)
+  assert.equal(completed.content.filter(block => block.type === 'image').length, 1)
+
+  const already = await tool.execute({ edits: [{ text: 'already', bold: true }] }, exec)
+  assert.match(already.content[0].text, /docs.status=already_applied docs.appliedCount=1\/1 docs.attemptedCount=1 docs.verifiedCount=1 docs.remainingCount=0 docs.verifiedBy=export/)
+  assert.match(already.content[0].text, /every requested formatting state was already present; final per-edit verification passed/)
+  assert.match(already.content[0].text, /docs.results=\[\{"index":0,"text":"already","status":"verified"\}\]/)
+
+  const partial = await tool.execute({ edits: [
+    { text: 'alpha', italic: true },
+    { text: 'missing', color: '#FFFFFF' },
+    { text: 'omega', underline: true },
+  ] }, exec)
+  assert.match(partial.content[0].text, /docs.status=partial docs.appliedCount=1\/3 docs.attemptedCount=2 docs.verifiedCount=1 docs.remainingCount=1 docs.verifiedBy=export/)
+  assert.match(partial.content[0].text, /formatting batch incomplete; only per-edit results marked verified are confirmed/)
+  assert.match(partial.content[0].text, /docs.results=.*"status":"unverified"/)
+  assert.match(partial.content[0].text, /docs.failure=.*"index":1.*"text":"missing"/)
+
+  const failed = await tool.execute({ edits: [{ text: 'missing', bold: true }, { text: 'later', underline: true }] }, exec)
+  assert.match(failed.content[0].text, /docs.status=failed docs.appliedCount=0\/2 docs.attemptedCount=1 docs.verifiedCount=0 docs.remainingCount=1 docs.verifiedBy=export/)
+  assert.match(failed.content[0].text, /Do not repeat verified edits or claim failed or unverified edits completed/)
+  assert.equal(commands.length, 4)
+})
+
 test('browser_docs_read forwards export options and returns document content without an image', async t => {
   const { server, url, commands } = await startFakeBridge({
     respond: (op, args) => op === 'docs' && args.action === 'read' ? {
@@ -2088,6 +2335,25 @@ test('Docs tools reject invalid actions and unbounded inputs before the bridge',
     ['browser_docs_format', { text: 'x', bold: 'yes' }, /bold must be a boolean/],
     ['browser_docs_format', { text: 'x', font: ' ' }, /font must be a non-empty string/],
     ['browser_docs_format', { text: 'x', bold: true, surprise: true }, /unknown argument/],
+    ['browser_docs_format_many', {}, /edits must be an array/],
+    ['browser_docs_format_many', { edits: [] }, /edits must be an array/],
+    ['browser_docs_format_many', { edits: Array.from({ length: 51 }, () => ({ text: 'x', bold: true })) }, /edits must be an array of 1 to 50/],
+    ['browser_docs_format_many', { edits: [null] }, /edits\[0\] must be an object/],
+    ['browser_docs_format_many', { edits: [{ text: '', bold: true }] }, /edits\[0\]\.text must be a non-empty string/],
+    ['browser_docs_format_many', { edits: [{ text: 'x'.repeat(1001), bold: true }] }, /at most 1000 characters/],
+    ['browser_docs_format_many', { edits: [{ text: 'x' }] }, /requires at least one formatting attribute/],
+    ['browser_docs_format_many', { edits: [{ text: 'x', occurrence: 'all', bold: true }] }, /occurrence must be "first", "last", or a positive integer/],
+    ['browser_docs_format_many', { edits: [{ text: 'x', font_size: 0 }] }, /font_size must be an integer from 1 to 400/],
+    ['browser_docs_format_many', { edits: [{ text: 'x', paragraph_style: 'Huge' }] }, /paragraph_style must be one of/],
+    ['browser_docs_format_many', { edits: [{ text: 'x', bold: 'yes' }] }, /bold must be a boolean/],
+    ['browser_docs_format_many', { edits: [{ text: 'x', font: ' ' }] }, /font must be a non-empty string/],
+    ['browser_docs_format_many', { edits: [{ text: 'x', font: 'F'.repeat(101) }] }, /at most 100 characters/],
+    ['browser_docs_format_many', { edits: [{ text: 'x', color: 'blue' }] }, /six-digit hex color/],
+    ['browser_docs_format_many', { edits: [{ text: 'x', highlight: '#fff' }] }, /six-digit hex color/],
+    ['browser_docs_format_many', { edits: [{ text: 'x', bold: true, surprise: true }] }, /unknown argument/],
+    ['browser_docs_format_many', { edits: [{ text: 'x', bold: true }], surprise: true }, /unknown argument/],
+    ['browser_docs_select_text', { text: ' ' }, /text must be a non-empty string/],
+    ['browser_docs_select_text', { text: 'x'.repeat(1001) }, /at most 1000 characters/],
     ['browser_docs_read', { format: 'pdf' }, /format must be outline, text, or html/],
     ['browser_docs_read', { max_chars: 99 }, /max_chars must be an integer from 100 to 100000/],
     ['browser_docs_page_setup', {}, /requires paper_size, orientation, or margins/],
@@ -2151,6 +2417,43 @@ test('browser_docs uses a 60-second request budget instead of the configured def
   )
   assert.match(result.content[0].text, /docs.status=applied/)
   assert.equal(result.content.length, 2)
+})
+
+test('browser_docs_format_many allows 60 seconds beyond the executor deadline', async t => {
+  const { server, url, commands } = await startFakeBridge({ delays: { docs: 660_001 } })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 100 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let settled = false
+  const pending = fake.tools.get('browser_docs_format_many').execute(
+    { edits: [{ text: 'Exact heading', bold: true }] },
+    { callId: 'c-docs-format-many-timeout', signal: new AbortController().signal },
+  )
+  pending.then(() => { settled = true }, () => { settled = true })
+  const rejection = assert.rejects(pending, /docs timed out after 660000ms/)
+  for (let index = 0; index < 100 && commands.length === 0; index += 1) {
+    await new Promise(resolve => setImmediate(resolve))
+  }
+  assert.equal(commands.length, 1)
+
+  t.mock.timers.tick(600_000)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(settled, false, 'the provider must remain pending after the executor deadline')
+  t.mock.timers.tick(59_999)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(settled, false)
+  t.mock.timers.tick(1)
+  await rejection
+  assert.equal(settled, true)
+  t.mock.timers.tick(1)
+  t.mock.timers.reset()
 })
 
 test('wait_for reports found and timed-out conditions', async t => {
@@ -2480,6 +2783,9 @@ test('batch validation rejects bad action lists', async t => {
   await assert.rejects(() => definition.execute({ actions: ['click'] }, exec), /must be an object with an op/)
   await assert.rejects(() => definition.execute({ actions: [{}] }, exec), /requires a string op/)
   await assert.rejects(() => definition.execute({ actions: [{ op: 'eval' }] }, exec), /unsupported op "eval"/)
+  for (const op of ['click_role', 'select_text', 'format_many']) {
+    await assert.rejects(() => definition.execute({ actions: [{ op }] }, exec), new RegExp(`unsupported op "${op}"`))
+  }
   await assert.rejects(() => definition.execute({ actions: [{ op: 'batch', actions: [] }] }, exec), /cannot nest another browser_batch/)
   await assert.rejects(() => definition.execute({ actions: [{ op: 'screenshot' }] }, exec), /does not support the "screenshot" op/)
   await assert.rejects(() => definition.execute({ actions: [{ op: 'tabs' }] }, exec), /does not support the "tabs" op/)
@@ -3358,6 +3664,118 @@ test('Docs semantic loop guard covers validation failures and singleton batch al
   )
   assert.equal(commands.length, 0)
   await waitFor(() => logEvents.some(event => event.type === 'tool.loop.detected' && event.data.semanticTool === 'browser_docs_replace_text'))
+})
+
+test('singleton format_many shares the browser_docs_format semantic fingerprint', async t => {
+  const { server, url, commands, logEvents } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000, maxRepeatedCalls: 2 })
+  t.after(() => fake.dispose())
+  const single = fake.tools.get('browser_docs_format')
+  const many = fake.tools.get('browser_docs_format_many')
+  const exec = { callId: 'c-docs-format-loop', signal: new AbortController().signal }
+
+  await assert.rejects(() => single.execute({ text: 'x' }, exec), /at least one formatting attribute/)
+  await assert.rejects(() => many.execute({ edits: [{ text: 'x' }] }, exec), /at least one formatting attribute/)
+  await assert.rejects(() => single.execute({ text: 'x' }, exec), /LOOP_DETECTED/)
+  assert.equal(commands.length, 0)
+  await waitFor(() => logEvents.some(event => event.type === 'tool.loop.detected' && event.data.semanticTool === 'browser_docs_format'))
+})
+
+test('partial and failed format_many results do not count as successful repeat progress', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    respond: (op, args) => {
+      if (op !== 'docs' || args.action !== 'format_many') return undefined
+      const status = args.edits[0].text.startsWith('failed') ? 'failed' : 'partial'
+      const verifiedCount = status === 'partial' ? 1 : 0
+      return {
+        ...DOCS_SET_FONT,
+        docs: {
+          action: 'format_many',
+          status,
+          editCount: args.edits.length,
+          appliedCount: verifiedCount,
+          attemptedCount: args.edits.length,
+          verifiedCount,
+          remainingCount: 0,
+          verifiedBy: 'export',
+          results: args.edits.map((_, index) => ({
+            index,
+            status: index < verifiedCount ? 'verified' : index === verifiedCount ? 'failed' : 'unverified',
+          })),
+          failure: { index: verifiedCount, code: 'DOCS_FORMAT_FAILED', message: 'not applied' },
+        },
+      }
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000, maxRepeatedCalls: 1 })
+  t.after(() => fake.dispose())
+  const tool = fake.tools.get('browser_docs_format_many')
+  const exec = { callId: 'c-docs-format-incomplete', signal: new AbortController().signal }
+
+  for (const [index, status] of ['partial', 'failed'].entries()) {
+    fake.listeners.get('agent/inbox/claimed')({ message: { id: `format-many-${status}`, content: [{ type: 'text', text: status }] }, turn: index + 1 })
+    const args = status === 'partial'
+      ? { edits: [{ text: 'partial-target', bold: true }, { text: 'missing', italic: true }] }
+      : { edits: [{ text: 'failed-target', bold: true }] }
+    const incomplete = await tool.execute(args, exec)
+    assert.match(incomplete.content[0].text, new RegExp(`docs.status=${status}`))
+    await assert.rejects(() => tool.execute({ edits: [{ text: `${status}-other` }] }, exec), /at least one formatting attribute/)
+    await assert.rejects(() => tool.execute(args, exec), /LOOP_DETECTED/)
+  }
+  assert.equal(commands.length, 2, 'the incomplete result is retried only once before the repeat guard stops it')
+})
+
+test('completed and already_applied format_many results count as successful repeat progress', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    respond: (op, args) => {
+      if (op !== 'docs' || args.action !== 'format_many') return undefined
+      const status = args.edits[0].text.startsWith('already') ? 'already_applied' : 'completed'
+      return {
+        ...DOCS_SET_FONT,
+        docs: {
+          action: 'format_many',
+          status,
+          editCount: args.edits.length,
+          appliedCount: args.edits.length,
+          attemptedCount: args.edits.length,
+          verifiedCount: args.edits.length,
+          remainingCount: 0,
+          verifiedBy: 'export',
+          results: args.edits.map((_, index) => ({ index, status: 'verified' })),
+        },
+      }
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000, maxRepeatedCalls: 1 })
+  t.after(() => fake.dispose())
+  const tool = fake.tools.get('browser_docs_format_many')
+  const exec = { callId: 'c-docs-format-complete', signal: new AbortController().signal }
+
+  for (const [index, status] of ['completed', 'already_applied'].entries()) {
+    fake.listeners.get('agent/inbox/claimed')({ message: { id: `format-many-${status}`, content: [{ type: 'text', text: status }] }, turn: index + 1 })
+    const args = { edits: [{ text: `${status}-target`, bold: true }] }
+    const first = await tool.execute(args, exec)
+    assert.match(first.content[0].text, new RegExp(`docs.status=${status}`))
+    await assert.rejects(() => tool.execute({ edits: [{ text: `${status}-other` }] }, exec), /at least one formatting attribute/)
+    const repeated = await tool.execute(args, exec)
+    assert.match(repeated.content[0].text, new RegExp(`docs.status=${status}`))
+  }
+  assert.equal(commands.length, 4, 'a different call after each successful result starts a fresh repeat series')
 })
 
 test('Docs failure circuit stops cascades and resets on a new turn or success', async t => {

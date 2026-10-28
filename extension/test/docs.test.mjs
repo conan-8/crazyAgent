@@ -3,11 +3,13 @@ import assert from 'node:assert/strict'
 import {
   docsFontName,
   docsFormat,
+  docsFormatMany,
   docsPageProbe,
   docsRename,
   docsReplaceMany,
   docsReplaceText,
   docsSameDocumentUrl,
+  docsSelectText,
   docsSetFont,
   docsToolbarFont,
   parseDocsMatchCounter,
@@ -41,6 +43,7 @@ function fakeDocs(options = {}) {
     ok: true,
     open: state.findOpen,
     enabled: true,
+    focused: state.findOpen,
     value: state.findValue,
     match: {
       current: state.removed || state.matches === 0 ? 0 : 1,
@@ -679,6 +682,7 @@ function fakeReplaceDocs(options = {}) {
           ok: true,
           open: state.findOpen,
           enabled: true,
+          focused: state.findOpen,
           value: state.findValue,
           match: { current: total ? 1 : 0, total, text: `${total ? 1 : 0} of ${total}` },
         }
@@ -1143,6 +1147,9 @@ test('Docs format stops later attributes after a verification failure and names 
   await assert.rejects(
     runFormatDocs(fake, { bold: true, underline: true, italic: true, font: 'Syne' }),
     error => error.code === 'DOCS_FORMAT_MISMATCH' && error.stage === 'format-underline-verify'
+      && error.failedAttribute === 'underline'
+      && error.priorResults.length === 2
+      && error.priorResults.every((result, index) => result.attribute === ['bold', 'italic'][index] && result.status === 'applied')
       && error.message.includes('bold=true (applied)') && error.message.includes('underline is unverified'),
   )
   assert.equal(fake.state.bold, true)
@@ -1175,4 +1182,1035 @@ test('Docs format validates every argument before using the tab', async () => {
   }
   assert.equal(fake.events.length, 0)
   assert.equal(fake.snapshots(), 0)
+})
+
+function fakeSelectDocs(options = {}) {
+  const paragraphs = options.paragraphs ?? ['needle']
+  const state = {
+    document: options.document ?? paragraphs.join('\n'),
+    findOpen: false,
+    findFocused: false,
+    findValue: '',
+    current: 0,
+  }
+  const events = []
+  let snapshots = 0
+  let currentChecks = 0
+  let now = 1_000
+  const tab = { id: 7, url: DOCS_URL }
+  const occurrences = value => {
+    const source = state.document.toLowerCase()
+    const wanted = String(value).toLowerCase()
+    if (!wanted) return 0
+    let count = 0
+    for (let index = source.indexOf(wanted); index >= 0; index = source.indexOf(wanted, index + wanted.length)) count += 1
+    return count
+  }
+  const total = value => options.nativeTotals?.[value] ?? occurrences(value)
+  const find = () => {
+    const count = total(state.findValue)
+    const current = count ? state.current : 0
+    return {
+      ok: true,
+      open: state.findOpen,
+      enabled: true,
+      focused: state.findOpen && state.findFocused,
+      value: state.findValue,
+      match: { current, total: count, text: `${current} of ${count}` },
+    }
+  }
+  const exported = options.exportHtml ?? `<html><body>${paragraphs.map(text => `<p>${String(text)
+    .replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;')}</p>`).join('')}</body></html>`
+  const io = {
+    now: () => now,
+    sleep: async ms => { now += ms },
+    getWindowId: async () => 1,
+    getActiveTab: async () => ({ ...tab }),
+    getTab: async () => {
+      currentChecks += 1
+      return options.staleAfter === currentChecks ? { ...tab, url: 'https://example.com/stale' } : { ...tab }
+    },
+    fetchExport: async () => {
+      events.push('export:html')
+      return exported
+    },
+    withDebugger: async (_tabId, fn) => fn(),
+    dispatchTrustedKey: async (_tabId, spec, mask) => {
+      events.push(`key:${spec.key}:${mask}`)
+      if (spec.key.toLowerCase() === 'f' && mask === 2) {
+        state.findOpen = true
+        state.findFocused = !options.focusFails
+        state.findValue = ''
+        state.current = 0
+      } else if (spec.key === 'Escape') {
+        state.findOpen = false
+        state.findFocused = false
+      } else if (spec.key === 'Enter' && state.findOpen) {
+        if (options.focusLossAfterKey) state.findFocused = false
+        if (options.queryDriftAfterKey) state.findValue = 'drift'
+        if (options.totalChangeAfterKey) state.document += ' needle'
+        const count = total(state.findValue)
+        if (!count) state.current = 0
+        else if (!options.navigationStalls) {
+          state.current = mask === 8 ? (state.current - 2 + count) % count + 1 : state.current % count + 1
+        }
+      }
+    },
+    runInTab: async (_tabId, _func, [command, args]) => {
+      events.push(`probe:${command}`)
+      if (command === 'find') return find()
+      if (command === 'setFind') {
+        state.findValue = args.value
+        const count = total(args.value)
+        state.current = count ? Math.min(options.initialCurrent ?? 1, count) : 0
+        events.push(`setFind:${args.value}`)
+        return { ok: true, readback: true, value: state.findValue }
+      }
+      throw new Error(`unexpected probe ${command}`)
+    },
+    snapshot: async () => {
+      snapshots += 1
+      return { op: 'snapshot', view: 'full' }
+    },
+  }
+  return { io, state, events, snapshots: () => snapshots }
+}
+
+async function runSelectDocs(fake, overrides = {}) {
+  return docsSelectText({}, { action: 'select_text', text: 'needle', ...overrides }, fake.io)
+}
+
+test('Docs select_text selects one unique match and returns only Find evidence', async () => {
+  const fake = fakeSelectDocs()
+  const result = await runSelectDocs(fake)
+  assert.deepEqual(result, {
+    op: 'docs',
+    docs: {
+      action: 'select_text',
+      status: 'selected',
+      scope: 'text',
+      text: 'needle',
+      occurrence: 1,
+      current: 1,
+      matchCount: 1,
+      verifiedBy: 'find-counter',
+      findFocused: true,
+    },
+  })
+  assert.equal(fake.state.findOpen, false)
+  assert.equal(fake.events.includes('export:html'), false)
+  assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs select_text resolves first, last, and nth with bounded wraparound navigation', async () => {
+  const cases = [
+    { initialCurrent: 3, occurrence: 'first', expected: 1, key: 'key:Enter:0' },
+    { initialCurrent: 1, occurrence: 'last', expected: 3, key: 'key:Enter:8' },
+    { initialCurrent: 1, occurrence: 2, expected: 2, key: 'key:Enter:0' },
+  ]
+  for (const item of cases) {
+    const fake = fakeSelectDocs({ document: 'needle one needle two needle', initialCurrent: item.initialCurrent })
+    const result = await runSelectDocs(fake, { occurrence: item.occurrence })
+    assert.equal(result.docs.occurrence, item.expected)
+    assert.equal(result.docs.current, item.expected)
+    assert.equal(result.docs.matchCount, 3)
+    const navigation = fake.events.filter(event => event === 'key:Enter:0' || event === 'key:Enter:8')
+    assert.deepEqual(navigation, [item.key])
+    assert.equal(fake.events.at(-1), 'probe:find')
+    assert.equal(fake.state.findOpen, false)
+    assert.equal(fake.snapshots(), 0)
+  }
+})
+
+test('Docs select_text rejects duplicates, zero matches, and out-of-range ordinals without fallback', async () => {
+  const cases = [
+    { document: 'needle needle', occurrence: undefined, code: 'DOCS_MATCH_NOT_UNIQUE' },
+    { document: 'nothing here', occurrence: undefined, code: 'DOCS_MATCH_NOT_UNIQUE' },
+    { document: 'nothing here', occurrence: 'first', code: 'DOCS_MATCH_OUT_OF_RANGE' },
+    { document: 'needle one needle two needle', occurrence: 4, code: 'DOCS_MATCH_OUT_OF_RANGE' },
+  ]
+  for (const item of cases) {
+    const fake = fakeSelectDocs({ document: item.document })
+    await assert.rejects(runSelectDocs(fake, { occurrence: item.occurrence }), error => error.code === item.code)
+    assert.equal(fake.events.includes('key:Escape:0'), false)
+    assert.equal(fake.events.some(event => event === 'key:Enter:0' || event === 'key:Enter:8'), false)
+    assert.equal(fake.state.findOpen, true)
+    assert.equal(fake.snapshots(), 0)
+  }
+})
+
+test('Docs select_text requires Find focus before filling the query', async () => {
+  const fake = fakeSelectDocs({ focusFails: true })
+  await assert.rejects(runSelectDocs(fake), error => error.code === 'DOCS_WAIT_TIMEOUT' && error.stage === 'open-find')
+  assert.equal(fake.events.some(event => event.startsWith('setFind:')), false)
+  assert.equal(fake.events.includes('key:Escape:0'), false)
+  assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs select_text stops after focus, query, current, or total drift during navigation', async () => {
+  const options = [{ focusLossAfterKey: true }, { queryDriftAfterKey: true }, { navigationStalls: true }, { totalChangeAfterKey: true }]
+  for (const option of options) {
+    const fake = fakeSelectDocs({ document: 'needle one needle two needle', ...option })
+    await assert.rejects(runSelectDocs(fake, { occurrence: 2 }), error => (
+      error.code === 'DOCS_WAIT_TIMEOUT' && error.stage === 'find-navigate'
+    ))
+    const navigation = fake.events.filter(event => event === 'key:Enter:0' || event === 'key:Enter:8')
+    assert.equal(navigation.length, 1)
+    assert.equal(fake.events.includes('key:Escape:0'), false)
+    assert.equal(fake.state.findOpen, true)
+    assert.equal(fake.snapshots(), 0)
+  }
+})
+
+test('Docs select_text maps a case-insensitive anchor to the computed full-paragraph occurrence', async () => {
+  const fake = fakeSelectDocs({ paragraphs: ['Same Needle', 'other', 'same needle'] })
+  const result = await runSelectDocs(fake, { text: 'NEEDLE', occurrence: 2, scope: 'paragraph' })
+  assert.deepEqual(result.docs, {
+    action: 'select_text',
+    status: 'selected',
+    scope: 'paragraph',
+    text: 'same needle',
+    occurrence: 2,
+    current: 2,
+    matchCount: 2,
+    verifiedBy: 'find-counter',
+    findFocused: true,
+    anchorText: 'NEEDLE',
+    paragraphIndex: 3,
+  })
+  assert.deepEqual(fake.events.filter(event => event.startsWith('setFind:')), ['setFind:NEEDLE', 'setFind:same needle'])
+  assert.deepEqual(fake.events.filter(event => event === 'key:Enter:0' || event === 'key:Enter:8'), ['key:Enter:0'])
+  assert.equal(fake.events.filter(event => event === 'export:html').length, 1)
+  assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs select_text paragraph mapping uses literal non-overlapping occurrences', async () => {
+  const fake = fakeSelectDocs({ paragraphs: ['aaaa'] })
+  const result = await runSelectDocs(fake, { text: 'aa', occurrence: 2, scope: 'paragraph' })
+  assert.equal(result.docs.text, 'aaaa')
+  assert.equal(result.docs.occurrence, 1)
+  assert.equal(result.docs.anchorText, 'aa')
+  assert.equal(fake.events.some(event => event === 'key:Enter:0' || event === 'key:Enter:8'), false)
+  assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs select_text paragraph mode fails closed for ambiguity and unmappable exports', async () => {
+  const longParagraph = `${'x'.repeat(1001)} needle`
+  const cases = [
+    {
+      options: { paragraphs: ['needle', 'needle'] }, args: { scope: 'paragraph' }, code: 'DOCS_MATCH_NOT_UNIQUE',
+    },
+    {
+      options: { paragraphs: [], document: 'needle', exportHtml: '<table><tr><td><p>needle</p></td></tr></table>' },
+      args: { scope: 'paragraph' }, code: 'DOCS_PARAGRAPH_UNMAPPABLE',
+    },
+    {
+      options: { document: 'before\nneedle after', exportHtml: '<p>before<br>needle after</p>' },
+      args: { scope: 'paragraph' }, code: 'DOCS_PARAGRAPH_UNMAPPABLE',
+    },
+    {
+      options: { paragraphs: [longParagraph] }, args: { scope: 'paragraph' }, code: 'DOCS_PARAGRAPH_UNMAPPABLE',
+    },
+    {
+      options: { paragraphs: ['needle'], document: 'needle needle' }, args: { scope: 'paragraph' }, code: 'DOCS_EXPORT_COUNT_MISMATCH',
+    },
+    {
+      options: { paragraphs: ['same needle'], nativeTotals: { needle: 1, 'same needle': 2 } },
+      args: { scope: 'paragraph' }, code: 'DOCS_EXPORT_COUNT_MISMATCH',
+    },
+  ]
+  for (const item of cases) {
+    const fake = fakeSelectDocs(item.options)
+    await assert.rejects(runSelectDocs(fake, item.args), error => error.code === item.code)
+    assert.equal(fake.events.includes('key:Escape:0'), false)
+    assert.equal(fake.events.some(event => event === 'key:Enter:0' || event === 'key:Enter:8'), false)
+    assert.equal(fake.state.findOpen, true)
+    assert.equal(fake.snapshots(), 0)
+  }
+})
+
+test('Docs select_text stops on a stale tab before filling the query', async () => {
+  const fake = fakeSelectDocs({ staleAfter: 2 })
+  await assert.rejects(runSelectDocs(fake), error => error.code === 'DOCS_STALE_TAB' && error.stage === 'find-query')
+  assert.equal(fake.events.some(event => event.startsWith('setFind:')), false)
+  assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs select_text validates every argument before using the tab', async () => {
+  const fake = fakeSelectDocs()
+  const rejected = [
+    [{ action: 'format' }, 'DOCS_BAD_DOCS_ACTION'],
+    [{ text: ' ' }, 'DOCS_BAD_DOCS_TEXT'],
+    [{ text: 'x'.repeat(1001) }, 'DOCS_BAD_DOCS_TEXT'],
+    [{ occurrence: 'all' }, 'DOCS_BAD_DOCS_OCCURRENCE'],
+    [{ occurrence: 0 }, 'DOCS_BAD_DOCS_OCCURRENCE'],
+    [{ occurrence: -1 }, 'DOCS_BAD_DOCS_OCCURRENCE'],
+    [{ occurrence: 1.5 }, 'DOCS_BAD_DOCS_OCCURRENCE'],
+    [{ occurrence: '1' }, 'DOCS_BAD_DOCS_OCCURRENCE'],
+    [{ scope: 'all' }, 'DOCS_BAD_DOCS_SCOPE'],
+    [{ scope: 'paragraph', text: 'two\nlines' }, 'DOCS_BAD_DOCS_TEXT'],
+    [{ surprise: true }, 'DOCS_BAD_DOCS_SELECT'],
+  ]
+  for (const [overrides, code] of rejected) {
+    await assert.rejects(runSelectDocs(fake, overrides), error => error.code === code)
+  }
+  assert.equal(fake.events.length, 0)
+  assert.equal(fake.snapshots(), 0)
+})
+
+const FORMAT_MANY_NORMAL = {
+  bold: false,
+  italic: false,
+  underline: false,
+  strike: false,
+  font: 'Arial',
+  fontSize: 11,
+  color: '#000000',
+  highlight: 'none',
+}
+const FORMAT_MANY_MARKS = ['bold', 'italic', 'underline', 'strike', 'font', 'fontSize', 'color', 'highlight']
+const formatManyRun = (text, marks = {}) => ({ text, ...FORMAT_MANY_NORMAL, ...marks })
+const formatManyPara = (text, style = 'P', marks = {}) => ({
+  kind: 'para', style, text, runs: text ? [formatManyRun(text, marks)] : [],
+})
+const formatManyEscape = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+const formatManyStyle = marks => [
+  `font-weight:${marks.bold ? 700 : 400}`,
+  `font-style:${marks.italic ? 'italic' : 'normal'}`,
+  marks.underline ? 'text-decoration:underline' : marks.strike ? 'text-decoration:line-through' : 'text-decoration:none',
+  `font-family:'${marks.font}'`,
+  `font-size:${marks.fontSize}pt`,
+  `color:${marks.color}`,
+  `background-color:${marks.highlight === 'none' ? 'transparent' : marks.highlight}`,
+].join(';')
+
+function formatManyHtml(blocks) {
+  const body = []
+  for (let index = 0; index < blocks.length;) {
+    const block = blocks[index]
+    if (block.kind === 'pagebreak') {
+      body.push('<hr style="page-break-before:always">')
+      index += 1
+      continue
+    }
+    if (block.kind === 'image') {
+      body.push('<img src="image.png">')
+      index += 1
+      continue
+    }
+    if (block.kind === 'hr') {
+      body.push('<hr>')
+      index += 1
+      continue
+    }
+    const spans = current => current.runs.map(run => `<span style="${formatManyStyle(run)}">${formatManyEscape(run.text).replaceAll('\n', '<br>')}</span>`).join('')
+    if (block.style !== 'LI') {
+      const tag = ['P', 'TITLE', 'SUBTITLE'].includes(block.style) ? 'p' : block.style.toLowerCase()
+      const className = block.style === 'TITLE' ? ' class="title"' : block.style === 'SUBTITLE' ? ' class="subtitle"' : ''
+      body.push(`<${tag}${className}>${spans(block)}</${tag}>`)
+      index += 1
+      continue
+    }
+    const ordered = block.ordered === true
+    const checklist = block.checklist === true
+    const start = block.number ?? 1
+    const items = []
+    while (index < blocks.length && blocks[index].style === 'LI'
+      && (blocks[index].ordered === true) === ordered && (blocks[index].checklist === true) === checklist) {
+      const current = blocks[index]
+      const checkbox = checklist ? `<input type="checkbox"${current.checked ? ' checked="checked"' : ''}>` : ''
+      items.push(`<li class="lst-test-${current.listLevel ?? 0}">${checkbox}${spans(current)}</li>`)
+      index += 1
+    }
+    body.push(`<${ordered ? 'ol' : 'ul'}${ordered && start !== 1 ? ` start="${start}"` : ''}>${items.join('')}</${ordered ? 'ol' : 'ul'}>`)
+  }
+  return `<html><body>${body.join('')}</body></html>`
+}
+
+function fakeFormatManyDocs(options = {}) {
+  const initialBlocks = structuredClone(options.blocks ?? [formatManyPara('alpha'), formatManyPara('sentinel')])
+  const baselineHtml = formatManyHtml(initialBlocks)
+  const state = {
+    blocks: structuredClone(initialBlocks),
+    findOpen: false,
+    findFocused: false,
+    findValue: '',
+    current: 0,
+    selection: undefined,
+    styleMenuOpen: false,
+    requestedStyle: undefined,
+    fontSizeFocused: false,
+    fontSizeValue: '11',
+    requestedFont: undefined,
+    menuOpen: false,
+    dialogOpen: false,
+    searchValue: '',
+    checked: false,
+    colorTarget: 'color',
+    colorMenuOpen: false,
+    highlightMenuOpen: false,
+    colorDialogOpen: false,
+    hexFocused: false,
+    hexValue: '',
+  }
+  const events = []
+  const exports = []
+  let snapshots = 0
+  let tabAccess = 0
+  let tabChecks = 0
+  let collateralApplied = false
+  let now = 1_000
+  const tab = { id: 7, url: DOCS_URL }
+  const matches = text => {
+    const found = []
+    const wanted = String(text).toLowerCase()
+    if (!wanted) return found
+    for (const [blockIndex, block] of state.blocks.entries()) {
+      if (block.kind !== 'para') continue
+      const source = block.text.toLowerCase()
+      for (let start = source.indexOf(wanted); start >= 0; start = source.indexOf(wanted, start + wanted.length)) {
+        found.push({ blockIndex, start, end: start + wanted.length })
+      }
+    }
+    return found
+  }
+  const nativeTotal = () => options.nativeTotals?.[state.findValue] ?? matches(state.findValue).length
+  const selectCurrent = () => {
+    const currentMatches = matches(state.findValue)
+    state.selection = currentMatches[state.current - 1]
+  }
+  const find = () => {
+    const total = nativeTotal()
+    return {
+      ok: true,
+      open: state.findOpen,
+      enabled: true,
+      focused: state.findOpen && state.findFocused,
+      value: state.findValue,
+      match: { current: total ? state.current : 0, total, text: `${total ? state.current : 0} of ${total}` },
+    }
+  }
+  const selectedBlock = () => state.blocks[state.selection?.blockIndex]
+  const selectedMarks = () => {
+    const block = selectedBlock()
+    if (!block || !state.selection) return FORMAT_MANY_NORMAL
+    let offset = 0
+    for (const run of block.runs) {
+      if (state.selection.start >= offset && state.selection.start < offset + run.text.length) return run
+      offset += run.text.length
+    }
+    return FORMAT_MANY_NORMAL
+  }
+  const styleName = code => ({ P: 'Normal text', TITLE: 'Title', SUBTITLE: 'Subtitle' })[code] ?? code?.replace(/^H/u, 'Heading ')
+  const styleCode = name => ({ 'Normal text': 'P', Title: 'TITLE', Subtitle: 'SUBTITLE' })[name] ?? `H${name.slice(-1)}`
+  const currentAttribute = attribute => {
+    if (attribute === 'paragraph_style') return styleName(selectedBlock()?.style)
+    if (attribute === 'font_size') return selectedMarks().fontSize
+    return selectedMarks()[attribute]
+  }
+  const mutateSelection = (attribute, value) => {
+    const block = selectedBlock()
+    if (!block || !state.selection) throw new Error(`No selection for ${attribute}`)
+    const field = attribute === 'font_size' ? 'fontSize' : attribute
+    const characters = []
+    for (const run of block.runs) {
+      for (let offset = 0; offset < run.text.length; offset += 1) {
+        characters.push({ text: run.text[offset], marks: Object.fromEntries(FORMAT_MANY_MARKS.map(key => [key, run[key]])) })
+      }
+    }
+    for (let offset = state.selection.start; offset < state.selection.end; offset += 1) characters[offset].marks[field] = value
+    const runs = []
+    for (const character of characters) {
+      const previous = runs.at(-1)
+      if (previous && FORMAT_MANY_MARKS.every(key => previous[key] === character.marks[key])) previous.text += character.text
+      else runs.push({ text: character.text, ...character.marks })
+    }
+    block.runs = runs
+    events.push(`mutate:${attribute}:${String(value)}`)
+    options.onMutate?.(attribute, value, state)
+  }
+  const io = {
+    now: () => now,
+    sleep: async ms => { now += ms },
+    getWindowId: async () => { tabAccess += 1; return 1 },
+    getActiveTab: async () => { tabAccess += 1; return { ...tab } },
+    getTab: async () => {
+      tabChecks += 1
+      return options.staleAfter === tabChecks ? { ...tab, url: 'https://example.com/stale' } : { ...tab }
+    },
+    fetchExport: async () => {
+      exports.push(exports.length === 0 ? 'baseline' : 'verify')
+      events.push('export:html')
+      if (options.exportError) throw options.exportError
+      if (options.collateralOnVerify && exports.length > 1 && !collateralApplied) {
+        collateralApplied = true
+        const sentinel = state.blocks.find(block => block.text === 'sentinel')
+        sentinel.runs = [formatManyRun('sentinel', { bold: true })]
+      }
+      if (exports.length > 1 && exports.length - 1 <= (options.staleVerifyReads ?? 0)) return baselineHtml
+      return formatManyHtml(state.blocks)
+    },
+    withDebugger: async (_tabId, fn) => fn(),
+    dispatchTrustedKey: async (_tabId, spec, mask) => {
+      events.push(`key:${spec.key}:${mask}`)
+      const key = spec.key.toLowerCase()
+      if (key === 'f' && mask === 2) {
+        state.findOpen = true
+        state.findFocused = true
+        state.findValue = ''
+        state.current = 0
+        state.selection = undefined
+        return
+      }
+      if (spec.key === 'Escape') {
+        state.findOpen = false
+        state.findFocused = false
+        return
+      }
+      if (spec.key === 'Enter' && state.findOpen) {
+        const total = nativeTotal()
+        state.current = mask === 8 ? (state.current - 2 + total) % total + 1 : state.current % total + 1
+        selectCurrent()
+        return
+      }
+      if (spec.key === 'Enter' && state.hexFocused) {
+        mutateSelection(state.colorTarget, state.hexValue)
+        state.hexFocused = false
+        state.colorDialogOpen = false
+        return
+      }
+      if (spec.key === 'Enter' && state.fontSizeFocused) {
+        mutateSelection('font_size', Number(state.fontSizeValue))
+        state.fontSizeFocused = false
+        return
+      }
+      const toggle = { b: 'bold', i: 'italic', u: 'underline' }[key]
+      if (mask === 2 && toggle) mutateSelection(toggle, !currentAttribute(toggle))
+    },
+    insertTrustedText: async (_tabId, text) => {
+      if (state.hexFocused) {
+        state.hexValue = text
+        events.push(`hex:${text}`)
+      } else if (state.fontSizeFocused) {
+        state.fontSizeValue = text
+        events.push(`insert:${text}`)
+      }
+    },
+    trustedClick: async (_tabId, x) => {
+      events.push(`click:${x}`)
+      if (x === 1) state.menuOpen = true
+      else if (x === 2) mutateSelection('font', state.requestedFont)
+      else if (x === 3) state.dialogOpen = true
+      else if (x === 4) state.checked = true
+      else if (x === 5) state.dialogOpen = false
+      else if (x === 6) state.dialogOpen = false
+      else if (x === 10) state.colorMenuOpen = true
+      else if (x === 11) state.highlightMenuOpen = true
+      else if (x === 12) {
+        state.colorDialogOpen = true
+        state.colorMenuOpen = false
+        state.highlightMenuOpen = false
+      } else if (x === 13) {
+        mutateSelection('highlight', 'none')
+        state.highlightMenuOpen = false
+      } else if (x === 14) state.hexFocused = true
+      else if (x === 100) state.styleMenuOpen = true
+      else if (x === 101) {
+        selectedBlock().style = styleCode(state.requestedStyle)
+        state.styleMenuOpen = false
+        events.push(`mutate:paragraph_style:${state.requestedStyle}`)
+      } else if (x === 102) state.fontSizeFocused = true
+    },
+    runInTab: async (_tabId, _func, [command, args]) => {
+      events.push(`probe:${command}`)
+      if (command === 'find') return find()
+      if (command === 'setFind') {
+        state.findValue = args.value
+        const count = nativeTotal()
+        state.current = count ? Math.min(options.initialCurrent ?? 1, count) : 0
+        selectCurrent()
+        events.push(`setFind:${args.value}`)
+        return { ok: true, readback: true, value: state.findValue }
+      }
+      if (command === 'format') {
+        const result = { ok: true }
+        for (const attribute of args.attributes) {
+          if (attribute === 'paragraph_style') Object.assign(result, {
+            paragraphStyle: currentAttribute(attribute), paragraphStylePoint: { x: 100, y: 20 },
+          })
+          else if (attribute === 'font_size') Object.assign(result, {
+            fontSize: currentAttribute(attribute),
+            fontSizeValue: state.fontSizeValue,
+            fontSizeFocused: state.fontSizeFocused,
+            fontSizePoint: { x: 102, y: 20 },
+          })
+          else result[attribute] = currentAttribute(attribute)
+        }
+        return result
+      }
+      if (command === 'formatStyleMenu') {
+        state.requestedStyle = args.style
+        return { ok: true, open: state.styleMenuOpen, point: state.styleMenuOpen ? { x: 101, y: 20 } : undefined }
+      }
+      if (command === 'toolbar') return { ok: true, font: currentAttribute('font'), controlName: `Font list. ${currentAttribute('font')} selected.` }
+      if (command === 'fontControl') return { ok: true, point: { x: 1, y: 20 } }
+      if (command === 'fontMenu') {
+        state.requestedFont = args.font
+        const found = (options.installed ?? ['Arial', 'Syne', 'Roboto']).includes(args.font)
+        return {
+          ok: true,
+          found,
+          checked: found && currentAttribute('font') === args.font,
+          point: found ? { x: 2, y: 20 } : undefined,
+          moreFonts: { x: 3, y: 20 },
+        }
+      }
+      if (command === 'setSearch') {
+        state.searchValue = args.value
+        return { ok: true, readback: true, value: state.searchValue }
+      }
+      if (command === 'fontDialog') {
+        const found = (options.allFonts ?? options.installed ?? ['Arial', 'Syne', 'Roboto']).includes(args.font)
+        return {
+          ok: true,
+          open: state.dialogOpen,
+          searchEnabled: true,
+          searchValue: state.searchValue,
+          noFonts: state.searchValue === args.font && !found,
+          signature: `${state.searchValue}:${found}:${state.checked}`,
+          found,
+          checked: found && state.checked,
+          point: found ? { x: 4, y: 20 } : undefined,
+          done: { x: 5, y: 20 },
+          cancel: { x: 6, y: 20 },
+        }
+      }
+      if (command === 'colorControl') {
+        state.colorTarget = args.attribute
+        return { ok: true, point: { x: args.attribute === 'color' ? 10 : 11, y: 20 } }
+      }
+      if (command === 'colorMenu') {
+        const open = args.attribute === 'color' ? state.colorMenuOpen : state.highlightMenuOpen
+        return {
+          ok: true,
+          open,
+          customPoint: open ? { x: 12, y: 20 } : undefined,
+          nonePoint: args.attribute === 'highlight' && open ? { x: 13, y: 20 } : undefined,
+        }
+      }
+      if (command === 'colorDialog') return {
+        ok: true,
+        open: state.colorDialogOpen,
+        enabled: true,
+        focused: state.hexFocused,
+        value: state.hexValue,
+        point: { x: 14, y: 20 },
+      }
+      throw new Error(`unexpected probe ${command}`)
+    },
+    snapshot: async () => {
+      snapshots += 1
+      return { op: 'snapshot', view: 'full', fakeSnapshot: snapshots }
+    },
+  }
+  return {
+    io,
+    state,
+    events,
+    exports,
+    snapshots: () => snapshots,
+    tabAccess: () => tabAccess,
+    advanceNow: ms => { now += ms },
+  }
+}
+
+const runFormatManyDocs = (fake, edits) => docsFormatMany({}, { action: 'format_many', edits }, fake.io)
+
+test('Docs format_many applies eight attributes and repeated colors with one baseline, final export, and snapshot', async () => {
+  const fake = fakeFormatManyDocs({
+    blocks: [
+      formatManyPara('Alpha beta Alpha'),
+      formatManyPara('Second range', 'P', { highlight: '#ffff00' }),
+      formatManyPara('sentinel'),
+    ],
+  })
+  const result = await runFormatManyDocs(fake, [
+    {
+      text: 'Alpha', occurrence: 'last', paragraph_style: 'Heading 2', font_size: 28,
+      bold: true, italic: true, underline: true, font: ' Syne ', color: '#A1B2C3', highlight: '#FFFF00',
+    },
+    { text: 'Second range', color: '#a1b2c3', highlight: 'none' },
+  ])
+  assert.equal(result.docs.action, 'format_many')
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(result.docs.editCount, 2)
+  assert.equal(result.docs.attemptedCount, 2)
+  assert.equal(result.docs.verifiedCount, 2)
+  assert.equal(result.docs.appliedCount, 2)
+  assert.equal(result.docs.remainingCount, 0)
+  assert.equal(result.docs.verifiedBy, 'export')
+  assert.deepEqual(result.docs.results.map(edit => [edit.occurrence, edit.status]), [[2, 'completed'], [1, 'completed']])
+  assert.equal(result.docs.results[0].results.length, 8)
+  assert.ok(result.docs.results.every(edit => edit.results.every(attribute => attribute.verifiedBy === 'export')))
+  assert.equal(fake.state.blocks[0].style, 'H2')
+  assert.equal(fake.state.blocks[0].runs[0].bold, false)
+  assert.deepEqual(fake.state.blocks[0].runs.at(-1), formatManyRun('Alpha', {
+    font: 'Syne', fontSize: 28, bold: true, italic: true, underline: true, color: '#a1b2c3', highlight: '#ffff00',
+  }))
+  assert.equal(fake.state.blocks[1].runs[0].color, '#a1b2c3')
+  assert.equal(fake.state.blocks[1].runs[0].highlight, 'none')
+  assert.equal(fake.state.blocks[2].runs[0].bold, false)
+  assert.equal(fake.events.filter(event => event === 'hex:#a1b2c3').length, 2)
+  assert.equal(fake.exports.length, 2)
+  assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs format_many resolves first, nth, and last ordinal targets independently', async () => {
+  const fake = fakeFormatManyDocs({ blocks: [formatManyPara('target target target')] })
+  const result = await runFormatManyDocs(fake, [
+    { text: 'target', occurrence: 'first', bold: true },
+    { text: 'target', occurrence: 2, italic: true },
+    { text: 'target', occurrence: 'last', underline: true },
+  ])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.deepEqual(fake.state.blocks[0].runs.map(run => [run.text, run.bold, run.italic, run.underline]), [
+    ['target', true, false, false], [' ', false, false, false],
+    ['target', false, true, false], [' ', false, false, false],
+    ['target', false, false, true],
+  ])
+  assert.deepEqual(result.docs.results.map(edit => edit.occurrence), [1, 2, 3])
+  assert.equal(fake.events.filter(event => event === 'key:f:2').length, 3)
+  assert.equal(fake.exports.length, 2)
+})
+
+test('Docs format_many keeps an all-already-applied batch on toolbar evidence without a final export', async () => {
+  const fake = fakeFormatManyDocs({ blocks: [formatManyPara('alpha', 'P', { bold: true })] })
+  const result = await runFormatManyDocs(fake, [{ text: 'alpha', bold: true }])
+  assert.equal(result.docs.status, 'already_applied')
+  assert.equal(result.docs.verifiedCount, 1)
+  assert.equal(result.docs.appliedCount, 1)
+  assert.equal(result.docs.alreadyAppliedCount, 1)
+  assert.equal(result.docs.verifiedBy, 'toolbar')
+  assert.deepEqual(result.docs.results[0].results, [{ attribute: 'bold', value: true, status: 'already_applied', verifiedBy: 'toolbar' }])
+  assert.equal(fake.exports.length, 1)
+  assert.equal(fake.events.some(event => event.startsWith('mutate:')), false)
+  assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs format_many rejects omitted-occurrence duplicates after baseline planning but before selection or mutation', async () => {
+  const fake = fakeFormatManyDocs({ blocks: [formatManyPara('same same')] })
+  await assert.rejects(runFormatManyDocs(fake, [{ text: 'same', bold: true }]), error => error.code === 'DOCS_FORMAT_MATCH_NOT_UNIQUE')
+  assert.equal(fake.exports.length, 1)
+  assert.equal(fake.events.some(event => event.startsWith('setFind:') || event.startsWith('mutate:')), false)
+  assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs format_many validates every edit and normalizes before any tab access', async () => {
+  const fake = fakeFormatManyDocs()
+  const rejected = [
+    [], null, Array.from({ length: 51 }, () => ({ text: 'x', bold: true })),
+    [null], [{ text: ' ', bold: true }], [{ text: 'x'.repeat(1001), bold: true }],
+    [{ text: 'x', occurrence: 0, bold: true }], [{ text: 'x', occurrence: 'all', bold: true }],
+    [{ text: 'x', font_size: 0 }], [{ text: 'x', font_size: 401 }], [{ text: 'x', font_size: 1.5 }],
+    [{ text: 'x', paragraph_style: 'Huge' }], [{ text: 'x', bold: 'yes' }],
+    [{ text: 'x', font: ' ' }], [{ text: 'x', font: 'F'.repeat(101) }],
+    [{ text: 'x', color: 'blue' }], [{ text: 'x', color: '#fff' }],
+    [{ text: 'x', highlight: '#fff' }], [{ text: 'x', highlight: 'NONE' }],
+    [{ text: 'x' }], [{ text: 'x', bold: true, surprise: true }],
+    [{ text: 'alpha', bold: true }, { text: 'sentinel', color: 'invalid' }],
+  ]
+  for (const edits of rejected) await assert.rejects(runFormatManyDocs(fake, edits))
+  assert.equal(fake.tabAccess(), 0)
+  assert.equal(fake.exports.length, 0)
+  assert.equal(fake.events.length, 0)
+  assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs format_many stops at a missing font and reports prior attributes and unattempted edits', async () => {
+  const fake = fakeFormatManyDocs({
+    installed: ['Arial'], allFonts: ['Arial'],
+    blocks: [formatManyPara('alpha'), formatManyPara('omega'), formatManyPara('sentinel')],
+  })
+  const result = await runFormatManyDocs(fake, [
+    { text: 'alpha', bold: true, font: 'Missing Sans' },
+    { text: 'omega', italic: true },
+    { text: 'sentinel', underline: true },
+  ])
+  assert.equal(result.docs.status, 'partial', JSON.stringify(result.docs))
+  assert.equal(result.docs.attemptedCount, 1)
+  assert.equal(result.docs.verifiedCount, 0)
+  assert.equal(result.docs.appliedCount, 0)
+  assert.equal(result.docs.remainingCount, 2)
+  assert.equal(result.docs.failure.attribute, 'font')
+  assert.equal(result.docs.failure.code, 'DOCS_FONT_MISSING')
+  assert.equal(result.docs.results[0].status, 'partial')
+  assert.deepEqual(result.docs.results[0].results.map(attribute => [attribute.attribute, attribute.status]), [
+    ['bold', 'applied'], ['font', 'font_missing'],
+  ])
+  assert.deepEqual(result.docs.results.slice(1).map(edit => [edit.status, edit.results[0].status]), [
+    ['unattempted', 'unattempted'], ['unattempted', 'unattempted'],
+  ])
+  assert.equal(fake.state.blocks[0].runs[0].bold, true)
+  assert.equal(fake.state.blocks[1].runs[0].italic, false)
+  assert.equal(fake.events.filter(event => event === 'key:f:2').length, 1)
+  assert.equal(fake.exports.length, 2)
+  assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs format_many waits for export convergence without repeating mutations or snapshots', async () => {
+  const fake = fakeFormatManyDocs({ staleVerifyReads: 2 })
+  const result = await runFormatManyDocs(fake, [{ text: 'alpha', bold: true }])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(fake.exports.length, 4)
+  assert.equal(fake.events.filter(event => event === 'mutate:bold:true').length, 1)
+  assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs format_many bounds divergent export reads and never reformats during convergence', async () => {
+  const fake = fakeFormatManyDocs({ staleVerifyReads: 99 })
+  const result = await runFormatManyDocs(fake, [{ text: 'alpha', bold: true }])
+  assert.equal(result.docs.status, 'partial')
+  assert.equal(result.docs.verifiedCount, 0)
+  assert.equal(result.docs.appliedCount, 0)
+  assert.equal(result.docs.failure.code, 'DOCS_FORMAT_VERIFY_FAILED')
+  assert.equal(result.docs.results[0].status, 'partial')
+  assert.equal(fake.exports.length, 7)
+  assert.equal(fake.events.filter(event => event === 'mutate:bold:true').length, 1)
+  assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs format_many rejects collateral formatting on the first final export', async () => {
+  const fake = fakeFormatManyDocs({ collateralOnVerify: true })
+  const result = await runFormatManyDocs(fake, [{ text: 'alpha', bold: true }])
+  assert.equal(result.docs.status, 'partial')
+  assert.equal(result.docs.failure.index, -1)
+  assert.equal(result.docs.failure.code, 'DOCS_FORMAT_COLLATERAL')
+  assert.equal(result.docs.failure.attribute, 'bold')
+  assert.equal(result.docs.verifiedCount, 0)
+  assert.equal(result.docs.results[0].status, 'partial')
+  assert.equal(fake.exports.length, 2)
+  assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs format_many compares native selection occurrence and count to the baseline plan', async () => {
+  const fake = fakeFormatManyDocs({ nativeTotals: { alpha: 2 } })
+  const result = await runFormatManyDocs(fake, [{ text: 'alpha', occurrence: 'first', bold: true }])
+  assert.equal(result.docs.status, 'failed')
+  assert.equal(result.docs.failure.code, 'DOCS_FORMAT_SELECTION_MISMATCH')
+  assert.deepEqual(result.docs.failure.expected, { occurrence: 1, matchCount: 1 })
+  assert.deepEqual(result.docs.failure.actual, { occurrence: 1, matchCount: 2 })
+  assert.equal(result.docs.verifiedBy, 'toolbar')
+  assert.equal(fake.events.some(event => event.startsWith('mutate:')), false)
+  assert.equal(fake.exports.length, 1)
+  assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs format_many formats an inline list target while preserving unrelated blocks', async () => {
+  const list = { ...formatManyPara('List target', 'LI'), listLevel: 0, ordered: false }
+  const fake = fakeFormatManyDocs({
+    blocks: [{ kind: 'pagebreak' }, list, formatManyPara('before\nafter'), { kind: 'image' }, formatManyPara('')],
+  })
+  const result = await runFormatManyDocs(fake, [{ text: 'List target', bold: true }])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(fake.state.blocks[1].runs[0].bold, true)
+  assert.equal(fake.state.blocks[2].text, 'before\nafter')
+  assert.equal(fake.state.blocks[2].runs[0].bold, false)
+  assert.equal(fake.exports.length, 2)
+  assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs format_many preserves changed-prefix evidence when a later edit goes stale', async () => {
+  const fake = fakeFormatManyDocs({ staleAfter: 7 })
+  await assert.rejects(runFormatManyDocs(fake, [
+    { text: 'alpha', bold: true },
+    { text: 'sentinel', italic: true },
+  ]), error => error.code === 'DOCS_STALE_TAB'
+    && error.formatMany?.attemptedCount === 2
+    && error.formatMany.mutationPossible === true
+    && error.formatMany.results[0].status === 'completed'
+    && error.formatMany.results[1].status === 'unattempted'
+    && error.message.includes('earlier prefix'))
+  assert.equal(fake.state.blocks[0].runs[0].bold, true)
+  assert.equal(fake.state.blocks[1].runs[0].italic, false)
+  assert.equal(fake.exports.length, 1)
+  assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs format_many serializes concurrent batches through the per-tab lock', async () => {
+  const fake = fakeFormatManyDocs()
+  const originalExport = fake.io.fetchExport
+  let active = 0
+  let maxActive = 0
+  let calls = 0
+  let releaseFirst
+  let markFirstStarted
+  const firstStarted = new Promise(resolve => { markFirstStarted = resolve })
+  const gate = new Promise(resolve => { releaseFirst = resolve })
+  fake.io.fetchExport = async (...args) => {
+    calls += 1
+    active += 1
+    maxActive = Math.max(maxActive, active)
+    if (calls === 1) {
+      markFirstStarted()
+      await gate
+    }
+    try {
+      return await originalExport(...args)
+    } finally {
+      active -= 1
+    }
+  }
+  const first = runFormatManyDocs(fake, [{ text: 'alpha', bold: true }])
+  await firstStarted
+  const second = runFormatManyDocs(fake, [{ text: 'sentinel', italic: true }])
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(calls, 1)
+  releaseFirst()
+  const [left, right] = await Promise.all([first, second])
+  assert.equal(left.docs.status, 'completed')
+  assert.equal(right.docs.status, 'completed')
+  assert.equal(maxActive, 1)
+  assert.equal(calls, 4)
+  assert.equal(fake.snapshots(), 2)
+})
+
+test('Docs format_many rejects an expired queued batch before export, Find, or mutation', async () => {
+  const first = fakeFormatManyDocs()
+  const queued = fakeFormatManyDocs()
+  const originalExport = first.io.fetchExport
+  let releaseFirst
+  let markFirstStarted
+  const firstStarted = new Promise(resolve => { markFirstStarted = resolve })
+  const gate = new Promise(resolve => { releaseFirst = resolve })
+  first.io.fetchExport = async (...args) => {
+    markFirstStarted()
+    await gate
+    return originalExport(...args)
+  }
+  const active = runFormatManyDocs(first, [{ text: 'alpha', bold: true }])
+  await firstStarted
+  const waiting = runFormatManyDocs(queued, [{ text: 'sentinel', italic: true }])
+  const rejected = assert.rejects(waiting, error => error.code === 'DOCS_DEADLINE'
+    && error.message.includes('before acquiring the tab lock'))
+  await new Promise(resolve => setImmediate(resolve))
+  queued.advanceNow(600_001)
+  releaseFirst()
+  const result = await active
+  assert.equal(result.docs.status, 'completed')
+  await rejected
+  assert.equal(queued.exports.length, 0)
+  assert.equal(queued.events.some(event => event.startsWith('setFind:') || event.startsWith('mutate:')), false)
+  assert.equal(queued.snapshots(), 0)
+})
+
+function captureFormatManyTimeouts(t) {
+  const scheduled = []
+  const originalSetTimeout = globalThis.setTimeout
+  const originalClearTimeout = globalThis.clearTimeout
+  t.after(() => {
+    globalThis.setTimeout = originalSetTimeout
+    globalThis.clearTimeout = originalClearTimeout
+  })
+  globalThis.setTimeout = (callback, ms, ...args) => {
+    const timer = { callback, ms, args, cleared: false, fired: false }
+    scheduled.push(timer)
+    return timer
+  }
+  globalThis.clearTimeout = timer => {
+    if (timer) timer.cleared = true
+  }
+  return {
+    fire(ms) {
+      const timer = scheduled.find(candidate => candidate.ms === ms && !candidate.cleared && !candidate.fired)
+      assert.ok(timer, `missing pending ${ms}ms timeout`)
+      timer.fired = true
+      timer.callback(...timer.args)
+    },
+  }
+}
+
+test('Docs format_many waits for an in-flight mutation to settle at the deadline', async t => {
+  const timeouts = captureFormatManyTimeouts(t)
+  const fake = fakeFormatManyDocs()
+  const originalDispatch = fake.io.dispatchTrustedKey
+  let releaseMutation
+  let markMutationStarted
+  let markMutationFinished
+  const mutationStarted = new Promise(resolve => { markMutationStarted = resolve })
+  const mutationFinished = new Promise(resolve => { markMutationFinished = resolve })
+  const gate = new Promise(resolve => { releaseMutation = resolve })
+  fake.io.dispatchTrustedKey = async (...args) => {
+    if (args[1].key.toLowerCase() === 'b' && args[2] === 2) {
+      markMutationStarted()
+      await gate
+      try {
+        return await originalDispatch(...args)
+      } finally {
+        markMutationFinished()
+      }
+    }
+    return originalDispatch(...args)
+  }
+  const pending = runFormatManyDocs(fake, [{ text: 'alpha', bold: true }])
+  const rejected = assert.rejects(pending, error => error.code === 'DOCS_DEADLINE'
+    && error.formatMany?.mutationPossible === true)
+  await mutationStarted
+  fake.advanceNow(600_000)
+  timeouts.fire(600_000)
+  releaseMutation()
+  await mutationFinished
+  await rejected
+  assert.equal(fake.events.filter(event => event === 'mutate:bold:true').length, 1)
+  assert.equal(fake.exports.length, 1)
+  assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs format_many reports DOCS_UNSETTLED and holds the lock until the in-flight flow finishes', async t => {
+  const timeouts = captureFormatManyTimeouts(t)
+  const fake = fakeFormatManyDocs()
+  const originalDispatch = fake.io.dispatchTrustedKey
+  let releaseMutation
+  let markMutationStarted
+  let markMutationFinished
+  const mutationStarted = new Promise(resolve => { markMutationStarted = resolve })
+  const mutationFinished = new Promise(resolve => { markMutationFinished = resolve })
+  const gate = new Promise(resolve => { releaseMutation = resolve })
+  fake.io.dispatchTrustedKey = async (...args) => {
+    if (args[1].key.toLowerCase() === 'b' && args[2] === 2) {
+      markMutationStarted()
+      await gate
+      try {
+        return await originalDispatch(...args)
+      } finally {
+        markMutationFinished()
+      }
+    }
+    return originalDispatch(...args)
+  }
+  const pending = runFormatManyDocs(fake, [{ text: 'alpha', bold: true }])
+  const rejected = assert.rejects(pending, error => error.code === 'DOCS_UNSETTLED'
+    && error.unsettled === true
+    && error.doNotRetry === true
+    && error.retryable === false
+    && error.formatMany?.doNotRetry === true
+    && /do not retry/u.test(error.message))
+  await mutationStarted
+  fake.advanceNow(600_000)
+  timeouts.fire(600_000)
+  await new Promise(resolve => setImmediate(resolve))
+  timeouts.fire(250)
+  await rejected
+  assert.equal(fake.exports.length, 1)
+  assert.equal(fake.snapshots(), 0)
+
+  const queued = runFormatManyDocs(fake, [{ text: 'sentinel', italic: true }])
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(fake.exports.length, 1)
+  releaseMutation()
+  await mutationFinished
+  const result = await queued
+  assert.equal(result.docs.status, 'completed')
+  assert.equal(fake.state.blocks[0].runs[0].bold, true)
+  assert.equal(fake.state.blocks[1].runs[0].italic, true)
+  assert.equal(fake.exports.length, 3)
 })

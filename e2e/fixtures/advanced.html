@@ -7,7 +7,11 @@
     body { font: 14px/1.6 system-ui, sans-serif; margin: 18px; color: #111; }
     iframe { display: block; width: 420px; height: 120px; border: 1px solid #999; margin: 6px 0; }
     .row { margin: 10px 0; }
-    #menu-popup { position: absolute; background: #fff; border: 1px solid #888; padding: 6px; border-radius: 6px; }
+    .frame-clip { overflow: visible; }
+    .frame-clip.clipped { width: 24px; height: 24px; overflow: hidden; }
+    #menu-popup, #file-popup { position: absolute; background: #fff; border: 1px solid #888; padding: 6px; border-radius: 6px; }
+    #file-popup [role="menuitem"] { padding: 6px 12px; cursor: pointer; }
+    #page-setup-dialog { margin-top: 8px; padding: 8px; border: 1px solid #888; }
   </style>
 </head>
 <body>
@@ -32,8 +36,15 @@
   </div>
 
   <div class="row">
-    <iframe id="same" src="frame-inner.html" title="Same origin frame"></iframe>
-    <iframe id="cross" src="http://localhost:17872/frame-inner.html" title="Cross origin frame"></iframe>
+    <button id="file-menu" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="file-popup">File</button>
+    <div id="file-popup" role="menu" aria-label="File" hidden></div>
+    <span>page setup count: <span id="page-setup-count">0</span></span>
+    <div id="page-setup-dialog" role="dialog" aria-label="Page setup" hidden>Page setup opened</div>
+  </div>
+
+  <div class="row">
+    <div id="same-clip" class="frame-clip"><iframe id="same" src="frame-inner.html" title="Same origin frame"></iframe></div>
+    <div id="cross-clip" class="frame-clip"><iframe id="cross" src="http://localhost:17872/frame-inner.html" title="Cross origin frame"></iframe></div>
   </div>
 
   <script>
@@ -60,6 +71,29 @@
     document.getElementById('menu-item').addEventListener('click', () => {
       menuCount += 1
       document.getElementById('menu-state').textContent = String(menuCount)
+    })
+
+    const fileMenu = document.getElementById('file-menu')
+    const filePopup = document.getElementById('file-popup')
+    fileMenu.addEventListener('click', () => {
+      fileMenu.setAttribute('aria-expanded', 'true')
+      filePopup.hidden = false
+      filePopup.replaceChildren()
+      setTimeout(() => {
+        const item = document.createElement('div')
+        item.id = 'page-setup-item'
+        item.setAttribute('role', 'menuitem')
+        item.tabIndex = 0
+        item.textContent = 'Page setup'
+        item.addEventListener('click', () => {
+          const count = document.getElementById('page-setup-count')
+          count.textContent = String(Number(count.textContent) + 1)
+          document.getElementById('page-setup-dialog').hidden = false
+          fileMenu.setAttribute('aria-expanded', 'false')
+          filePopup.hidden = true
+        })
+        filePopup.append(item)
+      }, 400)
     })
   </script>
 </body>

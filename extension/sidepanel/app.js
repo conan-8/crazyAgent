@@ -18,14 +18,22 @@ const DEFAULT_MODEL_BASE_URL = 'https://openrouter.ai/api/v1'
 const RECOMMENDED_MODEL_ID = 'deepseek/deepseek-v4.1-flash-1017'
 const HISTORY_KEY = 'crazyagent.history'
 const MAX_HISTORY = 12
-const MAX_FILE_BYTES = 100_000
-const MAX_ATTACHMENT_BYTES = 200_000
-const TEXT_FILE_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'jsonl', 'csv', 'tsv', 'xml', 'yaml', 'yml', 'html', 'htm', 'css', 'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'py', 'java', 'c', 'h', 'cpp', 'hpp', 'cs', 'go', 'rs', 'rb', 'php', 'sh', 'sql', 'toml', 'ini', 'cfg', 'log', 'svg'])
+const MAX_IMAGES = 4
+const MAX_IMAGE_BYTES = 5_000_000
+const MAX_TOTAL_IMAGE_BYTES = 12_000_000
+const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 let settingsDraftEffort = 'auto'
 let conversationHistory = []
 let currentConversationId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 let historySaveTimer = null
-let attachedFiles = []
+let attachedImages = []
+/** @type {Array<{id: string, text: string, images: Array<{name: string, size: number, mimeType: string, data: string}>}>} */
+let queuedMessages = []
+let dictation = null
+let queuedMessageSequence = 0
+let steeringMessageId = null
+let queueDispatchTimer = null
+let renderedQueueKey = ''
 
 /** @type {import('./protocol.js').Settings} */
 let settings = { ...DEFAULT_SETTINGS }
@@ -162,9 +170,11 @@ const els = {
   composerContextUsage: $('composer-context-usage'),
   composerContextPercent: $('composer-context-percent'),
   modelMenu: $('model-menu'),
-  attach: $('attach'),
-  fileInput: $('file-input'),
-  fileChips: $('file-chips'),
+  modelMenuList: $('model-menu-list'),
+  modelSearch: $('model-search'),
+  mic: $('mic'),
+  imageChips: $('image-chips'),
+  messageQueue: $('message-queue'),
   promptRail: $('prompt-rail'),
   promptRailList: $('prompt-rail-list'),
   settingsStatus: $('settings-status'),
@@ -288,22 +298,25 @@ function closeModelMenu() {
 }
 
 function renderModelMenu() {
-  const models = [...modelsState.models]
-  if (llmState.model && !models.some(item => item.id === llmState.model.id)) models.unshift(llmState.model)
-  els.modelMenu.replaceChildren()
+  const query = els.modelSearch.value.trim().toLowerCase()
+  const available = [...modelsState.models]
+  if (llmState.model && !available.some(item => item.id === llmState.model.id)) available.unshift(llmState.model)
+  const models = available.filter(model => !query || model.id.toLowerCase().includes(query) || model.name?.toLowerCase().includes(query))
+  els.modelMenuList.replaceChildren()
   if (models.length === 0) {
     const empty = document.createElement('div')
     empty.className = 'model-menu-empty'
-    empty.textContent = connected ? 'Loading models…' : 'Connect to load models'
-    els.modelMenu.appendChild(empty)
-    if (connected && !modelsState.loading) void refreshModels()
+    empty.textContent = query ? 'No models match your search' : connected ? 'Loading models…' : 'Connect to load models'
+    els.modelMenuList.appendChild(empty)
+    if (!query && connected && !modelsState.loading) void refreshModels()
+    return
   }
   for (const model of models.slice(0, 80)) {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'model-menu-item'
-    button.setAttribute('role', 'menuitemradio')
-    button.setAttribute('aria-checked', String(model.id === llmState.model?.id))
+    button.setAttribute('role', 'option')
+    button.setAttribute('aria-selected', String(model.id === llmState.model?.id))
     const copy = document.createElement('span')
     const name = document.createElement('span')
     name.textContent = shortModelName(model)
@@ -323,64 +336,89 @@ function renderModelMenu() {
         reasoningEffort: llmState.reasoningEffort ?? settings.reasoningEffort ?? 'auto',
       })
     })
-    els.modelMenu.appendChild(button)
+    els.modelMenuList.appendChild(button)
   }
 }
 
 function formatFileSize(bytes) {
-  return bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function renderFileChips() {
-  els.fileChips.replaceChildren()
-  els.fileChips.classList.toggle('hidden', attachedFiles.length === 0)
-  attachedFiles.forEach((file, index) => {
+function renderImageChips() {
+  els.imageChips.replaceChildren()
+  els.imageChips.classList.toggle('hidden', attachedImages.length === 0)
+  attachedImages.forEach((image, index) => {
     const chip = document.createElement('span')
-    chip.className = 'file-chip'
+    chip.className = 'image-chip'
+    const thumbnail = document.createElement('img')
+    thumbnail.src = imageDataUrl(image)
+    thumbnail.alt = ''
     const name = document.createElement('span')
-    name.textContent = file.name
-    name.title = file.name
+    name.textContent = image.name
+    name.title = image.name
     const size = document.createElement('small')
-    size.textContent = formatFileSize(file.size)
+    size.textContent = formatFileSize(image.size)
     const remove = document.createElement('button')
     remove.type = 'button'
-    remove.title = `Remove ${file.name}`
-    remove.setAttribute('aria-label', `Remove ${file.name}`)
+    remove.title = `Remove ${image.name}`
+    remove.setAttribute('aria-label', `Remove ${image.name}`)
     remove.textContent = '×'
     remove.addEventListener('click', () => {
-      attachedFiles.splice(index, 1)
-      renderFileChips()
+      attachedImages.splice(index, 1)
+      renderImageChips()
     })
-    chip.append(name, size, remove)
-    els.fileChips.appendChild(chip)
+    chip.append(thumbnail, name, size, remove)
+    els.imageChips.appendChild(chip)
   })
 }
 
-async function addFiles(fileList) {
-  const total = attachedFiles.reduce((sum, file) => sum + file.size, 0)
-  let used = total
-  for (const file of [...fileList].slice(0, Math.max(0, 5 - attachedFiles.length))) {
-    const extension = file.name.split('.').pop()?.toLowerCase() || ''
-    const textType = file.type.startsWith('text/') || TEXT_FILE_EXTENSIONS.has(extension)
-      || ['application/json', 'application/xml', 'application/javascript', 'image/svg+xml'].includes(file.type)
-    if (!textType) {
-      toast(`${file.name}: only text and source files are supported`)
+function readImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result ?? '')
+      const comma = result.indexOf(',')
+      if (!result.startsWith('data:') || comma < 0) reject(new Error('invalid image data'))
+      else resolve(result.slice(comma + 1))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('could not read image'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function addImages(fileList) {
+  const files = [...fileList]
+  let used = attachedImages.reduce((sum, image) => sum + image.size, 0)
+  for (const file of files) {
+    if (attachedImages.length >= MAX_IMAGES) {
+      toast(`Up to ${MAX_IMAGES} images can be attached`)
+      break
+    }
+    if (!IMAGE_MIME_TYPES.has(file.type)) {
+      toast(`${file.name || 'Clipboard item'}: paste a PNG, JPEG, WebP, or GIF image`)
       continue
     }
-    if (file.size > MAX_FILE_BYTES || used + file.size > MAX_ATTACHMENT_BYTES) {
-      toast(`${file.name}: attachments are limited to ${formatFileSize(MAX_FILE_BYTES)} each and ${formatFileSize(MAX_ATTACHMENT_BYTES)} total`)
+    if (file.size > MAX_IMAGE_BYTES || used + file.size > MAX_TOTAL_IMAGE_BYTES) {
+      toast(`Images are limited to ${formatFileSize(MAX_IMAGE_BYTES)} each and ${formatFileSize(MAX_TOTAL_IMAGE_BYTES)} total`)
       continue
     }
     try {
-      const text = await file.text()
-      attachedFiles.push({ name: file.name, size: file.size, text })
+      const data = await readImage(file)
+      const extension = file.type.split('/')[1]
+      attachedImages.push({
+        name: file.name || `pasted-image.${extension}`,
+        size: file.size,
+        mimeType: file.type,
+        data,
+      })
       used += file.size
     } catch {
-      toast(`Could not read ${file.name}`)
+      toast(`Could not read ${file.name || 'pasted image'}`)
     }
   }
-  if (fileList.length + attachedFiles.length > 5) toast('Up to 5 files can be attached')
-  renderFileChips()
+  renderImageChips()
 }
 
 async function loadHistory() {
@@ -864,7 +902,10 @@ function toast(text) {
 function setBusy(value, options = {}) {
   busy = value
   stopAvailable = value && options.stoppable !== false
-  els.send.disabled = value
+  els.send.disabled = value && !stopAvailable
+  const sendLabel = value && stopAvailable ? 'Queue message' : 'Send'
+  els.send.title = sendLabel
+  els.send.setAttribute('aria-label', sendLabel)
   renderComposerModel()
   updateStopButton()
   refreshStatus()
@@ -882,6 +923,7 @@ function updateStopButton() {
   els.stop.title = label
   els.stop.setAttribute('aria-label', label)
   els.stop.setAttribute('aria-busy', String(stopping))
+  renderQueuedMessages()
 }
 
 function setActivity(active) {
@@ -964,8 +1006,11 @@ function connect() {
     ws = null
     connected = false
     stopping = false
+    steeringMessageId = null
     clearTimeout(stopTimer)
     stopTimer = null
+    clearTimeout(queueDispatchTimer)
+    queueDispatchTimer = null
     setBusy(false)
     setActivity(false)
     setActivityPhase('Companion offline', 'offline')
@@ -1277,14 +1322,14 @@ function startTurn(text, attachments = []) {
   label.textContent = `Turn ${turnNumber}`
   const prompt = document.createElement('span')
   prompt.className = 'turn-prompt'
-  prompt.textContent = text || 'Attached files'
+  prompt.textContent = text || 'Attached images'
   prompt.title = String(text ?? '')
   bubble.append(prompt)
   if (attachments.length > 0) {
-    const files = document.createElement('span')
-    files.className = 'user-files'
-    files.textContent = attachments.map(file => file.name).join(' · ')
-    bubble.appendChild(files)
+    const images = document.createElement('span')
+    images.className = 'user-images'
+    images.textContent = attachments.map(image => image.name).join(' · ')
+    bubble.appendChild(images)
   }
   const duration = document.createElement('span')
   duration.className = 'turn-duration hidden'
@@ -1849,6 +1894,7 @@ function handleStatus(frame) {
     setActivityPhase('Ready', 'online')
     finalizeStreamActivity()
     refreshStatus()
+    scheduleQueuedMessage()
     return
   }
   if (status === 'capturing') {
@@ -2082,6 +2128,7 @@ function handleStopping(frame = {}) {
 function handleStopped(frame = {}) {
   const wasActive = busy || stopping
   const reason = frame.reason === 'idle' ? 'idle' : 'user'
+  if (frame.local === true) steeringMessageId = null
   cleanupAfterTurn()
   dshState = 'ready'
   finishTurn({})
@@ -2251,6 +2298,13 @@ function browserActivitySummary(op, result) {
   if (typeof result.text === 'string') {
     parts.push(`${result.text.length} chars${result.truncated ? ` of ${result.totalChars}` : ''} · ${Math.round(result.totalMs ?? 0)}ms`)
   }
+  if (result.roleClick) {
+    const roleClick = result.roleClick
+    const path = Array.isArray(roleClick.path) ? roleClick.path : []
+    const description = path.map(step => `${step?.role ?? step?.tag ?? 'element'} ${step?.name ?? step?.text ?? ''}`.trim()).join(' → ')
+    parts.push(`role click ${roleClick.status ?? 'result'} · ${roleClick.completed ?? path.length} step(s)${description ? ` · ${truncate(description, 80)}` : ''}`)
+    if (roleClick.failure) parts.push(`failed at ${roleClick.failure.index ?? '?'} ${roleClick.failure.code ?? 'error'}`)
+  }
   if (result.clicked) {
     parts.push(`click #${result.clicked.label} ${truncate(result.clicked.text || result.clicked.tag || '', 50)}`)
     parts.push(result.changed ? 'changed' : 'no visible change')
@@ -2356,14 +2410,275 @@ function closeImage() {
 /* composer / controls                                                 */
 /* ------------------------------------------------------------------ */
 
+function updateMicButton() {
+  const supported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
+  const active = dictation !== null
+  const label = active ? 'Stop dictation' : supported ? 'Start dictation' : 'Dictation is not supported in this browser'
+  els.mic.disabled = !supported
+  els.mic.classList.toggle('recording', active)
+  els.mic.title = label
+  els.mic.setAttribute('aria-label', label)
+  els.mic.setAttribute('aria-pressed', String(active))
+}
+
+function stopDictation() {
+  if (dictation === null) return
+  const session = dictation
+  dictation = null
+  try {
+    session.recognition.stop()
+  } catch {
+    // The recognition may already have ended.
+  }
+  updateMicButton()
+  logger.log('speech.stop', {}, 'info')
+}
+
+function dictationError(code) {
+  switch (code) {
+    case 'not-allowed':
+    case 'service-not-allowed': return 'Microphone permission was denied'
+    case 'audio-capture': return 'No microphone is available'
+    case 'network': return 'The speech recognition service is unavailable'
+    case 'no-speech': return 'No speech was detected'
+    case 'language-not-supported': return 'This browser does not support dictation in your language'
+    default: return `Dictation stopped${code ? `: ${code}` : ''}`
+  }
+}
+
+function toggleDictation() {
+  if (dictation !== null) {
+    stopDictation()
+    return
+  }
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (!Recognition) {
+    toast('Dictation is not supported in this browser')
+    return
+  }
+  const recognition = new Recognition()
+  const start = els.input.selectionStart ?? els.input.value.length
+  const end = els.input.selectionEnd ?? start
+  const rawBefore = els.input.value.slice(0, start)
+  const rawAfter = els.input.value.slice(end)
+  const before = rawBefore && !/\s$/u.test(rawBefore) ? `${rawBefore} ` : rawBefore
+  const after = rawAfter && !/^\s/u.test(rawAfter) ? ` ${rawAfter}` : rawAfter
+  const session = { recognition, before, after }
+  recognition.continuous = true
+  recognition.interimResults = true
+  recognition.lang = navigator.language || 'en-US'
+  recognition.onresult = event => {
+    if (dictation !== session) return
+    let transcript = ''
+    for (let index = 0; index < event.results.length; index += 1) {
+      transcript += event.results[index][0].transcript
+    }
+    els.input.value = `${session.before}${transcript}${session.after}`
+    const caret = session.before.length + transcript.length
+    els.input.setSelectionRange(caret, caret)
+    resizeInput()
+  }
+  recognition.onerror = event => {
+    if (dictation !== session) return
+    dictation = null
+    updateMicButton()
+    logger.log('speech.error', { code: event.error }, 'warn')
+    toast(dictationError(event.error))
+  }
+  recognition.onend = () => {
+    if (dictation !== session) return
+    dictation = null
+    updateMicButton()
+    logger.log('speech.end', {}, 'info')
+  }
+  try {
+    recognition.start()
+    dictation = session
+    updateMicButton()
+    els.input.focus()
+    logger.log('speech.start', { language: recognition.lang }, 'info')
+  } catch (error) {
+    dictation = null
+    updateMicButton()
+    toast(`Could not start dictation: ${errorMessage(error)}`)
+  }
+}
+
 function resizeInput() {
   els.input.style.height = 'auto'
   els.input.style.height = `${Math.min(els.input.scrollHeight, 132)}px`
 }
 
+function queuedMessagePreview(item) {
+  return item.text || item.images.map(image => image.name).join(', ') || 'Attached images'
+}
+
+function queueIcon(symbol) {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  icon.setAttribute('class', 'icon')
+  icon.setAttribute('aria-hidden', 'true')
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use')
+  use.setAttribute('href', `#${symbol}`)
+  icon.appendChild(use)
+  return icon
+}
+
+function renderQueuedMessages() {
+  const renderKey = JSON.stringify([queuedMessages.map(item => item.id), busy, stopAvailable, stopping, connected])
+  if (renderKey === renderedQueueKey) return
+  renderedQueueKey = renderKey
+  els.messageQueue.replaceChildren()
+  els.messageQueue.classList.toggle('hidden', queuedMessages.length === 0)
+  for (const item of queuedMessages) {
+    const preview = queuedMessagePreview(item)
+    const row = document.createElement('div')
+    row.className = 'queued-message'
+    row.dataset.queueId = item.id
+
+    const steer = document.createElement('button')
+    steer.type = 'button'
+    steer.className = 'queued-message-steer'
+    steer.disabled = stopping || !connected || (busy && !stopAvailable)
+    steer.title = busy ? 'Stop the current turn and steer this message' : 'Send queued message'
+    steer.setAttribute('aria-label', `${busy ? 'Steer' : 'Send'} queued message: ${preview}`)
+    steer.appendChild(queueIcon('icon-arrow-up'))
+    steer.addEventListener('click', () => steerQueuedMessage(item.id))
+
+    const body = document.createElement('div')
+    body.className = 'queued-message-body'
+    body.title = preview
+    const grip = document.createElement('span')
+    grip.className = 'queued-message-grip'
+    grip.setAttribute('aria-hidden', 'true')
+    const text = document.createElement('span')
+    text.className = 'queued-message-preview'
+    text.textContent = preview
+    const cancel = document.createElement('button')
+    cancel.type = 'button'
+    cancel.className = 'queued-message-cancel'
+    cancel.title = 'Remove from queue and edit'
+    cancel.setAttribute('aria-label', `Edit queued message: ${preview}`)
+    cancel.appendChild(queueIcon('icon-close'))
+    cancel.addEventListener('click', () => restoreQueuedMessage(item.id))
+
+    body.append(grip, text, cancel)
+    row.append(steer, body)
+    els.messageQueue.appendChild(row)
+  }
+}
+
+function clearComposerDraft() {
+  attachedImages = []
+  renderImageChips()
+  els.input.value = ''
+  resizeInput()
+}
+
+function restoreQueuedMessage(id) {
+  const item = queuedMessages.find(entry => entry.id === id)
+  if (!item) return
+  const images = [...item.images, ...attachedImages]
+  const bytes = images.reduce((sum, image) => sum + image.size, 0)
+  if (images.length > MAX_IMAGES || bytes > MAX_TOTAL_IMAGE_BYTES) {
+    toast('Make room in the composer before restoring these images')
+    return
+  }
+  queuedMessages = queuedMessages.filter(entry => entry.id !== id)
+  if (steeringMessageId === id) steeringMessageId = null
+  const existing = els.input.value
+  els.input.value = item.text && existing.trim() ? `${item.text}\n\n${existing}` : item.text || existing
+  attachedImages = images
+  renderImageChips()
+  renderQueuedMessages()
+  resizeInput()
+  els.input.focus()
+  els.input.setSelectionRange(els.input.value.length, els.input.value.length)
+  logger.log('chat.queue.restore', { queueId: id, remaining: queuedMessages.length }, 'info')
+}
+
+function dispatchMessage(item) {
+  if (busy || stopping) return false
+  if (!connected) {
+    showBanner('Not connected to the companion. Start it with npm run dev and reconnect.', 'Reconnect', () => connect())
+    return false
+  }
+  if (!llmState.model || !credentialState.configured) {
+    showBanner('Enter your OpenRouter API key and select a model before asking.', 'Open settings', openSettings)
+    openSettings()
+    return false
+  }
+  clearTimeout(stopTimer)
+  stopTimer = null
+  clearTimeout(queueDispatchTimer)
+  queueDispatchTimer = null
+  const prompt = item.text || 'Review the attached image(s).'
+  const images = item.images.map(image => ({ name: image.name, mimeType: image.mimeType, data: image.data }))
+  const frame = {
+    v: PROTOCOL_VERSION,
+    type: 'chat.send',
+    text: prompt,
+    autoCapture: settings.autoCapture !== false,
+    ...images.length > 0 ? { images } : {},
+  }
+  if (!sendFrame(frame)) return false
+  logger.log('chat.send', {
+    textLength: prompt.length,
+    autoCapture: settings.autoCapture !== false,
+    images: item.images.map(image => ({ name: image.name, size: image.size, mimeType: image.mimeType })),
+    preview: truncate(item.text, 300),
+  }, 'info')
+  beginUserTurn(item.text, item.images)
+  setBusy(true)
+  setStatus('busy', 'Sending…')
+  return true
+}
+
+function dispatchQueuedMessage(id) {
+  if (busy || stopping || !connected) return
+  const index = queuedMessages.findIndex(item => item.id === id)
+  if (index < 0) return
+  const [item] = queuedMessages.splice(index, 1)
+  steeringMessageId = null
+  renderQueuedMessages()
+  if (!dispatchMessage(item)) {
+    queuedMessages.splice(index, 0, item)
+    renderQueuedMessages()
+    return
+  }
+  logger.log('chat.queue.dispatch', { queueId: id, remaining: queuedMessages.length }, 'info')
+}
+
+function scheduleQueuedMessage() {
+  clearTimeout(queueDispatchTimer)
+  queueDispatchTimer = null
+  if (busy || stopping || !connected || queuedMessages.length === 0) return
+  queueDispatchTimer = setTimeout(() => {
+    queueDispatchTimer = null
+    if (busy || stopping || !connected) return
+    dispatchQueuedMessage(steeringMessageId ?? queuedMessages[0]?.id)
+  }, 0)
+}
+
+function steerQueuedMessage(id) {
+  const item = queuedMessages.find(entry => entry.id === id)
+  if (!item || stopping) return
+  if (!busy) {
+    dispatchQueuedMessage(id)
+    return
+  }
+  if (!stopAvailable) {
+    toast('Wait for the current operation to finish')
+    return
+  }
+  steeringMessageId = id
+  logger.log('chat.queue.steer', { queueId: id, preview: truncate(item.text, 300) }, 'info')
+  stopTurn()
+}
+
 function sendMessage() {
+  stopDictation()
   const text = els.input.value.trim()
-  if (text.length === 0 && attachedFiles.length === 0) return
+  if (text.length === 0 && attachedImages.length === 0) return
   if (!connected) {
     showBanner('Not connected to the companion. Start it with npm run dev and reconnect.', 'Reconnect', () => connect())
     return
@@ -2374,30 +2689,27 @@ function sendMessage() {
     return
   }
   if (busy) {
-    toast('Wait for the current turn to finish')
+    if (!stopAvailable) {
+      toast('Wait for the current operation to finish')
+      return
+    }
+    const item = {
+      id: `queue-${Date.now().toString(36)}-${++queuedMessageSequence}`,
+      text,
+      images: attachedImages,
+    }
+    queuedMessages.push(item)
+    clearComposerDraft()
+    renderQueuedMessages()
+    logger.log('chat.queue.add', {
+      queueId: item.id,
+      textLength: text.length,
+      images: item.images.map(image => ({ name: image.name, size: image.size, mimeType: image.mimeType })),
+      queued: queuedMessages.length,
+    }, 'info')
     return
   }
-  stopping = false
-  clearTimeout(stopTimer)
-  stopTimer = null
-  const files = attachedFiles
-  const attachmentContext = files.map(file => `\n\n<attached-file name=${JSON.stringify(file.name)}>\n${file.text}\n</attached-file>`).join('')
-  const prompt = `${text || 'Review the attached file(s).'}${attachmentContext}`
-  if (sendFrame({ v: PROTOCOL_VERSION, type: 'chat.send', text: prompt, autoCapture: settings.autoCapture !== false })) {
-    logger.log('chat.send', {
-      textLength: prompt.length,
-      autoCapture: settings.autoCapture !== false,
-      attachments: files.map(file => ({ name: file.name, size: file.size })),
-      preview: truncate(text, 300),
-    }, 'info')
-    beginUserTurn(text, files)
-    attachedFiles = []
-    renderFileChips()
-    els.input.value = ''
-    resizeInput()
-    setBusy(true)
-    setStatus('busy', 'Sending…')
-  }
+  if (dispatchMessage({ id: '', text, images: attachedImages })) clearComposerDraft()
 }
 
 /** Ask the companion to stop the running turn; the UI waits for chat.stopping/chat.stopped. */
@@ -2433,6 +2745,7 @@ function newChat() {
     toast('Wait for the current turn to finish')
     return
   }
+  stopDictation()
   stopping = false
   clearTimeout(stopTimer)
   stopTimer = null
@@ -2440,14 +2753,19 @@ function newChat() {
   sendFrame({ v: PROTOCOL_VERSION, type: 'chat.new' })
   clearChat()
   currentConversationId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  attachedFiles = []
-  renderFileChips()
+  attachedImages = []
+  renderImageChips()
   sessionId = ''
   updateFooter()
   if (connected) setStatus('online', 'Connected')
 }
 
 function clearChat() {
+  clearTimeout(queueDispatchTimer)
+  queueDispatchTimer = null
+  queuedMessages = []
+  steeringMessageId = null
+  renderQueuedMessages()
   toolRows.clear()
   streamToolEntries.clear()
   browserRows.clear()
@@ -2839,14 +3157,30 @@ els.historyModal.addEventListener('click', event => {
 })
 els.composerModel.addEventListener('click', () => {
   const opening = els.modelMenu.classList.contains('hidden')
-  if (opening) renderModelMenu()
+  if (opening) {
+    els.modelSearch.value = ''
+    renderModelMenu()
+  }
   els.modelMenu.classList.toggle('hidden', !opening)
   els.composerModel.setAttribute('aria-expanded', String(opening))
+  if (opening) setTimeout(() => els.modelSearch.focus(), 0)
 })
-els.attach.addEventListener('click', () => els.fileInput.click())
-els.fileInput.addEventListener('change', async () => {
-  await addFiles(els.fileInput.files)
-  els.fileInput.value = ''
+els.modelSearch.addEventListener('input', renderModelMenu)
+els.modelSearch.addEventListener('keydown', event => {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    els.modelMenuList.querySelector('.model-menu-item')?.click()
+  }
+})
+els.mic.addEventListener('click', toggleDictation)
+els.input.addEventListener('paste', event => {
+  const files = [...(event.clipboardData?.items ?? [])]
+    .filter(item => item.kind === 'file')
+    .map(item => item.getAsFile())
+    .filter(file => file && file.type.startsWith('image/'))
+  if (files.length === 0) return
+  event.preventDefault()
+  void addImages(files)
 })
 els.activityLog.addEventListener('scroll', updatePromptRail, { passive: true })
 document.querySelector('.topbar').addEventListener('pointerenter', () => {
@@ -2874,7 +3208,10 @@ els.bannerAction.addEventListener('click', () => {
 })
 
 els.newChat.addEventListener('click', newChat)
-els.stop.addEventListener('click', stopTurn)
+els.stop.addEventListener('click', () => {
+  steeringMessageId = null
+  stopTurn()
+})
 
 for (const chip of document.querySelectorAll('#activity-empty [data-prompt]')) {
   chip.addEventListener('click', () => {
@@ -2887,7 +3224,10 @@ for (const chip of document.querySelectorAll('#activity-empty [data-prompt]')) {
   })
 }
 
-els.input.addEventListener('input', resizeInput)
+els.input.addEventListener('input', event => {
+  resizeInput()
+  if (event.isTrusted) stopDictation()
+})
 els.input.addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
@@ -2911,6 +3251,7 @@ document.addEventListener('keydown', event => {
 })
 
 window.addEventListener('beforeunload', () => {
+  stopDictation()
   manualDisconnect = true
   try {
     ws?.close()
@@ -2937,7 +3278,8 @@ async function boot() {
   populateSettings()
   setEffortSelection(settings.reasoningEffort ?? 'auto')
   renderComposerModel()
-  renderFileChips()
+  renderImageChips()
+  updateMicButton()
   logger.log('settings.loaded', {
     hasToken: settings.token.length > 0,
     bridgeUrl: settings.bridgeUrl,

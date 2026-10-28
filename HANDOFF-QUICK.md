@@ -1,6 +1,6 @@
 # CrazyAgent — quick handoff
 
-**2026-10-27 Feature-document reliability.** Long-form history: `HANDOFF.md`
+**2026-10-27 semantic role paths and Docs range tools.** Long-form history: `HANDOFF.md`
 (§4 invariants, §15 session log). This file is the 2-minute version.
 
 ## 60-second resume
@@ -8,7 +8,7 @@
 ```sh
 cd /home/conan/Documents/GitHub/crazyAgent
 curl -s http://127.0.0.1:17871/health   # expect {"ok":true,"tools":true,...}
-npm test                                 # expect 339/339
+npm test                                 # expect 428/428
 npm run system-prompt                    # exact current prompt
 ```
 
@@ -20,9 +20,9 @@ reloaded and the panel reopened after `extension/` changes.
 
 | Item | Value |
 |---|---|
-| Commit | `95b7d5b` plus the current uncommitted Docs/speed/reliability work |
-| Tests | **339/339** including page-setup/checklist/page-break coverage; real-Docs acceptance still pending |
-| Tools | **24 model-facing** (16 general + guarded `browser_docs`, `browser_docs_format`, `browser_docs_page_setup`, `browser_docs_read`, `browser_docs_rename`, `browser_docs_replace_text`, `browser_docs_replace_many`, `browser_docs_write`) |
+| Commit | `7b29950` plus the current uncommitted semantic-tool work |
+| Tests | **428/428**; setup/system-prompt composition and isolated Edge click/advanced/canvas suites pass; live Docs acceptance of the new tools is still pending |
+| Tools | **27 model-facing** (17 general + guarded `browser_docs`, `browser_docs_format`, `browser_docs_format_many`, `browser_docs_page_setup`, `browser_docs_read`, `browser_docs_rename`, `browser_docs_replace_text`, `browser_docs_replace_many`, `browser_docs_select_text`, `browser_docs_write`) |
 | Companion | running, PID in `logs/companion.pid`, health `tools:true` |
 | Extension | unpacked `extension/`, ID `kmipadgipilkdidennbhcgmoolfedgph`; reload required |
 | Model | OpenRouter `deepseek/deepseek-v4.1-flash-1017`, reasoning `auto` = low from step 1 |
@@ -33,6 +33,14 @@ reloaded and the panel reopened after `extension/` changes.
 | Token / key | `.dsh-home/browser-agent/token`, `.dsh-home/browser-agent/api-key` (0600; never commit) |
 | Ports | bridge 17871, fixtures 17872, Edge e2e 9228 click / 9230 canvas / 9231 advanced / 9233 work |
 
+## Semantic role paths and Docs ranges (2026-10-27)
+
+- `browser_click_role` takes `{path:[{role,name}]}` with 1–4 exact, case-sensitive role/accessible-name steps. It waits for menus and revalidates targets internally, then returns one final full view. It targets page chrome only, never editor content. Dispatch/path completion is not application-outcome proof; `ROLE_CLICK_UNSETTLED` is not safe to retry.
+- `browser_docs_select_text` takes exact `text`, optional `occurrence:"first"|"last"` or a positive integer, and `scope:"text"|"paragraph"`. Omitted occurrence requires uniqueness; there is no `all` or persistent multi-select. Its text-only result carries Find-counter evidence and no screenshot.
+- `browser_docs_format_many` takes 1–50 ordered edits, the same occurrence semantics, and eight attributes (`paragraph_style`, `font_size`, `bold`, `italic`, `underline`, `font`, `color`, `highlight`). Baseline/final exports verify targets and collateral, including `href` and list metadata, with paragraph-style inheritance handling. It returns per-edit results and one final view, stops at the first failure, and has 600 s executor/660 s provider budgets.
+- Overlapping edits, `paragraph_style` on `LI`, and opaque structures such as tables fail closed. No generic Docs mutation batches are unlocked. `DOCS_UNSETTLED` is not safe to retry: allow the tab to stabilize, then inspect by export before any further mutation.
+- Verified: **428/428**, `npm run setup`, composed system prompt, and isolated Edge click/advanced/canvas suites after role hardening. **No live Google Docs acceptance yet for these tools.** Reload the normal unpacked extension, reopen the panel, and run `e2e/checklist.md` from fresh disposable documents at medium effort.
+
 ## Feature-document root fixes (2026-10-27)
 
 - Both analysed runs failed valid initial writes at the second color operation because hidden stale custom-color dialogs were counted as active Hex fields. The probe now selects one usable visible field and still rejects genuine ambiguity.
@@ -42,7 +50,7 @@ reloaded and the panel reopened after `extension/` changes.
 - The newest Feature Test attempts hit Page setup orientation verification and left the dialog open. It now detects label-linked radio inputs, resumes an existing dialog, and makes one fresh bounded OK retry after a close timeout.
 - A later bad run also produced many malformed write blocks. The schema now uses `const:true` for standalone `blank`/`page_break`, forbids blank/formatting combinations, and requires every `items` array to pair with `list` and vice versa.
 - `browser_docs_write` adds verified page breaks and checked checklists. New `browser_docs_page_setup` verifies paper, orientation, and margins before OK. The target live path is rename + page setup + one write, not manual recovery.
-- First capture timeout focuses the window once and retries; only a second timeout opens the 30-second circuit. Full tests are **339/339** and profile composition passes. Real acceptance remains unclaimed until fresh independent runs.
+- First capture timeout focuses the window once and retries; only a second timeout opens the 30-second circuit. Full tests are **428/428** and profile composition passes. Real acceptance remains unclaimed until fresh independent runs.
 
 ## Guarded compound Docs formatter (2026-10-26)
 
@@ -91,7 +99,7 @@ reloaded and the panel reopened after `extension/` changes.
   to 8 seconds of read-only export retries (six reads in the tested worst case); persistent
   divergence, empty list items, and collateral prefix changes are partial/failed.
   Font menus deduplicate only usable equivalent same-menu rows; conflicting menus still fail.
-  Returned outline covers appended content. Full `npm test` is **339/339** and profile
+  Returned outline covers appended content. Full `npm test` is **428/428** and profile
   composition passes.
   The first live writer run reached a **correct final document but was not accepted**:
   **81.545 s/23 model steps/22 tool calls**, three failed calls (duplicate Playfair rows
@@ -177,15 +185,16 @@ disconnects (>8 s), expected `PROTECTED_PAGE` on a Chrome-blocked tab, 1 page-la
 
 ## Suggested next work order
 
-Before further formatter optimization, repeat the focused real-Docs scenarios in `e2e/checklist.md`; neither unit/fake-driver tests, the real-extension canvas suite, nor the pre-change baselines establish live Docs acceptance.
+Before further formatter optimization, reload the normal unpacked extension and repeat the focused real-Docs scenarios in `e2e/checklist.md`, including ordinal selection, multi-range formatting, and the combined role-path scenario; neither unit/fake-driver tests, the real-extension canvas suite, nor the pre-change baselines establish live Docs acceptance.
 
 1. **Fix `click_at` empty-args failures** (6 in the latest run): require exactly one of
    `x/y` or `points` at the schema level/serializer, normalize/repair in batch, clearer error,
    add a test. Cheap, high frequency.
 2. **File upload** (pathless `DataTransfer` for `<input type=file>` + user-attached companion
    picker) — still the biggest capability gap ("add an image" class of tasks).
-3. Name/role targeting + batches that can cross a reveal boundary (Docs menus); native dialogs;
-   drag/slider/right-click; downloads/popups.
+3. Exact role/name menu paths are implemented in `browser_click_role`; generic batches that
+   cross other reveal boundaries remain open, alongside native dialogs, drag/slider/right-click,
+   and downloads/popups.
 4. Skill/recipe layer + durable task scratchpad; animation observation primitives
    (pixel-change watcher / frame bursts) for reaction-style tasks.
 5. Auto per-run `summary.md` cost/latency attribution and budget alerts.

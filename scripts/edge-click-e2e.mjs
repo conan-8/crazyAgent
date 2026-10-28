@@ -79,6 +79,13 @@ const prefix = `const mod = await import('./browser.js')
   const tab = tabs.find(item => item.url?.includes('click.html'))
   const settings = { ...mod.DEFAULT_SETTINGS }
   const read = async id => (await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: id => document.getElementById(id).textContent, args: [id] }))[0].result
+  const semanticState = async () => ({
+    exact: await read('semantic-count'),
+    decoy: await read('semantic-decoy-count'),
+    duplicateA: await read('semantic-duplicate-a-count'),
+    duplicateB: await read('semantic-duplicate-b-count'),
+    disabled: await read('semantic-disabled-count'),
+  })
 `
 const snapshot = await evaluate(`(async () => { ${prefix}
   const view = await mod.execute('snapshot', {}, settings)
@@ -131,6 +138,76 @@ assert.equal(role.changed, true, 'role=button click reports a change')
 assert.equal(role.count, '1', 'role=button handler ran')
 console.log('PASS role=button click')
 
+const semantic = await evaluate(`(async () => { ${prefix}
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => { document.getElementById('semantic-fixture').hidden = false } })
+  const view = await mod.execute('click_role', { path: [{ role: 'button', name: 'Semantic action' }] }, settings)
+  return { changed: view.changed, state: await semanticState() }
+})()`)
+assert.deepEqual(semantic.state, { exact: '1', decoy: '0', duplicateA: '0', duplicateB: '0', disabled: '0' }, 'only the exact accessible role/name activated')
+console.log('PASS exact accessible role/name click')
+
+const semanticMiss = await evaluate(`(async () => { ${prefix}
+  let failure
+  try { await mod.execute('click_role', { path: [{ role: 'button', name: 'Semantic' }] }, settings) }
+  catch (error) { failure = { code: error.code || 'ERROR', message: error.message } }
+  return { failure, state: await semanticState() }
+})()`)
+assert.ok(semanticMiss.failure, 'partial accessible name is refused')
+assert.match(`${semanticMiss.failure.code}: ${semanticMiss.failure.message}`, /NOT_FOUND|NO_MATCH|NO_EXACT|found 0|no exact/i, 'partial name reports no exact match')
+assert.deepEqual(semanticMiss.state, semantic.state, 'partial-name refusal changes no control')
+console.log('PASS exact-name refusal')
+
+const semanticAmbiguous = await evaluate(`(async () => { ${prefix}
+  let failure
+  try { await mod.execute('click_role', { path: [{ role: 'button', name: 'Duplicate semantic action' }] }, settings) }
+  catch (error) { failure = { code: error.code || 'ERROR', message: error.message } }
+  return { failure, state: await semanticState() }
+})()`)
+assert.ok(semanticAmbiguous.failure, 'duplicate accessible role/name is refused')
+assert.match(`${semanticAmbiguous.failure.code}: ${semanticAmbiguous.failure.message}`, /AMBIGUOUS|found 2|multiple/i, 'duplicate target reports ambiguity')
+assert.deepEqual(semanticAmbiguous.state, semantic.state, 'ambiguous refusal changes no control')
+console.log('PASS ambiguous role/name refusal')
+
+const semanticDisabled = await evaluate(`(async () => { ${prefix}
+  let failure
+  try { await mod.execute('click_role', { path: [{ role: 'button', name: 'Disabled semantic action' }] }, settings) }
+  catch (error) { failure = { code: error.code || 'ERROR', message: error.message } }
+  return { failure, state: await semanticState() }
+})()`)
+assert.ok(semanticDisabled.failure, 'disabled accessible role/name is refused')
+assert.match(`${semanticDisabled.failure.code}: ${semanticDisabled.failure.message}`, /DISABLED/i, 'disabled target reports disabled state')
+assert.deepEqual(semanticDisabled.state, semantic.state, 'disabled refusal changes no control')
+console.log('PASS disabled role/name refusal')
+
+const roleReview = await evaluate(`(async () => { ${prefix}
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => {
+    document.getElementById('role-review-fixture').hidden = false
+    document.getElementById('semantic-outer').scrollIntoView({ block: 'center' })
+  } })
+  await new Promise(resolve => setTimeout(resolve, 100))
+  const failures = {}
+  try { await mod.execute('click_role', { path: [{ role: 'button', name: 'Outer semantic action' }] }, settings) }
+  catch (error) { failures.outer = { code: error.code || 'ERROR', message: error.message } }
+  let inner
+  try { inner = await mod.execute('click_role', { path: [{ role: 'button', name: 'Inner semantic action' }] }, settings) }
+  catch (error) { failures.inner = { code: error.code || 'ERROR', message: error.message } }
+  try { await mod.execute('click_role', { path: [{ role: 'button', name: 'Hover moving action' }] }, settings) }
+  catch (error) { failures.hover = { code: error.code || 'ERROR', message: error.message } }
+  return {
+    failures,
+    innerStatus: inner?.roleClick?.status,
+    outer: await read('semantic-outer-count'),
+    inner: await read('semantic-inner-count'),
+    hover: await read('hover-moving-count'),
+  }
+})()`)
+assert.equal(roleReview.failures.outer?.code, 'ROLE_CLICK_COVERED', 'a nested interactive hit does not activate the outer role target')
+assert.equal(roleReview.failures.inner, undefined, 'the actual inner interactive target remains clickable')
+assert.equal(roleReview.innerStatus, 'completed')
+assert.equal(roleReview.failures.hover?.code, 'ROLE_CLICK_STALE_TARGET', 'hover reflow prevents the press')
+assert.deepEqual({ outer: roleReview.outer, inner: roleReview.inner, hover: roleReview.hover }, { outer: '0', inner: '1', hover: '0' })
+console.log('PASS nested interactive ownership, ordinary spans, and stale-on-hover refusal')
+
 const nested = await evaluate(`(async () => { ${prefix}
   const view = await mod.execute('click', { label: ${snapshot.ids.nested} }, settings)
   return { changed: view.changed, signals: view.signals }
@@ -167,6 +244,27 @@ const link = await evaluate(`(async () => { ${prefix}
 assert.equal(link.navigated, true, 'link click navigates')
 assert.match(link.url, /second\.html$/)
 console.log(`PASS link click navigates — ${link.clickMs}ms`)
+
+await evaluate(`(async () => {
+  const tabs = await chrome.tabs.query({})
+  const tab = tabs.find(item => item.url?.includes('second.html'))
+  await chrome.tabs.update(tab.id, { active: true, url: 'http://127.0.0.1:17872/click.html' })
+  await new Promise(resolve => setTimeout(resolve, 700))
+})()`)
+const delayedRole = await evaluate(`(async () => { ${prefix}
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => {
+    document.getElementById('role-review-fixture').hidden = false
+    document.getElementById('delayed-role').scrollIntoView({ block: 'center' })
+  } })
+  await new Promise(resolve => setTimeout(resolve, 100))
+  const view = await mod.execute('click_role', { path: [{ role: 'link', name: 'Delayed role navigation' }] }, settings)
+  return { status: view.roleClick.status, navigated: view.navigated, url: view.tab.url, title: view.tab.title }
+})()`)
+assert.equal(delayedRole.status, 'completed')
+assert.equal(delayedRole.navigated, true)
+assert.match(delayedRole.url, /second\.html\?delayed=role$/)
+assert.equal(delayedRole.title, 'Second Fixture Page', 'the final snapshot comes from the delayed destination')
+console.log('PASS delayed final navigation settles before snapshot')
 
 console.log('\nALL CLICK CHECKS PASSED')
 panel.close()

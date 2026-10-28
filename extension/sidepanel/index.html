@@ -20,7 +20,7 @@
       <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></symbol>
       <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5" /><path d="M18.5 9A7 7 0 0 0 6 6.5L4 9M5.5 15A7 7 0 0 0 18 17.5l2-2.5" /></symbol>
       <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></symbol>
-      <symbol id="icon-attach" viewBox="0 0 24 24"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 0 1-2.8-2.8l8.9-8.9" /></symbol>
+      <symbol id="icon-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" /></symbol>
       <symbol id="icon-arrow-up" viewBox="0 0 24 24"><path d="m6 11 6-6 6 6M12 5v14" /></symbol>
       <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 21h14" /></symbol>
       <symbol id="icon-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></symbol>
@@ -76,12 +76,12 @@
       </div>
 
       <form id="composer" class="composer">
+        <div id="message-queue" class="message-queue hidden" aria-label="Queued messages" aria-live="polite"></div>
         <div class="composer-field">
-          <input id="file-input" class="hidden" type="file" multiple />
-          <div id="file-chips" class="file-chips" aria-live="polite"></div>
+          <div id="image-chips" class="image-chips" aria-live="polite"></div>
           <textarea id="input" rows="2" placeholder="Ask or tell me what to do…" autocomplete="off" spellcheck="false" aria-label="Message"></textarea>
           <div class="composer-controls">
-            <button id="attach" class="attach" type="button" title="Add file" aria-label="Add file"><svg class="icon"><use href="#icon-attach" /></svg></button>
+            <button id="mic" class="mic" type="button" title="Start dictation" aria-label="Start dictation" aria-pressed="false"><svg class="icon"><use href="#icon-mic" /></svg></button>
             <span class="composer-spacer"></span>
             <span id="composer-model-context" class="composer-model-context" role="img" aria-label="Context usage" hidden>
               <svg class="composer-context-ring" viewBox="0 0 20 20" aria-hidden="true">
@@ -98,11 +98,19 @@
               <span id="composer-model-effort" class="composer-model-effort" hidden></span>
               <svg class="icon"><use href="#icon-chevron" /></svg>
             </button>
-            <button id="stop" class="stop hidden" type="button" title="Stop the current turn" aria-label="Stop the current turn" aria-busy="false"><span aria-hidden="true"></span></button>
-            <button id="send" class="send" type="submit" title="Send" aria-label="Send"><svg class="icon"><use href="#icon-arrow-up" /></svg></button>
+            <div class="composer-submit">
+              <button id="stop" class="stop hidden" type="button" title="Stop the current turn" aria-label="Stop the current turn" aria-busy="false"><span aria-hidden="true"></span></button>
+              <button id="send" class="send" type="submit" title="Send" aria-label="Send"><svg class="icon"><use href="#icon-arrow-up" /></svg></button>
+            </div>
           </div>
         </div>
-        <div id="model-menu" class="model-menu hidden" role="listbox" aria-label="Models"></div>
+        <div id="model-menu" class="model-menu hidden">
+          <div class="model-menu-search">
+            <svg class="icon" aria-hidden="true"><use href="#icon-search" /></svg>
+            <input id="model-search" type="search" placeholder="Search models…" spellcheck="false" autocomplete="off" aria-label="Search models" />
+          </div>
+          <div id="model-menu-list" class="model-menu-list" role="listbox" aria-label="Models"></div>
+        </div>
       </form>
 
       <footer class="footer">
