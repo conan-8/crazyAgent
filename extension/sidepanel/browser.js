@@ -8,6 +8,7 @@
 
 import {
   CLIPBOARD_ACTIONS,
+  CLIPBOARD_IMAGE_MAX_BYTES,
   CLIPBOARD_READ_MAX_CHARS,
   CLIPBOARD_SOURCES,
   CLIPBOARD_STORAGE_KEY,
@@ -17,12 +18,34 @@ import {
   clipboardPreview,
   fitClipboardText,
   makeClipboardEntry,
+  makeImageClipboardEntry,
   normalizeClipboardEntry,
 } from './clipboard.js'
+import { checkedFullPageSize, mapScreenshotRegion, parseScreenshotArgs } from './capture.js'
 import { docsFetchExport } from './docs-export.js'
 import { planDocsFormatEdits, validateDocsFormatEdits, verifyDocsFormatEdits } from './docs-format.js'
 import { formatOutline, parseDocStructure } from './docs-structure.js'
+import {
+  docsTableAnchor,
+  docsTableCellPlan,
+  docsTableCreateHtml,
+  docsTableFormatEdits,
+  docsTableNavigationPlan,
+  docsTables,
+  docsTableStructureRequest,
+  parseDocsTableArgs,
+  planDocsTableWrite,
+  publicDocsTable,
+  selectDocsTable,
+  verifyDocsTableDelete,
+  verifyDocsTableStructure,
+  verifyDocsTableWrite,
+} from './docs-table.js'
+import { DialogManager } from './dialogs.js'
+import { executeFind, findProbe } from './find.js'
 import { clickRole } from './role-click.js'
+import { preserveSystemClipboard, restoreSystemClipboard, writeHtmlToSystemClipboard, writeImageToSystemClipboard } from './system-clipboard.js'
+import { executeTable, tableProbe } from './table.js'
 
 export const DEFAULT_SETTINGS = {
   bridgeUrl: 'ws://127.0.0.1:17871/bridge',
@@ -257,8 +280,8 @@ async function getActiveTab(windowId) {
  * @param {number} windowId
  * @param {number} timeoutMs
  */
-function waitForTabComplete(tabId, windowId, timeoutMs) {
-  return new Promise(resolve => {
+async function waitForTabComplete(tabId, windowId, timeoutMs) {
+  const loaded = new Promise(resolve => {
     let settled = false
     const finish = () => {
       if (settled) return
@@ -276,6 +299,7 @@ function waitForTabComplete(tabId, windowId, timeoutMs) {
       if (tab.status === 'complete') finish()
     }).catch(finish)
   })
+  await dialogManager.racePending(tabId, loaded)
 }
 
 /**
@@ -287,7 +311,7 @@ function waitForTabComplete(tabId, windowId, timeoutMs) {
 async function runInTab(tabId, func, args, timeoutMs = 4_000) {
   let results
   try {
-    results = await Promise.race([
+    results = await dialogManager.racePending(tabId, Promise.race([
       chrome.scripting.executeScript({
         target: { tabId },
         world: 'ISOLATED',
@@ -298,9 +322,9 @@ async function runInTab(tabId, func, args, timeoutMs = 4_000) {
         () => reject(new BrowserError('SCRIPT_TIMEOUT', `The page script did not finish within ${timeoutMs}ms`)),
         timeoutMs,
       )),
-    ])
+    ]))
   } catch (error) {
-    if (error instanceof BrowserError) throw error
+    if (error instanceof BrowserError || error?.code === 'DIALOG_PENDING') throw error
     throw new BrowserError('SCRIPT_FAILED', `Chrome could not run in this tab: ${error instanceof Error ? error.message : String(error)}`)
   }
   const result = results?.[0]?.result
@@ -324,7 +348,7 @@ async function runInTab(tabId, func, args, timeoutMs = 4_000) {
 async function runInAllFrames(tabId, func, args = [], timeoutMs = 3_000) {
   let results
   try {
-    results = await Promise.race([
+    results = await dialogManager.racePending(tabId, Promise.race([
       chrome.scripting.executeScript({
         target: { tabId, allFrames: true },
         world: 'ISOLATED',
@@ -335,9 +359,9 @@ async function runInAllFrames(tabId, func, args = [], timeoutMs = 3_000) {
         () => reject(new BrowserError('SCRIPT_TIMEOUT', `The page script did not finish within ${timeoutMs}ms`)),
         timeoutMs,
       )),
-    ])
+    ]))
   } catch (error) {
-    if (error instanceof BrowserError) throw error
+    if (error instanceof BrowserError || error?.code === 'DIALOG_PENDING') throw error
     try {
       const result = await runInTab(tabId, func, args, timeoutMs)
       return [{ frameId: 0, result }]
@@ -403,13 +427,26 @@ async function settleAfterInput(tabId, settleMs) {
   }
 }
 
-/**
- * Attach the Chrome DevTools protocol for trusted input. Detaches afterwards;
- * only one client may attach at a time (DevTools counts as a client).
- * @param {number} tabId
- * @param {() => Promise<any>} fn
- */
-async function withDebugger(tabId, fn) {
+let activeDebuggerRun = null
+let debuggerCleanup = null
+let debuggerDetachWatcher = false
+const dialogManager = new DialogManager({ onBlockingDialog: tabId => invalidateRoleClickTab(tabId) })
+
+function throwPendingDialog(tabId) {
+  const pending = dialogManager.pending(tabId)
+  if (!pending) return
+  const error = new BrowserError('DIALOG_PENDING', `A JavaScript ${pending.type} dialog is pending: ${pending.message}`)
+  error.dialog = pending
+  throw error
+}
+
+async function finishDebuggerOperation(tabId) {
+  await dialogManager.waitForAutomatic(tabId)
+  throwPendingDialog(tabId)
+}
+
+/** Attach one tab or preserve the existing external-debugger error contract. */
+async function attachDebugger(tabId) {
   try {
     await chrome.debugger.attach({ tabId }, '1.3')
   } catch (error) {
@@ -420,9 +457,134 @@ async function withDebugger(tabId, fn) {
     throw new BrowserError('DEBUGGER_FAILED', `Could not attach trusted input to this tab: ${message}`)
   }
   try {
-    return await fn()
-  } finally {
+    await dialogManager.attach(tabId)
+  } catch (error) {
+    await detachDebugger(tabId)
+    throw new BrowserError('DEBUGGER_FAILED', `Could not initialize native dialog handling: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+async function detachDebugger(tabId) {
+  try {
     await chrome.debugger.detach({ tabId }).catch(() => {})
+  } finally {
+    dialogManager.detach(tabId)
+  }
+}
+
+function watchDebuggerDetach() {
+  if (debuggerDetachWatcher || !globalThis.chrome?.debugger?.onDetach) return
+  debuggerDetachWatcher = true
+  chrome.debugger.onDetach.addListener(source => {
+    if (activeDebuggerRun && !debuggerCleanup && source.tabId !== undefined) activeDebuggerRun.attachments.delete(source.tabId)
+  })
+}
+
+async function ensureDebuggerAttachment(run, tabId) {
+  if (!run.active || activeDebuggerRun !== run) throw new BrowserError('DEBUGGER_RUN_ENDED', 'The agent turn ended before trusted input could run.')
+  watchDebuggerDetach()
+  let attachment = run.attachments.get(tabId)
+  if (attachment === undefined) {
+    attachment = attachDebugger(tabId)
+    run.attachments.set(tabId, attachment)
+  }
+  await attachment
+  if (!run.active || activeDebuggerRun !== run) {
+    await detachDebugger(tabId)
+    throw new BrowserError('DEBUGGER_RUN_ENDED', 'The agent turn ended before trusted input could run.')
+  }
+}
+
+/** Start retaining the debugger banner for one agent turn. */
+export function beginDebuggerRun() {
+  if (activeDebuggerRun?.active) return activeDebuggerRun.started
+  const previousCleanup = debuggerCleanup
+  const run = { active: true, attachments: new Map(), operations: new Set(), started: null }
+  activeDebuggerRun = run
+  run.started = (async () => {
+    if (previousCleanup) await previousCleanup.catch(() => {})
+    if (!run.active || activeDebuggerRun !== run) return
+    const tab = await getActiveTab(await getWindowId())
+    await ensureDebuggerAttachment(run, tab.id)
+  })()
+  return run.started
+}
+
+async function prepareDebuggerRunTab(tabId) {
+  const run = activeDebuggerRun
+  if (!run?.active) return
+  await run.started.catch(() => {})
+  if (!run.active || activeDebuggerRun !== run) return
+  await ensureDebuggerAttachment(run, tabId)
+}
+
+async function prepareDebuggerCommand() {
+  const run = activeDebuggerRun
+  if (!run?.active) return
+  await run.started.catch(() => {})
+  if (!run.active || activeDebuggerRun !== run) return
+  const tab = await getActiveTab(await getWindowId())
+  await ensureDebuggerAttachment(run, tab.id)
+}
+
+/** Detach every tab used by the turn after in-flight trusted input settles. */
+export async function endDebuggerRun() {
+  const run = activeDebuggerRun
+  if (!run) {
+    if (debuggerCleanup) await debuggerCleanup
+    return
+  }
+  run.active = false
+  if (activeDebuggerRun === run) activeDebuggerRun = null
+  const cleanup = (async () => {
+    await run.started.catch(() => {})
+    await Promise.allSettled([...run.operations])
+    for (const [tabId, attachment] of run.attachments) {
+      const attached = await attachment.then(() => true).catch(() => false)
+      if (attached) await detachDebugger(tabId)
+    }
+  })()
+  debuggerCleanup = cleanup
+  await cleanup
+  if (debuggerCleanup === cleanup) debuggerCleanup = null
+}
+
+async function runDebuggerOperation(tabId, fn) {
+  try {
+    const result = await fn()
+    await finishDebuggerOperation(tabId)
+    return result
+  } catch (error) {
+    await dialogManager.waitForAutomatic(tabId)
+    throwPendingDialog(tabId)
+    throw error
+  }
+}
+
+/**
+ * Use a turn-scoped debugger lease when active; otherwise detach after one op.
+ * @param {number} tabId
+ * @param {() => Promise<any>} fn
+ */
+export async function withDebugger(tabId, fn) {
+  const run = activeDebuggerRun
+  if (run?.active) {
+    const operation = (async () => {
+      await ensureDebuggerAttachment(run, tabId)
+      return runDebuggerOperation(tabId, fn)
+    })()
+    run.operations.add(operation)
+    try {
+      return await operation
+    } finally {
+      run.operations.delete(operation)
+    }
+  }
+  await attachDebugger(tabId)
+  try {
+    return await runDebuggerOperation(tabId, fn)
+  } finally {
+    await detachDebugger(tabId)
   }
 }
 
@@ -619,15 +781,15 @@ async function diffRegion(before, after, cssX, cssY, radius = 120) {
 async function runInFrame(tabId, frameId, func, args, timeoutMs = 4_000) {
   let results
   try {
-    results = await Promise.race([
+    results = await dialogManager.racePending(tabId, Promise.race([
       chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, world: 'ISOLATED', func, args }),
       new Promise((_, reject) => setTimeout(
         () => reject(new BrowserError('SCRIPT_TIMEOUT', `The frame script did not finish within ${timeoutMs}ms`)),
         timeoutMs,
       )),
-    ])
+    ]))
   } catch (error) {
-    if (error instanceof BrowserError) throw error
+    if (error instanceof BrowserError || error?.code === 'DIALOG_PENDING') throw error
     throw new BrowserError('SCRIPT_FAILED', `Chrome could not run in this frame: ${error instanceof Error ? error.message : String(error)}`)
   }
   const result = results?.[0]?.result
@@ -2540,10 +2702,12 @@ async function captureChromeWithWatchdog(windowId, quality) {
 /**
  * @param {number} windowId
  * @param {number} quality
+ * @param {number} [tabId]
  * @returns {Promise<{dataUrl: string, captureMs: number}>}
  */
-export async function captureVisibleTab(windowId, quality) {
+export async function captureVisibleTab(windowId, quality, tabId) {
   const run = async () => {
+    if (tabId !== undefined) throwPendingDialog(tabId)
     const cooldown = captureCooldownUntil - Date.now()
     if (cooldown > 0) {
       throw new BrowserError('CAPTURE_COOLDOWN', `Screenshots are paused for ${Math.ceil(cooldown / 1000)}s after a Chrome capture timeout`)
@@ -2601,7 +2765,7 @@ export async function captureVisibleTab(windowId, quality) {
   }
   const next = captureGate.then(run, run)
   captureGate = next.catch(() => {})
-  return next
+  return tabId === undefined ? next : dialogManager.racePending(tabId, next)
 }
 
 /**
@@ -2703,83 +2867,280 @@ function assertCapturable(tab, force = false) {
   }
 }
 
+async function pageScreenshotCommand(tabId, params) {
+  let timer
+  try {
+    return await Promise.race([
+      chrome.debugger.sendCommand({ tabId }, 'Page.captureScreenshot', params),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new BrowserError('CAPTURE_TIMEOUT', 'Chrome did not return the page capture within 20000ms')), 20_000)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function resolveScreenshotRegion(tab, metrics, request) {
+  if (request.scope !== 'region') return {}
+  let basis
+  if (request.space === 'image') {
+    const history = (imageBasesByTab.get(tab.id) ?? []).filter(item => item.url === (tab.url ?? ''))
+    const points = [
+      { x: request.region.x, y: request.region.y },
+      { x: request.region.x + request.region.width, y: request.region.y + request.region.height },
+    ]
+    const resolved = resolveImageBasis({ space: 'image', viewId: request.viewId, points }, history)
+    if (resolved.error) throw new BrowserError(resolved.error.code, resolved.error.message)
+    basis = resolved.basis
+    const stored = lastViewByTab.get(tab.id)
+    if (!stored?.image?.data || Number(stored.viewId) !== Number(basis.viewId)) {
+      throw new BrowserError('NO_VIEW', 'Take a fresh viewport screenshot before measuring a region.')
+    }
+    const basisError = canvasBasisError(basis, metrics, metrics.scroll)
+    if (basisError) throw new BrowserError(basisError.code, basisError.message)
+    const mismatch = findCoordinateBasisMismatch(points, basis, history)
+    if (request.viewId !== undefined) mismatch.ambiguous = []
+    if (mismatch.stale.length > 0 || mismatch.ambiguous.length > 0) {
+      throw new BrowserError(mismatch.stale.length > 0 ? 'STALE_VIEW' : 'AMBIGUOUS_VIEW', 'The region coordinates fit a different screenshot scale. Take a fresh viewport screenshot, measure the region again, and pass its view_id.')
+    }
+  }
+  const scale = request.space === 'image' ? basis.viewport.width / basis.imageWidth : 1
+  const region = mapScreenshotRegion(request.region, request.space, metrics.viewport, scale)
+  return { region, ...(basis ? { basis: basisSummary(basis) } : {}) }
+}
+
+function restorePageScroll(x, y) {
+  window.scrollTo({ left: x, top: y, behavior: 'instant' })
+  const root = document.scrollingElement || document.documentElement
+  return { x: root.scrollLeft || 0, y: root.scrollTop || 0 }
+}
+
+async function capturePageImage(tab, metrics, request, region) {
+  const started = performance.now()
+  return withDebugger(tab.id, async () => {
+    let cssSize = { width: metrics.viewport.width, height: metrics.viewport.height }
+    let clip
+    let captureBeyondViewport = false
+    if (request.scope === 'full_page') {
+      const layout = await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.getLayoutMetrics', {})
+      const size = layout.cssContentSize ?? layout.contentSize
+      cssSize = checkedFullPageSize(size?.width, size?.height)
+      clip = { x: 0, y: 0, ...cssSize, scale: 1 }
+      captureBeyondViewport = true
+    } else {
+      const area = request.scope === 'region'
+        ? { x: metrics.scroll.x + region.x, y: metrics.scroll.y + region.y, width: region.width, height: region.height }
+        : { x: metrics.scroll.x, y: metrics.scroll.y, width: metrics.viewport.width, height: metrics.viewport.height }
+      clip = { ...area, scale: 1 }
+      cssSize = { width: area.width, height: area.height }
+      captureBeyondViewport = request.scope === 'region'
+    }
+    let metricsOverridden = false
+    try {
+      if (request.scope === 'full_page') {
+        await chrome.debugger.sendCommand({ tabId: tab.id }, 'Emulation.setDeviceMetricsOverride', {
+          width: cssSize.width,
+          height: cssSize.height,
+          deviceScaleFactor: Number(metrics.viewport.dpr) || 1,
+          mobile: false,
+        })
+        metricsOverridden = true
+        await pauseInTab(tab.id, 150)
+      }
+      const captured = await pageScreenshotCommand(tab.id, {
+        format: 'png',
+        fromSurface: true,
+        captureBeyondViewport,
+        clip,
+      })
+      if (typeof captured?.data !== 'string' || captured.data.length === 0) {
+        throw new BrowserError('CAPTURE_EMPTY', 'Chrome returned an empty page capture')
+      }
+      return {
+        dataUrl: `data:image/png;base64,${captured.data}`,
+        cssSize,
+        captureMs: Math.round(performance.now() - started),
+      }
+    } finally {
+      if (metricsOverridden) {
+        let cleanupError
+        try {
+          await chrome.debugger.sendCommand({ tabId: tab.id }, 'Emulation.clearDeviceMetricsOverride', {})
+        } catch (error) {
+          cleanupError = error
+        }
+        await pauseInTab(tab.id, 60)
+        const restored = await runInTab(tab.id, restorePageScroll, [metrics.scroll.x, metrics.scroll.y], 2_000).catch(error => {
+          cleanupError ??= error
+          return undefined
+        })
+        if (cleanupError) {
+          throw new BrowserError('CAPTURE_VIEWPORT_RESTORE', `Could not restore the viewport after full-page capture: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`)
+        }
+        if (!restored || Math.abs(restored.x - metrics.scroll.x) > 1 || Math.abs(restored.y - metrics.scroll.y) > 1) {
+          throw new BrowserError('CAPTURE_SCROLL_RESTORE', `Could not restore scroll position ${metrics.scroll.x},${metrics.scroll.y} after full-page capture`)
+        }
+      }
+    }
+  })
+}
+
+async function clipboardImageFromCapture(dataUrl) {
+  let bitmap
+  try {
+    bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob())
+  } catch (error) {
+    throw new BrowserError('CAPTURE_DECODE', `Could not decode the clipboard capture: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  const sourceBase64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+  const sourceBytes = Math.max(0, Math.floor(sourceBase64.length * 3 / 4) - (sourceBase64.endsWith('==') ? 2 : sourceBase64.endsWith('=') ? 1 : 0))
+  if (sourceBytes <= CLIPBOARD_IMAGE_MAX_BYTES) {
+    const image = { data: sourceBase64, mimeType: 'image/png', width: bitmap.width, height: bitmap.height, bytes: sourceBytes }
+    bitmap.close?.()
+    return image
+  }
+  let width = bitmap.width
+  let height = bitmap.height
+  let estimate = sourceBytes
+  try {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const ratio = attempt === 0 ? Math.max(0.2, Math.sqrt(CLIPBOARD_IMAGE_MAX_BYTES / estimate) * 0.85) : 0.7
+      width = Math.max(1, Math.floor(width * ratio))
+      height = Math.max(1, Math.floor(height * ratio))
+      const canvas = typeof OffscreenCanvas === 'function'
+        ? new OffscreenCanvas(width, height)
+        : (() => { const element = document.createElement('canvas'); element.width = width; element.height = height; return element })()
+      const context = canvas.getContext('2d')
+      if (!context) throw new BrowserError('CAPTURE_ENCODE', 'Could not resize the clipboard capture')
+      context.drawImage(bitmap, 0, 0, width, height)
+      const blob = typeof canvas.convertToBlob === 'function'
+        ? await canvas.convertToBlob({ type: 'image/png' })
+        : await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('canvas.toBlob returned null')), 'image/png'))
+      if (blob.size <= CLIPBOARD_IMAGE_MAX_BYTES) {
+        return {
+          data: bytesToBase64(new Uint8Array(await blob.arrayBuffer())),
+          mimeType: 'image/png',
+          width,
+          height,
+          bytes: blob.size,
+        }
+      }
+      estimate = blob.size
+    }
+  } finally {
+    bitmap.close?.()
+  }
+  throw new BrowserError('CLIPBOARD_IMAGE_TOO_LARGE', `The capture could not be reduced to the ${CLIPBOARD_IMAGE_MAX_BYTES}-byte clipboard limit; capture a smaller region.`)
+}
+
 /**
  * @param {'fast'|'normal'|'high'} detail
  * @param {import('./protocol.js').Settings} settings
  * @param {boolean} [retried]
  * @param {number} [delayMs] page-side delay before labelling and capturing
+ * @param {ReturnType<typeof parseScreenshotArgs>} [captureRequest]
  */
-async function snapshot(detail, settings, retried = false, delayMs = 0) {
+async function snapshot(detail, settings, retried = false, delayMs = 0, captureRequest) {
+  const request = captureRequest ?? { scope: 'viewport', space: 'image', toClipboard: false }
   const started = performance.now()
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
-  // An explicit delay runs in the page: the side panel is hidden and throttled,
-  // so its own timers are too coarse. It is counted in totalMs.
+  const pending = dialogManager.pending(tab.id)
+  if (pending) return pendingDialogResult('snapshot', tab, pending)
   if (delayMs > 0) await pauseInTab(tab.id, delayMs)
   const quality = detail === 'high' ? 80 : detail === 'fast' ? 50 : Number(settings.quality) || 72
   const maxWidth = detail === 'high' ? 2048 : detail === 'fast' ? 640 : Number(settings.captureWidth) || 1280
-  // The overlay must be painted before the capture, so label first, then shoot.
-  // Only the visible viewport is labelled; persistent ids survive relabelling.
   const labelStarted = performance.now()
   const labelled = await labelAllFrames(tab.id, LABEL_LIMIT)
   const metrics = labelled.metrics
   metrics.labels = labelled.labels
   const labelMs = Math.round(performance.now() - labelStarted)
-  const captured = await captureVisibleTab(windowId, quality)
-  if (settings.showHitboxes === false) await clearAllFrames(tab.id)
+  const special = request.scope !== 'viewport' || request.toClipboard
+  const resolved = special ? resolveScreenshotRegion(tab, metrics, request) : {}
+  let captured
+  if (special) {
+    await clearAllFrames(tab.id)
+    captured = await capturePageImage(tab, metrics, request, resolved.region)
+  } else {
+    captured = await captureVisibleTab(windowId, quality, tab.id)
+    if (settings.showHitboxes === false) await clearAllFrames(tab.id)
+  }
 
   const tabAfter = await getActiveTab(windowId)
-  if (tabAfter.id !== tab.id && !retried) return snapshot(detail, settings, true)
+  if ((tabAfter.id !== tab.id || special && tabAfter.url !== tab.url) && !retried) {
+    return snapshot(detail, settings, true, 0, request)
+  }
+  if (special && (tabAfter.id !== tab.id || tabAfter.url !== tab.url)) {
+    throw new BrowserError('STALE_TAB', 'The tab changed during capture; no clipboard content was stored.')
+  }
 
   const image = await compressDataUrl(captured.dataUrl, maxWidth, quality)
-  const cssPerImagePixel = metrics.viewport.width / image.width
   const scroll = lastScrollFor(tab.id, metrics.url) ?? metrics.scroll
-  // Every capture is a coordinate basis: it records the image size its pixels
-  // map through, so a later image-space click can name the view it measured on
-  // instead of silently inheriting whatever image happens to be latest (a
-  // detail:"fast" capture is 640px wide on the same viewport, half the normal
-  // view's scale).
-  const basis = {
-    viewId: nextViewId++,
-    url: metrics.url,
-    imageWidth: image.width,
-    imageHeight: image.height,
-    viewport: metrics.viewport,
-    scroll,
-    fingerprint: metrics.fingerprint,
-    at: Date.now(),
-  }
-  recordImageBasis(tab.id, basis)
-  lastViewByTab.set(tab.id, {
-    image: { data: image.data, mimeType: image.mimeType, width: image.width, height: image.height },
-    viewId: basis.viewId,
-    viewport: metrics.viewport,
-    tab: { id: tab.id, title: metrics.title, url: metrics.url },
-    labels: metrics.labels,
-    scroll,
-    fingerprint: metrics.fingerprint ?? {
+  const isViewport = request.scope === 'viewport'
+  const cssWidth = isViewport ? metrics.viewport.width : captured.cssSize.width
+  const cssPerImagePixel = cssWidth / image.width
+  let basis
+  if (isViewport) {
+    basis = {
+      viewId: nextViewId++,
       url: metrics.url,
-      title: metrics.title,
-      scrollX: Math.round(scroll?.x ?? 0),
-      scrollY: Math.round(scroll?.y ?? 0),
-      textLen: null,
-      active: '',
-      layout: [],
-    },
-    compactStreak: 0,
-    at: Date.now(),
-  })
-  if (lastViewByTab.size > 20) {
-    const oldest = lastViewByTab.keys().next().value
-    if (oldest !== undefined) lastViewByTab.delete(oldest)
+      imageWidth: image.width,
+      imageHeight: image.height,
+      viewport: metrics.viewport,
+      scroll,
+      fingerprint: metrics.fingerprint,
+      at: Date.now(),
+    }
+    recordImageBasis(tab.id, basis)
+    lastViewByTab.set(tab.id, {
+      image: { data: image.data, mimeType: image.mimeType, width: image.width, height: image.height },
+      viewId: basis.viewId,
+      viewport: metrics.viewport,
+      tab: { id: tab.id, title: metrics.title, url: metrics.url },
+      labels: metrics.labels,
+      scroll,
+      fingerprint: metrics.fingerprint ?? {
+        url: metrics.url,
+        title: metrics.title,
+        scrollX: Math.round(scroll?.x ?? 0),
+        scrollY: Math.round(scroll?.y ?? 0),
+        textLen: null,
+        active: '',
+        layout: [],
+      },
+      compactStreak: 0,
+      at: Date.now(),
+    })
+    if (lastViewByTab.size > 20) {
+      const oldest = lastViewByTab.keys().next().value
+      if (oldest !== undefined) lastViewByTab.delete(oldest)
+    }
+  }
+  let clipboard
+  if (request.toClipboard) {
+    const clipboardImage = await clipboardImageFromCapture(captured.dataUrl)
+    await writeVirtualClipboard(makeImageClipboardEntry({
+      image: clipboardImage,
+      source: 'screenshot',
+      tabId: tab.id,
+      url: typeof tab.url === 'string' ? tab.url : '',
+      at: Date.now(),
+    }))
+    clipboard = clipboardMeta('virtual', {
+      kind: 'image',
+      chars: 0,
+      source: 'screenshot',
+      ...clipboardImage,
+    })
   }
   return {
     op: 'snapshot',
     view: 'full',
-    viewId: basis.viewId,
-    labels: metrics.labels,
-    surfaces: metrics.surfaces,
+    ...(basis ? { viewId: basis.viewId } : {}),
+    labels: isViewport ? metrics.labels : [],
+    surfaces: isViewport ? metrics.surfaces : [],
     tab: {
       id: tab.id,
       title: metrics.title || tab.title || '',
@@ -2789,9 +3150,20 @@ async function snapshot(detail, settings, retried = false, delayMs = 0) {
     },
     viewport: metrics.viewport,
     scroll,
-    labelCount: metrics.labels.length,
+    labelCount: isViewport ? metrics.labels.length : 0,
     labelMs,
     image: { ...image, cssPerImagePixel },
+    ...(special ? {
+      capture: {
+        scope: request.scope,
+        unlabelled: true,
+        cssWidth: captured.cssSize.width,
+        cssHeight: captured.cssSize.height,
+        ...(resolved.region ? { region: resolved.region } : {}),
+      },
+    } : {}),
+    ...(resolved.basis ? { basis: resolved.basis } : {}),
+    ...(clipboard ? { clipboard } : {}),
     captureMs: captured.captureMs,
     encodeMs: image.encodeMs,
     totalMs: Math.round(performance.now() - started),
@@ -2841,6 +3213,17 @@ function tabSummary(tab, metrics) {
     url: metrics?.url || tab.url || '',
     windowId: tab.windowId,
     status: tab.status ?? 'unknown',
+  }
+}
+
+function pendingDialogResult(op, tab, pending) {
+  return {
+    op,
+    view: 'none',
+    screenshotSkipped: true,
+    ...(tab ? { tab: tabSummary(tab) } : {}),
+    dialog: pending,
+    capture: { status: 'blocked', reason: 'DIALOG_PENDING' },
   }
 }
 
@@ -3209,6 +3592,8 @@ function storeCompactView(tab, metrics, labels) {
  * @returns {Promise<{payload: Record<string, any>, mode: 'full'|'compact'|'none'}>}
  */
 async function buildActionView(tab, settings, requested, options = {}) {
+  const pending = dialogManager.pending(tab.id)
+  if (pending) return { mode: 'none', payload: pendingDialogResult('action', tab, pending) }
   // null is a real value: "the action ran but its effect could not be measured"
   // (canvas-editor typing). It must reach the payload unchanged so the provider
   // never renders it as NO VISIBLE CHANGE; only an explicit false is a verdict.
@@ -3294,6 +3679,8 @@ async function buildActionView(tab, settings, requested, options = {}) {
  * @returns {Promise<{payload: Record<string, any>, mode: 'full'|'compact'|'none'}>}
  */
 async function buildBatchView(tab, settings, requested) {
+  const pending = dialogManager.pending(tab.id)
+  if (pending) return { mode: 'none', payload: pendingDialogResult('batch', tab, pending) }
   if (requested === 'none') {
     const stored = lastViewByTab.get(tab.id)
     const metrics = await runInTab(tab.id, pageMetrics, [])
@@ -3491,7 +3878,7 @@ export function canvasSelectionError(url) {
   if (canvasEditorForUrl(url) !== 'Google Docs') return undefined
   return {
     code: 'DOCS_CANVAS_SELECT_UNSUPPORTED',
-    message: 'Google Docs drag selection is disabled because it can move text instead of selecting. Use browser_docs_replace_text, browser_docs_replace_many, or an exact Find selection instead.',
+    message: 'Google Docs drag selection is disabled because it can move text instead of selecting. Use browser_docs_replace, browser_docs_format, or an exact Find selection instead.',
   }
 }
 
@@ -3736,6 +4123,41 @@ async function readText(settings, scope, offset, maxChars) {
   }
 }
 
+async function autoView(settings) {
+  const started = performance.now()
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  assertCapturable(tab)
+  const text = await runInTab(tab.id, readPageText, ['page', 0, 6_000, CANVAS_EDITOR_PATTERNS])
+  if (text.textUnreliable === true) return snapshot('normal', settings)
+  const labelled = await labelAllFrames(tab.id, LABEL_LIMIT, { paint: false })
+  await clearAllFrames(tab.id)
+  const metrics = labelled.metrics
+  const current = await getActiveTab(windowId)
+  if (current.id !== tab.id || current.url !== tab.url) {
+    throw new BrowserError('STALE_TAB', 'The active tab changed during auto view; retry the view before acting')
+  }
+  return {
+    op: 'auto_view',
+    view: 'compact',
+    screenshotSkipped: true,
+    capture: { status: 'skipped', reason: 'DOM_FIRST_AUTO_VIEW' },
+    labels: labelled.labels,
+    surfaces: metrics.surfaces,
+    tab: tabSummary(tab, metrics),
+    viewport: metrics.viewport,
+    scroll: metrics.scroll,
+    labelCount: labelled.labels.length,
+    text: text.text,
+    totalChars: text.totalChars,
+    offset: text.offset,
+    maxChars: text.maxChars,
+    truncated: text.truncated,
+    nextOffset: text.nextOffset,
+    totalMs: Math.round(performance.now() - started),
+  }
+}
+
 /**
  * Score tab title/URL matches for query-based switching. Pure helper so the
  * matching behavior is testable without Chrome. `candidates` lists the best
@@ -3791,6 +4213,114 @@ export function formatTabCandidates(tabs, limit = 5) {
     .slice(0, Math.max(0, Number(limit) || 0))
     .map(tab => `${tab.id} ${JSON.stringify(String(tab.title ?? ''))} ${String(tab.url ?? '')}`)
     .join('; ')
+}
+
+const PLACE_SOURCES = ['shortcuts', 'bookmarks', 'history']
+const DEFAULT_PLACES_LIMIT = 8
+
+/**
+ * @param {Record<string, any>} args
+ * @returns {{query: string, sources: string[], limit: number}}
+ */
+export function parsePlacesArgs(args = {}) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    throw new BrowserError('BAD_PLACES', 'places arguments must be an object')
+  }
+  if (Object.keys(args).some(key => !['query', 'sources', 'limit'].includes(key))) {
+    throw new BrowserError('BAD_PLACES', 'places accepts only query, sources, and limit')
+  }
+  if (args.query !== undefined && typeof args.query !== 'string') {
+    throw new BrowserError('BAD_PLACES', 'query must be a string of at most 200 characters')
+  }
+  const query = (args.query ?? '').trim()
+  if (query.length > 200) throw new BrowserError('BAD_PLACES', 'query must be at most 200 characters')
+  const sources = args.sources === undefined ? [...PLACE_SOURCES] : args.sources
+  if (!Array.isArray(sources) || sources.length === 0 || sources.length > PLACE_SOURCES.length
+    || sources.some(source => !PLACE_SOURCES.includes(source)) || new Set(sources).size !== sources.length) {
+    throw new BrowserError('BAD_PLACES', 'sources must be a non-empty unique subset of shortcuts, bookmarks, and history')
+  }
+  const limit = args.limit === undefined ? DEFAULT_PLACES_LIMIT : args.limit
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) {
+    throw new BrowserError('BAD_PLACES', 'limit must be an integer from 1 to 20')
+  }
+  return { query, sources: [...sources], limit }
+}
+
+/** @param {unknown} value */
+function httpPlaceUrl(value) {
+  if (typeof value !== 'string' || value.length === 0) return undefined
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** @param {Array<Record<string, any>>} nodes @param {Array<Record<string, any>>} [output] */
+function flattenBookmarks(nodes, output = []) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (typeof node?.url === 'string') output.push(node)
+    if (Array.isArray(node?.children)) flattenBookmarks(node.children, output)
+  }
+  return output
+}
+
+/** @param {'shortcuts'|'bookmarks'|'history'} source @param {Record<string, any>} item */
+function normalizePlace(source, item) {
+  const url = httpPlaceUrl(item?.url)
+  if (url === undefined) return undefined
+  const place = { source, title: String(item.title ?? '').slice(0, 300), url }
+  if (source === 'history') {
+    if (Number.isFinite(item.visitCount)) place.visitCount = Math.max(0, Math.floor(item.visitCount))
+    if (Number.isFinite(item.typedCount)) place.typedCount = Math.max(0, Math.floor(item.typedCount))
+    if (Number.isFinite(item.lastVisitTime)) place.lastVisitTime = item.lastVisitTime
+  }
+  if (source === 'bookmarks' && Number.isFinite(item.dateAdded)) place.dateAdded = item.dateAdded
+  return place
+}
+
+/**
+ * Read one bounded set of personal destinations without touching any tab.
+ * @param {Record<string, any>} args
+ * @param {Record<string, any>} [api]
+ */
+export async function searchPlaces(args = {}, api = chrome) {
+  const request = parsePlacesArgs(args)
+  const groups = await Promise.all(request.sources.map(async source => {
+    let items
+    try {
+      if (source === 'shortcuts') {
+        const needle = request.query.toLowerCase()
+        const shortcuts = await api.topSites.get()
+        items = (Array.isArray(shortcuts) ? shortcuts : []).filter(item => !needle
+          || String(item?.title ?? '').toLowerCase().includes(needle)
+          || String(item?.url ?? '').toLowerCase().includes(needle))
+      } else if (source === 'bookmarks') {
+        items = request.query
+          ? await api.bookmarks.search(request.query)
+          : flattenBookmarks(await api.bookmarks.getTree())
+      } else {
+        items = await api.history.search({ text: request.query, maxResults: request.limit })
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new BrowserError('PLACES_UNAVAILABLE', `Could not read ${source}: ${message}`)
+    }
+    return (Array.isArray(items) ? items : [])
+      .map(item => normalizePlace(source, item))
+      .filter(Boolean)
+      .slice(0, request.limit)
+  }))
+  const places = groups.flat()
+  return {
+    op: 'places.search',
+    query: request.query,
+    sources: request.sources,
+    limit: request.limit,
+    places,
+    counts: Object.fromEntries(request.sources.map((source, index) => [source, groups[index].length])),
+  }
 }
 
 /**
@@ -3889,6 +4419,7 @@ async function activateTab(settings, tabId, query) {
   const active = await getActiveTab(windowId)
   if (active.id !== id) throw new BrowserError('ACTIVATE_FAILED', `Chrome did not activate tab ${id}`)
   if (target.discarded) await waitForTabComplete(id, windowId, 2_000)
+  await prepareDebuggerRunTab(id).catch(() => {})
   const shot = await snapshot('normal', settings)
   return {
     ...shot,
@@ -5054,38 +5585,44 @@ async function navigate(settings, args) {
   let tabId = active.id
   let newTab = false
   let history
-  if (request.url !== undefined) {
-    if (request.newTab) {
-      let created
-      try {
-        created = await chrome.tabs.create({ url: request.url, active: true })
-      } catch (error) {
-        throw new BrowserError('BAD_NAVIGATE', `Chrome could not open a new tab: ${error instanceof Error ? error.message : String(error)}`)
-      }
-      if (created?.id === undefined) throw new BrowserError('BAD_NAVIGATE', 'Chrome did not create the requested tab')
-      tabId = created.id
-      newTab = true
-    } else {
-      try {
-        await chrome.tabs.update(tabId, { url: request.url })
-      } catch (error) {
-        throw new BrowserError('BAD_NAVIGATE', `Chrome could not navigate this tab: ${error instanceof Error ? error.message : String(error)}`)
-      }
-    }
-  } else {
-    history = request.history
+  if (request.url !== undefined && request.newTab) {
+    let created
     try {
-      if (history === 'back') await chrome.tabs.goBack(tabId)
-      else if (history === 'forward') await chrome.tabs.goForward(tabId)
-      else await chrome.tabs.reload(tabId)
+      created = await chrome.tabs.create({ url: request.url, active: true })
     } catch (error) {
-      throw new BrowserError('BAD_NAVIGATE', `Chrome could not ${history} in this tab: ${error instanceof Error ? error.message : String(error)}`)
+      throw new BrowserError('BAD_NAVIGATE', `Chrome could not open a new tab: ${error instanceof Error ? error.message : String(error)}`)
     }
+    if (created?.id === undefined) throw new BrowserError('BAD_NAVIGATE', 'Chrome did not create the requested tab')
+    tabId = created.id
+    newTab = true
   }
+  if (request.url === undefined) history = request.history
   const waitStarted = performance.now()
-  await waitForNavigationStart(tabId, request.url, fromUrl, history === 'reload', 1_500)
-  const remaining = Math.max(1, 15_000 - (performance.now() - waitStarted))
-  await waitForTabComplete(tabId, windowId, remaining)
+  await withDebugger(tabId, async () => {
+    if (!newTab) dialogManager.expectBeforeUnload(tabId)
+    try {
+      if (!newTab && request.url !== undefined) {
+        try {
+          await chrome.tabs.update(tabId, { url: request.url })
+        } catch (error) {
+          throw new BrowserError('BAD_NAVIGATE', `Chrome could not navigate this tab: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      } else if (!newTab) {
+        try {
+          if (history === 'back') await chrome.tabs.goBack(tabId)
+          else if (history === 'forward') await chrome.tabs.goForward(tabId)
+          else await chrome.tabs.reload(tabId)
+        } catch (error) {
+          throw new BrowserError('BAD_NAVIGATE', `Chrome could not ${history} in this tab: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+      await dialogManager.racePending(tabId, waitForNavigationStart(tabId, request.url, fromUrl, history === 'reload', 1_500))
+      const remaining = Math.max(1, 15_000 - (performance.now() - waitStarted))
+      await waitForTabComplete(tabId, windowId, remaining)
+    } finally {
+      dialogManager.clearBeforeUnloadIntent(tabId)
+    }
+  })
   const waitMs = Math.round(performance.now() - waitStarted)
   const current = await chrome.tabs.get(tabId).catch(() => undefined)
   const timedOut = (current?.status ?? 'complete') !== 'complete'
@@ -5101,16 +5638,34 @@ async function navigate(settings, args) {
     waitMs,
   }
   if (batchDepth > 0) return { navigated }
+  await prepareDebuggerRunTab(tabId).catch(() => {})
   const shot = await snapshot('normal', settings)
   return { ...shot, op: 'navigate', navigated }
 }
 
+const WAIT_CONDITION_FIELDS = ['text', 'url', 'idle', 'ms', 'timeout_ms']
+
+function parseWaitView(args) {
+  const view = args?.view === undefined ? 'full' : args.view
+  if (!['auto', 'full', 'compact', 'none'].includes(view)) {
+    throw new BrowserError('BAD_VIEW', 'view must be auto, full, compact, or none')
+  }
+  return view
+}
+
 /**
- * Validate wait_for arguments.
+ * Validate wait conditions for standalone wait_for or one batch guard.
  * @param {Record<string, any>} args
+ * @param {boolean} allowView
  * @returns {{conditions: {text?: string, url?: string, idle?: boolean, ms?: number}, timeoutMs: number}}
  */
-export function parseWaitForArgs(args) {
+function parseWaitConditions(args, allowView) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    throw new BrowserError('BAD_WAIT', 'wait conditions must be an object')
+  }
+  const allowed = new Set(allowView ? [...WAIT_CONDITION_FIELDS, 'view'] : WAIT_CONDITION_FIELDS)
+  const unknown = Object.keys(args).find(key => !allowed.has(key))
+  if (unknown) throw new BrowserError('BAD_WAIT', `unknown wait argument ${JSON.stringify(unknown)}`)
   const conditions = {}
   if (args.text !== undefined) {
     if (typeof args.text !== 'string' || args.text.length === 0) {
@@ -5152,15 +5707,26 @@ export function parseWaitForArgs(args) {
 }
 
 /**
- * Wait for page conditions (text/url/idle), then return a fresh view.
- * @param {import('./protocol.js').Settings} settings
+ * Validate wait_for arguments.
  * @param {Record<string, any>} args
+ * @returns {{conditions: {text?: string, url?: string, idle?: boolean, ms?: number}, timeoutMs: number}}
  */
-async function waitFor(settings, args) {
-  const started = performance.now()
-  const { conditions, timeoutMs } = parseWaitForArgs(args)
-  const windowId = await getWindowId()
-  const tab = await getActiveTab(windowId)
+export function parseWaitForArgs(args) {
+  parseWaitView(args)
+  return parseWaitConditions(args, true)
+}
+
+function parseBatchGuardArgs(args, index, phase) {
+  try {
+    return parseWaitConditions(args, false)
+  } catch (error) {
+    if (error instanceof Error) error.message = `action ${index + 1} ${phase}: ${error.message}`
+    throw error
+  }
+}
+
+async function waitForTabConditions(tab, request, started = performance.now()) {
+  const { conditions, timeoutMs } = request
   assertCapturable(tab)
   if (conditions.ms > 0) await pauseInTab(tab.id, conditions.ms)
   const remaining = Math.max(1, timeoutMs - Math.round(performance.now() - started))
@@ -5172,10 +5738,54 @@ async function waitFor(settings, args) {
   const polled = await runInTab(tab.id, waitForConditionsPage, [pageConditions, remaining], remaining + 2_000)
   const found = polled?.found === true
   const elapsedMs = Math.round(performance.now() - started)
-  const waited = { conditions, found, timedOut: !found, elapsedMs }
+  return { conditions, found, timedOut: !found, elapsedMs }
+}
+
+function batchGuardError(phase, waited, cause) {
+  if (cause?.code === 'DIALOG_PENDING') {
+    cause.batchGuard = { phase, waited }
+    return cause
+  }
+  const code = phase === 'before' ? 'BATCH_PRECONDITION_FAILED' : 'BATCH_POSTCONDITION_FAILED'
+  const detail = cause
+    ? `failed: ${cause instanceof Error ? cause.message : String(cause)}`
+    : phase === 'before'
+      ? 'timed out; the action was not dispatched'
+      : 'timed out after dispatch; blind retry is unsafe'
+  const error = new BrowserError(code, `Batch ${phase} condition ${detail}`)
+  error.batchGuard = { phase, waited }
+  return error
+}
+
+async function waitForBatchGuard(request, phase) {
+  const started = performance.now()
+  let waited
+  try {
+    const tab = await getActiveTab(await getWindowId())
+    waited = await waitForTabConditions(tab, request, started)
+  } catch (error) {
+    throw batchGuardError(phase, waited, error)
+  }
+  if (waited.timedOut) throw batchGuardError(phase, waited)
+  return waited
+}
+
+/**
+ * Wait for page conditions (text/url/idle), then return the requested view.
+ * @param {import('./protocol.js').Settings} settings
+ * @param {Record<string, any>} args
+ */
+async function waitFor(settings, args) {
+  const started = performance.now()
+  const request = parseWaitForArgs(args)
+  const requestedView = parseWaitView(args)
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  const waited = await waitForTabConditions(tab, request, started)
   if (batchDepth > 0) return { waited }
-  const shot = await snapshot('normal', settings)
-  return { ...shot, op: 'wait_for', waited }
+  const activeTab = await getActiveTab(windowId).catch(() => tab)
+  const { payload } = await buildActionView(activeTab, settings, actionViewForTab(activeTab, requestedView))
+  return { ...payload, op: 'wait_for', waited }
 }
 
 /**
@@ -5205,6 +5815,17 @@ function parseSelectArgs(args) {
   return { from, to, space, view, viewId }
 }
 
+async function settleDragSelection(tabId, previous) {
+  const deadline = Date.now() + 100
+  let signature = previous
+  do {
+    await pauseInTab(tabId, 10)
+    signature = JSON.stringify(await runInTab(tabId, readSelection, [], 2_000))
+    if (signature !== previous) break
+  } while (Date.now() < deadline)
+  return signature
+}
+
 /**
  * Trusted drag from one CSS point to another through the debugger.
  * @param {number} tabId
@@ -5212,14 +5833,18 @@ function parseSelectArgs(args) {
  * @param {number} fromY
  * @param {number} toX
  * @param {number} toY
+ * @param {boolean} [awaitSelection]
  */
-async function trustedDrag(tabId, fromX, fromY, toX, toY) {
+async function trustedDrag(tabId, fromX, fromY, toX, toY, awaitSelection = false) {
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
     type: 'mouseMoved', x: fromX, y: fromY, button: 'none', clickCount: 0,
   })
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
     type: 'mousePressed', x: fromX, y: fromY, button: 'left', buttons: 1, clickCount: 1,
   })
+  let selectionSignature = awaitSelection
+    ? JSON.stringify(await runInTab(tabId, readSelection, [], 2_000))
+    : undefined
   const steps = 4
   for (let step = 1; step <= steps; step += 1) {
     const progress = step / steps
@@ -5231,6 +5856,7 @@ async function trustedDrag(tabId, fromX, fromY, toX, toY) {
       buttons: 1,
       clickCount: 1,
     })
+    if (awaitSelection) selectionSignature = await settleDragSelection(tabId, selectionSignature)
   }
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
     type: 'mouseReleased', x: toX, y: toY, button: 'left', buttons: 0, clickCount: 1,
@@ -5295,7 +5921,7 @@ async function selectRange(settings, args) {
   const fromCss = { x: mapped[0].cssX, y: mapped[0].cssY }
   const toCss = { x: mapped[1].cssX, y: mapped[1].cssY }
   try {
-    await withDebugger(tab.id, () => trustedDrag(tab.id, fromCss.x, fromCss.y, toCss.x, toCss.y))
+    await withDebugger(tab.id, () => trustedDrag(tab.id, fromCss.x, fromCss.y, toCss.x, toCss.y, !canvasEditor))
   } catch (error) {
     if (isDebuggerBusy(error)) throw error
     try {
@@ -5447,14 +6073,14 @@ function requireClipboardSession() {
   return session
 }
 
-/** @returns {Promise<{text: string, chars: number, source: string, tabId: number|null, url: string, at: number}|undefined>} */
+/** @returns {Promise<Record<string, any>|undefined>} */
 async function readVirtualClipboard() {
   const session = requireClipboardSession()
   const stored = await session.get(CLIPBOARD_STORAGE_KEY)
   return normalizeClipboardEntry(stored?.[CLIPBOARD_STORAGE_KEY])
 }
 
-/** @param {{text: string, chars: number, source: string, tabId: number|null, url: string, at: number}} entry */
+/** @param {Record<string, any>} entry */
 async function writeVirtualClipboard(entry) {
   const session = requireClipboardSession()
   await session.set({ [CLIPBOARD_STORAGE_KEY]: entry })
@@ -5484,6 +6110,7 @@ function clipboardMeta(target, extra = {}) {
     target,
     system: target === 'system',
     chars,
+    ...(extra.kind === 'image' ? { kind: 'image' } : {}),
     ...(typeof extra.preview === 'string' && extra.preview.length > 0 ? { preview: extra.preview } : {}),
     ...(typeof extra.source === 'string' && extra.source.length > 0 ? { source: extra.source } : {}),
     ...(extra.label === undefined ? {} : { label: extra.label }),
@@ -5491,6 +6118,12 @@ function clipboardMeta(target, extra = {}) {
     ...(Number.isFinite(Number(extra.originalChars)) ? { originalChars: Math.floor(Number(extra.originalChars)) } : {}),
     ...(extra.cleared === true ? { cleared: true } : {}),
     ...(extra.rich === true ? { rich: true } : {}),
+    ...(extra.mimeType === 'image/png' ? {
+      mimeType: 'image/png',
+      width: Math.max(1, Math.floor(Number(extra.width) || 1)),
+      height: Math.max(1, Math.floor(Number(extra.height) || 1)),
+      bytes: Math.max(1, Math.floor(Number(extra.bytes) || 1)),
+    } : {}),
   }
 }
 
@@ -5658,9 +6291,9 @@ async function clipboardCopy(request) {
 }
 
 /**
- * action read: return clipboard text. The system clipboard is read only for an
- * explicit target:"system" read. Returned text is capped at 20k chars and the
- * full length is reported separately.
+ * action read: return virtual text or a captured image. The system clipboard is
+ * read only for an explicit target:"system" read. Returned text is capped at
+ * 20k chars and the full length is reported separately.
  * @param {ReturnType<typeof parseClipboardArgs>} request
  */
 async function clipboardRead(request) {
@@ -5680,8 +6313,22 @@ async function clipboardRead(request) {
     }
   }
   const entry = await readVirtualClipboard()
-  if (!entry || entry.text.length === 0) {
-    throw new BrowserError('CLIPBOARD_EMPTY', 'The virtual clipboard is empty. Copy text first (action "copy" or "write"), or use target:"system".')
+  if (!entry || entry.kind !== 'image' && entry.text.length === 0) {
+    throw new BrowserError('CLIPBOARD_EMPTY', 'The virtual clipboard is empty. Copy text or take a screenshot with to_clipboard:true first, or use target:"system".')
+  }
+  if (entry.kind === 'image') {
+    return {
+      op: 'clipboard',
+      action: 'read',
+      clipboard: {
+        ...clipboardMeta('virtual', { kind: 'image', chars: 0, source: entry.source, ...entry.image }),
+        ...(entry.tabId === null ? {} : { tabId: entry.tabId }),
+        ...(entry.url.length === 0 ? {} : { url: entry.url }),
+        ...(entry.at > 0 ? { at: entry.at } : {}),
+      },
+      image: entry.image,
+      totalMs: Math.round(performance.now() - started),
+    }
   }
   const clipped = clipClipboardText(entry.text, CLIPBOARD_READ_MAX_CHARS)
   return {
@@ -5749,25 +6396,59 @@ async function clipboardClear() {
   }
 }
 
+function pasteImageDataTransfer(label, data) {
+  const state = globalThis.__crazyagent
+  const target = label > 0 ? state?.byId?.get(label) : document.activeElement
+  if (!target || !target.isConnected) return { ok: false, code: 'NOT_EDITABLE', message: 'The image paste target is not connected to the page' }
+  const binary = atob(data)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  const transfer = new DataTransfer()
+  transfer.items.add(new File([bytes], 'crazyagent-capture.png', { type: 'image/png' }))
+  const paste = new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true, composed: true })
+  target.dispatchEvent(paste)
+  const pasteHandled = paste.defaultPrevented
+  let dropHandled = false
+  if (!pasteHandled) {
+    const drop = new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true, composed: true })
+    target.dispatchEvent(drop)
+    dropHandled = drop.defaultPrevented
+  }
+  return { ok: true, handled: pasteHandled || dropHandled, pasteHandled, dropHandled, events: dropHandled ? ['paste', 'drop'] : ['paste'] }
+}
+
+async function syntheticImagePaste(settings, request, entry, tab) {
+  const delivered = await runInTab(tab.id, pasteImageDataTransfer, [request.label ?? 0, entry.image.data], 3_000)
+  if (delivered?.ok === false) throw new BrowserError(delivered.code ?? 'PASTE_FAILED', delivered.message ?? 'The image paste target is unavailable')
+  const activeTab = await getActiveTab(await getWindowId()).catch(() => tab)
+  const { payload } = await buildActionView(activeTab, settings, actionViewForTab(activeTab, request.view), {
+    changed: delivered.handled ? true : null,
+    signals: delivered.handled ? ['synthetic-paste-handled'] : [],
+  })
+  return { ...payload, synthetic: delivered }
+}
+
 /**
- * action paste: insert clipboard content into the page. The virtual clipboard
- * (and system with rich:false) types text through the existing typeText path so
- * mode/submit/verification match browser_type. system with rich:true (default)
- * focuses the target and sends one trusted Ctrl+V so the page pastes rich text
- * and images itself.
+ * action paste: insert clipboard content into the page. Virtual text (and system
+ * with rich:false) uses the existing typeText path. Rich system content uses one
+ * trusted Ctrl+V. Virtual images first preserve the OS clipboard in memory, then
+ * stage the PNG, dispatch Ctrl+V, and restore the prior formats.
  * @param {import('./protocol.js').Settings} settings
  * @param {ReturnType<typeof parseClipboardArgs>} request
  */
 async function clipboardPaste(settings, request) {
   const started = performance.now()
-  if (request.target === 'system' && request.rich) {
+  const dispatchRichPaste = async () => {
     if (request.label !== undefined) {
       const focused = await click(settings, { label: request.label, view: 'none' })
       if (focused?.navigated === true) {
         throw new BrowserError('PASTE_NAVIGATED', `Label ${request.label} navigated the page instead of focusing a field; take a fresh view and paste into the loaded page.`)
       }
     }
-    const keyed = await pressKey(settings, { key: 'v', modifiers: ['ctrl'], view: request.view })
+    return pressKey(settings, { key: 'v', modifiers: ['ctrl'], view: request.view })
+  }
+  if (request.target === 'system' && request.rich) {
+    const keyed = await dispatchRichPaste()
     const trusted = keyed?.pressed?.trusted === true
     return {
       ...keyed,
@@ -5788,6 +6469,82 @@ async function clipboardPaste(settings, request) {
       totalMs: Math.round(performance.now() - started),
     }
   }
+  const virtualEntry = request.target === 'virtual' ? await readVirtualClipboard() : undefined
+  if (virtualEntry?.kind === 'image') {
+    if (!request.rich) throw new BrowserError('CLIPBOARD_NO_TEXT', 'The virtual clipboard holds an image, not text. Paste with rich:true (the default).')
+    if (request.submit) throw new BrowserError('BAD_SUBMIT', 'submit is supported only for text pastes; an image paste already inserts at the current selection.')
+    const windowId = await getWindowId()
+    const tab = await getActiveTab(windowId)
+    let preserved
+    let restoreError
+    let keyed
+    let pasteError
+    try {
+      try {
+        preserved = await preserveSystemClipboard()
+      } catch (error) {
+        restoreError = error
+      }
+      await writeImageToSystemClipboard(virtualEntry.image)
+      keyed = await dispatchRichPaste()
+    } catch (error) {
+      pasteError = error
+    }
+    if (preserved !== undefined) {
+      try {
+        await restoreSystemClipboard(preserved)
+      } catch (error) {
+        restoreError = error
+      }
+    }
+    if (pasteError?.code === 'CLIPBOARD_DENIED') {
+      try {
+        keyed = await syntheticImagePaste(settings, request, virtualEntry, tab)
+        pasteError = undefined
+      } catch (error) {
+        pasteError.message += ` Synthetic paste also failed: ${error instanceof Error ? error.message : String(error)}`
+      }
+    }
+    if (pasteError) {
+      if (restoreError) pasteError.message += ` The previous system clipboard could not be restored: ${restoreError.message}`
+      throw pasteError
+    }
+    const synthetic = keyed?.synthetic
+    const trusted = synthetic ? false : keyed?.pressed?.trusted === true
+    return {
+      ...keyed,
+      op: 'clipboard',
+      action: 'paste',
+      clipboard: clipboardMeta('virtual', { kind: 'image', chars: 0, rich: true, source: virtualEntry.source, ...virtualEntry.image }),
+      pasted: {
+        chars: null,
+        mode: synthetic ? 'synthetic' : 'keys',
+        ...(request.label === undefined ? {} : { label: request.label }),
+        via: synthetic ? 'synthetic' : 'keys',
+        trusted,
+        rich: true,
+        width: virtualEntry.image.width,
+        height: virtualEntry.image.height,
+        systemPreserved: preserved !== undefined,
+        systemRestored: preserved !== undefined && restoreError === undefined,
+        systemStaged: synthetic === undefined,
+        ...(synthetic ? {
+          handled: synthetic.handled,
+          pasteHandled: synthetic.pasteHandled,
+          dropHandled: synthetic.dropHandled,
+        } : {}),
+        ...(restoreError ? { systemRestoreError: restoreError.message } : {}),
+        note: synthetic
+          ? synthetic.handled
+            ? 'a page handler consumed the synthetic image event; inspect the page to verify the attachment'
+            : 'no page handler consumed the synthetic image event; the app may require a real OS clipboard paste'
+          : trusted
+            ? 'the agent image was pasted by the page via one trusted Ctrl+V; do not repeat it blindly'
+            : 'the trusted Ctrl+V dispatch failed, so the image probably did not paste',
+      },
+      totalMs: Math.round(performance.now() - started),
+    }
+  }
   let text = ''
   let totalChars = 0
   let source = 'unknown'
@@ -5796,9 +6553,9 @@ async function clipboardPaste(settings, request) {
     totalChars = text.length
     source = 'system'
   } else {
-    const entry = await readVirtualClipboard()
+    const entry = virtualEntry
     if (!entry || entry.text.length === 0) {
-      throw new BrowserError('CLIPBOARD_EMPTY', 'The virtual clipboard is empty. Copy text first (action "copy" or "write").')
+      throw new BrowserError('CLIPBOARD_EMPTY', 'The virtual clipboard is empty. Copy text first (action "copy" or "write"), or take a screenshot with to_clipboard:true.')
     }
     text = entry.text
     totalChars = entry.chars
@@ -6311,6 +7068,51 @@ export function docsPageProbe(command, args = {}) {
     return { ok: true, focused: document.activeElement === boxes[0] }
   }
 
+  const menuSearchParts = () => {
+    const controls = [...new Set([
+      ...exact('combobox', 'Menus'),
+      ...exact('textbox', 'Menus'),
+      ...exact('combobox', 'Search the menus'),
+      ...exact('textbox', 'Search the menus'),
+    ])].filter(visible)
+    if (controls.length === 0) return { ok: true, present: false }
+    if (controls.length !== 1) return failure('AMBIGUOUS_CONTROL', `Expected one Docs menu-search control, found ${controls.length}`)
+    const control = controls[0]
+    const input = control.matches('input,textarea') ? control : control.querySelector('input,textarea')
+    if (!input) return failure('CONTROL_NOT_FOUND', 'The Docs menu-search control has no editable input')
+    return { ok: true, present: true, input }
+  }
+  const menuSearchState = () => {
+    const parts = menuSearchParts()
+    if (parts.error || !parts.present) return parts
+    return {
+      ok: true,
+      present: true,
+      enabled: !disabled(parts.input),
+      focused: document.activeElement === parts.input,
+      value: String(parts.input.value ?? ''),
+    }
+  }
+  const setMenuSearch = value => {
+    const parts = menuSearchParts()
+    if (parts.error) return parts.error
+    if (!parts.present) return failure('CONTROL_NOT_FOUND', 'Docs menu search is unavailable')
+    if (disabled(parts.input)) return failure('CONTROL_DISABLED', 'Docs menu search is disabled')
+    const prototype = parts.input.matches('textarea') ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+    if (setter) setter.call(parts.input, value)
+    else parts.input.value = value
+    parts.input.dispatchEvent(new Event('input', { bubbles: true }))
+    parts.input.dispatchEvent(new Event('change', { bubbles: true }))
+    return { ok: true, value: String(parts.input.value ?? ''), readback: String(parts.input.value ?? '') === value }
+  }
+  const tableMenuItem = wantedName => {
+    const items = nodes('menuitem').filter(hitVisible).filter(element => name(element) === wantedName)
+    if (items.length === 0) return { ok: true, present: false }
+    if (items.length !== 1) return failure('AMBIGUOUS_CONTROL', `Expected one ${wantedName} menu item, found ${items.length}`)
+    return { ok: true, present: true, disabled: disabled(items[0]), point: disabled(items[0]) ? undefined : point(items[0]) }
+  }
+
   const colorControl = attribute => {
     if (!['color', 'highlight'].includes(attribute)) return failure('BAD_PROBE', `Unknown color attribute ${String(attribute)}`)
     const toolbar = mainToolbar()
@@ -6376,6 +7178,9 @@ export function docsPageProbe(command, args = {}) {
     case 'documentContent': return documentContent()
     case 'focusDocument': return focusDocument()
     case 'setSearch': return setText('textbox', 'Search', args.value)
+    case 'menuSearch': return menuSearchState()
+    case 'setMenuSearch': return setMenuSearch(args.value)
+    case 'tableMenuItem': return tableMenuItem(args.name)
     case 'format': return formatState(args.attributes)
     case 'formatStyleMenu': return paragraphStyleMenu(args.style)
     default: return failure('BAD_PROBE', `Unknown Docs probe ${command}`)
@@ -6394,6 +7199,9 @@ function docsDriver(io) {
     dispatchTrustedKey: source.dispatchTrustedKey ?? dispatchTrustedKey,
     insertTrustedText: source.insertTrustedText ?? ((tabId, text) => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text })),
     trustedClick: source.trustedClick ?? docsTrustedClick,
+    preserveClipboard: source.preserveClipboard ?? (() => preserveSystemClipboard()),
+    writeClipboardHtml: source.writeClipboardHtml ?? ((html, text) => writeHtmlToSystemClipboard(html, text)),
+    restoreClipboard: source.restoreClipboard ?? (snapshot => restoreSystemClipboard(snapshot)),
     snapshot: source.snapshot ?? (settings => snapshot('normal', settings)),
     sleep: source.sleep ?? sleep,
     now: source.now ?? (() => Date.now()),
@@ -6475,6 +7283,21 @@ async function docsNativeText(context, stage, command, value) {
   docsCheckDeadline(context, stage)
 }
 
+async function docsMenuCommand(context, label) {
+  try {
+    await docsKey(context, 'table-menu-open', KEY_SPECS.Slash, MODIFIER_BITS.alt)
+    await docsWait(context, 'table-menu-open', 'menuSearch', {}, state => state.present && state.enabled && state.focused)
+    await docsNativeText(context, 'table-menu-query', 'setMenuSearch', label)
+    await docsWait(context, 'table-menu-query', 'menuSearch', {}, state => state.focused && state.value === label)
+    const item = await docsWait(context, 'table-menu-item', 'tableMenuItem', { name: label }, state => state.present && !state.disabled && state.point)
+    context.menuMutationPossible = true
+    await docsClick(context, 'table-menu-command', item.point)
+  } catch (error) {
+    try { await docsKey(context, 'table-menu-dismiss', KEY_SPECS.Escape) } catch {}
+    throw error
+  }
+}
+
 async function docsClick(context, stage, target) {
   if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y)) {
     throw docsFailure(stage, 'DOCS_CONTROL_UNAVAILABLE', 'The exact Docs control is missing or disabled')
@@ -6538,6 +7361,17 @@ async function docsVerifyFont(context, font, fontAdded) {
 }
 
 async function docsFinish(context, details) {
+  if (details.status === 'completed' && details.verifiedBy === 'export') {
+    const current = await docsCurrent(context, 'final-summary')
+    return {
+      op: 'docs',
+      view: 'none',
+      screenshotSkipped: true,
+      capture: { status: 'skipped', reason: 'DOCS_EXPORT_VERIFIED' },
+      tab: tabSummary(current),
+      docs: { action: context.action ?? 'set_font', ...details },
+    }
+  }
   docsCheckDeadline(context, 'final-snapshot')
   let shot
   try {
@@ -7412,10 +8246,13 @@ const DOCS_READ_DEADLINE_MS = 45_000
 async function docsReadFlow(context, args) {
   const format = args.format ?? 'outline'
   const maxChars = args.max_chars ?? 16_000
+  const offset = args.offset ?? 0
   const exported = await docsExport(context, 'read-export', format === 'text' ? 'txt' : 'html')
   const full = format === 'outline' ? formatOutline(parseDocStructure(exported)) : exported
-  const truncated = full.length > maxChars
-  const content = truncated ? `${full.slice(0, maxChars)}\n… [truncated ${full.length - maxChars} characters]` : full
+  const end = Math.min(offset + maxChars, full.length)
+  const truncated = end < full.length
+  const page = offset >= full.length ? '' : full.slice(offset, end)
+  const content = truncated ? `${page}\n… [truncated ${full.length - end} characters]` : page
   return {
     op: 'docs',
     docs: {
@@ -7424,6 +8261,8 @@ async function docsReadFlow(context, args) {
       format,
       chars: full.length,
       returned: content.length,
+      offset,
+      nextOffset: truncated ? end : null,
       truncated,
       content,
       verifiedBy: 'export',
@@ -7456,9 +8295,13 @@ async function docsReadLocked(settings, args, tab, driver) {
 
 export async function docsRead(settings, args, io = {}) {
   if (args?.action !== 'read') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be read')
+  if (Object.keys(args).some(key => !['action', 'format', 'max_chars', 'offset'].includes(key))) throw docsFailure('validate', 'BAD_DOCS_READ_ARGUMENT', 'docs read received an unknown argument')
   if (!['outline', 'text', 'html'].includes(args.format ?? 'outline')) throw docsFailure('validate', 'BAD_DOCS_READ_FORMAT', 'format must be outline, text, or html')
   if (args.max_chars !== undefined && (!Number.isInteger(args.max_chars) || args.max_chars < 100 || args.max_chars > 100_000)) {
     throw docsFailure('validate', 'BAD_DOCS_READ_CHARS', 'max_chars must be an integer from 100 to 100000')
+  }
+  if (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || args.offset < 0)) {
+    throw docsFailure('validate', 'BAD_DOCS_READ_OFFSET', 'offset must be a non-negative safe integer')
   }
   const driver = docsDriver(io)
   let tab
@@ -7974,6 +8817,354 @@ export async function docsWrite(settings, args, io = {}) {
   }
 }
 
+const DOCS_TABLE_DEADLINE_MS = 600_000
+
+function docsTableResult(context, details, tables) {
+  return docsFinish(context, { action: 'table', ...details }).then(result => ({
+    ...result,
+    ...tables ? { tables } : {},
+  }))
+}
+
+async function docsTableReadFlow(context, args) {
+  const blocks = parseDocStructure(await docsExport(context, 'table-read', 'html'))
+  const available = args.table === undefined ? docsTables(blocks) : [selectDocsTable(blocks, args.table)]
+  const tables = available.slice(0, 10).map(publicDocsTable)
+  return docsTableResult(context, {
+    tableAction: 'read',
+    status: 'completed',
+    count: tables.length,
+    totalCount: available.length,
+    truncated: available.length > tables.length || tables.some(table => table.truncated),
+    verifiedBy: 'export',
+  }, tables)
+}
+
+function docsTableCreateVerification(prefix, tableCount, actual, args) {
+  if (JSON.stringify(actual.slice(0, prefix.length)) !== JSON.stringify(prefix)) {
+    return { ok: false, code: 'DOCS_TABLE_COLLATERAL', message: 'The preserved document prefix changed during table creation' }
+  }
+  if (docsTables(actual).length !== tableCount + 1) {
+    return { ok: false, code: 'DOCS_TABLE_VERIFY_FAILED', message: `Expected one new table, found ${docsTables(actual).length - tableCount}` }
+  }
+  const table = actual[prefix.length]
+  if (table?.kind !== 'table') return { ok: false, code: 'DOCS_TABLE_VERIFY_FAILED', message: 'The new document-end block is not a table' }
+  const suffix = actual.slice(prefix.length + 1)
+  if (suffix.length > 1 || suffix.some(block => block?.kind !== 'para' || block.text.trim())) {
+    return { ok: false, code: 'DOCS_TABLE_COLLATERAL', message: 'Unexpected content followed the new table' }
+  }
+  const values = args.values ?? Array.from({ length: args.rows }, () => Array(args.columns).fill(''))
+  if (table.rows.length !== args.rows) return { ok: false, code: 'DOCS_TABLE_VERIFY_FAILED', message: `Expected ${args.rows} rows, found ${table.rows.length}` }
+  for (const [rowIndex, row] of table.rows.entries()) {
+    if (row.length !== args.columns) return { ok: false, code: 'DOCS_TABLE_VERIFY_FAILED', message: `Expected ${args.columns} cells in row ${rowIndex + 1}, found ${row.length}` }
+    for (const [columnIndex, cell] of row.entries()) {
+      if (cell.text !== values[rowIndex][columnIndex] || cell.rowspan !== 1 || cell.colspan !== 1) {
+        return { ok: false, code: 'DOCS_TABLE_VERIFY_FAILED', message: `New cell row ${rowIndex + 1}, column ${columnIndex + 1} did not match the requested value and shape`, actual: cell.text }
+      }
+    }
+  }
+  return { ok: true, table }
+}
+
+async function docsTableCreateFlow(context, args) {
+  context.attemptedCount = 0
+  const baseline = parseDocStructure(await docsExport(context, 'table-create-baseline', 'html'))
+  let preserved
+  try {
+    preserved = await context.driver.preserveClipboard()
+  } catch (error) {
+    throw docsDriverError('table-create-preserve', error?.code ?? 'DOCS_CLIPBOARD_FAILED', error)
+  }
+  let pasteError
+  let restoreError
+  try {
+    await docsFocusDocument(context)
+    const { prefix } = await docsWriteStart(context, baseline)
+    const content = docsTableCreateHtml(args)
+    try {
+      await context.driver.writeClipboardHtml(content.html, content.text)
+    } catch (error) {
+      throw docsDriverError('table-create-stage', error?.code ?? 'DOCS_CLIPBOARD_FAILED', error)
+    }
+    context.attemptedCount = 1
+    await docsKey(context, 'table-create-paste', { key: 'v', code: 'KeyV', keyCode: 86 }, MODIFIER_BITS.ctrl)
+    const verificationEnd = Math.min(context.deadline, context.driver.now() + 10_000)
+    let retryDelay = 500
+    let actual
+    let verification
+    while (true) {
+      actual = parseDocStructure(await docsExport(context, 'table-create-verify', 'html'))
+      verification = docsTableCreateVerification(prefix, docsTables(baseline).length, actual, args)
+      if (verification.ok || verification.code === 'DOCS_TABLE_COLLATERAL' || context.driver.now() + retryDelay > verificationEnd) break
+      await context.driver.sleep(retryDelay)
+      retryDelay = Math.min(2_000, retryDelay * 2)
+    }
+    context.createVerification = verification
+    context.createTable = verification.ok ? verification.table : actual[prefix.length]?.kind === 'table' ? actual[prefix.length] : undefined
+  } catch (error) {
+    pasteError = error
+  }
+  try {
+    await context.driver.restoreClipboard(preserved)
+  } catch (error) {
+    restoreError = error
+  }
+  if (pasteError) {
+    if (restoreError && pasteError instanceof Error) pasteError.message += `; clipboard restoration also failed: ${restoreError.message}`
+    throw pasteError
+  }
+  const verification = context.createVerification
+  const details = {
+    tableAction: 'create',
+    status: verification?.ok ? 'completed' : 'failed',
+    attemptedCount: context.attemptedCount,
+    verifiedCount: verification?.ok ? args.rows * args.columns : 0,
+    cellCount: args.rows * args.columns,
+    verifiedBy: 'export',
+    clipboardRestored: restoreError === undefined,
+    ...restoreError ? { clipboardRestoreError: restoreError.message } : {},
+    ...verification?.ok ? { tableIndex: verification.table.index } : { failure: { code: verification?.code ?? 'DOCS_TABLE_VERIFY_FAILED', message: verification?.message ?? 'Table creation could not be verified', ...verification?.actual !== undefined ? { actual: verification.actual } : {} } },
+  }
+  return docsTableResult(context, details, context.createTable?.kind === 'table' ? [publicDocsTable(context.createTable)] : undefined)
+}
+
+async function docsTableSelectPlan(context, plan) {
+  const selected = await docsSelectOccurrence(context, plan.text, plan.occurrence)
+  if (selected.occurrence !== plan.occurrence || selected.matchCount !== plan.matchCount) {
+    throw docsFailure('table-select', 'DOCS_TABLE_SELECTION_MISMATCH', `Native Find selected occurrence ${selected.occurrence} of ${selected.matchCount}; the table plan requires occurrence ${plan.occurrence} of ${plan.matchCount}`)
+  }
+  return selected
+}
+
+async function docsTableVerifiedExport(context, stage, verify) {
+  const verificationEnd = Math.min(context.deadline, context.driver.now() + 8_000)
+  let retryDelay = 500
+  while (true) {
+    const blocks = parseDocStructure(await docsExport(context, stage, 'html'))
+    const verification = verify(blocks)
+    if (verification.ok || verification.code === 'DOCS_TABLE_COLLATERAL' || context.driver.now() + retryDelay > verificationEnd) {
+      return { blocks, verification }
+    }
+    await context.driver.sleep(retryDelay)
+    retryDelay = Math.min(2_000, retryDelay * 2)
+  }
+}
+
+async function docsTableWriteFlow(context, args) {
+  let current = parseDocStructure(await docsExport(context, 'table-write-baseline', 'html'))
+  let latest = current
+  planDocsTableWrite(selectDocsTable(current, args.table), args.edits)
+  const results = args.edits.map((edit, index) => ({
+    index,
+    row: edit.row,
+    column: edit.column,
+    value: edit.value,
+    status: 'unattempted',
+    attempted: false,
+    mutationPossible: false,
+  }))
+  let failure
+  let attemptedCount = 0
+  for (const [index, edit] of args.edits.entries()) {
+    attemptedCount = index + 1
+    context.attemptedCount = attemptedCount
+    const result = results[index]
+    try {
+      const table = selectDocsTable(current, args.table)
+      const planned = planDocsTableWrite(table, [edit])[0]
+      if (planned.before === edit.value) {
+        Object.assign(result, { status: 'already_applied', before: planned.before, after: planned.before, verifiedBy: 'export' })
+        continue
+      }
+      const plan = planned.before
+        ? docsTableCellPlan(current, table, edit.row, edit.column)
+        : docsTableNavigationPlan(current, table, edit.row, edit.column)
+      await docsTableSelectPlan(context, plan)
+      if (!planned.before) {
+        await docsKey(context, 'table-cell-collapse', KEY_SPECS.ArrowRight)
+        const backwards = plan.steps < 0
+        for (let step = 0; step < Math.abs(plan.steps); step += 1) {
+          await docsKey(context, 'table-cell-navigate', KEY_SPECS.Tab, backwards ? MODIFIER_BITS.shift : 0)
+        }
+      }
+      result.attempted = true
+      result.mutationPossible = true
+      if (!edit.value) await docsKey(context, 'table-cell-clear', KEY_SPECS.Delete)
+      else await docsInsertText(context, 'table-cell-write', edit.value)
+      const { blocks: actual, verification } = await docsTableVerifiedExport(context, 'table-cell-verify', candidate => verifyDocsTableWrite(current, candidate, table.index, edit))
+      latest = actual
+      if (!verification.ok) {
+        const error = docsFailure('table-cell-verify', verification.code, verification.message)
+        error.actual = verification.actual
+        throw error
+      }
+      Object.assign(result, { status: 'applied', before: planned.before, after: edit.value, verifiedBy: 'export' })
+      current = actual
+    } catch (error) {
+      result.status = 'failed'
+      result.error = { code: error?.code ?? 'DOCS_TABLE_WRITE_FAILED', message: error instanceof Error ? error.message : String(error) }
+      failure = { index, ...result.error, mutationPossible: result.mutationPossible }
+      break
+    }
+  }
+  const appliedCount = results.filter(result => result.status === 'applied').length
+  const alreadyAppliedCount = results.filter(result => result.status === 'already_applied').length
+  const verifiedCount = appliedCount + alreadyAppliedCount
+  const status = !failure ? 'completed' : verifiedCount > 0 ? 'partial' : 'failed'
+  let tables
+  try { tables = [publicDocsTable(selectDocsTable(latest, args.table))] } catch {}
+  return docsTableResult(context, {
+    tableAction: 'write',
+    status,
+    editCount: args.edits.length,
+    attemptedCount,
+    appliedCount,
+    alreadyAppliedCount,
+    verifiedCount,
+    remainingCount: args.edits.length - verifiedCount,
+    results,
+    verifiedBy: 'export',
+    ...failure ? { failure } : {},
+  }, tables)
+}
+
+async function docsTableFormatFlow(context, args) {
+  const baseline = parseDocStructure(await docsExport(context, 'table-format-baseline', 'html'))
+  const table = selectDocsTable(baseline, args.table)
+  const { edits, targets } = docsTableFormatEdits(baseline, table, args.edits)
+  const result = await docsFormatManyFlow(context, edits)
+  Object.assign(result.docs, { tableAction: 'format', tableIndex: table.index, targets })
+  return result
+}
+
+function docsTableCommand(request) {
+  if (request.action === 'insert_rows') return request.position === 'before' ? 'Insert row above' : 'Insert row below'
+  if (request.action === 'insert_columns') return request.position === 'before' ? 'Insert column left' : 'Insert column right'
+  if (request.action === 'delete_rows') return 'Delete row'
+  if (request.action === 'delete_columns') return 'Delete column'
+  return 'Delete table'
+}
+
+async function docsTableStructureFlow(context, args) {
+  let current = parseDocStructure(await docsExport(context, 'table-structure-baseline', 'html'))
+  let latest = current
+  const initialTable = selectDocsTable(current, args.table)
+  const request = docsTableStructureRequest(initialTable, args)
+  const operations = []
+  if (args.action === 'insert_rows' || args.action === 'insert_columns') {
+    const key = args.action === 'insert_rows' ? 'row' : 'column'
+    let reference = request[key]
+    for (let index = 0; index < request.count; index += 1) {
+      operations.push({ action: args.action, position: request.position, count: 1, [key]: reference })
+      if (request.position === 'before') reference += 1
+    }
+  } else if (args.action === 'delete_rows') {
+    for (const row of request.rows) operations.push({ action: args.action, rows: [row] })
+  } else if (args.action === 'delete_columns') {
+    for (const column of request.columns) operations.push({ action: args.action, columns: [column] })
+  } else operations.push({ action: 'delete_table' })
+
+  let completedCount = 0
+  let failure
+  for (const [index, operation] of operations.entries()) {
+    context.attemptedCount = index + 1
+    context.menuMutationPossible = false
+    try {
+      const table = selectDocsTable(current, args.table)
+      const kind = operation.action === 'insert_rows' || operation.action === 'delete_rows' ? 'row'
+        : operation.action === 'insert_columns' || operation.action === 'delete_columns' ? 'column' : 'table'
+      const targetIndex = operation.row ?? operation.column ?? operation.rows?.[0] ?? operation.columns?.[0]
+      const plan = docsTableAnchor(current, table, kind, targetIndex)
+      await docsTableSelectPlan(context, plan)
+      await docsKey(context, 'table-structure-collapse', KEY_SPECS.ArrowRight)
+      await docsMenuCommand(context, docsTableCommand({ ...request, ...operation }))
+      const { blocks: actual, verification } = await docsTableVerifiedExport(context, 'table-structure-verify', candidate => operation.action === 'delete_table'
+        ? verifyDocsTableDelete(current, candidate, table.index)
+        : verifyDocsTableStructure(current, candidate, table.index, operation))
+      latest = actual
+      if (!verification.ok) throw docsFailure('table-structure-verify', verification.code, verification.message)
+      current = actual
+      completedCount += 1
+    } catch (error) {
+      failure = { index, code: error?.code ?? 'DOCS_TABLE_STRUCTURE_FAILED', message: error instanceof Error ? error.message : String(error), mutationPossible: context.menuMutationPossible === true }
+      break
+    }
+  }
+  const status = !failure ? 'completed' : completedCount > 0 ? 'partial' : 'failed'
+  let tables
+  try { tables = [publicDocsTable(selectDocsTable(latest, args.table))] } catch { tables = [] }
+  return docsTableResult(context, {
+    tableAction: args.action,
+    status,
+    operationCount: operations.length,
+    attemptedCount: context.attemptedCount ?? 0,
+    completedCount,
+    remainingCount: operations.length - completedCount,
+    verifiedBy: 'export',
+    ...failure ? { failure } : {},
+  }, tables)
+}
+
+async function docsTableFlow(context, args) {
+  if (args.action === 'read') return docsTableReadFlow(context, args)
+  if (args.action === 'create') return docsTableCreateFlow(context, args)
+  if (args.action === 'write') return docsTableWriteFlow(context, args)
+  if (args.action === 'format') return docsTableFormatFlow(context, args)
+  return docsTableStructureFlow(context, args)
+}
+
+async function docsTableLocked(settings, args, tab, driver) {
+  const context = {
+    settings,
+    tab,
+    driver,
+    action: 'table',
+    initialUrl: tab.url,
+    deadline: driver.now() + DOCS_TABLE_DEADLINE_MS,
+    deadlineMs: DOCS_TABLE_DEADLINE_MS,
+    attemptedCount: 0,
+    mutationPossible: false,
+  }
+  let timer
+  try {
+    return await Promise.race([
+      docsTableFlow(context, args),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(docsFailure('deadline', 'DOCS_DEADLINE', `The Docs table operation exceeded ${DOCS_TABLE_DEADLINE_MS / 1000}s`)), DOCS_TABLE_DEADLINE_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function docsTable(settings, args, io = {}) {
+  const normalizedArgs = parseDocsTableArgs(args)
+  const driver = docsDriver(io)
+  let tab
+  try {
+    const windowId = await driver.getWindowId()
+    tab = await driver.getActiveTab(windowId)
+  } catch (error) {
+    throw docsDriverError('validate-tab', 'DOCS_TAB_CHECK_FAILED', error)
+  }
+  if (tab?.id === undefined || !docsUrl(tab.url)) {
+    throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
+  }
+  const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(() => docsTableLocked(settings, normalizedArgs, tab, driver))
+  const gate = run.catch(() => {})
+  docsTabLocks.set(tab.id, gate)
+  try {
+    return await run
+  } catch (error) {
+    if (error instanceof Error) error.message += '; Docs table mutation state may be partial; inspect the document and do not retry the whole operation blindly'
+    throw error
+  } finally {
+    if (docsTabLocks.get(tab.id) === gate) docsTabLocks.delete(tab.id)
+  }
+}
+
 function docsTextOccurrences(haystack, needle) {
   const source = String(haystack).toLowerCase()
   const wanted = String(needle).toLowerCase()
@@ -8434,6 +9625,21 @@ const BATCH_ACTION_FIELDS = [
   'scroll', 'moved', 'wheel', 'requestedPixels', 'container', 'waited', 'navigated',
   'staleScroll', 'scrolledIntoView', 'reResolved',
 ]
+const BATCH_ARG_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u
+
+function validateBatchArgKeys(value, index) {
+  if (Array.isArray(value)) {
+    for (const item of value) validateBatchArgKeys(item, index)
+    return
+  }
+  if (!value || typeof value !== 'object') return
+  for (const [key, nested] of Object.entries(value)) {
+    if (!BATCH_ARG_KEY_PATTERN.test(key)) {
+      throw new BrowserError('BAD_BATCH', `action ${index + 1} args contains malformed key ${JSON.stringify(key)}; no actions ran`)
+    }
+    validateBatchArgKeys(nested, index)
+  }
+}
 
 /**
  * Run several already-validated actions in order with ONE final view.
@@ -8447,6 +9653,7 @@ async function batch(settings, args) {
   if (!Array.isArray(rawActions) || rawActions.length === 0 || rawActions.length > 20) {
     throw new BrowserError('BAD_BATCH', 'actions must be an array of 1 to 20 action objects')
   }
+  const preparedActions = []
   for (const [index, action] of rawActions.entries()) {
     if (!action || typeof action !== 'object' || Array.isArray(action)) {
       throw new BrowserError('BAD_BATCH', `action ${index + 1} must be an object`)
@@ -8458,6 +9665,14 @@ async function batch(settings, args) {
     if (action.args !== undefined && (typeof action.args !== 'object' || action.args === null || Array.isArray(action.args))) {
       throw new BrowserError('BAD_BATCH', `action ${index + 1} args must be an object`)
     }
+    validateBatchArgKeys(action.args ?? {}, index)
+    const prepared = { op, args: { ...(action.args ?? {}) } }
+    for (const phase of ['before', 'after']) {
+      if (prepared.args[phase] === undefined) continue
+      prepared[phase] = parseBatchGuardArgs(prepared.args[phase], index, phase)
+      delete prepared.args[phase]
+    }
+    preparedActions.push(prepared)
   }
   const stopOnError = args.stop_on_error !== false
   const initialTab = await getActiveTab(await getWindowId())
@@ -8472,21 +9687,37 @@ async function batch(settings, args) {
   const actionsStarted = performance.now()
   batchDepth += 1
   try {
-    for (const [index, action] of rawActions.entries()) {
+    for (const [index, action] of preparedActions.entries()) {
+      const guarded = action.before !== undefined || action.after !== undefined
+      const item = {
+        index: index + 1,
+        op: action.op,
+        ok: false,
+        ...(guarded ? { attempted: false, mutationPossible: false } : {}),
+      }
       try {
-        const inner = await execute(action.op, action.args ?? {}, settings)
-        const item = { index: index + 1, op: action.op, ok: true }
+        if (action.before) item.before = await waitForBatchGuard(action.before, 'before')
+        if (guarded) {
+          item.attempted = true
+          item.mutationPossible = true
+        }
+        const inner = await executeOperation(action.op, action.args, settings)
         for (const field of BATCH_ACTION_FIELDS) {
           if (inner && inner[field] !== undefined) item[field] = inner[field]
         }
+        if (action.after) item.after = await waitForBatchGuard(action.after, 'after')
+        item.ok = true
         actions.push(item)
       } catch (error) {
         const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'BATCH_ACTION_FAILED'
         const message = error instanceof Error ? error.message : String(error)
-        actions.push({ index: index + 1, op: action.op, ok: false, error: { code, message } })
+        const guard = error?.batchGuard
+        if (guard?.waited) item[guard.phase] = guard.waited
+        item.error = { code, message }
+        actions.push(item)
         ok = false
         failedIndex = index + 1
-        if (stopOnError) {
+        if (stopOnError || guard || code === 'DIALOG_PENDING') {
           stoppedEarly = true
           break
         }
@@ -8498,6 +9729,7 @@ async function batch(settings, args) {
   const elapsedMs = Math.round(performance.now() - actionsStarted)
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
+  await prepareDebuggerRunTab(tab.id).catch(() => {})
   const viewStarted = performance.now()
   const built = await buildBatchView(tab, settings, actionViewForTab(tab, requestedView))
   const viewMs = Math.round(performance.now() - viewStarted)
@@ -8536,24 +9768,108 @@ function normalizeDelayMs(value) {
   return Math.max(0, Math.min(5_000, Math.round(ms)))
 }
 
+export function parseDialogArgs(args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BrowserError('BAD_DIALOG', 'dialog arguments must be an object')
+  if (Object.keys(args).some(key => !['action', 'prompt_text'].includes(key))) throw new BrowserError('BAD_DIALOG', 'dialog received an unknown argument')
+  if (args.action !== 'accept' && args.action !== 'dismiss') throw new BrowserError('BAD_DIALOG', "action must be 'accept' or 'dismiss'")
+  if (args.prompt_text !== undefined && (args.action !== 'accept' || typeof args.prompt_text !== 'string' || args.prompt_text.length > 20_000)) {
+    throw new BrowserError('BAD_DIALOG', 'prompt_text is optional text of at most 20000 characters and is valid only when accepting a prompt')
+  }
+  return { action: args.action, promptText: args.prompt_text }
+}
+
+async function resolveDialog(args) {
+  const request = parseDialogArgs(args)
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  const pending = dialogManager.pending(tab.id)
+  if (!pending) throw new BrowserError('NO_DIALOG', 'There is no pending JavaScript dialog in the active tab')
+  if (request.promptText !== undefined && pending.type !== 'prompt') {
+    throw new BrowserError('BAD_DIALOG', 'prompt_text is valid only when the pending dialog is a prompt')
+  }
+  const resolved = await withDebugger(tab.id, () => dialogManager.resolve(tab.id, request.action, request.promptText))
+  const current = await chrome.tabs.get(tab.id).catch(() => tab)
+  return {
+    op: 'dialog',
+    view: 'none',
+    screenshotSkipped: true,
+    tab: tabSummary(current),
+    dialog: resolved,
+    capture: { status: 'skipped', reason: 'DIALOG_RESOLVED' },
+  }
+}
+
+function tableDriver() {
+  return {
+    getActiveTab: async () => getActiveTab(await getWindowId()),
+    assertCapturable: async tab => assertCapturable(tab),
+    runInAllFrames,
+    runInFrame,
+    tabSummary,
+    settle: async tabId => settleAfterInput(tabId, 40),
+    editCell: async (tabId, prepared, text) => {
+      await withDebugger(tabId, async () => {
+        let attempted = false
+        try {
+          if (prepared.editMode === 'enter') {
+            attempted = true
+            await dispatchTrustedKey(tabId, KEY_SPECS.Enter, 0)
+          }
+          const selectAll = parsePressKeyArgs({ key: 'a', modifiers: ['ctrl'] })
+          attempted = true
+          await dispatchTrustedKey(tabId, selectAll.spec, selectAll.mask)
+          if (text.length === 0) await dispatchTrustedKey(tabId, KEY_SPECS.Backspace, 0)
+          else await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text })
+          await dispatchTrustedKey(tabId, KEY_SPECS.Tab, 0)
+        } catch (error) {
+          if (attempted) {
+            throw new BrowserError('TABLE_UNSETTLED', `Table input may be partially applied; do not retry blindly. Read the table before further edits. ${error instanceof Error ? error.message : String(error)}`)
+          }
+          throw error
+        }
+      })
+    },
+  }
+}
+
+function findDriver(settings) {
+  return {
+    getActiveTab: async () => getActiveTab(await getWindowId()),
+    assertCapturable: async tab => assertCapturable(tab),
+    runInAllFrames,
+    runInFrame,
+    tabSummary,
+    canvasEditorForUrl,
+    invalidateCoordinates: async tabId => { imageBasesByTab.delete(tabId) },
+    snapshot: () => snapshot('normal', settings),
+  }
+}
+
 /**
  * Execute one bridge command.
  * @param {string} op
  * @param {Record<string, any>} args
- * @param {import('./protocol.js').Settings} [settings]
+ * @param {import('./protocol.js').Settings} settings
  */
-export async function execute(op, args = {}, settings) {
-  const normalized = normalizeSettings(settings)
-  if (normalized.paused) throw new BrowserError('PAUSED', 'Browser access is paused in the side panel.')
+async function executeOperation(op, args, normalized) {
   if (op === 'snapshot') {
-    const detail = args.detail === 'high' ? 'high' : args.detail === 'fast' ? 'fast' : 'normal'
-    return snapshot(detail, normalized, false, normalizeDelayMs(args.delay_ms))
+    const request = parseScreenshotArgs(args)
+    return snapshot(request.detail, normalized, false, request.delayMs, request)
+  }
+  if (op === 'auto_view') {
+    return autoView(normalized)
   }
   if (op === 'scroll') {
     return scroll(normalized, args.direction, args.pages, args.amount_px, args.at_x, args.at_y)
   }
+  if (op === 'dialog') {
+    return resolveDialog(args)
+  }
   if (op === 'tabs.list') {
     return listTabs(await getWindowId())
+  }
+  if (op === 'places.search') {
+    return searchPlaces(args)
   }
   if (op === 'tabs.activate') {
     return activateTab(normalized, args.tab_id, args.query)
@@ -8573,6 +9889,12 @@ export async function execute(op, args = {}, settings) {
   if (op === 'batch') {
     return batch(normalized, args)
   }
+  if (op === 'table') {
+    return executeTable(args, tableDriver())
+  }
+  if (op === 'find') {
+    return executeFind(args, findDriver(normalized))
+  }
   if (op === 'docs') {
     if (args.action === 'replace_text') return docsReplaceText(normalized, args)
     if (args.action === 'replace_many') return docsReplaceMany(normalized, args)
@@ -8582,6 +9904,7 @@ export async function execute(op, args = {}, settings) {
     if (args.action === 'select_text') return docsSelectText(normalized, args)
     if (args.action === 'read') return docsRead(normalized, args)
     if (args.action === 'write') return docsWrite(normalized, args)
+    if (args.action === 'table') return docsTable(normalized, { ...args, action: args.tableAction })
     if (args.action === 'page_setup') return docsPageSetup(normalized, args)
     return docsSetFont(normalized, args)
   }
@@ -8620,6 +9943,49 @@ export async function execute(op, args = {}, settings) {
     return clipboardOp(normalized, args)
   }
   throw new BrowserError('BAD_OP', `Unknown browser operation: ${String(op)}`)
+}
+
+function addDialogReports(result, reports) {
+  if (!result || typeof result !== 'object') return result
+  const dialogs = [...reports]
+  if (result.dialog && !dialogs.some(dialog => dialog.id === result.dialog.id)) dialogs.push(result.dialog)
+  if (dialogs.length === 0) return result
+  return {
+    ...result,
+    dialogs,
+    dialog: result.dialog?.status === 'pending' ? result.dialog : (result.dialog ?? dialogs.at(-1)),
+  }
+}
+
+async function finishDialogResult(op, result, cursor) {
+  await dialogManager.waitForAutomatic()
+  const reports = dialogManager.takeReports(cursor)
+  const tab = await getActiveTab(await getWindowId()).catch(() => undefined)
+  const pending = tab ? dialogManager.pending(tab.id) : undefined
+  if (pending) return addDialogReports(pendingDialogResult(op, tab, pending), reports)
+  return addDialogReports(result, reports)
+}
+
+export async function execute(op, args = {}, settings) {
+  const normalized = normalizeSettings(settings)
+  if (normalized.paused) throw new BrowserError('PAUSED', 'Browser access is paused in the side panel.')
+  await prepareDebuggerCommand().catch(() => {})
+  const cursor = dialogManager.cursor()
+  try {
+    const result = await executeOperation(op, args, normalized)
+    return await finishDialogResult(op, result, cursor)
+  } catch (error) {
+    if (op === 'dialog' && error?.code !== 'DIALOG_PENDING') throw error
+    let pending = error?.dialog
+    if (!pending) {
+      const active = await getActiveTab(await getWindowId()).catch(() => undefined)
+      pending = active ? dialogManager.pending(active.id) : undefined
+    }
+    if (!pending) throw error
+    const reports = dialogManager.takeReports(cursor)
+    const tab = await chrome.tabs.get(pending.tabId).catch(() => undefined)
+    return addDialogReports(pendingDialogResult(op, tab, pending), reports)
+  }
 }
 
 /** @param {import('./protocol.js').Settings} [settings] */

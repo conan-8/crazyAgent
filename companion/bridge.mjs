@@ -5,9 +5,9 @@
  *   ui    — the Chrome side panel, which owns chrome.* and executes browser ops
  *   tools — the DSH browser-use provider, which issues browser ops
  *
- * The companion itself also sends `snapshot` commands to the UI for the
- * per-turn auto-capture. Plugin-issued commands and companion-issued commands
- * are correlated independently but share the same wire frame shape.
+ * The companion itself also sends `auto_view` commands to the UI for the
+ * per-turn DOM-first view with screenshot fallback. Plugin-issued commands and
+ * companion-issued commands are correlated independently but share the same wire frame shape.
  *
  * Every inbound/outbound frame and client log event is optionally forwarded to
  * `onLog` for the debug bundle. Images are passed through to the debug store,

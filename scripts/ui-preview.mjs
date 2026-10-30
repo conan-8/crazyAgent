@@ -10,6 +10,7 @@
  *   node scripts/ui-preview.mjs --scenario empty      # idle dark + light
  *   node scripts/ui-preview.mjs --scenario turn       # finished turn: dark/narrow/wide/light
  *   node scripts/ui-preview.mjs --scenario live       # mid-turn live clocks
+ *   node scripts/ui-preview.mjs --scenario waiting    # pre-stream bouncing ball
  *   node scripts/ui-preview.mjs --scenario states     # finished feed / expanded step / new chat
  *   node scripts/ui-preview.mjs --scenario tools      # browser-command rows + tab-list card
  *   node scripts/ui-preview.mjs --scenario modals     # settings + debug log modals
@@ -178,9 +179,10 @@ const HELLO_FRAMES = [
     ok: true,
     baseUrl: 'https://openrouter.ai/api/v1',
     models: [
-      { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, imageInput: true, contextWindow: 1000000 },
-      { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, imageInput: true, contextWindow: 1000000 },
-      { id: 'openai/gpt-5', name: 'GPT-5', reasoning: true, imageInput: true, contextWindow: 400000 },
+      { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
+      { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
+      { id: 'openai/gpt-5', name: 'GPT-5', reasoning: true, imageInput: true, tools: true, contextWindow: 400000 },
+      { id: 'acme/text-only', name: 'Text Only Model', reasoning: true, imageInput: false, tools: true, contextWindow: 128000 },
     ],
   },
 ]
@@ -423,7 +425,18 @@ async function playQueueScenario(page, capture) {
   const { recv, batch } = makePage(page)
   await batch(HELLO_FRAMES)
   await sleep(300)
+  const idleComposerHeight = await page.evaluate(`document.querySelector('.composer-field').getBoundingClientRect().height`)
   await sendPrompt(page, 'Start the first task')
+  const runningComposer = await page.evaluate(`(() => {
+    const field = document.querySelector('.composer-field');
+    const style = getComputedStyle(field);
+    return { height: field.getBoundingClientRect().height, paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, gap: style.gap };
+  })()`)
+  assert.ok(runningComposer.height < idleComposerHeight)
+  assert.equal(runningComposer.paddingTop, '8px')
+  assert.equal(runningComposer.paddingBottom, '8px')
+  assert.equal(runningComposer.gap, '4px')
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('input')).paddingRight`), '48px')
 
   await pasteImage(page, 'notes.png')
   await sendPrompt(page, 'Queue this direction')
@@ -500,6 +513,17 @@ async function playComposerScenario(page, capture) {
   await page.evaluate(`document.getElementById('composer-model').click()`)
   await sleep(100)
   assert.equal(await page.evaluate(`document.activeElement.id`), 'model-search')
+  const initialConfigureCount = await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').length`)
+  await page.evaluate(`(() => {
+    const search = document.getElementById('model-search');
+    search.value = 'text-only';
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.model-menu-item').length`), 1)
+  assert.match(await page.evaluate(`document.querySelector('.model-menu-item').textContent`), /acme\/text-only · text only/)
+  assert.equal(await page.evaluate(`document.querySelector('.model-menu-item').disabled`), true)
+  await page.evaluate(`document.querySelector('.model-menu-item').click()`)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').length`), initialConfigureCount)
   await page.evaluate(`(() => {
     const search = document.getElementById('model-search');
     search.value = 'claude';
@@ -624,6 +648,41 @@ async function main() {
   } else if (SCENARIO === 'live') {
     await playTurn(page, { stopAfter: 'step2-running' })
     await shot('dark')
+  } else if (SCENARIO === 'waiting') {
+    const { recv, batch } = makePage(page)
+    await batch(HELLO_FRAMES)
+    await sleep(300)
+    await sendPrompt(page, 'Think before answering.')
+    await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 1, attemptId: 'waiting' })
+    await sleep(320)
+    const waiting = await page.evaluate(`(() => {
+      const loader = document.querySelector('.activity-step.running .thinking-wait');
+      if (!loader) return null;
+      const ball = loader.querySelector('.thinking-ball');
+      const shadow = loader.querySelector('.thinking-ball-shadow');
+      return {
+        visible: loader.getClientRects().length > 0,
+        label: loader.textContent,
+        ballAnimation: getComputedStyle(ball).animationName,
+        shadowAnimation: getComputedStyle(shadow).animationName,
+        glossy: getComputedStyle(ball).backgroundImage.includes('radial-gradient'),
+      };
+    })()`)
+    assert.deepEqual(waiting, {
+      visible: true,
+      label: 'gathering thoughts',
+      ballAnimation: 'thinking-ball-bounce',
+      shadowAnimation: 'thinking-ball-shadow',
+      glossy: true,
+    })
+    const firstBallTransform = await page.evaluate(`getComputedStyle(document.querySelector('.thinking-ball')).transform`)
+    await sleep(180)
+    const nextBallTransform = await page.evaluate(`getComputedStyle(document.querySelector('.thinking-ball')).transform`)
+    assert.notEqual(nextBallTransform, firstBallTransform)
+    await shot('dark')
+    await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text: 'The first streamed thought.' })
+    await assertVisibleReasoning(page, '.activity-step.running .activity-entry.reasoning.streaming', 'The first streamed thought.')
+    assert.equal(await page.evaluate(`document.querySelector('.thinking-wait') === null`), true)
   } else if (SCENARIO === 'states') {
     await playTurn(page)
     await sleep(300)
@@ -653,6 +712,12 @@ async function main() {
   } else if (SCENARIO === 'interactions') {
     await page.evaluate(`window.__mockBatch(${JSON.stringify(HELLO_FRAMES)})`)
     await sleep(400)
+    await page.evaluate(`window.__mockReceive({ v: 1, type: 'browser.command', id: 'auto-protected', callId: 'auto', turnId: 'turn-protected', command: { op: 'snapshot', args: {} } })`)
+    await sleep(300)
+    const protectedResult = await page.evaluate(`window.__frames.filter(frame => frame.type === 'browser.result' && frame.id === 'auto-protected').at(-1)`)
+    assert.equal(protectedResult.ok, false)
+    assert.equal(protectedResult.error.code, 'PROTECTED_PAGE')
+    assert.equal(await page.evaluate(`document.getElementById('activity-log').textContent.includes('Chrome blocks screenshots and scripts on this page')`), false)
     assert.equal(await page.evaluate(`document.getElementById('attach')`), null)
     assert.equal(await page.evaluate(`document.getElementById('file-input')`), null)
     assert.equal(await page.evaluate(`document.getElementById('mic') !== null`), true)
@@ -674,8 +739,19 @@ async function main() {
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.stop').length`), 1)
     await page.evaluate(`window.__mockReceive({ v: 1, type: 'chat.stopped', reason: 'user', sessionId: 'session-preview0001' })`)
     await sleep(200)
-    await page.evaluate(`document.getElementById('new-chat').click()`)
+    const newChatsBeforeReopen = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`)
+    assert.equal(newChatsBeforeReopen, 1)
+    await page.evaluate(`(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    })()`)
+    assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`), newChatsBeforeReopen)
+    await page.evaluate(`(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    })()`)
     await sleep(250)
+    assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`), newChatsBeforeReopen + 1)
     assert.equal(await page.evaluate(`document.querySelectorAll('.activity-turn').length`), 0)
     await page.evaluate(`document.getElementById('history').click()`)
     await page.evaluate(`(() => {

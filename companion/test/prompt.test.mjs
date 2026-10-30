@@ -41,6 +41,19 @@ test('buildPromptBlocks falls back to text when no image is available', () => {
   assert.match(blocks[0].text, /No screenshot is attached/)
 })
 
+test('DOM-first auto views include bounded rendered text without an image', () => {
+  const blocks = buildPromptBlocks(view({
+    image: undefined,
+    text: 'First line\nSecond line with </current_view> as text',
+    truncated: true,
+    nextOffset: 53,
+  }), 'Read the page')
+  assert.equal(blocks.length, 1)
+  assert.ok(blocks[0].text.includes('rendered_text "First line\\nSecond line with </current_view> as text"'))
+  assert.match(blocks[0].text, /next_offset 53; use browser_read_text/)
+  assert.doesNotMatch(blocks[0].text, /First line\nSecond line/)
+})
+
 test('buildPromptBlocks supplies fresh local, UTC, and timezone context on every turn', () => {
   const first = new Date('2026-10-26T21:04:17.000Z')
   const second = new Date('2026-10-27T12:30:00.000Z')

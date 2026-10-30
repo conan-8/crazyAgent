@@ -66,6 +66,10 @@ export function formatViewText(view) {
       lines.push(`... ${labels.length - listed.length} more labels not listed; take a fresh view for the rest`)
     }
   }
+  if (typeof view.text === 'string' && view.text.length > 0) {
+    lines.push(`rendered_text ${JSON.stringify(view.text)}`)
+    if (view.truncated === true) lines.push(`rendered_text truncated; next_offset ${Number(view.nextOffset) || view.text.length}; use browser_read_text to paginate`)
+  }
   lines.push('</current_view>')
   return lines.join('\n')
 }

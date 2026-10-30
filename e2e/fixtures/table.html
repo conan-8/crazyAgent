@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CrazyAgent Table Fixture</title>
+  <style>
+    body { font: 15px/1.4 system-ui, sans-serif; margin: 24px; }
+    table { border-collapse: collapse; min-width: 720px; }
+    td, th { position: relative; border: 1px solid #bbb; min-width: 130px; height: 42px; padding: 8px; text-align: left; }
+    th { background: #f3f4f6; }
+    .data-grid-input__input { position: absolute; inset: 0; width: 100%; opacity: 0; }
+    .data-grid-input:focus-within { outline: 3px solid #67e8f9; }
+    [aria-readonly="true"] { background: #eee; }
+    #events { margin-top: 18px; white-space: pre-wrap; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <h1>Chromatography data</h1>
+  <table id="dyes" aria-label="Dye measurements">
+    <thead>
+      <tr>
+        <td rowspan="2" class="data-grid-header__menu-cell"><button aria-label="table actions menu">…</button></td>
+        <th scope="col"><input class="column-header__name" aria-label="column 1 name" value="Dye" /><button aria-label="column menu">…</button></th>
+        <th scope="col"><input class="column-header__name" aria-label="column 2 name" value="Dye Distance" /><button aria-label="column menu">…</button></th>
+        <th scope="col"><input class="column-header__name" aria-label="column 3 name" value="Solvent Distance" /><button aria-label="column menu">…</button></th>
+        <th scope="col"><input class="column-header__name" aria-label="column 4 name" value="Retention Factor" /><button aria-label="column menu">…</button></th>
+      </tr>
+      <tr><th>cm</th><th>cm</th><th>cm</th><th>Rf</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div id="events">commits 0</div>
+  <script>
+    const names = ['Pink', 'Red-Orange', 'Orange', 'Yellow', 'Green', 'Teal', 'Aqua']
+    const state = names.map(name => [name, '', '', ''])
+    let editing = false
+    let commits = 0
+    const tbody = document.querySelector('#dyes tbody')
+    const events = document.getElementById('events')
+
+    function render() {
+      tbody.replaceChildren()
+      state.forEach((values, rowIndex) => {
+        const row = document.createElement('tr')
+        const header = document.createElement('th')
+        header.scope = 'row'
+        header.className = 'row-header'
+        header.textContent = String(rowIndex + 1)
+        row.appendChild(header)
+        values.forEach((value, columnIndex) => {
+          const cell = document.createElement('td')
+          const readonly = columnIndex === 3
+          cell.setAttribute('aria-readonly', String(readonly))
+          const wrapper = document.createElement('div')
+          wrapper.className = 'data-grid-input'
+          const display = document.createElement('span')
+          display.setAttribute('aria-hidden', 'true')
+          display.textContent = value
+          const input = document.createElement('input')
+          input.type = columnIndex === 0 ? 'text' : 'number'
+          input.className = 'data-grid-input__input'
+          input.tabIndex = -1
+          input.dataset.tablenav = ''
+          input.dataset.row = String(rowIndex)
+          input.dataset.column = String(columnIndex)
+          input.dataset.committed = value
+          input.setAttribute('aria-label', `column ${columnIndex + 1} row ${rowIndex + 1} value`)
+          input.value = value
+          input.readOnly = readonly
+          wrapper.append(display, input)
+          cell.appendChild(wrapper)
+          row.appendChild(cell)
+        })
+        tbody.appendChild(row)
+      })
+    }
+
+    function calculated(rowIndex) {
+      const distance = Number(state[rowIndex][1])
+      const solvent = Number(state[rowIndex][2])
+      return distance && solvent ? String(Number((distance / solvent).toFixed(4))) : ''
+    }
+
+    function commit(input) {
+      const rowIndex = Number(input.dataset.row)
+      const columnIndex = Number(input.dataset.column)
+      state[rowIndex][columnIndex] = input.value
+      input.dataset.committed = input.value
+      state[rowIndex][3] = calculated(rowIndex)
+      commits += 1
+      events.textContent = `commits ${commits}\n${rowIndex + 1},${columnIndex + 1}=${input.value}`
+      render()
+    }
+
+    tbody.addEventListener('keydown', event => {
+      const input = event.target.closest('input[data-row]')
+      if (!input || input.readOnly) return
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        if (!editing) editing = true
+        else {
+          editing = false
+          commit(input)
+        }
+        return
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        editing = false
+        const row = Number(input.dataset.row)
+        const column = Number(input.dataset.column)
+        commit(input)
+        const next = tbody.querySelector(`input[data-row="${row}"][data-column="${column + 1}"]`) ?? tbody.querySelector(`input[data-row="${row + 1}"][data-column="0"]`)
+        next?.focus()
+      }
+    })
+
+    render()
+  </script>
+</body>
+</html>

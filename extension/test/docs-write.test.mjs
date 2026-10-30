@@ -354,6 +354,13 @@ test('Docs write composes formatted paragraphs, blank space, and adjacent lists 
   assert.equal(result.docs.verifiedCount, 5)
   assert.equal(result.docs.attemptedCount, 5)
   assert.equal(result.docs.verifiedBy, 'export')
+  assert.equal(result.op, 'docs')
+  assert.equal(result.view, 'none')
+  assert.equal(result.screenshotSkipped, true)
+  assert.deepEqual(result.capture, { status: 'skipped', reason: 'DOCS_EXPORT_VERIFIED' })
+  assert.equal(result.tab.id, 7)
+  assert.equal(result.tab.url, URL)
+  assert.equal(result.image, undefined)
   assert.match(result.docs.outline, /TITLE: \*\*Release heading\*\*/)
   assert.match(result.docs.outline, /1\. first/)
   assert.match(result.docs.outline, /• alpha/)
@@ -372,7 +379,7 @@ test('Docs write composes formatted paragraphs, blank space, and adjacent lists 
   const bulletedItems = fake.events.indexOf('insert:alpha\nbeta')
   assert.ok(numbered >= 0 && numbered < numberedItems && numberedItems < bulleted && bulleted < bulletedItems)
   assert.equal(fake.exports.length, 3)
-  assert.equal(fake.snapshots(), 1)
+  assert.equal(fake.snapshots(), 0)
   assert.equal(fake.events.some(event => event.startsWith('hex:')), false)
 })
 
@@ -418,7 +425,7 @@ test('Docs write inserts a page break and verifies checked checklist items', asy
   assert.ok(fake.events.indexOf('key:Enter:10') < fake.events.indexOf('insert:Pending task'))
   assert.equal(fake.events.filter(event => event === 'insert:Completed task').length, 1)
   assert.equal(fake.exports.length, 3)
-  assert.equal(fake.snapshots(), 1)
+  assert.equal(fake.snapshots(), 0)
 })
 
 test('Docs write resets non-default baseline colors only when needed', async () => {
@@ -463,7 +470,7 @@ test('Docs write styles mixed inline runs before insertion and verifies exact ru
   assert.equal(fake.events.filter(event => event === 'click:2').length, 2)
   assert.equal(fake.events.some(event => event === 'probe:find' || event === 'probe:setFind'), false)
   assert.equal(fake.exports.length, 3)
-  assert.equal(fake.snapshots(), 1)
+  assert.equal(fake.snapshots(), 0)
 })
 
 test('Docs write rejects a wrong exported inline run instead of claiming success', async () => {
@@ -518,14 +525,14 @@ test('Docs write validates every block before any tab or export access', async (
   assert.equal(fake.snapshots(), 0)
 })
 
-test('Docs write waits for export convergence without retyping or extra snapshots', async () => {
+test('Docs write waits for export convergence without retyping or a final snapshot', async () => {
   const fake = fakeWrite({ staleVerifyReads: 2 })
   const result = await runWrite(fake, [{ text: 'Converged' }])
   assert.equal(result.docs.status, 'completed')
   assert.equal(result.docs.verifiedCount, 1)
   assert.equal(fake.exports.length, 5)
   assert.equal(fake.events.filter(event => event === 'insert:Converged').length, 1)
-  assert.equal(fake.snapshots(), 1)
+  assert.equal(fake.snapshots(), 0)
 })
 
 test('Docs write bounds verification reads and never retries missing input', async () => {

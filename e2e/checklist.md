@@ -1,270 +1,164 @@
 # CrazyAgent manual acceptance checklist
 
-Use a **normal website tab** and the real side panel (not the extension page opened as a tab). Keep the companion running in a terminal.
+Use the **real docked side panel**, not the extension page opened as a tab. Unit tests and direct executor suites do not check off these model-driven scenarios.
 
-## Preconditions
+## Setup and evidence rules
 
 ```sh
 npm install
 npm run setup
 npm run dev
-# second terminal, optional fixture pages:
+# optional second terminal:
 python3 -m http.server 17872 --bind 127.0.0.1 --directory e2e/fixtures
 ```
 
-- Chrome/Edge 116+; extension loaded unpacked from `extension/`.
-- **Before live Google Docs acceptance, reload the normal unpacked extension at `chrome://extensions` or `edge://extensions` and reopen the side panel.** Do not run these scenarios against a stale cached executor or the extension page opened as a tab.
-- Side panel token pasted in Settings; OpenRouter API key entered; **Refresh models** used and an image-capable model selected; Save clicked; status says **Connected**.
-- Every view shows yellow numbered badges on visible controls.
-- A normal tab is active. `chrome://` and extension pages are expected to fail.
-- The new `browser_click_role`, `browser_docs_select_text`, and `browser_docs_format_many` scenarios below have **no live Google Docs acceptance yet**. Unit/profile results and isolated Edge click/advanced/canvas suites do not check them off.
+- Load `extension/` unpacked in Chrome/Edge 116+. Before testing, reload it and reopen the panel; accept the current permissions.
+- Configure the pairing token and an image/tool-capable OpenRouter model. Status must be **Connected**.
+- Use a normal HTTP(S) tab and fresh chats. Use **medium effort** for comparable real-agent acceptance.
+- Current roster: **29 model-facing tools**. Only the unified Docs replacement/format tools are model-facing; internal legacy action names may appear in logs.
+- Last recorded implementation result was **552/552 tests** plus prompt composition. This is not live acceptance; both available isolated Docs profiles were signed out during the latest Docs table attempt.
 
-## Checks
+For every scenario, independently inspect final page/document state. Tool status, screenshots, `changed`, export verification, and the agent’s answer are diagnostic evidence. Record wall time, model steps, calls, failures, retries, wrong targets, collateral edits, and recovery edits—even when repaired. A recovered final state is not a clean pass.
 
-### 1. Open the side panel and configure the model
+## 1. Sidebar smoke checks
 
-- Click the toolbar icon.
-- If prompted, open Settings: paste the pairing token; paste the OpenRouter API key; keep the base URL `https://openrouter.ai/api/v1`; click **Refresh models**; pick an image-capable model (e.g. `deepseek/deepseek-v4.1-flash-1017`); leave **Remember** checked; Save.
-- The side panel shows the brand, active tab title, and a green status dot.
-- The active tab line updates when you switch tabs manually.
-- **Pass:** no error banner; Settings shows the key as configured and the model status names the selected model and **effort low** when the model supports reasoning; the model list shows hundreds of image-capable models.
+### Connection, activity, and reasoning
 
-### 1c. Reasoning policy
+- Open a fixture and ask “What is on this page?” Confirm the active-tab line, connected status, streamed activity, step timing, collapsed finished steps, and pinned final answer.
+- With Auto effort, confirm one `reasoning low` policy entry per turn and streamed thinking when the provider exposes it. Switch to Off and confirm later turns respect it.
+- Send a message during a turn and verify queue ordering and redirect/edit behavior. Use Stop and confirm the turn stops; send another message and check session resume or a logged fresh-session fallback.
+- Pause and request scrolling: the page must not move. Unpause and retry. Close the panel or stop the companion and confirm a clear disconnected/offline state without a crash.
 
-- With **Auto** effort, ask **“scroll down”**: the activity feed should show `policy: reasoning low (navigate, auto)` and stream thinking from the first model step.
-- Ask **“what is on this page?”**: the next `policy` line should also show `reasoning low (inspect, auto)`.
-- Switch to **Off** in Settings and save; every later turn should show `reasoning off` and no model reasoning content (provider-supplied summaries may still appear).
-- **Pass:** one `policy` line per turn; Auto always requests low, while manual Off is respected.
+### Observation and basic interaction
 
-### 1b. Live activity and per-step timing (single full-height pane)
+Use `article.html`, `click.html`, `canvas.html`, and `advanced.html`.
 
-- Ask a question on a normal page and keep the side panel visible.
-- The side panel is one **full-height activity feed** — there is no separate chat pane. Expect the feed to update while the turn runs: numbered **Step** blocks, each with a **thinking** row with reasoning/thinking deltas (when the provider exposes them), **assistant** text, tool rows with their own duration, browser actions, and token usage.
-- While a step runs it stays expanded and its header clock ticks; the activity header shows `step N · X.Xs`; the footer shows the completed steps so far plus the live one.
-- **As soon as the next step starts, the finished step collapses to a single header line** (`Step 1 clicked #12 Increment · changed … model 1.7s 2.8s`). Click a collapsed header to expand it again; click it once more to collapse.
-- After the turn, every step is collapsed, the turn's final answer is pinned below the steps as an `ANSWER` block, and the footer shows every step's own time plus the turn total (`⏱ s1 1.4s · s2 2.1s · total 5.6s`); hover it for the full breakdown. Expand the step to read its reasoning and tool rows.
-- Successful auto-captures must not append the redundant title/dimensions/KiB/scroll/labels/capture/encode row. Tool-driven screenshots still show their thumbnail and errors stay visible; all metadata remains in the debug log.
-- **Pass:** each step's own time is visible during the run, not only the total after it finishes; finished steps collapse automatically; the final answer stays visible; activity appears before the turn completes; the reasoning text is available for reasoning-capable models; no UI errors.
+- Ordinary auto-view should supply rendered text and labels without requiring a screenshot. A known canvas editor should use a full labelled screenshot. Read-text/find-only calls should not add an image.
+- Ask for the three article markers and verify the answer against the page.
+- Click Increment twice and verify the actual count is 2 and the label identity remains stable. Check Does nothing, Disabled action, the checkbox, and navigation; no hidden/covered/wrong control may be activated.
+- Click the canvas center and scroll it. Verify trusted input and actual canvas state, not just a pixel-change message.
+- Exercise Shadow action, both frame actions, Country = Canada, and hover → Menu item. Verify all target counters/values independently.
+- Scroll an article by about 700 pixels and switch between two tabs by name. Check actual scroll position and active tab.
 
-### 2. See the page
+### Forms, navigation, and waiting
 
-- On the fixture page (`/article.html`), ask: **“What is on this page?”**
-- Expect a “current view” card with a thumbnail, then an assistant answer mentioning **Section Alpha** / **ALPHA-MARKER**.
-- **Pass:** the screenshot matches the visible viewport; text is readable; no screenshot tool call is needed (auto-view).
-- Open the thumbnail; it enlarges and closes with Escape/✕.
+Use `form.html`.
 
-### 2b. Read text
+- Replace and append text, fill Notes and submit, use Tab/Enter and a modifier chord, and type into the focused editor. Verify field values, event counts, and submitted result.
+- Confirm password output is masked. Navigate to `second.html`, go back, and wait for READY; verify URL and page text.
+- Select a known text range and a collapsed range on an ordinary page. Verify the highlighted selection/readback. Google Docs drag selection must be refused before input.
 
-- On the fixture page, ask: **“Read this page and tell me the three markers.”**
-- Expect a `read text` card with a text preview and a character count, no screenshot, then an answer naming **ALPHA-MARKER**, **BETA-MARKER**, and **GAMMA-MARKER**.
-- **Pass:** no screenshot is captured for that call; the card shows the extracted text; latency is a few milliseconds.
+## 2. Semantic tools and orchestration
 
-### 2c. Click
+### Find and personal destinations
 
-Use `e2e/fixtures/click.html`.
+Use `find.html` and a uniquely named disposable HTTP(S) bookmark.
 
-- Ask: **“Click Increment and tell me the count.”**
-- Expect a `click` card with `clicked #<id> Increment`, `changed`, a fresh screenshot with yellow badges, and an answer saying **count: 1**.
-- Ask: **“Click Increment twice more.”** The count should be **3**, and the label id for Increment should stay the same across views.
-- Ask: **“Click Does nothing.”** The result must say **NO VISIBLE CHANGE**, and the model must not repeat it blindly.
-- Ask: **“Click Disabled action.”** Expect a `DISABLED` error, not a click.
-- Ask: **“Click the Toggle me checkbox.”** Expect `checked: true`, a visible tick, and a change signal.
-- Ask: **“Click Go to second page.”** Expect `navigated: true`, a screenshot of `second.html`, and new labels.
-- **Pass:** no click lands on a covered or hidden control; each click reports the exact element it hit; a no-op is reported honestly.
-
-### 2d. Canvas and surfaces
-
-Use `e2e/fixtures/canvas.html`.
-
-- Ask: **“Click the middle of the canvas.”** Expect a `click_at` card with `trusted input`, a pixel-change percentage, and a red dot drawn on the canvas.
-- Ask: **“Scroll down on the canvas.”** Expect `wheel: true` and the canvas offset to change.
-- **Pass:** the canvas reports `trusted 1 · synthetic 0`; no DOM event is relied on.
-
-### 2e. Shadow DOM, iframes, select, hover
-
-Use `e2e/fixtures/advanced.html`.
-
-- Ask: **“Click Shadow action.”** The shadow-DOM counter becomes 1.
-- Ask: **“Click Frame action in both frames.”** Both iframe counters become 1, and labels show `(iframe)`.
-- Ask: **“Set Country to Canada.”** The select shows `ca`.
-- Ask: **“Hover Menu, then click Menu item.”** The menu item appears after hover and its counter becomes 1.
-- **Pass:** no missed controls and no cross-frame confusion.
-
-### 3. Scroll
-
-- Ask: **“Scroll down by about 700 pixels and tell me which marker is visible.”**
-- Expect a `scroll` card with a fresh screenshot and `y=700/…`, then an answer mentioning **BETA-MARKER**.
-- Ask again to reach the bottom; expect `bottom` in the card metadata and the model to say it cannot scroll further.
-- **Pass:** the page actually moves; the card reports the same scroll position; the model does not repeat a no-op scroll indefinitely.
-- Try a second page with a nested scroll container (e.g., a social feed). The card should name the container (`div…`) rather than `document`.
-
-### 4. Tabs
-
-- Open a second tab at `/second.html` and return to `/article.html`.
-- Ask: **“Switch to the Second Fixture Page tab and tell me which marker is on it.”**
-- Expect a `switch tab` card with a fresh screenshot and an answer mentioning **SECOND-MARKER**; the model should switch by title/URL query without listing tabs first.
-- Then ask: **“List the tabs in this window.”** and expect a `tabs` card with rows (id, title, active marker).
-- The active-tab line at the top changes to “Second Fixture Page”.
-- **Pass:** the tab actually changes; the screenshot is from the new tab; no clicks are attempted.
-
-### 5. Stop / pause
+- Ask for an off-screen target without naming a tool. The model should use bounded semantic find as a fallback; reveal must scroll only, preserve focus/selection/content, invalidate old coordinates, and return a fresh full view.
+- Duplicate matches without an explicit occurrence must not choose arbitrarily. Explicit first/last/integer occurrence should reveal only that match. Known canvas editors must fail closed.
+- In a fresh chat, ask to open the disposable personal destination by name without giving its URL. Expect `browser_places` before search/guessing, then navigation to the exact returned URL. Verify the tab and remove the bookmark.
 
-- Click **Pause** in the side panel.
-- Ask the agent to scroll. Expect a clear “browser access is paused” error or a text-only response; the page must not move.
-- Click **Pause** again to resume; scroll should work.
-
-### 6. Auto-view off
-
-- Settings → uncheck **Attach a fresh view to every message** → save.
-- Ask: “What is on this page?”
-- Expect the model to call `browser_screenshot` explicitly (or ask for a view), rather than starting with a current-view card.
-- Re-enable auto-view afterwards.
-
-### 7. Protected page
-
-- Switch to `chrome://settings` (or any `chrome://` page).
-- Ask what is on the page.
-- **Pass:** a clear “Chrome blocks screenshots/scripts on this page” error; no blank screenshot; the side panel remains usable.
-
-### 8. Missing bridge
-
-- Close the side panel; send another prompt after reopening? (The panel is the bridge.)
-- Stop the companion (`Ctrl+C`). The banner should show “Companion offline”; no crash.
-- Start `npm run dev` again; click Reconnect; the token should still work (it is persisted).
-
-### 9. Typing, keys, navigation, waiting
-
-Use `e2e/fixtures/form.html`.
-
-- Ask: **“Type ‘Jane Doe’ into the Full name field.”** Expect a `type` card with `replace`, the character count, `value now "Jane Doe"`, and the input event count in `#events` increasing.
-- Ask: **“Append ‘ — test’ to the same field.”** The value keeps the old text and gains the suffix (`mode: append`).
-- Ask: **“Type a message in the Notes box and click Submit”** (or use `submit`): the form records the values in `#result`.
-- Ask: **“Press Tab, then press Enter.”** Focus moves to the next field and Enter submits.
-- Ask: **“Press Ctrl+K.”** The fixture records the shortcut as a trusted keydown.
-- Ask: **“Click into the editor and type ‘hello’.”** The focused editor receives trusted `Input.insertText`.
-- Ask: **“Go to 127.0.0.1:17872/second.html.”** Expect a `navigate` card, the URL changes, and a fresh view of the second page; then **“Go back.”**
-- Ask: **“Wait for READY on the page, then tell me what it says.”** Expect a `wait_for` card with `found` and a non-zero elapsed time.
-- Ask: **“Type into the password field.”** The card must show `value now "[password N chars]"`, never the secret.
-- **Pass:** no typing lands in the wrong element; navigation is http(s) only; waits report `found`/`timedOut` honestly.
-
-### 9d. Selection, fast views, reasoning speed
-
-Use `e2e/fixtures/form.html` and a disposable Google Doc.
-
-- Ask: **“Select the paragraph that says SELECT-ME-ALPHA and tell me what is selected.”** Expect a `select` card with the character count and a text preview; the page selection is highlighted.
-- Ask a select with identical start/end (or “click without selecting”): expect `selection collapsed (nothing selected)`.
-- On Google Docs, attempt `browser_select`: expect `DOCS_CANVAS_SELECT_UNSUPPORTED` before any drag or document change. Use exact Find or guarded replacement tools instead; drag selection must never be used for Docs editing.
-- On Google Docs, create `Benchmarks: yea` and a second unchanged paragraph. Ask: **“Delete only the word yea after Benchmarks:. Do not change anything else.”** Expect one `browser_docs_replace_text` call with `removed_text` and `verifiedBy:"find-counter"`, one final view, no manual Find and Replace calls, and no collateral edits. Repeat with a non-empty whole-title replacement and expect `replaced_text`. With duplicate target text, expect `DOCS_MATCH_NOT_UNIQUE` before mutation.
-- Rename a disposable document and expect one `browser_docs_rename` call with `renamed` and `verifiedBy:"document-title"`; title-field focus must be verified before Enter. Simulate focus failure and confirm Enter is never sent.
-- Replace `This Benchmarks…` with `Benchmarks…` when the heading already contains `Benchmarks`: expect successful replacement with `matchCount:2`, not a verification timeout. After three consecutive replacement failures, expect `DOCS_FAILURE_CIRCUIT` and no further speculative or canvas edits.
-- On a line that is not already Playfair Display, ask: **“Set only this line to Playfair Display.”** Expect one `browser_docs` call with `action:"set_font"`, `applied`, and `verifiedBy:"toolbar"`, plus one final view—not a model-driven sequence of menu actions.
-- Set a unique line to an initially unadded font such as Syne. Expect More fonts add → Done closed → ordinary menu reopened → apply, not success merely because the font was added. A request for exact `Syne` must never select `Syne Mono`.
-- Repeat the already-correct font: expect `already_applied` and no menu mutation. Try duplicate target text and `1 of 2`: expect no formatting change. Try a nonexistent font: expect `font_missing`; with removal explicitly requested, expect only `removed_text`, not a claim that the paragraph break vanished.
-- **Compound formatter:** in a fresh disposable document, create a unique `Release heading` paragraph and a sentinel paragraph with different text and formatting. Ask: **“Format only the exact text Release heading as Title, 28 pt, bold, Playfair Display. Do not change anything else.”** The first tool call must be one `browser_docs_format` with `paragraph_style:"Title"`, `font_size:28`, `bold:true`, and `font:"Playfair Display"`. Expect `completed`, four verified per-attribute results, one Find selection, and one final view, with no preliminary Find/menu calls, generic Docs batch, or replacement+format sequence. Confirm that size-field focus and value were verified before Enter. Independently inspect the containing paragraph's Title style, exact size/bold/font, and confirm that the sentinel and every other character and format are unchanged.
-- **Toggle off:** on another unique range that starts bold, italic, and underlined, ask to remove only bold. Expect `browser_docs_format` with `bold:false` (a desired final state, not a blind toggle), final bold off, and italic/underline unchanged.
-- **No-op:** repeat the original compound request after all four attributes are already correct. Expect `already_applied`, `appliedCount:0`, `alreadyAppliedCount:4`, no formatting mutation, and one final view.
-- **Duplicate refusal:** put the exact target text in two paragraphs and request formatting without an ordinal. Expect `DOCS_MATCH_NOT_UNIQUE` before formatting; independently confirm that neither occurrence nor any neighboring content changed.
-- **Missing-font partial:** on fresh unique non-bold text, request bold plus a definitely unavailable font. Expect `partial`, `appliedCount:1`, an applied bold result, and `failure.attribute:"font"` / `failure.code:"DOCS_FONT_MISSING"`. The font request must not delete text, and the model must not claim full success. Independently confirm that only bold changed and all document text is intact.
-- **Compound writer:** in a fresh disposable document with a differently formatted sentinel paragraph, give one medium-effort instruction: **“Append a Title ‘Release heading’ in Playfair Display, 28 pt, bold, then an intentional blank Normal paragraph, a numbered list of 3 items (Alpha, Beta, Gamma), a bulleted list of 3 items (Red, Green, Blue), and a closing paragraph in Roboto, 11 pt. Leave everything else unchanged.”** Expect one `browser_docs_write` call with five blocks and no preliminary click/type/Find/menu calls. Expect `completed`, `verifiedCount:5/5`, `attemptedCount:5`, `verifiedBy:"export"`, and the appended outline. Independently inspect the Title/font/size/bold, exactly one blank Normal paragraph, numbering 1–3, three bullets, Roboto 11 closing text, clean list exits with no empty list item, and unchanged sentinel text and formatting. The model must not spend one thinking step per block.
-- **Inline writer and time context:** in another fresh disposable document with a differently formatted sentinel, give one medium-effort instruction: **“Append one single-line paragraph that starts with today’s date, then ‘ — Welcome ’. Use Roboto 11 throughout except ‘quick’ in Merriweather and ‘Ctrl+Shift+7’ in Roboto Mono. Make ‘bold’ bold, ‘italic’ italic, ‘underlined’ underlined, and ‘blue’ #0000FF with a #FFFF00 highlight. Include those exact words after Welcome in that order. Leave everything else unchanged.”** Expect one `browser_docs_write` call using `runs`, no time-service navigation, no preliminary typing, and no post-typing Find or formatting recovery. Independently verify the current local date, exact run text/order, font/size/emphasis/color/highlight on each run, and unchanged sentinel.
-- **Feature-document composition:** from a fresh empty disposable Doc at medium effort, give the original Feature Test Document instruction once: rename to `Feature Test Document`; Letter/portrait/1-inch margins; Playfair Display enlarged Title plus Subtitle with today's date; a 2–3-sentence Roboto 11 intro containing a Merriweather sentence and bold/italic/underlined/blue/yellow-highlight words plus a Roboto Mono phrase; a page break; Heading 1 Section One/Two/Three; and under Section One three numbered items, three bullets, and two checklist items with exactly one checked. Target exactly three semantic mutations—`browser_docs_rename`, `browser_docs_page_setup`, and one `browser_docs_write`—with no primitive menus/coordinates/manual checklist or page-break recovery and zero failed calls. At most one independent `browser_docs_read` is allowed. Independently inspect Page setup and exported HTML for every run/format, the page-break position, all list types, exactly one checked item, and no collateral or extra content. Repeat from the same fresh state and record wall time, steps, calls, failures, retries, and recovery edits; a recovered final document is not acceptance.
-- **Writer recovery:** repeat with a definitely unavailable font. Expect a clear failure or explicit partial result, no claim of full success, no duplicate input or blind retry, and no dropped requested attributes. Recovery must inspect and fix the exact target or use one scoped Ctrl+Z for a known accidental latest mutation, followed by fresh view/export verification; no select-all/delete, content clearing, repeated Backspace, or blind undo chains. Use `browser_docs_read` with `format:"outline"` to inspect actual structure without navigating; then report the correct/partial/wrong/blocked state independently.
-- **General composition:** when several calls are already known for one logical unit, expect them in one assistant response, with mutations executed exclusively in model order. Only `browser_tabs`, `browser_read_text`, and `browser_docs_read` may overlap; no concurrent document writes. Do not add a screenshot solely to recheck evidence already present in a result.
-- Ask: **“Take a quick look at the page.”** Expect `browser_screenshot` with `detail:"fast"`; card metadata shows a 640 px image.
-- With **Auto** effort, ask **“delete the extra paragraph”** or **“add a comment here”** — the policy line should say `reasoning low (act, auto)` and thinking should stream from the first step. Ask **“what does this page say?”** — `reasoning low (inspect, auto)`.
-- **Pass:** selection and typing outcomes are honest, only the intended Docs range/paragraph changes, each semantic font/format operation returns one final view, and no dependent Docs actions are batched. Tool statuses and the agent's final answer are diagnostic only: independently inspect final text and formatting after every scenario, and record collateral or recovery edits even when repaired.
-
-### 9e. Semantic role paths and exact Docs ranges (live acceptance pending)
-
-Run these scenarios at **medium effort** in fresh chats, each from a newly created disposable document in the stated initial state. Reload the normal unpacked extension and reopen the panel before starting. None of the three new tools has live Google Docs acceptance yet; a green unit/fake-driver or isolated-fixture suite is not a pass here.
-
-#### A. Ordinal selection and one harmless primitive
-
-- Start with three separate paragraphs containing exactly `Duplicate target`, followed by a differently formatted `Sentinel: unchanged` paragraph. Give one instruction: **“Select only the second occurrence of the exact text ‘Duplicate target’ and make just that selected text bold with one keyboard formatting action. Do not change anything else.”**
-- Expect `browser_docs_select_text` with `occurrence:2`, `scope:"text"`, then exactly one `browser_press_key` Ctrl+B primitive with a full fresh view. Selection must return `status:"selected"`, `matchCount:3`, `current:2`, `occurrence:2`, and `verifiedBy:"find-counter"` as a text-only result with no screenshot. No manual Find, drag selection, generic Docs batch, or formatting before the verified selection.
-- Independently inspect an HTML export: only the second exact duplicate is bold; the first, third, sentinel, all text, links, and other formatting are unchanged. The selection result and final answer are not acceptance evidence.
-- Repeat separately from the same fresh three-duplicate state for `occurrence:"first"` and `occurrence:"last"`, applying the same single bold primitive and independently proving that only the requested occurrence changed.
-- Separately test wrapped containing-paragraph selection in a fresh document with a unique paragraph such as `Prefix anchor suffix` and sentinels. Request the exact anchor with `scope:"paragraph"`, then apply one harmless bold primitive. Expect the result to identify the full selected paragraph, `anchorText:"anchor"`, and its `paragraphIndex`; export must prove the whole intended paragraph—not merely the anchor or another paragraph—changed, with no collateral edits.
-- On duplicate text, omitting `occurrence` must fail rather than silently choosing first. There is no `occurrence:"all"` or persistent multi-select mode.
-
-#### B. One multi-range format call, then an exact second-edit failure
-
-- Fresh setup: a Normal-text `Release heading`; three separate `Duplicate target` paragraphs; a bulleted `List sentinel`; a `Link sentinel` pointing to `https://example.com/keep`; and a differently formatted `Plain sentinel`. Give one medium-effort instruction: **“Make ‘Release heading’ Heading 1, Playfair Display, 28 pt, bold, #0000FF with a #FFFF00 highlight. Make only the second ‘Duplicate target’ Roboto, 12 pt, italic, and underlined. Leave every other character, format, list, and link unchanged.”**
-- The first formatting call must be one `browser_docs_format_many` containing two ordered edits, with `occurrence:2` on the duplicate. Across the edits this exercises all eight attributes: paragraph style, font, size, bold, italic, underline, color, and highlight. Expect `completed`, `editCount:2`, `attemptedCount:2`, `verifiedCount:2`, `appliedCount:2`, `remainingCount:0`, `verifiedBy:"export"`, per-edit results, and one final view—no preliminary selection/menu calls or generic Docs mutation batch.
-- Independently inspect exported HTML for every requested run and paragraph property, only the second duplicate changed, and unchanged sentinels, list type/metadata, link text, and a structured link destination that still resolves to `https://example.com/keep` (including when Docs exports a redirecting `href`). Account for legitimate paragraph-style inheritance only inside the styled paragraph; any unrequested font/size/bold change elsewhere is collateral.
-- **Second-edit failure:** restore the same fresh initial state and add unique `First range`, `Second range`, and `Third range` paragraphs. Request one `browser_docs_format_many` with three ordered edits: bold `First range`; bold `Second range` and set a definitely unavailable font on that same second edit; italicize `Third range`. Expect the operation to stop at edit index 1. Exact result: overall `partial`, `editCount:3`, `attemptedCount:2`, `verifiedCount:1`, `appliedCount:1`, `remainingCount:1`; result 0 `completed` and export-verified, result 1 `partial` with bold applied and font failed, result 2 `unattempted` with its attributes unattempted; `failure.index:1`, `failure.attribute:"font"`, and `failure.code:"DOCS_FONT_MISSING"`. Do not retry the whole call or claim the third edit ran. Independently export-check the first two ranges' exact partial state, an unchanged third range, and no collateral edits.
-- Separate negative checks must fail before mutation: overlapping ranges (`DOCS_FORMAT_OVERLAPPING_EDITS`), conflicting paragraph-style edits, `paragraph_style` on an `LI`, and opaque structures such as tables (`DOCS_FORMAT_UNSUPPORTED_STRUCTURE`). Generic Docs mutation batches remain blocked.
-
-#### C. Combined exact selection, menu path, and multi-range formatting
-
-- Fresh setup: three separate `Menu target` paragraphs, unique `Batch heading` and `Batch accent` paragraphs, and differently formatted text/list/link sentinels. In a fresh chat at medium effort, give this instruction **once, with no guidance or continuation**: **“Make only the second ‘Menu target’ strikethrough using the Format → Text menu. Then make ‘Batch heading’ Heading 2 and 18 pt, and make ‘Batch accent’ bold and #008000. Leave all other text, formatting, lists, and links unchanged.”**
-- Target one `browser_docs_select_text` for ordinal 2, one `browser_click_role` for the exact role/name Format → Text → Strikethrough page-chrome menu path, then one `browser_docs_format_many` with the two supported edits, all executed exclusively in order. Menu reveal/wait/revalidation belongs inside `click_role`; do not use editor-content role clicks, guessed coordinates, manual Find, or a generic Docs mutation batch.
-- `roleClick.status:"completed"` proves path dispatch, not strikethrough or the requested document outcome. `ROLE_CLICK_UNSETTLED` and `DOCS_UNSETTLED` are not safe to retry; after `DOCS_UNSETTLED`, issue no further mutation and inspect only after the tab is stable.
-- Allow **at most one independent `browser_docs_read` with `format:"html"`** after the final mutation. Verify strikethrough only on the second duplicate, both multi-range edits, unchanged sentinels and structured link destinations, and no extra content or collateral formatting.
-- For every scenario and repetition, record wall time, model steps, tool calls, failed calls, retries, wrong-target actions, recovery edits, and collateral edits even if repaired. Repeat from the same fresh initial state to distinguish a lucky run from reliability. A recovered final document is not acceptance; **do not mark live Docs acceptance done until these normal-unpacked-extension runs pass independently.**
-
-### 9c. Batching and view modes
-
-Use `e2e/fixtures/form.html`.
-
-- Ask: **“Fill in the name and notes and submit.”** Expect a single `batch` card listing several actions, a header like `batch: N actions · S executed without tool errors · Xms`, and **one** final view; the form records the values. Any `changed:null` action is separately counted as UNVERIFIED, not called successful.
-- Ask for a sequence with a deliberately wrong label (or use a batch with one bad action) and check the card shows `FAILED at [i]` and, with `stop_on_error:false`, continues after the failure.
-- Do several actions in a row on the same page: after the first (full) view, later cards should say **compact** and carry no screenshot thumbnail, only a label delta like `labels +1/-1, 39 unchanged`.
-- Ask **“show me the page”**: the next action should return a full view (a thumbnail) because the model asked for `view:"full"`.
-- Take a view, do a compact action, then ask the agent to click an element whose label was only shown in the earlier view. It must resolve (cumulative label registry), not fail `UNKNOWN_LABEL`.
-- Ask the agent to press the `/` key: it must be accepted (no `BAD_KEY`).
-- **Pass:** batches run as one call, compact results never contain a stale screenshot, and label ids from earlier views still resolve.
-
-### 9b. Canvas editor typing
-
-- Open a Google Doc, click a caret position with `browser_click_at`, then ask the agent to type a short sentence; it must use label-less `browser_type` and `browser_press_key` for caret movement.
-- Once the caret is known, ask for several lines of contiguous prose with intentional blank lines. Expect one `browser_type` call containing the prose and newlines, not one call per line, followed by visual confirmation in the full fresh view. Unverified canvas input must not be blindly retyped.
-- **Pass:** text appears at the caret with the intended line breaks; the agent does not claim it cannot type.
-
-### 10. Debug log export
-
-- Click the **▤** button in the topbar.
-- The **Debug log** dialog shows the run id, log path, event count, screenshots, turns, warnings/errors, size, model, and extension context.
-- Leave **Include screenshots** and **Include raw DSH session log** checked.
-- Click **Download bundle**.
-- **Pass:** a `crazyagent-log-<runId>.zip` download starts; a toast names the bundle and size; no UI errors.
-- Open the ZIP: `summary.md` contains the user prompt, browser actions, tool calls, assistant text, screenshots, timings, and signals; `events.jsonl` contains detailed events; `screenshots/` contains the captures; `dsh-session.jsonl` is present.
-- Check that the pairing token and base64 image blobs do **not** appear in `events.jsonl`.
-- Click **Copy summary** and paste into a text editor; it should be readable.
-- Click **Copy logs path**; the path should exist on disk.
-- Uncheck screenshots, export again, and confirm the new ZIP has no `screenshots/` entries.
-
-### 11. Privacy controls
-
-- Confirm the toolbar badge shows **ON** only while a browser command is running.
-- Confirm `npm run dev` logs no page text or image bytes (only bridge status/errors).
-- Check `.dsh-home/attachments/` contains the screenshots you expect and `.dsh-home/browser-agent/logs/<runId>/` contains `events.jsonl`, a `screenshots/` directory, and a summary.
-- Inspect `events.jsonl`: it should contain extension/plugin/bridge/DSH events, but no pairing token and no inline base64 image data.
-
-
-## Performance observations
-
-Record from the side-panel footer and `docs/PHASE1-BENCH.md`:
-
-- simple “what is this page” turn: _____ s;
-- scroll-and-describe turn: _____ s;
-- tabs + switch turn: _____ s;
-- type-into-field turn: _____ s;
-- navigate + wait turn: _____ s;
-- look time: _____ ms;
-- screenshot size/dimensions (from the card or `.dsh-home`): _____.
-
-Local reference (Edge 151, DPR 2): snapshot **95 ms**, auto-view **58–73 ms**, 1280×966 JPEG ~96 KB, 6.4 s and 10.0 s turns.
-
-## Sharing a debug bundle
-
-When something looks interesting, attach `crazyagent-log-<runId>.zip` to the chat, or paste `summary.md` plus the relevant `events.jsonl` lines. Treat the bundle as sensitive page data; exclude screenshots when the page shows private content.
-
-## Cleanup
-
-```sh
-npm run clean -- --yes   # removes .dsh-home and logs
-npm run setup            # required before the next run
+### Tables
+
+Use `table.html`, then the configured isolated live-table harness, and finally authenticated Pivot when available.
+
+- Read a table and independently compare headers, row labels, values, and read-only cells. Reads must not mutate anything.
+- Request a multi-cell update using a mix of indexes and exact unique header/row names. Expect actual cell-control targeting, validation before input, no coordinate typing, already-correct skipping, and per-cell readback.
+- Verify every target and every collateral cell independently. Include computed cells and preserved names. A failure must stop later edits and report them unattempted.
+- On Pivot, separately verify server persistence after reload. DOM readback alone is not persistence proof. Record whether the model actually selected `browser_table`; direct fixture calls do not establish that.
+
+### Google Docs tables
+
+Use a fresh disposable document in the authenticated docked panel. The direct real-extension harness is `scripts/edge-docs-table-e2e.mjs`; it requires an isolated signed-in Docs profile and refuses to create anything when signed out.
+
+- Give one instruction to create a 3×4 table with twelve distinct words, bold and yellow-highlight the header, and add two rows. Expect only `browser_docs_table` mutations: create with values, format, and insert_rows; no coordinates, TSV paste, manual Tab/type/menu calls, or repair edits.
+- Independently export-check all twelve values, header bold/highlight, unchanged data rows, and the 5×4 shape. Repeat with duplicate cell values and an empty-cell write to confirm exact occurrence/navigation planning.
+- Exercise insert/delete row and column operations and explicit delete_table. Validate every target, collateral cell, and operation count. Merged-cell writes/structural edits and unanchored empty tables must fail closed rather than fall back to primitives.
+- Reload and export again for server persistence. Tool statuses and the agent’s answer are not acceptance evidence. Record wall time, calls, failures, retries, wrong targets, and recovery edits.
+- The latest attempt could not run these steps because both available isolated profiles were signed out. Unit/fake-driver results do not check off this subsection.
+
+### Batches and views
+
+Use `form.html` or `click.html`.
+
+- Fill several known fields and submit in one batch. Expect ordered per-action results, no intermediate screenshots, and one final view; verify form state.
+- Test an ordinary bad action with stop-on-error enabled/disabled. Then test a false precondition: no dispatch and no mutation. Test a false postcondition: dispatch occurred, later actions stopped, and blind retry is unsafe.
+- Confirm malformed nested argument keys fail before provider bridge traffic or executor guards/mutations/captures. Markup-shaped string **values** must remain valid data.
+- Check compact/none/full wait views and cumulative labels. Known canvas editors must still return full views where required.
+
+### Capture, clipboard, and dialogs
+
+- Capture viewport, full-page, and region views. Independently check dimensions and the full-page tail, viewport/scroll restoration, and that full/region images do not become coordinate bases.
+- Copy/read/write/clear/paste virtual text and capture a PNG to the virtual clipboard. Paste into a real contenteditable and inspect actual insertion. Check whether the OS clipboard was preserved, restored, overwritten, or bypassed; handler consumption alone is not attachment proof.
+- In one turn, capture the same bytes twice and inspect both model results and debug files: only the duplicate model image block is omitted; fresh metadata and both stored captures remain. A later turn must re-admit the image.
+- Use `dialog.html`: alert auto-accepts; confirm/prompt waits for explicit resolution; accepted prompt text reaches the page. Unintended beforeunload remains pending without a stale view; intended navigation resolves only its own beforeunload.
+
+## 3. Google Docs acceptance
+
+Reload the normal unpacked extension and reopen the docked panel before this section. Use fresh disposable documents, fresh chats, medium effort, and one instruction without guidance or continuation. Inspect exported HTML and final UI state independently.
+
+### A. Exact replacement and simple formatting
+
+Create a bold 28 pt first line and an unchanged sentinel:
+
+```text
+Benchmarks: yea
+This paragraph must remain exactly unchanged.
 ```
 
-Remove the unpacked extension from `chrome://extensions` if you are done. The test fixture server can be stopped with Ctrl+C.
+Ask:
+
+> Delete only the word “yea” after “Benchmarks:”. Preserve the colon and the first line’s bold 28 pt formatting. Do not change any other text.
+
+Expect one `browser_docs_replace` edit, counter verification, and a final full view. Final text must be `Benchmarks:` plus the unchanged sentinel, with bold 28 pt preserved. Repeat with a non-empty replacement and duplicate target text; ambiguity must fail before mutation.
+
+On another unique line, request Title, 28 pt, bold, and Playfair Display in one `browser_docs_format` edit. Expect no preliminary Find/menu calls, per-attribute verification, and one final full view. Check the containing paragraph and sentinel independently. Also check desired-state `bold:false`, an already-correct no-op, missing-font partial behavior, and duplicate refusal. Missing font must not delete text unless the explicit unique font-only `remove_if_missing:true` route was requested.
+
+Rename a disposable document and verify both the Rename-field safeguards and committed document title.
+
+### B. Ordinal selection and multi-range formatting
+
+Create three separate `Duplicate target` paragraphs and differently formatted text/list/link sentinels.
+
+- Select only the second occurrence with `browser_docs_select_text`, apply one Ctrl+B primitive, and export-check that only occurrence 2 changed. Repeat first/last and containing-paragraph selection from fresh states. Omitted occurrence on duplicates must fail; there is no `all` mode.
+- In one `browser_docs_format` call, format a unique heading across paragraph style/font/size/bold/color/highlight and only the second duplicate across font/size/italic/underline. Expect internal `format_many`, per-edit export verification, and no generic Docs batch. Check all eight attributes, occurrence targeting, sentinels, list metadata, and structured link destination.
+- Completed export-verified multi-route formatting may return `view:"none"` with `DOCS_EXPORT_VERIFIED`; partial/failed results must retain a final view. Skipped capture is not acceptance evidence.
+- Restore fresh state and make the second of three edits fail with an unavailable font. Expect the first verified, the second explicitly partial, and the third unattempted. Do not retry the whole call. Independently inspect exact partial state and collateral.
+
+For a menu-path scenario, select ordinal 2, use one exact `browser_click_role` path for Format → Text → Strikethrough, then one semantic multi-range format call. Role-path completion proves dispatch, not the document outcome; verify strikethrough and all collateral by export. `ROLE_CLICK_UNSETTLED` and `DOCS_UNSETTLED` are not safe to retry.
+
+### C. Compound writing and page setup
+
+From a fresh empty disposable document, give one instruction that:
+
+- renames it `Feature Test Document`;
+- sets Letter, portrait, 1-inch margins;
+- writes a formatted Title and dated Subtitle, a mixed-inline introduction, a page break, three headings, numbered/bulleted lists, and two checklist items with exactly one checked.
+
+Target exactly three semantic mutations: `browser_docs_rename`, `browser_docs_page_setup`, and one `browser_docs_write`. No primitive menu/coordinate/manual list/page-break recovery and zero failed calls. Allow at most one independent `browser_docs_read`.
+
+Export-check every run’s text/font/size/emphasis/color/highlight, paragraph styles, page-break position, list type/order, exact checked state, clean list exits, and absence of extra content. Repeat from the same fresh state and record all reliability metrics. A correct document after repairs is recovered, not accepted.
+
+Repeat a writer scenario with a definitely unavailable font. Expect an honest failure/partial result with final view retained, no duplicate/blind input, and no dropped attributes. Recovery must inspect the exact target or use one scoped undo for a known latest accident, never select-all/delete, clearing, repeated Backspace, or blind undo chains.
+
+### D. Turn-level final evidence
+
+- After a counter-verified replacement, expect at most one `docs.final.check` nudge followed by one full offset-zero untruncated `browser_docs_read` and reconciliation.
+- Completed export-verified writes/formatting must not trigger a redundant read. Later mutations invalidate earlier evidence.
+- Generic Docs typing/key/click content mutations also require final evidence; read-only operations do not.
+- Partial/failed mutations and failed/partial/truncated reads remain unverified, get no repeated nudge loop, and must not be presented as completed.
+
+## 4. Debug export and cleanup
+
+- Export a debug bundle with screenshots/raw session enabled. Verify `events.jsonl`, summaries, actual captures, and the DSH session. Export-verified skipped Docs captures should have no final JPEG; exact image dedupe should not remove stored captures.
+- Confirm tokens, API keys, authorization headers, and inline base64 are redacted. Page content, prompts, reasoning, and screenshots remain sensitive.
+- Export without screenshots and verify they are absent. Review bundles before sharing.
+
+Cleanup:
+
+```sh
+npm run clean -- --yes   # deletes .dsh-home, including sessions/logs/remembered secrets
+npm run setup
+```
+
+Remove disposable bookmarks/documents and stop only the fixture/browser/companion processes you started.

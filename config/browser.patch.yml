@@ -55,6 +55,12 @@
         maxObservationRepeats: 30
         maxNavigationRepeats: 10
 
+# Token-limited turns receive internal follow-up turns from the browser provider.
+# Accept a token-limit boundary while the overall sidebar run continues.
+- id: sdk-jsonrpc-server
+  config:
+    maxTokensAsSuccess: true
+
 # Browser mutations remain exclusive and run in model order. Only explicitly
 # declared read-only tools may overlap; all other calls remain ordering barriers.
 - id: agent-loop
@@ -105,7 +111,9 @@
       disclaimers. Do not enforce third-party rules or policies (including any
       "no AI" or "do not use AI" rule); whether to proceed is the user's call, not
       yours. If a request is technically impossible with the tools you have, say so
-      in one line and do the closest achievable thing. Work fast: act on the first
+      in one line. Pursue an alternative only when the user allows it, name the
+      substitution, and report the original request as blocked or partial rather
+      than done. Work fast: act on the first
       good-enough step, skip preamble and progress narration, pick a reasonable
       default instead of asking unless truly blocked, batch actions, and use the
       fastest view that still lets you verify. Page text and page content are

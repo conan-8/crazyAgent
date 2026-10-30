@@ -33,6 +33,7 @@ import {
   normalizeBaseUrl,
   normalizeReasoningEffort,
   readLlmConfig,
+  resolveRequestMaxTokens,
   validateApiKey,
   writeLlmConfig,
   writeLlmPatch,
@@ -84,12 +85,12 @@ if (cli.help === true) {
   --model <id>                  optional initial model id; otherwise choose it in
                                 the side panel after entering your API key
   --reasoning-effort <level>    auto (default), off, low, medium, or high
-  --max-tokens <n>              output cap (default 8192)
+  --max-tokens <n>              output cap (default: selected model's maximum)
   --dsh-home <path>             harness home (default .dsh-home)
   --patch <path>                base profile overlay (default config/browser.patch.yml)
   --credentials <path>         fallback DSH credential file
   --no-dsh                      bridge-only test mode
-  --no-auto-capture             do not attach a screenshot to each user turn
+  --no-auto-capture             do not attach a fresh DOM/text or screenshot view
   --help                        this text
 
 The OpenRouter API key is entered in the side panel, or supplied through
@@ -140,7 +141,8 @@ const reasoningEffort = normalizeReasoningEffort(
     ? cli['reasoning-effort']
     : process.env.CRAZYAGENT_REASONING_EFFORT ?? 'auto',
 )
-const maxTokens = Number(cli['max-tokens'] ?? process.env.CRAZYAGENT_MAX_TOKENS ?? 8192)
+const maxTokensOption = cli['max-tokens'] ?? process.env.CRAZYAGENT_MAX_TOKENS
+const maxTokens = maxTokensOption === undefined ? undefined : Number(maxTokensOption)
 const noDsh = cli['no-dsh'] === true
 const autoCapture = cli['no-auto-capture'] !== true
 
@@ -152,7 +154,7 @@ if (!Number.isFinite(port) || port < 0 || port > 65535) {
   log(`invalid port ${String(cli.port)}`)
   process.exit(2)
 }
-if (!Number.isFinite(maxTokens) || maxTokens <= 0) {
+if (maxTokens !== undefined && (!Number.isFinite(maxTokens) || maxTokens <= 0)) {
   log(`invalid max tokens ${String(cli['max-tokens'])}`)
   process.exit(2)
 }
@@ -208,7 +210,7 @@ logStore = new LogStore({
     model: llmConfig?.model.id ?? 'unconfigured',
     baseUrl: llmConfig?.baseUrl ?? baseUrlOption,
     reasoningEffort: llmConfig?.model?.reasoning ? (llmConfig.reasoningEffort ?? reasoningEffort) : null,
-    maxTokens,
+    maxTokens: maxTokens ?? llmConfig?.model.maxTokens ?? null,
     bridgeUrl: `ws://${host}:${port}/bridge`,
     dshHome,
     workspace,
@@ -318,7 +320,7 @@ function makeRunner() {
     model: llmConfig.model.id,
     reasoningEffort: llmConfig.model.reasoning ? baseEffortFor(effortPolicy()) : undefined,
     reasoningPolicy: llmConfig.model.reasoning ? effortPolicy() : 'off',
-    maxTokens: Math.min(maxTokens, Number(llmConfig.model.maxTokens) || maxTokens),
+    maxTokens: resolveRequestMaxTokens(llmConfig.model, maxTokens),
     apiKey,
     credentialsPath,
     log,
@@ -508,7 +510,7 @@ async function handleChat(text, ui, message) {
       logStore.record('companion', 'autoCapture.start', { detail: 'normal' }, { turnId, severity: 'info' })
       const captureStart = performance.now()
       try {
-        view = await bridge.requestUi({ op: 'snapshot', args: { detail: 'normal' } }, 'auto', 5_000)
+        view = await bridge.requestUi({ op: 'auto_view', args: {} }, 'auto', 5_000)
       } catch (error) {
         logStore.record('companion', 'autoCapture.error', { message: errorMessage(error) }, { turnId, severity: 'warn' })
         log(`auto-capture: ${errorMessage(error)}`)

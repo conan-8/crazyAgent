@@ -17,6 +17,8 @@ export const CLIPBOARD_PREVIEW_CHARS = 200
 export const CLIPBOARD_READ_MAX_CHARS = 20_000
 /** browser_type accepts at most 20,000 chars, so a typed paste is capped here. */
 export const CLIPBOARD_TYPE_MAX_CHARS = 20_000
+/** Decoded byte cap for one PNG in chrome.storage.session's 10 MB quota. */
+export const CLIPBOARD_IMAGE_MAX_BYTES = 6_000_000
 /** Marker appended to capped text so the model knows it was cut. */
 export const CLIPBOARD_TRUNCATION_MARKER = '\n[clipboard truncated]'
 
@@ -110,15 +112,52 @@ export function makeClipboardEntry(input) {
   }
 }
 
+function normalizeClipboardImage(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  if (value.mimeType !== 'image/png' || typeof value.data !== 'string' || value.data.length === 0) return undefined
+  if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(value.data) || value.data.length > Math.ceil(CLIPBOARD_IMAGE_MAX_BYTES * 4 / 3) + 4) return undefined
+  const width = Number(value.width)
+  const height = Number(value.height)
+  const bytes = Number(value.bytes)
+  if (!Number.isSafeInteger(width) || width <= 0 || width > 32_768
+    || !Number.isSafeInteger(height) || height <= 0 || height > 32_768
+    || !Number.isSafeInteger(bytes) || bytes <= 0 || bytes > CLIPBOARD_IMAGE_MAX_BYTES) return undefined
+  return { data: value.data, mimeType: 'image/png', width, height, bytes }
+}
+
+export function makeImageClipboardEntry(input) {
+  const image = normalizeClipboardImage(input?.image)
+  if (!image) {
+    const error = new Error(`image must be a PNG of at most ${CLIPBOARD_IMAGE_MAX_BYTES} decoded bytes with valid dimensions`)
+    error.code = 'BAD_CLIPBOARD_IMAGE'
+    throw error
+  }
+  return {
+    kind: 'image',
+    text: '',
+    chars: 0,
+    source: typeof input?.source === 'string' && input.source.length > 0 ? input.source : 'screenshot',
+    tabId: Number.isSafeInteger(input?.tabId) ? input.tabId : null,
+    url: typeof input?.url === 'string' ? input.url : '',
+    at: Number.isFinite(input?.at) ? Number(input.at) : Date.now(),
+    image,
+  }
+}
+
 /**
  * Validate one value read back from chrome.storage.session. Storage can hold a
  * partial object after an interrupted write, so every field is re-checked and
  * the text is re-capped. Returns undefined for missing or unusable entries.
  * @param {unknown} value
- * @returns {{text: string, chars: number, source: string, tabId: number|null, url: string, at: number} | undefined}
+ * @returns {Record<string, any> | undefined}
  */
 export function normalizeClipboardEntry(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  if (value.kind === 'image' || value.image !== undefined) {
+    const image = normalizeClipboardImage(value.image)
+    if (!image) return undefined
+    return makeImageClipboardEntry({ ...value, image, at: Number.isFinite(value.at) ? Number(value.at) : 0 })
+  }
   if (typeof value.text !== 'string') return undefined
   const fitted = fitClipboardText(value.text)
   return {

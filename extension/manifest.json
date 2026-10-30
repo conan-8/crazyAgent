@@ -12,7 +12,10 @@
     "clipboardRead",
     "clipboardWrite",
     "debugger",
-    "webNavigation"
+    "webNavigation",
+    "topSites",
+    "bookmarks",
+    "history"
   ],
   "host_permissions": [
     "<all_urls>"

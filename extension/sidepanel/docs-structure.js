@@ -129,11 +129,12 @@ export function parseDocStructure(html) {
     const current = para
     para = undefined
     const cell = tables.at(-1)?.cell
+    const { marks, ...block } = current
     if (cell) {
       cell.text.push(current.text)
+      cell.paragraphs.push({ kind: 'para', ...block })
       return
     }
-    const { marks, ...block } = current
     blocks.push({ kind: 'para', ...block })
   }
   const expression = /<(\/?)([a-zA-Z0-9]+)([^>]*)>|([^<]+)/gu
@@ -261,6 +262,7 @@ export function parseDocStructure(html) {
           if (table.cell) {
             table.rows.at(-1)?.push({
               text: table.cell.text.join('\n').replace(/\n+$/u, ''),
+              paragraphs: table.cell.paragraphs.length > 0 ? table.cell.paragraphs : [{ kind: 'para', style: 'P', text: '', marked: '', runs: [] }],
               colspan: table.cell.colspan,
               rowspan: table.cell.rowspan,
             })
@@ -270,6 +272,7 @@ export function parseDocStructure(html) {
           if (!table.rows.length) table.rows.push([])
           table.cell = {
             text: [],
+            paragraphs: [],
             colspan: Math.max(1, Number(attr(attrs, 'colspan') ?? 1) || 1),
             rowspan: Math.max(1, Number(attr(attrs, 'rowspan') ?? 1) || 1),
           }

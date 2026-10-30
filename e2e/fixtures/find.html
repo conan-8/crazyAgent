@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CrazyAgent Find Fixture</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; margin: 0; color: #17202a; }
+    header, main { max-width: 760px; margin: auto; padding: 24px; }
+    section { margin: 20px 0; padding: 18px; border: 1px solid #ccd3db; border-radius: 10px; }
+    input, button { font: inherit; padding: 8px; }
+    .filler { height: 1500px; background: repeating-linear-gradient(45deg, #eef1f5, #eef1f5 20px, #e2e8ef 20px, #e2e8ef 40px); }
+    #selection { user-select: text; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Semantic find fixture</h1>
+    <p id="selection">Preserve this exact selection during semantic find.</p>
+    <label for="focus-field">Focus field</label>
+    <input id="focus-field" value="preserve this value" />
+    <span id="click-count">clicks 0</span>
+  </header>
+  <main>
+    <section>
+      <p id="inline-target">The silver <span>key</span> is under the third stone.</p>
+      <p class="duplicate">Duplicate needle first</p>
+      <p class="duplicate">Duplicate needle second</p>
+      <p hidden>HIDDEN-FIND-NEEDLE</p>
+      <p aria-hidden="true">ARIA-HIDDEN-FIND-NEEDLE</p>
+    </section>
+    <section>
+      <label for="control-input">Find control label</label>
+      <input id="control-input" value="CONTROL-VALUE-NEEDLE" />
+      <label for="password-input">Password fixture</label>
+      <input id="password-input" type="password" value="PASSWORD-FIND-SECRET" />
+    </section>
+    <div class="filler"></div>
+    <section id="destination">
+      <h2>Off-screen destination</h2>
+      <p>UNIQUE-FIND-MARKER inside the intended destination.</p>
+      <button id="destination-button" type="button">Destination action</button>
+      <span id="destination-state">destination idle</span>
+    </section>
+    <section>
+      <find-widget></find-widget>
+      <iframe src="frame-inner.html" title="Find fixture frame" style="width: 420px; height: 120px"></iframe>
+    </section>
+  </main>
+  <script>
+    customElements.define('find-widget', class extends HTMLElement {
+      constructor() {
+        super()
+        const root = this.attachShadow({ mode: 'open' })
+        root.innerHTML = '<button type="button">SHADOW-FIND-MARKER</button>'
+      }
+    })
+    document.getElementById('destination-button').addEventListener('click', () => {
+      document.getElementById('destination-state').textContent = 'destination activated'
+    })
+    let clicks = 0
+    document.addEventListener('click', () => {
+      clicks += 1
+      document.getElementById('click-count').textContent = `clicks ${clicks}`
+    })
+  </script>
+</body>
+</html>

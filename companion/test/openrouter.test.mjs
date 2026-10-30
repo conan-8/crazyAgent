@@ -10,6 +10,7 @@ import {
   fetchModels,
   mapModel,
   readLlmConfig,
+  resolveRequestMaxTokens,
   validateApiKey,
   writeLlmConfig,
 } from '../openrouter.mjs'
@@ -24,19 +25,21 @@ const RAW_VISION = {
   pricing: { prompt: '0.0000003', completion: '0.0000012' },
 }
 
-test('mapModel keeps image chat models with tools and carries metadata', () => {
+test('mapModel carries metadata and image/tool capabilities for the full text-chat catalog', () => {
   const model = mapModel(RAW_VISION)
   assert.equal(model.id, 'vendor/vision-tools')
   assert.equal(model.contextWindow, 131072)
   assert.equal(model.maxTokens, 16384)
   assert.equal(model.pricing.prompt, 0.0000003)
   assert.equal(model.reasoning, true)
-  assert.equal(mapModel({ ...RAW_VISION, architecture: { input_modalities: ['text'] } }), undefined)
-  assert.equal(mapModel({ ...RAW_VISION, supported_parameters: ['temperature'] }), undefined)
+  assert.equal(model.imageInput, true)
+  assert.equal(model.tools, true)
+  assert.equal(mapModel({ ...RAW_VISION, architecture: { input_modalities: ['text'] } }).imageInput, false)
+  assert.equal(mapModel({ ...RAW_VISION, supported_parameters: ['temperature'] }).tools, false)
   assert.equal(mapModel({ ...RAW_VISION, architecture: { ...RAW_VISION.architecture, output_modalities: ['image'] } }), undefined)
 })
 
-test('fetchModels filters and sorts a mocked OpenRouter catalog', async () => {
+test('fetchModels returns and sorts every text-chat model with capability flags', async () => {
   const calls = []
   const fetchImpl = async (url, options) => {
     calls.push({ url, options })
@@ -47,7 +50,7 @@ test('fetchModels filters and sorts a mocked OpenRouter catalog', async () => {
         return {
           data: [
             RAW_VISION,
-            { ...RAW_VISION, id: 'aaa/text-only', architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
+            { ...RAW_VISION, id: 'aaa/text-only', name: 'AAA Text Only', architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
             { ...RAW_VISION, id: 'zzz/another-vision', name: 'ZZZ Another' },
           ],
         }
@@ -55,9 +58,11 @@ test('fetchModels filters and sorts a mocked OpenRouter catalog', async () => {
     }
   }
   const models = await fetchModels('https://openrouter.ai/api/v1/', { fetchImpl })
-  assert.equal(models.length, 2)
-  assert.equal(models[0].id, 'vendor/vision-tools')
-  assert.equal(models[1].id, 'zzz/another-vision')
+  assert.equal(models.length, 3)
+  assert.equal(models[0].id, 'aaa/text-only')
+  assert.equal(models[0].imageInput, false)
+  assert.equal(models[1].id, 'vendor/vision-tools')
+  assert.equal(models[2].id, 'zzz/another-vision')
   assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/models')
 })
 
@@ -76,6 +81,13 @@ test('validateApiKey rejects 401/403 and tolerates a missing /key endpoint', asy
   )
 })
 
+test('request output cap defaults to the model maximum and preserves explicit lower overrides', () => {
+  const model = { maxTokens: 131_072 }
+  assert.equal(resolveRequestMaxTokens(model), 131_072)
+  assert.equal(resolveRequestMaxTokens(model, 8_192), 8_192)
+  assert.equal(resolveRequestMaxTokens(model, 200_000), 131_072)
+})
+
 test('buildLlmPatch targets the generated llm-pi-ai row and contains no key', () => {
   const model = mapModel(RAW_VISION)
   const config = buildLlmConfig('https://openrouter.ai/api/v1/', model)
@@ -87,6 +99,8 @@ test('buildLlmPatch targets the generated llm-pi-ai row and contains no key', ()
   assert.equal(provider.apiKeyEnv, 'CRAZYAGENT_API_KEY')
   assert.equal(provider.api, 'openai-completions')
   assert.equal(provider.baseURL, 'https://openrouter.ai/api/v1')
+  assert.equal(provider.streamIdleTimeoutMs, 2_147_483_647)
+  assert.equal('timeoutMs' in provider, false)
   assert.equal(provider.models[0].id, 'vendor/vision-tools')
   assert.deepEqual(provider.models[0].input, ['text', 'image'])
   assert.equal(provider.models[0].contextWindow, 131072)

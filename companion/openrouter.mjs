@@ -1,9 +1,9 @@
 /**
  * OpenRouter model catalog, configuration, and generated DSH patch.
  *
- * The companion fetches the public model list, filters to chat models that
- * accept images and support tool calls, and writes a small llm-pi-ai overlay
- * targeting the selected model. The API key stays in the companion/DSH
+ * The companion fetches the full text-chat model list with image/tool
+ * capability flags and writes a small llm-pi-ai overlay targeting the selected
+ * model. The API key stays in the companion/DSH
  * environment and is never written to these files.
  */
 
@@ -43,10 +43,9 @@ export function mapModel(raw) {
   const outputs = Array.isArray(raw.architecture?.output_modalities) ? raw.architecture.output_modalities : []
   const modality = String(raw.architecture?.modality ?? '')
   const supportsImage = inputs.includes('image') || modality.includes('image')
-  if (!supportsImage) return undefined
   if (outputs.length > 0 && !outputs.includes('text')) return undefined
   const parameters = Array.isArray(raw.supported_parameters) ? raw.supported_parameters : undefined
-  if (parameters !== undefined && !parameters.includes('tools')) return undefined
+  const supportsTools = parameters === undefined || parameters.includes('tools')
   const reasoning = parameters !== undefined
     && (parameters.includes('reasoning') || parameters.includes('reasoning_effort') || parameters.includes('include_reasoning'))
 
@@ -61,6 +60,8 @@ export function mapModel(raw) {
     contextWindow,
     maxTokens,
     reasoning,
+    imageInput: supportsImage,
+    tools: supportsTools,
     pricing: {
       prompt: Number.isFinite(prompt) ? prompt : undefined,
       completion: Number.isFinite(completion) ? completion : undefined,
@@ -145,6 +146,15 @@ export function buildLlmConfig(baseUrl, model, reasoningEffort = 'auto') {
   }
 }
 
+/**
+ * @param {Record<string, any>} model
+ * @param {number | undefined} [requested]
+ */
+export function resolveRequestMaxTokens(model, requested) {
+  const modelMaximum = Number(model.maxTokens) > 0 ? Math.round(Number(model.maxTokens)) : 8_192
+  return requested === undefined ? modelMaximum : Math.min(requested, modelMaximum)
+}
+
 /** @param {string} path */
 export function readLlmConfig(path) {
   try {
@@ -190,6 +200,9 @@ export function buildLlmPatch(config) {
       'HTTP-Referer': 'http://localhost',
       'X-Title': 'CrazyAgent',
     },
+    // DSH has no infinite setting; its maximum prevents the five-minute
+    // idle watchdog from cutting off slow reasoning. No HTTP timeout is set.
+    streamIdleTimeoutMs: 2_147_483_647,
     compat: {
       supportsDeveloperRole: false,
       supportsStore: false,

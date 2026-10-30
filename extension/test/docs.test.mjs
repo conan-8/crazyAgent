@@ -1826,7 +1826,7 @@ function fakeFormatManyDocs(options = {}) {
 
 const runFormatManyDocs = (fake, edits) => docsFormatMany({}, { action: 'format_many', edits }, fake.io)
 
-test('Docs format_many applies eight attributes and repeated colors with one baseline, final export, and snapshot', async () => {
+test('Docs format_many applies eight attributes with one baseline, final export, and compact result', async () => {
   const fake = fakeFormatManyDocs({
     blocks: [
       formatManyPara('Alpha beta Alpha'),
@@ -1849,6 +1849,13 @@ test('Docs format_many applies eight attributes and repeated colors with one bas
   assert.equal(result.docs.appliedCount, 2)
   assert.equal(result.docs.remainingCount, 0)
   assert.equal(result.docs.verifiedBy, 'export')
+  assert.equal(result.op, 'docs')
+  assert.equal(result.view, 'none')
+  assert.equal(result.screenshotSkipped, true)
+  assert.deepEqual(result.capture, { status: 'skipped', reason: 'DOCS_EXPORT_VERIFIED' })
+  assert.equal(result.tab.id, 7)
+  assert.equal(result.tab.url, DOCS_URL)
+  assert.equal(result.fakeSnapshot, undefined)
   assert.deepEqual(result.docs.results.map(edit => [edit.occurrence, edit.status]), [[2, 'completed'], [1, 'completed']])
   assert.equal(result.docs.results[0].results.length, 8)
   assert.ok(result.docs.results.every(edit => edit.results.every(attribute => attribute.verifiedBy === 'export')))
@@ -1862,7 +1869,7 @@ test('Docs format_many applies eight attributes and repeated colors with one bas
   assert.equal(fake.state.blocks[2].runs[0].bold, false)
   assert.equal(fake.events.filter(event => event === 'hex:#a1b2c3').length, 2)
   assert.equal(fake.exports.length, 2)
-  assert.equal(fake.snapshots(), 1)
+  assert.equal(fake.snapshots(), 0)
 })
 
 test('Docs format_many resolves first, nth, and last ordinal targets independently', async () => {
@@ -1957,13 +1964,13 @@ test('Docs format_many stops at a missing font and reports prior attributes and 
   assert.equal(fake.snapshots(), 1)
 })
 
-test('Docs format_many waits for export convergence without repeating mutations or snapshots', async () => {
+test('Docs format_many waits for export convergence without repeating mutations or a final snapshot', async () => {
   const fake = fakeFormatManyDocs({ staleVerifyReads: 2 })
   const result = await runFormatManyDocs(fake, [{ text: 'alpha', bold: true }])
   assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
   assert.equal(fake.exports.length, 4)
   assert.equal(fake.events.filter(event => event === 'mutate:bold:true').length, 1)
-  assert.equal(fake.snapshots(), 1)
+  assert.equal(fake.snapshots(), 0)
 })
 
 test('Docs format_many bounds divergent export reads and never reformats during convergence', async () => {
@@ -2016,7 +2023,7 @@ test('Docs format_many formats an inline list target while preserving unrelated 
   assert.equal(fake.state.blocks[2].text, 'before\nafter')
   assert.equal(fake.state.blocks[2].runs[0].bold, false)
   assert.equal(fake.exports.length, 2)
-  assert.equal(fake.snapshots(), 1)
+  assert.equal(fake.snapshots(), 0)
 })
 
 test('Docs format_many preserves changed-prefix evidence when a later edit goes stale', async () => {
@@ -2071,7 +2078,7 @@ test('Docs format_many serializes concurrent batches through the per-tab lock', 
   assert.equal(right.docs.status, 'completed')
   assert.equal(maxActive, 1)
   assert.equal(calls, 4)
-  assert.equal(fake.snapshots(), 2)
+  assert.equal(fake.snapshots(), 0)
 })
 
 test('Docs format_many rejects an expired queued batch before export, Find, or mutation', async () => {

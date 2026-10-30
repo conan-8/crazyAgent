@@ -169,12 +169,42 @@ const READ_TEXT = {
   nextOffset: 24,
   totalMs: 7,
 }
+const FIND = {
+  op: 'find',
+  view: 'none',
+  screenshotSkipped: true,
+  tab: { id: 7, title: 'Fixture', url: 'https://example.test/fixture' },
+  find: { query: 'silver key', matchCount: 2, countExact: true, returnedCount: 2, truncated: false, revealed: false },
+  matches: [
+    { occurrence: 1, snippet: 'The silver key is nearby', source: 'text', tag: 'p', role: '', inViewport: false },
+    { occurrence: 2, snippet: 'Silver key', source: 'accessible-name', tag: 'button', role: 'button', inViewport: true, label: 6 },
+  ],
+}
+const FIND_REVEAL = {
+  ...SNAPSHOT,
+  op: 'find',
+  find: { ...FIND.find, returnedCount: 1, occurrence: 2, revealed: true },
+  matches: [FIND.matches[1]],
+  reveal: { inViewport: true, moved: true },
+}
 const TABS = {
   op: 'tabs.list',
   tabs: [
     { id: 7, title: 'Fixture', url: 'https://example.test/fixture', active: true, pinned: false, status: 'complete' },
     { id: 8, title: 'Second Tab', url: 'https://example.test/two', active: false, pinned: false, status: 'complete' },
   ],
+}
+const PLACES = {
+  op: 'places.search',
+  query: 'project',
+  sources: ['shortcuts', 'bookmarks', 'history'],
+  limit: 2,
+  places: [
+    { source: 'shortcuts', title: 'Project board', url: 'https://example.test/board' },
+    { source: 'bookmarks', title: 'Saved project', url: 'https://example.test/saved', dateAdded: 1700000000000 },
+    { source: 'history', title: 'Recent project', url: 'https://example.test/recent', visitCount: 12, lastVisitTime: 1700000001000 },
+  ],
+  counts: { shortcuts: 1, bookmarks: 1, history: 1 },
 }
 const TYPE = {
   op: 'type',
@@ -864,7 +894,9 @@ async function startFakeBridge(options = {}) {
         }
         const result = op === 'scroll' ? SCROLL
           : op === 'tabs.list' ? TABS
-            : op === 'read_text' ? READ_TEXT
+            : op === 'places.search' ? PLACES
+              : op === 'read_text' ? READ_TEXT
+                : op === 'find' ? args.reveal === true ? FIND_REVEAL : FIND
               : op === 'select_option' ? SELECT
                 : op === 'hover' ? HOVER
                   : SNAPSHOT
@@ -939,7 +971,7 @@ async function waitFor(predicate, timeoutMs = 2_000) {
   throw new Error('timed out waiting for condition')
 }
 
-test('registers the provider, guidance, and the twenty-seven browser tools', async t => {
+test('registers the provider, guidance, and the consolidated browser tools', async t => {
   const { server, url, logEvents } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -957,18 +989,19 @@ test('registers the provider, guidance, and the twenty-seven browser tools', asy
     'browser_click_at',
     'browser_click_role',
     'browser_clipboard',
-    'browser_docs',
+    'browser_dialog',
     'browser_docs_format',
-    'browser_docs_format_many',
     'browser_docs_page_setup',
     'browser_docs_read',
     'browser_docs_rename',
-    'browser_docs_replace_many',
-    'browser_docs_replace_text',
+    'browser_docs_replace',
     'browser_docs_select_text',
+    'browser_docs_table',
     'browser_docs_write',
+    'browser_find',
     'browser_hover',
     'browser_navigate',
+    'browser_places',
     'browser_press_key',
     'browser_read_text',
     'browser_screenshot',
@@ -976,6 +1009,7 @@ test('registers the provider, guidance, and the twenty-seven browser tools', asy
     'browser_select',
     'browser_select_option',
     'browser_switch_tab',
+    'browser_table',
     'browser_tabs',
     'browser_type',
     'browser_wait_for',
@@ -983,155 +1017,122 @@ test('registers the provider, guidance, and the twenty-seven browser tools', asy
   await waitFor(() => logEvents.some(event => event.type === 'provider.registered'))
   const registered = logEvents.find(event => event.type === 'provider.registered')
   assert.deepEqual([...registered.data.tools].sort(), toolNames)
-  const parallelSafe = new Set(['browser_tabs', 'browser_read_text', 'browser_docs_read'])
+  const parallelSafe = new Set(['browser_tabs', 'browser_places', 'browser_read_text', 'browser_docs_read'])
   for (const [name, tool] of fake.tools) {
     if (parallelSafe.has(name)) assert.equal(tool.isConcurrencySafe(), true, `${name} must be parallel-safe`)
     else assert.equal(tool.isConcurrencySafe, undefined, `${name} must remain exclusive`)
   }
   assert.equal(fake.sections.length, 1)
   const guidance = fake.sections[0].text
-  assert.match(guidance, /untrusted data/)
-  // Operating stance: user authority, haste, no invented refusals.
-  assert.match(guidance, /Operating rules \(highest priority\)/)
-  assert.match(guidance, /The user's instruction is the task/)
-  assert.match(guidance, /Do not refuse, moralize, warn/)
-  assert.match(guidance, /Be hasty/)
-  assert.match(guidance, /first good-enough step/)
-  assert.match(guidance, /Exact Google Docs deletion\/replacement is a direct tool task, not a reading task/)
-  assert.match(guidance, /your FIRST tool call/)
-  assert.match(guidance, /Do not call browser_read_text or browser_screenshot first/)
-  assert.match(guidance, /Do not invent refusals/)
-  assert.match(guidance, /no AI/)
-  // v2 refinements: verification/claims, final-answer contract, destructive
-  // actions, blocked-by-user, stop-early budget, untrusted-vs-user, clipboard guard.
-  assert.match(guidance, /user's words are the instructions/)
-  assert.match(guidance, /1-3 short bullets/)
-  assert.match(guidance, /Never close tabs/)
-  assert.match(guidance, /Do not clear formatting, select-all\/delete, erase content, or repeatedly Backspace as failure recovery/)
-  assert.match(guidance, /one scoped Ctrl\+Z is allowed/)
-  assert.match(guidance, /never chain blind undos/)
-  assert.match(guidance, /login, CAPTCHA\/2FA, payment/)
-  assert.match(guidance, /only use credentials the user provided/)
-  assert.match(guidance, /no per-turn call limit/)
-  assert.match(guidance, /never split work across turns/)
-  // Canvas editors require visual confirmation between single actions.
-  assert.match(guidance, /render their chrome themselves/)
-  assert.match(guidance, /one action \+ full fresh view/)
-  assert.match(guidance, /No mutating batches or multi-point bursts/)
-  assert.match(guidance, /executor will reject them/)
-  assert.match(guidance, /Never reuse coordinates measured in an earlier view/)
-  assert.match(guidance, /labelled ARIA toolbar\/menu controls/)
-  assert.match(guidance, /Docs' div comboboxes are not native selects/)
-  assert.match(guidance, /never use browser_select_option on them/)
-  assert.match(guidance, /exact labelled menuitemcheckbox/)
-  assert.match(guidance, /More fonts control and its labelled search field/)
-  assert.match(guidance, /prefer browser_docs with action:"set_font" for font-only changes/)
+  assert.ok(guidance.length >= 12_000 && guidance.length <= 15_500, `GUIDANCE must be 12-15.5K chars, got ${guidance.length}`)
+  for (const pattern of [
+    /browser_table instead of coordinate\/Tab batches/,
+    /continue only failed\/unattempted cells/,
+    /Ordinary initial views provide rendered text\/labels/,
+    /browser_find is a fallback after dedicated tools/,
+    /reveal:true scrolls only a unique\/explicit occurrence/,
+    /Known canvas editors are unsupported/,
+    /Operating rules \(highest priority\)/,
+    /The user's instruction is the task/,
+    /Do not refuse, moralize, warn/,
+    /untrusted data/,
+    /user's words are the instructions/,
+    /Be hasty/,
+    /Compose one logical unit in ONE assistant response/,
+    /Mutations execute exclusively in model order/,
+    /1-3 short bullets/,
+    /reconcile every item and explicit constraint with the latest evidence/,
+    /DONE means the original target and every pass criterion are satisfied/,
+    /PARTIAL means any part is missing, approximate, or violates a constraint/,
+    /BLOCKED means the original target cannot be completed/,
+    /reporting check, not proof of success/,
+    /dialog.status:"pending"/,
+    /call browser_dialog once/,
+    /Never close tabs/,
+    /select-all\/delete/,
+    /One scoped Ctrl\+Z is allowed/,
+    /never chain blind undos/,
+    /CAPTCHA\/2FA/,
+    /Never paste secrets or passwords/,
+    /no per-turn call limit/,
+    /one action \+ full fresh view/,
+    /No mutating batches or multi-point bursts/,
+    /executor will reject them/,
+    /never retry unverified input blindly/,
+    /Never reuse earlier coordinates/,
+    /prefer browser_click_role with path:\[\{role,name\}/,
+    /ROLE_CLICK_UNSETTLED/,
+    /Docs' div comboboxes are not native selects/,
+    /Google Docs drag selection is rejected because it can move text/,
+    /Unlabelled browser_type inserts at the caret\/current selection, not a whole-document replace/,
+    /composite form 'shift\+Tab'/,
+    /never read the system clipboard without a user request/,
+    /trusted Ctrl\+V/,
+    /rich text and images/,
+    /select text with browser_select first/,
+    /browser_places first.*not search\/guessing/,
+    /Open only a matching returned HTTP\(S\) URL/,
+    /never substitute silently/,
+    /file pickers cannot be driven by browser_click/,
+    /detail:"fast"/,
+    /delay_ms/,
+    /view: "auto"/,
+    /view:"full"/,
+    /view:"none"/,
+    /points:\[\{x,y\}, \.\.\.\]/,
+    /Ctrl\+Alt\+M/,
+    /document tabs/,
+  ]) assert.match(guidance, pattern)
+
+  assert.match(guidance, /make browser_docs_replace your FIRST tool call/)
+  assert.match(guidance, /edits:\[\{text,replacement\}, \.\.\.\] \(1-200\)/)
+  assert.match(guidance, /do not read page text first/i)
+  assert.match(guidance, /recheck uniqueness/)
+  assert.match(guidance, /zero-based failure index/)
+  assert.match(guidance, /do not choose another target/i)
+  assert.match(guidance, /Three consecutive failures trip DOCS_FAILURE_CIRCUIT/)
   assert.match(guidance, /make browser_docs_format your FIRST tool call/)
-  assert.match(guidance, /paragraph_style, font_size, bold, italic, underline, or font/)
-  assert.match(guidance, /one unique selection and one final view/)
-  assert.match(guidance, /Booleans are desired states/)
-  assert.match(guidance, /prefer browser_click_role with path:\[\{role,name\}/)
-  assert.match(guidance, /Dedicated Docs mutation tools retain precedence over browser_click_role/)
-  assert.match(guidance, /make browser_docs_format_many your FIRST formatting tool call/)
   assert.match(guidance, /paragraph_style, font_size, bold, italic, underline, font, color, or highlight/)
-  assert.match(guidance, /Omitting occurrence always requires a unique match; it never picks first/)
-  assert.match(guidance, /browser_docs_select_text with exact text and occurrence:"first"\|"last" or a positive one-based integer/)
+  assert.match(guidance, /omitting occurrence always requires a unique match, never picks first/)
+  assert.match(guidance, /Booleans are desired states/)
+  assert.match(guidance, /remove_if_missing:true/)
+  assert.match(guidance, /matched text only, never its paragraph break/)
+  assert.match(guidance, /More fonts add → close → reopen → apply/)
+  assert.match(guidance, /Syne must not match Syne Mono/)
+  assert.match(guidance, /browser_docs_select_text with exact text/)
   assert.match(guidance, /Omitted occurrence remains unique-only and never defaults to first/)
   assert.match(guidance, /text-only result reports the verified selection/)
-  assert.match(guidance, /Compose one logical unit in ONE assistant response/)
-  assert.match(guidance, /Browser mutations execute exclusively in model order/)
+  assert.match(guidance, /exactly one guarded primitive action/)
   assert.match(guidance, /make browser_docs_write your FIRST content tool call/)
-  assert.match(guidance, /formats every run ahead of the caret/)
   assert.match(guidance, /runs:\[\{text/)
-  assert.match(guidance, /color, and highlight/)
-  assert.match(guidance, /Include every explicitly requested attribute, including font_size/)
-  assert.match(guidance, /never retype content or drop requested attributes/)
-  assert.match(guidance, /exits lists with Enter twice/)
   assert.match(guidance, /list:"numbered"\|"bulleted"\|"checklist"/)
   assert.match(guidance, /\{text,checked\}/)
   assert.match(guidance, /\{page_break:true\}/)
-  assert.match(guidance, /never send blank:false/)
+  assert.match(guidance, /Never send blank:false/)
   assert.match(guidance, /always pair every items array with list and every list with items/)
-  assert.match(guidance, /use browser_docs_page_setup/)
-  assert.match(guidance, /compose already-known rename, page-setup, and write calls in one response/)
-  assert.match(guidance, /Returned results are enough verification/)
-  assert.match(guidance, /plain unformatted prose, enter contiguous text and intended newlines in one call/)
-  assert.match(guidance, /unique 1-of-1 exact text find/)
-  assert.match(guidance, /exact visible role\/name controls/)
-  assert.match(guidance, /More fonts add → close → reopen → apply/)
-  assert.match(guidance, /Duplicate text is left untouched/)
-  assert.match(guidance, /Syne must not match Syne Mono/)
-  assert.match(guidance, /matched text only, never its paragraph break/)
-  assert.match(guidance, /not a license for dependent batches/)
-  assert.match(guidance, /actual tool browser_docs_replace_text/)
-  assert.match(guidance, /do not read page text first/)
-  assert.match(guidance, /do not choose another target/)
-  assert.match(guidance, /one actual browser_docs_replace_many call/)
-  assert.match(guidance, /rechecks uniqueness after earlier edits/)
-  assert.match(guidance, /never claim unattempted edits completed/)
-  assert.match(guidance, /Do not manually operate Find and Replace for these cases or switch tool names/)
-  assert.match(guidance, /clicks Replace once internally/)
-  assert.match(guidance, /use browser_docs_rename/)
-  assert.match(guidance, /verifies title-field focus before Enter/)
-  assert.match(guidance, /Three consecutive Docs replacement failures trip DOCS_FAILURE_CIRCUIT/)
-  assert.match(guidance, /Google Docs drag selection is rejected because it can move text/)
-  assert.doesNotMatch(guidance, /browser_docs\.(?:set_font|replace_text|replace_many)/)
+  assert.match(guidance, /formats every run ahead of the caret/)
+  assert.match(guidance, /exits lists with Enter twice/)
+  assert.match(guidance, /never retype content or drop requested attributes/)
+  assert.match(guidance, /browser_docs_page_setup/)
+  assert.match(guidance, /browser_docs_rename/)
+  assert.match(guidance, /Returned export results suffice/)
+  assert.match(guidance, /partial\/failed\/non-export mutations stay unverified/)
+  assert.match(guidance, /browser_wait_for waits for text, URL substring, idle:true, or fixed ms/)
+  assert.match(guidance, /Optional view:"full"\|"compact"\|"none"\|"auto"/)
+  assert.match(guidance, /browser_batch runs up to 20 known actions/)
+  assert.match(guidance, /Earlier actions remain APPLIED/)
+  assert.match(guidance, /never dependent edits\/canvas mutations/)
+  assert.match(guidance, /before\/after conditions with text\/url\/idle\/ms\/timeout_ms/)
+  assert.match(guidance, /BATCH_PRECONDITION_FAILED means no dispatch\/attempted:false/)
+  assert.match(guidance, /BATCH_POSTCONDITION_FAILED means dispatch occurred/)
+  assert.match(guidance, /Any guard failure stops even with stop_on_error:false/)
+  assert.match(guidance, /never assume success or rollback/)
+  assert.doesNotMatch(guidance, /browser_docs_(?:replace_text|replace_many|format_many)\b/)
+  assert.doesNotMatch(guidance, /browser_docs with action:/)
   assert.doesNotMatch(guidance, /update_normal_style/)
-  assert.match(guidance, /only verified edits are confirmed/)
-  assert.match(guidance, /use browser_docs_select_text with exact text and the requested occurrence/)
-  assert.match(guidance, /Do not drive Ctrl\+F\/Find yourself/)
-  assert.match(guidance, /exactly one guarded primitive action/)
-  assert.match(guidance, /browser_press_key\/browser_click with view:"full"/)
-  assert.match(guidance, /does not give replacement tools ordinal or multi-match support/)
-  assert.doesNotMatch(guidance, /Ctrl\+F, make selection a separate visually confirmed step before formatting/)
-  assert.match(guidance, /never use stop_on_error:false for dependent edits/)
-  assert.match(guidance, /Unlabelled browser_type inserts at the caret\/current selection, not a whole-document replace/)
-  assert.match(guidance, /Canvas append\/empty operations may be rejected/)
-  assert.match(guidance, /never retry unverified input blindly/)
-  assert.match(guidance, /selection is UNVERIFIED/)
-  assert.doesNotMatch(guidance, /cannot select a neighbour/)
-  assert.doesNotMatch(guidance, /That whole sequence is one batch/)
-  assert.doesNotMatch(guidance, /browser_press_key takes repeat/)
-  assert.doesNotMatch(guidance, /One big paste/)
-  assert.doesNotMatch(guidance, /Measured 2026-10-23/)
-  assert.match(guidance, /leaves the earlier actions APPLIED/)
-  assert.match(guidance, /document tabs/)
-  assert.match(guidance, /only see real Chrome tabs/)
-  assert.match(guidance, /Never paste secrets or passwords/)
-  assert.match(guidance, /read the system clipboard only when the user asks/)
-  assert.match(guidance, /points:\[\{x,y\}, \.\.\.\]/)
-  assert.match(guidance, /view:"none"/)
-  assert.match(guidance, /delay_ms/)
   for (const tool of ['browser_type', 'browser_press_key', 'browser_navigate', 'browser_wait_for', 'browser_batch', 'browser_select', 'browser_clipboard']) {
     assert.match(guidance, new RegExp(tool), tool)
   }
-  // Clipboard guidance: virtual-first, system only on request, rich Ctrl+V.
-  assert.match(guidance, /virtual clipboard/i)
-  assert.match(guidance, /never read the system clipboard without a user request/)
-  assert.match(guidance, /trusted Ctrl\+V/)
-  assert.match(guidance, /rich text and images/)
-  assert.match(guidance, /select text with browser_select first/)
-  assert.match(guidance, /detail:"fast"/)
-  assert.match(guidance, /Ctrl\+Alt\+M/)
-  assert.match(guidance, /view: "auto"/)
-  assert.match(guidance, /view:"full"/)
-  assert.match(guidance, /compact confirmation/)
-  assert.match(guidance, /returns one view for the whole sequence/)
-  assert.match(guidance, /stop_on_error:false/)
-  // Hardening guidance: click_at capacity, composite keys, dangerous chords,
-  // range selection, stale/off-screen coordinates, retries, and file pickers.
-  assert.match(guidance, /up to 20/)
-  assert.match(guidance, /composite form 'shift\+Tab'/)
-  assert.match(guidance, /ctrl\/cmd\+W/)
-  assert.match(guidance, /use one scoped Ctrl\+Z only to revert a known accidental latest mutation/)
-  assert.match(guidance, /never undo blindly or repeatedly/)
-  assert.match(guidance, /Prefer it over clicking and pressing Home\/Shift\+End/)
-  assert.match(guidance, /off-screen or clipped/)
-  assert.match(guidance, /fails twice/)
-  assert.match(guidance, /file pickers cannot be driven by browser_click/)
-  assert.doesNotMatch(guidance, /cannot click or type in Phase 1/)
-  assert.doesNotMatch(guidance, /cannot type/i)
-  assert.doesNotMatch(guidance, /cannot navigate/i)
 })
 
 test('scroll tool returns metadata and an image block', async t => {
@@ -1156,6 +1157,95 @@ test('scroll tool returns metadata and an image block', async t => {
   assert.equal(value.content[1].data, 'AAAA')
 })
 
+test('central image dedupe works across tools while preserving fresh metadata and session isolation', async t => {
+  const images = ['AAAA', 'AAAA', 'BBBB', 'BBBB', 'BBBB', 'BBBB', 'BBBB', 'BBBB']
+  let snapshot = 0
+  const { server, url } = await startFakeBridge({
+    respond: (op, args) => {
+      if (op !== 'snapshot') return undefined
+      const index = snapshot++
+      return { ...SNAPSHOT, viewId: index + 1, image: { ...IMAGE, data: images[index] } }
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  let call = 0
+  const exec = sessionId => ({
+    callId: `dedupe-${call++}`,
+    ...sessionId === undefined ? {} : { agent: { session: { id: sessionId } } },
+    signal: new AbortController().signal,
+  })
+  const capture = sessionId => fake.tools.get('browser_screenshot').execute({}, exec(sessionId))
+  const imageCount = result => result.content.filter(block => block.type === 'image').length
+
+  const first = await capture('session-a')
+  assert.equal(imageCount(first), 1)
+  const duplicateAcrossTools = await fake.tools.get('browser_scroll').execute({ direction: 'down' }, exec('session-a'))
+  assert.equal(imageCount(duplicateAcrossTools), 0)
+  assert.match(duplicateAcrossTools.content[0].text, /scroll document y=612\/2400/)
+  assert.match(duplicateAcrossTools.content[0].text, /exact duplicate of the previous attached image/)
+
+  const textOnly = await fake.tools.get('browser_read_text').execute({}, exec('session-a'))
+  assert.equal(imageCount(textOnly), 0)
+  assert.doesNotMatch(textOnly.content[0].text, /exact duplicate/)
+  const duplicateAfterText = await capture('session-a')
+  assert.equal(imageCount(duplicateAfterText), 0)
+  assert.match(duplicateAfterText.content[0].text, /view #2/)
+  assert.match(duplicateAfterText.content[0].text, /exact duplicate/)
+
+  const changed = await capture('session-a')
+  assert.equal(imageCount(changed), 1)
+  const duplicateChanged = await capture('session-a')
+  assert.equal(imageCount(duplicateChanged), 0)
+  const otherSession = await capture('session-b')
+  assert.equal(imageCount(otherSession), 1)
+  const missingSession = await capture(undefined)
+  assert.equal(imageCount(missingSession), 1)
+  const missingSessionAgain = await capture(undefined)
+  assert.equal(imageCount(missingSessionAgain), 1)
+  const sessionAUnchanged = await capture('session-a')
+  assert.equal(imageCount(sessionAUnchanged), 0)
+  assert.match(sessionAUnchanged.content[0].text, /view #8/)
+})
+
+test('turn/end clears only that session dedupe basis for the next turn', async t => {
+  const { server, url } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const sessionA = { id: 'session-a', surface: { nodes: [] }, append: () => {} }
+  const sessionB = { id: 'session-b', surface: { nodes: [] }, append: () => {} }
+  let call = 0
+  const capture = session => fake.tools.get('browser_screenshot').execute({}, {
+    callId: `turn-dedupe-${call++}`,
+    agent: { session },
+    signal: new AbortController().signal,
+  })
+  const imageCount = result => result.content.filter(block => block.type === 'image').length
+
+  assert.equal(imageCount(await capture(sessionA)), 1)
+  assert.equal(imageCount(await capture(sessionA)), 0, 'identical images still dedupe within a turn')
+  assert.equal(imageCount(await capture(sessionB)), 1, 'another session has an independent basis')
+
+  fake.listeners.get('session/event')(sessionA, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  assert.equal(imageCount(await capture(sessionA)), 1, 'the next turn attaches identical bytes')
+  assert.equal(imageCount(await capture(sessionA)), 0, 'the new turn starts a fresh same-turn series')
+  assert.equal(imageCount(await capture(sessionB)), 0, 'ending session A does not clear session B')
+})
+
 test('tabs tool returns a readable list without an image', async t => {
   const { server, url } = await startFakeBridge()
   t.after(() => {
@@ -1172,6 +1262,70 @@ test('tabs tool returns a readable list without an image', async t => {
   assert.equal(value.content.length, 1)
   assert.match(value.content[0].text, /\[7\] "Fixture"/)
   assert.match(value.content[0].text, /\[8\] "Second Tab"/)
+})
+
+test('places returns exact personal destinations and validates filters before bridge access', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  await waitFor(() => server.clients.size > 0)
+  const tool = fake.tools.get('browser_places')
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ['limit', 'query', 'sources'])
+  assert.equal(tool.parameters.properties.limit.maximum, 20)
+  assert.equal(tool.isConcurrencySafe(), true)
+  const exec = { callId: 'call-places', signal: new AbortController().signal }
+  const value = await tool.execute({ query: ' project ', sources: ['shortcuts', 'bookmarks', 'history'], limit: 2 }, exec)
+  assert.deepEqual(commands.at(-1), {
+    op: 'places.search',
+    args: { query: 'project', sources: ['shortcuts', 'bookmarks', 'history'], limit: 2 },
+  })
+  assert.equal(value.content.length, 1)
+  assert.match(value.content[0].text, /3 personal place\(s\) matching "project"/)
+  assert.match(value.content[0].text, /\[shortcuts\] "Project board" https:\/\/example\.test\/board/)
+  assert.match(value.content[0].text, /\[bookmarks\] "Saved project".*added 2023-11-14T22:13:20\.000Z/)
+  assert.match(value.content[0].text, /\[history\] "Recent project".*12 visits, last visited/)
+  assert.match(value.content[0].text, /pass its exact URL to browser_navigate/)
+
+  await tool.execute({}, exec)
+  assert.deepEqual(commands.at(-1), { op: 'places.search', args: {} })
+  const beforeInvalid = commands.length
+  const invalid = [
+    { query: 4 },
+    { query: 'x'.repeat(201) },
+    { sources: [] },
+    { sources: ['history', 'history'] },
+    { sources: ['web'] },
+    { limit: 0 },
+    { limit: 21 },
+    { limit: 1.5 },
+  ]
+  for (const args of invalid) await assert.rejects(() => tool.execute(args, exec), /browser_places/)
+  assert.equal(commands.length, beforeInvalid, 'invalid calls never reach the extension')
+})
+
+test('places empty results explicitly forbid URL guessing', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: op => op === 'places.search' ? { ...PLACES, places: [], counts: { shortcuts: 0, bookmarks: 0, history: 0 } } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+  const result = await fake.tools.get('browser_places').execute({}, { callId: 'call-places-empty', signal: new AbortController().signal })
+  assert.match(result.content[0].text, /0 personal place\(s\)/)
+  assert.match(result.content[0].text, /No matching destination was found/)
+  assert.match(result.content[0].text, /do not guess a URL/)
 })
 
 test('forwards DSH assistant-stream frames as live activity', async t => {
@@ -1213,6 +1367,62 @@ test('forwards DSH assistant-stream frames as live activity', async t => {
 })
 
 
+test('browser_table validates, routes semantic edits, and formats table readback without an image', async t => {
+  const table = {
+    index: 1,
+    headers: ['Dye', 'Dye Distance'],
+    rows: [{ label: '1', cells: [{ value: 'Pink', editable: true }, { value: '0.7', editable: true }] }],
+  }
+  const { server, url, commands } = await startFakeBridge({
+    respond: (op, args) => {
+      if (op !== 'table') return undefined
+      if (args.action === 'read') return { op: 'table', view: 'none', table: { action: 'read', status: 'completed', count: 1 }, tables: [table] }
+      return {
+        op: 'table',
+        view: 'none',
+        table: {
+          action: 'write', status: 'completed', index: 1, editCount: 1, verifiedCount: 1, appliedCount: 1, alreadyAppliedCount: 0,
+          results: [{ row: 1, column: 2, status: 'applied', after: '0.7' }],
+        },
+        tables: [table],
+      }
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const tool = fake.tools.get('browser_table')
+  const exec = { callId: 'table-call', signal: new AbortController().signal }
+
+  const read = await tool.execute({ action: 'read' }, exec)
+  assert.equal(read.content.length, 1)
+  assert.match(read.content[0].text, /TABLE 1: 1 rows/)
+  assert.match(read.content[0].text, /Dye="Pink"/)
+  assert.deepEqual(commands.at(-1), { op: 'table', args: { action: 'read' } })
+
+  const write = await tool.execute({ action: 'write', edits: [{ row: 1, column: '  Dye   Distance  ', value: '0.7' }] }, exec)
+  assert.match(write.content[0].text, /table 1 write: completed · 1\/1 verified/)
+  assert.match(write.content[0].text, /row 1, column 2: applied = "0.7"/)
+  assert.match(write.content[0].text, /server persistence is not implied/)
+  assert.deepEqual(commands.at(-1), { op: 'table', args: { action: 'write', edits: [{ row: 1, column: 'Dye Distance', value: '0.7' }] } })
+
+  const before = commands.length
+  const invalid = [
+    {},
+    { action: 'read', edits: [{ row: 1, column: 1, value: 'x' }] },
+    { action: 'write', edits: [] },
+    { action: 'write', edits: [{ row: 0, column: 1, value: 'x' }] },
+    { action: 'write', edits: [{ row: 1, column: 1, value: 'two\nlines' }] },
+  ]
+  for (const args of invalid) await assert.rejects(() => tool.execute(args, exec), /browser_table/)
+  assert.equal(commands.length, before)
+})
+
+
 test('read_text returns text without an image block', async t => {
   const { server, url } = await startFakeBridge()
   t.after(() => {
@@ -1229,6 +1439,40 @@ test('read_text returns text without an image block', async t => {
   assert.equal(result.content[0].type, 'text')
   assert.match(result.content[0].text, /ALPHA-MARKER/)
   assert.match(result.content[0].text, /next_offset 24/)
+})
+
+test('find validates arguments, returns bounded matches, and reveals with one fresh view', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const tool = fake.tools.get('browser_find')
+  const exec = { callId: 'find-search', signal: new AbortController().signal }
+  const search = await tool.execute({ query: '  silver\n key  ' }, exec)
+  assert.equal(search.content.length, 1)
+  assert.match(search.content[0].text, /2 rendered match/)
+  assert.match(search.content[0].text, /#2 .*accessible-name.*label 6/)
+  assert.match(search.content[0].text, /view: skipped — text-only search/)
+  assert.deepEqual(commands.at(-1), { op: 'find', args: { query: 'silver key' } })
+
+  const revealed = await tool.execute({ query: 'silver key', occurrence: 2, reveal: true }, { ...exec, callId: 'find-reveal' })
+  assert.ok(revealed.content.some(block => block.type === 'image'))
+  assert.match(revealed.content[0].text, /showing occurrence 2/)
+  assert.match(revealed.content[0].text, /no focus, selection, click, or edit/)
+  assert.deepEqual(commands.at(-1), { op: 'find', args: { query: 'silver key', occurrence: 2, reveal: true } })
+
+  const before = commands.length
+  const invalid = [
+    {}, { query: ' ' }, { query: 'x'.repeat(201) }, { query: 'key', occurrence: 0 },
+    { query: 'key', occurrence: 'all' }, { query: 'key', reveal: 'yes' }, { query: 'key', surprise: true },
+  ]
+  for (const args of invalid) await assert.rejects(() => tool.execute(args, exec), /browser_find/)
+  assert.equal(commands.length, before)
 })
 
 test('switch_tab accepts a query and rejects an empty target', async t => {
@@ -1715,10 +1959,102 @@ test('navigate validation rejects bad targets and combinations', async t => {
   await assert.rejects(() => definition.execute({ history: 'reload', new_tab: true }, exec), /new_tab is only valid with url/)
 })
 
-test('browser_docs validates its schema, forwards exactly, and formats every set_font status', async t => {
+test('browser_dialog forwards exact choices and formats resolved and pending dialog evidence', async t => {
   const { server, url, commands } = await startFakeBridge({
     respond: (op, args) => {
-      if (op !== 'docs') return undefined
+      if (op !== 'dialog') return undefined
+      if (args.action === 'accept') return {
+        op: 'dialog',
+        view: 'none',
+        screenshotSkipped: true,
+        capture: { status: 'skipped', reason: 'DIALOG_RESOLVED' },
+        dialog: {
+          id: 2,
+          tabId: 7,
+          type: 'prompt',
+          message: 'Name the draft',
+          defaultPrompt: 'Untitled',
+          status: 'resolved',
+          action: 'accept',
+          automatic: false,
+          userInput: args.prompt_text,
+        },
+      }
+      return {
+        op: 'dialog',
+        view: 'none',
+        screenshotSkipped: true,
+        capture: { status: 'blocked', reason: 'DIALOG_PENDING' },
+        dialog: { id: 3, tabId: 7, type: 'confirm', message: 'Delete the draft?', status: 'pending' },
+      }
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const tool = fake.tools.get('browser_dialog')
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.deepEqual(tool.parameters.required, ['action'])
+  assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ['action', 'prompt_text'])
+  assert.deepEqual(tool.parameters.properties.action.enum, ['accept', 'dismiss'])
+  assert.equal(tool.parameters.properties.prompt_text.maxLength, 20_000)
+  const exec = { callId: 'c-dialog', signal: new AbortController().signal }
+
+  const resolved = await tool.execute({ action: 'accept', prompt_text: 'Release plan' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'dialog', args: { action: 'accept', prompt_text: 'Release plan' } })
+  assert.equal(resolved.content.length, 1)
+  const resolvedText = resolved.content[0].text
+  assert.match(resolvedText, /dialog type=prompt status=resolved automatic=false/)
+  assert.match(resolvedText, /message: "Name the draft"/)
+  assert.match(resolvedText, /action: accept/)
+  assert.match(resolvedText, /userInput: "Release plan"/)
+  assert.match(resolvedText, /defaultPrompt: "Untitled"/)
+  assert.match(resolvedText, /view: skipped — no screenshot returned; capture status=skipped; reason=DIALOG_RESOLVED/)
+
+  const pending = await tool.execute({ action: 'dismiss' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'dialog', args: { action: 'dismiss' } })
+  assert.equal(pending.content.length, 1)
+  const pendingText = pending.content[0].text
+  assert.match(pendingText, /dialog type=confirm status=pending automatic=false/)
+  assert.match(pendingText, /message: "Delete the draft\?"/)
+  assert.match(pendingText, /view: skipped — no screenshot returned; capture status=blocked; reason=DIALOG_PENDING/)
+  assert.equal(commands.length, 2)
+})
+
+test('browser_dialog validation rejects malformed choices before bridge traffic', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const tool = fake.tools.get('browser_dialog')
+  const exec = { callId: 'c-dialog-bad', signal: new AbortController().signal }
+  const invalid = [
+    [{}, /action must be/],
+    [{ action: 'cancel' }, /action must be/],
+    [{ action: 'accept', unexpected: true }, /unknown argument/],
+    [{ action: 'dismiss', prompt_text: 'not allowed' }, /only with action "accept"/],
+    [{ action: 'accept', prompt_text: 42 }, /must be a string/],
+    [{ action: 'accept', prompt_text: 'x'.repeat(20_001) }, /at most 20000 characters/],
+  ]
+  for (const [args, error] of invalid) await assert.rejects(() => tool.execute(args, exec), error)
+  assert.equal(commands.length, 0)
+})
+
+test('browser_docs_format preserves the narrow legacy set_font route and statuses', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    respond: (op, args) => {
+      if (op !== 'docs' || args.action !== 'set_font') return undefined
       if (args.font === 'Already Sans') {
         return { ...DOCS_SET_FONT, docs: { ...DOCS_SET_FONT.docs, status: 'already_applied', fontAdded: false } }
       }
@@ -1742,27 +2078,17 @@ test('browser_docs validates its schema, forwards exactly, and formats every set
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
   t.after(() => fake.dispose())
 
-  const tool = fake.tools.get('browser_docs')
-  assert.deepEqual(tool.parameters.required, ['action', 'text', 'font'])
+  const tool = fake.tools.get('browser_docs_format')
+  assert.deepEqual(tool.parameters.required, ['edits'])
   assert.equal(tool.parameters.additionalProperties, false)
-  assert.deepEqual(tool.parameters.properties.action.enum, ['set_font'])
-  assert.equal(tool.parameters.properties.text.minLength, 1)
-  assert.equal(tool.parameters.properties.text.maxLength, 1000)
-  assert.equal(tool.parameters.properties.replacement, undefined)
-  assert.equal(tool.parameters.properties.edits, undefined)
-  assert.equal(tool.parameters.properties.font.maxLength, 100)
-  assert.equal(tool.parameters.properties.remove_if_missing.type, 'boolean')
-  const single = fake.tools.get('browser_docs_replace_text')
-  assert.deepEqual(single.parameters.required, ['text', 'replacement'])
-  assert.equal(single.parameters.additionalProperties, false)
-  const many = fake.tools.get('browser_docs_replace_many')
-  assert.deepEqual(many.parameters.required, ['edits'])
-  assert.equal(many.parameters.additionalProperties, false)
-  assert.equal(many.parameters.properties.edits.maxItems, 200)
-  assert.deepEqual(many.parameters.properties.edits.items.required, ['text', 'replacement'])
+  assert.equal(tool.parameters.properties.edits.maxItems, 50)
+  const editSchema = tool.parameters.properties.edits.items
+  assert.equal(editSchema.properties.text.maxLength, 1000)
+  assert.equal(editSchema.properties.font.maxLength, 100)
+  assert.equal(editSchema.properties.remove_if_missing.type, 'boolean')
   const exec = { callId: 'c-docs', signal: new AbortController().signal }
 
-  const applied = await tool.execute({ action: 'set_font', text: 'Exact heading', font: 'Syne', remove_if_missing: true }, exec)
+  const applied = await tool.execute({ edits: [{ text: 'Exact heading', font: 'Syne', remove_if_missing: true }] }, exec)
   assert.deepEqual(commands.at(-1), {
     op: 'docs',
     args: { action: 'set_font', text: 'Exact heading', font: 'Syne', remove_if_missing: true },
@@ -1771,26 +2097,22 @@ test('browser_docs validates its schema, forwards exactly, and formats every set
   assert.match(applied.content[0].text, /font applied to the unique matched text; toolbar verification passed/)
   assert.equal(applied.content.filter(block => block.type === 'image').length, 1)
 
-  const already = await tool.execute({ action: 'set_font', text: 'Exact heading', font: 'Already Sans' }, exec)
-  assert.deepEqual(commands.at(-1), { op: 'docs', args: { action: 'set_font', text: 'Exact heading', font: 'Already Sans' } })
+  const already = await tool.execute({ edits: [{ text: 'Exact heading', font: 'Already Sans', remove_if_missing: false }] }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'docs', args: { action: 'set_font', text: 'Exact heading', font: 'Already Sans', remove_if_missing: false } })
   assert.match(already.content[0].text, /docs.status=already_applied docs.matchCount=1 docs.fontAdded=false docs.verifiedBy=toolbar/)
   assert.match(already.content[0].text, /font was already applied .* toolbar verification passed/)
-  assert.equal(already.content.length, 2)
 
-  const missing = await tool.execute({ action: 'set_font', text: 'Exact heading', font: 'Missing Sans' }, exec)
+  const missing = await tool.execute({ edits: [{ text: 'Exact heading', font: 'Missing Sans', remove_if_missing: false }] }, exec)
   assert.match(missing.content[0].text, /docs.status=font_missing/)
   assert.match(missing.content[0].text, /requested font is missing; the matched text was left unchanged/)
   assert.doesNotMatch(missing.content[0].text, /result: font applied/)
-  assert.equal(missing.content.length, 2)
 
-  const removed = await tool.execute({ action: 'set_font', text: 'Exact heading', font: 'Remove Sans' }, exec)
+  const removed = await tool.execute({ edits: [{ text: 'Exact heading', font: 'Remove Sans', remove_if_missing: true }] }, exec)
   assert.match(removed.content[0].text, /docs.status=removed_text/)
   assert.match(removed.content[0].text, /removed the matched text only, not the paragraph break/)
   assert.match(removed.content[0].text, /docs.removedText="Exact heading"/)
-  assert.doesNotMatch(removed.content[0].text, /paragraph break.*removed/i)
-  assert.equal(removed.content.length, 2)
 
-  const removedBoolean = await tool.execute({ action: 'set_font', text: 'Exact heading', font: 'Remove Bool' }, exec)
+  const removedBoolean = await tool.execute({ edits: [{ text: 'Exact heading', font: 'Remove Bool', remove_if_missing: true }] }, exec)
   assert.match(removedBoolean.content[0].text, /docs.removedText=true/)
 })
 
@@ -1821,7 +2143,7 @@ test('browser_docs_rename forwards a guarded rename and validates the title', as
   assert.equal(commands.length, 1)
 })
 
-test('browser_docs_replace_text forwards and formats exact deletion and replacement', async t => {
+test('browser_docs_replace routes one edit to replace_text and formats both outcomes', async t => {
   const { server, url, commands } = await startFakeBridge({
     respond: (op, args) => {
       if (op !== 'docs' || args.action !== 'replace_text') return undefined
@@ -1844,24 +2166,28 @@ test('browser_docs_replace_text forwards and formats exact deletion and replacem
   const fake = makeContext()
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
   t.after(() => fake.dispose())
-  const tool = fake.tools.get('browser_docs_replace_text')
+  const tool = fake.tools.get('browser_docs_replace')
+  assert.deepEqual(tool.parameters.required, ['edits'])
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.equal(tool.parameters.properties.edits.minItems, 1)
+  assert.equal(tool.parameters.properties.edits.maxItems, 200)
+  assert.deepEqual(tool.parameters.properties.edits.items.required, ['text', 'replacement'])
   const exec = { callId: 'c-docs-replace', signal: new AbortController().signal }
 
-  const removed = await tool.execute({ text: 'yea', replacement: '' }, exec)
+  const removed = await tool.execute({ edits: [{ text: 'yea', replacement: '' }] }, exec)
   assert.deepEqual(commands.at(-1), { op: 'docs', args: { action: 'replace_text', text: 'yea', replacement: '' } })
   assert.match(removed.content[0].text, /docs.status=removed_text docs.matchCount=0 docs.verifiedBy=find-counter/)
   assert.match(removed.content[0].text, /removed the matched text only, not the paragraph break/)
   assert.doesNotMatch(removed.content[0].text, /fontAdded/)
   assert.equal(removed.content.filter(block => block.type === 'image').length, 1)
 
-  const replaced = await tool.execute({ text: 'Old title', replacement: 'New title' }, exec)
+  const replaced = await tool.execute({ edits: [{ text: 'Old title', replacement: 'New title' }] }, exec)
   assert.deepEqual(commands.at(-1), { op: 'docs', args: { action: 'replace_text', text: 'Old title', replacement: 'New title' } })
   assert.match(replaced.content[0].text, /docs.status=replaced_text docs.matchCount=1 docs.verifiedBy=find-counter/)
   assert.match(replaced.content[0].text, /replaced the unique matched text; find-counter verification passed/)
-  assert.doesNotMatch(replaced.content[0].text, /fontAdded/)
 })
 
-test('browser_docs forwards one replace_many call and formats complete and partial results', async t => {
+test('browser_docs_replace routes multiple edits to replace_many with complete and partial results', async t => {
   const { server, url, commands } = await startFakeBridge({
     respond: (op, args) => {
       if (op !== 'docs' || args.action !== 'replace_many') return undefined
@@ -1896,7 +2222,7 @@ test('browser_docs forwards one replace_many call and formats complete and parti
   const fake = makeContext()
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
   t.after(() => fake.dispose())
-  const tool = fake.tools.get('browser_docs_replace_many')
+  const tool = fake.tools.get('browser_docs_replace')
   const exec = { callId: 'c-docs-replace-many', signal: new AbortController().signal }
 
   const edits = [{ text: 'alpha', replacement: 'A' }, { text: 'beta ', replacement: '' }]
@@ -1955,14 +2281,15 @@ test('browser_docs_format validates its schema, forwards desired states, and for
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 100 })
   t.after(() => fake.dispose())
   const tool = fake.tools.get('browser_docs_format')
-  assert.deepEqual(tool.parameters.required, ['text'])
+  assert.deepEqual(tool.parameters.required, ['edits'])
   assert.equal(tool.parameters.additionalProperties, false)
-  assert.equal(tool.parameters.properties.font_size.maximum, 400)
-  assert.ok(tool.parameters.properties.paragraph_style.enum.includes('Title'))
+  const editSchema = tool.parameters.properties.edits.items
+  assert.equal(editSchema.properties.font_size.maximum, 400)
+  assert.ok(editSchema.properties.paragraph_style.enum.includes('Title'))
   const exec = { callId: 'c-docs-format', signal: new AbortController().signal }
 
   const completed = await tool.execute({
-    text: 'Exact heading', paragraph_style: 'Title', font_size: 28, bold: true, italic: false, font: ' Syne ',
+    edits: [{ text: 'Exact heading', paragraph_style: 'Title', font_size: 28, bold: true, italic: false, font: ' Syne ' }],
   }, exec)
   assert.deepEqual(commands.at(-1), {
     op: 'docs',
@@ -1973,7 +2300,7 @@ test('browser_docs_format validates its schema, forwards desired states, and for
   assert.match(completed.content[0].text, /docs.results=.*"attribute":"bold"/)
   assert.equal(completed.content.filter(block => block.type === 'image').length, 1)
 
-  const partial = await tool.execute({ text: 'Exact heading', bold: true, font: 'Missing Sans' }, exec)
+  const partial = await tool.execute({ edits: [{ text: 'Exact heading', bold: true, font: 'Missing Sans' }] }, exec)
   assert.equal(commands.length, 2)
   assert.match(partial.content[0].text, /docs.status=partial docs.appliedCount=1\/2/)
   assert.match(partial.content[0].text, /formatting incomplete; inspect the per-attribute results/)
@@ -2045,7 +2372,7 @@ test('browser_docs_select_text forwards explicit ordinals and returns text-only 
   assert.equal(commands.length, 2, 'invalid selection requests never reach the bridge')
 })
 
-test('browser_docs_format_many validates closed edits, normalizes forwarding, and formats every status', async t => {
+test('browser_docs_format routes ordinal, color, highlight, and multiple edits to format_many', async t => {
   const { server, url, commands } = await startFakeBridge({
     delays: { docs: 150 },
     respond: (op, args) => {
@@ -2086,7 +2413,7 @@ test('browser_docs_format_many validates closed edits, normalizes forwarding, an
   const fake = makeContext()
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 100 })
   t.after(() => fake.dispose())
-  const tool = fake.tools.get('browser_docs_format_many')
+  const tool = fake.tools.get('browser_docs_format')
   assert.equal(tool.parameters.additionalProperties, false)
   assert.deepEqual(tool.parameters.required, ['edits'])
   assert.equal(tool.parameters.properties.edits.minItems, 1)
@@ -2131,7 +2458,18 @@ test('browser_docs_format_many validates closed edits, normalizes forwarding, an
   assert.match(completed.content[0].text, /docs.results=.*"index":2.*"text":"Third range"/)
   assert.equal(completed.content.filter(block => block.type === 'image').length, 1)
 
-  const already = await tool.execute({ edits: [{ text: 'already', bold: true }] }, exec)
+  await tool.execute({ edits: [{ text: 'Color only', color: '#A1B2C3' }] }, exec)
+  assert.deepEqual(commands.at(-1), {
+    op: 'docs',
+    args: { action: 'format_many', edits: [{ text: 'Color only', color: '#a1b2c3' }] },
+  })
+  await tool.execute({ edits: [{ text: 'Highlight only', highlight: '#FFFF00' }] }, exec)
+  assert.deepEqual(commands.at(-1), {
+    op: 'docs',
+    args: { action: 'format_many', edits: [{ text: 'Highlight only', highlight: '#ffff00' }] },
+  })
+
+  const already = await tool.execute({ edits: [{ text: 'already', occurrence: 'first', bold: true }] }, exec)
   assert.match(already.content[0].text, /docs.status=already_applied docs.appliedCount=1\/1 docs.attemptedCount=1 docs.verifiedCount=1 docs.remainingCount=0 docs.verifiedBy=export/)
   assert.match(already.content[0].text, /every requested formatting state was already present; final per-edit verification passed/)
   assert.match(already.content[0].text, /docs.results=\[\{"index":0,"text":"already","status":"verified"\}\]/)
@@ -2149,7 +2487,7 @@ test('browser_docs_format_many validates closed edits, normalizes forwarding, an
   const failed = await tool.execute({ edits: [{ text: 'missing', bold: true }, { text: 'later', underline: true }] }, exec)
   assert.match(failed.content[0].text, /docs.status=failed docs.appliedCount=0\/2 docs.attemptedCount=1 docs.verifiedCount=0 docs.remainingCount=1 docs.verifiedBy=export/)
   assert.match(failed.content[0].text, /Do not repeat verified edits or claim failed or unverified edits completed/)
-  assert.equal(commands.length, 4)
+  assert.equal(commands.length, 6)
 })
 
 test('browser_docs_read forwards export options and returns document content without an image', async t => {
@@ -2158,7 +2496,8 @@ test('browser_docs_read forwards export options and returns document content wit
       op: 'docs',
       docs: {
         action: 'read', status: 'completed', format: args.format, chars: 24, returned: 24,
-        truncated: false, content: 'TITLE: Heading\n1. first', verifiedBy: 'export',
+        offset: args.offset ?? 0, nextOffset: args.offset === 0 ? 24 : null,
+        truncated: args.offset === 0, content: 'TITLE: Heading\n1. first', verifiedBy: 'export',
       },
     } : undefined,
   })
@@ -2172,14 +2511,19 @@ test('browser_docs_read forwards export options and returns document content wit
   const tool = fake.tools.get('browser_docs_read')
   assert.equal(tool.parameters.additionalProperties, false)
   assert.equal(tool.parameters.properties.max_chars.maximum, 100000)
+  assert.equal(tool.parameters.properties.offset.minimum, 0)
   const exec = { callId: 'c-docs-read', signal: new AbortController().signal }
-  const result = await tool.execute({ format: 'outline', max_chars: 500 }, exec)
-  assert.deepEqual(commands.at(-1), { op: 'docs', args: { action: 'read', format: 'outline', max_chars: 500 } })
-  assert.match(result.content[0].text, /docs.status=completed docs.format=outline docs.chars=24 docs.truncated=false docs.verifiedBy=export/)
+  const result = await tool.execute({ format: 'outline', max_chars: 500, offset: 0 }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'docs', args: { action: 'read', format: 'outline', max_chars: 500, offset: 0 } })
+  assert.match(result.content[0].text, /docs.status=completed docs.format=outline docs.chars=24 docs.truncated=true docs.verifiedBy=export docs.offset=0 docs.next_offset=24/)
   assert.match(result.content[0].text, /TITLE: Heading\n1\. first/)
   assert.equal(result.content.filter(block => block.type === 'image').length, 0)
   await tool.execute({}, exec)
   assert.deepEqual(commands.at(-1), { op: 'docs', args: { action: 'read', format: 'outline' } })
+  const commandCount = commands.length
+  await assert.rejects(tool.execute({ offset: -1 }, exec), /offset must be a non-negative safe integer/)
+  await assert.rejects(tool.execute({ unexpected: true }, exec), /unknown argument/)
+  assert.equal(commands.length, commandCount)
 })
 
 test('browser_docs_page_setup validates and forwards exact page settings', async t => {
@@ -2245,6 +2589,9 @@ test('browser_docs_write forwards validated blocks and formats complete and part
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
   t.after(() => fake.dispose())
   const tool = fake.tools.get('browser_docs_write')
+  assert.match(tool.description, /Completed export-verified results are text-only with explicit skipped-capture evidence/)
+  assert.match(tool.description, /other outcomes retain their views/)
+  assert.doesNotMatch(tool.description, /one final view/)
   assert.deepEqual(tool.parameters.required, ['blocks'])
   assert.equal(tool.parameters.properties.blocks.maxItems, 50)
   assert.deepEqual(tool.parameters.properties.blocks.items.properties.list.enum, ['numbered', 'bulleted', 'checklist'])
@@ -2306,6 +2653,89 @@ test('browser_docs_write forwards validated blocks and formats complete and part
   assert.match(partial.content[0].text, /never retype the request blindly/)
 })
 
+test('browser_docs_table validates, routes every action family, and formats export readback', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    respond: (op, args) => {
+      if (op !== 'docs' || args.action !== 'table') return undefined
+      return {
+        op: 'docs',
+        view: 'none',
+        screenshotSkipped: true,
+        docs: {
+          action: 'table',
+          tableAction: args.tableAction,
+          status: 'completed',
+          verifiedBy: 'export',
+          editCount: args.edits?.length,
+          verifiedCount: args.edits?.length ?? 2,
+          cellCount: 2,
+          operationCount: 1,
+          completedCount: 1,
+        },
+        tables: [{ index: 1, rows: 1, columns: 2, cells: [[
+          { value: 'H1', rowspan: 1, colspan: 1 },
+          { value: 'H2', rowspan: 1, colspan: 1 },
+        ]] }],
+      }
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const tool = fake.tools.get('browser_docs_table')
+  const exec = { callId: 'c-docs-table', signal: new AbortController().signal }
+  assert.deepEqual(tool.parameters.required, ['action'])
+  assert.ok(tool.parameters.properties.action.enum.includes('delete_table'))
+
+  const created = await tool.execute({ action: 'create', rows: 1, columns: 2, values: [['H1', 'H2']] }, exec)
+  assert.deepEqual(commands.at(-1), {
+    op: 'docs',
+    args: { action: 'table', tableAction: 'create', rows: 1, columns: 2, values: [['H1', 'H2']] },
+  })
+  assert.match(created.content[0].text, /TABLE 1: 1 rows × 2 columns/)
+  assert.match(created.content[0].text, /r1: "H1" \| "H2"/)
+  assert.equal(created.content.some(block => block.type === 'image'), false)
+
+  await tool.execute({ action: 'write', table: 1, edits: [{ row: 1, column: 2, value: 'changed' }] }, exec)
+  assert.deepEqual(commands.at(-1).args, {
+    action: 'table', tableAction: 'write', table: 1, edits: [{ row: 1, column: 2, value: 'changed' }],
+  })
+  await tool.execute({ action: 'format', edits: [{ row: 1, bold: true, font: ' Syne ', highlight: '#FFFF00' }] }, exec)
+  assert.deepEqual(commands.at(-1).args, {
+    action: 'table', tableAction: 'format', edits: [{ row: 1, bold: true, font: 'Syne', highlight: '#ffff00' }],
+  })
+  await tool.execute({ action: 'insert_rows', row: 1, count: 2 }, exec)
+  assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'insert_rows', row: 1, position: 'after', count: 2 })
+  await tool.execute({ action: 'insert_columns', column: 2, position: 'before' }, exec)
+  assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'insert_columns', column: 2, position: 'before', count: 1 })
+  await tool.execute({ action: 'delete_rows', rows: [3, 1] }, exec)
+  assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'delete_rows', rows: [3, 1] })
+  await tool.execute({ action: 'delete_columns', columns: [2] }, exec)
+  assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'delete_columns', columns: [2] })
+  await tool.execute({ action: 'delete_table', table: 1 }, exec)
+  assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'delete_table', table: 1 })
+  await tool.execute({ action: 'read' }, exec)
+  assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'read' })
+
+  const beforeInvalid = commands.length
+  const invalid = [
+    {},
+    { action: 'other' },
+    { action: 'create', rows: 2, columns: 2, values: [['bad']] },
+    { action: 'write', edits: [{ row: 1, column: 1, value: 'two\nlines' }] },
+    { action: 'format', edits: [{ row: 1 }] },
+    { action: 'insert_rows', position: 'middle' },
+    { action: 'delete_rows', rows: [1, 1] },
+    { action: 'read', edits: [] },
+  ]
+  for (const args of invalid) await assert.rejects(() => tool.execute(args, exec))
+  assert.equal(commands.length, beforeInvalid)
+})
+
 test('Docs tools reject invalid actions and unbounded inputs before the bridge', async t => {
   const { server, url, commands } = await startFakeBridge()
   t.after(() => {
@@ -2318,40 +2748,31 @@ test('Docs tools reject invalid actions and unbounded inputs before the bridge',
 
   const exec = { callId: 'c-docs-bad', signal: new AbortController().signal }
   const rejected = [
-    ['browser_docs', {}, /only supports action "set_font"/],
-    ['browser_docs', { action: 'replace_text', text: 'x', replacement: '' }, /use browser_docs_replace_text/],
-    ['browser_docs', { action: 'set_font', text: '', font: 'Syne' }, /text must be a non-empty string/],
-    ['browser_docs', { action: 'set_font', text: '   ', font: 'Syne' }, /text must be a non-empty string/],
-    ['browser_docs', { action: 'set_font', text: 'x'.repeat(1001), font: 'Syne' }, /at most 1000 characters/],
-    ['browser_docs', { action: 'set_font', text: 'x', font: '' }, /font must be a non-empty string/],
-    ['browser_docs', { action: 'set_font', text: 'x', font: 'F'.repeat(101) }, /at most 100 characters/],
-    ['browser_docs', { action: 'set_font', text: 'x', font: 'Syne', remove_if_missing: 'yes' }, /remove_if_missing must be true or false/],
-    ['browser_docs_format', { text: 'x' }, /at least one formatting attribute/],
-    ['browser_docs_format', { text: ' ', bold: true }, /text must be a non-empty string/],
-    ['browser_docs_format', { text: 'x', font_size: 0 }, /font_size must be an integer from 1 to 400/],
-    ['browser_docs_format', { text: 'x', font_size: 401 }, /font_size must be an integer from 1 to 400/],
-    ['browser_docs_format', { text: 'x', font_size: 1.5 }, /font_size must be an integer from 1 to 400/],
-    ['browser_docs_format', { text: 'x', paragraph_style: 'Huge' }, /paragraph_style must be one of/],
-    ['browser_docs_format', { text: 'x', bold: 'yes' }, /bold must be a boolean/],
-    ['browser_docs_format', { text: 'x', font: ' ' }, /font must be a non-empty string/],
-    ['browser_docs_format', { text: 'x', bold: true, surprise: true }, /unknown argument/],
-    ['browser_docs_format_many', {}, /edits must be an array/],
-    ['browser_docs_format_many', { edits: [] }, /edits must be an array/],
-    ['browser_docs_format_many', { edits: Array.from({ length: 51 }, () => ({ text: 'x', bold: true })) }, /edits must be an array of 1 to 50/],
-    ['browser_docs_format_many', { edits: [null] }, /edits\[0\] must be an object/],
-    ['browser_docs_format_many', { edits: [{ text: '', bold: true }] }, /edits\[0\]\.text must be a non-empty string/],
-    ['browser_docs_format_many', { edits: [{ text: 'x'.repeat(1001), bold: true }] }, /at most 1000 characters/],
-    ['browser_docs_format_many', { edits: [{ text: 'x' }] }, /requires at least one formatting attribute/],
-    ['browser_docs_format_many', { edits: [{ text: 'x', occurrence: 'all', bold: true }] }, /occurrence must be "first", "last", or a positive integer/],
-    ['browser_docs_format_many', { edits: [{ text: 'x', font_size: 0 }] }, /font_size must be an integer from 1 to 400/],
-    ['browser_docs_format_many', { edits: [{ text: 'x', paragraph_style: 'Huge' }] }, /paragraph_style must be one of/],
-    ['browser_docs_format_many', { edits: [{ text: 'x', bold: 'yes' }] }, /bold must be a boolean/],
-    ['browser_docs_format_many', { edits: [{ text: 'x', font: ' ' }] }, /font must be a non-empty string/],
-    ['browser_docs_format_many', { edits: [{ text: 'x', font: 'F'.repeat(101) }] }, /at most 100 characters/],
-    ['browser_docs_format_many', { edits: [{ text: 'x', color: 'blue' }] }, /six-digit hex color/],
-    ['browser_docs_format_many', { edits: [{ text: 'x', highlight: '#fff' }] }, /six-digit hex color/],
-    ['browser_docs_format_many', { edits: [{ text: 'x', bold: true, surprise: true }] }, /unknown argument/],
-    ['browser_docs_format_many', { edits: [{ text: 'x', bold: true }], surprise: true }, /unknown argument/],
+    ['browser_docs_format', {}, /edits must be an array/],
+    ['browser_docs_format', { edits: [] }, /edits must be an array/],
+    ['browser_docs_format', { edits: Array.from({ length: 51 }, () => ({ text: 'x', bold: true })) }, /edits must be an array of 1 to 50/],
+    ['browser_docs_format', { edits: [null] }, /edits\[0\] must be an object/],
+    ['browser_docs_format', { edits: [{ text: '', bold: true }] }, /edits\[0\]\.text must be a non-empty string/],
+    ['browser_docs_format', { edits: [{ text: '   ', bold: true }] }, /text must be a non-empty string/],
+    ['browser_docs_format', { edits: [{ text: 'x'.repeat(1001), bold: true }] }, /at most 1000 characters/],
+    ['browser_docs_format', { edits: [{ text: 'x' }] }, /requires at least one formatting attribute/],
+    ['browser_docs_format', { edits: [{ text: 'x', occurrence: 'all', bold: true }] }, /occurrence must be "first", "last", or a positive integer/],
+    ['browser_docs_format', { edits: [{ text: 'x', font_size: 0 }] }, /font_size must be an integer from 1 to 400/],
+    ['browser_docs_format', { edits: [{ text: 'x', font_size: 401 }] }, /font_size must be an integer from 1 to 400/],
+    ['browser_docs_format', { edits: [{ text: 'x', font_size: 1.5 }] }, /font_size must be an integer from 1 to 400/],
+    ['browser_docs_format', { edits: [{ text: 'x', paragraph_style: 'Huge' }] }, /paragraph_style must be one of/],
+    ['browser_docs_format', { edits: [{ text: 'x', bold: 'yes' }] }, /bold must be a boolean/],
+    ['browser_docs_format', { edits: [{ text: 'x', font: ' ' }] }, /font must be a non-empty string/],
+    ['browser_docs_format', { edits: [{ text: 'x', font: 'F'.repeat(101) }] }, /at most 100 characters/],
+    ['browser_docs_format', { edits: [{ text: 'x', color: 'blue' }] }, /six-digit hex color/],
+    ['browser_docs_format', { edits: [{ text: 'x', highlight: '#fff' }] }, /six-digit hex color/],
+    ['browser_docs_format', { edits: [{ text: 'x', bold: true, surprise: true }] }, /unknown argument/],
+    ['browser_docs_format', { edits: [{ text: 'x', bold: true }], surprise: true }, /unknown argument/],
+    ['browser_docs_format', { edits: [{ text: 'x', font: 'Syne', remove_if_missing: 'yes' }] }, /remove_if_missing must be true or false/],
+    ['browser_docs_format', { edits: [{ text: 'x', font: 'Syne', bold: true, remove_if_missing: true }] }, /only on one unique font-only edit/],
+    ['browser_docs_format', { edits: [{ text: 'x', font: 'Syne', occurrence: 'first', remove_if_missing: true }] }, /only on one unique font-only edit/],
+    ['browser_docs_format', { edits: [{ text: 'x', font: 'Syne', remove_if_missing: true }, { text: 'y', bold: true }] }, /only on one unique font-only edit/],
+    ['browser_docs_format', { edits: [{ text: 'x', remove_if_missing: true }] }, /at least one formatting attribute/],
     ['browser_docs_select_text', { text: ' ' }, /text must be a non-empty string/],
     ['browser_docs_select_text', { text: 'x'.repeat(1001) }, /at most 1000 characters/],
     ['browser_docs_read', { format: 'pdf' }, /format must be outline, text, or html/],
@@ -2380,17 +2801,17 @@ test('Docs tools reject invalid actions and unbounded inputs before the bridge',
     ['browser_docs_write', { blocks: [{ runs: [{ text: 'x\ny' }] }] }, /single-line/],
     ['browser_docs_write', { blocks: [{ runs: [{ text: 'x' }], items: ['y'], list: 'bulleted' }] }, /exactly one of text, runs, items, blank:true, or page_break:true/],
     ['browser_docs_write', { blocks: [{ text: 'x' }], surprise: true }, /unknown argument/],
-    ['browser_docs_replace_text', {}, /text must be a non-empty string/],
-    ['browser_docs_replace_text', { text: 'x' }, /replacement must be a string/],
-    ['browser_docs_replace_text', { text: 'x', replacement: 4 }, /replacement must be a string/],
-    ['browser_docs_replace_text', { text: 'x', replacement: 'y'.repeat(1001) }, /at most 1000 characters/],
-    ['browser_docs_replace_text', { text: 'same', replacement: 'same' }, /replacement must differ from text/],
-    ['browser_docs_replace_many', {}, /edits must be an array/],
-    ['browser_docs_replace_many', { edits: [] }, /edits must be an array/],
-    ['browser_docs_replace_many', { edits: [null] }, /edits\[0\] must be an object/],
-    ['browser_docs_replace_many', { edits: [{ text: '', replacement: '' }] }, /edits\[0\]\.text must be a non-empty string/],
-    ['browser_docs_replace_many', { edits: [{ text: 'x' }] }, /edits\[0\]\.replacement must be a string/],
-    ['browser_docs_replace_many', { edits: [{ text: 'same', replacement: 'same' }] }, /edits\[0\] replacement must differ from text/],
+    ['browser_docs_replace', {}, /edits must be an array/],
+    ['browser_docs_replace', { edits: [] }, /edits must be an array/],
+    ['browser_docs_replace', { edits: Array.from({ length: 201 }, () => ({ text: 'x', replacement: 'y' })) }, /edits must be an array of 1 to 200/],
+    ['browser_docs_replace', { edits: [null] }, /edits\[0\] must be an object/],
+    ['browser_docs_replace', { edits: [{ text: '', replacement: '' }] }, /edits\[0\]\.text must be a non-empty string/],
+    ['browser_docs_replace', { edits: [{ text: 'x' }] }, /edits\[0\]\.replacement must be a string/],
+    ['browser_docs_replace', { edits: [{ text: 'x', replacement: 4 }] }, /replacement must be a string/],
+    ['browser_docs_replace', { edits: [{ text: 'x', replacement: 'y'.repeat(1001) }] }, /at most 1000 characters/],
+    ['browser_docs_replace', { edits: [{ text: 'same', replacement: 'same' }] }, /edits\[0\] replacement must differ from text/],
+    ['browser_docs_replace', { edits: [{ text: 'x', replacement: 'y', surprise: true }] }, /unknown argument/],
+    ['browser_docs_replace', { edits: [{ text: 'x', replacement: 'y' }], surprise: true }, /unknown argument/],
   ]
   let turn = 0
   for (const [toolName, args, pattern] of rejected) {
@@ -2400,7 +2821,7 @@ test('Docs tools reject invalid actions and unbounded inputs before the bridge',
   assert.equal(commands.length, 0)
 })
 
-test('browser_docs uses a 60-second request budget instead of the configured default', async t => {
+test('legacy set_font routing uses a 60-second request budget instead of the configured default', async t => {
   const { server, url } = await startFakeBridge({ delays: { docs: 250 } })
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -2411,15 +2832,15 @@ test('browser_docs uses a 60-second request budget instead of the configured def
   t.after(() => fake.dispose())
 
   await waitFor(() => server.clients.size > 0)
-  const result = await fake.tools.get('browser_docs').execute(
-    { action: 'set_font', text: 'Exact heading', font: 'Syne' },
+  const result = await fake.tools.get('browser_docs_format').execute(
+    { edits: [{ text: 'Exact heading', font: 'Syne', remove_if_missing: false }] },
     { callId: 'c-docs-timeout', signal: new AbortController().signal },
   )
   assert.match(result.content[0].text, /docs.status=applied/)
   assert.equal(result.content.length, 2)
 })
 
-test('browser_docs_format_many allows 60 seconds beyond the executor deadline', async t => {
+test('browser_docs_format allows 60 seconds beyond the format_many executor deadline', async t => {
   const { server, url, commands } = await startFakeBridge({ delays: { docs: 660_001 } })
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -2432,8 +2853,8 @@ test('browser_docs_format_many allows 60 seconds beyond the executor deadline', 
 
   t.mock.timers.enable({ apis: ['setTimeout'] })
   let settled = false
-  const pending = fake.tools.get('browser_docs_format_many').execute(
-    { edits: [{ text: 'Exact heading', bold: true }] },
+  const pending = fake.tools.get('browser_docs_format').execute(
+    { edits: [{ text: 'Exact heading', occurrence: 'first', bold: true }] },
     { callId: 'c-docs-format-many-timeout', signal: new AbortController().signal },
   )
   pending.then(() => { settled = true }, () => { settled = true })
@@ -2456,8 +2877,13 @@ test('browser_docs_format_many allows 60 seconds beyond the executor deadline', 
   t.mock.timers.reset()
 })
 
-test('wait_for reports found and timed-out conditions', async t => {
-  const { server, url, commands } = await startFakeBridge()
+test('wait_for reports conditions and forwards optional views without setting a default', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    respond: (op, args) => op === 'wait_for' ? {
+      ...(args.text === 'NEVER' ? WAIT_FOR_TIMEOUT : WAIT_FOR),
+      view: args.view ?? 'full',
+    } : undefined,
+  })
   t.after(() => {
     for (const client of server.clients) client.terminate()
     server.close()
@@ -2467,6 +2893,7 @@ test('wait_for reports found and timed-out conditions', async t => {
   t.after(() => fake.dispose())
 
   const definition = fake.tools.get('browser_wait_for')
+  assert.deepEqual(definition.parameters.properties.view.enum, ['auto', 'full', 'compact', 'none'])
   const exec = { callId: 'c-wait', signal: new AbortController().signal }
   const found = await definition.execute({ text: 'READY' }, exec)
   assert.match(found.content[0].text, /waited for text "READY" · found after 812ms/)
@@ -2478,6 +2905,11 @@ test('wait_for reports found and timed-out conditions', async t => {
 
   await definition.execute({ text: 'READY', timeout_ms: 15000 }, exec)
   assert.deepEqual(commands.at(-1), { op: 'wait_for', args: { text: 'READY', timeout_ms: 15000 } })
+
+  const none = await definition.execute({ text: 'READY', view: 'none' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'wait_for', args: { text: 'READY', view: 'none' } })
+  assert.equal(none.content.filter(block => block.type === 'image').length, 0)
+  assert.match(none.content[0].text, /view: skipped — no screenshot returned/)
 })
 
 test('wait_for validation requires a condition, bounded values, and timeout_ms at least ms', async t => {
@@ -2508,6 +2940,8 @@ test('wait_for validation requires a condition, bounded values, and timeout_ms a
     () => definition.execute({ ms: 15_000, timeout_ms: 10_000 }, exec),
     /timeout_ms must be greater than or equal to ms/,
   )
+  await assert.rejects(() => definition.execute({ text: 'x', view: 'mid' }, exec), /view must be one of/)
+  await assert.rejects(() => definition.execute({ text: 'x', surprise: true }, exec), /unknown argument/)
   assert.equal(commands.length, 0, 'all invalid waits, including timeout_ms < ms, fail before bridge traffic')
 })
 
@@ -2761,8 +3195,8 @@ test('batch click_at reports dispatch instead of no visible change', async t => 
   assert.doesNotMatch(text, /NO VISIBLE CHANGE/)
 })
 
-test('batch validation rejects bad action lists', async t => {
-  const { server, url } = await startFakeBridge()
+test('batch validation rejects bad action lists and guard conditions before the bridge', async t => {
+  const { server, url, commands } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
     server.close()
@@ -2772,6 +3206,9 @@ test('batch validation rejects bad action lists', async t => {
   t.after(() => fake.dispose())
 
   const definition = fake.tools.get('browser_batch')
+  const conditionSchema = definition.parameters.properties.actions.items.properties.before
+  assert.equal(conditionSchema.additionalProperties, false)
+  assert.equal(conditionSchema.properties.view, undefined)
   const exec = { callId: 'c-batch-bad', signal: new AbortController().signal }
   await assert.rejects(() => definition.execute({}, exec), /requires an actions array/)
   await assert.rejects(() => definition.execute({ actions: 'click' }, exec), /requires an actions array/)
@@ -2797,6 +3234,205 @@ test('batch validation rejects bad action lists', async t => {
     () => definition.execute({ actions: [{ op: 'click', label: 3 }], view: 'mid' }, exec),
     /view must be one of auto, full, compact, none/,
   )
+  const invalidGuards = [
+    [{ before: null }, /before must be an object/],
+    [{ before: {} }, /before requires at least one condition/],
+    [{ before: { text: 'x', view: 'full' } }, /before does not accept a view field/],
+    [{ before: { ms: 15_000, timeout_ms: 10_000 } }, /before timeout_ms must be greater than or equal to ms/],
+    [{ after: { text: '' } }, /after text must be a non-empty string/],
+    [{ after: { idle: 'yes' } }, /after idle must be true or false/],
+    [{ after: { text: 'x', surprise: true } }, /after received an unknown argument/],
+  ]
+  for (const [guard, pattern] of invalidGuards) {
+    await assert.rejects(() => definition.execute({ actions: [{ op: 'click', label: 3, ...guard }] }, exec), pattern)
+  }
+  await assert.rejects(
+    () => definition.execute({ actions: [{ op: 'click', args: { label: 3, before: { text: 'x', view: 'none' } } }] }, exec),
+    /before does not accept a view field/,
+  )
+  assert.equal(commands.length, 0)
+})
+
+test('batch rejects corrupt argument names recursively without inspecting DSML-looking string values', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const definition = fake.tools.get('browser_batch')
+  const exec = { callId: 'c-batch-malformed', signal: new AbortController().signal }
+  const malformedKey = 'before:{"url":"/form.html","timeout_ms":1000}}]</｜DSML｜ parameter_view_note_placeholder'
+  const malformedActions = [
+    { op: 'type', label: 7, text: 'x', before: { url: '/form.html', timeout_ms: 1000 }, [malformedKey]: 'x' },
+    { op: 'type', label: 7, text: 'x', before: { url: '/form.html', [malformedKey]: 'x' } },
+    { op: 'click_at', points: [{ x: 100, y: 200, 'bad-key': 'x' }] },
+  ]
+  for (const action of malformedActions) {
+    await assert.rejects(
+      () => definition.execute({ actions: [action] }, exec),
+      /browser_batch arguments are malformed.*no actions ran/,
+    )
+  }
+  assert.equal(commands.length, 0, 'malformed keys at any depth prevent every bridge request')
+
+  const dsmlText = 'before:{"url":"/form.html","timeout_ms":1000}}]</｜DSML｜ parameter_view_note_placeholder'
+  const validActions = [
+    {
+      op: 'type',
+      args: {
+        label: 7,
+        text: dsmlText,
+        submit: true,
+        before: { url: '/form.html', timeout_ms: 1000 },
+        after: { text: 'Submitted', idle: true },
+      },
+    },
+    { op: 'click_at', points: [{ x: 100, y: 200 }, { x: 300, y: 400, space: 'css' }] },
+  ]
+  const valid = await definition.execute({ actions: validActions, view: 'none' }, exec)
+  assert.match(valid.content[0].text, /batch: 2 actions/)
+  assert.equal(commands.length, 1)
+  assert.deepEqual(commands[0], {
+    op: 'batch',
+    args: {
+      actions: [
+        {
+          op: 'type',
+          args: {
+            label: 7,
+            text: dsmlText,
+            submit: true,
+            before: { url: '/form.html', timeout_ms: 1000 },
+            after: { text: 'Submitted', idle: true },
+          },
+        },
+        { op: 'click_at', args: { points: [{ x: 100, y: 200 }, { x: 300, y: 400, space: 'css' }] } },
+      ],
+      view: 'none',
+    },
+  })
+})
+
+test('batch forwards guards and honestly formats success, precondition, and postcondition outcomes', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    respond: (op, args) => {
+      if (op !== 'batch') return undefined
+      const action = args.actions[0]
+      const base = {
+        ...BATCH_SINGLE,
+        batch: { ...BATCH_SINGLE.batch, total: args.actions.length, stoppedEarly: true, ok: false, succeeded: 0, failedIndex: 1 },
+      }
+      if (action.args.before?.text === 'BLOCKED') {
+        return {
+          ...base,
+          batch: { ...base.batch, executed: 0 },
+          actions: [{
+            index: 1, op: 'click', ok: false, attempted: false, mutationPossible: false,
+            before: { found: false, timedOut: true, elapsedMs: 10_000 },
+            error: { code: 'BATCH_PRECONDITION_FAILED', message: 'Required text did not appear.' },
+          }],
+        }
+      }
+      if (action.args.after?.text === 'MUTATED') {
+        return {
+          ...base,
+          batch: { ...base.batch, executed: 1 },
+          actions: [{
+            index: 1, op: 'click', ok: false, attempted: true, mutationPossible: true, changed: true,
+            before: { found: true, timedOut: false, elapsedMs: 2 },
+            after: { found: false, timedOut: true, elapsedMs: 20_000 },
+            error: { code: 'BATCH_POSTCONDITION_FAILED', message: 'Expected text did not appear.' },
+          }],
+        }
+      }
+      return {
+        ...BATCH_SINGLE,
+        actions: [{
+          index: 1, op: 'click', ok: true, changed: true, attempted: true, mutationPossible: true,
+          before: { found: true, timedOut: false, elapsedMs: 2 },
+          after: { found: true, timedOut: false, elapsedMs: 3 },
+        }],
+      }
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const tool = fake.tools.get('browser_batch')
+  const exec = { callId: 'c-batch-guards', signal: new AbortController().signal }
+
+  const success = await tool.execute({
+    actions: [{ op: 'click', label: 3, before: { text: 'READY', timeout_ms: 5_000 }, after: { idle: true } }],
+    stop_on_error: false,
+    view: 'none',
+  }, exec)
+  assert.deepEqual(commands.at(-1), {
+    op: 'batch',
+    args: {
+      actions: [{ op: 'click', args: { label: 3, before: { text: 'READY', timeout_ms: 5_000 }, after: { idle: true } } }],
+      stop_on_error: false,
+      view: 'none',
+    },
+  })
+  assert.match(success.content[0].text, /before=\{"found":true,"timedOut":false,"elapsedMs":2\}/)
+  assert.match(success.content[0].text, /after=\{"found":true,"timedOut":false,"elapsedMs":3\}/)
+  assert.match(success.content[0].text, /attempted=true · mutationPossible=true/)
+
+  const actions = [
+    { op: 'click', label: 3, before: { text: 'BLOCKED' } },
+    { op: 'click', label: 9 },
+  ]
+  const precondition = await tool.execute({ actions, stop_on_error: false, view: 'none' }, exec)
+  assert.match(precondition.content[0].text, /FAILED BATCH_PRECONDITION_FAILED/)
+  assert.match(precondition.content[0].text, /action \[1\] was not dispatched/)
+  assert.match(precondition.content[0].text, /attempted=false · mutationPossible=false/)
+  assert.match(precondition.content[0].text, /stopped the batch even with stop_on_error:false/)
+  assert.doesNotMatch(precondition.content[0].text, /\[2\] click/)
+
+  actions[0].before = { text: 'READY' }
+  actions[0].after = { text: 'MUTATED' }
+  const postcondition = await tool.execute({ actions, stop_on_error: false, view: 'none' }, exec)
+  assert.match(postcondition.content[0].text, /FAILED BATCH_POSTCONDITION_FAILED/)
+  assert.match(postcondition.content[0].text, /action \[1\] was dispatched before its postcondition failed/)
+  assert.match(postcondition.content[0].text, /mutation is possible, blind retry is unsafe/)
+  assert.match(postcondition.content[0].text, /attempted=true · mutationPossible=true/)
+  assert.doesNotMatch(postcondition.content[0].text, /\[2\] click/)
+})
+
+test('batch deadline includes default and declared before/after wait budgets', async t => {
+  const { server, url, commands } = await startFakeBridge({ delays: { batch: 51_001 } })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 50 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let settled = false
+  const pending = fake.tools.get('browser_batch').execute({
+    actions: [{ op: 'click', label: 3, before: { text: 'READY' }, after: { text: 'DONE', timeout_ms: 20_000 } }],
+  }, { callId: 'c-batch-wait-timeout', signal: new AbortController().signal })
+  pending.then(() => { settled = true }, () => { settled = true })
+  const rejection = assert.rejects(pending, /batch timed out after 51000ms/)
+  for (let index = 0; index < 100 && commands.length === 0; index += 1) await new Promise(resolve => setImmediate(resolve))
+  assert.equal(commands.length, 1)
+  t.mock.timers.tick(50_999)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(settled, false)
+  t.mock.timers.tick(1)
+  await rejection
+  assert.equal(settled, true)
+  t.mock.timers.reset()
 })
 
 test('batch uses a per-call timeout without changing other tools', async t => {
@@ -3420,6 +4056,135 @@ test('clipboard paste reports text pastes and trusted system Ctrl+V pastes', asy
   assert.match(systemText.content[0].text, /pasted 24 chars from the system clipboard into \[7\] · append/)
 })
 
+test('screenshot forwards full-page and region capture options and reports clipboard storage', async t => {
+  const captured = {
+    ...SNAPSHOT,
+    viewId: undefined,
+    labels: [],
+    labelCount: 0,
+    capture: { scope: 'full_page', unlabelled: true, cssWidth: 800, cssHeight: 2400 },
+    clipboard: { target: 'virtual', kind: 'image', width: 800, height: 2400, bytes: 4 },
+  }
+  const { server, url, commands } = await startFakeBridge({ respond: op => op === 'snapshot' ? captured : undefined })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const tool = fake.tools.get('browser_screenshot')
+  const exec = { callId: 'c-capture-options', signal: new AbortController().signal }
+  const full = await tool.execute({ scope: 'full_page', to_clipboard: true }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'snapshot', args: { detail: 'normal', scope: 'full_page', to_clipboard: true } })
+  assert.match(full.content[0].text, /capture: full_page; 800x2400 CSS px; unlabelled=true; not a viewport coordinate basis/)
+  assert.match(full.content[0].text, /clipboard: virtual 800x2400 PNG stored/)
+
+  await tool.execute({ scope: 'region', region: { x: 10, y: 20, width: 300, height: 200 }, view_id: 4 }, exec)
+  assert.deepEqual(commands.at(-1), {
+    op: 'snapshot',
+    args: { detail: 'normal', scope: 'region', region: { x: 10, y: 20, width: 300, height: 200 }, space: 'image', view_id: 4 },
+  })
+  const beforeInvalid = commands.length
+  const rejected = [
+    { scope: 'region' },
+    { scope: 'full_page', region: { x: 0, y: 0, width: 2, height: 2 } },
+    { scope: 'region', region: { x: 0, y: 0, width: -2, height: 2 } },
+    { scope: 'region', region: { x: 0, y: 0, width: 2, height: 2 }, view_id: 0 },
+    { to_clipboard: 'yes' },
+  ]
+  for (const args of rejected) await assert.rejects(() => tool.execute(args, exec), /browser_screenshot/)
+  assert.equal(commands.length, beforeInvalid)
+})
+
+test('clipboard reads captured images and reports image paste restoration', async t => {
+  const image = { data: 'iVBORw==', mimeType: 'image/png', width: 2, height: 3, bytes: 4 }
+  const { server, url } = await startFakeBridge({
+    respond: (op, args) => {
+      if (op !== 'clipboard') return undefined
+      if (args.action === 'read') {
+        return { op: 'clipboard', action: 'read', clipboard: { target: 'virtual', kind: 'image', source: 'screenshot', ...image }, image }
+      }
+      if (args.action === 'paste') {
+        return {
+          ...CLIPBOARD_PASTE_KEYS,
+          clipboard: { target: 'virtual', kind: 'image', source: 'screenshot', rich: true, ...image },
+          pasted: { ...CLIPBOARD_PASTE_KEYS.pasted, width: 2, height: 3, systemRestored: true },
+        }
+      }
+      return undefined
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const tool = fake.tools.get('browser_clipboard')
+  const exec = { callId: 'c-image-clipboard', signal: new AbortController().signal }
+
+  const read = await tool.execute({ action: 'read' }, exec)
+  assert.equal(read.content.length, 2)
+  assert.match(read.content[0].text, /read a 2x3 image\/png from the virtual clipboard/)
+  assert.match(read.content[0].text, /source: a screenshot capture/)
+  assert.deepEqual(read.content[1], { type: 'image', data: 'iVBORw==', mimeType: 'image/png' })
+
+  const paste = await tool.execute({ action: 'paste', label: 7 }, exec)
+  const text = paste.content.map(block => block.text ?? '').join('\n')
+  assert.match(text, /pasted the 2x3 image from the virtual clipboard into \[7\] via one trusted Ctrl\+V/)
+  assert.match(text, /previous system clipboard was restored/)
+  assert.match(text, /do not repeat it blindly/)
+})
+
+test('clipboard reports synthetic image delivery and unhandled events honestly', async t => {
+  const image = { data: 'iVBORw==', mimeType: 'image/png', width: 2, height: 3, bytes: 4 }
+  const { server, url } = await startFakeBridge({
+    respond: (op, args) => op === 'clipboard' && args.action === 'paste' ? {
+      ...CLIPBOARD_PASTE_KEYS,
+      clipboard: { target: 'virtual', kind: 'image', source: 'screenshot', rich: true, ...image },
+      pasted: {
+        chars: null,
+        mode: 'synthetic',
+        label: args.label,
+        via: 'synthetic',
+        trusted: false,
+        handled: args.label !== 8,
+        pasteHandled: args.label !== 8,
+        dropHandled: false,
+        width: 2,
+        height: 3,
+        systemPreserved: false,
+        systemRestored: false,
+        systemStaged: false,
+        systemRestoreError: 'Document is not focused',
+      },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const tool = fake.tools.get('browser_clipboard')
+  const exec = { callId: 'c-synthetic-image', signal: new AbortController().signal }
+
+  const handled = await tool.execute({ action: 'paste', label: 7 }, exec)
+  const handledText = handled.content.map(block => block.text ?? '').join('\n')
+  assert.match(handledText, /delivered the 2x3 image from the virtual clipboard to \[7\] via a synthetic paste event/)
+  assert.match(handledText, /a page handler consumed the event/)
+  assert.match(handledText, /previous system clipboard was not read and was left unchanged/)
+
+  const unhandled = await tool.execute({ action: 'paste', label: 8 }, exec)
+  const unhandledText = unhandled.content.map(block => block.text ?? '').join('\n')
+  assert.match(unhandledText, /no page handler consumed the event/)
+  assert.match(unhandledText, /do not retry blindly/i)
+})
+
 test('clipboard validation rejects bad calls before the bridge', async t => {
   const { server, url, commands } = await startFakeBridge()
   t.after(() => {
@@ -3528,6 +4293,10 @@ test('observation repeats are allowed far past the mutating limit', async t => {
   await assert.rejects(() => screenshot.execute({ detail: 'fast' }, exec), /LOOP_DETECTED/)
   const docsRead = fake.tools.get('browser_docs_read')
   for (let index = 0; index < 4; index++) assert.ok((await docsRead.execute({ format: 'outline' }, exec)).content.length >= 1)
+  const places = fake.tools.get('browser_places')
+  for (let index = 0; index < 4; index++) assert.ok((await places.execute({ query: 'project' }, exec)).content.length >= 1)
+  const table = fake.tools.get('browser_table')
+  for (let index = 0; index < 4; index++) assert.ok((await table.execute({ action: 'read' }, exec)).content.length >= 1)
   await waitFor(() => logEvents.some(event => event.type === 'tool.loop.detected'))
   const loop = logEvents.find(event => event.type === 'tool.loop.detected')
   assert.equal(loop.data.observation, true)
@@ -3644,7 +4413,7 @@ test('repeated identical calls fail with LOOP_DETECTED', async t => {
   assert.equal(commands.filter(command => command.op === 'click').length, 5)
 })
 
-test('Docs semantic loop guard covers validation failures and singleton batch aliases', async t => {
+test('Docs semantic loop guard covers singleton replacement validation failures', async t => {
   const { server, url, commands, logEvents } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -3654,19 +4423,21 @@ test('Docs semantic loop guard covers validation failures and singleton batch al
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
   t.after(() => fake.dispose())
 
+  const tool = fake.tools.get('browser_docs_replace')
   const exec = { callId: 'c-docs-loop', signal: new AbortController().signal }
-  await assert.rejects(() => fake.tools.get('browser_docs_replace_text').execute({ replacement: '' }, exec), /text must be a non-empty string/)
-  await assert.rejects(() => fake.tools.get('browser_docs').execute({ action: 'replace_text', replacement: '' }, exec), /only supports action/)
-  await assert.rejects(() => fake.tools.get('browser_docs_replace_many').execute({ edits: [{ replacement: '' }] }, exec), /text must be a non-empty string/)
+  const args = { edits: [{ replacement: '' }] }
+  for (let index = 0; index < 3; index += 1) {
+    await assert.rejects(() => tool.execute(args, exec), /text must be a non-empty string/)
+  }
   await assert.rejects(
-    () => fake.tools.get('browser_docs_replace_text').execute({ replacement: '' }, exec),
+    () => tool.execute(args, exec),
     /LOOP_DETECTED.*Do not switch replacement tools, batching modes, or targets.*Stop and report/,
   )
   assert.equal(commands.length, 0)
   await waitFor(() => logEvents.some(event => event.type === 'tool.loop.detected' && event.data.semanticTool === 'browser_docs_replace_text'))
 })
 
-test('singleton format_many shares the browser_docs_format semantic fingerprint', async t => {
+test('singleton browser_docs_format edits keep one semantic repeat fingerprint', async t => {
   const { server, url, commands, logEvents } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -3675,13 +4446,13 @@ test('singleton format_many shares the browser_docs_format semantic fingerprint'
   const fake = makeContext()
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000, maxRepeatedCalls: 2 })
   t.after(() => fake.dispose())
-  const single = fake.tools.get('browser_docs_format')
-  const many = fake.tools.get('browser_docs_format_many')
+  const tool = fake.tools.get('browser_docs_format')
   const exec = { callId: 'c-docs-format-loop', signal: new AbortController().signal }
+  const args = { edits: [{ text: 'x' }] }
 
-  await assert.rejects(() => single.execute({ text: 'x' }, exec), /at least one formatting attribute/)
-  await assert.rejects(() => many.execute({ edits: [{ text: 'x' }] }, exec), /at least one formatting attribute/)
-  await assert.rejects(() => single.execute({ text: 'x' }, exec), /LOOP_DETECTED/)
+  await assert.rejects(() => tool.execute(args, exec), /at least one formatting attribute/)
+  await assert.rejects(() => tool.execute(args, exec), /at least one formatting attribute/)
+  await assert.rejects(() => tool.execute(args, exec), /LOOP_DETECTED/)
   assert.equal(commands.length, 0)
   await waitFor(() => logEvents.some(event => event.type === 'tool.loop.detected' && event.data.semanticTool === 'browser_docs_format'))
 })
@@ -3719,14 +4490,14 @@ test('partial and failed format_many results do not count as successful repeat p
   const fake = makeContext()
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000, maxRepeatedCalls: 1 })
   t.after(() => fake.dispose())
-  const tool = fake.tools.get('browser_docs_format_many')
+  const tool = fake.tools.get('browser_docs_format')
   const exec = { callId: 'c-docs-format-incomplete', signal: new AbortController().signal }
 
   for (const [index, status] of ['partial', 'failed'].entries()) {
     fake.listeners.get('agent/inbox/claimed')({ message: { id: `format-many-${status}`, content: [{ type: 'text', text: status }] }, turn: index + 1 })
     const args = status === 'partial'
       ? { edits: [{ text: 'partial-target', bold: true }, { text: 'missing', italic: true }] }
-      : { edits: [{ text: 'failed-target', bold: true }] }
+      : { edits: [{ text: 'failed-target', occurrence: 'first', bold: true }] }
     const incomplete = await tool.execute(args, exec)
     assert.match(incomplete.content[0].text, new RegExp(`docs.status=${status}`))
     await assert.rejects(() => tool.execute({ edits: [{ text: `${status}-other` }] }, exec), /at least one formatting attribute/)
@@ -3763,12 +4534,12 @@ test('completed and already_applied format_many results count as successful repe
   const fake = makeContext()
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000, maxRepeatedCalls: 1 })
   t.after(() => fake.dispose())
-  const tool = fake.tools.get('browser_docs_format_many')
+  const tool = fake.tools.get('browser_docs_format')
   const exec = { callId: 'c-docs-format-complete', signal: new AbortController().signal }
 
   for (const [index, status] of ['completed', 'already_applied'].entries()) {
     fake.listeners.get('agent/inbox/claimed')({ message: { id: `format-many-${status}`, content: [{ type: 'text', text: status }] }, turn: index + 1 })
-    const args = { edits: [{ text: `${status}-target`, bold: true }] }
+    const args = { edits: [{ text: `${status}-target`, occurrence: 'first', bold: true }] }
     const first = await tool.execute(args, exec)
     assert.match(first.content[0].text, new RegExp(`docs.status=${status}`))
     await assert.rejects(() => tool.execute({ edits: [{ text: `${status}-other` }] }, exec), /at least one formatting attribute/)
@@ -3802,10 +4573,10 @@ test('Docs failure circuit stops cascades and resets on a new turn or success', 
   const fake = makeContext()
   apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
   t.after(() => fake.dispose())
-  const tool = fake.tools.get('browser_docs_replace_text')
+  const tool = fake.tools.get('browser_docs_replace')
   const exec = { callId: 'c-docs-circuit', signal: new AbortController().signal }
   let index = 0
-  const attempt = () => tool.execute({ text: `target-${index++}`, replacement: '' }, exec)
+  const attempt = () => tool.execute({ edits: [{ text: `target-${index++}`, replacement: '' }] }, exec)
 
   for (let i = 0; i < 3; i += 1) await assert.rejects(attempt, /missing target/)
   await assert.rejects(attempt, /DOCS_FAILURE_CIRCUIT.*Stop and report/)
@@ -3986,4 +4757,58 @@ test('midturn image pruning uses hysteresis and turn/end still prunes', async t 
     keep: 2,
     targets: 3,
   })
+})
+
+test('max-token responses queue internal follow-up turns without reviving aborted turns', async t => {
+  const { server, url, logEvents } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const session = { id: 'token-limit-session', surface: { nodes: [] } }
+  const followups = []
+  const agent = { session, followup: message => followups.push(message) }
+  const sessionEvent = fake.listeners.get('session/event')
+  const turnStopping = fake.listeners.get('agent/turn-stopping')
+  const assistant = (turn, step, reason) => sessionEvent(session, {
+    type: 'assistant/message',
+    data: {
+      turn,
+      step,
+      usage: { outputTokens: 8_192 },
+      stream: [{ type: 'chunk', chunk: { type: 'finish', reason: { kind: reason } } }],
+    },
+  })
+
+  assistant(1, 5, 'max-tokens')
+  await turnStopping({ agent, turn: 1, signal: new AbortController().signal })
+  assert.equal(followups.length, 1)
+  assert.match(followups[0].content[0].text, /Continue the same task in this new step/)
+  assert.equal(followups[0].source.kind, 'token-limit-continuation')
+
+  assistant(2, 1, 'max-tokens')
+  await turnStopping({ agent, turn: 2, signal: new AbortController().signal })
+  assert.equal(followups.length, 2, 'every token-limited turn gets one continuation')
+  assert.notEqual(followups[0].id, followups[1].id)
+
+  assistant(3, 1, 'completed')
+  await turnStopping({ agent, turn: 3, signal: new AbortController().signal })
+  assert.equal(followups.length, 2, 'ordinary completion does not continue')
+
+  assistant(4, 1, 'max-tokens')
+  const aborted = new AbortController()
+  aborted.abort({ kind: 'user' })
+  await turnStopping({ agent, turn: 4, signal: aborted.signal })
+  assert.equal(followups.length, 2, 'manual cancellation wins over continuation')
+  sessionEvent(session, { type: 'turn/end', data: { turn: 4, reason: { kind: 'aborted' } } })
+  await turnStopping({ agent, turn: 4, signal: new AbortController().signal })
+  assert.equal(followups.length, 2, 'turn cleanup prevents a stale continuation')
+
+  await waitFor(() => logEvents.filter(event => event.type === 'model.max_tokens.continued').length === 2)
+  assert.deepEqual(logEvents.filter(event => event.type === 'model.max_tokens.continued').map(event => event.data.step), [5, 1])
 })

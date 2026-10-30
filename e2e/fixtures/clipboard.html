@@ -20,6 +20,10 @@
     #copy-label { display: inline-block; margin: 10px 0; padding: 8px 10px; background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 8px; }
     button { font: inherit; padding: 8px 16px; border: 1px solid #333; border-radius: 6px; background: #111; color: #fff; cursor: pointer; }
     #status { margin-top: 14px; padding: 10px; min-height: 22px; font-family: ui-monospace, monospace; white-space: pre-wrap; color: #065f46; background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 8px; }
+    #capture-region { width: 220px; height: 90px; margin: 14px 0; padding: 8px; box-sizing: border-box; background: linear-gradient(135deg, #f97316, #7c3aed); color: #fff; font: 700 14px/1.3 ui-monospace, monospace; }
+    #image-target { min-height: 120px; width: 360px; padding: 8px; border: 2px dashed #2563eb; border-radius: 6px; background: #eff6ff; }
+    #image-target img { display: block; max-width: 100%; height: auto; }
+    #page-tail { margin-top: 40px; padding-top: 1100px; }
   </style>
 </head>
 <body>
@@ -38,7 +42,13 @@
   <label class="field-label" for="paste-input">Input target</label>
   <input id="paste-input" type="text" aria-label="Input target" />
 
+  <div id="capture-region">REGION-CAPTURE-MARKER<br />220 × 90 CSS px</div>
+
+  <label class="field-label" for="image-target">Image target</label>
+  <div id="image-target" contenteditable="true" role="textbox" tabindex="0" aria-label="Image target"></div>
+
   <div id="status">status: idle</div>
+  <div id="page-tail">FULL-PAGE-CAPTURE-MARKER</div>
 
   <script>
     const source = document.getElementById('source-paragraph')
@@ -52,6 +62,24 @@
       status.textContent = `status: selected ${selection.toString().length} chars`
     }
     document.getElementById('select-button').addEventListener('click', selectParagraph)
+
+    window.__caImagePastes = []
+    window.__caSyntheticConsume = false
+    document.getElementById('image-target').addEventListener('paste', event => {
+      const files = [...(event.clipboardData?.files ?? [])]
+      if (window.__caSyntheticConsume && files.length > 0) {
+        event.preventDefault()
+        const image = document.createElement('img')
+        image.src = URL.createObjectURL(files[0])
+        event.currentTarget.appendChild(image)
+      }
+      window.__caImagePastes.push({
+        trusted: event.isTrusted,
+        handled: event.defaultPrevented,
+        types: [...(event.clipboardData?.types ?? [])],
+        files: files.map(file => ({ type: file.type, size: file.size })),
+      })
+    })
   </script>
 </body>
 </html>

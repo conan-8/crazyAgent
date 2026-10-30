@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CrazyAgent Dialog Fixture</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; margin: 24px; max-width: 760px; color: #172033; }
+    button, a { font: inherit; }
+    button { display: block; margin: 10px 0; padding: 8px 14px; }
+    #state { margin-top: 20px; padding: 12px; white-space: pre-wrap; font-family: ui-monospace, monospace; background: #f3f6fb; border: 1px solid #cbd5e1; }
+  </style>
+</head>
+<body>
+  <h1>Native dialog fixture</h1>
+  <p>Each control records the value returned by the browser dialog.</p>
+  <button id="alert" type="button">Open alert</button>
+  <button id="confirm" type="button">Open confirm</button>
+  <button id="prompt" type="button">Open prompt</button>
+  <button id="arm-beforeunload" type="button">Arm beforeunload</button>
+  <a id="leave" href="second.html?from=dialog">Navigate away</a>
+  <div id="state" aria-live="polite">alert=(none)
+confirm=(none)
+prompt=(none)
+beforeunload=disarmed</div>
+  <script>
+    const values = { alert: '(none)', confirm: '(none)', prompt: '(none)', beforeunload: 'disarmed' }
+    const render = () => {
+      document.getElementById('state').textContent = Object.entries(values).map(([key, value]) => `${key}=${value}`).join('\n')
+    }
+    document.getElementById('alert').addEventListener('click', () => {
+      alert('fixture alert: work can continue')
+      values.alert = 'returned'
+      render()
+    })
+    document.getElementById('confirm').addEventListener('click', () => {
+      const accepted = confirm('fixture confirm: delete the draft?')
+      values.confirm = accepted ? 'accepted' : 'dismissed'
+      render()
+    })
+    document.getElementById('prompt').addEventListener('click', () => {
+      const value = prompt('fixture prompt: name the draft', 'default-draft')
+      values.prompt = value === null ? 'dismissed' : `accepted:${value}`
+      render()
+    })
+    document.getElementById('arm-beforeunload').addEventListener('click', () => {
+      values.beforeunload = 'armed'
+      render()
+    })
+    window.addEventListener('beforeunload', event => {
+      if (values.beforeunload !== 'armed') return
+      event.preventDefault()
+      event.returnValue = 'fixture beforeunload: leave without saving?'
+    })
+  </script>
+</body>
+</html>

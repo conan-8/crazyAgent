@@ -20,7 +20,7 @@ function fakeRead(options = {}) {
     },
     fetchExport: async (url, format) => {
       calls.push({ url, format })
-      return { body: format === 'txt' ? 'Heading\none\ntwo\n' : HTML }
+      return { body: format === 'txt' ? (options.text ?? 'Heading\none\ntwo\n') : HTML }
     },
     snapshot: async () => { snapshots += 1 },
   }
@@ -59,6 +59,32 @@ test('Docs read bounds content and reports truncation', async () => {
   assert.match(result.docs.content, /truncated \d+ characters/)
 })
 
+test('Docs read paginates distinct slices and reaches the exact tail', async () => {
+  const text = `${'a'.repeat(100)}MIDDLE-MARKER${'z'.repeat(100)}`
+  const fake = fakeRead({ text })
+  const first = await docsRead({}, { action: 'read', format: 'text', max_chars: 100 }, fake.io)
+  assert.equal(first.docs.offset, 0)
+  assert.equal(first.docs.nextOffset, 100)
+  assert.equal(first.docs.truncated, true)
+  assert.doesNotMatch(first.docs.content, /MIDDLE-MARKER/)
+
+  const second = await docsRead({}, { action: 'read', format: 'text', max_chars: 100, offset: first.docs.nextOffset }, fake.io)
+  assert.equal(second.docs.offset, 100)
+  assert.equal(second.docs.nextOffset, 200)
+  assert.match(second.docs.content, /MIDDLE-MARKER/)
+  assert.notEqual(second.docs.content, first.docs.content)
+
+  const third = await docsRead({}, { action: 'read', format: 'text', max_chars: 100, offset: second.docs.nextOffset }, fake.io)
+  assert.equal(third.docs.content, 'z'.repeat(13))
+  assert.equal(third.docs.nextOffset, null)
+  assert.equal(third.docs.truncated, false)
+
+  const beyond = await docsRead({}, { action: 'read', format: 'text', offset: 999 }, fake.io)
+  assert.equal(beyond.docs.content, '')
+  assert.equal(beyond.docs.returned, 0)
+  assert.equal(beyond.docs.nextOffset, null)
+})
+
 test('Docs read rejects a stale document after export', async () => {
   const fake = fakeRead({ staleAfter: 2 })
   await assert.rejects(docsRead({}, { action: 'read' }, fake.io), error => error.code === 'DOCS_STALE_TAB')
@@ -69,6 +95,8 @@ test('Docs read validates inputs before using the tab', async () => {
   const fake = fakeRead()
   await assert.rejects(docsRead({}, { action: 'read', format: 'pdf' }, fake.io), error => error.code === 'DOCS_BAD_DOCS_READ_FORMAT')
   await assert.rejects(docsRead({}, { action: 'read', max_chars: 99 }, fake.io), error => error.code === 'DOCS_BAD_DOCS_READ_CHARS')
+  await assert.rejects(docsRead({}, { action: 'read', offset: -1 }, fake.io), error => error.code === 'DOCS_BAD_DOCS_READ_OFFSET')
+  await assert.rejects(docsRead({}, { action: 'read', unexpected: true }, fake.io), error => error.code === 'DOCS_BAD_DOCS_READ_ARGUMENT')
   assert.equal(fake.calls.length, 0)
   assert.equal(fake.snapshots(), 0)
 })

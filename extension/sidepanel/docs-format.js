@@ -86,17 +86,41 @@ function supportedParagraph(block) {
   return block?.kind === 'para' && (ORDINARY_STYLES.has(block.style) || block.style === 'LI') && typeof block.text === 'string'
 }
 
+function supportedTable(block) {
+  if (block?.kind !== 'table' || !Array.isArray(block.rows) || block.rows.length === 0) return false
+  return block.rows.every(row => Array.isArray(row) && row.length > 0 && row.every(cell => {
+    if (!cell || !Number.isInteger(cell.rowspan) || cell.rowspan < 1 || !Number.isInteger(cell.colspan) || cell.colspan < 1
+      || !Array.isArray(cell.paragraphs) || cell.paragraphs.length === 0 || !cell.paragraphs.every(supportedParagraph)) return false
+    return cell.text === cell.paragraphs.map(paragraph => paragraph.text).join('\n').replace(/\n+$/u, '')
+  }))
+}
+
+function comparableParagraphs(blocks) {
+  const paragraphs = []
+  for (const block of blocks) {
+    if (supportedParagraph(block)) paragraphs.push(block)
+    else if (supportedTable(block)) {
+      for (const row of block.rows) for (const cell of row) paragraphs.push(...cell.paragraphs)
+    }
+  }
+  return paragraphs
+}
+
+function tableMetadata(table) {
+  return table.rows.map(row => row.map(cell => ({
+    rowspan: cell.rowspan,
+    colspan: cell.colspan,
+    paragraphs: cell.paragraphs.length,
+  })))
+}
+
 function validateComparableBlocks(blocks) {
   if (!Array.isArray(blocks)) throw formatError('DOCS_FORMAT_UNSUPPORTED_STRUCTURE', 'blocks must be an array')
   for (const [paragraphIndex, block] of blocks.entries()) {
-    if (supportedParagraph(block)) {
-      characterMarks(block, paragraphIndex, 'baseline')
-      continue
-    }
-    if (!SIMPLE_BLOCKS.has(block?.kind)) {
-      throw formatError('DOCS_FORMAT_UNSUPPORTED_STRUCTURE', `blocks[${paragraphIndex}] is unsupported or too opaque for complete collateral verification`, { paragraphIndex })
-    }
+    if (supportedParagraph(block) || supportedTable(block) || SIMPLE_BLOCKS.has(block?.kind)) continue
+    throw formatError('DOCS_FORMAT_UNSUPPORTED_STRUCTURE', `blocks[${paragraphIndex}] is unsupported or too opaque for complete collateral verification`, { paragraphIndex })
   }
+  for (const [paragraphIndex, block] of comparableParagraphs(blocks).entries()) characterMarks(block, paragraphIndex, 'baseline')
 }
 
 function escapeRegExp(value) {
@@ -111,10 +135,10 @@ function literalMatches(text, wanted) {
 export function planDocsFormatEdits(blocks, edits) {
   const normalizedEdits = validateDocsFormatEdits(edits)
   validateComparableBlocks(blocks)
+  const paragraphs = comparableParagraphs(blocks)
   const plans = normalizedEdits.map((edit, index) => {
     const matches = []
-    for (const [paragraphIndex, block] of blocks.entries()) {
-      if (!supportedParagraph(block)) continue
+    for (const [paragraphIndex, block] of paragraphs.entries()) {
       for (const range of literalMatches(block.text, edit.text)) matches.push({ paragraphIndex, ...range })
     }
     const matchCount = matches.length
@@ -131,7 +155,7 @@ export function planDocsFormatEdits(blocks, edits) {
       }
     }
     const match = matches[occurrence - 1]
-    if (blocks[match.paragraphIndex].style === 'LI' && edit.paragraph_style !== undefined) {
+    if (paragraphs[match.paragraphIndex].style === 'LI' && edit.paragraph_style !== undefined) {
       throw editError('DOCS_FORMAT_UNSUPPORTED_STRUCTURE', index, 'paragraph_style cannot be applied to a list item target', { paragraphIndex: match.paragraphIndex, attribute: 'paragraph_style' })
     }
     return { index, paragraphIndex: match.paragraphIndex, start: match.start, end: match.end, occurrence, matchCount, text: edit.text }
@@ -289,10 +313,16 @@ export function verifyDocsFormatEdits(baselineBlocks, finalBlocks, plans, edits,
     }
     if (supportedParagraph(baseline)) {
       if (!supportedParagraph(final)) return unsupportedVerification(edits, attemptedCount, final, paragraphIndex, 'final')
-      if (baseline.text !== final.text) {
+      continue
+    }
+    if (supportedTable(baseline)) {
+      if (!supportedTable(final)) return unsupportedVerification(edits, attemptedCount, final, paragraphIndex, 'final')
+      const expected = tableMetadata(baseline)
+      const actual = tableMetadata(final)
+      if (!sameStructure(expected, actual)) {
         return collateralFailure(edits, attemptedCount, {
-          attribute: 'text', expected: baseline.text, actual: actualValue(final.text), paragraphIndex,
-          message: `Text changed unexpectedly at paragraph ${paragraphIndex}`,
+          attribute: 'tableStructure', expected, actual, paragraphIndex,
+          message: `Table shape or cell paragraph counts changed unexpectedly at block ${paragraphIndex}`,
         })
       }
       continue
@@ -306,6 +336,26 @@ export function verifyDocsFormatEdits(baselineBlocks, finalBlocks, plans, edits,
       })
     }
   }
+
+  const baselineParagraphs = comparableParagraphs(baselineBlocks)
+  const finalParagraphs = comparableParagraphs(finalBlocks)
+  if (baselineParagraphs.length !== finalParagraphs.length) {
+    return collateralFailure(edits, attemptedCount, {
+      attribute: 'paragraphCount', expected: baselineParagraphs.length, actual: finalParagraphs.length,
+      message: 'The final export has a different flattened paragraph count',
+    })
+  }
+  for (const [paragraphIndex, baseline] of baselineParagraphs.entries()) {
+    const final = finalParagraphs[paragraphIndex]
+    if (baseline.text !== final.text) {
+      return collateralFailure(edits, attemptedCount, {
+        attribute: 'text', expected: baseline.text, actual: actualValue(final.text), paragraphIndex,
+        message: `Text changed unexpectedly at paragraph ${paragraphIndex}`,
+      })
+    }
+  }
+  baselineBlocks = baselineParagraphs
+  finalBlocks = finalParagraphs
 
   const activePlans = plans.slice(0, attemptedCount)
   for (let index = 0; index < attemptedCount; index += 1) {

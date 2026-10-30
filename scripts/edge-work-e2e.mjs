@@ -273,6 +273,39 @@ assert.ok(navigateBack.image && navigateBack.image.width > 0, 'history back retu
 assert.match(navigateBack.text, /Work fixture/, 'form content is visible after history back')
 console.log('PASS navigate history back — fresh view of the form')
 
+const placesMarker = `CrazyAgent Places ${Date.now()}`
+const places = await evaluate(`(async () => { ${prefix}
+  const bookmark = await chrome.bookmarks.create({ title: '${placesMarker}', url: '${BASE}/second.html?from=bookmark' })
+  try {
+    const bookmarkResult = await mod.execute('places.search', { query: '${placesMarker}', sources: ['bookmarks'], limit: 5 }, settings)
+    const historyResult = await mod.execute('places.search', { query: 'second.html', sources: ['history'], limit: 20 }, settings)
+    const shortcutResult = await mod.execute('places.search', { sources: ['shortcuts'], limit: 20 }, settings)
+    const target = bookmarkResult.places.find(place => place.title === '${placesMarker}')
+    const opened = target ? await mod.execute('navigate', { url: target.url }, settings) : undefined
+    return {
+      bookmarkUrl: target?.url,
+      bookmarkCount: bookmarkResult.places.length,
+      historyFound: historyResult.places.some(place => place.url.includes('/second.html')),
+      shortcutsValid: shortcutResult.places.every(place => /^https?:\\/\\//.test(place.url)),
+      requestedUrl: opened?.navigated?.requestedUrl,
+      openedUrl: opened?.tab?.url,
+      openedText: opened ? await pageText() : '',
+    }
+  } finally {
+    await chrome.bookmarks.remove(bookmark.id)
+  }
+})()`)
+assert.equal(places.bookmarkCount, 1, 'unique bookmark query returns one destination')
+assert.equal(places.bookmarkUrl, `${BASE}/second.html?from=bookmark`, 'bookmark URL is returned exactly')
+assert.equal(places.historyFound, true, 'fixture navigation is discoverable in recent history')
+assert.equal(places.shortcutsValid, true, 'shortcut results are empty or navigable HTTP(S) URLs')
+assert.equal(places.requestedUrl, places.bookmarkUrl, 'navigation uses the exact returned bookmark URL')
+assert.equal(places.openedUrl, places.bookmarkUrl, 'active tab independently shows the bookmark destination')
+assert.match(places.openedText, /SECOND-MARKER/, 'bookmark destination content is loaded')
+const remainingPlaceBookmarks = await evaluate(`chrome.bookmarks.search(${JSON.stringify(placesMarker)})`)
+assert.equal(remainingPlaceBookmarks.length, 0, 'temporary bookmark is removed')
+console.log('PASS places lookup — bookmark + recent history + shortcuts, exact URL opened, cleanup verified')
+
 const waitFound = await evaluate(`(async () => { ${prefix}
   await mod.execute('navigate', { url: '${BASE}/form.html?late=5000' }, settings)
   const result = await mod.execute('wait_for', { text: 'late content ready', timeout_ms: 10000 }, settings)

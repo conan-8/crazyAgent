@@ -9,10 +9,11 @@
  *   node scripts/edge-clipboard-e2e.mjs
  *
  * The virtual clipboard is always exercised: selection copy -> storage.session
- * -> paste, label copy -> read, write/read/clear, and append paste. System
- * clipboard checks (write/read, rich Ctrl+V paste, rich:false text paste) print
- * SKIP when the isolated Edge profile denies clipboard access; that is an
- * environment limitation, not an executor failure.
+ * -> paste, label copy -> read, write/read/clear, append paste, and full-page or
+ * region PNG capture. System and virtual-image rich clipboard checks print SKIP
+ * when the isolated Edge profile denies clipboard access or does not deliver a
+ * trusted paste to the page; that is an environment limitation, not proof of
+ * insertion. Previous-clipboard restoration is checked independently.
  */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -85,14 +86,15 @@ async function evaluate(expression, userGesture = false) {
 }
 
 // Find (or create) the fixture tab and load clipboard.html fresh.
+const fixtureUrl = `${BASE}/clipboard.html?run=${Date.now()}`
 const fixture = await evaluate(`(async () => {
   const tabs = await chrome.tabs.query({})
   let tab = tabs.find(item => item.url?.includes('/clipboard.html'))
   if (!tab) {
-    tab = await chrome.tabs.create({ url: '${BASE}/clipboard.html', active: true })
+    tab = await chrome.tabs.create({ url: '${fixtureUrl}', active: true })
   } else {
     await chrome.tabs.update(tab.id, { active: true })
-    await chrome.tabs.update(tab.id, { url: '${BASE}/clipboard.html' })
+    await chrome.tabs.update(tab.id, { url: '${fixtureUrl}' })
   }
   await new Promise(resolve => setTimeout(resolve, 900))
   return { id: tab.id }
@@ -230,6 +232,84 @@ assert.equal(writeReadClear.emptyError?.code, 'CLIPBOARD_EMPTY', 'reading a clea
 console.log('PASS write -> read -> clear (CLIPBOARD_EMPTY after clear)')
 
 /* ---------------------------------------------------------------- */
+/* full-page and region captures -> image clipboard                   */
+/* ---------------------------------------------------------------- */
+
+const imageCaptures = await evaluate(`(async () => { ${prefix}
+  const ground = (await chrome.scripting.executeScript({ target: { tabId }, func: () => {
+    const rect = document.getElementById('capture-region').getBoundingClientRect()
+    return {
+      pageHeight: document.scrollingElement.scrollHeight,
+      tail: document.getElementById('page-tail').textContent,
+      dpr: window.devicePixelRatio || 1,
+      region: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+    }
+  } }))[0].result
+  const full = await mod.execute('snapshot', { scope: 'full_page', to_clipboard: true, detail: 'fast' }, settings)
+  const fullStored = await storage()
+  const fullRead = await mod.execute('clipboard', { action: 'read' }, settings)
+  const fullMatches = fullRead.image?.data === fullStored?.image?.data
+  const fullBitmap = await createImageBitmap(await (await fetch('data:image/png;base64,' + fullRead.image.data)).blob())
+  const stripHeight = Math.min(120, fullBitmap.height)
+  const strip = document.createElement('canvas')
+  strip.width = fullBitmap.width
+  strip.height = stripHeight
+  const stripContext = strip.getContext('2d')
+  stripContext.drawImage(fullBitmap, 0, fullBitmap.height - stripHeight, strip.width, stripHeight, 0, 0, strip.width, stripHeight)
+  const pixels = stripContext.getImageData(0, 0, strip.width, stripHeight).data
+  let lightPixels = 0
+  for (let index = 0; index < pixels.length; index += 4) {
+    if (pixels[index] >= 240 && pixels[index + 1] >= 240 && pixels[index + 2] >= 240) lightPixels += 1
+  }
+  const tailLightRatio = lightPixels / (strip.width * stripHeight)
+  fullBitmap.close()
+  const region = await mod.execute('snapshot', {
+    scope: 'region', space: 'css', region: ground.region, to_clipboard: true, detail: 'fast',
+  }, settings)
+  const regionStored = await storage()
+  return {
+    ground,
+    full: {
+      capture: full.capture,
+      viewId: full.viewId ?? null,
+      labelCount: full.labelCount,
+      clipboard: full.clipboard,
+      stored: fullStored ? { kind: fullStored.kind, image: { ...fullStored.image, data: undefined } } : null,
+      readKind: fullRead.clipboard?.kind,
+      fullMatches,
+      tailLightRatio,
+    },
+    region: {
+      capture: region.capture,
+      clipboard: region.clipboard,
+      stored: regionStored ? { kind: regionStored.kind, image: { ...regionStored.image, data: undefined } } : null,
+    },
+  }
+})()`, true)
+assert.equal(imageCaptures.ground.tail, 'FULL-PAGE-CAPTURE-MARKER')
+assert.equal(imageCaptures.full.capture.scope, 'full_page')
+assert.equal(imageCaptures.full.capture.cssHeight, imageCaptures.ground.pageHeight, 'CDP captured the independently measured full document height')
+assert.equal(imageCaptures.full.viewId, null, 'full-page capture is not a viewport coordinate basis')
+assert.equal(imageCaptures.full.labelCount, 0)
+assert.equal(imageCaptures.full.clipboard.kind, 'image')
+assert.equal(imageCaptures.full.stored.kind, 'image')
+assert.equal(imageCaptures.full.readKind, 'image')
+assert.equal(imageCaptures.full.fullMatches, true, 'clipboard read returns the exact stored PNG')
+assert.ok(imageCaptures.full.tailLightRatio >= 0.95, `full-page tail must contain the blank/sentinel area, not repeated colored viewport content (light ratio=${imageCaptures.full.tailLightRatio})`)
+assert.equal(imageCaptures.region.capture.scope, 'region')
+const expectedRegion = {
+  x: Math.floor(imageCaptures.ground.region.x),
+  y: Math.floor(imageCaptures.ground.region.y),
+  width: Math.ceil(imageCaptures.ground.region.x + imageCaptures.ground.region.width) - Math.floor(imageCaptures.ground.region.x),
+  height: Math.ceil(imageCaptures.ground.region.y + imageCaptures.ground.region.height) - Math.floor(imageCaptures.ground.region.y),
+}
+assert.deepEqual(imageCaptures.region.capture.region, expectedRegion)
+assert.equal(imageCaptures.region.clipboard.width, Math.round(expectedRegion.width * imageCaptures.ground.dpr))
+assert.equal(imageCaptures.region.clipboard.height, Math.round(expectedRegion.height * imageCaptures.ground.dpr))
+assert.equal(imageCaptures.region.stored.image.mimeType, 'image/png')
+console.log(`PASS full-page capture -> PNG clipboard (${imageCaptures.full.clipboard.width}x${imageCaptures.full.clipboard.height}); region capture ${imageCaptures.region.clipboard.width}x${imageCaptures.region.clipboard.height}`)
+
+/* ---------------------------------------------------------------- */
 /* system clipboard: explicit write/read                             */
 /* ---------------------------------------------------------------- */
 
@@ -241,8 +321,16 @@ await new Promise(resolve => setTimeout(resolve, 300))
 const systemWrite = await evaluate(`(async () => { ${prefix}
   try {
     const write = await mod.execute('clipboard', { action: 'write', target: 'system', text: 'SYSTEM-MARKER-99' }, settings)
+    await new Promise(resolve => setTimeout(resolve, 100))
     const read = await mod.execute('clipboard', { action: 'read', target: 'system' }, settings)
-    return { ok: true, focused: document.hasFocus(), writeChars: write.clipboard.chars, readTarget: read.clipboard.target, text: read.text }
+    return {
+      ok: read.text === 'SYSTEM-MARKER-99',
+      focused: document.hasFocus(),
+      writeChars: write.clipboard.chars,
+      readTarget: read.clipboard.target,
+      text: read.text,
+      ...(read.text === 'SYSTEM-MARKER-99' ? {} : { code: 'CLIPBOARD_WRITE_MISMATCH', message: 'writeText resolved but the OS clipboard still contains different content: ' + read.text }),
+    }
   } catch (error) {
     return { ok: false, focused: document.hasFocus(), code: error.code ?? 'ERROR', message: error.message }
   }
@@ -254,6 +342,152 @@ if (!systemWrite.ok) {
   assert.equal(systemWrite.readTarget, 'system')
   assert.equal(systemWrite.text, 'SYSTEM-MARKER-99', 'system read returns what was written')
   console.log('PASS system clipboard write -> read')
+}
+
+/* ---------------------------------------------------------------- */
+/* virtual image paste + previous system clipboard restoration        */
+/* ---------------------------------------------------------------- */
+
+if (systemWrite.ok) {
+  const virtualImagePaste = await evaluate(`(async () => { ${prefix}
+    try {
+      await chrome.tabs.update(tabId, { active: true })
+      await chrome.scripting.executeScript({ target: { tabId }, func: () => {
+        const target = document.getElementById('image-target')
+        target.innerHTML = ''
+        window.__caImagePastes = []
+        target.focus()
+      } })
+      const paste = await mod.execute('clipboard', { action: 'paste', view: 'none' }, settings)
+      await chrome.scripting.executeScript({ target: { tabId }, func: async () => {
+        const deadline = performance.now() + 2_000
+        while ((window.__caImagePastes ?? []).length === 0 && performance.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+      } })
+      const after = (await chrome.scripting.executeScript({ target: { tabId }, func: () => ({
+        active: document.activeElement?.id ?? '',
+        events: window.__caImagePastes ?? [],
+        images: [...document.getElementById('image-target').querySelectorAll('img')].map(image => ({
+          srcPrefix: image.src.slice(0, 30),
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+        })),
+      }) }))[0].result
+      const restored = await mod.execute('clipboard', { action: 'read', target: 'system' }, settings)
+      return {
+        ok: true,
+        trusted: paste.pasted?.trusted,
+        restoredFlag: paste.pasted?.systemRestored,
+        restoredText: restored.text,
+        ...after,
+      }
+    } catch (error) {
+      return { ok: false, code: error.code ?? 'ERROR', message: error.message }
+    }
+  })()`, true)
+  if (!virtualImagePaste.ok) {
+    console.log(`SKIP virtual image rich paste — ${virtualImagePaste.code}: ${virtualImagePaste.message}`)
+  } else {
+    assert.equal(virtualImagePaste.trusted, true, 'virtual image paste used trusted Ctrl+V')
+    assert.equal(virtualImagePaste.restoredFlag, true, 'the previous system clipboard was restored')
+    assert.equal(virtualImagePaste.restoredText, 'SYSTEM-MARKER-99', 'system clipboard text matches the pre-paste marker')
+    console.log('PASS virtual image handoff restored the previous system clipboard')
+    const inserted = virtualImagePaste.images.find(image => image.srcPrefix.startsWith('data:image/png') && image.naturalWidth > 0)
+    if (!inserted) {
+      console.log(`SKIP virtual image insertion — trusted Ctrl+V and restoration succeeded, but this isolated window produced no usable pasted image (events=${JSON.stringify(virtualImagePaste.events)}, active=${virtualImagePaste.active})`)
+    } else {
+      console.log(`PASS virtual image paste -> contenteditable <img> (${inserted.naturalWidth}x${inserted.naturalHeight}); paste events=${virtualImagePaste.events.length}`)
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* denied-focus fallback: synthetic File delivery, no OS mutation     */
+/* ---------------------------------------------------------------- */
+
+{
+  const deniedClipboardBefore = await evaluate(`(async () => {
+    const items = await navigator.clipboard.read()
+    const output = []
+    for (const item of items) {
+      for (const type of item.types) {
+        const bytes = new Uint8Array(await (await item.getType(type)).arrayBuffer())
+        let binary = ''
+        for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index])
+        output.push({ type, data: btoa(binary) })
+      }
+    }
+    return output
+  })()`, true)
+  await panel.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {})
+  const deniedFocusPaste = await evaluate(`(async () => { ${prefix}
+    try {
+      await chrome.tabs.update(tabId, { active: true })
+      const initiallyUnfocused = document.hasFocus() === false
+      await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => {
+        const target = document.getElementById('image-target')
+        target.innerHTML = ''
+        window.__caSyntheticConsume = true
+        target.focus()
+      } })
+      const paste = await mod.execute('clipboard', { action: 'paste', view: 'none' }, settings)
+      await chrome.scripting.executeScript({ target: { tabId }, func: async () => {
+        const deadline = performance.now() + 2_000
+        while (performance.now() < deadline) {
+          const image = document.getElementById('image-target').querySelector('img')
+          if (image?.naturalWidth > 0) return
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+      } })
+      const after = (await chrome.scripting.executeScript({ target: { tabId }, func: () => ({
+        images: [...document.getElementById('image-target').querySelectorAll('img')].map(image => ({
+          srcPrefix: image.src.slice(0, 30), naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
+        })),
+        events: window.__caImagePastes,
+      }) }))[0].result
+      return {
+        ok: true,
+        initiallyUnfocused,
+        via: paste.pasted?.via,
+        trusted: paste.pasted?.trusted,
+        handled: paste.pasted?.handled,
+        staged: paste.pasted?.systemStaged,
+        preserved: paste.pasted?.systemPreserved,
+        restored: paste.pasted?.systemRestored,
+        restoreError: paste.pasted?.systemRestoreError,
+        ...after,
+      }
+    } catch (error) {
+      return { ok: false, code: error.code ?? 'ERROR', message: error.message }
+    }
+  })()`, true)
+  await panel.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
+  assert.equal(deniedFocusPaste.ok, true, `denied-focus image paste must not be blocked: ${deniedFocusPaste.message ?? ''}`)
+  assert.equal(deniedFocusPaste.initiallyUnfocused, true, 'the test starts with the real unfocused-panel condition')
+  assert.equal(deniedFocusPaste.via, 'synthetic')
+  assert.equal(deniedFocusPaste.trusted, false)
+  assert.equal(deniedFocusPaste.handled, true, 'the composer consumed the synthetic PNG File')
+  assert.equal(deniedFocusPaste.staged, false, 'the denied OS clipboard was not used for delivery')
+  assert.equal(deniedFocusPaste.preserved, false)
+  assert.equal(deniedFocusPaste.restored, false)
+  assert.match(deniedFocusPaste.restoreError, /Document is not focused/)
+  assert.ok(deniedFocusPaste.images.some(image => image.naturalWidth > 0), 'the composer inserted a decoded image from the File')
+  const deniedClipboardAfter = await evaluate(`(async () => {
+    const items = await navigator.clipboard.read()
+    const output = []
+    for (const item of items) {
+      for (const type of item.types) {
+        const bytes = new Uint8Array(await (await item.getType(type)).arrayBuffer())
+        let binary = ''
+        for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index])
+        output.push({ type, data: btoa(binary) })
+      }
+    }
+    return output
+  })()`, true)
+  assert.deepEqual(deniedClipboardAfter, deniedClipboardBefore, 'the denied-focus synthetic fallback leaves every clipboard format byte-for-byte unchanged')
+  console.log('PASS genuinely unfocused panel -> synthetic PNG File consumed by composer; old clipboard unchanged')
 }
 
 /* ---------------------------------------------------------------- */

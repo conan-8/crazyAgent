@@ -3,10 +3,10 @@
  *
  * The panel owns the WebSocket to the local companion. It renders model text
  * and tool activity, executes browser commands from the DSH provider, and
- * attaches a fresh screenshot to each user turn (via the companion's prompt).
+ * attaches a fresh DOM/text or screenshot view to each user turn.
  */
 
-import { DEFAULT_SETTINGS, execute, testCapture, imageDataUrl } from './browser.js'
+import { DEFAULT_SETTINGS, execute, testCapture, imageDataUrl, beginDebuggerRun, endDebuggerRun } from './browser.js'
 import { ClientLogger } from './logger.js'
 import { renderMarkdown } from './markdown.js'
 import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protocol.js'
@@ -25,6 +25,7 @@ const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'imag
 let settingsDraftEffort = 'auto'
 let conversationHistory = []
 let currentConversationId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+let newChatOnNextConnect = true
 let historySaveTimer = null
 let attachedImages = []
 /** @type {Array<{id: string, text: string, images: Array<{name: string, size: number, mimeType: string, data: string}>}>} */
@@ -252,6 +253,14 @@ function shortModelName(model) {
   return withoutPath.replace(/^[^:]+:\s*/u, '') || withoutPath
 }
 
+function isAgentModel(model) {
+  return model?.imageInput !== false && model?.tools !== false
+}
+
+function modelLimitations(model) {
+  return [model?.imageInput === false ? 'text only' : '', model?.tools === false ? 'no tool calls' : ''].filter(Boolean).join(' · ')
+}
+
 function contextWindowBadge(model) {
   const tokens = Number(model?.contextWindow)
   return {
@@ -312,21 +321,27 @@ function renderModelMenu() {
     return
   }
   for (const model of models.slice(0, 80)) {
+    const compatible = isAgentModel(model)
+    const limitations = modelLimitations(model)
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'model-menu-item'
+    button.disabled = !compatible
+    button.classList.toggle('unavailable', !compatible)
+    button.title = compatible ? model.id : `${model.id} · ${limitations}; browser-agent models require images and tool calls`
     button.setAttribute('role', 'option')
     button.setAttribute('aria-selected', String(model.id === llmState.model?.id))
     const copy = document.createElement('span')
     const name = document.createElement('span')
     name.textContent = shortModelName(model)
     const id = document.createElement('small')
-    id.textContent = model.id
+    id.textContent = limitations ? `${model.id} · ${limitations}` : model.id
     copy.append(name, id)
     const check = document.createElement('span')
     check.textContent = model.id === llmState.model?.id ? '✓' : ''
     button.append(copy, check)
     button.addEventListener('click', () => {
+      if (!compatible) return
       closeModelMenu()
       if (model.id === llmState.model?.id || busy) return
       sendLlmConfigure({
@@ -619,19 +634,20 @@ function renderProviderStatus() {
 
   renderEffortStatus()
   const selected = selectedModelInfo()
+  const compatibleCount = modelsState.models.filter(isAgentModel).length
   let text
   let kind = 'hint'
   if (modelsState.loading) {
-    text = 'Loading image-capable OpenRouter models…'
+    text = 'Loading OpenRouter models…'
   } else if (modelsState.error) {
     text = `Model list: ${modelsState.error}`
     kind = 'hint error'
   } else if (selected) {
     text = modelLabel(selected)
       + (selected.reasoning ? ` · effort ${effortLabel(llmState.reasoningEffort ?? 'auto')}` : ' · no reasoning')
-      + (modelsState.models.length > 0 ? ` · ${modelsState.models.length} image-capable models loaded` : '')
-  } else if (modelsState.models.length > 0) {
-    text = `${modelsState.models.length} image-capable models loaded. Choose one above.`
+      + (compatibleCount > 0 ? ` · ${compatibleCount} agent-compatible models loaded` : '')
+  } else if (compatibleCount > 0) {
+    text = `${compatibleCount} agent-compatible models loaded. Choose one above.`
   } else if (connected) {
     text = 'OpenRouter models have not been loaded. Click Refresh.'
   } else {
@@ -644,7 +660,8 @@ function renderProviderStatus() {
 
 function fillModelOptions() {
   const query = els.settingModel.value.trim().toLowerCase()
-  const matches = modelsState.models.filter(model => !query || model.id.toLowerCase().includes(query) || model.name?.toLowerCase().includes(query))
+  const compatibleModels = modelsState.models.filter(isAgentModel)
+  const matches = compatibleModels.filter(model => !query || model.id.toLowerCase().includes(query) || model.name?.toLowerCase().includes(query))
   els.modelOptions.replaceChildren()
   for (const model of matches.slice(0, 60)) {
     const option = document.createElement('button')
@@ -671,9 +688,9 @@ function fillModelOptions() {
   }
   if (els.settingModel.value.trim().length === 0) {
     const preferred = [RECOMMENDED_MODEL_ID, settings.modelId, llmState.model?.id]
-      .find(id => id && modelsState.models.some(model => model.id === id))
+      .find(id => id && compatibleModels.some(model => model.id === id))
     if (preferred) els.settingModel.value = preferred
-    else if (modelsState.models[0]) els.settingModel.value = modelsState.models[0].id
+    else if (compatibleModels[0]) els.settingModel.value = compatibleModels[0].id
   }
   renderProviderStatus()
 }
@@ -1012,6 +1029,7 @@ function connect() {
     clearTimeout(queueDispatchTimer)
     queueDispatchTimer = null
     setBusy(false)
+    void endDebuggerRun()
     setActivity(false)
     setActivityPhase('Companion offline', 'offline')
     finalizeStreamActivity()
@@ -1418,6 +1436,21 @@ function beginStep(frame) {
   head.append(createStepIcon(), caret, title, meta, duration)
   const body = document.createElement('div')
   body.className = 'step-body'
+  const waiting = document.createElement('div')
+  waiting.className = 'thinking-wait'
+  waiting.setAttribute('role', 'status')
+  const ballScene = document.createElement('span')
+  ballScene.className = 'thinking-ball-scene'
+  ballScene.setAttribute('aria-hidden', 'true')
+  const shadow = document.createElement('span')
+  shadow.className = 'thinking-ball-shadow'
+  const ball = document.createElement('span')
+  ball.className = 'thinking-ball'
+  ballScene.append(shadow, ball)
+  const waitingLabel = document.createElement('span')
+  waitingLabel.textContent = 'gathering thoughts'
+  waiting.append(ballScene, waitingLabel)
+  body.appendChild(waiting)
   block.append(head, body)
 
   const step = {
@@ -1530,6 +1563,7 @@ function finishTurn({ totalMs } = {}) {
  */
 function pushActivity(kind, label, text, options = {}) {
   if (kind === 'error' || currentTurn !== null) els.activityEmpty?.classList.add('hidden')
+  activityContainer().querySelector(':scope > .thinking-wait')?.remove()
   const entry = document.createElement('div')
   entry.className = `activity-entry ${kind}${options.running ? ' running' : ''}`
   const kindEl = document.createElement('span')
@@ -1808,6 +1842,7 @@ function handleFrame(frame) {
       } else {
         hideBanner()
       }
+      if (newChatOnNextConnect) newChat()
       refreshStatus()
       return
     case 'chat.status':
@@ -1940,6 +1975,7 @@ function toolLabel(name) {
     case 'browser_tabs': return 'tabs'
     case 'browser_switch_tab': return 'switch tab'
     case 'browser_read_text': return 'read text'
+    case 'browser_find': return 'find'
     case 'browser_type': return 'type'
     case 'browser_press_key': return 'press key'
     case 'browser_navigate': return 'navigate'
@@ -2066,6 +2102,7 @@ function cleanupAfterTurn() {
   clearTimeout(stopTimer)
   stopTimer = null
   setBusy(false)
+  void endDebuggerRun()
   void execute('labels.clear', {}, settings).catch(() => {})
   finalizeStreamActivity()
 }
@@ -2175,18 +2212,20 @@ async function handleBrowserCommand(frame) {
   setActivityPhase(
     op === 'tabs.list' ? 'Listing tabs…'
       : op === 'tabs.activate' ? 'Switching tabs…'
-        : op === 'scroll' ? 'Scrolling…'
-          : op === 'click' ? 'Clicking…'
-            : op === 'read_text' ? 'Reading text…'
-              : op === 'clipboard' ? 'Clipboard…'
-                : 'Capturing…',
+        : op === 'places.search' ? 'Finding places…'
+          : op === 'scroll' ? 'Scrolling…'
+            : op === 'click' ? 'Clicking…'
+              : op === 'read_text' || op === 'auto_view' ? 'Reading text…'
+                : op === 'find' ? 'Finding text…'
+                  : op === 'clipboard' ? 'Clipboard…'
+                    : 'Capturing…',
     'busy',
   )
-  // Tool-driven commands already have a row from chat.tool_call; auto-captures
-  // and other companion-requested commands get their own timed row.
+  // Auto-capture outcomes stay in the debug log rather than the conversation.
+  const isAutoCapture = (op === 'snapshot' || op === 'auto_view') && frame.callId === 'auto'
   const toolRecord = typeof frame.callId === 'string' ? toolRows.get(frame.callId) : undefined
   const rowKey = typeof frame.callId === 'string' ? frame.callId : String(frame.id)
-  const ownRow = toolRecord === undefined
+  const ownRow = toolRecord === undefined && !isAutoCapture
     ? pushActivity('browser', op === 'tabs.list' ? 'tabs' : op, argsPreview(JSON.stringify(args)), { running: true })
     : null
   if (ownRow !== null) browserRows.set(rowKey, { row: ownRow, startedAt: started })
@@ -2205,7 +2244,7 @@ async function handleBrowserCommand(frame) {
     if (ownRow !== null) {
       finishActivityEntry(ownRow, { text: error.message, ok: false, durationMs: now() - started })
       browserRows.delete(rowKey)
-    } else {
+    } else if (!isAutoCapture) {
       pushActivity('error', 'browser', error.message)
     }
     setActivityPhase('Paused', 'paused')
@@ -2221,8 +2260,7 @@ async function handleBrowserCommand(frame) {
     const uiMs = now() - started
     const summary = browserActivitySummary(op, result)
     if (ownRow !== null) {
-      if (op === 'snapshot' && frame.callId === 'auto') ownRow.entry.remove()
-      else finishActivityEntry(ownRow, { text: summary, ok: true, durationMs: uiMs })
+      finishActivityEntry(ownRow, { text: summary, ok: true, durationMs: uiMs })
       browserRows.delete(rowKey)
     } else if (toolRecord !== undefined) {
       toolRecord.uiMs = uiMs
@@ -2249,6 +2287,8 @@ async function handleBrowserCommand(frame) {
       scroll: result.scroll,
       moved: result.moved,
       tabs: Array.isArray(result.tabs) ? result.tabs.length : undefined,
+      places: Array.isArray(result.places) ? result.places.length : undefined,
+      placeCounts: result.counts,
       tab: result.tab ? { id: result.tab.id, title: result.tab.title, url: result.tab.url } : undefined,
       typed: result.typed,
       pressed: result.pressed,
@@ -2266,7 +2306,7 @@ async function handleBrowserCommand(frame) {
     if (ownRow !== null) {
       finishActivityEntry(ownRow, { text: `${op}: ${message}`, ok: false, durationMs: now() - started })
       browserRows.delete(rowKey)
-    } else {
+    } else if (!isAutoCapture) {
       pushActivity('error', 'browser', `${op}: ${message}`)
     }
     setActivityPhase('Browser error', 'error')
@@ -2287,6 +2327,7 @@ async function handleBrowserCommand(frame) {
 
 function browserActivitySummary(op, result) {
   if (!result || typeof result !== 'object') return op
+  if (Array.isArray(result.places)) return `${result.places.length} places${result.query ? ` · ${truncate(result.query, 60)}` : ''}`
   if (Array.isArray(result.tabs)) return `${result.tabs.length} tabs · ${result.tabs.filter(tab => tab.active).map(tab => tab.title).join('') || 'no active marker'}`
   const parts = []
   if (result.tab?.title) parts.push(truncate(result.tab.title, 60))
@@ -2620,7 +2661,11 @@ function dispatchMessage(item) {
     autoCapture: settings.autoCapture !== false,
     ...images.length > 0 ? { images } : {},
   }
-  if (!sendFrame(frame)) return false
+  void beginDebuggerRun().catch(() => {})
+  if (!sendFrame(frame)) {
+    void endDebuggerRun()
+    return false
+  }
   logger.log('chat.send', {
     textLength: prompt.length,
     autoCapture: settings.autoCapture !== false,
@@ -2745,6 +2790,7 @@ function newChat() {
     toast('Wait for the current turn to finish')
     return
   }
+  newChatOnNextConnect = !connected
   stopDictation()
   stopping = false
   clearTimeout(stopTimer)
@@ -3208,6 +3254,11 @@ els.bannerAction.addEventListener('click', () => {
 })
 
 els.newChat.addEventListener('click', newChat)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return
+  if (connected) newChat()
+  else newChatOnNextConnect = true
+})
 els.stop.addEventListener('click', () => {
   steeringMessageId = null
   stopTurn()
