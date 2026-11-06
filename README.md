@@ -36,11 +36,14 @@ Install CrazyAgent v2.0.0-beta on this computer from https://github.com/conan-8/
 
 `setup` initializes `.dsh-home/profiles/sdk-minimal`, links the local DSH plugins, and validates profile composition. `dev` starts the loopback-only companion and prints bridge pairing information.
 
-1. Open `chrome://extensions` or `edge://extensions`.
-2. Enable Developer mode, choose **Load unpacked**, and select the checkout's `extension/` directory.
-3. Click the CrazyAgent toolbar icon to open the side panel.
-4. In **Settings**, enter the pairing token and your OpenRouter API key, refresh models, select **DeepSeek V4.1 Flash**, and save. Never share the API key or pairing token publicly.
-5. Wait for **Connected**, open a normal page, and ask a question or request an action.
+> [!IMPORTANT]
+> **Finish the browser setup**
+>
+> 1. **Open your browser's extension page:** go to `chrome://extensions` or `edge://extensions`.
+> 2. **Load CrazyAgent:** enable **Developer mode**, choose **Load unpacked**, and select the checkout's `extension/` directory.
+> 3. **Open the side panel:** click the **CrazyAgent** toolbar icon.
+> 4. **Connect your model:** in **Settings**, enter the pairing token and your OpenRouter API key, refresh models, select **DeepSeek V4.1 Flash**, and save. **Never share the API key or pairing token publicly.**
+> 5. **Start a task:** wait for **Connected**, open a normal page, and ask a question or request an action.
 
 Keep the companion and side panel open while the agent runs; the panel is also the browser executor. **Do not touch the browser while a task is running:** clicking, typing, scrolling, or switching tabs can invalidate the agent's targets. After an install or extension reload, dismiss the one-time safety notice with **Got it** or Escape.
 
