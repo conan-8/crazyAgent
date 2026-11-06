@@ -78,6 +78,7 @@ export const DEFAULT_SETTINGS = {
   paused: false,
   modelBaseUrl: 'https://openrouter.ai/api/v1',
   modelId: '',
+  reasoningEffort: 'medium',
 }
 
 const CAPTURE_INTERVAL_MS = 0

@@ -3,7 +3,7 @@
 Screenshots of the CrazyAgent side panel captured from the mocked-bridge preview
 harness (`scripts/ui-preview.mjs`). The dark activity and slash-command frames
 were refreshed for v2.0.0 Beta on 2026-11-06 with the normal DeepSeek V4.1 Flash
-model; the other activity frames date from 2026-10-22 and the disclaimer frame
+model and the recommended Medium reasoning default; the other activity frames date from 2026-10-22 and the disclaimer frame
 from 2026-11-04. No companion, extension permissions, or model tokens are involved:
 the harness opens the real
 `extension/sidepanel/index.html` page in an isolated Edge instance, replaces the

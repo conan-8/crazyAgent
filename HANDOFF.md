@@ -135,6 +135,7 @@ Generated state lives under ignored `.dsh-home/`; local companion output is unde
 - Last recorded composition: **17,995 characters total / 17,001 guidance**. This is not latency evidence.
 - Downloads default to `$HOME/Downloads`; `CRAZYAGENT_DOWNLOADS_DIR` selects the absolute confined folder the agent reads/attaches from and must match Chrome's configured download location (the extension cannot change it). An empty value is treated as unset and an invalid value falls back to the default folder with a warning, so the tools still register. Downloaded files are not removed by `npm run clean`.
 - The model route is generated from side-panel Settings. Do not hand-edit `.dsh-home/browser-agent/llm.patch.yml`.
+- New companion and side-panel configurations default to **Medium** reasoning effort, which is the recommended setting. Saved choices remain unchanged; Auto still requests low from the first model step when selected.
 - Compaction uses `thresholdRatio:0.55`, `headroomTokens:131072`, `retainTokens:20000`, and `maxTokens:8192`. Newest images are retained while older ones are offloaded at turn end and in batched mid-turn passes.
 - There is no per-turn call cap. Repeat guards default to 3 mutations, 30 observations, and 10 unmodified navigation keys. Side-panel reconnect grace defaults to 8 seconds.
 - Bridge defaults: `127.0.0.1:17871`, `/bridge`, `/health`; fixture server `17872`.

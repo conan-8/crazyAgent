@@ -12,6 +12,7 @@ export const DEFAULT_BRIDGE_URL = 'ws://127.0.0.1:17871/bridge'
  * @property {boolean} autoCapture
  * @property {boolean} showHitboxes
  * @property {boolean} paused
+ * @property {string} [reasoningEffort]
  */
 
 /** @param {string} value @param {number} max */

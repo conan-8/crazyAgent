@@ -84,7 +84,7 @@ if (cli.help === true) {
                                 (default ${DEFAULT_BASE_URL})
   --model <id>                  optional initial model id; otherwise choose it in
                                 the side panel after entering your API key
-  --reasoning-effort <level>    auto (default), off, low, medium, or high
+  --reasoning-effort <level>    medium (default), auto, off, low, or high
   --max-tokens <n>              output cap (default: selected model's maximum)
   --dsh-home <path>             harness home (default .dsh-home)
   --patch <path>                base profile overlay (default config/browser.patch.yml)
@@ -139,7 +139,7 @@ const modelOverride = typeof cli.model === 'string'
 const reasoningEffort = normalizeReasoningEffort(
   typeof cli['reasoning-effort'] === 'string'
     ? cli['reasoning-effort']
-    : process.env.CRAZYAGENT_REASONING_EFFORT ?? 'auto',
+    : process.env.CRAZYAGENT_REASONING_EFFORT ?? 'medium',
 )
 const maxTokensOption = cli['max-tokens'] ?? process.env.CRAZYAGENT_MAX_TOKENS
 const maxTokens = maxTokensOption === undefined ? undefined : Number(maxTokensOption)

@@ -27,7 +27,7 @@ There are **33 model-facing tools**: 25 general browser tools and 8 guarded Docs
 Paste this prompt into a coding agent on the computer where Chrome or Edge is installed:
 
 ```text
-Install CrazyAgent v2.0.0-beta on this computer from https://github.com/conan-8/crazyAgent. First verify Git, Node.js 22.19 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Stop and tell me if anything required is missing; do not use sudo or replace my runtimes. Clone the v2.0.0-beta tag into a new crazyAgent directory, then run npm ci and npm run setup in that checkout. If the directory already exists, do not overwrite or delete it; ask me for another location. Start npm run dev -- --model deepseek/deepseek-v4.1-flash --reasoning-effort auto as a persistent background process and verify http://127.0.0.1:17871/health responds successfully. If that port is already occupied, stop and report it instead of killing an existing process. Then give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions and open the CrazyAgent side panel. Guide me to copy the local pairing token into Settings, enter my own OpenRouter API key there, select DeepSeek V4.1 Flash, and save. Never ask for my API key in chat, print it, commit it, or send it anywhere except CrazyAgent's local Settings. Keep the companion running. Finish with the install path, health status, and restart command. Do not run any website tasks or model-spending tests until I confirm installation is complete.
+Install CrazyAgent v2.0.0-beta on this computer from https://github.com/conan-8/crazyAgent. First verify Git, Node.js 22.19 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Stop and tell me if anything required is missing; do not use sudo or replace my runtimes. Clone the v2.0.0-beta tag into a new crazyAgent directory, then run npm ci and npm run setup in that checkout. If the directory already exists, do not overwrite or delete it; ask me for another location. Start npm run dev -- --model deepseek/deepseek-v4.1-flash --reasoning-effort medium as a persistent background process and verify http://127.0.0.1:17871/health responds successfully. If that port is already occupied, stop and report it instead of killing an existing process. Then give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions and open the CrazyAgent side panel. Guide me to copy the local pairing token into Settings, enter my own OpenRouter API key there, select DeepSeek V4.1 Flash, and save. Never ask for my API key in chat, print it, commit it, or send it anywhere except CrazyAgent's local Settings. Keep the companion running. Finish with the install path, health status, and restart command. Do not run any website tasks or model-spending tests until I confirm installation is complete.
 ```
 
 `setup` initializes `.dsh-home/profiles/sdk-minimal`, links the local DSH plugins, and validates profile composition. `dev` starts the loopback-only companion and prints bridge pairing information.
@@ -132,7 +132,7 @@ Direct Docs export checks and six toolbar attributes (`paragraph_style`, `font_s
 - **Parallelism:** maximum 4 calls, but only `browser_tabs`, `browser_places`, `browser_read_text`, `browser_docs_read`, and `browser_downloads` are parallel-safe. Mutations remain exclusive in model order.
 - **Runaway protection:** no per-turn call cap; identical-repeat guards default to 3 mutations, 30 observations, and 10 unmodified navigation keys.
 - **Keyboard safety:** `browser_press_key` and batch key steps reject ctrl/cmd+W in code (not just guidance); closing or listing tabs is left to `browser_tabs`/`browser_switch_tab`.
-- **Reasoning:** Auto requests `low` from the first model step for reasoning-capable models; Off/Low/Medium/High can be selected manually.
+- **Reasoning:** Medium is the default and recommended effort for new configurations. Saved choices are preserved; Auto requests `low` from the first model step when selected, and Off/Low/High remain available manually.
 - **Image context:** exact duplicate images are omitted only at model admission within the same session/turn. Older images are durably offloaded while attachments remain on disk. Capture and debug storage still occur.
 - **Stop and queue:** Stop interrupts the current runtime and resumes the session on the next message when possible. Messages sent during a turn are queued and can redirect the turn.
 
@@ -152,7 +152,7 @@ The companion can also be configured from the CLI:
 
 ```sh
 npm run dev -- --base-url https://openrouter.ai/api/v1 \
-  --model deepseek/deepseek-v4.1-flash --reasoning-effort auto
+  --model deepseek/deepseek-v4.1-flash --reasoning-effort medium
 ```
 
 Output tokens default to the selected model’s advertised maximum; `--max-tokens` sets a lower explicit cap. API-key resolution order is `CRAZYAGENT_API_KEY`, the optional stored key, `OPENROUTER_API_KEY`, then the DSH credential store.

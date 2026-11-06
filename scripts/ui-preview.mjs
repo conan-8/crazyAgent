@@ -160,7 +160,7 @@ const settings = {
   quality: 72,
   autoCapture: true,
   paused: false,
-  reasoningEffort: 'auto',
+  reasoningEffort: 'medium',
   modelId: 'deepseek/deepseek-v4.1-flash',
 }
 
@@ -177,8 +177,8 @@ const HELLO_FRAMES = [
     llm: {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
-      model: { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek: DeepSeek V4.1 Flash ', reasoning: true, imageInput: true },
-      reasoningEffort: 'auto',
+      model: { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek: DeepSeek V4.1 Flash', reasoning: true, imageInput: true },
+      reasoningEffort: 'medium',
     },
     credentials: { configured: true, source: 'stored' },
     log: { runId: 'run-preview', path: OUT },
@@ -191,7 +191,7 @@ const HELLO_FRAMES = [
     ok: true,
     baseUrl: 'https://openrouter.ai/api/v1',
     models: [
-      { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek: DeepSeek V4.1 Flash ', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
+      { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek: DeepSeek V4.1 Flash', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
       { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
       { id: 'openai/gpt-5', name: 'GPT-5', reasoning: true, imageInput: true, tools: true, contextWindow: 400000 },
       { id: 'acme/text-only', name: 'Text Only Model', reasoning: true, imageInput: false, tools: true, contextWindow: 128000 },
@@ -364,11 +364,11 @@ async function playToolScenario(page) {
   assert.equal(modelMeta.flexGrow, '1')
   assert.equal(modelMeta.maxWidth, 'none')
   assert.ok(modelMeta.width > 200, `model selector uses available width (${modelMeta.width}px)`)
-  assert.equal(modelMeta.modelName, 'DeepSeek V4.1 Flash ')
-  assert.equal(modelMeta.effortText, '· low')
-  assert.equal(modelMeta.effortTitle, 'Reasoning effort: Auto (low from the first step)')
+  assert.equal(modelMeta.modelName, 'DeepSeek V4.1 Flash')
+  assert.equal(modelMeta.effortText, '· medium')
+  assert.equal(modelMeta.effortTitle, 'Reasoning effort: Medium')
   assert.equal(modelMeta.effortColor, 'rgb(255, 195, 0)')
-  assert.match(modelMeta.buttonTitle, /deepseek\/deepseek-v4\.1-flash-/)
+  assert.match(modelMeta.buttonTitle, /deepseek\/deepseek-v4\.1-flash\s/)
   await recv({ v: 1, type: 'chat.activity', kind: 'usage', usage: { totalTokens: 250000, inputTokens: 250000 } })
   const contextMeta = await page.evaluate(`(() => {
     const progress = document.getElementById('composer-context-progress')
@@ -564,7 +564,7 @@ async function playComposerScenario(page, capture) {
     search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   })()`)
   assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1).model`), 'anthropic/claude-sonnet-4.5')
-  await recv({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'auto' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })
+  await recv({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'medium' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })
 
   // Empty composer: starting dictation shows the listening dots inside the
   // textarea, they bounce, and stopping removes them.
@@ -1380,7 +1380,7 @@ async function main() {
     const configured = await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1)`)
     assert.equal(configured.model, 'anthropic/claude-sonnet-4.5')
     assert.equal(await page.evaluate(`document.activeElement.id`), 'input', 'selecting a model must return focus to the composer')
-    await page.evaluate(`window.__mockReceive({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'auto' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })`)
+    await page.evaluate(`window.__mockReceive({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'medium' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })`)
     await page.evaluate(`document.getElementById('settings').click()`)
     await page.evaluate(`document.querySelector('[data-effort="high"]').click()`)
     await page.evaluate(`document.getElementById('settings-save').click()`)

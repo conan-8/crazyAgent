@@ -91,6 +91,7 @@ test('request output cap defaults to the model maximum and preserves explicit lo
 test('buildLlmPatch targets the generated llm-pi-ai row and contains no key', () => {
   const model = mapModel(RAW_VISION)
   const config = buildLlmConfig('https://openrouter.ai/api/v1/', model)
+  assert.equal(config.reasoningEffort, 'medium')
   const patch = buildLlmPatch(config)
   assert.ok(!patch.includes('apiKey"') && !patch.includes('sk-or-'))
   const parsed = yaml.load(patch)

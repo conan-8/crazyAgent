@@ -25,7 +25,7 @@ const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 5_000_000
 const MAX_TOTAL_IMAGE_BYTES = 12_000_000
 const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
-let settingsDraftEffort = 'auto'
+let settingsDraftEffort = 'medium'
 let conversationHistory = []
 let currentConversationId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 let newChatOnNextConnect = true
@@ -253,7 +253,7 @@ function populateSettings() {
 }
 
 function setEffortSelection(value) {
-  settingsDraftEffort = EFFORT_LABELS[value] ? value : 'auto'
+  settingsDraftEffort = EFFORT_LABELS[value] ? value : 'medium'
   for (const button of els.settingEffort.querySelectorAll('[data-effort]')) {
     const selected = button.dataset.effort === settingsDraftEffort
     button.classList.toggle('active', selected)
@@ -285,7 +285,7 @@ function contextWindowBadge(model) {
 
 function renderComposerModel() {
   const model = modelsState.models.find(item => item.id === llmState.model?.id) ?? llmState.model
-  const policy = llmState.reasoningEffort ?? settings.reasoningEffort ?? 'auto'
+  const policy = llmState.reasoningEffort ?? settings.reasoningEffort ?? 'medium'
   const context = contextWindowBadge(model)
   const effortText = model?.reasoning === false ? 'no CoT' : policy === 'auto' ? 'low' : policy
   const effortTitle = model?.reasoning === false
@@ -378,7 +378,7 @@ function renderModelMenu() {
         baseUrl: llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL,
         model: model.id,
         remember: true,
-        reasoningEffort: llmState.reasoningEffort ?? settings.reasoningEffort ?? 'auto',
+        reasoningEffort: llmState.reasoningEffort ?? settings.reasoningEffort ?? 'medium',
       })
     })
     els.modelMenuList.appendChild(button)
@@ -769,12 +769,12 @@ const EFFORT_LABELS = {
 }
 
 function effortLabel(value) {
-  return EFFORT_LABELS[value] ?? EFFORT_LABELS.auto
+  return EFFORT_LABELS[value] ?? EFFORT_LABELS.medium
 }
 
 function renderEffortStatus() {
   if (!els.effortStatus) return
-  const policy = llmState.reasoningEffort ?? 'auto'
+  const policy = llmState.reasoningEffort ?? 'medium'
   if (!llmState.model) {
     els.effortStatus.textContent = 'Select a model to configure reasoning.'
     return
@@ -842,7 +842,7 @@ function renderProviderStatus() {
     kind = 'hint error'
   } else if (selected) {
     text = modelLabel(selected)
-      + (selected.reasoning ? ` · effort ${effortLabel(llmState.reasoningEffort ?? 'auto')}` : ' · no reasoning')
+      + (selected.reasoning ? ` · effort ${effortLabel(llmState.reasoningEffort ?? 'medium')}` : ' · no reasoning')
       + (compatibleCount > 0 ? ` · ${compatibleCount} agent-compatible models loaded` : '')
   } else if (compatibleCount > 0) {
     text = `${compatibleCount} agent-compatible models loaded. Choose one above.`
@@ -1046,7 +1046,7 @@ function openSettings() {
   els.settingBaseUrl.value = llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL
   els.settingModel.value = llmState.model?.id || settings.modelId || ''
   els.settingRememberKey.checked = true
-  setEffortSelection(llmState.reasoningEffort ?? 'auto')
+  setEffortSelection(llmState.reasoningEffort ?? 'medium')
   renderProviderStatus()
   els.settingsModal.classList.remove('hidden')
   // Model info leads the panel, so a configured setup opens at the top; a panel
@@ -3443,7 +3443,7 @@ els.settingsSave.addEventListener('click', () => {
   }
   const reconnectNeeded = settings.bridgeUrl !== url || settings.token !== token
   const modelChanged = model !== (llmState.model?.id ?? '') || baseUrl !== (llmState.baseUrl ?? settings.modelBaseUrl)
-  const effortChanged = reasoningEffort !== (llmState.reasoningEffort ?? 'auto')
+  const effortChanged = reasoningEffort !== (llmState.reasoningEffort ?? 'medium')
   const llmUpdate = (modelChanged || effortChanged || apiKey.length > 0)
     ? { baseUrl, model, remember, reasoningEffort, ...(apiKey.length > 0 ? { apiKey } : {}) }
     : null
@@ -3719,7 +3719,7 @@ async function boot() {
   await loadSettings()
   await loadHistory()
   populateSettings()
-  setEffortSelection(settings.reasoningEffort ?? 'auto')
+  setEffortSelection(settings.reasoningEffort ?? 'medium')
   renderComposerModel()
   renderImageChips()
   updateMicButton()

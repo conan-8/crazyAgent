@@ -19,7 +19,7 @@ export const REASONING_POLICIES = ['auto', 'off', 'low', 'medium', 'high']
 /** @param {unknown} value @returns {'auto'|'off'|'low'|'medium'|'high'} */
 export function normalizeReasoningEffort(value) {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  return REASONING_POLICIES.includes(text) ? text : 'auto'
+  return REASONING_POLICIES.includes(text) ? text : 'medium'
 }
 
 /** @param {'auto'|'off'|'low'|'medium'|'high'} policy */
@@ -129,7 +129,7 @@ export async function validateApiKey(baseUrl, apiKey, options = {}) {
 }
 
 /** @param {string} baseUrl @param {Record<string, any>} model @param {string} [reasoningEffort] */
-export function buildLlmConfig(baseUrl, model, reasoningEffort = 'auto') {
+export function buildLlmConfig(baseUrl, model, reasoningEffort = 'medium') {
   return {
     provider: 'openrouter',
     baseUrl: normalizeBaseUrl(baseUrl),
