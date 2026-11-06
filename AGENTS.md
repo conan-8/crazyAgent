@@ -1,4 +1,4 @@
-# CrazyAgent development contract
+# crazyAgent development contract
 
 ## Change one observable milestone at a time
 

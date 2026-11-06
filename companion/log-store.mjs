@@ -722,7 +722,7 @@ export class LogStore {
   summary() {
     const stats = this.stats()
     const lines = []
-    lines.push(`# CrazyAgent debug log — ${stats.runId}`)
+    lines.push(`# crazyAgent debug log — ${stats.runId}`)
     lines.push('')
     lines.push(`Generated: ${isoNow()}`)
     lines.push(`Started: ${stats.startedAt}`)
@@ -926,7 +926,7 @@ export class LogStore {
         }
       }
     }
-    files['README.txt'] = strToU8(`CrazyAgent debug bundle
+    files['README.txt'] = strToU8(`crazyAgent debug bundle
 ========================
 
 This bundle was generated for development debugging. It contains:

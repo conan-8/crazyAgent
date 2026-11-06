@@ -273,7 +273,7 @@ assert.ok(navigateBack.image && navigateBack.image.width > 0, 'history back retu
 assert.match(navigateBack.text, /Work fixture/, 'form content is visible after history back')
 console.log('PASS navigate history back — fresh view of the form')
 
-const placesMarker = `CrazyAgent Places ${Date.now()}`
+const placesMarker = `crazyAgent Places ${Date.now()}`
 const places = await evaluate(`(async () => { ${prefix}
   const bookmark = await chrome.bookmarks.create({ title: '${placesMarker}', url: '${BASE}/second.html?from=bookmark' })
   try {

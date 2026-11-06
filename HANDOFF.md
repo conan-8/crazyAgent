@@ -1,4 +1,4 @@
-# CrazyAgent — continuation handoff
+# crazyAgent — continuation handoff
 
 Last updated: **2026-11-06**. This is the architecture and current-state handoff. `HANDOFF-QUICK.md` is the short resume; `README.md` is the setup/user guide. Older run narratives were removed intentionally—use the debug logs for ground truth.
 
@@ -22,7 +22,7 @@ The working tree contains substantial uncommitted implementation and documentati
 
 ## 2. Architecture
 
-CrazyAgent uses **DSH 0.2.1-rc.2** for the agent loop, sessions, tool pipeline, prompt assembly, attachments, compaction, and model routing.
+crazyAgent uses **DSH 0.2.1-rc.2** for the agent loop, sessions, tool pipeline, prompt assembly, attachments, compaction, and model routing.
 
 ```text
 Chrome/Edge tab

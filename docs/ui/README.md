@@ -1,11 +1,10 @@
 # Side-panel UI reference frames
 
-Screenshots of the CrazyAgent side panel captured from the mocked-bridge preview
-harness (`scripts/ui-preview.mjs`). The dark activity and slash-command frames
-were refreshed for v2.0.0 Beta on 2026-11-06 with the normal DeepSeek V4.1 Flash
-model and the recommended Medium reasoning default; the other activity frames date from 2026-10-22 and the disclaimer frame
-from 2026-11-04. No companion, extension permissions, or model tokens are involved:
-the harness opens the real
+Screenshots of the crazyAgent side panel captured from the mocked-bridge preview
+harness (`scripts/ui-preview.mjs`). All frames were refreshed on 2026-11-06 with
+camel-case crazyAgent branding, the normal DeepSeek V4.1 Flash model, and the
+recommended Medium reasoning default. No companion, extension permissions, or
+model tokens are involved: the harness opens the real
 `extension/sidepanel/index.html` page in an isolated Edge instance, replaces the
 bridge WebSocket with an in-page mock, and plays scripted frames through the real
 UI code.
@@ -47,11 +46,11 @@ page body.
 | Frame | State |
 |---|---|
 | `sidebar-activity-dark.jpeg` | Finished v2 turn: user request, compact action summary, formatted final answer, and the current DeepSeek V4.1 Flash composer |
-| `sidebar-activity-light.jpeg` | Same turn in light mode |
+| `sidebar-activity-light.jpeg` | Same turn with light-theme emulation requested; the current UI uses a fixed dark color scheme |
 | `sidebar-live-dark.jpeg` | Mid-turn: finished step collapsed, running step expanded with live clock, `step 2 · 2.7s` header pill, live footer step |
 | `sidebar-step-expanded.jpeg` | A finished step expanded by clicking its header |
 | `sidebar-narrow.jpeg` | 320 px side panel |
-| `sidebar-empty-dark.jpeg` | Legacy idle frame captured 2026-10-22, when the home view still had a hero and prompt chips; the current home shows up to three recent sessions (or a blank field) above the composer |
+| `sidebar-empty-dark.jpeg` | Current new-chat home view with a recent session above the composer |
 | `disclaimer-full-screen.jpeg` | One-time full-screen notice after an extension install/reload, led by the amber "Don't touch the browser while the agent is running" warning |
 | `sidebar-slash-commands.jpeg` | Slash-command palette above the composer: `/new` and `/model`, the first row selected, with the ↑↓/Enter/Esc hint line |
 

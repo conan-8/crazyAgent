@@ -1,5 +1,5 @@
 /**
- * CrazyAgent browser-use provider: the user's current Chrome window, reached
+ * crazyAgent browser-use provider: the user's current Chrome window, reached
  * through the local companion bridge.
  *
  * Tools: screenshot, labelled click, coordinate burst click, trusted drag, typing,
@@ -386,7 +386,7 @@ class BridgeClient {
       this.logEvent('bridge.disconnect', { code, reason: String(reason ?? '') }, 'warn')
       if (this.#ready) this.log('bridge: disconnected')
       this.#ready = false
-      this.#failPending(new Error('browser bridge disconnected; open the CrazyAgent side panel'))
+      this.#failPending(new Error('browser bridge disconnected; open the crazyAgent side panel'))
       this.#scheduleConnect(1_000)
     })
     ws.on('error', error => {
@@ -459,7 +459,7 @@ class BridgeClient {
         return
       }
       if (Date.now() - started > CONNECT_WAIT_MS) {
-        done?.(new Error('browser bridge is not connected; open the CrazyAgent side panel'))
+        done?.(new Error('browser bridge is not connected; open the crazyAgent side panel'))
         return
       }
       setTimeout(tick, 50)

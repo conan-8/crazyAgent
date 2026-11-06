@@ -106,12 +106,12 @@ if (!existsSync(CREDENTIALS)) {
 }
 
 process.stdout.write(`
-CrazyAgent setup complete.
+crazyAgent setup complete.
 
 Next:
   1. npm run dev
   2. Open chrome://extensions, enable Developer mode, Load unpacked -> extension/
-  3. Click the CrazyAgent toolbar icon and paste the pairing token
+  3. Click the crazyAgent toolbar icon and paste the pairing token
   4. Enter your OpenRouter API key, click Refresh models, select an image-capable model, and Save
   5. Visit a normal website and ask "What is on this page?"
 

@@ -1,4 +1,4 @@
-# CrazyAgent manual acceptance checklist
+# crazyAgent manual acceptance checklist
 
 Use the **real docked side panel**, not the extension page opened as a tab. Unit tests and direct executor suites do not check off these model-driven scenarios.
 
