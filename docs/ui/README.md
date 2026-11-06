@@ -1,11 +1,11 @@
 # Side-panel UI reference frames
 
 Screenshots of the CrazyAgent side panel captured from the mocked-bridge preview
-harness (`scripts/ui-preview.mjs`). The dark activity frame was refreshed for
-v2.0.0 Beta on 2026-11-06; the other activity frames date from 2026-10-22, the
-disclaimer frame from 2026-11-04, and the slash-command frame from 2026-11-04
-(refreshed 2026-11-05 to include the composer Pause/Resume control). No companion,
-extension permissions, or model tokens are involved: the harness opens the real
+harness (`scripts/ui-preview.mjs`). The dark activity and slash-command frames
+were refreshed for v2.0.0 Beta on 2026-11-06 with the normal DeepSeek V4.1 Flash
+model; the other activity frames date from 2026-10-22 and the disclaimer frame
+from 2026-11-04. No companion, extension permissions, or model tokens are involved:
+the harness opens the real
 `extension/sidepanel/index.html` page in an isolated Edge instance, replaces the
 bridge WebSocket with an in-page mock, and plays scripted frames through the real
 UI code.

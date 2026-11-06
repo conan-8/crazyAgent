@@ -2,7 +2,7 @@
 
 **Control Chrome or Edge from a local side panel with guarded browser actions, file transfer, and semantic Google Docs editing.** Built on **DSH 0.2.1-rc.2**.
 
-**Optimised for DeepSeek V4.1 Flash** on OpenRouter (`deepseek/deepseek-v4.1-flash-1017`). Other image-capable, tool-capable models remain available. [Download v2.0.0-beta](https://github.com/conan-8/crazyAgent/releases/tag/v2.0.0-beta).
+**Optimised for DeepSeek V4.1 Flash** on OpenRouter (`deepseek/deepseek-v4.1-flash`). Other image-capable, tool-capable models remain available. [Download v2.0.0-beta](https://github.com/conan-8/crazyAgent/releases/tag/v2.0.0-beta).
 
 <p align="center">
   <img src="docs/ui/sidebar-activity-dark.jpeg" alt="CrazyAgent completing a browser task in the side panel" width="360">
@@ -31,7 +31,7 @@ There are **33 model-facing tools**: 25 general browser tools and 8 guarded Docs
 Paste this prompt into a coding agent on the computer where Chrome or Edge is installed:
 
 ```text
-Install CrazyAgent v2.0.0-beta on this computer from https://github.com/conan-8/crazyAgent. First verify Git, Node.js 22.19 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Stop and tell me if anything required is missing; do not use sudo or replace my runtimes. Clone the v2.0.0-beta tag into a new crazyAgent directory, then run npm ci and npm run setup in that checkout. If the directory already exists, do not overwrite or delete it; ask me for another location. Start npm run dev -- --model deepseek/deepseek-v4.1-flash-1017 --reasoning-effort auto as a persistent background process and verify http://127.0.0.1:17871/health responds successfully. If that port is already occupied, stop and report it instead of killing an existing process. Then give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions and open the CrazyAgent side panel. Guide me to copy the local pairing token into Settings, enter my own OpenRouter API key there, select DeepSeek V4.1 Flash, and save. Never ask for my API key in chat, print it, commit it, or send it anywhere except CrazyAgent's local Settings. Keep the companion running. Finish with the install path, health status, and restart command. Do not run any website tasks or model-spending tests until I confirm installation is complete.
+Install CrazyAgent v2.0.0-beta on this computer from https://github.com/conan-8/crazyAgent. First verify Git, Node.js 22.19 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Stop and tell me if anything required is missing; do not use sudo or replace my runtimes. Clone the v2.0.0-beta tag into a new crazyAgent directory, then run npm ci and npm run setup in that checkout. If the directory already exists, do not overwrite or delete it; ask me for another location. Start npm run dev -- --model deepseek/deepseek-v4.1-flash --reasoning-effort auto as a persistent background process and verify http://127.0.0.1:17871/health responds successfully. If that port is already occupied, stop and report it instead of killing an existing process. Then give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions and open the CrazyAgent side panel. Guide me to copy the local pairing token into Settings, enter my own OpenRouter API key there, select DeepSeek V4.1 Flash, and save. Never ask for my API key in chat, print it, commit it, or send it anywhere except CrazyAgent's local Settings. Keep the companion running. Finish with the install path, health status, and restart command. Do not run any website tasks or model-spending tests until I confirm installation is complete.
 ```
 
 `setup` initializes `.dsh-home/profiles/sdk-minimal`, links the local DSH plugins, and validates profile composition. `dev` starts the loopback-only companion and prints bridge pairing information.
@@ -39,7 +39,7 @@ Install CrazyAgent v2.0.0-beta on this computer from https://github.com/conan-8/
 1. Open `chrome://extensions` or `edge://extensions`.
 2. Enable Developer mode, choose **Load unpacked**, and select the checkout's `extension/` directory.
 3. Click the CrazyAgent toolbar icon to open the side panel.
-4. In **Settings**, enter the pairing token and your OpenRouter API key, refresh models, select **DeepSeek V4.1 Flash 1017**, and save. Never share the API key or pairing token publicly.
+4. In **Settings**, enter the pairing token and your OpenRouter API key, refresh models, select **DeepSeek V4.1 Flash**, and save. Never share the API key or pairing token publicly.
 5. Wait for **Connected**, open a normal page, and ask a question or request an action.
 
 Keep the companion and side panel open while the agent runs; the panel is also the browser executor. **Do not touch the browser while a task is running:** clicking, typing, scrolling, or switching tabs can invalidate the agent's targets. After an install or extension reload, dismiss the one-time safety notice with **Got it** or Escape.
@@ -153,7 +153,7 @@ The companion can also be configured from the CLI:
 
 ```sh
 npm run dev -- --base-url https://openrouter.ai/api/v1 \
-  --model deepseek/deepseek-v4.1-flash-1017 --reasoning-effort auto
+  --model deepseek/deepseek-v4.1-flash --reasoning-effort auto
 ```
 
 Output tokens default to the selected model’s advertised maximum; `--max-tokens` sets a lower explicit cap. API-key resolution order is `CRAZYAGENT_API_KEY`, the optional stored key, `OPENROUTER_API_KEY`, then the DSH credential store.

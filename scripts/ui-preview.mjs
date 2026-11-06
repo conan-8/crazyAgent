@@ -161,7 +161,7 @@ const settings = {
   autoCapture: true,
   paused: false,
   reasoningEffort: 'auto',
-  modelId: 'deepseek/deepseek-v4.1-flash-1017',
+  modelId: 'deepseek/deepseek-v4.1-flash',
 }
 
 const HELLO_FRAMES = [
@@ -171,13 +171,13 @@ const HELLO_FRAMES = [
     type: 'chat.hello',
     companion: { version: 'preview', pid: 1, startedAt: Date.now() },
     provider: 'openrouter',
-    model: 'deepseek/deepseek-v4.1-flash-1017',
+    model: 'deepseek/deepseek-v4.1-flash',
     autoCapture: true,
     dsh: { state: 'ready' },
     llm: {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
-      model: { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, imageInput: true },
+      model: { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek: DeepSeek V4.1 Flash ', reasoning: true, imageInput: true },
       reasoningEffort: 'auto',
     },
     credentials: { configured: true, source: 'stored' },
@@ -191,7 +191,7 @@ const HELLO_FRAMES = [
     ok: true,
     baseUrl: 'https://openrouter.ai/api/v1',
     models: [
-      { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
+      { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek: DeepSeek V4.1 Flash ', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
       { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
       { id: 'openai/gpt-5', name: 'GPT-5', reasoning: true, imageInput: true, tools: true, contextWindow: 400000 },
       { id: 'acme/text-only', name: 'Text Only Model', reasoning: true, imageInput: false, tools: true, contextWindow: 128000 },
@@ -327,7 +327,7 @@ async function playTurn(page, options = {}) {
     sessionId: 'session-preview0001',
     text: 'Done — **I clicked Increment twice**. The counter now reads **2**.\n\n- First bullet\n- Second bullet\n\n1. First numbered item\n2. Second numbered item\n\n| Plan | Price |\n| --- | ---: |\n| Pro | $24 |\n| Team | $39 |',
     timings: { totalMs: 28400, autoCaptureMs: 412, firstEventMs: 910, toolCalls: 3, promptTextBytes: 18422, imageBytes: 182000, images: 1 },
-    model: 'deepseek/deepseek-v4.1-flash-1017',
+    model: 'deepseek/deepseek-v4.1-flash',
     provider: 'openrouter',
   })
   await recv({ v: 1, type: 'chat.status', status: 'idle' })
@@ -364,11 +364,11 @@ async function playToolScenario(page) {
   assert.equal(modelMeta.flexGrow, '1')
   assert.equal(modelMeta.maxWidth, 'none')
   assert.ok(modelMeta.width > 200, `model selector uses available width (${modelMeta.width}px)`)
-  assert.equal(modelMeta.modelName, 'DeepSeek V4.1 Flash 1017')
+  assert.equal(modelMeta.modelName, 'DeepSeek V4.1 Flash ')
   assert.equal(modelMeta.effortText, '· low')
   assert.equal(modelMeta.effortTitle, 'Reasoning effort: Auto (low from the first step)')
   assert.equal(modelMeta.effortColor, 'rgb(255, 195, 0)')
-  assert.match(modelMeta.buttonTitle, /deepseek\/deepseek-v4\.1-flash-1017/)
+  assert.match(modelMeta.buttonTitle, /deepseek\/deepseek-v4\.1-flash-/)
   await recv({ v: 1, type: 'chat.activity', kind: 'usage', usage: { totalTokens: 250000, inputTokens: 250000 } })
   const contextMeta = await page.evaluate(`(() => {
     const progress = document.getElementById('composer-context-progress')
@@ -434,7 +434,7 @@ async function playToolScenario(page) {
     sessionId: 'session-preview0001',
     text: 'I can see the fixture page in the tab list. The tab list card above shows every open tab.',
     timings: { totalMs: 6200, autoCaptureMs: 0, firstEventMs: 620, toolCalls: 1 },
-    model: 'deepseek/deepseek-v4.1-flash-1017',
+    model: 'deepseek/deepseek-v4.1-flash',
     provider: 'openrouter',
   })
   await recv({ v: 1, type: 'chat.status', status: 'idle' })

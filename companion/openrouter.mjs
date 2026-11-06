@@ -13,7 +13,7 @@ import yaml from 'js-yaml'
 
 export const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1'
 export const MODEL_CACHE_MS = 5 * 60 * 1000
-export const RECOMMENDED_MODEL_ID = 'deepseek/deepseek-v4.1-flash-1017'
+export const RECOMMENDED_MODEL_ID = 'deepseek/deepseek-v4.1-flash'
 export const REASONING_POLICIES = ['auto', 'off', 'low', 'medium', 'high']
 
 /** @param {unknown} value @returns {'auto'|'off'|'low'|'medium'|'high'} */
