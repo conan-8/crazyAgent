@@ -1026,6 +1026,12 @@ textarea {
   border-color: var(--border);
 }
 
+.composer-input {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
 #input {
   width: 100%;
   min-height: 42px;
@@ -1039,6 +1045,7 @@ textarea {
   color: var(--text);
   font-size: 14px;
   line-height: 1.5;
+  transition: padding-right 0.18s ease;
 }
 
 .composer-field:has(.stop:not(.hidden)) {
@@ -1050,6 +1057,59 @@ textarea {
 .composer-field:has(.stop:not(.hidden)) #input {
   min-height: 36px;
   padding-right: 48px;
+}
+
+/* Dictation is live: reserve the textarea's bottom-right corner for the
+   listening pill so the bouncing dots never sit on top of dictated text. */
+.composer-field:has(.mic.recording) #input {
+  padding-right: 100px;
+}
+
+.dictation-indicator {
+  position: absolute;
+  right: 1px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 9px 0 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  pointer-events: none;
+  animation: dictation-indicator-in 0.2s ease-out;
+}
+
+.dictation-indicator[hidden] {
+  display: none;
+}
+
+.dictation-dots {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 10px;
+}
+
+.dictation-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: dictation-dot 1.05s ease-in-out infinite;
+}
+
+.dictation-dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.dictation-dot:nth-child(3) {
+  animation-delay: 0.32s;
 }
 
 #input::placeholder,
@@ -1097,6 +1157,38 @@ input::placeholder {
 
 .mic:disabled {
   color: #4f4f4f;
+}
+
+/* Pause/Resume browser access. Lives beside dictation so the user can stop the
+   agent touching the page without ending the chat turn. */
+.pause-toggle {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  margin: 0 0 2px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #999;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.pause-toggle:hover {
+  background: #252525;
+  color: #d0d0d0;
+}
+
+.pause-toggle[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.pause-toggle .icon {
+  width: 15px;
+  height: 15px;
 }
 
 .composer-model {
@@ -1437,6 +1529,87 @@ input::placeholder {
 
 .model-menu-list > [aria-selected="true"] {
   color: var(--accent);
+}
+
+/* Slash-command palette: same surface as the model picker, but aligned with
+   the composer field and tall enough to read the hint line. */
+.slash-menu {
+  position: absolute;
+  right: 12px;
+  bottom: calc(100% + 1px);
+  left: 12px;
+  z-index: 19;
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  padding: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(30, 30, 30, 0.96);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  font-size: 13px;
+  animation: rise 0.15s ease-out;
+}
+
+.slash-menu-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.slash-command {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  overflow: hidden;
+  border-radius: 8px;
+  color: #e0e0e0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.slash-command:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.slash-command[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.slash-command-name {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.slash-command-description {
+  min-width: 0;
+  overflow: hidden;
+  color: #9a9a9a;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slash-command[aria-selected="true"] .slash-command-description {
+  color: var(--text-soft);
+}
+
+.slash-menu-hint {
+  margin-top: 4px;
+  padding: 6px 10px 2px;
+  border-top: 1px solid var(--border);
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 .footer {
@@ -2084,6 +2257,134 @@ input::placeholder {
   color: #fff;
 }
 
+/* One-time disclaimer. A native <dialog> keeps it above every other overlay
+   and traps focus; it fills the whole side panel so it reads as a full screen.
+   The hands-off warning is the point of the screen, so it owns the raised
+   amber callout and the dominant type; everything else stays quiet. */
+.disclaimer {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.disclaimer::backdrop {
+  background: var(--bg);
+}
+
+.disclaimer-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Fall back to plain centering if `safe center` is unsupported. */
+  justify-content: center;
+  justify-content: safe center;
+  gap: 15px;
+  width: 100%;
+  height: 100%;
+  padding: 30px 22px;
+  overflow-y: auto;
+  text-align: center;
+  animation: rise 0.28s ease-out;
+}
+
+.disclaimer-warning {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 322px;
+  padding: 21px 18px 20px;
+  border: 1px solid rgba(255, 195, 0, 0.45);
+  border-radius: 18px;
+  background:
+    radial-gradient(135% 105% at 50% 0%, rgba(255, 195, 0, 0.18), rgba(255, 195, 0, 0.05) 62%),
+    #201a0d;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 214, 92, 0.17),
+    0 18px 44px rgba(0, 0, 0, 0.55),
+    0 0 42px rgba(255, 195, 0, 0.07);
+}
+
+.disclaimer-warning-badge {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 3px;
+  border: 1px solid rgba(255, 195, 0, 0.4);
+  border-radius: 50%;
+  background: rgba(255, 195, 0, 0.13);
+  color: var(--accent);
+}
+
+.disclaimer-warning-icon {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.disclaimer-kicker {
+  margin: 0;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.disclaimer h2 {
+  max-width: 262px;
+  margin: 0;
+  color: #ffd24d;
+  font-size: 23px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.disclaimer-warning-copy {
+  max-width: 272px;
+  margin: 0;
+  color: #e6d6ab;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.disclaimer-copy {
+  max-width: 300px;
+  margin: 0;
+  color: #9c9c9c;
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.disclaimer-dismiss {
+  width: 100%;
+  max-width: 300px;
+  height: 38px;
+  margin-top: 3px;
+  font-size: 13px;
+}
+
 .toast {
   position: fixed;
   bottom: 70px;
@@ -2225,6 +2526,30 @@ input::placeholder {
   to {
     opacity: 1;
     transform: translate(-50%, 0);
+  }
+}
+
+@keyframes dictation-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.5;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes dictation-indicator-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -2737,6 +3062,160 @@ input::placeholder {
 
   #input {
     min-height: 30px;
+  }
+}
+
+.back-home {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 12;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(38, 38, 38, 0.86);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 5px 16px rgba(0, 0, 0, 0.24);
+  color: var(--text-soft);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+}
+
+.back-home:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.back-home .icon {
+  width: 16px;
+  height: 16px;
+  transform: rotate(90deg);
+}
+
+.app.chat-open .activity-log {
+  padding-top: 56px;
+}
+
+/* The floating back button covers the top-left of the feed; shift the activity
+   header clear of it so the phase text is never hidden under the button. */
+.app.chat-open .activity-head {
+  padding-left: 62px;
+}
+
+.activity {
+  position: relative;
+}
+
+.activity-empty {
+  z-index: 4;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 24px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.app.new-chat-draft .message-queue {
+  display: none;
+}
+
+.recent-sessions {
+  width: 100%;
+  min-width: 0;
+  max-width: 360px;
+  pointer-events: auto;
+  animation: rise 0.25s ease-out;
+}
+
+.recent-sessions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+
+.recent-sessions-head h2 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.recent-sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.recent-session-open {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 58px;
+  padding: 10px 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text-soft);
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.recent-session-open:hover {
+  border-color: #3a3a3a;
+  background: var(--panel-raised);
+}
+
+.recent-session-open.running {
+  border-color: rgba(255, 195, 0, 0.28);
+}
+
+.recent-session-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.recent-session-title {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-session-copy small {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.recent-session-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.recent-session-spinner {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(255, 195, 0, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: recent-session-spin 0.8s linear infinite;
+}
+
+@keyframes recent-session-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

@@ -101,7 +101,7 @@ const readExport = async () => {
     return { status: response.status, body: await response.text() }
   })()`)
   assert.equal(exported.status, 200, 'independent authenticated export succeeds')
-  return parseDocStructure(exported.body)
+  return { blocks: parseDocStructure(exported.body), html: exported.body }
 }
 const summarize = result => ({
   action: result.docs?.tableAction,
@@ -113,6 +113,24 @@ const summarize = result => ({
 const completed = result => {
   assert.equal(result.docs?.status, 'completed', JSON.stringify(result.docs))
   return summarize(result)
+}
+
+const assertCompactCells = html => {
+  const styles = new Map([...html.matchAll(/\.([a-zA-Z0-9_-]+)\s*\{([^}]*)\}/gu)].map(match => [match[1], match[2]]))
+  const paragraphs = []
+  for (const cell of html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)) {
+    for (const paragraph of cell[1].matchAll(/<p\b([^>]*)>/gu)) paragraphs.push(paragraph[1])
+  }
+  assert.ok(paragraphs.length > 0, 'created table contains cell paragraphs')
+  for (const attributes of paragraphs) {
+    const classes = /\bclass="([^"]*)"/u.exec(attributes)?.[1]?.split(/\s+/u) ?? []
+    const inline = /\bstyle="([^"]*)"/u.exec(attributes)?.[1] ?? ''
+    const body = `${classes.map(name => styles.get(name) ?? '').join(';')};${inline}`
+    const shorthand = /(?:^|;)\s*padding\s*:\s*0(?:pt|px)?(?:;|$)/iu.test(body)
+    const top = /padding-top\s*:\s*0(?:pt|px)?(?:;|$)/iu.test(body)
+    const bottom = /padding-bottom\s*:\s*0(?:pt|px)?(?:;|$)/iu.test(body)
+    assert.ok(shorthand || top && bottom, `cell paragraph has nonzero vertical spacing: ${body}`)
+  }
 }
 
 const started = Date.now()
@@ -131,7 +149,10 @@ try {
     ['Snickerdoodle', 'Hullabaloo', 'Brouhaha', 'Borborygmus'],
   ]
   evidence.push(completed(await execute('create', { rows: 3, columns: 4, values })))
+  const created = await readExport()
+  assertCompactCells(created.html)
   evidence.push(completed(await execute('format', { edits: [{ row: 1, bold: true, highlight: '#ffff00' }] })))
+  evidence.push(completed(await execute('format', { edits: [{ row: 1, cell_background: '#cccccc' }] })))
   evidence.push(completed(await execute('insert_rows', { count: 2 })))
   evidence.push(completed(await execute('insert_columns', { count: 1 })))
   evidence.push(completed(await execute('write', { edits: [
@@ -141,6 +162,8 @@ try {
   ] })))
   evidence.push(completed(await execute('delete_rows', { rows: [5] })))
   evidence.push(completed(await execute('delete_columns', { columns: [5] })))
+  evidence.push(completed(await execute('merge', { row: 2, column: 1 })))
+  evidence.push(completed(await execute('unmerge', { row: 2, column: 1 })))
   const read = await execute('read')
   assert.equal(read.docs.status, 'completed')
   assert.equal(read.tables[0].rows, 4)
@@ -150,7 +173,7 @@ try {
   await doc.send('Page.reload', { ignoreCache: true })
   await sleep(2_000)
   await waitFor(doc, `location.pathname.includes('/document/d/') && document.readyState === 'complete'`, 60_000)
-  const blocks = await readExport()
+  const { blocks } = await readExport()
   const tables = blocks.filter(block => block.kind === 'table')
   assert.equal(tables.length, 1, 'one table persists after reload')
   const finalTable = tables[0]
@@ -158,11 +181,15 @@ try {
   assert.equal(finalTable.rows[0].length, 4)
   assert.deepEqual(finalTable.rows.map(row => row.map(item => item.text)), [
     values[0],
-    ['Kerfuffle', ...values[1].slice(1)],
+    // Merge joins the two cells' paragraphs with a line break; unmerge keeps
+    // the combined text in the top-left cell and leaves the other cell empty.
+    ['Kerfuffle\nFlibbertigibbet', '', 'Discombobulated', 'Malarkey'],
     values[2],
     ['', '', '', ''],
   ])
+  assert.ok(finalTable.rows.every(row => row.every(item => item.rowspan === 1 && item.colspan === 1)), 'unmerge leaves a fully unmerged table')
   for (const headerCell of finalTable.rows[0]) {
+    assert.equal(headerCell.background, '#cccccc', 'native header cell background persists after reload')
     for (const paragraph of headerCell.paragraphs) {
       for (const run of paragraph.runs) {
         if (!run.text) continue
@@ -173,6 +200,7 @@ try {
   }
   for (const row of finalTable.rows.slice(1)) {
     for (const item of row) {
+      assert.notEqual(item.background, '#cccccc', 'no collateral native cell background')
       for (const paragraph of item.paragraphs) {
         for (const run of paragraph.runs) assert.notEqual(run.highlight, '#ffff00', 'no collateral header highlight')
       }
@@ -181,7 +209,7 @@ try {
 
   evidence.push(completed(await execute('delete_table')))
   const afterDelete = await readExport()
-  assert.equal(afterDelete.some(block => block.kind === 'table'), false, 'table deletion persists in the server export')
+  assert.equal(afterDelete.blocks.some(block => block.kind === 'table'), false, 'table deletion persists in the server export')
   console.log(JSON.stringify({
     durationMs: Date.now() - started,
     title,
@@ -189,6 +217,8 @@ try {
     evidence,
     independentExportVerified: true,
     reloadPersistenceVerified: true,
+    compactCellsVerified: true,
+    nativeCellBackgroundsVerified: true,
     finalShape: '4 rows × 4 columns before explicit delete_table',
     finalStateVerified: true,
   }, null, 2))

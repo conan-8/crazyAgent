@@ -26,9 +26,12 @@ test('Docs export accepts only exact document URLs and html/txt formats', () => 
 test('Docs export retry delay bounds Retry-After and uses growing backoff', () => {
   assert.equal(docsExportRetryDelayMs('2', 0), 2000)
   assert.equal(docsExportRetryDelayMs('0', 0), 250)
-  assert.equal(docsExportRetryDelayMs('99', 0), 5000)
+  assert.equal(docsExportRetryDelayMs('99', 0), 15000)
   assert.equal(docsExportRetryDelayMs(null, 0), 1200)
   assert.equal(docsExportRetryDelayMs(null, 1), 2400)
+  assert.equal(docsExportRetryDelayMs(null, 2), 4800)
+  assert.equal(docsExportRetryDelayMs(null, 3), 9600)
+  assert.equal(docsExportRetryDelayMs(null, 4), 15000)
 })
 
 test('Docs export retries only bounded transient statuses and returns the body', async () => {
@@ -59,11 +62,13 @@ test('Docs export does not retry permission failures', async () => {
 
 test('Docs export stops after bounded transient retries', async () => {
   let calls = 0
+  const sleeps = []
   await assert.rejects(docsFetchExport(URL, 'html', {
     fetch: async () => { calls += 1; return response(429) },
-    sleep: async () => {},
+    sleep: async ms => { sleeps.push(ms) },
   }), error => error.code === 'DOCS_EXPORT_RATE_LIMIT')
-  assert.equal(calls, 3)
+  assert.equal(calls, 5)
+  assert.deepEqual(sleeps, [1200, 2400, 4800, 9600])
 })
 
 test('Docs export has a bounded fetch and body-read timeout', async () => {
@@ -97,7 +102,7 @@ test('Docs export serializes concurrent requests and spaces successive calls', a
 test('Docs export shares a cooldown after the final rate-limit failure', async () => {
   let now = 0
   const sleeps = []
-  const responses = [response(429, '', '2'), response(429, '', '2'), response(429, '', '2'), response(200, '<html>recovered</html>')]
+  const responses = Array.from({ length: 5 }, () => response(429, '', '2')).concat(response(200, '<html>recovered</html>'))
   const io = {
     coordinate: true,
     now: () => now,
@@ -108,5 +113,5 @@ test('Docs export shares a cooldown after the final rate-limit failure', async (
   await assert.rejects(docsFetchExport(otherUrl, 'html', io), error => error.code === 'DOCS_EXPORT_RATE_LIMIT')
   const recovered = await docsFetchExport(otherUrl, 'html', io)
   assert.equal(recovered.body, '<html>recovered</html>')
-  assert.deepEqual(sleeps, [2000, 2000, 2000])
+  assert.deepEqual(sleeps, [2000, 2000, 2000, 2000, 2000])
 })

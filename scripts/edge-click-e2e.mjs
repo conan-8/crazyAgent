@@ -65,6 +65,8 @@ async function evaluate(expression) {
   return result.result?.value
 }
 
+let debuggerStarted = false
+try {
 await evaluate(`(async () => {
   const tabs = await chrome.tabs.query({})
   const tab = tabs.find(item => item.url?.includes('second.html') || item.url?.includes('click.html'))
@@ -74,11 +76,23 @@ await evaluate(`(async () => {
   return 'reset'
 })()`)
 
+// Mirror the real turn lifecycle: one debugger lease spans the whole session, so
+// Chrome's debugging infobar is present before the first view and attach/detach
+// viewport resizes are exercised the same way a real turn hits them.
+debuggerStarted = true
+const debuggerRun = await evaluate(`(async () => {
+  const mod = await import('./browser.js')
+  await mod.beginDebuggerRun()
+  return 'started'
+})()`)
+assert.equal(debuggerRun, 'started', 'the fixture runs inside one debugger lease')
+
 const prefix = `const mod = await import('./browser.js')
   const tabs = await chrome.tabs.query({})
   const tab = tabs.find(item => item.url?.includes('click.html'))
   const settings = { ...mod.DEFAULT_SETTINGS }
   const read = async id => (await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: id => document.getElementById(id).textContent, args: [id] }))[0].result
+  const noopDispatchCount = async () => (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: () => window.__crazyagentNoopDispatchCount ?? 0 }))[0].result
   const semanticState = async () => ({
     exact: await read('semantic-count'),
     decoy: await read('semantic-decoy-count'),
@@ -210,10 +224,11 @@ console.log('PASS nested interactive ownership, ordinary spans, and stale-on-hov
 
 const nested = await evaluate(`(async () => { ${prefix}
   const view = await mod.execute('click', { label: ${snapshot.ids.nested} }, settings)
-  return { changed: view.changed, signals: view.signals }
+  return { changed: view.changed, signals: view.signals, dispatchCount: await noopDispatchCount() }
 })()`)
 assert.equal(nested.changed, false, 'no-op click reports no visible change')
 assert.deepEqual(nested.signals, [], 'no-op click has no change signals')
+assert.equal(nested.dispatchCount, 1, 'the no-op click still dispatched exactly one pointer input')
 console.log('PASS no-op click is reported honestly')
 
 const checkbox = await evaluate(`(async () => { ${prefix}
@@ -266,5 +281,22 @@ assert.match(delayedRole.url, /second\.html\?delayed=role$/)
 assert.equal(delayedRole.title, 'Second Fixture Page', 'the final snapshot comes from the delayed destination')
 console.log('PASS delayed final navigation settles before snapshot')
 
+const debuggerRunEnd = await evaluate(`(async () => {
+  const mod = await import('./browser.js')
+  await mod.endDebuggerRun()
+  return 'ended'
+})()`)
+assert.equal(debuggerRunEnd, 'ended', 'the fixture releases its debugger lease in cleanup')
+debuggerStarted = false
+
 console.log('\nALL CLICK CHECKS PASSED')
-panel.close()
+} finally {
+  if (debuggerStarted) {
+    await evaluate(`(async () => {
+      const mod = await import('./browser.js')
+      await mod.endDebuggerRun()
+      return 'ended'
+    })()`).catch(() => {})
+  }
+  panel.close()
+}

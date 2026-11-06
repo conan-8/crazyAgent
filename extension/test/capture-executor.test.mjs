@@ -8,7 +8,15 @@ function chromeEvent() {
   return { addListener: () => {}, removeListener: () => {} }
 }
 
-function fakeCaptureBrowser(t, { pageWidth = 800, pageHeight = 1_200, scrollY = 0 } = {}) {
+function fakeCaptureBrowser(t, {
+  pageWidth = 800,
+  pageHeight = 1_200,
+  scrollY = 0,
+  focused = true,
+  windowState = 'normal',
+  captureFailure,
+  debuggerFailure,
+} = {}) {
   const previous = {
     chrome: globalThis.chrome,
     createImageBitmap: globalThis.createImageBitmap,
@@ -18,6 +26,7 @@ function fakeCaptureBrowser(t, { pageWidth = 800, pageHeight = 1_200, scrollY = 
   const commands = []
   const scripts = []
   const stored = new Map()
+  const state = { visibleCaptureCalls: 0, focusCalls: 0 }
   let bitmap = { width: 800, height: 600 }
   const metrics = () => ({
     title: tab.title,
@@ -37,11 +46,17 @@ function fakeCaptureBrowser(t, { pageWidth = 800, pageHeight = 1_200, scrollY = 
     async convertToBlob({ type }) { return new Blob(['display-image'], { type }) }
   }
   globalThis.chrome = {
-    windows: { getCurrent: async () => ({ id: 1 }), update: async () => {} },
+    windows: {
+      getCurrent: async () => ({ id: 1, focused, state: windowState }),
+      get: async id => ({ id, focused, state: windowState }),
+      update: async () => { state.focusCalls += 1 },
+    },
     tabs: {
       query: async () => [{ ...tab }],
       get: async () => ({ ...tab }),
       captureVisibleTab: async () => {
+        state.visibleCaptureCalls += 1
+        if (captureFailure) throw captureFailure
         bitmap = { width: 800, height: 600 }
         return 'data:image/jpeg;base64,dW51c2Vk'
       },
@@ -62,7 +77,9 @@ function fakeCaptureBrowser(t, { pageWidth = 800, pageHeight = 1_200, scrollY = 
       },
     },
     debugger: {
-      attach: async () => {},
+      attach: async () => {
+        if (debuggerFailure) throw debuggerFailure
+      },
       detach: async () => {},
       onEvent: chromeEvent(),
       onDetach: chromeEvent(),
@@ -70,7 +87,9 @@ function fakeCaptureBrowser(t, { pageWidth = 800, pageHeight = 1_200, scrollY = 
         commands.push({ method, params })
         if (method === 'Page.getLayoutMetrics') return { cssContentSize: { width: pageWidth, height: pageHeight } }
         if (method === 'Page.captureScreenshot') {
-          bitmap = { width: params.clip.width, height: params.clip.height }
+          const width = params.clip?.width ?? 800
+          const height = params.clip?.height ?? 600
+          bitmap = { width, height }
           return { data: 'iVBORw==' }
         }
         return {}
@@ -89,7 +108,7 @@ function fakeCaptureBrowser(t, { pageWidth = 800, pageHeight = 1_200, scrollY = 
     globalThis.createImageBitmap = previous.createImageBitmap
     globalThis.OffscreenCanvas = previous.OffscreenCanvas
   })
-  return { commands, scripts, stored }
+  return { commands, scripts, stored, state }
 }
 
 test('full-page capture stores a clean PNG without creating a viewport coordinate basis', async t => {
@@ -131,4 +150,78 @@ test('region capture maps current-view image coordinates into page clip coordina
   assert.equal(result.viewId, undefined)
   assert.equal(result.clipboard.width, 200)
   assert.equal(result.clipboard.height, 100)
+})
+
+test('focused window keeps the fast visible-tab viewport capture', async t => {
+  const fake = fakeCaptureBrowser(t, { focused: true })
+  const result = await execute('snapshot', {}, {})
+  assert.equal(result.view, 'full')
+  assert.equal(result.image.width, 800)
+  assert.equal(result.image.mimeType, 'image/jpeg')
+  assert.equal(fake.state.visibleCaptureCalls, 1)
+  assert.equal(fake.state.focusCalls, 0)
+  assert.equal(fake.commands.filter(command => command.method === 'Page.captureScreenshot').length, 0)
+})
+
+test('unfocused window captures the viewport through the page debugger without touching the window', async t => {
+  const fake = fakeCaptureBrowser(t, { focused: false })
+  const result = await execute('snapshot', {}, {})
+  assert.equal(result.view, 'full')
+  assert.equal(result.image.width, 800)
+  assert.equal(result.image.height, 600)
+  assert.ok(result.viewId > 0, 'the page capture still creates a viewport coordinate basis')
+  const capture = fake.commands.find(command => command.method === 'Page.captureScreenshot')
+  assert.deepEqual(capture.params, { format: 'jpeg', quality: 72, fromSurface: true, captureBeyondViewport: false })
+  assert.equal(fake.state.visibleCaptureCalls, 0, 'an unfocused window never waits on the visible-tab API')
+  assert.equal(fake.state.focusCalls, 0, 'capturing an unfocused window never steals focus')
+})
+
+test('minimized window captures through the page debugger and never calls the visible-tab API', async t => {
+  const fake = fakeCaptureBrowser(t, { focused: false, windowState: 'minimized' })
+  const result = await execute('snapshot', {}, {})
+  assert.equal(result.view, 'full')
+  assert.equal(result.image.width, 800)
+  assert.ok(fake.commands.some(command => command.method === 'Page.captureScreenshot'))
+  assert.equal(fake.state.visibleCaptureCalls, 0, 'a minimized window must not hang on captureVisibleTab')
+  assert.equal(fake.state.focusCalls, 0)
+})
+
+test('a failed visible-tab capture on a focused window falls back to the page capture', async t => {
+  const fake = fakeCaptureBrowser(t, {
+    focused: true,
+    captureFailure: new Error('The active tab is not currently visible'),
+  })
+  const result = await execute('snapshot', {}, {})
+  assert.equal(result.view, 'full')
+  assert.equal(fake.state.visibleCaptureCalls, 1)
+  assert.deepEqual(
+    fake.commands.find(command => command.method === 'Page.captureScreenshot').params,
+    { format: 'jpeg', quality: 72, fromSurface: true, captureBeyondViewport: false },
+  )
+  assert.equal(fake.state.focusCalls, 0)
+})
+
+test('a debugger-busy page capture on an unfocused window falls back to the visible-tab API', async t => {
+  const fake = fakeCaptureBrowser(t, {
+    focused: false,
+    debuggerFailure: new Error('Another debugger is already attached to the tab'),
+  })
+  const result = await execute('snapshot', {}, {})
+  assert.equal(result.view, 'full')
+  assert.equal(fake.state.visibleCaptureCalls, 1)
+  assert.equal(fake.state.focusCalls, 0)
+})
+
+test('a minimized window reports a page-capture failure instead of hanging on the visible-tab API', async t => {
+  const fake = fakeCaptureBrowser(t, {
+    focused: false,
+    windowState: 'minimized',
+    debuggerFailure: new Error('Another debugger is already attached to the tab'),
+  })
+  await assert.rejects(
+    execute('snapshot', {}, {}),
+    error => error.code === 'DEBUGGER_BUSY',
+  )
+  assert.equal(fake.state.visibleCaptureCalls, 0)
+  assert.equal(fake.state.focusCalls, 0)
 })

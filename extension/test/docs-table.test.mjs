@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { docsTable } from '../sidepanel/browser.js'
+import { docsTable, executeOperation } from '../sidepanel/browser.js'
 import { planDocsFormatEdits, verifyDocsFormatEdits } from '../sidepanel/docs-format.js'
 import { parseDocStructure } from '../sidepanel/docs-structure.js'
 import {
@@ -9,16 +9,19 @@ import {
   docsTableFormatEdits,
   docsTableNavigationPlan,
   docsParagraphEntries,
+  docsTableStructureRequest,
   parseDocsTableArgs,
   planDocsTableWrite,
   selectDocsTable,
+  verifyDocsTableCellBackground,
   verifyDocsTableStructure,
+  verifyDocsTableUnmerge,
 } from '../sidepanel/docs-table.js'
 
 const URL = 'https://docs.google.com/document/d/abc/edit'
 const escapeHtml = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 const para = (text = '') => ({ kind: 'para', style: 'P', text, marked: text, runs: text ? [{ text, bold: false, italic: false, underline: false, strike: false, color: '#000000', highlight: 'none' }] : [] })
-const cell = (text = '') => ({ text, paragraphs: [para(text)], rowspan: 1, colspan: 1 })
+const cell = (text = '') => ({ text, paragraphs: [para(text)], rowspan: 1, colspan: 1, background: 'none' })
 const table = (values, index = 1) => ({ kind: 'table', index, rows: values.map(row => row.map(cell)) })
 
 function exportHtml(blocks) {
@@ -26,7 +29,7 @@ function exportHtml(blocks) {
   const paragraphHtml = block => `<p>${block.runs.map(runHtml).join('')}</p>`
   return `<html><body>${blocks.map(block => {
     if (block.kind === 'para') return paragraphHtml(block)
-    if (block.kind === 'table') return `<table>${block.rows.map(row => `<tr>${row.map(item => `<td${item.rowspan > 1 ? ` rowspan="${item.rowspan}"` : ''}${item.colspan > 1 ? ` colspan="${item.colspan}"` : ''}>${item.paragraphs.map(paragraphHtml).join('')}</td>`).join('')}</tr>`).join('')}</table>`
+    if (block.kind === 'table') return `<table>${block.rows.map(row => `<tr>${row.map(item => `<td style="background-color:${item.background ?? 'none'}"${item.rowspan > 1 ? ` rowspan="${item.rowspan}"` : ''}${item.colspan > 1 ? ` colspan="${item.colspan}"` : ''}>${item.paragraphs.map(paragraphHtml).join('')}</td>`).join('')}</tr>`).join('')}</table>`
     return ''
   }).join('')}</body></html>`
 }
@@ -40,7 +43,7 @@ function positions(source, text) {
   return found
 }
 
-function fakeDocs(initialBlocks = [para()]) {
+function fakeDocs(initialBlocks = [para()], options = {}) {
   const state = {
     blocks: structuredClone(initialBlocks),
     findOpen: false,
@@ -48,12 +51,23 @@ function fakeDocs(initialBlocks = [para()]) {
     findCurrent: 0,
     selection: undefined,
     currentCell: undefined,
+    cellSpan: 1,
     menuOpen: false,
     menuQuery: '',
+    formatMenuOpen: false,
+    tableMenuOpen: false,
+    cellPanelOpen: false,
+    cellSectionOpen: false,
+    colorSectionOpen: false,
+    backgroundMenuOpen: false,
+    colorDialogOpen: false,
+    hexFocused: false,
+    hexValue: '',
     clipboardHtml: undefined,
     restored: 0,
     inserts: 0,
     clicks: [],
+    hovers: [],
   }
   const tab = { id: 7, url: URL }
   let now = 1000
@@ -67,6 +81,7 @@ function fakeDocs(initialBlocks = [para()]) {
     const match = matches()[state.findCurrent - 1]
     if (!match?.entry) return
     state.selection = { entry: match.entry, start: match.start - match.entry.start, end: match.start - match.entry.start + state.findValue.length }
+    state.cellSpan = 1
     if (match.entry.tableIndex !== undefined) {
       state.currentCell = { tableIndex: match.entry.tableIndex, rowIndex: match.entry.rowIndex, columnIndex: match.entry.columnIndex }
     }
@@ -113,6 +128,10 @@ function fakeDocs(initialBlocks = [para()]) {
     snapshot: async () => ({ op: 'snapshot', view: 'full' }),
     insertTrustedText: async (_tabId, text) => {
       state.inserts += 1
+      if (state.hexFocused) {
+        state.hexValue = text
+        return
+      }
       if (state.selection) {
         const block = selectedParagraph()
         block.text = text
@@ -130,6 +149,7 @@ function fakeDocs(initialBlocks = [para()]) {
     },
     dispatchTrustedKey: async (_tabId, spec, mask) => {
       const key = spec.key.toLowerCase()
+      if (state.hexFocused && key === 'a' && mask === 2) return
       if (key === 'f' && mask === 2) {
         state.findOpen = true
         state.findValue = ''
@@ -145,6 +165,17 @@ function fakeDocs(initialBlocks = [para()]) {
         if (state.findOpen) selectCurrent()
         state.findOpen = false
         state.menuOpen = false
+        return
+      }
+      if (key === 'arrowright' && mask === 8) {
+        if (options.shiftExtend === false) return
+        if (state.selection?.entry.tableIndex !== undefined) {
+          const entry = state.selection.entry
+          state.currentCell = { tableIndex: entry.tableIndex, rowIndex: entry.rowIndex, columnIndex: entry.columnIndex }
+          state.selection = undefined
+          state.cellSpan = 1
+        }
+        state.cellSpan = Math.min(2, (state.cellSpan ?? 1) + 1)
         return
       }
       if (key === 'arrowright') {
@@ -167,13 +198,13 @@ function fakeDocs(initialBlocks = [para()]) {
         return
       }
       if (key === '/' && mask === 1) {
+        if (options.menuSearch === false) return
         state.menuOpen = true
         state.menuQuery = ''
         return
       }
       if (key === 'v' && mask === 2) {
         const inserted = parseDocStructure(`<html><body>${state.clipboardHtml.html}</body></html>`)
-        if (state.blocks.length === 1 && state.blocks[0].kind === 'para' && !state.blocks[0].text) state.blocks = []
         state.blocks.push(...inserted, para())
         return
       }
@@ -193,8 +224,62 @@ function fakeDocs(initialBlocks = [para()]) {
         state.blocks.push(para())
       }
     },
+    trustedHover: async (_tabId, x) => {
+      state.hovers.push(x)
+      if (x === 71) state.tableMenuOpen = true
+    },
     trustedClick: async (_tabId, x) => {
       state.clicks.push(x)
+      if (x === 70) {
+        state.formatMenuOpen = true
+        return
+      }
+      if (x === 50 && state.menuQuery === 'Table options') {
+        state.cellPanelOpen = true
+        state.cellSectionOpen = false
+        state.colorSectionOpen = false
+        state.menuOpen = false
+        return
+      }
+      if (x === 60) {
+        state.cellSectionOpen = true
+        return
+      }
+      if (x === 61) {
+        state.colorSectionOpen = true
+        return
+      }
+      if (x === 62) {
+        state.backgroundMenuOpen = true
+        return
+      }
+      if (x === 63) {
+        const { target } = currentTableAndCell()
+        if (!target) throw new Error('cell background outside table')
+        target.background = '#d9d9d9'
+        return
+      }
+      if (x === 12) {
+        state.colorDialogOpen = true
+        state.backgroundMenuOpen = false
+        return
+      }
+      if (x === 14) {
+        state.hexFocused = true
+        return
+      }
+      if (x === 16) {
+        const { target } = currentTableAndCell()
+        if (!target) throw new Error('cell background outside table')
+        target.background = state.hexValue
+        state.hexFocused = false
+        state.colorDialogOpen = false
+        return
+      }
+      if (x === 17) {
+        state.cellPanelOpen = false
+        return
+      }
       if (x !== 50) return
       const { tableBlock } = currentTableAndCell()
       if (!tableBlock) throw new Error('table command outside table')
@@ -209,6 +294,31 @@ function fakeDocs(initialBlocks = [para()]) {
       } else if (state.menuQuery === 'Delete row') tableBlock.rows.splice(rowIndex, 1)
       else if (state.menuQuery === 'Delete column') {
         for (const row of tableBlock.rows) row.splice(columnIndex, 1)
+      } else if (state.menuQuery === 'Merge cells') {
+        const row = tableBlock.rows[rowIndex]
+        const span = state.cellSpan ?? 1
+        if (span !== 2) throw new Error('Merge cells requires a two-cell selection')
+        const mergedCells = row.splice(columnIndex, span)
+        row.splice(columnIndex, 0, {
+          ...mergedCells[0],
+          colspan: span,
+          rowspan: 1,
+          text: mergedCells.map(item => item.text).join('\n').replace(/\n+$/u, ''),
+          paragraphs: mergedCells.flatMap(item => item.paragraphs),
+        })
+        state.cellSpan = 1
+      } else if (state.menuQuery === 'Unmerge cells') {
+        const row = tableBlock.rows[rowIndex]
+        const target = row[columnIndex]
+        if (!target || target.colspan < 2 && target.rowspan < 2) throw new Error('unmerge target is not merged')
+        const pieces = [{ ...target, colspan: 1, rowspan: 1 }, ...Array.from({ length: target.colspan - 1 }, () => cell())]
+        row.splice(columnIndex, 1, ...pieces)
+        for (let offset = 1; offset < target.rowspan; offset += 1) {
+          const nextRow = tableBlock.rows[rowIndex + offset]
+          if (!nextRow) throw new Error('unmerge rowspan exceeds the table rows')
+          nextRow.splice(columnIndex, 0, cell())
+        }
+        state.cellSpan = 1
       } else if (state.menuQuery === 'Delete table') {
         const index = state.blocks.indexOf(tableBlock)
         state.blocks.splice(index, 1)
@@ -235,7 +345,37 @@ function fakeDocs(initialBlocks = [para()]) {
         state.menuQuery = args.value
         return { ok: true, readback: true }
       }
-      if (command === 'tableMenuItem') return { ok: true, present: state.menuOpen && state.menuQuery === args.name, disabled: false, point: { x: 50, y: 20 } }
+      if (command === 'formatMenu') return { ok: true, present: true, disabled: false, point: { x: 70, y: 20 } }
+      if (command === 'tableMenu') return { ok: true, present: state.formatMenuOpen, disabled: false, point: state.formatMenuOpen ? { x: 71, y: 20 } : undefined }
+      if (command === 'tableMenuItem') {
+        if (state.tableMenuOpen) state.menuQuery = args.name
+        const present = state.tableMenuOpen || state.menuOpen && state.menuQuery === args.name
+        const disabled = present && args.name === 'Merge cells' && (state.cellSpan ?? 1) !== 2
+        return { ok: true, present, disabled, point: present && !disabled ? { x: 50, y: 20 } : undefined }
+      }
+      if (command === 'tableCellBackground') return {
+        ok: true,
+        open: state.cellPanelOpen,
+        cellPoint: state.cellPanelOpen ? { x: 60, y: 20 } : undefined,
+        colorPoint: state.cellPanelOpen && state.cellSectionOpen ? { x: 61, y: 20 } : undefined,
+        backgroundPoint: state.cellPanelOpen && state.colorSectionOpen ? { x: 62, y: 20 } : undefined,
+        closePoint: state.cellPanelOpen ? { x: 17, y: 20 } : undefined,
+      }
+      if (command === 'colorMenu') return {
+        ok: true,
+        open: state.backgroundMenuOpen,
+        customPoint: state.backgroundMenuOpen && !options.backgroundPresetOnly ? { x: 12, y: 20 } : undefined,
+        presetPoint: state.backgroundMenuOpen && options.backgroundPresetOnly && args.value === '#d9d9d9' ? { x: 63, y: 20 } : undefined,
+      }
+      if (command === 'colorDialog') return {
+        ok: true,
+        open: state.colorDialogOpen,
+        enabled: true,
+        focused: state.hexFocused,
+        value: state.hexValue,
+        point: { x: 14, y: 20 },
+        okPoint: state.colorDialogOpen ? { x: 16, y: 20 } : undefined,
+      }
       if (command === 'format') {
         const block = selectedParagraph()
         const bold = Boolean(block?.runs.some(run => positions(block.text, state.findValue).length && run.bold))
@@ -248,18 +388,26 @@ function fakeDocs(initialBlocks = [para()]) {
 }
 
 test('Docs table arguments validate every action before browser access', () => {
+  assert.deepEqual(parseDocsTableArgs({ action: 'table', tableAction: 'read' }), { action: 'read', table: undefined })
+  assert.deepEqual(parseDocsTableArgs({ action: 'table', tableAction: 'create', rows: 2, columns: 2, values: [['a', 'b'], ['c', 'd']] }), {
+    action: 'create', rows: 2, columns: 2, values: [['a', 'b'], ['c', 'd']],
+  })
   assert.deepEqual(parseDocsTableArgs({ action: 'create', rows: 2, columns: 2, values: [['a', 'b'], ['c', 'd']] }), {
     action: 'create', rows: 2, columns: 2, values: [['a', 'b'], ['c', 'd']],
   })
   assert.deepEqual(parseDocsTableArgs({ action: 'insert_rows', row: 2, count: 2 }), { action: 'insert_rows', table: undefined, row: 2, position: 'after', count: 2 })
   assert.deepEqual(parseDocsTableArgs({ action: 'delete_columns', columns: [3, 1] }), { action: 'delete_columns', table: undefined, columns: [3, 1] })
   assert.deepEqual(parseDocsTableArgs({ action: 'format', edits: [{ row: 1, bold: true, highlight: '#FFFF00' }] }), { action: 'format', table: undefined, edits: [{ row: 1, bold: true, highlight: '#ffff00' }] })
+  assert.deepEqual(parseDocsTableArgs({ action: 'format', edits: [{ row: 1, cell_background: '#CCCCCC' }] }), { action: 'format', table: undefined, edits: [{ row: 1, cell_background: '#cccccc' }] })
   const invalid = [
     {}, { action: 'unknown' }, { action: 'create', rows: 0, columns: 2 },
     { action: 'create', rows: 2, columns: 2, values: [['only one']] },
     { action: 'write', edits: [{ row: 1, column: 1, value: 'bad\nvalue' }] },
     { action: 'write', edits: [{ row: 1, column: 1, value: 'x' }, { row: 1, column: 1, value: 'y' }], surprise: true },
     { action: 'format', edits: [{ row: 1 }] },
+    { action: 'format', edits: [{ row: 1, cell_background: '#fff' }] },
+    { action: 'format', edits: [{ row: 1, bold: true, cell_background: '#cccccc' }] },
+    { action: 'format', edits: [{ row: 1, cell_background: '#cccccc' }, { row: 2, bold: true }] },
     { action: 'insert_rows', position: 'middle' },
     { action: 'delete_rows', rows: [1, 1] },
     { action: 'delete_columns', columns: [] },
@@ -319,10 +467,10 @@ test('Docs table structural verification preserves existing cells and detects co
   assert.equal(verifyDocsTableStructure(baseline, inserted, 1, { action: 'insert_rows', row: 1, position: 'after', count: 1 }).code, 'DOCS_TABLE_COLLATERAL')
 })
 
-test('Docs table create pastes one populated native table and restores the clipboard', async () => {
+test('Docs table executor accepts the provider envelope, creates a native table, and restores the clipboard', async () => {
   const fake = fakeDocs()
   const values = [['A', 'B', 'C', 'D'], ['E', 'F', 'G', 'H'], ['I', 'J', 'K', 'L']]
-  const result = await docsTable({}, { action: 'create', rows: 3, columns: 4, values }, fake.io)
+  const result = await executeOperation('docs', { action: 'table', tableAction: 'create', rows: 3, columns: 4, values }, {}, fake.io)
   assert.equal(result.docs.status, 'completed')
   assert.equal(result.docs.tableAction, 'create')
   assert.equal(result.docs.verifiedCount, 12)
@@ -330,6 +478,8 @@ test('Docs table create pastes one populated native table and restores the clipb
   assert.equal(fake.state.restored, 1)
   assert.deepEqual(result.tables[0].cells.map(row => row.map(item => item.value)), values)
   assert.equal(fake.state.blocks.filter(block => block.kind === 'table').length, 1)
+  assert.equal(fake.state.blocks[0].kind, 'para')
+  assert.equal(fake.state.blocks[1].kind, 'table')
 })
 
 test('Docs table write replaces duplicate and empty cells with per-cell export verification', async () => {
@@ -377,6 +527,69 @@ test('Docs table formats a header row without changing data rows', async () => {
   assert.ok(actual.rows[1].every(item => item.paragraphs[0].runs.every(run => !run.bold)))
 })
 
+test('Docs table formatting waits for document focus before trusting the selected cell toolbar', async () => {
+  const fake = fakeDocs([table([['H1', 'H2', 'H3'], ['D1', 'D2', 'D3']])])
+  const runInTab = fake.io.runInTab
+  let staleToolbar = false
+  let focusProbes = 0
+  fake.io.runInTab = async (tabId, func, [command, args]) => {
+    if (command === 'setFind') staleToolbar = true
+    if (command === 'documentContent') {
+      staleToolbar = false
+      focusProbes += 1
+    }
+    if (command === 'format' && staleToolbar && fake.state.findValue !== 'H1') return { ok: true, bold: true }
+    return runInTab(tabId, func, [command, args])
+  }
+  const result = await docsTable({}, { action: 'format', edits: [{ row: 1, bold: true }] }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.ok(selectDocsTable(fake.state.blocks).rows[0].every(item => item.paragraphs[0].runs.every(run => run.bold)))
+  assert.equal(focusProbes, 3)
+})
+
+test('Docs table applies exact cell backgrounds without changing text highlights or data cells', async () => {
+  const fake = fakeDocs([table([['H1', 'H2', 'H3'], ['D1', 'D2', 'D3']])])
+  const result = await docsTable({}, { action: 'format', edits: [{ row: 1, cell_background: '#CCCCCC' }] }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(result.docs.verifiedCount, 3)
+  assert.equal(result.docs.appliedCount, 3)
+  const actual = selectDocsTable(fake.state.blocks)
+  assert.deepEqual(actual.rows.map(row => row.map(item => item.background)), [['#cccccc', '#cccccc', '#cccccc'], ['none', 'none', 'none']])
+  assert.ok(actual.rows.flat().every(item => item.paragraphs.flatMap(paragraph => paragraph.runs).every(run => run.highlight === 'none')))
+  assert.equal(result.tables[0].cells[0][0].background, '#cccccc')
+})
+
+test('Docs table applies an exact visible background preset without opening the custom dialog', async () => {
+  const fake = fakeDocs([table([['H1', 'H2', 'H3'], ['D1', 'D2', 'D3']])], { backgroundPresetOnly: true })
+  const result = await docsTable({}, { action: 'format', edits: [{ row: 1, cell_background: '#D9D9D9' }] }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(result.docs.verifiedCount, 3)
+  assert.deepEqual(selectDocsTable(fake.state.blocks).rows.map(row => row.map(item => item.background)), [['#d9d9d9', '#d9d9d9', '#d9d9d9'], ['none', 'none', 'none']])
+  assert.equal(fake.state.clicks.filter(x => x === 63).length, 3)
+  assert.equal(fake.state.clicks.includes(12), false)
+  assert.equal(fake.state.clicks.includes(16), false)
+})
+
+test('Docs table rejects an unavailable background instead of substituting a preset', async () => {
+  const fake = fakeDocs([table([['H1', 'H2'], ['D1', 'D2']])], { backgroundPresetOnly: true })
+  const result = await docsTable({}, { action: 'format', edits: [{ row: 1, column: 1, cell_background: '#D9E2F3' }] }, fake.io)
+  assert.equal(result.docs.status, 'failed')
+  assert.equal(result.docs.failure.code, 'DOCS_TABLE_COLOR_UNAVAILABLE')
+  assert.equal(fake.state.clicks.includes(63), false)
+  assert.equal(fake.state.clicks.includes(12), false)
+  assert.deepEqual(selectDocsTable(fake.state.blocks).rows.map(row => row.map(item => item.background)), [['none', 'none'], ['none', 'none']])
+})
+
+test('Docs table cell-background verification detects wrong values and collateral cells', () => {
+  const baseline = [table([['a', 'b'], ['c', 'd']])]
+  const final = structuredClone(baseline)
+  final[0].rows[0][0].background = '#cccccc'
+  assert.equal(verifyDocsTableCellBackground(baseline, final, 1, { row: 1, column: 1, value: '#cccccc' }).ok, true)
+  assert.equal(verifyDocsTableCellBackground(baseline, final, 1, { row: 1, column: 1, value: '#ffff00' }).code, 'DOCS_TABLE_VERIFY_FAILED')
+  final[0].rows[1][1].background = '#ff0000'
+  assert.equal(verifyDocsTableCellBackground(baseline, final, 1, { row: 1, column: 1, value: '#cccccc' }).code, 'DOCS_TABLE_COLLATERAL')
+})
+
 test('Docs table inserts and deletes rows and columns through exact native commands', async () => {
   const fake = fakeDocs([table([['a', 'b'], ['c', 'd']])])
   const insertedRows = await docsTable({}, { action: 'insert_rows', count: 2 }, fake.io)
@@ -400,6 +613,159 @@ test('Docs table inserts and deletes rows and columns through exact native comma
   assert.ok(fake.state.clicks.every(x => x === 50))
 })
 
+test('Docs table merges and unmerges an exact last-row pair with collateral verification', async () => {
+  const fake = fakeDocs([table([
+    ['Name', 'Value', 'Notes'],
+    ['Alpha', '12', 'First sample'],
+    ['Beta', '34', 'Second sample'],
+    ['Total', '46', ''],
+  ])])
+  const merged = await docsTable({}, { action: 'merge', row: 4, column: 2 }, fake.io)
+  assert.equal(merged.docs.status, 'completed', JSON.stringify(merged.docs))
+  const mergedTable = selectDocsTable(fake.state.blocks)
+  assert.equal(mergedTable.rows[3].length, 2)
+  assert.equal(mergedTable.rows[3][1].colspan, 2)
+  assert.equal(mergedTable.rows[3][1].text, '46')
+  assert.deepEqual(mergedTable.rows[0].map(item => item.text), ['Name', 'Value', 'Notes'])
+
+  const unmerged = await docsTable({}, { action: 'unmerge', row: 4, column: 2 }, fake.io)
+  assert.equal(unmerged.docs.status, 'completed', JSON.stringify(unmerged.docs))
+  const restored = selectDocsTable(fake.state.blocks)
+  assert.deepEqual(restored.rows[3].map(item => item.text), ['Total', '46', ''])
+  assert.ok(restored.rows[3].every(item => item.colspan === 1 && item.rowspan === 1))
+})
+
+test('Docs table merge falls back to exact native menus when menu search does not open', async () => {
+  const fake = fakeDocs([table([['A', 'B'], ['C', 'D']])], { menuSearch: false })
+  const result = await docsTable({}, { action: 'merge', row: 1, column: 1 }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  const actual = selectDocsTable(fake.state.blocks)
+  assert.equal(actual.rows[0].length, 1)
+  assert.equal(actual.rows[0][0].colspan, 2)
+  assert.ok(fake.state.clicks.includes(70))
+  assert.equal(fake.state.clicks.includes(71), false)
+  assert.ok(fake.state.hovers.includes(71))
+  assert.deepEqual(actual.rows[1].map(item => item.text), ['C', 'D'])
+})
+
+test('Docs table unmerge refuses unsupported merged shapes before any table command', async () => {
+  const vertical = table([['A', 'V', 'B'], ['C', 'D']])
+  vertical.rows[0][1].rowspan = 2
+  const wide = table([['A', 'H', 'B']])
+  wide.rows[0][1].colspan = 3
+  const ragged = table([['A', 'B'], ['C']])
+  const twoMerges = table([['A', 'H1', 'H2'], ['B', 'C', 'D', 'E', 'F']])
+  twoMerges.rows[0][1].colspan = 2
+  twoMerges.rows[0][2].colspan = 2
+  for (const [blocks_, row, column] of [
+    [vertical, 1, 2],
+    [wide, 1, 2],
+    [ragged, 1, 1],
+    [twoMerges, 1, 3],
+  ]) {
+    const fake = fakeDocs([blocks_])
+    const before = JSON.stringify(fake.state.blocks)
+    await assert.rejects(
+      docsTable({}, { action: 'unmerge', row, column }, fake.io),
+      error => error.code === 'DOCS_TABLE_MERGED_UNSUPPORTED' && /no table command was sent/u.test(error.message),
+    )
+    assert.equal(fake.state.clicks.length, 0)
+    assert.equal(fake.state.inserts, 0)
+    assert.equal(JSON.stringify(fake.state.blocks), before)
+  }
+})
+
+test('Docs table unmerge refuses a row/column that does not address the only merge', async () => {
+  const blocks_ = table([['A', 'M'], ['D', 'E', 'F']])
+  blocks_.rows[0][1].colspan = 2
+  for (const [row, column] of [[1, 1], [1, 3], [2, 1]]) {
+    const fake = fakeDocs([blocks_])
+    await assert.rejects(docsTable({}, { action: 'unmerge', row, column }, fake.io), error => error.code === 'DOCS_TABLE_TARGET_NOT_FOUND')
+    assert.equal(fake.state.clicks.length, 0)
+  }
+})
+
+test('Docs table unmerges a supported middle-of-row two-cell merge with exact row verification', async () => {
+  const fake = fakeDocs([table([['X', 'A', 'B', 'Y']])])
+  const merged = await docsTable({}, { action: 'merge', row: 1, column: 2 }, fake.io)
+  assert.equal(merged.docs.status, 'completed', JSON.stringify(merged.docs))
+  const mergedRow = selectDocsTable(fake.state.blocks).rows[0]
+  assert.deepEqual(mergedRow.map(item => [item.text, item.colspan]), [['X', 1], ['A\nB', 2], ['Y', 1]])
+  const unmerged = await docsTable({}, { action: 'unmerge', row: 1, column: 2 }, fake.io)
+  assert.equal(unmerged.docs.status, 'completed', JSON.stringify(unmerged.docs))
+  const restoredRow = selectDocsTable(fake.state.blocks).rows[0]
+  assert.deepEqual(restoredRow.map(item => [item.text, item.colspan, item.rowspan]), [
+    ['X', 1, 1], ['A\nB', 1, 1], ['', 1, 1], ['Y', 1, 1],
+  ])
+})
+
+test('Docs table merge requires the two-cell selection extension', async () => {
+  const fake = fakeDocs([table([['A', 'B'], ['C', 'D']])], { shiftExtend: false })
+  const result = await docsTable({}, { action: 'merge', row: 1, column: 1 }, fake.io)
+  assert.equal(result.docs.status, 'failed')
+  assert.equal(result.docs.failure.code, 'DOCS_WAIT_TIMEOUT')
+  assert.equal(fake.state.clicks.length, 0)
+  assert.deepEqual(selectDocsTable(fake.state.blocks).rows.map(row => row.map(item => item.text)), [['A', 'B'], ['C', 'D']])
+})
+
+test('Docs table merge refuses an empty left target before any native command', async () => {
+  const fake = fakeDocs([table([['', 'B']])])
+  const result = await docsTable({}, { action: 'merge', row: 1, column: 1 }, fake.io)
+  assert.equal(result.docs.status, 'failed')
+  assert.equal(result.docs.failure.code, 'DOCS_TABLE_UNMAPPABLE')
+  assert.equal(fake.state.clicks.length, 0)
+  assert.equal(fake.state.inserts, 0)
+})
+
+test('Docs table unmerge verification rejects vertical and multi-merge baselines even without the precheck', () => {
+  const run = { bold: false, italic: false, underline: false, strike: false, color: '#000000', highlight: 'none' }
+  const textCell = (text, rowspan = 1, colspan = 1) => ({
+    text,
+    paragraphs: text
+      ? [{ kind: 'para', style: 'P', text, marked: text, runs: [{ text, ...run }] }]
+      : [{ kind: 'para', style: 'P', text: '', marked: '', runs: [] }],
+    rowspan,
+    colspan,
+  })
+  const verticalBaseline = [{ kind: 'table', index: 1, rows: [[textCell('A'), textCell('V', 2), textCell('B')], [textCell('C'), textCell('D')]] }]
+  const verticalFinal = [{ kind: 'table', index: 1, rows: [[textCell('A'), textCell('V'), textCell('B')], [textCell('C'), textCell(''), textCell('D')]] }]
+  assert.equal(verifyDocsTableUnmerge(verticalBaseline, verticalFinal, 1, { row: 1, column: 2 }).ok, false)
+  assert.equal(verifyDocsTableUnmerge(verticalBaseline, verticalFinal, 1, { row: 1, column: 2 }).code, 'DOCS_TABLE_MERGED_UNSUPPORTED')
+  const multiBaseline = [{
+    kind: 'table',
+    index: 1,
+    rows: [[textCell('A'), textCell('H1', 1, 2), textCell('H2', 1, 2)], [textCell('B'), textCell('C'), textCell('D'), textCell('E'), textCell('F')]],
+  }]
+  const multiFinal = [{
+    kind: 'table',
+    index: 1,
+    rows: [[textCell('A'), textCell('H1', 1, 2), textCell('H2'), textCell('')], [textCell('B'), textCell('C'), textCell('D'), textCell('E'), textCell('F')]],
+  }]
+  const result = verifyDocsTableUnmerge(multiBaseline, multiFinal, 1, { row: 1, column: 3 })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'DOCS_TABLE_MERGED_UNSUPPORTED')
+})
+
+test('Docs table unmerge verification rejects a wrong second cell and damaged neighbors', () => {
+  const run = { bold: false, italic: false, underline: false, strike: false, color: '#000000', highlight: 'none' }
+  const textCell = (text, colspan = 1) => ({
+    text,
+    paragraphs: text
+      ? [{ kind: 'para', style: 'P', text, marked: text, runs: [{ text, ...run }] }]
+      : [{ kind: 'para', style: 'P', text: '', marked: '', runs: [] }],
+    rowspan: 1,
+    colspan,
+  })
+  const baseline = [{ kind: 'para', style: 'P', text: 'sentinel', marked: 'sentinel', runs: [{ text: 'sentinel', ...run }] }, { kind: 'table', index: 1, rows: [[textCell('X'), textCell('M', 2), textCell('Y')]] }]
+  const request = docsTableStructureRequest(selectDocsTable(baseline, 1), { action: 'unmerge', row: 1, column: 2 })
+  const correct = [{ ...structuredClone(baseline[0]) }, { kind: 'table', index: 1, rows: [[textCell('X'), textCell('M'), textCell(''), textCell('Y')]] }]
+  assert.equal(verifyDocsTableUnmerge(baseline, correct, 1, request).ok, true)
+  const wrongSecond = [{ ...structuredClone(baseline[0]) }, { kind: 'table', index: 1, rows: [[textCell('X'), textCell('M'), textCell('0'), textCell('Y')]] }]
+  assert.equal(verifyDocsTableUnmerge(baseline, wrongSecond, 1, request).code, 'DOCS_TABLE_VERIFY_FAILED')
+  const damagedNeighbor = [{ ...structuredClone(baseline[0]) }, { kind: 'table', index: 1, rows: [[textCell('X'), textCell('M'), textCell(''), textCell('Z')]] }]
+  assert.equal(verifyDocsTableUnmerge(baseline, damagedNeighbor, 1, request).code, 'DOCS_TABLE_COLLATERAL')
+})
+
 test('Docs table delete removes only the selected table', async () => {
   const fake = fakeDocs([para('before'), table([['a']]), para('after')])
   const result = await docsTable({}, { action: 'delete_table' }, fake.io)
@@ -411,6 +777,8 @@ test('Docs table delete removes only the selected table', async () => {
 test('Docs table HTML generator escapes cell content and preserves the requested shape', () => {
   const content = docsTableCreateHtml({ rows: 1, columns: 2, values: [['<a>&"', 'plain']] })
   assert.match(content.html, /&lt;a&gt;&amp;&quot;/)
+  assert.doesNotMatch(content.html, /<p>/u)
+  assert.match(content.html, /<p style="margin:0;padding:0">/u)
   const parsed = parseDocStructure(`<html><body>${content.html}</body></html>`)
   assert.deepEqual(parsed[0].rows[0].map(item => item.text), ['<a>&"', 'plain'])
 })

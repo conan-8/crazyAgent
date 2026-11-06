@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { WebSocketServer } from 'ws'
 import { apply } from '../lib/index.js'
 
@@ -93,7 +96,7 @@ function defaultResult(command) {
   throw new Error(`No fake result for ${command.op}/${command.args?.action ?? ''}`)
 }
 
-async function setup(t, respond = () => undefined) {
+async function setup(t, respond = () => undefined, options = {}) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
   await new Promise((resolve, reject) => {
     server.once('listening', resolve)
@@ -143,6 +146,7 @@ async function setup(t, respond = () => undefined) {
     bridgeUrl: `ws://127.0.0.1:${port}/bridge`,
     bridgeToken: 'test',
     requestTimeoutMs: 500,
+    ...(options.downloadsDir === undefined ? {} : { downloadsDir: options.downloadsDir }),
   })
   const session = { id: 'session-1', surface: { nodes: [] }, append: () => {} }
   const steered = []
@@ -196,6 +200,12 @@ async function stop(fixture, { turn = 1, session = fixture.session, aborted = fa
   })
 }
 
+function finish(fixture, { turn = 1, session = fixture.session } = {}) {
+  const data = { turn, reason: { kind: 'completed' } }
+  fixture.fake.listeners.get('session/event')(session, { type: 'turn/end', data })
+  return data
+}
+
 async function waitFor(predicate, timeoutMs = 1_000) {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
@@ -235,7 +245,9 @@ test('dirty Docs mutation steers one final read and reconciliation', async t => 
   assert.equal(message.source.kind, 'runtime-context')
   const text = message.content[0].text
   assert.match(text, /browser_docs_read exactly once/)
+  assert.match(text, /format:"html"/)
   assert.match(text, /offset:0/)
+  assert.match(text, /max_chars:100000/)
   assert.match(text, /Reconcile the requested document changes/)
   assert.match(text, /Do not make recovery edits/)
   assert.match(text, /unverified or partial/)
@@ -268,6 +280,9 @@ test('completed export-verified mutation does not request a redundant read', asy
   await waitFor(() => finalLogs(fixture).length === 1)
   assert.equal(finalLogs(fixture)[0].data.outcome, 'satisfied')
   assert.equal(finalLogs(fixture)[0].data.reason, 'mutation-export')
+  const ended = finish(fixture)
+  assert.equal(ended.docsVerification, 'verified')
+  assert.equal(ended.docsVerificationReason, 'mutation-export')
 })
 
 test('only completed export-verified view:none Docs results suppress images', async t => {
@@ -388,6 +403,9 @@ test('a failed final read allows stopping after the single nudge', async t => {
   await waitFor(() => finalLogs(fixture).length === 2)
   assert.equal(finalLogs(fixture)[1].data.outcome, 'allowed-unverified')
   assert.equal(finalLogs(fixture)[1].data.reason, 'read-error')
+  const ended = finish(fixture)
+  assert.equal(ended.docsVerification, 'unverified')
+  assert.equal(ended.docsVerificationReason, 'read-error')
 })
 
 test('non-Docs, selection, and read-only turns are not gated', async t => {
@@ -649,4 +667,32 @@ test('explicit no-ops and non-Docs or URL-less generic results do not trigger fi
 
   assert.equal(fixture.steered.length, 0)
   assert.equal(finalLogs(fixture).length, 0)
+})
+
+test('an attached Docs upload demands final export evidence like other mutations', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'crazyagent-docs-upload-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await writeFile(join(root, 'image.png'), 'image')
+  const fixture = await setup(t, command => {
+    if (command.op === 'upload') {
+      return {
+        op: 'upload',
+        view: 'none',
+        screenshotSkipped: true,
+        tab: { id: 7, title: 'Fixture Docs', url: DOCS_URL },
+        upload: { status: 'attached', filename: 'image.png', size: 5, mime: 'image/png', input: { index: 1, name: 'Upload' } },
+      }
+    }
+  }, { downloadsDir: root })
+
+  const { error } = await runTool(fixture, { tool: 'browser_upload', args: { filename: 'image.png' }, turn: 1, callId: 'docs-upload' })
+  assert.equal(error, undefined)
+  await stop(fixture, { turn: 1 })
+
+  assert.equal(fixture.steered.length, 1, 'an attached Docs upload must demand one final docs read')
+  assert.match(fixture.steered[0].content[0].text, /browser_docs_read exactly once/)
+  await waitFor(() => finalLogs(fixture).length === 1)
+  assert.equal(finalLogs(fixture)[0].data.outcome, 'nudged')
+  assert.equal(finalLogs(fixture)[0].data.lastMutation, 'generic:upload')
+  assert.equal(finalLogs(fixture)[0].data.reason, 'generic-docs-unverified')
 })

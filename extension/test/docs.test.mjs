@@ -94,6 +94,7 @@ function fakeDocs(options = {}) {
           state.findValue = args.value
           events.push(`setFind:${args.value}`)
           return { ok: true, readback: state.findValue === args.value, value: state.findValue }
+        case 'documentContent': return { ok: true, present: true, focused: true }
         case 'toolbar': return { ok: true, font: state.toolbar, controlName: `Font list. ${state.toolbar} selected.` }
         case 'fontControl': return { ok: true, point: point('fontControl') }
         case 'fontMenu': {
@@ -408,17 +409,35 @@ test('Docs font menu filters unusable duplicates and rejects conflicting active 
 
     const staleHex = make('input', { label: 'Hex color', hidden: true })
     const activeHex = make('input', { label: 'Hex color' })
+    const colorOk = make('div', { label: 'OK', roleName: 'button', x: 20 })
     activeHex.value = '#0000ff'
-    root.children = [staleHex, activeHex]
+    root.children = [staleHex, activeHex, colorOk]
     rows.length = 0
-    rows.push(activeHex)
+    rows.push(activeHex, colorOk)
     assert.deepEqual(docsPageProbe('colorDialog'), {
-      ok: true, open: true, enabled: true, focused: false, value: '#0000ff', point: { x: 50, y: 10 },
+      ok: true, open: true, enabled: true, focused: false, value: '#0000ff', point: { x: 50, y: 10 }, okPoint: { x: 70, y: 10 },
     })
     const secondVisibleHex = make('input', { label: 'Hex color', y: 30 })
     root.children.push(secondVisibleHex)
     rows.push(secondVisibleHex)
     assert.equal(docsPageProbe('colorDialog').code, 'AMBIGUOUS_DIALOG')
+
+    const backgroundControl = make('button', { label: 'Cell background color Transparent' })
+    const greyPreset = make('button', { label: 'Pale grey #d9d9d9', x: 20 })
+    const whitePreset = make('button', { label: 'Dull white #efefef', x: 40 })
+    root.children = [backgroundControl, greyPreset, whitePreset]
+    rows.length = 0
+    rows.push(backgroundControl, greyPreset, whitePreset)
+    assert.deepEqual(docsPageProbe('colorMenu', { attribute: 'color', value: '#D9D9D9' }), {
+      ok: true, open: true, customPoint: undefined, nonePoint: undefined, presetPoint: { x: 70, y: 10 },
+    })
+    const unavailable = docsPageProbe('colorMenu', { attribute: 'color', value: '#d9e2f3' })
+    assert.equal(unavailable.open, true)
+    assert.equal(unavailable.presetPoint, undefined)
+    const duplicateGrey = make('button', { label: 'Current color Pale grey #d9d9d9', x: 60 })
+    root.children.push(duplicateGrey)
+    rows.push(duplicateGrey)
+    assert.equal(docsPageProbe('colorMenu', { attribute: 'color', value: '#d9d9d9' }).code, 'AMBIGUOUS_CONTROL')
 
     const more = make('div', { label: 'More', roleName: 'button' })
     toolbar.children = [more]
@@ -1266,6 +1285,7 @@ function fakeSelectDocs(options = {}) {
         events.push(`setFind:${args.value}`)
         return { ok: true, readback: true, value: state.findValue }
       }
+      if (command === 'documentContent') return { ok: true, present: true, focused: true }
       throw new Error(`unexpected probe ${command}`)
     },
     snapshot: async () => {
@@ -1316,7 +1336,7 @@ test('Docs select_text resolves first, last, and nth with bounded wraparound nav
     assert.equal(result.docs.matchCount, 3)
     const navigation = fake.events.filter(event => event === 'key:Enter:0' || event === 'key:Enter:8')
     assert.deepEqual(navigation, [item.key])
-    assert.equal(fake.events.at(-1), 'probe:find')
+    assert.equal(fake.events.at(-1), 'probe:documentContent')
     assert.equal(fake.state.findOpen, false)
     assert.equal(fake.snapshots(), 0)
   }
@@ -1674,7 +1694,7 @@ function fakeFormatManyDocs(options = {}) {
         return
       }
       if (spec.key === 'Enter' && state.hexFocused) {
-        mutateSelection(state.colorTarget, state.hexValue)
+        mutateSelection(state.colorTarget, options.staleColorOnEnter ? '#ff0000' : state.hexValue)
         state.hexFocused = false
         state.colorDialogOpen = false
         return
@@ -1714,7 +1734,11 @@ function fakeFormatManyDocs(options = {}) {
         mutateSelection('highlight', 'none')
         state.highlightMenuOpen = false
       } else if (x === 14) state.hexFocused = true
-      else if (x === 100) state.styleMenuOpen = true
+      else if (x === 16) {
+        mutateSelection(state.colorTarget, state.hexValue)
+        state.hexFocused = false
+        state.colorDialogOpen = false
+      } else if (x === 100) state.styleMenuOpen = true
       else if (x === 101) {
         selectedBlock().style = styleCode(state.requestedStyle)
         state.styleMenuOpen = false
@@ -1732,6 +1756,7 @@ function fakeFormatManyDocs(options = {}) {
         events.push(`setFind:${args.value}`)
         return { ok: true, readback: true, value: state.findValue }
       }
+      if (command === 'documentContent') return { ok: true, present: true, focused: true }
       if (command === 'format') {
         const result = { ok: true }
         for (const attribute of args.attributes) {
@@ -1805,6 +1830,7 @@ function fakeFormatManyDocs(options = {}) {
         focused: state.hexFocused,
         value: state.hexValue,
         point: { x: 14, y: 20 },
+        okPoint: state.colorDialogOpen ? { x: 16, y: 20 } : undefined,
       }
       throw new Error(`unexpected probe ${command}`)
     },
@@ -1828,6 +1854,7 @@ const runFormatManyDocs = (fake, edits) => docsFormatMany({}, { action: 'format_
 
 test('Docs format_many applies eight attributes with one baseline, final export, and compact result', async () => {
   const fake = fakeFormatManyDocs({
+    staleColorOnEnter: true,
     blocks: [
       formatManyPara('Alpha beta Alpha'),
       formatManyPara('Second range', 'P', { highlight: '#ffff00' }),

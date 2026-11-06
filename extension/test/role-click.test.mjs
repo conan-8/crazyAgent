@@ -6,6 +6,7 @@ import {
   parseRoleClickArgs,
   roleClickFrameOwnershipProbe,
   roleClickTransition,
+  roleClickViewportStabilityProbe,
 } from '../sidepanel/role-click.js'
 
 const URL = 'https://example.test/start'
@@ -35,6 +36,7 @@ function fakeRoleClick(options = {}) {
     nodes: options.nodes ?? { 0: [] },
     surfaces: options.surfaces ?? 0,
     pending: [],
+    viewportSamples: 0,
   }
   const events = []
   const clicks = []
@@ -103,6 +105,18 @@ function fakeRoleClick(options = {}) {
       ...(frame.frameId !== 0 ? { ownershipToken: frame.ownershipToken ?? 'test-token' } : {}),
     })),
     runInFrame: async (_tabId, frameId, func, [request]) => {
+      if (func === roleClickViewportStabilityProbe) {
+        state.viewportSamples += 1
+        events.push(`viewport:${frameId}`)
+        const configured = options.viewportStable
+        const stable = typeof configured === 'function'
+          ? configured(fake, state.viewportSamples) === true
+          : Array.isArray(configured)
+            ? configured[Math.min(state.viewportSamples - 1, configured.length - 1)] === true
+            : true
+        const sample = { width: 800, height: 600, clientWidth: 800, clientHeight: 600 }
+        return { first: { ...sample }, second: { ...sample }, stable }
+      }
       if (func === roleClickFrameOwnershipProbe) {
         events.push(`ownership:${frameId}:${request.targetFrameId}`)
         if (options.ownershipError === frameId) throw new Error(`owner frame ${frameId} unavailable`)
@@ -122,7 +136,15 @@ function fakeRoleClick(options = {}) {
         surfaceCount: state.surfaces,
       }
     },
-    withDebugger: async (_tabId, fn) => fn(),
+    withDebugger: async (_tabId, fn) => {
+      events.push('attach')
+      options.onDebuggerAttach?.(fake)
+      try {
+        return await fn()
+      } finally {
+        events.push('detach')
+      }
+    },
     trustedClick: async (_tabId, x, y, hooks) => {
       events.push(`move:${x}:${y}`)
       await options.onMouseMove?.(fake)
@@ -489,6 +511,76 @@ test('hover revalidation refuses identity, exact role/name, position, and hit ch
     assert.equal(fake.clicks.length, 0, label)
     assert.equal(fake.snapshots.length, 0, label)
   }
+})
+
+test('target resolution runs inside the debugger lease after the attach viewport settles', async () => {
+  const node = control('save', 'button', 'Save')
+  let attachments = 0
+  const fake = fakeRoleClick({
+    nodes: { 0: [node] },
+    onDebuggerAttach() {
+      attachments += 1
+      // Chrome's debugging infobar shrinks the page viewport on attach; the
+      // control reflows up by 22 CSS px. Resolving after the lease sees y=8.
+      if (attachments === 1) node.y -= 22
+    },
+    // First sample is taken while the resize is still settling, then stable.
+    viewportStable: (_fake, index) => index > 1,
+  })
+  const result = await run(fake, [{ role: 'button', name: 'Save' }])
+  assert.equal(result.roleClick.status, 'completed', JSON.stringify(result.roleClick))
+  assert.deepEqual(fake.clicks, [{ id: 'save', x: 20, y: 8 }])
+  const attachIndex = fake.events.indexOf('attach')
+  const firstProbe = fake.events.findIndex(event => event.startsWith('probe:'))
+  assert.ok(attachIndex >= 0, 'the debugger lease was entered')
+  assert.ok(firstProbe > attachIndex, 'target resolution happened after the attach, inside the lease')
+  assert.ok(fake.events.includes('viewport:0'), 'the viewport stability probe ran in the top frame')
+  assert.equal(fake.events.filter(event => event === 'probe:0:button:Save').length >= 2, true)
+})
+
+test('an attach that changes the viewport does not produce a false stale target', async () => {
+  // Regression guard for the measured 768 -> 721 infobar resize: the old flow
+  // resolved before the lease, so the post-hover revalidation compared the
+  // pre-attach geometry with the post-attach geometry and refused.
+  const node = control('save', 'button', 'Save')
+  const fake = fakeRoleClick({
+    nodes: { 0: [node] },
+    onDebuggerAttach() { node.y -= 47 },
+    viewportStable: () => true,
+  })
+  const result = await run(fake, [{ role: 'button', name: 'Save' }])
+  assert.equal(result.roleClick.status, 'completed')
+  assert.equal(fake.events.some(event => event.startsWith('press:')), true)
+  assert.deepEqual(fake.clicks, [{ id: 'save', x: 20, y: -17 }])
+})
+
+test('a genuine post-hover reflow still refuses the press', async () => {
+  const node = control('save', 'button', 'Save')
+  const fake = fakeRoleClick({
+    nodes: { 0: [node] },
+    onDebuggerAttach() { node.y -= 22 },
+    viewportStable: () => true,
+    onMouseMove() { node.y -= 22 },
+  })
+  await assert.rejects(run(fake, [{ role: 'button', name: 'Save' }]), error => {
+    assert.equal(error.code, 'ROLE_CLICK_STALE_TARGET')
+    return true
+  })
+  assert.equal(fake.events.some(event => event.startsWith('press:')), false)
+  assert.equal(fake.clicks.length, 0)
+  assert.equal(fake.snapshots.length, 0)
+})
+
+test('a viewport that never settles is bounded and still resolves inside the lease', async () => {
+  const fake = fakeRoleClick({
+    nodes: { 0: [control('save', 'button', 'Save')] },
+    viewportStable: () => false,
+  })
+  const result = await run(fake, [{ role: 'button', name: 'Save' }])
+  assert.equal(result.roleClick.status, 'completed')
+  assert.equal(fake.clicks.length, 1)
+  assert.ok(fake.state.now >= 1_500, `the stability wait is bounded but observed (now=${fake.state.now})`)
+  assert.ok(fake.state.now < 2_500, `the stability wait must not consume the step budget (now=${fake.state.now})`)
 })
 
 test('ancestor and top ownership is required initially and after hover', async () => {

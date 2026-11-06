@@ -247,7 +247,11 @@ function fakeWrite(options = {}) {
         state.highlight = 'none'
         state.highlightMenuOpen = false
       } else if (x === 14) state.hexFocused = true
-      else if (x === 15) state.controlsRevealed = true
+      else if (x === 16) {
+        state[state.colorTarget] = state.hexValue
+        state.hexFocused = false
+        state.colorDialogOpen = false
+      } else if (x === 15) state.controlsRevealed = true
     },
     runInTab: async (_tabId, _func, [command, args]) => {
       events.push(`probe:${command}`)
@@ -321,6 +325,7 @@ function fakeWrite(options = {}) {
           focused: state.hexFocused,
           value: state.hexValue,
           point: { x: 14, y: 20 },
+          okPoint: state.colorDialogOpen ? { x: 16, y: 20 } : undefined,
         }
       }
       if (command === 'documentContent') return { ok: true, present: true, focused: state.documentFocused }

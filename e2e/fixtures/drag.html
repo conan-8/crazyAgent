@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CrazyAgent Trusted Drag Fixture</title>
+  <style>
+    :root { font: 13px/1.4 system-ui, sans-serif; color: #172033; background: #f5f7fb; }
+    body { margin: 14px; }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    h2 { margin: 0 0 6px; font-size: 14px; }
+    p { margin: 2px 0 7px; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(260px, 1fr)); gap: 10px; }
+    section { background: #fff; border: 1px solid #cbd3df; border-radius: 7px; padding: 9px; min-height: 150px; }
+    .state { display: block; margin-top: 6px; font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
+    .items { display: flex; gap: 5px; min-height: 48px; padding: 5px; border: 1px dashed #8d99aa; }
+    .item { padding: 9px 11px; border: 1px solid #61708a; border-radius: 4px; background: #e8efff; cursor: grab; user-select: none; touch-action: none; }
+    .item.dragging { background: #ffe7a8; }
+    #html5-source { background: #e5f8ed; }
+    .zones { display: flex; gap: 6px; }
+    .zone { flex: 1; min-height: 52px; padding: 5px; border: 2px dashed #7c8da5; }
+    .zone.over { background: #fff3c4; }
+    #range { width: 95%; }
+    #custom-track { position: relative; height: 30px; margin: 18px 8px 8px; border-radius: 5px; background: #dbe3ef; touch-action: none; }
+    #custom-thumb { position: absolute; left: 20%; top: -5px; width: 22px; height: 38px; margin-left: -11px; border: 2px solid #294a7c; border-radius: 5px; background: #8fb8ff; cursor: ew-resize; }
+    #longpress-item.ready { background: #d2f4df; }
+    #longpress-item { position: relative; width: 100px; }
+    #noop { user-select: none; touch-action: none; }
+    #selection-text { user-select: text; padding: 5px; border: 1px solid #ccd3dd; }
+    #fixture-state { grid-column: 1 / -1; margin: 0; min-height: 44px; background: #111b2c; color: #eaf1ff; border-radius: 6px; padding: 8px; font: 11px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
+    button { font: inherit; }
+  </style>
+</head>
+<body>
+  <h1>Trusted drag fixture</h1>
+  <p>Every widget exposes independent DOM state and a machine-readable snapshot below. Event delivery is not the acceptance check.</p>
+  <div class="grid">
+    <section>
+      <h2>Pointer sortable</h2>
+      <div id="pointer-list" class="items" data-order="Alpha,Beta,Gamma">
+        <div id="pointer-alpha" class="item" data-pointer-item="Alpha" tabindex="0" role="button" aria-label="Pointer Alpha">Alpha</div>
+        <div id="pointer-beta" class="item" data-pointer-item="Beta" tabindex="0" role="button" aria-label="Pointer Beta">Beta</div>
+        <div id="pointer-gamma" class="item" data-pointer-item="Gamma" tabindex="0" role="button" aria-label="Pointer Gamma">Gamma</div>
+      </div>
+      <output id="pointer-state" class="state"></output>
+    </section>
+
+    <section>
+      <h2>Native HTML5 drag and drop</h2>
+      <div class="zones">
+        <div id="html5-origin" class="zone" aria-label="HTML5 origin">
+          <div id="html5-source" class="item" draggable="true" tabindex="0" role="button" aria-label="HTML5 payload">Payload</div>
+        </div>
+        <div id="html5-accept" class="zone" data-drop="accept" tabindex="0" role="button" aria-label="HTML5 accepting destination">Accept</div>
+        <div id="html5-reject" class="zone" data-drop="reject" tabindex="0" role="button" aria-label="HTML5 rejecting destination">Reject</div>
+      </div>
+      <output id="html5-state" class="state"></output>
+      <div class="zones">
+        <div id="clone-origin" class="zone" aria-label="Clone origin">
+          <div id="clone-source" class="item" draggable="true" tabindex="0" role="button" aria-label="Clone payload">Clone</div>
+        </div>
+        <div id="clone-accept" class="zone" data-clone-drop="accept" tabindex="0" role="button" aria-label="Clone accepting destination">Clone here</div>
+      </div>
+      <output id="clone-state" class="state"></output>
+    </section>
+
+    <section>
+      <h2>Native range and custom ARIA slider</h2>
+      <label for="range">Native range <output id="range-value">20</output></label>
+      <input id="range" type="range" min="0" max="100" value="20" aria-label="Native range" />
+      <div id="custom-track" aria-label="Custom slider track">
+        <div id="custom-thumb" tabindex="0" role="slider" aria-label="Custom slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="20"></div>
+      </div>
+      <output id="slider-state" class="state"></output>
+    </section>
+
+    <section>
+      <h2>Long-press activation (300 ms)</h2>
+      <div class="zones">
+        <div id="longpress-origin" class="zone">
+          <div id="longpress-item" class="item" tabindex="0" role="button" aria-label="Long press item">Hold me</div>
+        </div>
+        <div id="longpress-destination" class="zone" tabindex="0" role="button" aria-label="Long press destination">Destination</div>
+      </div>
+      <output id="longpress-state" class="state"></output>
+    </section>
+
+    <section>
+      <h2>Intentional source no-op</h2>
+      <div id="noop" class="item" tabindex="0" role="button" aria-label="Intentional no-op">Events only</div>
+      <p>Down/move/up counters change, but this element never reorders, moves, changes value, or selects text.</p>
+      <output id="noop-state" class="state"></output>
+      <h2>Rerender with unchanged appearance</h2>
+      <div id="rerender-wrap"><div id="rerender-item" class="item" tabindex="0" role="button" aria-label="Rerender item">Replace me</div></div>
+      <output id="rerender-state" class="state"></output>
+    </section>
+
+    <section>
+      <h2>Selection evidence</h2>
+      <div id="selection-text">Drag across this selectable sentence to expose selection ground truth.</div>
+      <output id="selection-state" class="state">selection: ""</output>
+      <h2>Fixture controls</h2>
+      <button id="reset" type="button">Reset all drag widgets</button>
+      <p>Coordinates are CSS viewport pixels. No fixture handler calls the module under test.</p>
+    </section>
+
+    <section>
+      <h2>Unsupported child frame</h2>
+      <iframe id="child-drag-frame" title="Child drag frame" style="width:100%;height:72px;border:1px solid #8d99aa" srcdoc="<div id='frame-item' tabindex='0' role='button' aria-label='Child frame drag item' style='padding:12px;background:#e8efff'>Frame item</div><script>window.__frameInputCount=0;document.getElementById('frame-item').addEventListener('pointerdown',()=>{parent.__frameInputCount=(parent.__frameInputCount||0)+1})</script>"></iframe>
+      <p>Independent frame pointer-down count: <span id="frame-input-state">0</span></p>
+    </section>
+
+    <pre id="fixture-state" aria-label="Drag fixture ground truth"></pre>
+  </div>
+
+  <script>
+    (() => {
+      const byId = id => document.getElementById(id)
+      const counts = {
+        pointerDown: 0, pointerMove: 0, pointerUp: 0, pointerCommits: 0,
+        html5Start: 0, html5Over: 0, html5Drop: 0, html5End: 0,
+        rangeInput: 0, rangeChange: 0,
+        customValue: 20, longReady: 0, longEarly: 0, longMoves: 0,
+        noopDown: 0, noopMove: 0, noopUp: 0, rerenders: 0,
+      }
+      let longHeldMs = 0
+      let lastHtml5Text = ''
+      let lastPointerDrop = null
+      window.__dragTestMid = ''
+      window.__midDragEvents = []
+      window.__frameInputCount = 0
+
+      const pointerOrder = () => [...byId('pointer-list').children].map(item => item.dataset.pointerItem)
+      const snapshot = () => ({
+        pointerOrder: pointerOrder(),
+        pointerEvents: [counts.pointerDown, counts.pointerMove, counts.pointerUp],
+        pointerCommits: counts.pointerCommits,
+        pointerLastDrop: lastPointerDrop,
+        midDragEvents: [...window.__midDragEvents],
+        frameInputs: window.__frameInputCount,
+        html5Parent: byId('html5-source').parentElement.id,
+        html5Payload: lastHtml5Text,
+        html5Events: [counts.html5Start, counts.html5Over, counts.html5Drop, counts.html5End],
+        cloneParent: byId('clone-source').parentElement.id,
+        cloneCopies: document.querySelectorAll('.clone-copy').length,
+        rangeValue: byId('range').value,
+        rangeEvents: [counts.rangeInput, counts.rangeChange],
+        customValue: byId('custom-thumb').getAttribute('aria-valuenow'),
+        longPress: {
+          parent: byId('longpress-item').parentElement.id,
+          ready: counts.longReady,
+          early: counts.longEarly,
+          moves: counts.longMoves,
+          heldMs: longHeldMs,
+        },
+        noopEvents: [counts.noopDown, counts.noopMove, counts.noopUp],
+        rerenders: counts.rerenders,
+        selection: String(getSelection()),
+      })
+      const render = () => {
+        const state = snapshot()
+        byId('pointer-list').dataset.order = state.pointerOrder.join(',')
+        byId('pointer-state').textContent = `order: ${state.pointerOrder.join(',')}\nevents down/move/up: ${state.pointerEvents.join('/')}`
+        byId('html5-state').textContent = `parent: ${state.html5Parent}\npayload: ${JSON.stringify(state.html5Payload)}\nstart/over/drop/end: ${state.html5Events.join('/')}`
+        byId('clone-state').textContent = `original parent: ${state.cloneParent}; independent clones: ${state.cloneCopies}`
+        byId('range-value').textContent = state.rangeValue
+        byId('slider-state').textContent = `native value: ${state.rangeValue}; input/change: ${state.rangeEvents.join('/')}\ncustom aria-valuenow: ${state.customValue}`
+        byId('longpress-state').textContent = `parent: ${state.longPress.parent}\nready/early/moves: ${state.longPress.ready}/${state.longPress.early}/${state.longPress.moves}; heldMs: ${state.longPress.heldMs}`
+        byId('noop-state').textContent = `down/move/up: ${state.noopEvents.join('/')}; structure/value/selection intentionally unchanged`
+        byId('rerender-state').textContent = `replacement count: ${state.rerenders}; original node detached after drop`
+        byId('selection-state').textContent = `selection: ${JSON.stringify(state.selection)}`
+        byId('frame-input-state').textContent = String(state.frameInputs)
+        byId('fixture-state').textContent = JSON.stringify(state, null, 2)
+      }
+      window.dragFixtureSnapshot = snapshot
+
+      const pointerList = byId('pointer-list')
+      let pointerDrag = null
+      pointerList.addEventListener('pointerdown', event => {
+        const item = event.target.closest('[data-pointer-item]')
+        if (!item || event.button !== 0) return
+        event.preventDefault()
+        counts.pointerDown += 1
+        pointerDrag = { item, id: event.pointerId, x: event.clientX, y: event.clientY, active: false, over: null }
+        item.setPointerCapture(event.pointerId)
+        item.classList.add('dragging')
+        render()
+      })
+      pointerList.addEventListener('pointermove', event => {
+        if (!pointerDrag || event.pointerId !== pointerDrag.id) return
+        counts.pointerMove += 1
+        if (Math.hypot(event.clientX - pointerDrag.x, event.clientY - pointerDrag.y) >= 6) pointerDrag.active = true
+        if (pointerDrag.active && window.__dragTestMid) {
+          const mode = window.__dragTestMid
+          window.__midDragEvents.push(mode)
+          if (mode === 'source-move') pointerDrag.item.style.transform = 'translateY(30px)'
+          if (mode === 'source-detach') pointerDrag.item.remove()
+          if (mode === 'destination-detach') document.querySelector('[data-pointer-item="Beta"]')?.remove()
+          window.__dragTestMid = ''
+        }
+        if (pointerDrag.active) pointerDrag.over = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-pointer-item]') ?? null
+        render()
+      })
+      const finishPointer = event => {
+        if (!pointerDrag || event.pointerId !== pointerDrag.id) return
+        if (event.type === 'pointerup') {
+          counts.pointerUp += 1
+          const { item, active } = pointerDrag
+          const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-pointer-item]')
+          lastPointerDrop = { active, source: item.dataset.pointerItem, target: target?.dataset.pointerItem ?? null, x: event.clientX, y: event.clientY }
+          if (active && target && target !== item && item.isConnected && target.isConnected) {
+            const before = pointerOrder().join(',')
+            const rect = target.getBoundingClientRect()
+            pointerList.insertBefore(item, event.clientY < rect.top + rect.height / 2 ? target : target.nextSibling)
+            if (pointerOrder().join(',') !== before) counts.pointerCommits += 1
+          }
+        }
+        pointerDrag.item.classList.remove('dragging')
+        pointerDrag = null
+        render()
+      }
+      pointerList.addEventListener('pointerup', finishPointer)
+      pointerList.addEventListener('pointercancel', finishPointer)
+
+      const html5Source = byId('html5-source')
+      html5Source.addEventListener('dragstart', event => {
+        counts.html5Start += 1
+        lastHtml5Text = 'fixture-payload-742'
+        event.dataTransfer.setData('text/plain', lastHtml5Text)
+        event.dataTransfer.effectAllowed = 'move'
+        render()
+      })
+      html5Source.addEventListener('dragend', () => {
+        counts.html5End += 1
+        for (const zone of document.querySelectorAll('.zone')) zone.classList.remove('over')
+        render()
+      })
+      for (const zone of document.querySelectorAll('[data-drop]')) {
+        zone.addEventListener('dragenter', () => zone.classList.add('over'))
+        zone.addEventListener('dragleave', () => zone.classList.remove('over'))
+        zone.addEventListener('dragover', event => {
+          counts.html5Over += 1
+          if (zone.dataset.drop === 'accept') {
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'move'
+          }
+          render()
+        })
+        zone.addEventListener('drop', event => {
+          if (zone.dataset.drop !== 'accept') return
+          event.preventDefault()
+          counts.html5Drop += 1
+          lastHtml5Text = event.dataTransfer.getData('text/plain')
+          zone.append(html5Source)
+          zone.classList.remove('over')
+          render()
+        })
+      }
+
+      const cloneSource = byId('clone-source')
+      const cloneAccept = byId('clone-accept')
+      cloneSource.addEventListener('dragstart', event => {
+        event.dataTransfer.setData('text/plain', 'clone-fixture-912')
+        event.dataTransfer.effectAllowed = 'copy'
+      })
+      cloneAccept.addEventListener('dragover', event => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      })
+      cloneAccept.addEventListener('drop', event => {
+        event.preventDefault()
+        if (event.dataTransfer.getData('text/plain') !== 'clone-fixture-912') return
+        const copy = cloneSource.cloneNode(true)
+        copy.removeAttribute('id')
+        copy.removeAttribute('draggable')
+        copy.classList.add('clone-copy')
+        copy.textContent = 'Clone copy'
+        cloneAccept.append(copy)
+        render()
+      })
+
+      byId('range').addEventListener('input', () => { counts.rangeInput += 1; render() })
+      byId('range').addEventListener('change', () => { counts.rangeChange += 1; render() })
+
+      const track = byId('custom-track')
+      const thumb = byId('custom-thumb')
+      let customDragging = false
+      const customAt = clientX => {
+        const rect = track.getBoundingClientRect()
+        const value = Math.round(Math.max(0, Math.min(100, (clientX - rect.left) / rect.width * 100)))
+        counts.customValue = value
+        thumb.setAttribute('aria-valuenow', String(value))
+        thumb.style.left = `${value}%`
+        render()
+      }
+      thumb.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        customDragging = true
+        thumb.setPointerCapture(event.pointerId)
+      })
+      thumb.addEventListener('pointermove', event => { if (customDragging) customAt(event.clientX) })
+      thumb.addEventListener('pointerup', () => { customDragging = false })
+      thumb.addEventListener('pointercancel', () => { customDragging = false })
+
+      const longItem = byId('longpress-item')
+      let longDrag = null
+      longItem.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        const started = performance.now()
+        longItem.setPointerCapture(event.pointerId)
+        longDrag = { id: event.pointerId, started, ready: false, timer: null }
+        longDrag.timer = setTimeout(() => {
+          if (!longDrag) return
+          longDrag.ready = true
+          longHeldMs = Math.round(performance.now() - started)
+          counts.longReady += 1
+          longItem.classList.add('ready')
+          render()
+        }, 300)
+      })
+      longItem.addEventListener('pointermove', event => {
+        if (longDrag && !longDrag.ready) {
+          counts.longEarly += 1
+          clearTimeout(longDrag.timer)
+          longDrag.timer = null
+        }
+      })
+      const finishLong = event => {
+        if (!longDrag || event.pointerId !== longDrag.id) return
+        clearTimeout(longDrag.timer)
+        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('#longpress-destination')
+        if (longDrag.ready && event.type === 'pointerup' && target) {
+          byId('longpress-destination').append(longItem)
+          counts.longMoves += 1
+        }
+        longItem.classList.remove('ready')
+        longDrag = null
+        render()
+      }
+      longItem.addEventListener('pointerup', finishLong)
+      longItem.addEventListener('pointercancel', finishLong)
+
+      const noop = byId('noop')
+      noop.addEventListener('pointerdown', event => {
+        event.preventDefault()
+        counts.noopDown += 1
+        noop.setPointerCapture(event.pointerId)
+        render()
+      })
+      noop.addEventListener('pointermove', () => { counts.noopMove += 1; render() })
+      noop.addEventListener('pointerup', () => { counts.noopUp += 1; render() })
+
+      const rerender = event => {
+        const original = event.currentTarget
+        const replacement = original.cloneNode(true)
+        replacement.addEventListener('pointerup', rerender)
+        original.replaceWith(replacement)
+        counts.rerenders += 1
+        byId('rerender-state').dataset.originalConnected = String(original.isConnected)
+        render()
+      }
+      byId('rerender-item').addEventListener('pointerup', rerender)
+
+      document.addEventListener('selectionchange', render)
+      byId('reset').addEventListener('click', () => location.reload())
+      render()
+    })()
+  </script>
+</body>
+</html>

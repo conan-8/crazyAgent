@@ -38,6 +38,7 @@
         bridgeUrl: !!js process.env.DSH_BROWSER_BRIDGE_URL
         bridgeToken: !!js process.env.DSH_BROWSER_BRIDGE_TOKEN
         requestTimeoutMs: 10000
+        downloadsDir: !!js process.env.CRAZYAGENT_DOWNLOADS_DIR
         # There is deliberately NO per-turn call limit. Measured 2026-10-23: a
         # 10-university document task needs 80+ calls, and cutting the turn at
         # 80 threw away working state - the user had to say "continue" five

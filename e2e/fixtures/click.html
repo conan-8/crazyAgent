@@ -123,5 +123,11 @@
   </div>
 
   <p><button id="nested" type="button"><span>Nested label</span></button></p>
+  <script>
+    window.__crazyagentNoopDispatchCount = 0
+    document.getElementById('nested').addEventListener('pointerdown', () => {
+      window.__crazyagentNoopDispatchCount += 1
+    })
+  </script>
 </body>
 </html>

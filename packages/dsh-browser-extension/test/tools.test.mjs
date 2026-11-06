@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { WebSocketServer } from 'ws'
+import Ajv from 'ajv'
 import { apply } from '../lib/index.js'
 
 const IMAGE = { data: 'AAAA', mimeType: 'image/jpeg', width: 1, height: 1, bytes: 3 }
@@ -998,6 +999,9 @@ test('registers the provider, guidance, and the consolidated browser tools', asy
     'browser_docs_select_text',
     'browser_docs_table',
     'browser_docs_write',
+    'browser_download',
+    'browser_downloads',
+    'browser_drag',
     'browser_find',
     'browser_hover',
     'browser_navigate',
@@ -1012,20 +1016,26 @@ test('registers the provider, guidance, and the consolidated browser tools', asy
     'browser_table',
     'browser_tabs',
     'browser_type',
+    'browser_upload',
     'browser_wait_for',
   ])
   await waitFor(() => logEvents.some(event => event.type === 'provider.registered'))
   const registered = logEvents.find(event => event.type === 'provider.registered')
   assert.deepEqual([...registered.data.tools].sort(), toolNames)
-  const parallelSafe = new Set(['browser_tabs', 'browser_places', 'browser_read_text', 'browser_docs_read'])
+  const parallelSafe = new Set(['browser_tabs', 'browser_places', 'browser_read_text', 'browser_docs_read', 'browser_downloads'])
   for (const [name, tool] of fake.tools) {
     if (parallelSafe.has(name)) assert.equal(tool.isConcurrencySafe(), true, `${name} must be parallel-safe`)
     else assert.equal(tool.isConcurrencySafe, undefined, `${name} must remain exclusive`)
   }
   assert.equal(fake.sections.length, 1)
   const guidance = fake.sections[0].text
-  assert.ok(guidance.length >= 12_000 && guidance.length <= 15_500, `GUIDANCE must be 12-15.5K chars, got ${guidance.length}`)
+  assert.ok(guidance.length >= 12_000 && guidance.length <= 17_000, `GUIDANCE must be 12-17K chars, got ${guidance.length}`)
+  // Every registered tool must be named by the guidance at least once
+  // (browser_scroll was the last one missing).
+  for (const name of toolNames) assert.match(guidance, new RegExp(`\\b${name}\\b`), `${name} must be mentioned in GUIDANCE`)
   for (const pattern of [
+    /browser_scroll scrolls the active tab and returns a fresh view/,
+    /pages defaults to 0\.85 viewport/,
     /browser_table instead of coordinate\/Tab batches/,
     /continue only failed\/unattempted cells/,
     /Ordinary initial views provide rendered text\/labels/,
@@ -1073,7 +1083,12 @@ test('registers the provider, guidance, and the consolidated browser tools', asy
     /browser_places first.*not search\/guessing/,
     /Open only a matching returned HTTP\(S\) URL/,
     /never substitute silently/,
-    /file pickers cannot be driven by browser_click/,
+    /Use browser_download—not browser_click—for direct URLs\/links or labelled Download controls/,
+    /call browser_downloads to list actual files/,
+    /never guess filenames/,
+    /browser_upload assigns by label, exact input name, or returned input index/,
+    /Attachment is not server submission/,
+    /Never open a native file picker/,
     /detail:"fast"/,
     /delay_ms/,
     /view: "auto"/,
@@ -1103,6 +1118,9 @@ test('registers the provider, guidance, and the consolidated browser tools', asy
   assert.match(guidance, /Omitted occurrence remains unique-only and never defaults to first/)
   assert.match(guidance, /text-only result reports the verified selection/)
   assert.match(guidance, /exactly one guarded primitive action/)
+  assert.match(guidance, /never batch selection\/formatting or chain Ctrl\+B repairs/)
+  assert.match(guidance, /identical failure without new page evidence/)
+  assert.match(guidance, /never repeat an identical table call without new page evidence/)
   assert.match(guidance, /make browser_docs_write your FIRST content tool call/)
   assert.match(guidance, /runs:\[\{text/)
   assert.match(guidance, /list:"numbered"\|"bulleted"\|"checklist"/)
@@ -2708,6 +2726,10 @@ test('browser_docs_table validates, routes every action family, and formats expo
   assert.deepEqual(commands.at(-1).args, {
     action: 'table', tableAction: 'format', edits: [{ row: 1, bold: true, font: 'Syne', highlight: '#ffff00' }],
   })
+  await tool.execute({ action: 'format', edits: [{ row: 1, cell_background: '#CCCCCC' }] }, exec)
+  assert.deepEqual(commands.at(-1).args, {
+    action: 'table', tableAction: 'format', edits: [{ row: 1, cell_background: '#cccccc' }],
+  })
   await tool.execute({ action: 'insert_rows', row: 1, count: 2 }, exec)
   assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'insert_rows', row: 1, position: 'after', count: 2 })
   await tool.execute({ action: 'insert_columns', column: 2, position: 'before' }, exec)
@@ -2716,6 +2738,10 @@ test('browser_docs_table validates, routes every action family, and formats expo
   assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'delete_rows', rows: [3, 1] })
   await tool.execute({ action: 'delete_columns', columns: [2] }, exec)
   assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'delete_columns', columns: [2] })
+  await tool.execute({ action: 'merge', row: 4, column: 2 }, exec)
+  assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'merge', row: 4, column: 2, count: 2 })
+  await tool.execute({ action: 'unmerge', row: 4, column: 2 }, exec)
+  assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'unmerge', row: 4, column: 2 })
   await tool.execute({ action: 'delete_table', table: 1 }, exec)
   assert.deepEqual(commands.at(-1).args, { action: 'table', tableAction: 'delete_table', table: 1 })
   await tool.execute({ action: 'read' }, exec)
@@ -2728,11 +2754,21 @@ test('browser_docs_table validates, routes every action family, and formats expo
     { action: 'create', rows: 2, columns: 2, values: [['bad']] },
     { action: 'write', edits: [{ row: 1, column: 1, value: 'two\nlines' }] },
     { action: 'format', edits: [{ row: 1 }] },
+    { action: 'format', edits: [{ row: 1, cell_background: '#fff' }] },
+    { action: 'format', edits: [{ row: 1, bold: true, cell_background: '#cccccc' }] },
+    { action: 'format', edits: [{ row: 1, cell_background: '#cccccc' }, { row: 2, bold: true }] },
     { action: 'insert_rows', position: 'middle' },
     { action: 'delete_rows', rows: [1, 1] },
+    { action: 'merge', row: 1, column: 1, count: 1 },
+    { action: 'merge' },
+    { action: 'unmerge', row: 1, column: 1, count: 2 },
     { action: 'read', edits: [] },
   ]
   for (const args of invalid) await assert.rejects(() => tool.execute(args, exec))
+  await assert.rejects(() => tool.execute({ action: 'merge', row: 1 }, exec), /merge requires row and column/)
+  await assert.rejects(() => tool.execute({ action: 'unmerge', column: 2 }, exec), /unmerge requires row and column/)
+  await assert.rejects(() => tool.execute({ action: 'unmerge', row: 1, column: 1, count: 2 }, exec), /unmerge does not accept count/)
+  assert.match(tool.parameters.properties.count.description, /unmerge rejects count/)
   assert.equal(commands.length, beforeInvalid)
 })
 
@@ -3639,6 +3675,151 @@ test('click_at forwards view_id and reports the basis it mapped through', async 
   )
 })
 
+test('browser_drag routes refs and formats scoped clone evidence without claiming drop success', async t => {
+  const { server, url, commands } = await startFakeBridge({
+    respond: op => op === 'drag' ? {
+      ...SNAPSHOT,
+      op: 'drag',
+      view: 'none',
+      image: undefined,
+      attempted: true,
+      ok: true,
+      changed: true,
+      observed: 'changed',
+      mutationPossible: true,
+      outcome: { op: 'drag', attempted: true, ok: true, mutationPossible: true },
+      drag: {
+        status: 'changed',
+        sourceOutcome: { changed: false, complete: true, signals: [] },
+        destinationOutcome: { changed: true, complete: true, signals: ['destination-children-changed'] },
+        dispatch: { mode: 'html5', dropDispatched: true, mouseReleased: true },
+      },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const definition = fake.tools.get('browser_drag')
+  const value = await definition.execute({ ref: 'e3', to_ref: '4', to_position: 'bottom', hold_ms: 350, view: 'none' }, {
+    callId: 'c-drag-clone', signal: new AbortController().signal,
+  })
+  assert.deepEqual(commands.at(-1), {
+    op: 'drag',
+    args: { label: 3, to_label: 4, to_position: 'bottom', hold_ms: 350, view: 'none' },
+  })
+  const text = value.content.map(block => block.text ?? '').join('\n')
+  assert.match(text, /source: changed=false/)
+  assert.match(text, /destination: changed=true · complete=true · signals=destination-children-changed/)
+  assert.match(text, /dropDispatched=true · mouseReleased=true · diagnostic only, not application acceptance/)
+  assert.match(text, /action: attempted=true · ok=true · mutationPossible=true/)
+  assert.equal(definition.parameters.properties.expect, undefined)
+  assert.ok(Array.isArray(definition.parameters.allOf))
+  const validate = new Ajv().compile(definition.parameters)
+  assert.equal(validate({ label: 3, to_label: 4 }), true)
+  assert.equal(validate({ ref: 'e3', to_ref: 'e4' }), true)
+  assert.equal(validate({ x: 1, y: 2, to_x: 3, to_y: 4 }), true)
+  assert.equal(validate({ label: 3, dx: 1, dy: 2 }), true, 'one delta branch permits dx and dy together')
+  assert.equal(validate({ label: 3, dx: 1 }), true)
+  assert.equal(validate({ label: 3, dy: 1 }), true)
+  assert.equal(validate({ to_label: 4 }), false)
+  assert.equal(validate({ label: 3 }), false)
+  for (const args of [
+    { label: 3, ref: 'e3', to_label: 4 },
+    { label: 3, x: 1, y: 2, to_label: 4 },
+    { ref: 'e3', x: 1, y: 2, to_label: 4 },
+    { label: 3, to_label: 4, to_ref: 'e4' },
+    { label: 3, to_label: 4, to_x: 5, to_y: 6 },
+    { label: 3, to_ref: 'e4', to_x: 5, to_y: 6 },
+    { label: 3, to_label: 4, dx: 1 },
+    { label: 3, to_label: 4, dy: 1 },
+    { label: 3, to_x: 5, to_y: 6, dx: 1, dy: 2 },
+  ]) assert.equal(validate(args), false, JSON.stringify(args))
+})
+
+test('browser_drag formats unknown and measured no-op outcomes honestly', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: (op, args) => {
+      if (op !== 'drag') return undefined
+      const unknown = args.label === 5
+      return {
+        ...SNAPSHOT,
+        op: 'drag',
+        attempted: true,
+        ok: unknown ? null : false,
+        changed: unknown ? null : false,
+        observed: unknown ? 'unknown' : 'unchanged',
+        mutationPossible: true,
+        outcome: { op: 'drag', attempted: true, ok: unknown ? null : false, mutationPossible: true },
+        ...unknown ? {} : { error: { code: 'DRAG_NO_EFFECT', message: 'all checks unchanged' } },
+        drag: {
+          status: unknown ? 'unknown' : 'unchanged',
+          sourceOutcome: { changed: false, complete: !unknown, signals: [] },
+          destinationOutcome: { changed: unknown ? null : false, complete: !unknown, signals: [] },
+          dispatch: { mode: 'pointer', dropDispatched: false, mouseReleased: true },
+        },
+      }
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const tool = fake.tools.get('browser_drag')
+  const exec = { callId: 'c-drag-outcomes', signal: new AbortController().signal }
+  const unknown = await tool.execute({ label: 5, dx: 20 }, exec)
+  const unknownText = unknown.content.map(block => block.text ?? '').join('\n')
+  assert.match(unknownText, /ok=unknown/)
+  assert.match(unknownText, /outcome UNVERIFIED/)
+  assert.match(unknownText, /do not retry blindly/)
+  const noop = await tool.execute({ label: 6, to_label: 7 }, exec)
+  const noopText = noop.content.map(block => block.text ?? '').join('\n')
+  assert.match(noopText, /error DRAG_NO_EFFECT/)
+  assert.match(noopText, /no measured drag effect/)
+  assert.match(noopText, /unrelated page mutations are not proof/)
+})
+
+test('browser_drag rejects ambiguous and malformed calls before bridge traffic', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const tool = fake.tools.get('browser_drag')
+  const exec = { callId: 'c-drag-invalid', signal: new AbortController().signal }
+  const invalid = [
+    {}, { label: 1 }, { to_label: 2 },
+    { label: 1, ref: 1, dx: 1 },
+    { label: 1, x: 1, y: 2, dx: 1 },
+    { x: 1, dx: 1 },
+    { label: 1, to_label: 2, to_ref: 2 },
+    { label: 1, to_label: 2, dx: 1 },
+    { label: 1, to_x: 2 },
+    { ref: 'e01', dx: 1 },
+    { label: 1, to_label: 2, to_position: 'middle' },
+    { label: 1, dx: 1, to_position: 'top' },
+    { label: 1, dx: '1' },
+    { label: 1, dx: 1, hold_ms: 3001 },
+    { label: 1, dx: 1, settle_ms: 2001 },
+    { x: 1, y: 2, to_x: 3, to_y: 4, space: 'viewport' },
+    { x: 1, y: 2, to_x: 3, to_y: 4, view_id: 0 },
+    { label: 1, dx: 1, expect: { pixel_changed: true } },
+  ]
+  for (const args of invalid) await assert.rejects(() => tool.execute(args, exec), JSON.stringify(args))
+  assert.equal(commands.length, 0)
+})
+
 test('select tool reports the range and its preview', async t => {
   const { server, url, commands } = await startFakeBridge()
   t.after(() => {
@@ -3854,6 +4035,26 @@ test('press_key accepts composite chords and merges explicit modifiers', async t
   await assert.rejects(() => definition.execute({ key: 'ctrl+' }, exec), /must end with exactly one key name/)
   await assert.rejects(() => definition.execute({ key: 'ctrl+Alt+Tab+Enter' }, exec), /unknown modifier "Tab"/)
   await assert.rejects(() => definition.execute({ key: 'ctrl+Tab', modifiers: ['hyper'] }, exec), /not one of ctrl, alt, shift, meta/)
+
+  // Ctrl/Cmd+W closes the user's tab; it must fail before bridge traffic in
+  // every spelling, while plain w and non-ctrl/meta chords still work.
+  const beforeRefusals = commands.length
+  for (const args of [
+    { key: 'ctrl+w' },
+    { key: 'w', modifiers: ['ctrl'] },
+    { key: 'ctrl+shift+w' },
+    { key: 'KeyW', modifiers: ['meta'] },
+    { key: 'META+W' },
+  ]) {
+    await assert.rejects(() => definition.execute(args, exec), /closes the user's tab.*must never be pressed.*browser_tabs/s, JSON.stringify(args))
+  }
+  assert.equal(commands.length, beforeRefusals, 'refused chords must not reach the bridge')
+  await definition.execute({ key: 'w' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'press_key', args: { key: 'w' } })
+  await definition.execute({ key: 'shift+w' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'press_key', args: { key: 'w', modifiers: ['shift'] } })
+  await definition.execute({ key: 'shift+W' }, exec)
+  assert.deepEqual(commands.at(-1), { op: 'press_key', args: { key: 'W', modifiers: ['shift'] } })
 })
 
 test('batch normalizes composite press_key chords before forwarding', async t => {
@@ -3888,6 +4089,16 @@ test('batch normalizes composite press_key chords before forwarding', async t =>
     () => definition.execute({ actions: [{ op: 'press_key', key: 'hyper+Tab' }] }, { callId: 'c-batch-bad-chord', signal: new AbortController().signal }),
     /actions\[0\] press_key key "hyper\+Tab" has unknown modifier/,
   )
+  // The same Ctrl/Cmd+W guard covers batch normalization: no action runs, and
+  // no batch command reaches the executor.
+  const beforeClose = commands.length
+  for (const closeAction of [{ op: 'press_key', key: 'ctrl+w' }, { op: 'press_key', args: { key: 'meta+w' } }]) {
+    await assert.rejects(
+      () => definition.execute({ actions: [closeAction] }, { callId: 'c-batch-close', signal: new AbortController().signal }),
+      /press_key refuses .*closes the user's tab/,
+    )
+  }
+  assert.equal(commands.length, beforeClose, 'refused batch chords must not reach the bridge')
 })
 
 test('click_at surfaces off-screen points without counting them as misses', async t => {
@@ -4811,4 +5022,213 @@ test('max-token responses queue internal follow-up turns without reviving aborte
 
   await waitFor(() => logEvents.filter(event => event.type === 'model.max_tokens.continued').length === 2)
   assert.deepEqual(logEvents.filter(event => event.type === 'model.max_tokens.continued').map(event => event.data.step), [5, 1])
+})
+
+test('direct expectation schemas normalize wire calls and format independent evidence', async t => {
+  const dialogScope = { kind: 'native-dialog', target: 'not-applicable' }
+  const { server, url, commands } = await startFakeBridge({
+    respond: (op, args) => {
+      const base = op === 'click' ? CLICK : op === 'click_at' ? CLICK_AT : op === 'type' ? TYPE : PRESS_KEY
+      return {
+        ...base,
+        observed: 'changed',
+        outcome: { op, attempted: true, ok: true, mutationPossible: true },
+        mutationPossible: true,
+        expect: args.expect,
+        expectEvidence: {
+          dialog: {
+            before: { scope: dialogScope, open: false },
+            after: { scope: dialogScope, open: true },
+          },
+        },
+      }
+    },
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const exec = { callId: 'c-expect-direct', signal: new AbortController().signal }
+  const calls = [
+    ['browser_click', { label: 3, expect: { dialog: 'open' } }],
+    ['browser_click_at', { x: 100, y: 200, expect: { dialog: 'open' } }],
+    ['browser_type', { label: 7, text: 'hello', expect: { dialog: 'open' } }],
+    ['browser_press_key', { key: 'Enter', expect: { dialog: 'open' } }],
+  ]
+  for (const [name, args] of calls) {
+    const definition = fake.tools.get(name)
+    assert.equal(definition.parameters.properties.expect.additionalProperties, false)
+    const result = await definition.execute(args, exec)
+    assert.match(result.content[0].text, /expectation: VERIFIED · observed=changed/)
+    assert.match(result.content[0].text, /dialog: VERIFIED · observed=changed/)
+    assert.match(result.content[0].text, /action: attempted=true · ok=true · mutationPossible=true/)
+  }
+  assert.deepEqual(commands.map(command => command.args.expect), calls.map(() => ({ dialog: 'open' })))
+})
+
+test('provider evaluates pre-existing text itself and includes bounded semantic deltas', async t => {
+  const scope = { kind: 'field', id: 7, target: 'unique' }
+  const { server, url, commands } = await startFakeBridge({
+    respond: (op, args) => op === 'type' ? {
+      ...TYPE,
+      observed: 'changed',
+      outcome: { op, attempted: true, ok: true, mutationPossible: true },
+      mutationPossible: true,
+      expect: args.expect,
+      expectation: { status: 'verified', checks: [] },
+      expectEvidence: {
+        text_landed: {
+          before: { scope, contains: true, complete: true },
+          after: { scope, contains: true, complete: true },
+        },
+      },
+      semanticDelta: { text: 'New text:\n· Created' },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const result = await fake.tools.get('browser_type').execute(
+    { label: 7, text: 'already', expect: { text_landed: 'already' } },
+    { callId: 'c-expect-preexisting', signal: new AbortController().signal },
+  )
+  assert.deepEqual(commands.at(-1).args.expect, { text_landed: 'already' })
+  assert.match(result.content[0].text, /expectation: UNVERIFIED · observed=changed/)
+  assert.match(result.content[0].text, /reason=preexisting-text/)
+  assert.match(result.content[0].text, /semantic deltas \(diagnostic only; not application-outcome proof\):\nNew text:\n· Created/)
+})
+
+test('malformed and incompatible direct expectations never reach the bridge', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const exec = { callId: 'c-expect-invalid', signal: new AbortController().signal }
+  const rejected = [
+    ['browser_click', { label: 3, expect: { pixel_changed: false } }, 'BAD_EXPECT'],
+    ['browser_click_at', { x: 100, y: 200, expect: { export_contains: 'x' } }, 'EXPECT_UNSUPPORTED'],
+    ['browser_type', { label: 7, text: 'x', expect: { surprise: true } }, 'BAD_EXPECT'],
+    ['browser_press_key', { key: 'Enter', expect: { toolbar_style: { color: '#ffffff' } } }, 'BAD_EXPECT'],
+  ]
+  for (const [name, args, code] of rejected) {
+    await assert.rejects(fake.tools.get(name).execute(args, exec), error => error.code === code)
+  }
+  assert.equal(commands.length, 0)
+})
+
+test('batch preserves guards and normalized flat or nested expectations', async t => {
+  const scope = { kind: 'field', id: 7, target: 'unique' }
+  const { server, url, commands } = await startFakeBridge({
+    respond: (op, args) => op === 'batch' ? {
+      ...BATCH_SINGLE,
+      observed: 'changed',
+      outcome: { op: 'batch', attempted: true, ok: true, mutationPossible: true },
+      mutationPossible: true,
+      batch: { ...BATCH_SINGLE.batch, total: 1, executed: 1, succeeded: 1, ok: true },
+      actions: [{
+        index: 1,
+        op: 'type',
+        ok: true,
+        changed: true,
+        attempted: true,
+        mutationPossible: true,
+        observed: 'changed',
+        outcome: { index: 1, op: 'type', attempted: true, ok: true, mutationPossible: true },
+        expect: args.actions[0].args.expect,
+        expectEvidence: {
+          text_landed: {
+            before: { scope, contains: false, complete: true },
+            after: { scope, contains: true, complete: true },
+          },
+        },
+        before: { found: true, conditions: { ms: 0 } },
+        after: { found: true, conditions: { idle: true } },
+      }],
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  assert.equal(fake.tools.get('browser_batch').parameters.properties.actions.items.properties.expect.additionalProperties, false)
+  const exec = { callId: 'c-expect-batch', signal: new AbortController().signal }
+  const action = { op: 'type', label: 7, text: 'marker', before: { ms: 0 }, after: { idle: true }, expect: { text_landed: 'marker' } }
+  const flat = await fake.tools.get('browser_batch').execute({ actions: [action], view: 'none' }, exec)
+  assert.match(flat.content[0].text, /batch evidence: observed=changed · outcome=ok · mutationPossible=true/)
+  assert.match(flat.content[0].text, /text_landed: VERIFIED · observed=changed · reason=appeared/)
+  await fake.tools.get('browser_batch').execute({ actions: [{ op: 'type', args: { label: 7, text: 'marker', before: { ms: 0 }, after: { idle: true }, expect: { text_landed: 'marker' } } }], view: 'none' }, exec)
+  const expectedWire = {
+    op: 'type',
+    args: { label: 7, text: 'marker', before: { ms: 0 }, after: { idle: true }, expect: { text_landed: 'marker' } },
+  }
+  assert.deepEqual(commands[0].args.actions, [expectedWire])
+  assert.deepEqual(commands[1].args.actions, [expectedWire])
+})
+
+test('an incompatible later batch expectation prevents the entire bridge batch', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const exec = { callId: 'c-expect-batch-invalid', signal: new AbortController().signal }
+  await assert.rejects(fake.tools.get('browser_batch').execute({
+    actions: [
+      { op: 'type', label: 7, text: 'first', expect: { text_landed: 'first' } },
+      { op: 'click', label: 3, expect: { pixel_changed: true } },
+    ],
+  }, exec), error => error.code === 'EXPECT_UNSUPPORTED' && error.path === 'browser_batch.actions[1].expect.pixel_changed')
+  await assert.rejects(fake.tools.get('browser_batch').execute({
+    actions: [{ op: 'click', label: 3, expect: { pixel_changed: false } }],
+  }, exec), error => error.code === 'BAD_EXPECT' || error.code === 'EXPECT_UNSUPPORTED')
+  assert.equal(commands.length, 0)
+})
+
+test('Ajv enforces top-level and nested args.expect capabilities in the public batch schema', async t => {
+  const { server, url } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const schema = fake.tools.get('browser_batch').parameters
+  const validate = new Ajv({ allErrors: true }).compile(schema)
+  const valid = [
+    { actions: [{ op: 'type', args: { label: 7, text: 'marker', expect: { text_landed: 'marker' } } }] },
+    { actions: [{ op: 'click_at', args: { x: 1, y: 2, expect: { dialog: 'open' } } }] },
+    { actions: [{ op: 'navigate', args: { url: 'https://example.test' } }] },
+    { actions: [{ op: 'press_key', key: 'Enter', args: { expect: { dialog: 'closed' } } }] },
+    { actions: [{ op: 'click', label: 3, expect: { dialog: 'open' } }] },
+  ]
+  for (const input of valid) assert.equal(validate(input), true, JSON.stringify(validate.errors))
+  const invalid = [
+    { actions: [{ op: 'click_at', args: { x: 1, y: 2, expect: { text_landed: 'marker' } } }] },
+    { actions: [{ op: 'navigate', args: { url: 'https://example.test', expect: { dialog: 'open' } } }] },
+    { actions: [{ op: 'click_at', x: 1, y: 2, expect: { text_landed: 'marker' } }] },
+    { actions: [{ op: 'wait_for', args: { ms: 0, expect: { dialog: 'open' } } }] },
+    { actions: [{ op: 'type', args: { label: 7, text: 'x', expect: { pixel_changed: false } } }] },
+    { actions: [{ op: 'type', args: { label: 7, text: 'x', expect: { toolbar_style: { color: '#aabbcc' } } } }] },
+    { actions: [{ op: 'click', args: { label: 3, expect: { text_landed: 'marker' } } }] },
+    { actions: [{ op: 'navigate', url: 'https://example.test', expect: { dialog: 'open' } }] },
+  ]
+  for (const input of invalid) assert.equal(validate(input), false, JSON.stringify(input))
 })

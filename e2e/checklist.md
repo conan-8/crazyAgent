@@ -15,8 +15,8 @@ python3 -m http.server 17872 --bind 127.0.0.1 --directory e2e/fixtures
 - Load `extension/` unpacked in Chrome/Edge 116+. Before testing, reload it and reopen the panel; accept the current permissions.
 - Configure the pairing token and an image/tool-capable OpenRouter model. Status must be **Connected**.
 - Use a normal HTTP(S) tab and fresh chats. Use **medium effort** for comparable real-agent acceptance.
-- Current roster: **29 model-facing tools**. Only the unified Docs replacement/format tools are model-facing; internal legacy action names may appear in logs.
-- Last recorded implementation result was **552/552 tests** plus prompt composition. This is not live acceptance; both available isolated Docs profiles were signed out during the latest Docs table attempt.
+- Current roster: **33 model-facing tools**. Only the unified Docs replacement/format tools are model-facing; internal legacy action names may appear in logs.
+- Last recorded implementation result was **800/800 tests**, prompt composition, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs. The drag fixture used real provider/executor calls in a fresh isolated Edge profile and independently checked pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards with collateral application-state checks. The expectation and click fixtures retained full regression passes. These are not live model acceptance; no connected Docs browser or isolated live-model acceptance profile is configured.
 
 For every scenario, independently inspect final page/document state. Tool status, screenshots, `changed`, export verification, and the agent’s answer are diagnostic evidence. Record wall time, model steps, calls, failures, retries, wrong targets, collateral edits, and recovery edits—even when repaired. A recovered final state is not a clean pass.
 
@@ -24,10 +24,25 @@ For every scenario, independently inspect final page/document state. Tool status
 
 ### Connection, activity, and reasoning
 
+- Reload the unpacked extension and reopen the panel: the one-time full-screen notice appears, led by the amber **Don't touch the browser / While the agent is running** warning. **Got it** or Escape dismisses it; closing and reopening the panel must not show it again until the next extension reload. Dismissing the notice must leave focus in the composer.
 - Open a fixture and ask “What is on this page?” Confirm the active-tab line, connected status, streamed activity, step timing, collapsed finished steps, and pinned final answer.
 - With Auto effort, confirm one `reasoning low` policy entry per turn and streamed thinking when the provider exposes it. Switch to Off and confirm later turns respect it.
 - Send a message during a turn and verify queue ordering and redirect/edit behavior. Use Stop and confirm the turn stops; send another message and check session resume or a logged fresh-session fallback.
-- Pause and request scrolling: the page must not move. Unpause and retry. Close the panel or stop the companion and confirm a clear disconnected/offline state without a crash.
+
+### Composer slash commands
+
+The cheap gate is `node scripts/ui-preview.mjs --scenario slash` (mocked bridge, isolated Edge); it does not replace the docked-panel checks below.
+
+- Type `/` in an empty composer: an inline palette above the composer lists `/new` and `/model`, with the first row highlighted and an `↑↓ navigate · Enter run · Esc dismiss` hint. It must stay inside the panel at the narrowest supported width.
+- In DevTools' Accessibility pane the composer exposes the **combobox** role with `expanded` true while the palette is open and false after Escape, and `aria-activedescendant` follows the highlighted row and is removed on close. Screen-reader checks are welcome but the AX tree is the minimum independent check.
+- ArrowUp/ArrowDown move and wrap the highlight without changing the draft, and focus stays in the textarea. Escape closes the palette and leaves the draft intact. Shift+Enter inserts a newline and must not run the highlighted command.
+- Enter or Tab on `/new` starts a new chat like the **+** button (fresh view, one `chat.new` in the debug log, previous conversation preserved in History); unlike **+**, it consumes the composer draft. Run it while a stoppable turn is streaming: the draft view opens, the running session stays alive, and it retires when the turn finishes. While an operation is still starting (not yet stoppable), `/new` must refuse with a wait message instead of retiring the session.
+- Enter or Tab on `/model` opens the composer model picker with search focused; choosing a model sends `llm.configure` and the composer label updates. Escape, an outside click, or choosing a row must return keyboard focus to the composer. While a turn is running, `/model` must refuse with a clear wait message rather than changing models under the active session.
+- Clicking a palette row runs that command. The Send button with an exact `/new` or `/model` runs the command too; neither path may emit a `chat.send` frame.
+- Type `/usr/local/bin`, `/new chat`, or `/new ` (trailing space) and press Enter: the palette stays closed and the text is sent to the model as an ordinary prompt.
+- While the `/new` draft view waits on a running turn, type a draft and paste an image. When the turn ends, the draft view retires but the composer text and image must remain; nothing may be silently cleared.
+- The palette is not model acceptance; inspect the resulting chat state independently (debug-log frames, History, composer label, draft view).
+- Pause and request scrolling: click the composer **Pause/Resume** toggle; the status/activity phase must show Paused, the page must not move, and each page command must return `PAUSED` instead of executing. Press Resume and retry; the page must then scroll. Close the panel or stop the companion and confirm a clear disconnected/offline state without a stranded "Working…" clock or a stuck draft view.
 
 ### Observation and basic interaction
 
@@ -35,7 +50,7 @@ Use `article.html`, `click.html`, `canvas.html`, and `advanced.html`.
 
 - Ordinary auto-view should supply rendered text and labels without requiring a screenshot. A known canvas editor should use a full labelled screenshot. Read-text/find-only calls should not add an image.
 - Ask for the three article markers and verify the answer against the page.
-- Click Increment twice and verify the actual count is 2 and the label identity remains stable. Check Does nothing, Disabled action, the checkbox, and navigation; no hidden/covered/wrong control may be activated.
+- Click Increment twice and verify the actual count is 2 and the label identity remains stable. Check Does nothing, Disabled action, the checkbox, and navigation; no hidden/covered/wrong control may be activated. A no-op click must report no visible change, and role-click must keep refusing a target that moves after hover (zero presses) while tolerating the debugger-infobar viewport resize.
 - Click the canvas center and scroll it. Verify trusted input and actual canvas state, not just a pixel-change message.
 - Exercise Shadow action, both frame actions, Country = Canada, and hover → Menu item. Verify all target counters/values independently.
 - Scroll an article by about 700 pixels and switch between two tabs by name. Check actual scroll position and active tab.
@@ -47,6 +62,19 @@ Use `form.html`.
 - Replace and append text, fill Notes and submit, use Tab/Enter and a modifier chord, and type into the focused editor. Verify field values, event counts, and submitted result.
 - Confirm password output is masked. Navigate to `second.html`, go back, and wait for READY; verify URL and page text.
 - Select a known text range and a collapsed range on an ordinary page. Verify the highlighted selection/readback. Google Docs drag selection must be refused before input.
+
+### Trusted drag direct gate
+
+Run `node scripts/edge-drag-e2e.mjs` for the self-contained isolated provider/executor fixture. This is a direct gate, not a model-driven checklist substitute.
+
+- Pointer sortable: verify after/bottom and before/top reorder against actual DOM order and untouched HTML5/range/clone state.
+- HTML5: verify an accepted move by source parent, payload, and drop receipt; verify a refused drop returns `DRAG_NO_EFFECT` with no application-state mutation, despite native event receipts.
+- Clone: keep the original source parent/static and independently count one destination clone; source `changed:false` plus destination child evidence must not become a no-op.
+- Sliders: verify native range value readback and custom `aria-valuenow`; verify exact `browser_type` replacement on the native range and its input/change events.
+- Long-press: hold at least 300ms and verify destination parent/held time; an early gesture returns `DRAG_NO_EFFECT` with no destination move.
+- Intentional no-op: event counters may prove input, but all semantic application state must remain unchanged. A detached rerender must return `observed:"unknown"` and `outcome.ok:null`, not moved or unchanged.
+- Ambiguous sources, off-screen coordinates, stale views, scale ambiguity, and Google Docs must fail before dispatch with no application-state mutation. Child-frame drags are unsupported in this milestone.
+- A real-sidebar/model drag workflow remains unrun; do not treat this direct fixture as model acceptance.
 
 ## 2. Semantic tools and orchestration
 
@@ -73,9 +101,9 @@ Use a fresh disposable document in the authenticated docked panel. The direct re
 
 - Give one instruction to create a 3×4 table with twelve distinct words, bold and yellow-highlight the header, and add two rows. Expect only `browser_docs_table` mutations: create with values, format, and insert_rows; no coordinates, TSV paste, manual Tab/type/menu calls, or repair edits.
 - Independently export-check all twelve values, header bold/highlight, unchanged data rows, and the 5×4 shape. Repeat with duplicate cell values and an empty-cell write to confirm exact occurrence/navigation planning.
-- Exercise insert/delete row and column operations and explicit delete_table. Validate every target, collateral cell, and operation count. Merged-cell writes/structural edits and unanchored empty tables must fail closed rather than fall back to primitives.
+- Exercise insert/delete row and column operations, exact two-horizontal-cell merge/unmerge, and explicit delete_table. Validate every target, combined text, span, collateral cell, and operation count. Only colspan-2 horizontal merges/unmerges are supported: vertical merges and colspan>2 must fail closed before mutation, as must other merged-cell writes/structural edits and unanchored empty tables; none may fall back to primitives.
 - Reload and export again for server persistence. Tool statuses and the agent’s answer are not acceptance evidence. Record wall time, calls, failures, retries, wrong targets, and recovery edits.
-- The latest attempt could not run these steps because both available isolated profiles were signed out. Unit/fake-driver results do not check off this subsection.
+- The latest post-fix run is still pending because no connected Docs browser is available. Unit/fake-driver results do not check off this subsection.
 
 ### Batches and views
 
@@ -86,12 +114,37 @@ Use `form.html` or `click.html`.
 - Confirm malformed nested argument keys fail before provider bridge traffic or executor guards/mutations/captures. Markup-shaped string **values** must remain valid data.
 - Check compact/none/full wait views and cumulative labels. Known canvas editors must still return full views where required.
 
+### Action evidence and typed postconditions
+
+Use `expect.html`; the direct isolated-profile gate is `scripts/edge-expect-e2e.mjs`, which passed with independent field, dialog, counter, and DOM-state inspection. It does not evaluate model tool selection.
+
+- Direct `text_landed` must verify only an absent-to-present transition in the actual editable target, including a `<label>` and its associated input. Pre-existing text stays unverified even when append changes the value; verify the exact final field contents independently.
+- Direct `pixel_changed:true` must force a fresh full-view comparison with tab/document identity and remain diagnostic-only. Check New on screen/Changed/New text against actual added/renamed controls and visible status text, requiring the exact addition set and rejecting pre-existing page chrome or one-sided scopes. An all-off-screen burst stays unknown at root and per-check with `attempted:false`, `mutationPossible:false`, and no trusted/synthetic dispatch or collateral counter change.
+- Exercise direct `press_key` text evidence, an on-screen `click_at` pixel check with an independent dispatch count, and `dialog:"closed"` through Escape. A diverged expectation must not trigger a second input or repair action.
+- Pending native dialogs must rethrow invalid expectations; valid pending results retain the expectation with null attempted/ok/mutationPossible. URL/navigation-generation mismatches and URL-sensitive expectations after potentially document-changing batch steps must fail before input.
+- Direct `dialog:"open"` and Docs `export_contains`/six-attribute `toolbar_style` checks require explicit scopes. Final dialog/toolbar state is not causation proof; export and toolbar checks are rejected outside a supported Docs document and color/highlight is currently unsupported.
+- In batches, combine `text_landed`/`dialog` expectations with ordinary before/after guards. A false precondition prevents dispatch and leaves the expectation unverified; a false postcondition preserves the typed evidence but returns `outcome.ok:false`, `attempted:true`, and `mutationPossible:true`.
+- Unknown keys, incompatible checks, and `pixel_changed:false` must fail before input. Top-level and nested `args.expect` forms have equivalent per-operation conditional schemas, with valid/invalid Ajv regressions. An invalid later batch action must prevent every earlier mutation. Never re-aim, retry, or re-mutate after a failed expectation; only bounded read-only reobservation is allowed. Acceptance scripts mark debugger startup attempted before awaiting it so `finally` always attempts cleanup after partial startup.
+- The real-sidebar/model scenario remains unrun: ask the model to declare applicable expectations and verify its tool choices and final page state independently. Authenticated Docs export/toolbar expectation acceptance is also pending a signed-in isolated Docs profile.
+
 ### Capture, clipboard, and dialogs
 
 - Capture viewport, full-page, and region views. Independently check dimensions and the full-page tail, viewport/scroll restoration, and that full/region images do not become coordinate bases.
+- With a turn running that asks for views, switch focus to another app (and separately to another browser window) and minimize the browser. Fresh views must keep arriving with the real labelled page, no “Screenshots are paused” error, and Chrome must not bring itself forward or restore the window. Independently inspect the actual images for page content and label badges; a success status alone is not evidence. `scripts/edge-capture-e2e.mjs` covers the direct-executor focused/unfocused/minimized path without a model, including viewport × devicePixelRatio image size and image-space clicks that activate the labelled control while unfocused and minimized.
 - Copy/read/write/clear/paste virtual text and capture a PNG to the virtual clipboard. Paste into a real contenteditable and inspect actual insertion. Check whether the OS clipboard was preserved, restored, overwritten, or bypassed; handler consumption alone is not attachment proof.
 - In one turn, capture the same bytes twice and inspect both model results and debug files: only the duplicate model image block is omitted; fresh metadata and both stored captures remain. A later turn must re-admit the image.
 - Use `dialog.html`: alert auto-accepts; confirm/prompt waits for explicit resolution; accepted prompt text reaches the page. Unintended beforeunload remains pending without a stale view; intended navigation resolves only its own beforeunload.
+
+### Downloads and uploads
+
+Use an isolated browser profile whose Chrome download location is pointed at a temporary Downloads folder (Chrome's download directory is a user setting; the extension cannot set it, and "Ask where to save" must be off so page-control downloads complete). Set `CRAZYAGENT_DOWNLOADS_DIR` to that same absolute folder before starting the companion. `scripts/edge-files-e2e.mjs` starts its own fixture/upload server and covers the direct-executor path; it passed, but that does not check model tool selection.
+
+- In a fresh docked-panel chat, ask for `payload.txt` by its direct fixture URL and then ask to attach the downloaded file to `Chat attachment` and send it. Expect `browser_download` followed by `browser_upload`; no native file picker or arbitrary filesystem tool.
+- Independently compare the saved file with `e2e/fixtures/payload.txt`, then inspect the receiving server's multipart filename and exact bytes. Attachment readback alone is not submission proof.
+- Repeat from the same initial state with the labelled **Download payload** link and a forced filename collision. The original file must remain unchanged and Chrome must return a unique second name.
+- Use **Download viewer payload** to verify dynamic-button capture and the exact `Viewer+Payload.txt` result. Then exercise a Schoology-style `+`-encoded filename: `browser_downloads` must find it with a spaced query, a spaced upload attempt must return exact alternatives, and the actual `+` filename must upload successfully. Move one file into a Downloads subfolder and confirm `browser_downloads` still lists/finds it (bounded recursion).
+- Check hidden/visible inputs, open shadow DOM, and a same-origin iframe. A site-isolated cross-origin iframe must fail closed with `UPLOAD_FRAME_UNSUPPORTED` before assignment. Multiple inputs without a selector must fail closed; exact name or a returned input index must revalidate the intended input. Ordinary clicks on file inputs must return `FILE_INPUT`, not open a picker.
+- Attempt an absolute path, `../` traversal, and a symlink escaping Downloads. All must fail before file assignment. Record any failed call, retry, wrong target, or uncertain assignment even when repaired.
 
 ## 3. Google Docs acceptance
 

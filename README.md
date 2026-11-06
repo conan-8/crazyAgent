@@ -31,7 +31,7 @@ npm run dev
 4. In **Settings**, enter the pairing token and OpenRouter API key, keep or edit the base URL, refresh models, select an image/tool-capable model, and save.
 5. Wait for **Connected**, open a normal page, and ask a question or request an action.
 
-Keep the panel open while the agent runs; it is also the browser executor. Reload the extension and reopen the panel after extension changes. Restart the companion after companion, provider, or config changes.
+Keep the panel open while the agent runs; it is also the browser executor. Reload the extension and reopen the panel after extension changes. Restart the companion after companion, provider, or config changes. After an install or extension reload, the panel shows a one-time full-screen notice that some actions may be unexpected; dismiss it with **Got it** (or Escape) — it will not appear again until the next install/reload.
 
 ## Operating behavior
 
@@ -42,7 +42,7 @@ Keep the panel open while the agent runs; it is also the browser executor. Reloa
 
 ## Capabilities
 
-There are **29 model-facing tools**: 21 general browser tools and 8 Docs tools.
+There are **33 model-facing tools**: 25 general browser tools and 8 Docs tools.
 
 ### General browser tools
 
@@ -58,6 +58,7 @@ There are **29 model-facing tools**: 21 general browser tools and 8 Docs tools.
 | `browser_type` | Replace/append in labelled editable elements or insert at a known caret/selection |
 | `browser_press_key` | One trusted key or supported modifier chord |
 | `browser_select` | Trusted text-range selection outside Google Docs with non-canvas selection readback |
+| `browser_drag` | Standalone trusted pointer/HTML5 drag with current-view guards, source/destination evidence, sliders, clone/drop support, and bounded long-press |
 | `browser_scroll` | DOM scrolling with trusted wheel fallback for canvas apps |
 | `browser_hover` | Reveal hover-dependent controls |
 | `browser_select_option` | Set a native `<select>` and emit input/change events |
@@ -65,10 +66,23 @@ There are **29 model-facing tools**: 21 general browser tools and 8 Docs tools.
 | `browser_navigate` | Open an HTTP(S) URL, use a new tab, reload, or go back/forward |
 | `browser_wait_for` | Wait for text, URL, idle, and/or a fixed delay with explicit view control |
 | `browser_dialog` | Accept/dismiss a pending native JavaScript dialog, with optional prompt text |
+| `browser_download` | Download a direct URL/link or labelled Download control with collision-safe naming, completion waiting, and filesystem verification |
+| `browser_downloads` | List regular Downloads files newest first, including bounded subfolders, with optional normalized search; returns exact filenames and metadata without reading file bytes |
+| `browser_upload` | Attach a regular file from Downloads to a labelled, named, or indexed file input, including hidden inputs, open shadow roots, and same-origin accessible frames (site-isolated cross-origin frames fail with `UPLOAD_FRAME_UNSUPPORTED`), with File name/size readback |
 | `browser_tabs` | List current-window tabs |
 | `browser_switch_tab` | Activate by tab id or title/URL query |
 | `browser_places` | On-demand read-only lookup in new-tab shortcuts, bookmarks, and recent history |
 | `browser_clipboard` | Copy/read/write/clear/paste text or captured PNGs using a session virtual clipboard or explicit system clipboard |
+
+### Action evidence and typed postconditions
+
+`browser_click`, `browser_click_at`, `browser_type`, and `browser_press_key` accept an optional strict `expect` object with only `export_contains`, `toolbar_style`, `dialog`, `text_landed`, and `pixel_changed`. Supported batch steps accept `text_landed` or `dialog`; top-level and nested `args.expect` forms use equivalent per-operation conditional schemas, Ajv-verified, while other checks, unknown keys, incompatible capabilities, and `pixel_changed:false` fail before any guard or mutation. Ordinary batch `before`/`after` guards still run and their outcome remains separate from expectation evidence.
+
+Results distinguish `observed` (`changed`, `unchanged`, or `unknown`), `expectation.status` (`verified`, `diverged`, or `unverified`), `outcome.ok`, and `mutationPossible`. Text and Docs-export checks require the same uniquely identified scope, including document URL and navigation generation, to change from absent to present; pre-existing text and truncated absence cannot verify. URL-sensitive batch expectations are rejected after any preceding step that could replace the document. Dialog and toolbar checks measure final state without claiming causation. Pixel scopes also require tab/document identity and remain direct-only and diagnostic, never application-success proof. Bounded semantic New on screen/Changed/New text summaries use actual same-scope label snapshots or mutation-added visible text, not aggregate text lengths or one-sided scopes. Failed expectations do not cause automatic re-aiming, retries, or further mutations.
+
+Direct Docs export checks and six toolbar attributes (`paragraph_style`, `font_size`, `bold`, `italic`, `underline`, `font`) require an active supported Docs document; color/highlight and batch export/toolbar/pixel checks are currently rejected. Dedicated export-verified Docs tools do not pay for redundant generic checks. A failed expectation can be followed only by bounded read-only inspection, not another blind mutation.
+
+`browser_drag` is standalone and exclusive, not a batch step. It uses trusted pointer activation/hold/interpolation and native HTML5 interception/replay only for native sources, with no synthetic fallback. Source movement/value/selection and destination child/text evidence remain separate from `observed`, `outcome.ok`, and `mutationPossible`. Static-source clone effects require destination evidence; drop dispatch and unrelated DOM changes are not success. A no-op requires every applicable measurement to stay unchanged, while detached or missing evidence is unknown. Image/CSS coordinates retain `view_id` and stale-layout guards; child-frame drags and Google Docs are rejected. Prefer `browser_type` with an exact value for native range inputs when a spatial gesture is unnecessary.
 
 ### Google Docs tools
 
@@ -80,7 +94,7 @@ There are **29 model-facing tools**: 21 general browser tools and 8 Docs tools.
 | `browser_docs_select_text` | Select exact text or its containing paragraph; no `all` or persistent multi-select |
 | `browser_docs_page_setup` | Verify and set Letter paper, portrait/landscape orientation, and inch margins |
 | `browser_docs_write` | Append bounded formatted paragraphs, inline runs, flat lists/checklists, blanks, and page breaks at document end |
-| `browser_docs_table` | Create with optional values, read, write exact cells, format cell/row/column/table text, and insert/delete rows, columns, or tables with export verification |
+| `browser_docs_table` | Create compact tables, read values and native cell backgrounds, write exact cells, format text, apply native backgrounds with dedicated `cell_background`-only calls, edit structure, merge/unmerge exactly two horizontal cells with a guarded native-menu fallback, or delete tables with export verification |
 | `browser_docs_read` | Authenticated export as outline, text, or bounded HTML with pagination and no screenshot |
 
 `browser_docs_replace` and `browser_docs_format` internally route to legacy executor actions; those internal names are not additional model tools.
@@ -89,19 +103,22 @@ There are **29 model-facing tools**: 21 general browser tools and 8 Docs tools.
 
 - **DOM-first auto views:** ordinary pages attach up to 6,000 characters of rendered text plus labels without an image. Known canvas editors receive a full labelled screenshot. Screenshots remain available for visual/spatial needs.
 - **Views:** ordinary DOM actions default to compact results and escalate to full views when needed. Known document editors retain strict fresh-view rules. Completed export-verified Docs results may skip a redundant final screenshot; this is not independent acceptance evidence.
+- **Screenshots while you are elsewhere:** the agent can still see the page when the browser window is unfocused or minimized. A focused, visible window uses Chrome's visible-tab capture; an unfocused or minimized window uses a page-level capture instead. Screenshots never focus or restore the browser window, and captured image pixels match the viewport × devicePixelRatio on every path, so image-space clicks still work while the window is unfocused or minimized. Do not touch the browser while the agent is running: clicking, typing, scrolling, or switching tabs can throw off its targets and break the task.
 - **Batch safety:** malformed argument keys fail before activity. A failed precondition means no dispatch; a failed postcondition follows dispatch, so blind retry is unsafe. Guard failures always stop the batch and earlier actions are not rolled back.
-- **Ambiguity:** exact text, accessible-name, tab, table, and occurrence ambiguity fails closed rather than selecting an arbitrary target.
-- **Parallelism:** maximum 4 calls, but only `browser_tabs`, `browser_places`, `browser_read_text`, and `browser_docs_read` are parallel-safe. Mutations remain exclusive in model order.
+- **Ambiguity:** exact text, accessible-name, tab, table, file-input, and occurrence ambiguity fails closed rather than selecting an arbitrary target.
+- **File transfer:** direct/link/dynamic downloads use unique names and are verified on disk after completion. Chrome chooses where downloads are saved; the agent reads and attaches only inside its configured Downloads folder, so point Chrome's download location at that folder and disable "Ask where to save" (page-control downloads cannot answer the picker). `browser_downloads` lists actual regular files newest first, including bounded subfolders; spaces and `+` match only for discovery. Uploads accept exact regular files whose real paths remain inside that folder and attach them to labelled/named/indexed inputs, including hidden inputs, open shadow roots, and same-origin accessible frames; site-isolated cross-origin frames fail closed with `UPLOAD_FRAME_UNSUPPORTED`. The attached File name/size is verified. Attachment is not server-submission or persistence proof; inspect the destination after submitting.
+- **Parallelism:** maximum 4 calls, but only `browser_tabs`, `browser_places`, `browser_read_text`, `browser_docs_read`, and `browser_downloads` are parallel-safe. Mutations remain exclusive in model order.
 - **Runaway protection:** no per-turn call cap; identical-repeat guards default to 3 mutations, 30 observations, and 10 unmodified navigation keys.
+- **Keyboard safety:** `browser_press_key` and batch key steps reject ctrl/cmd+W in code (not just guidance); closing or listing tabs is left to `browser_tabs`/`browser_switch_tab`.
 - **Reasoning:** Auto requests `low` from the first model step for reasoning-capable models; Off/Low/Medium/High can be selected manually.
 - **Image context:** exact duplicate images are omitted only at model admission within the same session/turn. Older images are durably offloaded while attachments remain on disk. Capture and debug storage still occur.
 - **Stop and queue:** Stop interrupts the current runtime and resumes the session on the next message when possible. Messages sent during a turn are queued and can redirect the turn.
 
-Not supported yet include element drag/drop, file upload, downloads, arbitrary JavaScript, native print dialogs, and general browser-chrome automation. Protected pages, closed shadow roots, inaccessible frames, and the built-in PDF viewer can remain inaccessible.
+Not supported yet include drag batching and child-frame drags, native file pickers, arbitrary JavaScript, native print dialogs, and general browser-chrome automation. File access is confined to the configured Downloads folder; arbitrary filesystem paths are unavailable. Protected pages, closed shadow roots, inaccessible frames, and the built-in PDF viewer can remain inaccessible.
 
 ## Side-panel UI
 
-The panel is a single activity feed with streaming reasoning/text/tool events, per-step timing, collapsible finished steps, and a pinned final answer. The composer supports queued messages, Stop/Pause, model and reasoning settings, up to four pasted images, and browser speech recognition when available.
+The panel is a single activity feed with streaming reasoning/text/tool events, per-step timing, collapsible finished steps, and a pinned final answer. The composer supports queued messages, Stop, a Pause/Resume toggle that rejects page commands without ending the chat, model and reasoning settings, up to four pasted images, browser speech recognition when available, and slash commands: typing `/` opens an inline palette where `/new` starts a fresh chat (a stoppable running turn stays alive behind the draft view, while an operation that is still starting refuses with a wait message) and `/model` opens the model picker. ArrowUp/ArrowDown choose, Enter or Tab runs, and Escape dismisses; path-like text that merely starts with `/` is sent as ordinary prose. Closing the model picker (Escape, outside click, or choosing a model) returns focus to the composer, and a draft typed or attached while the `/new` view waits behind a running turn survives when that turn ends. After an extension install or reload, a one-time full-screen notice leads with an amber **Don't touch the browser** warning: while the agent runs, clicking, typing, scrolling, or switching tabs can throw off its clicks and targets and break the task. **Got it** or Escape dismisses it; it does not return on ordinary panel opens.
 
 The **Debug log** dialog exports local run evidence. See `docs/DEBUG-LOGS.md` before sharing a bundle.
 
@@ -118,6 +135,8 @@ npm run dev -- --base-url https://openrouter.ai/api/v1 \
 
 Output tokens default to the selected model’s advertised maximum; `--max-tokens` sets a lower explicit cap. API-key resolution order is `CRAZYAGENT_API_KEY`, the optional stored key, `OPENROUTER_API_KEY`, then the DSH credential store.
 
+File transfer is confined to one Downloads folder. The extension cannot change Chrome's download directory: set Chrome's download location to that folder (default `$HOME/Downloads`) and disable "Ask where to save", otherwise page-control downloads stall on Chrome's save dialog. Set `CRAZYAGENT_DOWNLOADS_DIR` to the same absolute path before `npm run dev` to select a different confined folder (for example an isolated test profile's folder); only regular files whose real paths remain inside it are accepted. Restart the companion after changing it.
+
 Generated state is under ignored `.dsh-home/`. To remove it:
 
 ```sh
@@ -125,15 +144,15 @@ npm run clean -- --yes
 npm run setup
 ```
 
-This deletes sessions, attachments, debug logs, tokens, and any remembered key.
+This deletes sessions, attachments, debug logs, tokens, and any remembered key. It does not delete files downloaded into your Downloads folder.
 
 ## Privacy and permissions
 
-Screenshots, rendered text, labels, prompts, pasted images, and explicit tool results such as personal destinations or clipboard contents can be sent to the configured model provider. Debug logs and DSH attachments remain local until shared, but contain sensitive page/conversation data.
+Screenshots, rendered text, labels, prompts, pasted images, and explicit tool results such as personal destinations, clipboard contents, filenames, and file metadata can be sent to the configured model provider. Local file bytes are not sent to the model provider by `browser_upload`; Chrome attaches the file, and the destination site receives it when the page submits. Debug logs and DSH attachments remain local until shared, but contain sensitive page/conversation data and may contain local file paths.
 
-The extension requests broad host access plus side-panel, tabs, scripting, storage, debugger, web-navigation, clipboard, top-sites, bookmarks, and history permissions. Clipboard and personal-data access occur only through explicit user/model actions, not a background sync. Pause blocks browser commands; closing the panel disconnects the executor.
+The extension requests broad host access plus side-panel, tabs, scripting, storage, debugger, downloads, web-navigation, clipboard, top-sites, bookmarks, and history permissions. Clipboard, download, upload, and personal-data access occur only through explicit user/model actions, not a background sync. Pause/Resume blocks browser commands without ending the chat; closing the panel disconnects the executor.
 
-Read `PRIVACY.md` for storage paths, redaction limits, clipboard behavior, and controls.
+Read `PRIVACY.md` for storage paths, Downloads confinement, redaction limits, clipboard behavior, and controls.
 
 ## Development and verification
 
@@ -144,17 +163,21 @@ npm run system-prompt          # exact composed prompt; -- --json for counts
 npm run bench                  # local bridge benchmark
 ```
 
-Last recorded implementation verification: **552/552 tests** and prompt composition. Earlier real find/auto-view, work/canvas, and other fixture/model runs are historical evidence. **Authenticated real-extension/model Docs table acceptance, authenticated Pivot, real-model HTML-table selection, and normal authenticated docked-panel Docs acceptance remain pending.** Both available isolated Docs profiles were signed out, so the latest table harness stopped before creating a document.
+Last recorded implementation verification: **800/800 tests**, prompt composition, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs. The drag fixture used real provider/executor calls to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. Independent checks inspected DOM order, values, parentage, drop receipts, and collateral application state; refused and intentional no-op cases preserved every semantic application value. Earlier expectation, click, capture, and file-transfer fixtures retained their evidence. These are direct executor checks, not real-model acceptance. **A real-sidebar/model drag workflow and expectation workflow, download→upload workflow, authenticated Docs export/toolbar expectations and Docs table acceptance, authenticated Pivot, real-model HTML-table selection, normal authenticated docked-panel Docs acceptance, and a real docked-panel turn that keeps receiving views after the user switches apps or minimizes the browser remain pending.** No connected Docs browser or isolated live-model acceptance profile is currently configured.
 
 Useful harnesses:
 
+- `scripts/edge-drag-e2e.mjs` — self-contained isolated provider/executor drag fixture with independent order/value/drop-receipt, clone, no-op, rerender, stale-view, and collateral-state checks.
+- `scripts/edge-files-e2e.mjs` — self-hosted file-transfer fixture with independent source/download and multipart-received byte checks; requires an isolated Edge/CDP profile with a temporary Downloads preference.
+- `scripts/edge-capture-e2e.mjs` — self-hosted isolated profile that verifies focused, unfocused, and minimized viewport captures at viewport × devicePixelRatio, with labelled-pixel checks, image-space clicks while unfocused/minimized, and unchanged window focus/state.
+- `scripts/ui-preview.mjs` — mocked-bridge side-panel screenshots and UI assertions (disclaimer, slash palette, Pause/Resume, draft-view focus/attachments, disconnect cleanup) without a companion or model spend.
+- `scripts/edge-expect-e2e.mjs` — isolated direct/batch expectation fixture with independent text, dialog, pixel, semantic, and mutation-state checks.
 - `scripts/edge-click-e2e.mjs`, `edge-work-e2e.mjs`, `edge-canvas-e2e.mjs`, `edge-advanced-e2e.mjs` — direct real-extension fixture checks.
 - `scripts/edge-find-e2e.mjs`, `edge-table-e2e.mjs`, `edge-dialog-e2e.mjs`, `edge-clipboard-e2e.mjs` — focused executor checks.
-- `scripts/edge-docs-table-e2e.mjs` — disposable-document table workflow with independent export and reload persistence; requires an isolated signed-in Docs profile.
+- `scripts/edge-docs-table-e2e.mjs` — disposable-document table workflow with independent compact-spacing, native-background, collateral, export, and reload-persistence checks; requires an isolated signed-in Docs profile.
 - `scripts/edge-find-live-e2e.mjs`, `edge-table-live-e2e.mjs` — isolated real-sidebar acceptance harnesses.
-- `scripts/ui-preview.mjs` — mocked-bridge UI screenshots without model spend.
 
-Fixture scripts need the static server and isolated Edge/CDP setup described in `HANDOFF.md`. Direct executor success is not model-driven acceptance. Use `e2e/checklist.md` for the real docked side panel and independent final-state checks.
+Most fixture scripts need the static server and isolated Edge/CDP setup described in `HANDOFF.md`; the file-transfer script starts its own server. Direct executor success is not model-driven acceptance. Use `e2e/checklist.md` for the real docked side panel and independent final-state checks.
 
 ## Troubleshooting
 
@@ -164,7 +187,7 @@ Fixture scripts need the static server and isolated Edge/CDP setup described in 
 | Invalid pairing token | Copy the current token into Settings; do not share it |
 | No model/key configured | Enter the key, refresh models, select an image/tool-capable model, and save |
 | Model list or key rejected | Check base URL, network access, account access, and key validity |
-| Browser bridge disconnected | Reopen/unpause the side panel; it is the executor |
+| Browser bridge disconnected | Reopen the side panel (and press Resume if it was paused); it is the executor |
 | Protected-page error | Switch to a normal HTTP(S) tab |
 | Trusted input unavailable | Close DevTools on the tab and check debugger permission |
 | Changes do not apply | Reload/reopen the extension; restart the companion for provider/config changes |

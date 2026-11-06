@@ -62,16 +62,18 @@ test('Docs structure preserves checklist and checked-state evidence', () => {
   assert.match(formatOutline(blocks), /☐ pending/)
 })
 
-test('Docs structure outline preserves empty lines and table shape', () => {
+test('Docs structure outline preserves empty lines, table shape, and cell backgrounds', () => {
   const blocks = parseDocStructure(doc(
     '<h2><span>Results</span></h2><p></p><p></p>'
-      + '<table><tr><td colspan="2"><p><span>H</span></p></td></tr><tr><td><p><span>1</span></p></td><td></td></tr></table>',
+      + '<table><tr><td colspan="2" style="background-color:#cccccc"><p><span>H</span></p></td></tr><tr><td><p><span>1</span></p></td><td></td></tr></table>',
   ))
   assert.match(formatOutline(blocks), /H2: Results/)
   assert.match(formatOutline(blocks), /\(empty line ×2\)/)
   assert.match(formatOutline(blocks), /TABLE 1 \(2 rows × 2 cols\)/)
   assert.match(formatOutline(blocks), /H ⟨merged 1×2⟩/)
   assert.match(formatOutline(blocks), /1 \| ·/)
+  assert.equal(blocks[3].rows[0][0].background, '#cccccc')
+  assert.equal(blocks[3].rows[1][0].background, 'none')
 })
 
 test('Docs structure class parser captures formatting without treating color as a text mark', () => {

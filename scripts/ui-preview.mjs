@@ -14,8 +14,11 @@
  *   node scripts/ui-preview.mjs --scenario states     # finished feed / expanded step / new chat
  *   node scripts/ui-preview.mjs --scenario tools      # browser-command rows + tab-list card
  *   node scripts/ui-preview.mjs --scenario modals     # settings + debug log modals
+ *   node scripts/ui-preview.mjs --scenario disclaimer # one-time full-screen notice after a reload
  *   node scripts/ui-preview.mjs --scenario queue      # queued messages + steer/cancel actions
- *   node scripts/ui-preview.mjs --scenario composer   # image paste + model search + dictation
+ *   node scripts/ui-preview.mjs --scenario recent     # new-chat recents + running session indicator
+ *   node scripts/ui-preview.mjs --scenario composer   # image paste + model search + dictation dots
+ *   node scripts/ui-preview.mjs --scenario slash      # slash-command palette: filter, keys, execution
  *
  * Options: --out DIR (default /tmp/crazyagent-ui-preview) and SHOT_FORMAT=jpeg.
  * Needs Node >= 22 (global WebSocket) and microsoft-edge or (set EDGE_BIN) on PATH.
@@ -123,6 +126,15 @@ const MOCK_BRIDGE = `(() => {
     if (socket && socket.onmessage) socket.onmessage({ data: JSON.stringify(frame) });
   };
   window.__mockBatch = frames => { for (const frame of frames) window.__mockReceive(frame); };
+  window.__mockDrop = (code = 1006, reason = 'preview disconnect') => {
+    const socket = window.__mockSocket;
+    if (!socket) return false;
+    socket.readyState = 3;
+    if (typeof socket.onclose === 'function') {
+      try { socket.onclose({ code, reason }) } catch (e) {}
+    }
+    return true;
+  };
   class MockSpeechRecognition {
     constructor() { window.__mockSpeech = this; }
     start() { this.started = true; }
@@ -202,6 +214,13 @@ async function sendPrompt(page, text) {
     document.getElementById('composer').requestSubmit();
   })()`)
   await sleep(250)
+}
+
+async function finishPrompt(page, sessionId, text = '') {
+  const { recv } = makePage(page)
+  await recv({ v: 1, type: 'chat.done', sessionId, text, timings: { totalMs: 1 } })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(180)
 }
 
 async function pasteImage(page, name = 'screenshot.png') {
@@ -547,6 +566,76 @@ async function playComposerScenario(page, capture) {
   assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1).model`), 'anthropic/claude-sonnet-4.5')
   await recv({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'auto' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })
 
+  // Empty composer: starting dictation shows the listening dots inside the
+  // textarea, they bounce, and stopping removes them.
+  assert.equal(await page.evaluate(`document.getElementById('dictation-indicator').hidden`), true)
+  await page.evaluate(`document.getElementById('mic').click()`)
+  await sleep(250)
+  const dictation = await page.evaluate(`(() => {
+    const indicator = document.getElementById('dictation-indicator');
+    const input = document.getElementById('input');
+    const dots = [...indicator.querySelectorAll('.dictation-dot')];
+    const rect = indicator.getBoundingClientRect();
+    const inputRect = input.getBoundingClientRect();
+    return {
+      visible: !indicator.hidden && indicator.getClientRects().length > 0,
+      label: indicator.textContent.trim(),
+      insideTextArea: rect.left >= inputRect.left - 1 && rect.right <= inputRect.right + 1 && rect.top >= inputRect.top - 1 && rect.bottom <= inputRect.bottom + 1,
+      dotCount: dots.length,
+      animationNames: dots.map(dot => getComputedStyle(dot).animationName),
+      animationDelays: dots.map(dot => Math.round(parseFloat(getComputedStyle(dot).animationDelay) * 1000)),
+      playState: getComputedStyle(dots[0]).animationPlayState,
+      paddingRight: parseFloat(getComputedStyle(input).paddingRight),
+    };
+  })()`)
+  assert.equal(dictation.visible, true)
+  assert.equal(dictation.label, 'Listening')
+  assert.equal(dictation.insideTextArea, true)
+  assert.equal(dictation.dotCount, 3)
+  assert.deepEqual(dictation.animationNames, ['dictation-dot', 'dictation-dot', 'dictation-dot'])
+  assert.deepEqual(dictation.animationDelays, [0, 160, 320])
+  assert.equal(dictation.playState, 'running')
+  assert.ok(dictation.paddingRight >= 100, `dictation should reserve textarea space, got ${dictation.paddingRight}`)
+  const bouncing = await page.evaluate(`(async () => {
+    const dot = document.querySelector('.dictation-dot');
+    const seen = new Set();
+    for (let index = 0; index < 12; index += 1) {
+      seen.add(getComputedStyle(dot).transform);
+      if (seen.size > 1) return true;
+      await new Promise(resolve => setTimeout(resolve, 60));
+    }
+    return false;
+  })()`)
+  assert.equal(bouncing, true, 'bouncing dots should animate')
+  await sleep(2_700) // let the model-configured toast fade before the screenshot
+  await capture('dictation')
+
+  // Narrowest supported panel: the pill must stay inside the field and leave
+  // enough room for dictated text next to the reserved corner.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 280, height: 940, deviceScaleFactor: 2, mobile: false })
+  await sleep(250)
+  const narrowDictation = await page.evaluate(`(() => {
+    const field = document.querySelector('.composer-field').getBoundingClientRect();
+    const indicatorEl = document.getElementById('dictation-indicator');
+    const indicator = indicatorEl.getBoundingClientRect();
+    const input = document.getElementById('input');
+    return {
+      insideField: indicator.left >= field.left - 1 && indicator.right <= field.right + 1 && indicator.bottom <= field.bottom + 1,
+      labelClipped: indicatorEl.scrollWidth > indicatorEl.clientWidth + 1,
+      inputContentWidth: input.clientWidth - parseFloat(getComputedStyle(input).paddingRight),
+    };
+  })()`)
+  assert.equal(narrowDictation.insideField, true, 'listening pill must stay inside the composer field')
+  assert.equal(narrowDictation.labelClipped, false)
+  assert.ok(narrowDictation.inputContentWidth > 80, `narrow dictation textarea is too tight: ${narrowDictation.inputContentWidth}`)
+  await capture('dictation-narrow')
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 940, deviceScaleFactor: 2, mobile: false })
+  await sleep(250)
+
+  await page.evaluate(`document.getElementById('mic').click()`)
+  await sleep(50)
+  assert.equal(await page.evaluate(`document.getElementById('dictation-indicator').hidden`), true)
+
   await page.evaluate(`(() => {
     const input = document.getElementById('input');
     input.value = 'Hello world';
@@ -555,6 +644,7 @@ async function playComposerScenario(page, capture) {
   })()`)
   assert.equal(await page.evaluate(`document.getElementById('mic').classList.contains('recording')`), true)
   assert.equal(await page.evaluate(`document.getElementById('mic').getAttribute('aria-pressed')`), 'true')
+  assert.equal(await page.evaluate(`document.getElementById('dictation-indicator').hidden`), false)
   await sleep(200)
   assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('mic')).color`), 'rgb(255, 195, 0)')
   await page.evaluate(`window.__mockSpeechResults([['team', false]])`)
@@ -569,12 +659,412 @@ async function playComposerScenario(page, capture) {
   await page.evaluate(`document.getElementById('mic').click()`)
   assert.equal(await page.evaluate(`document.getElementById('mic').classList.contains('recording')`), false)
   assert.equal(await page.evaluate(`document.getElementById('mic').getAttribute('aria-pressed')`), 'false')
+  assert.equal(await page.evaluate(`document.getElementById('dictation-indicator').hidden`), true)
+  await sleep(250)
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('input')).paddingRight`), '4px')
   await page.evaluate(`document.getElementById('composer').requestSubmit()`)
   await sleep(250)
   const sent = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1)`)
   assert.equal(sent.text, 'Hello team mates world')
   assert.equal(sent.images.length, 1)
   assert.equal(sent.images[0].name, 'screenshot.png')
+}
+
+/** Slash-command composer: trigger rules, filtering, keyboard selection, execution. */
+async function playSlashScenario(page, capture) {
+  const { recv, batch } = makePage(page)
+  await batch(HELLO_FRAMES)
+  await sleep(300)
+
+  const type = async value => {
+    await page.evaluate(`(() => {
+      const input = document.getElementById('input');
+      input.value = ${JSON.stringify(value)};
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`)
+    await sleep(140)
+  }
+  const press = async (target, key) => {
+    const source = target === 'document' ? 'document' : `document.querySelector(${JSON.stringify(target)})`
+    await page.evaluate(`${source}.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify({ key, bubbles: true, cancelable: true })}))`)
+    await sleep(140)
+  }
+  const menuState = async () => page.evaluate(`(() => {
+    const menu = document.getElementById('slash-menu');
+    const list = document.getElementById('slash-menu-list');
+    const input = document.getElementById('input');
+    return {
+      visible: !menu.classList.contains('hidden'),
+      expanded: input.getAttribute('aria-expanded'),
+      controls: input.getAttribute('aria-controls'),
+      activeDescendant: input.getAttribute('aria-activedescendant'),
+      hint: menu.querySelector('.slash-menu-hint').textContent,
+      menuRole: menu.getAttribute('role'),
+      listRole: list.getAttribute('role'),
+      listLabel: list.getAttribute('aria-label'),
+      items: [...menu.querySelectorAll('.slash-command')].map(item => ({
+        id: item.dataset.command,
+        name: item.querySelector('.slash-command-name').textContent,
+        description: item.querySelector('.slash-command-description').textContent,
+        selected: item.getAttribute('aria-selected') === 'true',
+        role: item.getAttribute('role'),
+      })),
+    };
+  })()`)
+  const frameCount = async type => page.evaluate(`window.__frames.filter(frame => frame.type === ${JSON.stringify(type)}).length`)
+  const inputValue = async () => page.evaluate(`document.getElementById('input').value`)
+  const modelMenuHidden = async () => page.evaluate(`document.getElementById('model-menu').classList.contains('hidden')`)
+  const focusComposer = async () => {
+    await page.evaluate(`document.getElementById('input').focus()`)
+    await sleep(60)
+  }
+  /** Dispatch a real CDP key press so preventDefault/default actions are exercised. */
+  const trustedKey = async (key, options = {}) => {
+    const spec = {
+      Enter: { code: 'Enter', vk: 13, text: '\r' },
+      Tab: { code: 'Tab', vk: 9 },
+      Escape: { code: 'Escape', vk: 27 },
+      ArrowUp: { code: 'ArrowUp', vk: 38 },
+      ArrowDown: { code: 'ArrowDown', vk: 40 },
+    }[key] ?? { code: key, vk: 0 }
+    const modifiers = options.modifiers ?? 0
+    const base = { key, code: spec.code, windowsVirtualKeyCode: spec.vk, nativeVirtualKeyCode: spec.vk, modifiers }
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, ...(spec.text ? { text: spec.text, unmodifiedText: spec.text } : {}) })
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
+    await sleep(160)
+  }
+  const trustedClickAt = async (x, y) => {
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 })
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 })
+    await sleep(180)
+  }
+  const trustedClick = async selector => {
+    const point = await page.evaluate(`(() => {
+      const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    })()`)
+    await trustedClickAt(point.x, point.y)
+  }
+  /** Read the real accessibility tree (not DOM attributes) for the composer. */
+  const axState = async () => {
+    const { root } = await page.send('DOM.getDocument', { depth: 1 })
+    const { nodeId } = await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#input' })
+    const { nodes } = await page.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false })
+    const node = nodes[0]
+    const property = name => node?.properties?.find(item => item.name === name)?.value?.value
+    return { role: node?.role?.value, expanded: property('expanded'), activeDescendant: property('activedescendant') }
+  }
+  await page.send('Accessibility.enable')
+  const sendCount = await frameCount('chat.send')
+  const newCount = await frameCount('chat.new')
+
+  // Dormant until the draft is a single leading slash token.
+  assert.equal((await menuState()).visible, false)
+  assert.equal((await menuState()).expanded, 'false')
+  await type('hello')
+  assert.equal((await menuState()).visible, false)
+
+  // A bare slash lists both commands, first selected, with ARIA wiring.
+  await type('/')
+  const open = await menuState()
+  assert.equal(open.visible, true)
+  assert.equal(open.expanded, 'true')
+  assert.equal(open.activeDescendant, 'slash-command-new')
+  assert.deepEqual(open.items.map(item => item.name), ['/new', '/model'])
+  assert.deepEqual(open.items.map(item => item.description), ['Start a new chat', 'Choose the model for your next turn'])
+  assert.deepEqual(open.items.map(item => item.selected), [true, false])
+  assert.deepEqual(open.items.map(item => item.role), ['option', 'option'])
+  assert.match(open.hint, /↑↓ navigate · Enter run · Esc dismiss/)
+  assert.equal(open.controls, 'slash-menu-list')
+  assert.equal(open.listRole, 'listbox')
+  assert.equal(open.listLabel, 'Slash commands')
+  assert.equal(open.menuRole, null, 'only the list itself carries the listbox role')
+  const openAx = await axState()
+  assert.equal(openAx.role, 'combobox')
+  assert.equal(openAx.expanded, true, 'the accessibility tree must expose expanded=true')
+  await capture('commands')
+
+  // Narrowest supported panel: the palette stays inside the panel and the
+  // hint line never clips.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 280, height: 940, deviceScaleFactor: 2, mobile: false })
+  await sleep(250)
+  const narrow = await page.evaluate(`(() => {
+    const menu = document.getElementById('slash-menu');
+    const hint = menu.querySelector('.slash-menu-hint');
+    const rect = menu.getBoundingClientRect();
+    return {
+      insidePanel: rect.left >= 0 && rect.right <= innerWidth,
+      menuOverflow: menu.scrollWidth > menu.clientWidth + 1,
+      hintOverflow: hint.scrollWidth > hint.clientWidth + 1,
+    };
+  })()`)
+  assert.deepEqual(narrow, { insidePanel: true, menuOverflow: false, hintOverflow: false })
+  await capture('commands-narrow')
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 940, deviceScaleFactor: 2, mobile: false })
+  await sleep(250)
+
+  // Arrow keys move and wrap the active option without rewriting the draft.
+  await press('#input', 'ArrowDown')
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [false, true])
+  assert.equal((await menuState()).activeDescendant, 'slash-command-model')
+  assert.equal(await inputValue(), '/')
+  await press('#input', 'ArrowUp')
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [true, false])
+  await press('#input', 'ArrowUp')
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [false, true])
+
+  // Filtering narrows the list and resets the selection.
+  await type('/m')
+  assert.deepEqual((await menuState()).items.map(item => item.name), ['/model'])
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [true])
+
+  // Escape dismisses the palette without rewriting the draft.
+  await press('#input', 'Escape')
+  const dismissed = await menuState()
+  assert.equal(dismissed.visible, false)
+  assert.equal(dismissed.expanded, 'false')
+  assert.equal(dismissed.activeDescendant, null, 'closing must drop aria-activedescendant')
+  assert.equal((await axState()).expanded, false)
+  assert.equal(await inputValue(), '/m')
+
+  // Prose that merely starts with a slash is never treated as a command.
+  for (const draft of ['please /new', '/usr/local/bin', '/new chat', '/new ']) {
+    await type(draft)
+    assert.equal((await menuState()).visible, false, draft)
+  }
+
+  // Trusted Enter (real CDP key, not a synthetic event) runs /new exactly once
+  // and preventDefault keeps the stray newline out of the cleared composer.
+  await type('/ne')
+  assert.deepEqual((await menuState()).items.map(item => item.name), ['/new'])
+  await focusComposer()
+  await trustedKey('Enter')
+  assert.equal(await frameCount('chat.new'), newCount + 1)
+  assert.equal(await frameCount('chat.send'), sendCount)
+  assert.equal((await menuState()).visible, false)
+  assert.equal(await inputValue(), '', 'preventDefault must stop the Enter newline')
+  assert.equal(await page.evaluate(`document.activeElement.id`), 'input')
+
+  // Trusted arrows move the highlight and keep focus in the textarea.
+  await type('/')
+  await focusComposer()
+  await trustedKey('ArrowDown')
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [false, true])
+  assert.equal(await page.evaluate(`document.activeElement.id`), 'input')
+  await trustedKey('ArrowUp')
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [true, false])
+
+  // Trusted Escape closes the palette and drops activedescendant wiring.
+  await trustedKey('Escape')
+  assert.equal((await menuState()).visible, false)
+  assert.equal(await page.evaluate(`document.getElementById('input').getAttribute('aria-activedescendant')`), null)
+  assert.equal((await axState()).expanded, false)
+
+  // Trusted Shift+Enter inserts a newline instead of running the highlight.
+  await type('/n')
+  await focusComposer()
+  await trustedKey('Enter', { modifiers: 8 })
+  assert.equal((await menuState()).visible, false)
+  assert.equal(await page.evaluate(`document.getElementById('input').value.includes('\\n')`), true)
+  assert.equal(await frameCount('chat.new'), newCount + 1)
+  await type('')
+
+  // A trusted outside click dismisses the palette and keeps the draft.
+  await type('/model')
+  await focusComposer()
+  const outside = await page.evaluate(`(() => {
+    const rect = document.getElementById('activity').getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + Math.min(160, rect.height / 2) };
+  })()`)
+  await trustedClickAt(outside.x, outside.y)
+  assert.equal((await menuState()).visible, false)
+  assert.equal(await inputValue(), '/model')
+
+  // A trusted row click runs the command, keeps focus in the textarea, and
+  // does not let the click bubble close the picker the command just opened.
+  await type('/m')
+  await focusComposer()
+  await trustedClick('.slash-command[data-command="model"]')
+  assert.equal(await modelMenuHidden(), false, 'row click must open the model picker')
+  // A missed click (blur closes the palette before mouseup) would leave the
+  // picker closed; the command then hands focus to its search field.
+  assert.equal(await page.evaluate(`document.activeElement.id`), 'model-search')
+  assert.equal(await inputValue(), '')
+  assert.equal((await menuState()).visible, false)
+  await trustedKey('Escape')
+  assert.equal(await modelMenuHidden(), true)
+  assert.equal(await page.evaluate(`document.activeElement.id`), 'input', 'Escape must return focus to the composer')
+
+  // Tab runs the highlighted command too; /model opens the real model picker.
+  await type('/m')
+  await focusComposer()
+  await trustedKey('Tab')
+  assert.equal(await modelMenuHidden(), false)
+  assert.equal(await page.evaluate(`document.activeElement.id`), 'model-search')
+  assert.equal((await menuState()).visible, false)
+  assert.equal(await frameCount('chat.send'), sendCount)
+  await press('document', 'Escape')
+  assert.equal(await modelMenuHidden(), true)
+  assert.equal(await page.evaluate(`document.activeElement.id`), 'input', 'Escape must return focus to the composer')
+
+  // The Send button runs an exact token, never sends it as text.
+  await type('/model')
+  await page.evaluate(`document.getElementById('send').click()`)
+  await sleep(220)
+  assert.equal(await modelMenuHidden(), false)
+  assert.equal(await inputValue(), '')
+  assert.equal(await frameCount('chat.send'), sendCount)
+  await press('document', 'Escape')
+  assert.equal(await modelMenuHidden(), true)
+  assert.equal(await page.evaluate(`document.activeElement.id`), 'input', 'Escape must return focus to the composer')
+
+  // A path-like draft remains ordinary text: a trusted Enter sends it
+  // verbatim and leaves no stray newline behind.
+  await type('/usr/local/bin')
+  await focusComposer()
+  await trustedKey('Enter')
+  await sleep(250)
+  const sent = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1)`)
+  assert.equal(sent.text, '/usr/local/bin')
+  assert.equal(await frameCount('chat.send'), sendCount + 1)
+  assert.equal(await inputValue(), '')
+  await recv({ v: 1, type: 'chat.done', sessionId: 'session-preview0001', text: '', timings: { totalMs: 1 } })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(200)
+
+  // While a turn is running, /model refuses with a visible wait message and
+  // never opens the picker or sends the text.
+  await sendPrompt(page, 'Stay busy while I try to switch models.')
+  const busySendCount = await frameCount('chat.send')
+  await type('/model')
+  await focusComposer()
+  await trustedKey('Enter')
+  assert.equal(await modelMenuHidden(), true)
+  assert.equal(await page.evaluate(`document.getElementById('toast').classList.contains('hidden')`), false)
+  assert.match(await page.evaluate(`document.getElementById('toast').textContent`), /Wait for the current operation to finish/)
+  assert.equal(await frameCount('chat.send'), busySendCount)
+  await recv({ v: 1, type: 'chat.done', sessionId: 'session-preview0001', text: '', timings: { totalMs: 1 } })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(200)
+
+  // /new during a running turn opens the draft view and keeps the session
+  // alive; chat.done then retires the draft with a fresh chat.new.
+  await sendPrompt(page, 'Keep working while I start another chat.')
+  await type('/new')
+  assert.equal((await menuState()).visible, true)
+  await focusComposer()
+  await trustedKey('Enter')
+  assert.equal(await frameCount('chat.new'), newCount + 1, 'busy /new must not retire the running session early')
+  assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('new-chat-draft')`), true)
+  assert.equal(await inputValue(), '')
+  assert.equal((await menuState()).visible, false)
+  await recv({ v: 1, type: 'chat.done', sessionId: 'session-preview0001', text: '', timings: { totalMs: 1 } })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(250)
+  assert.equal(await frameCount('chat.new'), newCount + 2)
+  assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('new-chat-draft')`), false)
+  assert.equal(await inputValue(), '')
+
+  // Attachments pasted in the draft view survive retirement: finishing the old
+  // turn must not silently discard the next message the user prepared.
+  await sendPrompt(page, 'Finish this while I prepare the next one.')
+  await type('/new')
+  await focusComposer()
+  await trustedKey('Enter')
+  assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('new-chat-draft')`), true)
+  await pasteImage(page, 'draft.png')
+  assert.equal(await page.evaluate(`Boolean(document.querySelector('.image-chip')?.textContent.includes('draft.png'))`), true)
+  await recv({ v: 1, type: 'chat.done', sessionId: 'session-preview0001', text: '', timings: { totalMs: 1 } })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(250)
+  assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('new-chat-draft')`), false)
+  assert.equal(
+    await page.evaluate(`Boolean(document.querySelector('.image-chip')?.textContent.includes('draft.png'))`),
+    true,
+    'draft-view attachments must survive the draft retirement',
+  )
+  await page.evaluate(`document.querySelector('.image-chip button').click()`)
+  await sleep(120)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.image-chip').length`), 0)
+
+  // Pause rejects page commands without ending the chat, persists the setting,
+  // and resumes cleanly.
+  await page.evaluate(`document.getElementById('pause').click()`)
+  await sleep(220)
+  const pausedState = await page.evaluate(`(async () => {
+    const stored = await chrome.storage.local.get('crazyagent.settings');
+    return {
+      pressed: document.getElementById('pause').getAttribute('aria-pressed'),
+      label: document.getElementById('pause').getAttribute('aria-label'),
+      status: document.getElementById('status-text').textContent,
+      phase: document.getElementById('activity-phase').textContent,
+      stored: stored['crazyagent.settings']?.paused,
+    };
+  })()`)
+  assert.deepEqual(pausedState, {
+    pressed: 'true',
+    label: 'Resume browser access',
+    status: 'Paused',
+    phase: 'Paused',
+    stored: true,
+  })
+  await recv({ v: 1, type: 'browser.command', id: 'paused-view', callId: 'paused-1', turnId: 'turn-paused', command: { op: 'snapshot', args: {} } })
+  await sleep(250)
+  const pausedResult = await page.evaluate(`window.__frames.filter(frame => frame.type === 'browser.result' && frame.id === 'paused-view').at(-1)`)
+  assert.equal(pausedResult?.ok, false)
+  assert.equal(pausedResult?.error?.code, 'PAUSED', 'paused browser commands must be rejected before the executor runs')
+  await page.evaluate(`document.getElementById('pause').click()`)
+  await sleep(220)
+  const resumedState = await page.evaluate(`(async () => {
+    const stored = await chrome.storage.local.get('crazyagent.settings');
+    return {
+      pressed: document.getElementById('pause').getAttribute('aria-pressed'),
+      status: document.getElementById('status-text').textContent,
+      stored: stored['crazyagent.settings']?.paused,
+    };
+  })()`)
+  assert.deepEqual(resumedState, { pressed: 'false', status: 'Connected', stored: false })
+
+  // A dropped bridge ends the live turn instead of stranding a "Working…" clock
+  // or a /new draft whose sends would report a session that no longer exists.
+  await sendPrompt(page, 'Dropped bridge test.')
+  await type('/new')
+  await focusComposer()
+  await trustedKey('Enter')
+  assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('new-chat-draft')`), true)
+  assert.equal(await page.evaluate('window.__mockDrop()'), true)
+  await sleep(350)
+  const droppedState = await page.evaluate(`(() => ({
+    draft: document.querySelector('.app').classList.contains('new-chat-draft'),
+    runningSteps: document.querySelectorAll('.activity-step.running').length,
+    runningTurns: document.querySelectorAll('.agent-turn.running').length,
+    sendLabel: document.getElementById('send').getAttribute('aria-label'),
+    phase: document.getElementById('activity-phase').textContent,
+    timingLive: document.querySelectorAll('.timing-live').length,
+    timerHidden: document.getElementById('activity-timer').classList.contains('hidden'),
+    waitToast: /Wait for the running session/.test(document.getElementById('toast').textContent),
+  }))()`)
+  assert.deepEqual(droppedState, {
+    draft: false,
+    runningSteps: 0,
+    runningTurns: 0,
+    sendLabel: 'Send',
+    phase: 'Companion offline',
+    timingLive: 0,
+    timerHidden: true,
+    waitToast: false,
+  })
+  await sleep(2_700)
+  assert.equal(await page.evaluate('Boolean(window.__mockSocket)'), true, 'the panel must reconnect after a dropped bridge')
+  await batch(HELLO_FRAMES)
+  await sleep(350)
+  const reconnectedState = await page.evaluate(`(() => ({
+    draft: document.querySelector('.app').classList.contains('new-chat-draft'),
+    sendLabel: document.getElementById('send').getAttribute('aria-label'),
+    phase: document.getElementById('activity-phase').textContent,
+  }))()`)
+  assert.deepEqual(reconnectedState, { draft: false, sendLabel: 'Send', phase: 'Ready' })
 }
 
 async function main() {
@@ -608,7 +1098,9 @@ async function main() {
 
   await page.send('Page.navigate', { url: `chrome-extension://${extensionId}/sidepanel/index.html` })
   await sleep(1300)
-  await page.evaluate(`chrome.storage.local.set({ 'crazyagent.settings': ${JSON.stringify(settings)} })`)
+  // The background worker flags the one-time disclaimer on install/reload;
+  // clear it here so every scenario starts from an already-dismissed notice.
+  await page.evaluate(`chrome.storage.local.set({ 'crazyagent.settings': ${JSON.stringify(settings)}, 'crazyagent.disclaimerPending': false })`)
   await page.send('Page.reload')
   await sleep(1600)
   for (let i = 0; i < 40; i += 1) {
@@ -703,12 +1195,131 @@ async function main() {
     await sleep(400)
     await page.evaluate(`document.getElementById('settings').click()`)
     await sleep(300)
+    const settingsSections = await page.evaluate(`[...document.querySelectorAll('#settings-modal .settings-body > .settings-section > h3')].map(node => node.textContent)`)
+    assert.deepEqual(settingsSections, ['Model', 'Connection', 'Capture'], 'Settings should lead with the model info')
+    const settingsScroll = await page.evaluate(`(() => {
+      const body = document.querySelector('#settings-modal .settings-body');
+      const model = document.getElementById('model-label').getBoundingClientRect();
+      const frame = body.getBoundingClientRect();
+      return { scrollTop: body.scrollTop, modelTop: model.top, frameTop: frame.top, active: document.activeElement.id };
+    })()`)
+    assert.equal(settingsScroll.scrollTop, 0, 'Settings should open at the top')
+    assert.ok(settingsScroll.modelTop >= settingsScroll.frameTop, 'Model heading should be visible at the top of the settings body')
+    assert.equal(settingsScroll.active, 'setting-apikey', 'A configured setup should open focused on the model section')
     await shot('settings')
+    // The docked panel can be much shorter than this preview; opening settings
+    // must still land on the model section instead of auto-scrolling to the
+    // pairing token.
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 620, deviceScaleFactor: 2, mobile: false })
+    await sleep(200)
     await page.evaluate(`document.getElementById('settings-close').click()`)
+    await sleep(150)
+    assert.equal(
+      await page.evaluate(`document.activeElement.id`),
+      'input',
+      'closing settings must return focus to the composer',
+    )
+    await page.evaluate(`document.getElementById('settings').click()`)
+    await sleep(300)
+    const shortSettings = await page.evaluate(`(() => {
+      const body = document.querySelector('#settings-modal .settings-body');
+      const model = document.getElementById('model-label').getBoundingClientRect();
+      const frame = body.getBoundingClientRect();
+      return { scrollTop: body.scrollTop, modelTop: model.top, frameTop: frame.top };
+    })()`)
+    assert.equal(shortSettings.scrollTop, 0, 'Settings should not auto-scroll away from the model section on a short panel')
+    assert.ok(shortSettings.modelTop >= shortSettings.frameTop, 'Model heading should stay visible on a short panel')
+    await page.evaluate(`document.getElementById('settings-close').click()`)
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 940, deviceScaleFactor: 2, mobile: false })
     await sleep(200)
     await page.evaluate(`document.getElementById('debug-log').click()`)
     await sleep(300)
     await shot('debug-log')
+  } else if (SCENARIO === 'disclaimer') {
+    // The background worker flags the notice on extension install/reload. Set
+    // the flag directly so the preview shows exactly what a user sees, then
+    // verify the hands-off warning is the dominant block, it covers the whole
+    // panel, is cleared once, and stays gone when the panel is merely reopened.
+    const noticeState = () => page.evaluate(`(async () => {
+      const dialog = document.getElementById('disclaimer');
+      const rect = dialog.open ? dialog.getBoundingClientRect() : null;
+      const stored = await chrome.storage.local.get('crazyagent.disclaimerPending');
+      const warning = document.querySelector('.disclaimer-warning');
+      const copy = document.getElementById('disclaimer-copy');
+      const styles = el => {
+        const computed = getComputedStyle(el);
+        return {
+          fontSize: parseFloat(computed.fontSize),
+          fontWeight: Number(computed.fontWeight),
+          color: computed.color,
+          backgroundColor: computed.backgroundColor,
+          backgroundImage: computed.backgroundImage,
+          borderWidth: parseFloat(computed.borderTopWidth),
+        };
+      };
+      return {
+        open: dialog.open,
+        rect: rect && { width: rect.width, height: rect.height, left: rect.left, top: rect.top },
+        viewport: { width: innerWidth, height: innerHeight },
+        title: document.getElementById('disclaimer-title').textContent,
+        warning: warning.textContent.replace(/\\s+/g, ' ').trim(),
+        copy: copy.textContent,
+        warningStyles: styles(warning),
+        titleStyles: styles(document.getElementById('disclaimer-title')),
+        copyStyles: styles(copy),
+        warningBeforeCopy: Boolean(warning.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING),
+        warningAboveCopy: warning.getBoundingClientRect().bottom <= copy.getBoundingClientRect().top + 1,
+        describedBy: (dialog.getAttribute('aria-describedby') || '').split(/\\s+/),
+        focused: document.activeElement?.id,
+        pending: stored['crazyagent.disclaimerPending'],
+      };
+    })()`)
+    await page.evaluate(`chrome.storage.local.set({ 'crazyagent.disclaimerPending': true })`)
+    await page.send('Page.reload')
+    await sleep(1400)
+    const opened = await noticeState()
+    assert.equal(opened.open, true)
+    assert.deepEqual(opened.rect, { width: opened.viewport.width, height: opened.viewport.height, left: 0, top: 0 })
+    // The warning is the point of the notice: it must spell out the hands-off
+    // rule, and it must read as the dominant block ahead of the quiet copy.
+    assert.equal(opened.title, "Don't touch the browser")
+    assert.match(opened.warning, /while the agent is running/i)
+    assert.match(opened.warning, /don'?t touch the browser/i)
+    assert.match(opened.warning, /clicking, typing, scrolling, or switching tabs/i)
+    assert.match(opened.warning, /break the task/i)
+    assert.match(opened.copy, /unexpected/)
+    assert.ok(opened.describedBy.includes('disclaimer-warning-kicker'), 'the warning lead-in must be part of the dialog description')
+    assert.ok(opened.describedBy.includes('disclaimer-warning-copy'), 'the warning body must be part of the dialog description')
+    assert.ok(opened.describedBy.includes('disclaimer-copy'), 'the supporting copy must stay part of the dialog description')
+    assert.equal(opened.warningBeforeCopy, true, 'the warning must come before the supporting copy')
+    assert.equal(opened.warningAboveCopy, true, 'the warning must sit above the supporting copy')
+    assert.ok(opened.titleStyles.fontSize >= opened.copyStyles.fontSize * 1.5, 'the warning headline must dominate the supporting copy')
+    assert.ok(opened.titleStyles.fontWeight > opened.copyStyles.fontWeight, 'the warning headline must be heavier than the supporting copy')
+    assert.notEqual(opened.titleStyles.color, opened.copyStyles.color, 'the warning headline must use warning color')
+    assert.ok(opened.warningStyles.borderWidth > 0, 'the warning must own a bordered surface')
+    assert.notEqual(opened.warningStyles.backgroundColor, 'rgba(0, 0, 0, 0)', 'the warning surface must be filled')
+    assert.match(opened.warningStyles.backgroundImage, /gradient/, 'the warning surface must carry the warm gradient')
+    assert.equal(opened.focused, 'disclaimer-dismiss')
+    assert.equal(opened.pending, false, 'showing the notice must consume the pending flag')
+    assert.equal(await page.evaluate(`document.querySelectorAll('.modal:not(.hidden)').length`), 0)
+    await shot('full-screen')
+    // Escape is a second, non-button way out; it must not leave the notice stuck.
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await sleep(250)
+    assert.equal((await noticeState()).open, false)
+    assert.equal(
+      await page.evaluate(`document.activeElement.id`),
+      'input',
+      'dismissing the one-time notice must leave focus in the composer',
+    )
+    // Reopening the panel (page reload, same extension load) stays quiet.
+    await page.send('Page.reload')
+    await sleep(1400)
+    const reopened = await noticeState()
+    assert.equal(reopened.open, false)
+    assert.equal(reopened.pending, false)
+    assert.equal(await page.evaluate(`Boolean(window.__mockSocket)`), true)
   } else if (SCENARIO === 'interactions') {
     await page.evaluate(`window.__mockBatch(${JSON.stringify(HELLO_FRAMES)})`)
     await sleep(400)
@@ -768,10 +1379,16 @@ async function main() {
     await page.evaluate(`document.querySelectorAll('.model-menu-item')[1].click()`)
     const configured = await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1)`)
     assert.equal(configured.model, 'anthropic/claude-sonnet-4.5')
+    assert.equal(await page.evaluate(`document.activeElement.id`), 'input', 'selecting a model must return focus to the composer')
     await page.evaluate(`window.__mockReceive({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'auto' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })`)
     await page.evaluate(`document.getElementById('settings').click()`)
     await page.evaluate(`document.querySelector('[data-effort="high"]').click()`)
     await page.evaluate(`document.getElementById('settings-save').click()`)
+    assert.equal(
+      await page.evaluate(`document.activeElement.id`),
+      'input',
+      'saving settings must return focus to the composer',
+    )
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1).reasoningEffort`), 'high')
     await page.evaluate(`window.__mockReceive({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'high' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })`)
     await page.evaluate(`document.getElementById('debug-log').click()`)
@@ -781,10 +1398,116 @@ async function main() {
     await page.evaluate(`document.getElementById('log-copy-summary').click()`)
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'log.summary').length`), 1)
     await shot('debug-actions')
+  } else if (SCENARIO === 'recent') {
+    const { batch } = makePage(page)
+    await batch(HELLO_FRAMES)
+    await sleep(300)
+    for (const title of ['First task', 'Second task', 'Third task', 'Fourth task']) {
+      await sendPrompt(page, title)
+      await finishPrompt(page, `session-${title.toLowerCase().replaceAll(' ', '-')}`, `${title} complete`)
+      await page.evaluate(`document.getElementById('new-chat').click()`)
+      await sleep(180)
+    }
+    const recentTitles = () => page.evaluate(`[...document.querySelectorAll('.recent-session-title')].map(node => node.textContent)`)
+    assert.deepEqual(await recentTitles(), ['Fourth task', 'Third task', 'Second task'])
+    assert.equal(await page.evaluate(`document.querySelectorAll('.recent-session-open').length`), 3)
+    assert.equal(await page.evaluate(`document.getElementById('activity-empty').getClientRects().length > 0`), true)
+    await shot('three')
+    await page.evaluate(`document.querySelector('.recent-session-title').textContent = 'Fourth task ' + 'x'.repeat(240)`)
+    await setWidth(280)
+    const narrowLayout = await page.evaluate(`(() => Object.fromEntries(['#activity-empty', '#recent-sessions', '#recent-sessions-list', '.recent-session-open', '.recent-session-title', '#recent-sessions-all'].map(selector => {
+      const node = document.querySelector(selector);
+      const rect = node.getBoundingClientRect();
+      return [selector, { left: rect.left, right: rect.right, width: rect.width, clientWidth: node.clientWidth, scrollWidth: node.scrollWidth, overflowX: getComputedStyle(node).overflowX }];
+    })))()`)
+    for (const selector of ['#activity-empty', '#recent-sessions', '#recent-sessions-list', '.recent-session-open', '#recent-sessions-all']) {
+      const layout = narrowLayout[selector]
+      assert.ok(layout.left >= 0 && layout.right <= 280, `${selector} exceeds the 280px viewport: ${JSON.stringify(layout)}`)
+      assert.equal(layout.scrollWidth, layout.clientWidth, `${selector} scrolls horizontally: ${JSON.stringify(layout)}`)
+    }
+    assert.ok(narrowLayout['.recent-session-title'].scrollWidth > narrowLayout['.recent-session-title'].clientWidth, 'long title should truncate instead of widening the list')
+    await shot('narrow')
+    await setWidth(420)
+
+    await page.evaluate(`document.getElementById('recent-sessions-all').click()`)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.history-item').length`), 4)
+    await page.evaluate(`document.getElementById('history-close').click()`)
+    await page.evaluate(`document.querySelector('.recent-session-open').click()`)
+    await sleep(180)
+    assert.equal(await page.evaluate(`document.querySelector('.turn-prompt').textContent`), 'Fourth task')
+    assert.equal(await page.evaluate(`document.getElementById('activity-empty').getClientRects().length`), 0)
+    const backLayout = await page.evaluate(`(() => {
+      const button = document.getElementById('back-home');
+      const rect = button.getBoundingClientRect();
+      return {
+        visible: button.getClientRects().length > 0,
+        width: rect.width,
+        height: rect.height,
+        bottom: rect.bottom,
+        radius: getComputedStyle(button).borderRadius,
+        firstTurnTop: document.querySelector('.activity-turn').getBoundingClientRect().top,
+      };
+    })()`)
+    assert.equal(backLayout.visible, true)
+    assert.equal(backLayout.width, 36)
+    assert.equal(backLayout.height, 36)
+    assert.equal(backLayout.radius, '50%')
+    assert.ok(backLayout.firstTurnTop >= backLayout.bottom, 'back button must not cover the first message')
+    await shot('chat')
+    await page.evaluate(`document.getElementById('back-home').click()`)
+    await sleep(180)
+    assert.equal(await page.evaluate(`document.getElementById('back-home').getClientRects().length`), 0)
+    assert.equal(await page.evaluate(`document.getElementById('activity-empty').getClientRects().length > 0`), true)
+
+    await sendPrompt(page, 'Keep this task running')
+    assert.equal(await page.evaluate(`document.getElementById('back-home').getClientRects().length > 0`), true)
+    const newChatsBeforeDraft = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`)
+    await page.evaluate(`document.getElementById('back-home').click()`)
+    await sleep(180)
+    assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`), newChatsBeforeDraft)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.activity-turn').length`), 1)
+    assert.equal(await page.evaluate(`document.getElementById('back-home').getClientRects().length`), 0)
+    assert.equal(await page.evaluate(`document.getElementById('activity-empty').getClientRects().length > 0`), true)
+    assert.deepEqual(await recentTitles(), ['Keep this task running', 'Fourth task', 'Third task'])
+    assert.equal(await page.evaluate(`document.querySelectorAll('.recent-session-open.running').length`), 1)
+    assert.equal(await page.evaluate(`document.querySelector('.recent-session-running').textContent`), 'Running')
+    const spinnerStyle = await page.evaluate(`(() => {
+      const style = getComputedStyle(document.querySelector('.recent-session-spinner'));
+      return { color: style.borderTopColor, animation: style.animationName };
+    })()`)
+    assert.deepEqual(spinnerStyle, { color: 'rgb(255, 195, 0)', animation: 'recent-session-spin' })
+    await setWidth(280)
+    const runningLayout = await page.evaluate(`(() => {
+      const empty = document.getElementById('activity-empty');
+      const row = document.querySelector('.recent-session-open.running');
+      return { clientWidth: empty.clientWidth, scrollWidth: empty.scrollWidth, rowRight: row.getBoundingClientRect().right };
+    })()`)
+    assert.equal(runningLayout.scrollWidth, runningLayout.clientWidth)
+    assert.ok(runningLayout.rowRight <= 280)
+    await shot('running')
+    await setWidth(420)
+
+    await page.evaluate(`document.querySelector('.recent-session-open.running').click()`)
+    await sleep(180)
+    assert.equal(await page.evaluate(`document.getElementById('activity-empty').getClientRects().length`), 0)
+    assert.equal(await page.evaluate(`document.querySelector('.turn-prompt').textContent`), 'Keep this task running')
+    assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`), newChatsBeforeDraft)
+
+    await page.evaluate(`document.getElementById('new-chat').click()`)
+    await sleep(180)
+    await finishPrompt(page, 'session-running', 'Running task complete')
+    assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`), newChatsBeforeDraft + 1)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.activity-turn').length`), 0)
+    assert.equal(await page.evaluate(`document.getElementById('activity-empty').getClientRects().length > 0`), true)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.recent-session-open.running, .recent-session-spinner').length`), 0)
+    assert.deepEqual(await recentTitles(), ['Keep this task running', 'Fourth task', 'Third task'])
+    await shot('finished')
   } else if (SCENARIO === 'queue') {
     await playQueueScenario(page, shot)
   } else if (SCENARIO === 'composer') {
     await playComposerScenario(page, shot)
+  } else if (SCENARIO === 'slash') {
+    await playSlashScenario(page, shot)
   } else {
     await playTurn(page)
     await sleep(400)

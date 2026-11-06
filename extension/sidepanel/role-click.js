@@ -5,6 +5,17 @@ const ROLE_CLICK_FINAL_QUIET_MS = 100
 const ROLE_CLICK_NAVIGATION_LOAD_MS = 2_000
 const ROLE_CLICK_INPUT_SETTLE_MS = 250
 const ROLE_CLICK_SNAPSHOT_MS = 4_000
+// Attaching chrome.debugger shows Chrome's "debugging this browser" infobar,
+// which shrinks the page viewport by its height (measured 768 -> 721 CSS px at
+// dpr 2). Coordinates resolved before that resize are a few pixels off, so the
+// role-click flow resolves inside the debugger lease and waits (bounded) for the
+// viewport to stop changing first.
+const ROLE_CLICK_VIEWPORT_SAMPLE_GAP_MS = 60
+const ROLE_CLICK_VIEWPORT_SETTLE_MS = 500
+// The step deadline checks inside the operation are authoritative; the bounded
+// race is only a hang safety net. The small grace lets the precise resolution or
+// input phase report first instead of the generic outer timeout.
+const ROLE_CLICK_BOUNDED_GRACE_MS = 400
 
 export const ROLE_CLICK_ROLES = Object.freeze([
   'button',
@@ -289,6 +300,38 @@ export function roleClickProbe(request) {
       message: error instanceof Error ? error.message : String(error),
     }
   }
+}
+
+/**
+ * Serialized into the top frame. Sample the layout viewport twice, a frame
+ * apart, so the caller can tell a settled page surface from one that is still
+ * being resized by Chrome's debugging infobar or a page animation. Self-contained.
+ */
+export function roleClickViewportStabilityProbe() {
+  const sample = () => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+    clientWidth: document.documentElement?.clientWidth ?? 0,
+    clientHeight: document.documentElement?.clientHeight ?? 0,
+  })
+  const first = sample()
+  return new Promise(resolve => {
+    let finished = false
+    const finish = () => {
+      if (finished) return
+      finished = true
+      clearTimeout(timer)
+      const second = sample()
+      resolve({
+        first,
+        second,
+        stable: first.width === second.width && first.height === second.height
+          && first.clientWidth === second.clientWidth && first.clientHeight === second.clientHeight,
+      })
+    }
+    const timer = setTimeout(finish, 80)
+    requestAnimationFrame(() => requestAnimationFrame(finish))
+  })
 }
 
 /** Verify one source-marked iframe in the actual owning chain at its local point. */
@@ -621,19 +664,71 @@ async function roleRevalidateCandidate(context, before, step, next, deadlineStep
   return true
 }
 
+/**
+ * Read one viewport-stability sample from the top frame. The probe samples
+ * twice a frame apart; `stable` is false while a resize is still settling.
+ */
+async function roleSampleViewport(context, deadlineStep) {
+  roleRemaining(context, deadlineStep)
+  let sample
+  try {
+    sample = await context.driver.runInFrame(
+      context.tab.id,
+      0,
+      roleClickViewportStabilityProbe,
+      [],
+      Math.max(1, roleRemaining(context, deadlineStep)),
+    )
+  } catch (error) {
+    throw roleDriverError('ROLE_CLICK_VIEWPORT', error)
+  }
+  if (!sample || typeof sample !== 'object' || !sample.first || !sample.second || typeof sample.stable !== 'boolean') {
+    throw roleFailure('ROLE_CLICK_VIEWPORT', 'The viewport stability probe returned no usable result')
+  }
+  return sample
+}
+
+/**
+ * Wait (bounded) for the page viewport to stop changing after entering a
+ * debugger lease. Chrome's debugging infobar resizes the page on attach, and a
+ * target resolved in the old geometry would trip the post-hover guard even
+ * though nothing moved. A viewport that keeps changing past the bound is not
+ * fatal: the target is still resolved inside the lease and the post-hover
+ * revalidation still refuses genuine movement.
+ */
+async function roleWaitForViewportStability(context, deadlineStep) {
+  const bound = Math.min(context.deadline, deadlineStep.deadline, roleNow(context) + ROLE_CLICK_VIEWPORT_SETTLE_MS)
+  let sample = await roleSampleViewport(context, deadlineStep)
+  for (;;) {
+    if (sample.stable) return sample
+    const remaining = bound - roleNow(context)
+    if (remaining <= 0) return sample
+    await context.driver.sleep(Math.min(ROLE_CLICK_VIEWPORT_SAMPLE_GAP_MS, remaining))
+    roleRemaining(context, deadlineStep)
+    sample = await roleSampleViewport(context, deadlineStep)
+  }
+}
+
 async function roleWaitForTarget(context, step, next, deadlineStep) {
+  const notFound = () => roleFailure('ROLE_CLICK_NOT_FOUND', `No visible ${step.role} named ${JSON.stringify(step.name)} appeared within 3s`)
   const wait = async () => {
     for (;;) {
-      await roleAssertStable(context)
-      roleRemaining(context, deadlineStep)
-      const found = await roleProbeFrames(context, step, next, deadlineStep)
-      if (found.url !== context.initialUrl) {
-        throw roleFailure('ROLE_CLICK_STALE_NAVIGATION', 'The top frame URL changed during target resolution', { navigated: true })
-      }
-      const candidate = await roleUsableCandidate(context, found, step, deadlineStep)
-      if (candidate) return { ...found, candidate }
-      if (roleNow(context) >= Math.min(context.deadline, deadlineStep.deadline)) {
-        throw roleFailure('ROLE_CLICK_NOT_FOUND', `No visible ${step.role} named ${JSON.stringify(step.name)} appeared within 3s`)
+      // A search that runs out of its step budget is a not-found answer, not a
+      // generic step timeout: no input was dispatched while resolving.
+      if (roleNow(context) >= Math.min(context.deadline, deadlineStep.deadline)) throw notFound()
+      try {
+        await roleAssertStable(context)
+        roleRemaining(context, deadlineStep)
+        const found = await roleProbeFrames(context, step, next, deadlineStep)
+        if (found.url !== context.initialUrl) {
+          throw roleFailure('ROLE_CLICK_STALE_NAVIGATION', 'The top frame URL changed during target resolution', { navigated: true })
+        }
+        const candidate = await roleUsableCandidate(context, found, step, deadlineStep)
+        if (candidate) return { ...found, candidate }
+        if (roleNow(context) >= Math.min(context.deadline, deadlineStep.deadline)) throw notFound()
+      } catch (error) {
+        if (error?.code === 'ROLE_CLICK_STEP_TIMEOUT' || error?.code === 'ROLE_CLICK_DEADLINE') throw notFound()
+        throw error
       }
       await context.driver.sleep(Math.min(ROLE_CLICK_POLL_MS, roleRemaining(context, deadlineStep)))
     }
@@ -642,7 +737,7 @@ async function roleWaitForTarget(context, step, next, deadlineStep) {
     wait(),
     roleRemaining(context, deadlineStep),
     () => { deadlineStep.cancelled = true },
-    roleFailure('ROLE_CLICK_NOT_FOUND', `No visible ${step.role} named ${JSON.stringify(step.name)} appeared within 3s`),
+    notFound(),
   )
 }
 
@@ -720,11 +815,18 @@ async function roleClickStep(context, path, index, deadlineStep, attempt) {
   const step = path[index]
   const next = index < path.length - 1 ? path[index + 1] : undefined
   const final = index === path.length - 1
-  const before = await roleWaitForTarget(context, step, next, deadlineStep)
-  await roleAssertStable(context)
-  roleRemaining(context, deadlineStep)
+  // The target is resolved inside the same debugger lease as the press: the
+  // first attach shows Chrome's debugging infobar, which resizes the page
+  // viewport. Resolving before the lease would measure the old geometry and the
+  // post-hover guard would then refuse the press with ROLE_CLICK_STALE_TARGET
+  // even though the user's page did not move. Genuine post-hover reflow is still
+  // refused by the same guard.
+  let before
   try {
     await context.driver.withDebugger(context.tab.id, async () => {
+      await roleWaitForViewportStability(context, deadlineStep)
+      before = await roleWaitForTarget(context, step, next, deadlineStep)
+      await roleAssertStable(context)
       roleRemaining(context, deadlineStep)
       attempt.inputPending = true
       try {
@@ -831,7 +933,7 @@ async function roleClickMain(context, path) {
       const remaining = Math.min(ROLE_CLICK_STEP_MS, roleRemaining(context))
       const outcome = await roleBounded(
         roleClickStep(context, path, index, deadlineStep, attempt),
-        remaining,
+        Math.min(ROLE_CLICK_STEP_MS + ROLE_CLICK_BOUNDED_GRACE_MS, remaining + ROLE_CLICK_BOUNDED_GRACE_MS),
         () => { deadlineStep.cancelled = true },
         roleFailure('ROLE_CLICK_STEP_TIMEOUT', `Path step ${index + 1} exceeded its 3s deadline`, { index }),
         attempt,

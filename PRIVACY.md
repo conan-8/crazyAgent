@@ -42,6 +42,14 @@ Clipboard contents returned to the model are provider-bound like other tool resu
 
 `browser_places` reads new-tab shortcuts, bookmarks, and recent history only when explicitly called. It returns bounded HTTP(S) results and has no write/delete operation. There is no startup sync, automatic history attachment, background read, or separate persistent copy. Returned titles, URLs, and visit metadata enter the model conversation and local debug logs.
 
+## Downloads and uploads
+
+`browser_download` saves direct URLs/links or labelled Download controls through Chrome with unique names, waits for completion, and verifies the saved regular file. `browser_downloads` lists regular filenames, sizes, and modification times newest first, including bounded subfolders, with optional normalized search; it does not read file bytes. `browser_upload` accepts an exact relative filename only when its real path remains inside the configured Downloads folder (default `$HOME/Downloads`). Absolute paths, parent traversal, directories, and symlinks escaping that folder are refused. Uploads attach to labelled, named, or indexed file inputs, including hidden inputs, open shadow roots, and same-origin accessible frames; site-isolated cross-origin frames fail closed with `UPLOAD_FRAME_UNSUPPORTED`.
+
+The companion checks file metadata; it does not send local file bytes to the model provider. Filenames, sizes, source URLs, target metadata, and local paths in tool arguments/results may enter the model conversation and debug logs. Chrome reads the file for attachment, and the destination site receives its contents when the page submits them. Input name/size readback proves attachment, not submission or server persistence.
+
+The extension cannot change Chrome's download directory. Point Chrome's download location at the confined folder (default `$HOME/Downloads`) and disable "Ask where to save"; set `CRAZYAGENT_DOWNLOADS_DIR` to that same absolute path before starting the companion to select a different folder. Test fixtures use isolated temporary folders and browser profiles.
+
 ## Local storage
 
 Generated state is under ignored `.dsh-home/`:
@@ -71,18 +79,19 @@ The side-panel export dialog can omit screenshots and the raw DSH session. Bundl
 ## Permissions
 
 - `sidePanel`, `tabs`, `scripting`, `storage` — panel UI, active-tab operations, and local settings.
-- `debugger`, `webNavigation` — trusted surface input, coordinate mapping, and frame ownership.
+- `debugger`, `webNavigation` — trusted surface input, coordinate mapping, frame ownership, and file-input assignment.
+- `downloads` — explicit direct-URL/link downloads and completion/path inspection.
 - `clipboardRead`, `clipboardWrite` — explicit system clipboard operations and temporary virtual-image staging/restoration.
 - `topSites`, `bookmarks`, `history` — explicit read-only `browser_places` lookups.
 - `<all_urls>` — capture and script sites visited by the user; this does not imply continuous reading of every page.
 
 ## Controls
 
-- **Pause** rejects browser commands without ending the chat.
+- **Pause/Resume** (composer toggle, persisted with the other settings) rejects browser commands with `PAUSED` without ending the chat.
 - Disable **Attach a fresh view to every message** to turn off auto-view; explicit screenshot tools remain available.
 - Closing the side panel disconnects browser execution.
 - Uninstalling the extension clears its extension storage.
 - `npm run clean -- --yes` deletes `.dsh-home`, including sessions, attachments, logs, token, and remembered key; run `npm run setup` afterward.
 - Incognito and `file://` access require explicit browser permission and may still be restricted.
 
-Clicking, typing, navigation, semantic table edits, and Docs operations can change real pages and documents. Page text is treated as untrusted instructions, but that does not make hostile pages safe. Protected-page errors and process isolation limit access; they do not replace careful use.
+Clicking, typing, navigation, semantic table edits, Docs operations, downloads, and uploads can change real pages, documents, your Downloads folder, and destination sites. Page text is treated as untrusted instructions, but that does not make hostile pages safe. Protected-page errors, Downloads confinement, and process isolation limit access; they do not replace careful use.

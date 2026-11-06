@@ -41,11 +41,13 @@ function validateValue(value, label) {
 }
 
 function validateFormat(edit, index) {
-  checkKeys(edit, ['row', 'column', ...DOCS_TABLE_FORMAT_ATTRIBUTES], `edits[${index}]`)
+  checkKeys(edit, ['row', 'column', ...DOCS_TABLE_FORMAT_ATTRIBUTES, 'cell_background'], `edits[${index}]`)
   if (edit.row !== undefined) boundedIndex(edit.row, DOCS_TABLE_MAX_ROWS, `edits[${index}].row`)
   if (edit.column !== undefined) boundedIndex(edit.column, DOCS_TABLE_MAX_COLUMNS, `edits[${index}].column`)
   const attributes = DOCS_TABLE_FORMAT_ATTRIBUTES.filter(attribute => edit[attribute] !== undefined)
-  if (attributes.length === 0) throw tableFailure('DOCS_TABLE_BAD_FORMAT', `edits[${index}] requires at least one formatting attribute`)
+  const background = edit.cell_background !== undefined
+  if (attributes.length === 0 && !background) throw tableFailure('DOCS_TABLE_BAD_FORMAT', `edits[${index}] requires at least one formatting attribute`)
+  if (background && attributes.length > 0) throw tableFailure('DOCS_TABLE_BAD_FORMAT', `edits[${index}].cell_background requires a dedicated format call without text attributes`)
   if (edit.paragraph_style !== undefined && !DOCS_TABLE_PARAGRAPH_STYLES.includes(edit.paragraph_style)) {
     throw tableFailure('DOCS_TABLE_BAD_FORMAT', `edits[${index}].paragraph_style is unsupported`)
   }
@@ -64,6 +66,9 @@ function validateFormat(edit, index) {
   if (edit.highlight !== undefined && (typeof edit.highlight !== 'string' || edit.highlight !== 'none' && !/^#[0-9a-f]{6}$/iu.test(edit.highlight))) {
     throw tableFailure('DOCS_TABLE_BAD_FORMAT', `edits[${index}].highlight must be "none" or a six-digit hex color`)
   }
+  if (background && (typeof edit.cell_background !== 'string' || !/^#[0-9a-f]{6}$/iu.test(edit.cell_background))) {
+    throw tableFailure('DOCS_TABLE_BAD_FORMAT', `edits[${index}].cell_background must be a six-digit hex color`)
+  }
   return {
     ...edit.row === undefined ? {} : { row: edit.row },
     ...edit.column === undefined ? {} : { column: edit.column },
@@ -71,10 +76,15 @@ function validateFormat(edit, index) {
       attribute === 'font' ? edit.font.trim()
         : attribute === 'color' || attribute === 'highlight' && edit.highlight !== 'none' ? edit[attribute].toLowerCase()
           : edit[attribute]])),
+    ...background ? { cell_background: edit.cell_background.toLowerCase() } : {},
   }
 }
 
 export function parseDocsTableArgs(args = {}) {
+  if (args?.action === 'table' && typeof args.tableAction === 'string') {
+    const { tableAction, ...rest } = args
+    args = { ...rest, action: tableAction }
+  }
   checkKeys(args, ['action', 'table', 'rows', 'columns', 'values', 'edits', 'row', 'column', 'position', 'count'], 'browser_docs_table')
   if (typeof args.action !== 'string') throw tableFailure('DOCS_TABLE_BAD_ACTION', 'action is required')
   optionalTable(args)
@@ -115,7 +125,11 @@ export function parseDocsTableArgs(args = {}) {
     case 'format': {
       if (Object.keys(args).some(key => !['action', 'table', 'edits'].includes(key))) throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', 'format accepts only action, table, and edits')
       if (!Array.isArray(args.edits) || args.edits.length < 1 || args.edits.length > DOCS_TABLE_MAX_FORMATS) throw tableFailure('DOCS_TABLE_BAD_EDITS', `format requires 1 to ${DOCS_TABLE_MAX_FORMATS} edits`)
-      return { action: 'format', table: args.table, edits: args.edits.map(validateFormat) }
+      const edits = args.edits.map(validateFormat)
+      if (edits.some(edit => edit.cell_background !== undefined) && edits.some(edit => edit.cell_background === undefined)) {
+        throw tableFailure('DOCS_TABLE_BAD_FORMAT', 'cell_background requires a dedicated format call without text-formatting edits')
+      }
+      return { action: 'format', table: args.table, edits }
     }
     case 'insert_rows':
     case 'insert_columns': {
@@ -136,6 +150,17 @@ export function parseDocsTableArgs(args = {}) {
       if (new Set(values).size !== values.length) throw tableFailure('DOCS_TABLE_DUPLICATE_TARGET', `${key} contains a duplicate index`)
       return { action: args.action, table: args.table, [key]: values }
     }
+    case 'merge':
+      if (Object.keys(args).some(key => !['action', 'table', 'row', 'column', 'count'].includes(key))) throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', 'merge accepts only action, table, row, column, and count')
+      boundedIndex(args.row, DOCS_TABLE_MAX_ROWS, 'row')
+      boundedIndex(args.column, DOCS_TABLE_MAX_COLUMNS, 'column')
+      if (args.count !== undefined && args.count !== 2) throw tableFailure('DOCS_TABLE_BAD_INDEX', 'merge currently requires exactly two horizontal cells')
+      return { action: 'merge', table: args.table, row: args.row, column: args.column, count: 2 }
+    case 'unmerge':
+      if (Object.keys(args).some(key => !['action', 'table', 'row', 'column'].includes(key))) throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', 'unmerge accepts only action, table, row, and column')
+      boundedIndex(args.row, DOCS_TABLE_MAX_ROWS, 'row')
+      boundedIndex(args.column, DOCS_TABLE_MAX_COLUMNS, 'column')
+      return { action: 'unmerge', table: args.table, row: args.row, column: args.column }
     case 'delete_table':
       if (Object.keys(args).some(key => !['action', 'table'].includes(key))) throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', 'delete_table accepts only action and table')
       return { action: 'delete_table', table: args.table }
@@ -177,6 +202,7 @@ export function publicDocsTable(table) {
       rowspan: cell.rowspan,
       colspan: cell.colspan,
       paragraphs: cell.paragraphs.length,
+      background: cell.background ?? 'none',
     }))),
   }
 }
@@ -255,11 +281,43 @@ export function planDocsTableWrite(table, edits) {
 
 export function docsTableCellPlan(blocks, table, row, column) {
   const cell = cellAt(table, row, column)
-  if (cell.paragraphs.length !== 1 || !cell.paragraphs[0].text) throw tableFailure('DOCS_TABLE_UNMAPPABLE', 'The requested cell has no single non-empty text paragraph')
+  const paragraphIndex = cell.paragraphs.findLastIndex(paragraph => paragraph.text)
+  if (paragraphIndex < 0) throw tableFailure('DOCS_TABLE_UNMAPPABLE', 'The requested cell has no non-empty text paragraph')
   const entries = docsParagraphEntries(blocks)
-  const entry = entries.find(item => item.tableIndex === table.index && item.rowIndex === row - 1 && item.columnIndex === column - 1 && item.paragraphIndex === 0)
+  const entry = entries.find(item => item.tableIndex === table.index && item.rowIndex === row - 1 && item.columnIndex === column - 1 && item.paragraphIndex === paragraphIndex)
   if (!entry) throw tableFailure('DOCS_TABLE_UNMAPPABLE', 'The requested cell is missing from the flattened document export')
   return { ...docsTableFindPlan(entries, entry), cell }
+}
+
+export function docsTableCellBackgroundEdits(blocks, table, requests) {
+  const edits = []
+  const targets = []
+  const seen = new Set()
+  for (const [requestIndex, request] of requests.entries()) {
+    const cells = []
+    for (const [rowIndex, row] of table.rows.entries()) {
+      if (request.row !== undefined && request.row !== rowIndex + 1) continue
+      for (const [columnIndex, cell] of row.entries()) {
+        if (request.column !== undefined && request.column !== columnIndex + 1) continue
+        cells.push({ rowIndex, columnIndex, cell })
+      }
+    }
+    if (cells.length === 0) throw tableFailure('DOCS_TABLE_TARGET_NOT_FOUND', `edits[${requestIndex}] does not match any table cells`)
+    for (const { rowIndex, columnIndex } of cells) {
+      const key = `${rowIndex}:${columnIndex}`
+      if (seen.has(key)) throw tableFailure('DOCS_TABLE_DUPLICATE_TARGET', `edits[${requestIndex}] overlaps an earlier cell-background target`)
+      seen.add(key)
+      edits.push({
+        row: rowIndex + 1,
+        column: columnIndex + 1,
+        value: requests[requestIndex].cell_background,
+        plan: docsTableCellPlan(blocks, table, rowIndex + 1, columnIndex + 1),
+      })
+      targets.push({ requestIndex, row: rowIndex + 1, column: columnIndex + 1 })
+    }
+  }
+  if (edits.length > DOCS_TABLE_MAX_FORMATS) throw tableFailure('DOCS_TABLE_BAD_EDITS', `The requested regions expand to ${edits.length} cells; the limit is ${DOCS_TABLE_MAX_FORMATS}`)
+  return { edits, targets }
 }
 
 export function docsTableNavigationPlan(blocks, table, row, column) {
@@ -351,7 +409,7 @@ function escapeHtml(value) {
 
 export function docsTableCreateHtml(request) {
   const values = request.values ?? Array.from({ length: request.rows }, () => Array(request.columns).fill(''))
-  const rows = values.map(row => `<tr>${row.map(value => `<td style="border:1px solid #000000;padding:5px;vertical-align:top"><p>${escapeHtml(value)}</p></td>`).join('')}</tr>`).join('')
+  const rows = values.map(row => `<tr>${row.map(value => `<td style="border:1px solid #000000;padding:5px;vertical-align:top"><p style="margin:0;padding:0">${escapeHtml(value)}</p></td>`).join('')}</tr>`).join('')
   return {
     html: `<table style="border-collapse:collapse;width:100%"><tbody>${rows}</tbody></table>`,
     text: values.map(row => row.join('\t')).join('\n'),
@@ -368,6 +426,20 @@ function sameOutside(baseline, final, tableIndex) {
 
 function verificationError(code, message, details = {}) {
   return { ok: false, code, message, ...details }
+}
+
+export function verifyDocsTableCellBackground(baseline, final, tableIndex, edit) {
+  if (!sameOutside(baseline, final, tableIndex)) return verificationError('DOCS_TABLE_COLLATERAL', 'Content outside the target table changed unexpectedly')
+  const before = selectDocsTable(baseline, tableIndex)
+  const after = selectDocsTable(final, tableIndex)
+  const actual = after.rows[edit.row - 1]?.[edit.column - 1]
+  if (actual?.background !== edit.value) {
+    return verificationError('DOCS_TABLE_VERIFY_FAILED', `Cell background readback was ${JSON.stringify(actual?.background)} instead of ${JSON.stringify(edit.value)}`, { actual: actual?.background })
+  }
+  const expected = structuredClone(before)
+  expected.rows[edit.row - 1][edit.column - 1].background = edit.value
+  if (JSON.stringify(expected) !== JSON.stringify(after)) return verificationError('DOCS_TABLE_COLLATERAL', `Cell background formatting changed content or formatting outside row ${edit.row}, column ${edit.column}`)
+  return { ok: true }
 }
 
 export function verifyDocsTableWrite(baseline, final, tableIndex, edit) {
@@ -434,6 +506,122 @@ export function verifyDocsTableStructure(baseline, final, tableIndex, spec) {
   return { ok: true }
 }
 
+function verifyUnchangedTableCells(before, after, rowIndex, replacements, prefixCount, shiftAfter) {
+  if (before.rows.length !== after.rows.length) return verificationError('DOCS_TABLE_COLLATERAL', 'The table row count changed during a merge operation')
+  for (const [currentRow, row] of before.rows.entries()) {
+    if (currentRow === rowIndex) continue
+    if (JSON.stringify(row) !== JSON.stringify(after.rows[currentRow])) {
+      return verificationError('DOCS_TABLE_COLLATERAL', `Non-target row ${currentRow + 1} changed during a merge operation`)
+    }
+  }
+  for (const [columnIndex, wanted] of replacements.entries()) {
+    const actualColumn = columnIndex < prefixCount ? columnIndex : columnIndex + shiftAfter
+    if (JSON.stringify(wanted) !== JSON.stringify(after.rows[rowIndex]?.[actualColumn])) {
+      return verificationError('DOCS_TABLE_COLLATERAL', `Non-target cell in row ${rowIndex + 1}, column ${actualColumn + 1} changed during a merge operation`)
+    }
+  }
+  return { ok: true }
+}
+
+export function verifyDocsTableMerge(baseline, final, tableIndex, spec) {
+  if (!sameOutside(baseline, final, tableIndex)) return verificationError('DOCS_TABLE_COLLATERAL', 'Content outside the target table changed unexpectedly')
+  const before = selectDocsTable(baseline, tableIndex)
+  const after = selectDocsTable(final, tableIndex)
+  const rowIndex = spec.row - 1
+  const columnIndex = spec.column - 1
+  const row = before.rows[rowIndex]
+  const cells = row?.slice(columnIndex, columnIndex + spec.count) ?? []
+  if (cells.length !== spec.count || cells.some(cell => cell.colspan !== 1 || cell.rowspan !== 1)) return verificationError('DOCS_TABLE_MERGED_UNSUPPORTED', 'The merge targets are not two adjacent unmerged cells')
+  const actualRow = after.rows[rowIndex]
+  if (actualRow?.length !== row.length - spec.count + 1) return verificationError('DOCS_TABLE_VERIFY_FAILED', `Expected ${row.length - spec.count + 1} cells after merging, found ${actualRow?.length ?? 0}`)
+  const merged = actualRow[columnIndex]
+  const expectedText = cells.map(cell => cell.text).join('\n').replace(/\n+$/u, '')
+  if (!merged || merged.colspan !== spec.count || merged.rowspan !== 1 || merged.text !== expectedText) {
+    return verificationError('DOCS_TABLE_VERIFY_FAILED', `Merged cell did not have the requested span ${spec.count} and combined text`, { actual: merged?.text })
+  }
+  const replacements = [...row.slice(0, columnIndex), ...row.slice(columnIndex + spec.count)]
+  return verifyUnchangedTableCells(before, after, rowIndex, replacements, columnIndex, 1)
+}
+
+function mergedCellLocations(table) {
+  const merged = []
+  for (const [rowIndex, row] of table.rows.entries()) {
+    for (const [columnIndex, cell] of row.entries()) {
+      if (!cell || cell.rowspan !== 1 || cell.colspan !== 1) merged.push({ rowIndex, columnIndex, cell })
+    }
+  }
+  return merged
+}
+
+/**
+ * The only merged-cell structural edit the executor supports is unmerging
+ * exactly one horizontal two-cell merge inside an otherwise unmerged,
+ * visually rectangular table. Cell addressing is array-index based, so any
+ * other merge, rowspan, or ragged row would let a request resolve to a
+ * different visual cell; those shapes fail closed before a command is sent.
+ */
+function unmergeShapeProblem(table, row, column) {
+  if (!table.rows[row - 1]) return { code: 'DOCS_TABLE_TARGET_NOT_FOUND', message: `Row ${row} does not exist` }
+  const columns = docsTableColumns(table)
+  if (columns < 2 || table.rows.some(item => item.reduce((sum, cell) => sum + cell.colspan, 0) !== columns)) {
+    return { code: 'DOCS_TABLE_MERGED_UNSUPPORTED', message: 'unmerge requires a visibly rectangular table; ragged rows and vertical (rowspan>1) merges are unsupported; no table command was sent' }
+  }
+  const merged = mergedCellLocations(table)
+  if (merged.length !== 1) {
+    return { code: 'DOCS_TABLE_MERGED_UNSUPPORTED', message: `unmerge supports exactly one horizontal two-cell merge in an otherwise unmerged table; found ${merged.length} merged region(s); no table command was sent` }
+  }
+  const [target] = merged
+  if (target.cell.rowspan !== 1 || target.cell.colspan !== 2) {
+    return { code: 'DOCS_TABLE_MERGED_UNSUPPORTED', message: `unmerge supports exactly one rowspan=1, colspan=2 horizontal merge; the only merge spans ${target.cell.rowspan} row(s) by ${target.cell.colspan} column(s); no table command was sent` }
+  }
+  if (target.rowIndex !== row - 1 || target.columnIndex !== column - 1) {
+    return { code: 'DOCS_TABLE_TARGET_NOT_FOUND', message: `Row ${row}, column ${column} does not address the only merged cell (row ${target.rowIndex + 1}, column ${target.columnIndex + 1}); no table command was sent` }
+  }
+  const visualColumn = table.rows[row - 1].slice(0, column - 1).reduce((sum, cell) => sum + cell.colspan, 0) + 1
+  if (visualColumn !== column) {
+    return { code: 'DOCS_TABLE_MERGED_UNSUPPORTED', message: `Row ${row}, column ${column} maps to visual column ${visualColumn}; an unambiguous single horizontal merge is required; no table command was sent` }
+  }
+  return undefined
+}
+
+export function verifyDocsTableUnmerge(baseline, final, tableIndex, spec) {
+  if (!sameOutside(baseline, final, tableIndex)) return verificationError('DOCS_TABLE_COLLATERAL', 'Content outside the target table changed unexpectedly')
+  const before = selectDocsTable(baseline, tableIndex)
+  const after = selectDocsTable(final, tableIndex)
+  const problem = unmergeShapeProblem(before, spec.row, spec.column)
+  if (problem) return verificationError(problem.code, problem.message)
+  const rowIndex = spec.row - 1
+  const columnIndex = spec.column - 1
+  const row = before.rows[rowIndex]
+  const target = row[columnIndex]
+  if (before.rows.length !== after.rows.length) return verificationError('DOCS_TABLE_VERIFY_FAILED', 'The table row count changed while unmerging a cell')
+  if (docsTableColumns(before) !== docsTableColumns(after)) return verificationError('DOCS_TABLE_VERIFY_FAILED', 'The table column span changed while unmerging a cell')
+  if (after.rows.some(item => item.some(cell => cell.rowspan !== 1 || cell.colspan !== 1))) {
+    return verificationError('DOCS_TABLE_VERIFY_FAILED', 'The unmerged table still contains a merged cell')
+  }
+  const actualRow = after.rows[rowIndex]
+  if (actualRow?.length !== row.length + 1) return verificationError('DOCS_TABLE_VERIFY_FAILED', `Expected ${row.length + 1} cells after unmerging, found ${actualRow?.length ?? 0}`)
+  const first = actualRow[columnIndex]
+  if (!first || first.colspan !== 1 || first.rowspan !== 1 || first.text !== target.text) {
+    return verificationError('DOCS_TABLE_VERIFY_FAILED', 'The unmerged content cell did not preserve the original text and shape', { actual: first?.text })
+  }
+  if (!emptyCellMatches(actualRow[columnIndex + 1])) return verificationError('DOCS_TABLE_VERIFY_FAILED', 'The newly unmerged second cell was not empty and unmerged')
+  for (const [currentRow, beforeRow] of before.rows.entries()) {
+    if (currentRow === rowIndex) continue
+    if (JSON.stringify(beforeRow) !== JSON.stringify(after.rows[currentRow])) {
+      return verificationError('DOCS_TABLE_COLLATERAL', `Non-target row ${currentRow + 1} changed during an unmerge operation`)
+    }
+  }
+  for (const [index, wanted] of row.entries()) {
+    if (index === columnIndex) continue
+    const actualIndex = index < columnIndex ? index : index + 1
+    if (JSON.stringify(wanted) !== JSON.stringify(actualRow[actualIndex])) {
+      return verificationError('DOCS_TABLE_COLLATERAL', `Non-target cell in row ${rowIndex + 1}, column ${actualIndex + 1} changed during an unmerge operation`)
+    }
+  }
+  return { ok: true }
+}
+
 export function verifyDocsTableDelete(baseline, final, tableIndex) {
   const expectedOutside = baseline.filter(block => block?.kind !== 'table' || block.index !== tableIndex)
   if (docsTables(final).length !== docsTables(baseline).length - 1) return verificationError('DOCS_TABLE_VERIFY_FAILED', 'The selected table was not removed exactly once')
@@ -445,7 +633,19 @@ export function verifyDocsTableDelete(baseline, final, tableIndex) {
 }
 
 export function docsTableStructureRequest(table, request) {
+  if (request.action === 'delete_table') return request
+  if (request.action === 'unmerge') {
+    const problem = unmergeShapeProblem(table, request.row, request.column)
+    if (problem) throw tableFailure(problem.code, problem.message)
+    return request
+  }
   const columns = assertSimpleTable(table)
+  if (request.action === 'merge') {
+    if (request.count !== 2) throw tableFailure('DOCS_TABLE_BAD_INDEX', 'merge currently requires exactly two horizontal cells')
+    cellAt(table, request.row, request.column)
+    cellAt(table, request.row, request.column + 1)
+    return request
+  }
   if (request.action === 'insert_rows') {
     if (request.row !== undefined && request.row > table.rows.length) throw tableFailure('DOCS_TABLE_TARGET_NOT_FOUND', 'The insertion row does not exist')
     if (table.rows.length + request.count > DOCS_TABLE_MAX_ROWS) throw tableFailure('DOCS_TABLE_BAD_INDEX', `A table may contain at most ${DOCS_TABLE_MAX_ROWS} rows after insertion`)

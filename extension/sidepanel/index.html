@@ -21,6 +21,8 @@
       <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5" /><path d="M18.5 9A7 7 0 0 0 6 6.5L4 9M5.5 15A7 7 0 0 0 18 17.5l2-2.5" /></symbol>
       <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></symbol>
       <symbol id="icon-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" /></symbol>
+      <symbol id="icon-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" /></symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z" /></symbol>
       <symbol id="icon-arrow-up" viewBox="0 0 24 24"><path d="m6 11 6-6 6 6M12 5v14" /></symbol>
       <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M5 21h14" /></symbol>
       <symbol id="icon-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></symbol>
@@ -44,6 +46,8 @@
         </div>
       </header>
 
+      <button id="back-home" class="icon-btn back-home hidden" type="button" title="Back to new chat" aria-label="Back to new chat"><svg class="icon"><use href="#icon-chevron" /></svg></button>
+
       <div class="statusbar" role="status">
         <span id="status-dot" class="dot offline" aria-hidden="true"></span>
         <span id="status-text" class="status-text">Connecting…</span>
@@ -59,10 +63,16 @@
           <span id="activity-timer" class="activity-timer hidden" aria-hidden="true"></span>
           <span id="activity-latest" class="activity-latest">Waiting for a turn</span>
         </div>
-        <div id="activity-log" class="activity-log" role="log" aria-label="Activity timeline">
-          <div class="activity-empty" id="activity-empty">
-            <h1 class="visually-hidden">See the page with CrazyAgent</h1>
-          </div>
+        <div id="activity-log" class="activity-log" role="log" aria-label="Activity timeline"></div>
+        <div class="activity-empty" id="activity-empty">
+          <h1 class="visually-hidden">See the page with CrazyAgent</h1>
+          <section id="recent-sessions" class="recent-sessions hidden" aria-labelledby="recent-sessions-title">
+            <div class="recent-sessions-head">
+              <h2 id="recent-sessions-title">Recent sessions</h2>
+              <button id="recent-sessions-all" class="link" type="button">View all</button>
+            </div>
+            <div id="recent-sessions-list" class="recent-sessions-list"></div>
+          </section>
         </div>
       </section>
 
@@ -79,9 +89,16 @@
         <div id="message-queue" class="message-queue hidden" aria-label="Queued messages" aria-live="polite"></div>
         <div class="composer-field">
           <div id="image-chips" class="image-chips" aria-live="polite"></div>
-          <textarea id="input" rows="2" placeholder="Ask or tell me what to do…" autocomplete="off" spellcheck="false" aria-label="Message"></textarea>
+          <div class="composer-input">
+            <textarea id="input" rows="2" placeholder="Ask or tell me what to do…" autocomplete="off" spellcheck="false" role="combobox" aria-label="Message" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="slash-menu-list"></textarea>
+            <div id="dictation-indicator" class="dictation-indicator" role="status" hidden>
+              <span class="dictation-dots" aria-hidden="true"><span class="dictation-dot"></span><span class="dictation-dot"></span><span class="dictation-dot"></span></span>
+              <span class="dictation-label">Listening</span>
+            </div>
+          </div>
           <div class="composer-controls">
             <button id="mic" class="mic" type="button" title="Start dictation" aria-label="Start dictation" aria-pressed="false"><svg class="icon"><use href="#icon-mic" /></svg></button>
+            <button id="pause" class="pause-toggle" type="button" title="Pause browser access" aria-label="Pause browser access" aria-pressed="false"><svg class="icon"><use href="#icon-pause" /></svg></button>
             <span class="composer-spacer"></span>
             <span id="composer-model-context" class="composer-model-context" role="img" aria-label="Context usage" hidden>
               <svg class="composer-context-ring" viewBox="0 0 20 20" aria-hidden="true">
@@ -103,6 +120,10 @@
               <button id="send" class="send" type="submit" title="Send" aria-label="Send"><svg class="icon"><use href="#icon-arrow-up" /></svg></button>
             </div>
           </div>
+        </div>
+        <div id="slash-menu" class="slash-menu hidden">
+          <div id="slash-menu-list" class="slash-menu-list" role="listbox" aria-label="Slash commands"></div>
+          <div class="slash-menu-hint" aria-hidden="true">↑↓ navigate · Enter run · Esc dismiss</div>
         </div>
         <div id="model-menu" class="model-menu hidden">
           <div class="model-menu-search">
@@ -126,18 +147,6 @@
           <button id="settings-close" class="icon-btn close-btn" type="button" title="Close" aria-label="Close settings"><svg class="icon"><use href="#icon-close" /></svg></button>
         </div>
         <div class="modal-body settings-body">
-          <section class="settings-section" aria-labelledby="connection-label">
-            <h3 id="connection-label">Connection</h3>
-            <label class="field">
-              <span>Bridge URL</span>
-              <input id="setting-url" type="text" spellcheck="false" />
-            </label>
-            <label class="field">
-              <span>Pairing token</span>
-              <input id="setting-token" type="password" spellcheck="false" placeholder="Printed by npm run dev" />
-            </label>
-          </section>
-
           <section class="settings-section" aria-labelledby="model-label">
             <h3 id="model-label">Model</h3>
             <label class="field">
@@ -177,6 +186,18 @@
             <label class="check">
               <span>Remember the API key on this machine</span>
               <input id="setting-remember-key" type="checkbox" checked />
+            </label>
+          </section>
+
+          <section class="settings-section" aria-labelledby="connection-label">
+            <h3 id="connection-label">Connection</h3>
+            <label class="field">
+              <span>Bridge URL</span>
+              <input id="setting-url" type="text" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span>Pairing token</span>
+              <input id="setting-token" type="password" spellcheck="false" placeholder="Printed by npm run dev" />
             </label>
           </section>
 
@@ -274,6 +295,26 @@
         <img id="image-modal-img" alt="Screenshot" />
       </div>
     </div>
+
+    <dialog id="disclaimer" class="disclaimer" aria-labelledby="disclaimer-title" aria-describedby="disclaimer-warning-kicker disclaimer-warning-copy disclaimer-copy">
+      <div class="disclaimer-inner">
+        <!-- The point of this one-time notice is the hands-off rule, so it gets
+             the dominant type and the only raised, tinted callout on the panel. -->
+        <div class="disclaimer-warning">
+          <span class="disclaimer-warning-badge" aria-hidden="true">
+            <svg class="disclaimer-warning-icon" viewBox="0 0 24 24">
+              <path d="M12 3.2a1.9 1.9 0 0 1 1.64.95l8.03 13.9A1.9 1.9 0 0 1 20.03 21H3.97a1.9 1.9 0 0 1-1.64-2.85l8.03-13.9A1.9 1.9 0 0 1 12 3.2Z" />
+              <path d="M12 9.1v4.6M12 17.2v.01" />
+            </svg>
+          </span>
+          <p id="disclaimer-warning-kicker" class="disclaimer-kicker">While the agent is running</p>
+          <h2 id="disclaimer-title">Don't touch the browser</h2>
+          <p id="disclaimer-warning-copy" class="disclaimer-warning-copy">Clicking, typing, scrolling, or switching tabs can throw off the agent's clicks and targets and break the task.</p>
+        </div>
+        <p id="disclaimer-copy" class="disclaimer-copy">CrazyAgent can click, type, and scroll in your tabs. Some actions may look unexpected; you can stop a turn at any time.</p>
+        <button id="disclaimer-dismiss" class="primary disclaimer-dismiss" type="button">Got it</button>
+      </div>
+    </dialog>
 
     <div id="toast" class="toast hidden" role="status"></div>
 

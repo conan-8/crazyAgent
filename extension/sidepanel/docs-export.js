@@ -1,5 +1,5 @@
 const DEFAULT_TIMEOUT_MS = 10_000
-const DEFAULT_RETRIES = 2
+const DEFAULT_RETRIES = 4
 const MIN_EXPORT_INTERVAL_MS = 250
 const exportQueues = new Map()
 const exportCooldowns = new Map()
@@ -30,8 +30,8 @@ export function docsExportUrl(value, format = 'html') {
 
 export function docsExportRetryDelayMs(retryAfter, attempt) {
   const seconds = retryAfter !== null && /^\s*\d+(?:\.\d+)?\s*$/u.test(retryAfter ?? '') ? Number(retryAfter) : Number.NaN
-  if (Number.isFinite(seconds)) return Math.min(5_000, Math.max(250, Math.round(seconds * 1_000)))
-  return 1_200 * (attempt + 1)
+  if (Number.isFinite(seconds)) return Math.min(15_000, Math.max(250, Math.round(seconds * 1_000)))
+  return Math.min(15_000, 1_200 * (2 ** attempt))
 }
 
 async function performExport(tabUrl, format, io, target, coordinated) {

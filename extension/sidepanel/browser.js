@@ -27,6 +27,7 @@ import { planDocsFormatEdits, validateDocsFormatEdits, verifyDocsFormatEdits } f
 import { formatOutline, parseDocStructure } from './docs-structure.js'
 import {
   docsTableAnchor,
+  docsTableCellBackgroundEdits,
   docsTableCellPlan,
   docsTableCreateHtml,
   docsTableFormatEdits,
@@ -37,15 +38,35 @@ import {
   planDocsTableWrite,
   publicDocsTable,
   selectDocsTable,
+  verifyDocsTableCellBackground,
   verifyDocsTableDelete,
+  verifyDocsTableMerge,
+  verifyDocsTableUnmerge,
   verifyDocsTableStructure,
   verifyDocsTableWrite,
 } from './docs-table.js'
 import { DialogManager } from './dialogs.js'
 import { executeFind, findProbe } from './find.js'
+import { executeDrag as executeTrustedDrag, docsDragError, parseDragArgs } from './drag.js'
+import { executeDownload, executeUpload, pathInsideRoot } from './files.js'
 import { clickRole } from './role-click.js'
 import { preserveSystemClipboard, restoreSystemClipboard, writeHtmlToSystemClipboard, writeImageToSystemClipboard } from './system-clipboard.js'
 import { executeTable, tableProbe } from './table.js'
+import {
+  docsExportTextSnapshot,
+  docsToolbarSnapshot,
+  expectDialogProbe,
+  expectFocusedTextProbe,
+  expectLabelledTextProbe,
+  finalizeActionEvidence,
+  finalizeBatchEvidence,
+  focusedTextSnapshot,
+  labelledTextSnapshot,
+  parseOperationExpect,
+  supportsActionEvidence,
+  unknownToolbarBaseline,
+} from './expect-executor.js'
+import { assertBatchExpectSequence } from './action-expect.js'
 
 export const DEFAULT_SETTINGS = {
   bridgeUrl: 'ws://127.0.0.1:17871/bridge',
@@ -144,6 +165,7 @@ const KEY_SPECS = {
   BracketLeft: { key: '[', code: 'BracketLeft', keyCode: 219, text: '[', shifted: '{' },
   BracketRight: { key: ']', code: 'BracketRight', keyCode: 221, text: ']', shifted: '}' },
 }
+const KEY_ALIASES = { right: 'ArrowRight', left: 'ArrowLeft', up: 'ArrowUp', down: 'ArrowDown' }
 /** CDP Input.dispatchKeyEvent modifier bits. */
 const MODIFIER_BITS = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
 
@@ -639,6 +661,10 @@ async function docsTrustedClick(tabId, x, y) {
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', clickCount: 0 })
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...base })
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...base })
+}
+
+async function docsTrustedHover(tabId, x, y) {
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', clickCount: 0 })
 }
 
 /** Revalidate after hover, then dispatch or settle the complete trusted click. */
@@ -1228,6 +1254,7 @@ function pageMetrics() {
   return {
     title: document.title,
     url: location.href,
+    timeOrigin: performance.timeOrigin,
     readyState: document.readyState,
     fingerprint: {
       url: location.href,
@@ -1324,7 +1351,7 @@ async function labelPage(limit, paint = true) {
       const type = (el.type || 'text').toLowerCase()
       if (type === 'checkbox') return 'checkbox'
       if (type === 'radio') return 'radio'
-      if (type === 'submit' || type === 'button' || type === 'reset' || type === 'image') return 'button'
+      if (type === 'submit' || type === 'button' || type === 'reset' || type === 'image' || type === 'file') return 'button'
       if (type === 'search') return 'searchbox'
       return 'textbox'
     }
@@ -1384,7 +1411,7 @@ async function labelPage(limit, paint = true) {
     if (el.closest(`#${OVERLAY_ID}`)) continue
     if (el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert')) continue
     const tag = el.tagName.toLowerCase()
-    if (tag === 'input' && (el.type === 'hidden' || el.type === 'file')) continue
+    if (tag === 'input' && el.type === 'hidden') continue
 
     const rect = el.getBoundingClientRect()
     if (rect.width < 6 || rect.height < 6) continue
@@ -1526,6 +1553,7 @@ async function labelPage(limit, paint = true) {
   return {
     title: document.title,
     url: location.href,
+    timeOrigin: performance.timeOrigin,
     readyState: document.readyState,
     fingerprint: {
       url: location.href,
@@ -1885,6 +1913,9 @@ async function clickLabelled(label) {
   if (disabled) {
     return { ok: false, code: 'DISABLED', message: `Label ${label} (${tag} ${JSON.stringify(text)}) is disabled and cannot be clicked.`, clicked: { label, tag, role, text } }
   }
+  if ((tag === 'input' && el.type === 'file') || (tag === 'label' && el.control?.type === 'file')) {
+    return { ok: false, code: 'FILE_INPUT', message: `Label ${label} selects a file input. Use browser_upload instead of opening a native file picker.`, clicked: { label, tag, role, text } }
+  }
 
   // Scroll only when the target is not already fully inside the viewport: a
   // click that scrolls invalidates the stored screenshot's image coordinates,
@@ -1975,9 +2006,45 @@ async function clickLabelled(label) {
     dialogs: document.querySelectorAll('dialog[open],[role="dialog"]:not([aria-hidden="true"]),[role="alertdialog"]').length,
   })
   const before = fingerprint()
+  // Every click injects its own ripple/crosshair overlay and removes it 900ms
+  // later. That removal can land inside a later click's observation window (a
+  // batch, or two clicks in quick succession), so counting it as a page mutation
+  // reported changed:true for a click that changed nothing. Self-injected nodes
+  // are bookkeeping, not page response: drop records that only add/remove them.
+  const rippleSelector = '[data-crazyagent-click-ripple]'
+  const selfInjectedNode = node => {
+    if (!node || node.nodeType !== 1) return false
+    if (node.id === rippleStyleId) return true
+    if (typeof node.matches === 'function'
+      && node.matches(`${rippleSelector},[data-crazyagent-click-ring],[data-crazyagent-click-crosshair]`)) return true
+    return typeof node.closest === 'function' && node.closest(rippleSelector) !== null
+  }
+  const selfInjectedRecord = record => {
+    const target = record?.target
+    if (target && target.nodeType === 1) {
+      if (target.id === rippleStyleId) return true
+      if (typeof target.closest === 'function' && target.closest(rippleSelector)) return true
+    }
+    const nodes = [...record?.addedNodes ?? [], ...record?.removedNodes ?? []]
+    return nodes.length > 0 && nodes.every(selfInjectedNode)
+  }
+  const pageMutations = records => {
+    let count = 0
+    for (const record of records) if (!selfInjectedRecord(record)) count += 1
+    return count
+  }
   const __tDispatch = performance.now()
   let mutations = 0
-  const observer = new MutationObserver(records => { mutations += records.length })
+  const added = new Set()
+  const observer = new MutationObserver(records => {
+    mutations += pageMutations(records)
+    for (const record of records) {
+      if (selfInjectedRecord(record)) continue
+      if (record.type === 'childList') {
+        for (const node of record.addedNodes) added.add(node)
+      } else if (record.type === 'characterData') added.add(record.target)
+    }
+  })
   observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true })
 
   const base = {
@@ -2028,8 +2095,9 @@ async function clickLabelled(label) {
       resolve()
     }
     const timer = setTimeout(finish, 150)
-    const settle = new MutationObserver(() => {
-      if (performance.now() - __tDispatch > 20) finish()
+    const settle = new MutationObserver(records => {
+      // A batch containing only self-injected overlay churn is not a response.
+      if (performance.now() - __tDispatch > 20 && pageMutations(records) > 0) finish()
     })
     settle.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true })
     setTimeout(() => settle.disconnect(), 160)
@@ -2049,12 +2117,47 @@ async function clickLabelled(label) {
   const selected = el.getAttribute('aria-selected')
   if (selected !== null) signals.push(`selected:${selected}`)
 
+  const inline = new Set(['A', 'ABBR', 'B', 'BDI', 'BDO', 'CITE', 'CODE', 'DATA', 'DFN', 'EM', 'I', 'IMG', 'KBD', 'MARK', 'Q', 'S', 'SAMP', 'SMALL', 'SPAN', 'STRONG', 'SUB', 'SUP', 'TIME', 'U', 'VAR', 'WBR'])
+  const blocks = new Set()
+  for (const node of added) {
+    let element = node.nodeType === 1 ? node : node.parentElement
+    while (element && inline.has(element.tagName) && element.parentElement
+      && !['BODY', 'HTML'].includes(element.parentElement.tagName)
+      && !element.id && !element.getAttribute('role')) element = element.parentElement
+    if (!element?.isConnected || selfInjectedNode(element) || /^(SCRIPT|STYLE|NOSCRIPT|HEAD|TITLE|BODY|HTML)$/u.test(element.tagName)) continue
+    blocks.add(element)
+  }
+  const topBlocks = [...blocks].filter(element => {
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) if (blocks.has(parent)) return false
+    return true
+  })
+  const newText = []
+  let newTextChars = 0
+  for (const element of topBlocks) {
+    if (newText.length >= 12 || newTextChars > 1_200) break
+    let visible = false
+    try {
+      const style = getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      visible = style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0
+        && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth
+    } catch {
+      visible = false
+    }
+    if (!visible && !element.closest('[role="alert"],[role="status"],[aria-live]')) continue
+    const text = String(element.innerText ?? element.textContent ?? '').replace(/\s+/gu, ' ').trim().slice(0, 300)
+    if (!text || newText.includes(text)) continue
+    newText.push(text)
+    newTextChars += text.length
+  }
+
   return {
     ok: true,
     clicked: { label, tag, role, text },
     changed: signals.length > 0,
     signals,
     mutations,
+    newText,
     scroll,
     scrolledIntoView,
     timings: {
@@ -2721,43 +2824,39 @@ export async function captureVisibleTab(windowId, quality, tabId) {
       dataUrl = await captureChromeWithWatchdog(windowId, quality)
     } catch (error) {
       if (error instanceof BrowserError && error.code === 'CAPTURE_TIMEOUT') {
-        try {
-          await chrome.windows?.update?.(windowId, { focused: true })
-        } catch {}
-        lastCaptureAt = Date.now()
-        try {
-          dataUrl = await captureChromeWithWatchdog(windowId, quality)
-        } catch (focusedError) {
-          if (focusedError instanceof BrowserError && focusedError.code === 'CAPTURE_TIMEOUT') captureCooldownUntil = Date.now() + CAPTURE_COOLDOWN_MS
-          throw focusedError
+        // Never focus the window here: that yanks the user's focus away from
+        // whatever they switched to. Unfocused and minimized windows take the
+        // page-level CDP path in captureViewportImage instead; this cooldown
+        // only guards the focused-window capture API against piling up hung
+        // calls until that fallback succeeds.
+        captureCooldownUntil = Date.now() + CAPTURE_COOLDOWN_MS
+        throw error
+      }
+      const message = error instanceof Error ? error.message : String(error)
+      const quotaFailure = /quota|MAX_CAPTURE_VISIBLE_TAB/i.test(message)
+      const transientFailure = /image readback failed|failed to capture tab/i.test(message)
+      if (quotaFailure || transientFailure) {
+        let retryError
+        for (const delay of quotaFailure ? [650, 900] : [150, 400]) {
+          await sleep(delay)
+          lastCaptureAt = Date.now()
+          try {
+            dataUrl = await captureChromeWithWatchdog(windowId, quality)
+            retryError = undefined
+            break
+          } catch (retryFailure) {
+            if (retryFailure instanceof BrowserError && retryFailure.code === 'CAPTURE_TIMEOUT') {
+              captureCooldownUntil = Date.now() + CAPTURE_COOLDOWN_MS
+              throw retryFailure
+            }
+            retryError = retryFailure
+          }
+        }
+        if (dataUrl === undefined) {
+          throw new BrowserError('CAPTURE_QUOTA', `Chrome refused the screenshot after retries (${retryError instanceof Error ? retryError.message : String(retryError)})`)
         }
       } else {
-        const message = error instanceof Error ? error.message : String(error)
-        const quotaFailure = /quota|MAX_CAPTURE_VISIBLE_TAB/i.test(message)
-        const transientFailure = /image readback failed|failed to capture tab/i.test(message)
-        if (quotaFailure || transientFailure) {
-          let retryError
-          for (const delay of quotaFailure ? [650, 900] : [150, 400]) {
-            await sleep(delay)
-            lastCaptureAt = Date.now()
-            try {
-              dataUrl = await captureChromeWithWatchdog(windowId, quality)
-              retryError = undefined
-              break
-            } catch (error) {
-              if (error instanceof BrowserError && error.code === 'CAPTURE_TIMEOUT') {
-                captureCooldownUntil = Date.now() + CAPTURE_COOLDOWN_MS
-                throw error
-              }
-              retryError = error
-            }
-          }
-          if (dataUrl === undefined) {
-            throw new BrowserError('CAPTURE_QUOTA', `Chrome refused the screenshot after retries (${retryError instanceof Error ? retryError.message : String(retryError)})`)
-          }
-        } else {
-          throw new BrowserError('CAPTURE_FAILED', `Chrome could not capture this tab: ${message}`)
-        }
+        throw new BrowserError('CAPTURE_FAILED', `Chrome could not capture this tab: ${message}`)
       }
     }
     captureCooldownUntil = 0
@@ -2766,6 +2865,115 @@ export async function captureVisibleTab(windowId, quality, tabId) {
   const next = captureGate.then(run, run)
   captureGate = next.catch(() => {})
   return tabId === undefined ? next : dialogManager.racePending(tabId, next)
+}
+
+/**
+ * Choose a capture strategy for the current viewport from Chrome's window state.
+ *
+ * `captureVisibleTab` only returns frames for a window Chrome renders on screen;
+ * a window behind another app, or minimized, can leave the call pending until
+ * the watchdog fires and pauses captures. A page-level CDP capture renders the
+ * tab from its own surface, so it does not need focus and never steals it.
+ *
+ * @param {{focused?: boolean, state?: string}|undefined} windowInfo
+ * @returns {'visible-first'|'page-first'|'page-only'}
+ */
+export function viewportCapturePlan(windowInfo) {
+  if (!windowInfo || typeof windowInfo !== 'object') return 'visible-first'
+  if (windowInfo.state === 'minimized') return 'page-only'
+  return windowInfo.focused === false ? 'page-first' : 'visible-first'
+}
+
+/** @param {number} windowId */
+async function resolveViewportCapturePlan(windowId) {
+  try {
+    return viewportCapturePlan(await chrome.windows.get(windowId))
+  } catch {
+    return 'visible-first'
+  }
+}
+
+function captureAttemptMessage(error) {
+  if (error instanceof BrowserError) return `${error.code}: ${error.message}`
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** @param {unknown} error @param {unknown} pageError */
+function combineCaptureFailure(error, pageError) {
+  const visibleMessage = error instanceof BrowserError
+    ? error.message
+    : `Chrome could not capture this tab: ${captureAttemptMessage(error)}`
+  const combined = new BrowserError(
+    error instanceof BrowserError ? error.code : 'CAPTURE_FAILED',
+    `${visibleMessage} (the page-level capture also failed: ${captureAttemptMessage(pageError)})`,
+  )
+  combined.visibleError = error
+  combined.pageError = pageError
+  return combined
+}
+
+/** Failures that must reach the caller unchanged instead of retrying another capture path. */
+const IMMEDIATE_CAPTURE_CODES = new Set(['DIALOG_PENDING', 'DEBUGGER_RUN_ENDED', 'PAUSED', 'PROTECTED_PAGE', 'NO_TAB'])
+
+/**
+ * Capture the current viewport through CDP. The tab is rendered from its own
+ * surface, so this works while the window is unfocused, occluded, or minimized.
+ * The image keeps the same device-pixel scale as captureVisibleTab.
+ * @param {chrome.tabs.Tab} tab
+ * @param {number} quality
+ */
+async function captureViewportPageImage(tab, quality) {
+  const started = performance.now()
+  return withDebugger(tab.id, async () => {
+    const captured = await pageScreenshotCommand(tab.id, {
+      format: 'jpeg',
+      quality,
+      fromSurface: true,
+      captureBeyondViewport: false,
+    }, CAPTURE_WATCHDOG_MS)
+    if (typeof captured?.data !== 'string' || captured.data.length === 0) {
+      throw new BrowserError('CAPTURE_EMPTY', 'Chrome returned an empty page capture')
+    }
+    return { dataUrl: `data:image/jpeg;base64,${captured.data}`, captureMs: Math.round(performance.now() - started) }
+  })
+}
+
+/**
+ * Capture the viewport with the path that matches the window state, and fall
+ * back to the other path once before reporting failure. The focused+visible
+ * case keeps the existing fast API; everything else prefers the page capture.
+ * @param {number} windowId
+ * @param {chrome.tabs.Tab} tab
+ * @param {number} quality
+ */
+async function captureViewportImage(windowId, tab, quality) {
+  const plan = await resolveViewportCapturePlan(windowId)
+  if (plan === 'page-only') {
+    return captureViewportPageImage(tab, quality)
+  }
+  if (plan === 'page-first') {
+    try {
+      return await captureViewportPageImage(tab, quality)
+    } catch (pageError) {
+      if (pageError instanceof BrowserError && IMMEDIATE_CAPTURE_CODES.has(pageError.code)) throw pageError
+      try {
+        return await captureVisibleTab(windowId, quality, tab.id)
+      } catch (visibleError) {
+        throw combineCaptureFailure(visibleError, pageError)
+      }
+    }
+  }
+  try {
+    return await captureVisibleTab(windowId, quality, tab.id)
+  } catch (visibleError) {
+    if (visibleError instanceof BrowserError && IMMEDIATE_CAPTURE_CODES.has(visibleError.code)) throw visibleError
+    try {
+      return await captureViewportPageImage(tab, quality)
+    } catch (pageError) {
+      if (pageError instanceof BrowserError && IMMEDIATE_CAPTURE_CODES.has(pageError.code)) throw pageError
+      throw combineCaptureFailure(visibleError, pageError)
+    }
+  }
 }
 
 /**
@@ -2867,13 +3075,13 @@ function assertCapturable(tab, force = false) {
   }
 }
 
-async function pageScreenshotCommand(tabId, params) {
+async function pageScreenshotCommand(tabId, params, timeoutMs = 20_000) {
   let timer
   try {
     return await Promise.race([
       chrome.debugger.sendCommand({ tabId }, 'Page.captureScreenshot', params),
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new BrowserError('CAPTURE_TIMEOUT', 'Chrome did not return the page capture within 20000ms')), 20_000)
+        timer = setTimeout(() => reject(new BrowserError('CAPTURE_TIMEOUT', `Chrome did not return the page capture within ${timeoutMs}ms`)), timeoutMs)
       }),
     ])
   } finally {
@@ -3064,7 +3272,7 @@ async function snapshot(detail, settings, retried = false, delayMs = 0, captureR
     await clearAllFrames(tab.id)
     captured = await capturePageImage(tab, metrics, request, resolved.region)
   } else {
-    captured = await captureVisibleTab(windowId, quality, tab.id)
+    captured = await captureViewportImage(windowId, tab, quality)
     if (settings.showHitboxes === false) await clearAllFrames(tab.id)
   }
 
@@ -3086,6 +3294,7 @@ async function snapshot(detail, settings, retried = false, delayMs = 0, captureR
     basis = {
       viewId: nextViewId++,
       url: metrics.url,
+      timeOrigin: metrics.timeOrigin,
       imageWidth: image.width,
       imageHeight: image.height,
       viewport: metrics.viewport,
@@ -3097,6 +3306,7 @@ async function snapshot(detail, settings, retried = false, delayMs = 0, captureR
     lastViewByTab.set(tab.id, {
       image: { data: image.data, mimeType: image.mimeType, width: image.width, height: image.height },
       viewId: basis.viewId,
+      timeOrigin: metrics.timeOrigin,
       viewport: metrics.viewport,
       tab: { id: tab.id, title: metrics.title, url: metrics.url },
       labels: metrics.labels,
@@ -3138,6 +3348,7 @@ async function snapshot(detail, settings, retried = false, delayMs = 0, captureR
   return {
     op: 'snapshot',
     view: 'full',
+    timeOrigin: metrics.timeOrigin,
     ...(basis ? { viewId: basis.viewId } : {}),
     labels: isViewport ? metrics.labels : [],
     surfaces: isViewport ? metrics.surfaces : [],
@@ -3219,6 +3430,9 @@ function tabSummary(tab, metrics) {
 function pendingDialogResult(op, tab, pending) {
   return {
     op,
+    attempted: null,
+    ok: null,
+    mutationPossible: null,
     view: 'none',
     screenshotSkipped: true,
     ...(tab ? { tab: tabSummary(tab) } : {}),
@@ -3552,6 +3766,7 @@ function storeCompactView(tab, metrics, labels) {
   if (!stored) {
     lastViewByTab.set(tab.id, {
       image: undefined,
+      timeOrigin: metrics.timeOrigin,
       viewport: metrics.viewport,
       tab: { id: tab.id, title: metrics.title, url: metrics.url },
       labels,
@@ -3567,6 +3782,7 @@ function storeCompactView(tab, metrics, labels) {
   const layout = compareLayoutFingerprints(stored.fingerprint?.layout, metrics.fingerprint?.layout)
   const after = scrollFor(tab, metrics)
   stored.tab = { id: tab.id, title: metrics.title, url: metrics.url }
+  stored.timeOrigin = metrics.timeOrigin
   stored.viewport = metrics.viewport
   stored.labels = labels
   stored.scroll = after
@@ -3603,6 +3819,7 @@ async function buildActionView(tab, settings, requested, options = {}) {
     const stored = lastViewByTab.get(tab.id)
     const metrics = await runInTab(tab.id, pageMetrics, [])
     const shift = deriveLayoutShiftOutcome(stored, metrics)
+    const actionShift = options.layoutBaseline === undefined ? shift : deriveLayoutShiftOutcome(options.layoutBaseline, metrics)
     const basisViewId = stored?.image?.data ? stored.viewId : undefined
     if (shift.layoutChanged && stored) {
       delete stored.image
@@ -3614,9 +3831,11 @@ async function buildActionView(tab, settings, requested, options = {}) {
       const derived = options.derive({ stored, metrics, labels: undefined, delta: undefined }) ?? {}
       changed = derived.changed === true ? true : baseChanged === null || derived.changed === null ? null : false
       signals = Array.isArray(derived.signals) ? derived.signals : []
-    } else if (changed === false && shift.layoutChanged) {
-      // The page did not report a change, but controls moved: that is a state
-      // change the old signal missed, and saying otherwise would be a lie.
+    } else if (changed === false && actionShift.layoutChanged) {
+      // The page did not report a change, but controls moved during this action:
+      // that is a state change the old signal missed, and saying otherwise would
+      // be a lie. Movement that predates the action is reported only as a
+      // stale-view warning below, not as this action's change.
       changed = true
       signals = [...signals, 'layout-changed']
     }
@@ -3648,13 +3867,14 @@ async function buildActionView(tab, settings, requested, options = {}) {
   }
   const delta = labelDelta(stored?.labels ?? [], labelled.labels)
   const shift = deriveLayoutShiftOutcome(stored, labelled.metrics)
+  const actionShift = options.layoutBaseline === undefined ? shift : deriveLayoutShiftOutcome(options.layoutBaseline, labelled.metrics)
   let changed = baseChanged
   let signals = baseSignals
   if (typeof options.derive === 'function') {
     const derived = options.derive({ stored, metrics: labelled.metrics, labels: labelled.labels, delta }) ?? {}
     changed = derived.changed === true ? true : baseChanged === null || derived.changed === null ? null : false
     signals = Array.isArray(derived.signals) ? derived.signals : []
-  } else if (changed === false && shift.layoutChanged) {
+  } else if (changed === false && actionShift.layoutChanged) {
     changed = true
     signals = [...signals, 'layout-changed']
   }
@@ -4682,6 +4902,170 @@ export function staleScrollInfo(storedScroll, currentScroll, threshold = STALE_S
   return Math.abs(dy) > Math.max(0, Number(threshold) || 0) ? { fromY, toY, dy } : undefined
 }
 
+function actionBeforeView(tab) {
+  const stored = lastViewByTab.get(tab.id)
+  if (!stored) return { tab: { id: tab.id, title: tab.title ?? '', url: tab.url ?? '' } }
+  return {
+    ...stored,
+    tab: { ...stored.tab },
+    ...(Array.isArray(stored.labels) ? { labels: stored.labels.map(label => ({ ...label })) } : {}),
+  }
+}
+
+function actionDialogScope(tab) {
+  return { kind: 'native-dialog', id: tab.id, target: 'not-applicable', detail: 'active-tab-and-accessible-frames' }
+}
+
+async function readActionDialogSnapshot(tab) {
+  const pending = dialogManager.pending(tab.id)
+  if (pending) return { scope: actionDialogScope(tab), open: true }
+  try {
+    const frames = await listFrames(tab.id)
+    const probes = await runInAllFrames(tab.id, expectDialogProbe, [], 2_000)
+    if (probes.length !== frames.length || probes.some(frame => !Number.isSafeInteger(frame.result?.visible))) {
+      return { scope: { ...actionDialogScope(tab), target: 'unknown' }, open: null, limits: ['dialog-frames-incomplete'] }
+    }
+    return { scope: actionDialogScope(tab), open: probes.some(frame => frame.result.visible > 0) }
+  } catch (error) {
+    if (dialogManager.pending(tab.id)) return { scope: actionDialogScope(tab), open: true }
+    return {
+      scope: { ...actionDialogScope(tab), target: 'unknown' },
+      open: null,
+      limits: [typeof error?.code === 'string' ? error.code : 'dialog-unreadable'],
+    }
+  }
+}
+
+async function readActionExportSnapshot(tab, expected, limits = []) {
+  try {
+    const exported = await docsFetchExport(tab.url, 'txt')
+    return docsExportTextSnapshot(exported.body, expected, tab.url, limits)
+  } catch (error) {
+    return docsExportTextSnapshot(undefined, expected, tab.url, [...limits, typeof error?.code === 'string' ? error.code : 'DOCS_EXPORT_FAILED'])
+  }
+}
+
+async function readActionToolbarSnapshot(tab, expected) {
+  try {
+    const probe = await runInTab(tab.id, docsPageProbe, ['format', Object.keys(expected)], 4_000)
+    return docsToolbarSnapshot(probe, expected, tab.url)
+  } catch (error) {
+    return docsToolbarSnapshot(undefined, expected, tab.url)
+  }
+}
+
+async function startActionExpect(op, args, tab, settings, options = {}) {
+  const expectation = parseOperationExpect(op, args.expect, tab.url, {
+    batch: batchDepth > 0,
+    path: options.path ?? 'expect',
+  })
+  const context = { beforeView: actionBeforeView(tab), expectEvidence: {} }
+  if (expectation?.dialog !== undefined) {
+    context.expectEvidence.dialog = { before: await readActionDialogSnapshot(tab) }
+  }
+  if (expectation?.export_contains !== undefined) {
+    const before = await readActionExportSnapshot(tab, expectation.export_contains)
+    if (typeof before.contains !== 'boolean') {
+      throw new BrowserError('EXPECT_BASELINE_UNAVAILABLE', 'The complete scoped Docs export baseline is unavailable; no input was dispatched.')
+    }
+    context.expectEvidence.export_contains = { before }
+  }
+  if (expectation?.toolbar_style !== undefined) {
+    context.expectEvidence.toolbar_style = { before: unknownToolbarBaseline(tab.url) }
+  }
+  if (expectation?.pixel_changed === true) {
+    let before = lastViewByTab.get(tab.id)
+    const pinnedCanvasBasis = op === 'click_at' && canvasEditorForUrl(tab.url)
+    if (!pinnedCanvasBasis || !before?.image?.data || (before.tab?.url ?? '') !== (tab.url ?? '')) {
+      before = await snapshot('normal', settings)
+    }
+    context.pixelBefore = before
+    context.beforeView = actionBeforeView(tab)
+  }
+  return { expectation, context }
+}
+
+function actionPixelScope(view) {
+  const width = Math.round(Number(view?.viewport?.width) || 0)
+  const height = Math.round(Number(view?.viewport?.height) || 0)
+  const tabId = view?.tab?.id
+  const url = view?.tab?.url
+  const timeOrigin = view?.timeOrigin
+  if (!Number.isSafeInteger(tabId) || typeof url !== 'string' || url.length === 0
+    || !Number.isFinite(timeOrigin) || timeOrigin <= 0) {
+    return { kind: 'viewport-region', target: 'unknown', detail: 'document-identity-unavailable' }
+  }
+  return { kind: 'viewport-region', id: tabId, target: 'not-applicable', detail: `${timeOrigin}|${url}|${width}x${height}` }
+}
+
+async function finishActionExpect(session, tab, result, options = {}) {
+  const { expectation, context } = session
+  if (!expectation) {
+    context.newText = result.newText
+    return context
+  }
+  if (expectation.dialog !== undefined) {
+    context.expectEvidence.dialog.after = await readActionDialogSnapshot(tab)
+  }
+  if (expectation.export_contains !== undefined) {
+    const before = context.expectEvidence.export_contains.before
+    let after = await readActionExportSnapshot(tab, expectation.export_contains)
+    if (before.contains === false && after.contains === false) {
+      await pauseInTab(tab.id, 250)
+      after = await readActionExportSnapshot(tab, expectation.export_contains, ['reobserved-once'])
+    }
+    context.expectEvidence.export_contains.after = after
+  }
+  if (expectation.toolbar_style !== undefined) {
+    context.expectEvidence.toolbar_style.after = await readActionToolbarSnapshot(tab, expectation.toolbar_style)
+  }
+  if (expectation.pixel_changed === true) {
+    const before = context.pixelBefore
+    const after = options.pixelAfter ?? result
+    const beforeScope = actionPixelScope(before)
+    const afterScope = actionPixelScope(after)
+    const beforeCaptured = Boolean(before?.image?.data) && beforeScope.target === 'not-applicable'
+    const afterCaptured = Boolean(after?.image?.data) && afterScope.target === 'not-applicable'
+    let changed = options.pixelChanged
+    const limits = []
+    if (changed === undefined && beforeCaptured && afterCaptured) {
+      try {
+        const viewport = after.viewport ?? before.viewport ?? { width: 1, height: 1 }
+        changed = (await diffRegion(before, after, viewport.width / 2, viewport.height / 2, Math.max(viewport.width, viewport.height))).changed
+      } catch {
+        changed = null
+        limits.push('pixel-diff-failed')
+      }
+    }
+    context.expectEvidence.pixel_changed = {
+      before: { scope: beforeScope, captured: beforeCaptured },
+      after: { scope: afterScope, captured: afterCaptured },
+      changed: typeof changed === 'boolean' ? changed : null,
+      limits,
+    }
+  }
+  context.newText = result.newText
+  return context
+}
+
+async function readActionLabelledText(tab, target, label, expected) {
+  try {
+    const probe = await runInFrame(tab.id, target.frameId, expectLabelledTextProbe, [target.localId, expected], 2_000)
+    return labelledTextSnapshot(probe, label, target.frameId)
+  } catch {
+    return labelledTextSnapshot(undefined, label, target.frameId)
+  }
+}
+
+async function readActionFocusedText(tab, expected) {
+  try {
+    const frames = await runInAllFrames(tab.id, expectFocusedTextProbe, [expected], 2_000)
+    return focusedTextSnapshot(frames)
+  } catch {
+    return { scope: { kind: 'field', target: 'unknown' }, complete: null, limits: ['focused-target-unavailable'] }
+  }
+}
+
 /**
  * Click points in the current view on canvas/video/iframe or unlabelled targets.
  * Ordinary pages allow 20-point bursts and skipped captures. Known document
@@ -4702,7 +5086,9 @@ async function clickAt(settings, args) {
   const burstError = canvasBurstError(tab.url ?? '', request.points.length)
   if (burstError) throw new BrowserError(burstError.code, burstError.message)
   request.view = actionViewForTab(tab, request.view)
-  const before = lastViewByTab.get(tab.id)
+  const expectSession = await startActionExpect('click_at', args, tab, settings)
+  if (expectSession.expectation?.pixel_changed === true) request.view = 'full'
+  const before = expectSession.context.pixelBefore ?? lastViewByTab.get(tab.id)
   const history = (imageBasesByTab.get(tab.id) ?? []).filter(basis => basis.url === (tab.url ?? ''))
   const resolved = canvasEditor
     ? resolveCanvasImageBasis(request.viewId, history)
@@ -4810,16 +5196,21 @@ async function clickAt(settings, args) {
     const derived = deriveFingerprintOutcome(stored, metrics)
     const shift = deriveLayoutShiftOutcome(stored, metrics)
     const staleScroll = staleScrollInfo(before?.scroll, metrics?.scroll)
-    return {
+    const inner = {
       points,
       trusted,
       offScreenCount,
+      attempted: onScreen.length > 0,
+      mutationPossible: onScreen.length > 0,
       changed: derived.changed,
       ...(basis ? { basis: basisSummary(basis) } : {}),
       ...(staleScroll ? { staleScroll } : {}),
       ...shift,
       clickMs: Math.round(performance.now() - started),
     }
+    inner._actionEvidence = await finishActionExpect(expectSession, tab, inner)
+    if (expectSession.expectation) inner.expect = expectSession.expectation
+    return inner
   }
   let payload
   let mode
@@ -4842,6 +5233,8 @@ async function clickAt(settings, args) {
     points,
     trusted,
     offScreenCount,
+    attempted: onScreen.length > 0,
+    mutationPossible: onScreen.length > 0,
     changedCount: points.filter(point => point.changed === true).length,
     ...(basis ? { basis: basisSummary(basis) } : {}),
     // Points that are plausible on two different image scales: the click still
@@ -4879,6 +5272,12 @@ async function clickAt(settings, args) {
       ? ['pixels-changed']
       : (Array.isArray(payload?.signals) ? payload.signals : [])
   }
+  const clickedPoints = points.filter(point => point.offScreen !== true)
+  const pixelChanged = clickedPoints.some(point => point.changed === true)
+    ? true
+    : clickedPoints.length > 0 && clickedPoints.every(point => point.changed === false) ? false : null
+  result._actionEvidence = await finishActionExpect(expectSession, tab, result, { pixelAfter: shot ?? payload, pixelChanged })
+  if (expectSession.expectation) result.expect = expectSession.expectation
   return result
 }
 
@@ -4903,6 +5302,8 @@ async function click(settings, args) {
   const __afterLookup = performance.now()
   const target = resolveLabelTarget(tab, label)
   if (!target) throw await decorateStaleLabelError(tab, missingLabelError(tab, label))
+  const expectSession = await startActionExpect('click', args, tab, settings)
+  if (expectSession.expectation?.pixel_changed === true) viewMode = 'full'
   const clickOnce = async labelTarget => {
     try {
       return await runInFrame(tab.id, labelTarget.frameId, clickLabelled, [labelTarget.localId], 1_200)
@@ -4922,6 +5323,11 @@ async function click(settings, args) {
       if (canvasEditor) invalidateCanvasImageBases(tab.id)
     }
   }
+  // Layout baseline for this click: a layout shift caused by an older action
+  // (for example a previous hover that left the page reflowed) must not be
+  // reported as this click changing the page. The stored view is still compared
+  // separately for the stale-coordinate warning.
+  const layoutBaseline = await runInTab(tab.id, pageMetrics, []).catch(() => undefined)
   const result = await clickOnce(target)
   if (result?.ok === false) {
     const code = typeof result.code === 'string' ? result.code : 'CLICK_FAILED'
@@ -4963,18 +5369,22 @@ async function click(settings, args) {
   const baseChanged = pendingNavigation ? navigated : result.changed === true
   const signals = Array.isArray(result.signals) ? result.signals : []
   if (batchDepth > 0) {
-    return {
+    const inner = {
       changed: baseChanged,
       signals,
       clicked: result.clicked,
       navigated,
       scrolledIntoView,
       ...(clickScroll ? { scroll: clickScroll } : {}),
+      ...(Array.isArray(result.newText) ? { newText: result.newText } : {}),
     }
+    inner._actionEvidence = await finishActionExpect(expectSession, tab, inner)
+    if (expectSession.expectation) inner.expect = expectSession.expectation
+    return inner
   }
   const activeTab = await getActiveTab(windowId).catch(() => tab)
   const __beforeView = performance.now()
-  const { payload, mode } = await buildActionView(activeTab, settings, viewMode, { changed: baseChanged, signals })
+  const { payload, mode } = await buildActionView(activeTab, settings, viewMode, { changed: baseChanged, signals, layoutBaseline })
   const viewMs = Math.round(performance.now() - __beforeView)
   const changed = mode === 'full' && pendingNavigation
     ? navigated || (payload.tab?.title ?? '') !== (tab.title ?? '')
@@ -4987,7 +5397,7 @@ async function click(settings, args) {
   const reportedSignals = mode === 'full'
     ? signals
     : (Array.isArray(payload.signals) ? payload.signals : [])
-  return {
+  const finalResult = {
     ...payload,
     op: 'click',
     clicked: result.clicked,
@@ -5006,7 +5416,11 @@ async function click(settings, args) {
       snapshotMs: viewMs,
       tabStatus: current?.status,
     },
+    ...(Array.isArray(result.newText) ? { newText: result.newText } : {}),
   }
+  finalResult._actionEvidence = await finishActionExpect(expectSession, activeTab, finalResult, { pixelAfter: payload })
+  if (expectSession.expectation) finalResult.expect = expectSession.expectation
+  return finalResult
 }
 
 /**
@@ -5275,14 +5689,20 @@ async function typeText(settings, args) {
       `${canvasEditor} unlabelled typing inserts at the caret or replaces the current selection. Append and empty-text clearing are not verifiable here; use a labelled field, or select the intended range and use Backspace/Delete in a separate action.`,
     )
   }
+  const expectSession = await startActionExpect('type', args, tab, settings)
+  let textTarget
   let outcome
   try {
     if (request.label !== undefined) {
-      const target = resolveLabelTarget(tab, request.label)
-      if (!target) throw await decorateStaleLabelError(tab, missingLabelError(tab, request.label))
+      textTarget = resolveLabelTarget(tab, request.label)
+      if (!textTarget) throw await decorateStaleLabelError(tab, missingLabelError(tab, request.label))
+      if (expectSession.expectation?.text_landed !== undefined) {
+        const before = await readActionLabelledText(tab, textTarget, request.label, expectSession.expectation.text_landed)
+        expectSession.context.expectEvidence.text_landed = { before }
+      }
       let domResult
       try {
-        domResult = await runInFrame(tab.id, target.frameId, typeLabelled, [target.localId, request.text, request.mode], 5_000)
+        domResult = await runInFrame(tab.id, textTarget.frameId, typeLabelled, [textTarget.localId, request.text, request.mode], 5_000)
       } catch (error) {
         const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
         if (code === 'SCRIPT_TIMEOUT') throw new BrowserError('TYPE_TIMEOUT', 'Typing into this field did not complete. Take a fresh view and try again.')
@@ -5290,7 +5710,7 @@ async function typeText(settings, args) {
       }
       if (domResult?.ok === false) {
         if (domResult.code === 'NOT_EDITABLE') {
-          outcome = await trustedTypeIntoFallbackTarget(tab.id, target, request)
+          outcome = await trustedTypeIntoFallbackTarget(tab.id, textTarget, request)
         } else {
           const error = new BrowserError(domResult.code ?? 'TYPE_FAILED', domResult.message ?? 'Could not type into this field.')
           throw await decorateStaleLabelError(tab, error, domResult.valuePreview)
@@ -5298,9 +5718,13 @@ async function typeText(settings, args) {
       } else {
         outcome = domResult.verified
           ? { method: 'dom', ...domResult }
-          : await trustedTypeIntoLabel(tab.id, target, request, domResult)
+          : await trustedTypeIntoLabel(tab.id, textTarget, request, domResult)
       }
     } else {
+      if (expectSession.expectation?.text_landed !== undefined) {
+        const before = await readActionFocusedText(tab, expectSession.expectation.text_landed)
+        expectSession.context.expectEvidence.text_landed = { before }
+      }
       outcome = await trustedTypeIntoFocus(tab.id, request, canvasEditor)
     }
   } catch (error) {
@@ -5308,6 +5732,12 @@ async function typeText(settings, args) {
     throw error
   }
   if (canvasEditor) invalidateCanvasImageBases(tab.id)
+  if (expectSession.expectation?.text_landed !== undefined) {
+    const after = request.label !== undefined
+      ? await readActionLabelledText(tab, textTarget, request.label, expectSession.expectation.text_landed)
+      : await readActionFocusedText(tab, expectSession.expectation.text_landed)
+    expectSession.context.expectEvidence.text_landed.after = after
+  }
   let submitted = false
   if (request.submit) {
     await pressEnter(tab.id)
@@ -5341,11 +5771,20 @@ async function typeText(settings, args) {
           ...(valuePreview === undefined ? {} : { valuePreview }),
         }),
   }
-  if (batchDepth > 0) return { changed, signals, typed }
+  if (batchDepth > 0) {
+    const inner = { changed, signals, typed }
+    inner._actionEvidence = await finishActionExpect(expectSession, tab, inner)
+    if (expectSession.expectation) inner.expect = expectSession.expectation
+    return inner
+  }
   const activeTab = await getActiveTab(windowId).catch(() => tab)
-  const viewMode = actionViewForTab(activeTab, parseViewArg(args, 'auto'))
+  const requestedView = actionViewForTab(activeTab, parseViewArg(args, 'auto'))
+  const viewMode = expectSession.expectation?.pixel_changed === true ? 'full' : requestedView
   const { payload } = await buildActionView(activeTab, settings, viewMode, { changed, signals })
-  return { ...payload, op: 'type', typed, changed, signals }
+  const finalResult = { ...payload, op: 'type', typed, changed, signals }
+  finalResult._actionEvidence = await finishActionExpect(expectSession, activeTab, finalResult, { pixelAfter: payload })
+  if (expectSession.expectation) finalResult.expect = expectSession.expectation
+  return finalResult
 }
 
 /**
@@ -5428,7 +5867,7 @@ export function parsePressKeyArgs(args) {
     throw new BrowserError('BAD_KEY', 'key must be a named key, a single printable ASCII character, or a KeyA/Digit1 code name')
   }
   const composite = splitCompositeKey(args.key)
-  const key = composite.key
+  const key = KEY_ALIASES[composite.key.toLowerCase()] ?? composite.key
   const modifiers = [...composite.modifiers]
   if (args.modifiers !== undefined) {
     if (!Array.isArray(args.modifiers)) throw new BrowserError('BAD_KEY', 'modifiers must be an array')
@@ -5486,8 +5925,14 @@ async function pressKey(settings, args) {
   assertCapturable(tab)
   const request = parsePressKeyArgs(args)
   const canvasEditor = canvasEditorForUrl(tab.url)
-  const viewMode = actionViewForTab(tab, parseViewArg(args, 'auto'))
-  const before = lastViewByTab.get(tab.id)
+  let viewMode = actionViewForTab(tab, parseViewArg(args, 'auto'))
+  const expectSession = await startActionExpect('press_key', args, tab, settings)
+  if (expectSession.expectation?.pixel_changed === true) viewMode = 'full'
+  if (expectSession.expectation?.text_landed !== undefined) {
+    const beforeText = await readActionFocusedText(tab, expectSession.expectation.text_landed)
+    expectSession.context.expectEvidence.text_landed = { before: beforeText }
+  }
+  const before = expectSession.context.pixelBefore ?? lastViewByTab.get(tab.id)
   const pressed = { key: request.key, modifiers: request.modifiers, trusted: true }
   try {
     await withDebugger(tab.id, () => dispatchTrustedKey(tab.id, request.spec, request.mask))
@@ -5499,10 +5944,16 @@ async function pressKey(settings, args) {
     if (canvasEditor) invalidateCanvasImageBases(tab.id)
   }
   await settleAfterInput(tab.id, undefined)
+  if (expectSession.expectation?.text_landed !== undefined) {
+    expectSession.context.expectEvidence.text_landed.after = await readActionFocusedText(tab, expectSession.expectation.text_landed)
+  }
   if (batchDepth > 0) {
     const metrics = await runInTab(tab.id, pageMetrics, [])
     const derived = deriveFingerprintOutcome(before, metrics)
-    return { changed: derived.changed, signals: derived.signals, pressed }
+    const inner = { changed: derived.changed, signals: derived.signals, pressed }
+    inner._actionEvidence = await finishActionExpect(expectSession, tab, inner)
+    if (expectSession.expectation) inner.expect = expectSession.expectation
+    return inner
   }
   const activeTab = await getActiveTab(windowId).catch(() => tab)
   const { payload, mode } = await buildActionView(activeTab, settings, viewMode, {
@@ -5512,9 +5963,15 @@ async function pressKey(settings, args) {
     // Full views still verify the key press with a full-view pixel diff.
     const viewport = payload.viewport ?? { width: 1, height: 1 }
     const diff = await diffRegion(before, payload, viewport.width / 2, viewport.height / 2, Math.max(viewport.width, viewport.height))
-    return { ...payload, op: 'press_key', pressed, changed: diff.changed, signals: diff.changed ? ['pixels-changed'] : [] }
+    const finalResult = { ...payload, op: 'press_key', pressed, changed: diff.changed, signals: diff.changed ? ['pixels-changed'] : [] }
+    finalResult._actionEvidence = await finishActionExpect(expectSession, activeTab, finalResult, { pixelAfter: payload, pixelChanged: diff.changed })
+    if (expectSession.expectation) finalResult.expect = expectSession.expectation
+    return finalResult
   }
-  return { ...payload, op: 'press_key', pressed }
+  const finalResult = { ...payload, op: 'press_key', pressed }
+  finalResult._actionEvidence = await finishActionExpect(expectSession, activeTab, finalResult, { pixelAfter: payload })
+  if (expectSession.expectation) finalResult.expect = expectSession.expectation
+  return finalResult
 }
 
 /**
@@ -5786,6 +6243,143 @@ async function waitFor(settings, args) {
   const activeTab = await getActiveTab(windowId).catch(() => tab)
   const { payload } = await buildActionView(activeTab, settings, actionViewForTab(activeTab, requestedView))
   return { ...payload, op: 'wait_for', waited }
+}
+
+function dragDriver(tabId) {
+  return {
+    getActiveTab: async () => getActiveTab(await getWindowId()),
+    assertCapturable: async tab => assertCapturable(tab),
+    resolveLabelTarget,
+    runInFrame,
+    withDebugger,
+    sendCommand: (tabId, method, params) => chrome.debugger.sendCommand({ tabId }, method, params),
+    onDragIntercepted: (tabId, listener) => {
+      const event = (source, method, params) => {
+        if (source.tabId === tabId && method === 'Input.dragIntercepted') listener(params.data)
+      }
+      chrome.debugger.onEvent.addListener(event)
+      return () => chrome.debugger.onEvent.removeListener(event)
+    },
+    sleep: ms => pauseInTab(tabId, ms),
+  }
+}
+
+async function dragCoordinates(tab, args) {
+  const { view: _view, space: rawSpace, view_id: rawViewId, ...rest } = args
+  const parsed = parseDragArgs(rest)
+  const hasPoints = parsed.source.x !== undefined || parsed.destination.x !== undefined
+  const space = rawSpace ?? 'image'
+  if (space !== 'image' && space !== 'css') throw new BrowserError('BAD_DRAG', 'space must be image or css')
+  const viewId = parseViewId(rawViewId)
+  if (!hasPoints && (rawSpace !== undefined || viewId !== undefined)) {
+    throw new BrowserError('BAD_DRAG', 'space and view_id are valid only with x/y or to_x/to_y coordinates; dx/dy are always CSS pixels')
+  }
+  if (space === 'css' && viewId !== undefined) throw new BrowserError('BAD_VIEW', 'view_id is valid only with image coordinates')
+  if (!hasPoints) return { args: rest }
+
+  const before = lastViewByTab.get(tab.id)
+  if (!before) throw new BrowserError('NO_VIEW', 'Take a current view before using coordinates for browser_drag, including space:"css".')
+  const history = (imageBasesByTab.get(tab.id) ?? []).filter(basis => basis.url === (tab.url ?? ''))
+  const points = [
+    ...parsed.source.x === undefined ? [] : [{ x: parsed.source.x, y: parsed.source.y }],
+    ...parsed.destination.x === undefined ? [] : [{ x: parsed.destination.x, y: parsed.destination.y }],
+  ]
+  const resolved = space === 'image' ? resolveImageBasis({ space, viewId, points }, history) : {}
+  if (resolved.error) throw new BrowserError(resolved.error.code, resolved.error.message)
+  const basis = resolved.basis
+  if (space === 'image' && (!before.image?.data || !basis)) {
+    throw new BrowserError('NO_VIEW', 'Take a full fresh view before using image coordinates for browser_drag.')
+  }
+  const liveMetrics = await runInTab(tab.id, pageMetrics, [])
+  const coordinateBasis = space === 'image' ? basis : {
+    url: before.tab?.url ?? tab.url,
+    viewport: before.viewport,
+    scroll: before.scroll,
+    fingerprint: before.fingerprint,
+  }
+  const timeOrigin = space === 'image' ? basis.timeOrigin : before.timeOrigin
+  if (!Number.isFinite(timeOrigin) || timeOrigin !== liveMetrics.timeOrigin) {
+    throw new BrowserError('STALE_VIEW', 'The document changed since the browser_drag view was captured. Take a fresh view; no drag or hover was dispatched.')
+  }
+  const basisError = canvasBasisError(coordinateBasis, liveMetrics, scrollFor(tab, liveMetrics))
+  if (basisError) throw new BrowserError(basisError.code, basisError.message.replace(/canvas view|canvas editor/gu, 'browser_drag view'))
+  if (space === 'image') {
+    const mismatch = findCoordinateBasisMismatch(points, basis, history)
+    if (viewId !== undefined) mismatch.ambiguous = []
+    if (mismatch.stale.length > 0) {
+      const current = basisSummary(basis)
+      const stale = mismatch.stale[0].from
+      throw new BrowserError('STALE_VIEW', `These drag coordinates fit view #${stale.viewId}, not the selected view #${current.viewId}. Take a fresh view and measure both points again; no drag was dispatched.`)
+    }
+    if (mismatch.ambiguous.length > 0) {
+      throw new BrowserError('AMBIGUOUS_VIEW', 'These drag coordinates fit more than one image scale. Take a fresh view and pass its view_id; no drag was dispatched.')
+    }
+  }
+  const viewport = basis?.viewport ?? liveMetrics.viewport
+  const scale = space === 'image' ? basis.viewport.width / basis.imageWidth : 1
+  const mapped = mapClickPoints(points, space, viewport, scale)
+  if (mapped.some(point => point.offScreen)) {
+    throw new BrowserError('DRAG_OFF_SCREEN', 'A drag endpoint is clipped or outside the current viewport. Take a fresh view; no drag was dispatched.')
+  }
+  let index = 0
+  if (parsed.source.x !== undefined) {
+    rest.x = mapped[index].cssX
+    rest.y = mapped[index].cssY
+    index += 1
+  }
+  if (parsed.destination.x !== undefined) {
+    rest.to_x = mapped[index].cssX
+    rest.to_y = mapped[index].cssY
+  }
+  return { args: rest, basis }
+}
+
+async function drag(settings, args) {
+  const windowId = await getWindowId()
+  const tab = await getActiveTab(windowId)
+  assertCapturable(tab)
+  const docsError = docsDragError(tab.url)
+  if (docsError) throw new BrowserError(docsError.code, docsError.message)
+  const mapped = await dragCoordinates(tab, args)
+  let result
+  try {
+    result = await executeTrustedDrag(mapped.args, dragDriver(tab.id))
+  } catch (error) {
+    if (error?.code !== 'DRAG_NO_EFFECT') throw error
+    result = {
+      op: 'drag',
+      attempted: true,
+      ok: false,
+      changed: false,
+      signals: [],
+      mutationPossible: true,
+      error: { code: error.code, message: error.message },
+      drag: {
+        status: 'unchanged',
+        dispatch: error.dispatch,
+        outcome: error.outcome,
+        sourceOutcome: error.sourceOutcome,
+        destinationOutcome: error.destinationOutcome,
+      },
+    }
+  }
+  const activeTab = await getActiveTab(windowId).catch(() => undefined)
+  if (!activeTab || activeTab.id !== tab.id || (activeTab.url ?? '') !== (tab.url ?? '')) {
+    const error = new BrowserError('DRAG_STALE_TAB', 'The active tab changed after the drag; its outcome is unverified and no other-tab success view was captured. Inspect the original tab before any retry.')
+    error.mutationPossible = true
+    throw error
+  }
+  const viewMode = actionViewForTab(activeTab, parseViewArg(args, 'full'))
+  const { payload } = await buildActionView(activeTab, settings, viewMode, {
+    changed: result.changed,
+    signals: result.signals,
+    derive: () => ({ changed: result.changed, signals: result.signals }),
+  })
+  return {
+    ...payload,
+    ...result,
+    ...(mapped.basis ? { basis: basisSummary(mapped.basis) } : {}),
+  }
 }
 
 /**
@@ -7121,16 +7715,23 @@ export function docsPageProbe(command, args = {}) {
     const control = one(exact('button', wantedName, toolbar.element).filter(hitVisible), `Main toolbar ${wantedName}`)
     return control.error || { ok: true, point: point(control.element) }
   }
-  const colorMenuState = attribute => {
+  const colorMenuState = (attribute, value) => {
     if (!['color', 'highlight'].includes(attribute)) return failure('BAD_PROBE', `Unknown color attribute ${String(attribute)}`)
     const custom = exact('button', 'Add a custom color').filter(hitVisible)
     const none = attribute === 'highlight' ? exact('button', 'None').filter(hitVisible) : []
-    if (custom.length > 1 || none.length > 1) return failure('AMBIGUOUS_CONTROL', `${attribute} menu controls are ambiguous`)
+    const swatches = nodes('button').filter(hitVisible).filter(element => {
+      const label = name(element)
+      return !/^(?:Cell background color|Table border)\b/iu.test(label) && /#[0-9a-f]{6}\b/iu.test(label)
+    })
+    const wanted = typeof value === 'string' && /^#[0-9a-f]{6}$/iu.test(value) ? value.toLowerCase() : undefined
+    const presets = wanted ? swatches.filter(element => name(element).toLowerCase().includes(wanted)) : []
+    if (custom.length > 1 || none.length > 1 || presets.length > 1) return failure('AMBIGUOUS_CONTROL', `${attribute} menu controls are ambiguous`)
     return {
       ok: true,
-      open: custom.length > 0 || none.length > 0,
+      open: custom.length > 0 || none.length > 0 || swatches.length > 0,
       customPoint: custom.length === 1 ? point(custom[0]) : undefined,
       nonePoint: none.length === 1 ? point(none[0]) : undefined,
+      presetPoint: presets.length === 1 ? point(presets[0]) : undefined,
     }
   }
   const colorDialogState = () => {
@@ -7138,6 +7739,9 @@ export function docsPageProbe(command, args = {}) {
     if (boxes.length === 0) return { ok: true, open: false }
     if (boxes.length !== 1) return failure('AMBIGUOUS_DIALOG', 'Expected one visible Hex color textbox')
     const box = boxes[0]
+    const dialog = box.closest('[role="dialog"]') ?? document
+    const confirmations = exact('button', 'OK', dialog).filter(hitVisible)
+    if (confirmations.length !== 1) return failure('AMBIGUOUS_DIALOG', `Expected one visible custom-color OK button, found ${confirmations.length}`)
     return {
       ok: true,
       open: true,
@@ -7145,6 +7749,23 @@ export function docsPageProbe(command, args = {}) {
       focused: document.activeElement === box,
       value: String(box.value ?? ''),
       point: disabled(box) ? undefined : point(box),
+      okPoint: disabled(confirmations[0]) ? undefined : point(confirmations[0]),
+    }
+  }
+
+  const tableCellBackgroundState = () => {
+    const cell = exact('button', 'Cell').filter(hitVisible)
+    const color = exact('button', 'Color').filter(hitVisible)
+    const background = nodes('button').filter(hitVisible).filter(element => name(element).startsWith('Cell background color'))
+    const close = exact('button', 'Close side sheet').filter(hitVisible)
+    if ([cell, color, background, close].some(items => items.length > 1)) return failure('AMBIGUOUS_CONTROL', 'Table cell-background controls are ambiguous')
+    return {
+      ok: true,
+      open: close.length === 1,
+      cellPoint: cell.length === 1 ? point(cell[0]) : undefined,
+      colorPoint: color.length === 1 ? point(color[0]) : undefined,
+      backgroundPoint: background.length === 1 ? point(background[0]) : undefined,
+      closePoint: close.length === 1 ? point(close[0]) : undefined,
     }
   }
 
@@ -7162,6 +7783,8 @@ export function docsPageProbe(command, args = {}) {
       return setText('textbox', args.side, args.value)
     }
     case 'editMenu': return menuControl('Edit')
+    case 'formatMenu': return menuControl('Format')
+    case 'tableMenu': return menuControl('Table ►')
     case 'replaceMenuItem': return menuControl('Find and replace')
     case 'setReplaceFind': return setText('textbox', 'Find', args.value, true)
     case 'setReplaceWith': return setText('textbox', 'Replace with', args.value, true)
@@ -7173,7 +7796,7 @@ export function docsPageProbe(command, args = {}) {
     case 'fontMenu': return menuState(args.font)
     case 'fontDialog': return dialogState(args.font)
     case 'colorControl': return colorControl(args.attribute)
-    case 'colorMenu': return colorMenuState(args.attribute)
+    case 'colorMenu': return colorMenuState(args.attribute, args.value)
     case 'colorDialog': return colorDialogState()
     case 'documentContent': return documentContent()
     case 'focusDocument': return focusDocument()
@@ -7181,6 +7804,7 @@ export function docsPageProbe(command, args = {}) {
     case 'menuSearch': return menuSearchState()
     case 'setMenuSearch': return setMenuSearch(args.value)
     case 'tableMenuItem': return tableMenuItem(args.name)
+    case 'tableCellBackground': return tableCellBackgroundState()
     case 'format': return formatState(args.attributes)
     case 'formatStyleMenu': return paragraphStyleMenu(args.style)
     default: return failure('BAD_PROBE', `Unknown Docs probe ${command}`)
@@ -7199,6 +7823,7 @@ function docsDriver(io) {
     dispatchTrustedKey: source.dispatchTrustedKey ?? dispatchTrustedKey,
     insertTrustedText: source.insertTrustedText ?? ((tabId, text) => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text })),
     trustedClick: source.trustedClick ?? docsTrustedClick,
+    trustedHover: source.trustedHover ?? docsTrustedHover,
     preserveClipboard: source.preserveClipboard ?? (() => preserveSystemClipboard()),
     writeClipboardHtml: source.writeClipboardHtml ?? ((html, text) => writeHtmlToSystemClipboard(html, text)),
     restoreClipboard: source.restoreClipboard ?? (snapshot => restoreSystemClipboard(snapshot)),
@@ -7283,10 +7908,27 @@ async function docsNativeText(context, stage, command, value) {
   docsCheckDeadline(context, stage)
 }
 
+async function docsNativeMenuCommand(context, label) {
+  const format = await docsProbe(context, 'table-format-menu', 'formatMenu')
+  if (!format.present || format.disabled) throw docsFailure('table-format-menu', 'DOCS_CONTROL_NOT_FOUND', 'The exact Format menu is unavailable')
+  await docsClick(context, 'table-format-menu', format.point)
+  const table = await docsWait(context, 'table-submenu-open', 'tableMenu', {}, state => state.present && !state.disabled && state.point)
+  await docsHover(context, 'table-submenu-open', table.point)
+  const item = await docsWait(context, 'table-native-menu-item', 'tableMenuItem', { name: label }, state => state.present && !state.disabled && state.point)
+  context.menuMutationPossible = true
+  await docsClick(context, 'table-native-menu-command', item.point)
+}
+
 async function docsMenuCommand(context, label) {
   try {
-    await docsKey(context, 'table-menu-open', KEY_SPECS.Slash, MODIFIER_BITS.alt)
-    await docsWait(context, 'table-menu-open', 'menuSearch', {}, state => state.present && state.enabled && state.focused)
+    try {
+      await docsKey(context, 'table-menu-open', KEY_SPECS.Slash, MODIFIER_BITS.alt)
+      await docsWait(context, 'table-menu-open', 'menuSearch', {}, state => state.present && state.enabled && state.focused)
+    } catch (error) {
+      if (error?.code !== 'DOCS_WAIT_TIMEOUT') throw error
+      await docsNativeMenuCommand(context, label)
+      return
+    }
     await docsNativeText(context, 'table-menu-query', 'setMenuSearch', label)
     await docsWait(context, 'table-menu-query', 'menuSearch', {}, state => state.focused && state.value === label)
     const item = await docsWait(context, 'table-menu-item', 'tableMenuItem', { name: label }, state => state.present && !state.disabled && state.point)
@@ -7311,6 +7953,19 @@ async function docsClick(context, stage, target) {
   docsCheckDeadline(context, stage)
 }
 
+async function docsHover(context, stage, target) {
+  if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y)) {
+    throw docsFailure(stage, 'DOCS_CONTROL_UNAVAILABLE', 'The exact Docs control is missing or disabled')
+  }
+  await docsCurrent(context, stage)
+  try {
+    await context.driver.withDebugger(context.tab.id, () => context.driver.trustedHover(context.tab.id, target.x, target.y))
+  } catch (error) {
+    throw docsDriverError(stage, 'DOCS_INPUT_FAILED', error)
+  }
+  docsCheckDeadline(context, stage)
+}
+
 async function docsWait(context, stage, command, args, predicate, timeoutMs = 3_000) {
   const end = Math.min(context.deadline, context.driver.now() + timeoutMs)
   let latest
@@ -7323,9 +7978,13 @@ async function docsWait(context, stage, command, args, predicate, timeoutMs = 3_
   throw docsFailure(stage, 'DOCS_WAIT_TIMEOUT', `Docs did not reach the required ${stage} state${observed}`)
 }
 
-async function docsCloseFind(context, stage) {
+async function docsCloseFind(context, stage, awaitDocumentFocus = false) {
   await docsKey(context, stage, KEY_SPECS.Escape)
   await docsWait(context, stage, 'find', {}, state => !state.open)
+  if (awaitDocumentFocus) {
+    await docsWait(context, `${stage}-document-focus`, 'documentContent', {}, state => state.present && state.focused)
+    await context.driver.sleep(80)
+  }
 }
 
 function docsFindReady(state, text) {
@@ -7522,7 +8181,7 @@ async function docsSelectFoundOccurrence(context, text, occurrence, found) {
       docsFindReady(state, text) && state.match.current === current && state.match.total === total
     ))
   }
-  await docsCloseFind(context, 'close-find')
+  await docsCloseFind(context, 'close-find', true)
   return {
     text,
     occurrence: target,
@@ -8446,13 +9105,13 @@ async function docsApplyWriteColor(context, attribute, value, options = {}) {
   } else {
     const menu = await docsWait(context, `${prefix}-${attribute}-custom`, 'colorMenu', { attribute }, state => state.customPoint)
     await docsClick(context, `${prefix}-${attribute}-custom`, menu.customPoint)
-    const dialog = await docsWait(context, `${prefix}-${attribute}-dialog`, 'colorDialog', {}, state => state.open && state.enabled && state.point)
+    const dialog = await docsWait(context, `${prefix}-${attribute}-dialog`, 'colorDialog', {}, state => state.open && state.enabled && state.point && state.okPoint)
     await docsClick(context, `${prefix}-${attribute}-focus`, dialog.point)
     await docsWait(context, `${prefix}-${attribute}-focus`, 'colorDialog', {}, state => state.focused)
     await docsKey(context, `${prefix}-${attribute}-select`, { key: 'a', code: 'KeyA', keyCode: 65 }, MODIFIER_BITS.ctrl)
     await docsInsertText(context, `${prefix}-${attribute}-input`, value)
-    await docsWait(context, `${prefix}-${attribute}-input`, 'colorDialog', {}, state => state.focused && state.value === value)
-    await docsKey(context, `${prefix}-${attribute}-commit`, KEY_SPECS.Enter)
+    const committed = await docsWait(context, `${prefix}-${attribute}-input`, 'colorDialog', {}, state => state.focused && state.value === value)
+    await docsClick(context, `${prefix}-${attribute}-commit`, committed.okPoint)
     await docsWait(context, `${prefix}-${attribute}-close`, 'colorDialog', {}, state => !state.open)
   }
   if (cache) context.writeColors[attribute] = value
@@ -8847,9 +9506,11 @@ function docsTableCreateVerification(prefix, tableCount, actual, args) {
   if (docsTables(actual).length !== tableCount + 1) {
     return { ok: false, code: 'DOCS_TABLE_VERIFY_FAILED', message: `Expected one new table, found ${docsTables(actual).length - tableCount}` }
   }
-  const table = actual[prefix.length]
+  const leading = actual[prefix.length]
+  const tableOffset = leading?.kind === 'para' && !leading.text.trim() ? prefix.length + 1 : prefix.length
+  const table = actual[tableOffset]
   if (table?.kind !== 'table') return { ok: false, code: 'DOCS_TABLE_VERIFY_FAILED', message: 'The new document-end block is not a table' }
-  const suffix = actual.slice(prefix.length + 1)
+  const suffix = actual.slice(tableOffset + 1)
   if (suffix.length > 1 || suffix.some(block => block?.kind !== 'para' || block.text.trim())) {
     return { ok: false, code: 'DOCS_TABLE_COLLATERAL', message: 'Unexpected content followed the new table' }
   }
@@ -9028,7 +9689,107 @@ async function docsTableWriteFlow(context, args) {
   }, tables)
 }
 
+async function docsApplyCellBackground(context, edit) {
+  await docsTableSelectPlan(context, edit.plan)
+  await docsKey(context, 'table-cell-background-collapse', KEY_SPECS.ArrowRight)
+  await docsMenuCommand(context, 'Table options')
+  let state = await docsWait(context, 'table-cell-background-panel', 'tableCellBackground', {}, current => current.open)
+  if (!state.backgroundPoint) {
+    if (!state.colorPoint) {
+      await docsClick(context, 'table-cell-background-cell', state.cellPoint)
+      state = await docsWait(context, 'table-cell-background-cell', 'tableCellBackground', {}, current => current.colorPoint || current.backgroundPoint)
+    }
+    if (!state.backgroundPoint) {
+      await docsClick(context, 'table-cell-background-color', state.colorPoint)
+      state = await docsWait(context, 'table-cell-background-color', 'tableCellBackground', {}, current => current.backgroundPoint)
+    }
+  }
+  await docsClick(context, 'table-cell-background-open', state.backgroundPoint)
+  const menu = await docsWait(context, 'table-cell-background-menu', 'colorMenu', { attribute: 'color', value: edit.value }, current => current.open)
+  if (menu.presetPoint) {
+    context.menuMutationPossible = true
+    await docsClick(context, 'table-cell-background-preset', menu.presetPoint)
+  } else {
+    if (!menu.customPoint) {
+      throw docsFailure('table-cell-background-color', 'DOCS_TABLE_COLOR_UNAVAILABLE', `The open cell-background palette has no exact ${edit.value} preset or custom-color control`)
+    }
+    await docsClick(context, 'table-cell-background-custom', menu.customPoint)
+    const dialog = await docsWait(context, 'table-cell-background-dialog', 'colorDialog', {}, current => current.open && current.enabled && current.point && current.okPoint)
+    await docsClick(context, 'table-cell-background-focus', dialog.point)
+    await docsWait(context, 'table-cell-background-focus', 'colorDialog', {}, current => current.focused)
+    await docsKey(context, 'table-cell-background-select', { key: 'a', code: 'KeyA', keyCode: 65 }, MODIFIER_BITS.ctrl)
+    await docsInsertText(context, 'table-cell-background-input', edit.value)
+    const committed = await docsWait(context, 'table-cell-background-input', 'colorDialog', {}, current => current.focused && current.value === edit.value)
+    context.menuMutationPossible = true
+    await docsClick(context, 'table-cell-background-commit', committed.okPoint)
+    await docsWait(context, 'table-cell-background-close-dialog', 'colorDialog', {}, current => !current.open)
+  }
+  state = await docsWait(context, 'table-cell-background-close-panel', 'tableCellBackground', {}, current => current.open && current.closePoint)
+  await docsClick(context, 'table-cell-background-close-panel', state.closePoint)
+  await docsWait(context, 'table-cell-background-closed', 'tableCellBackground', {}, current => !current.open)
+}
+
+async function docsTableCellBackgroundFlow(context, args) {
+  const baseline = parseDocStructure(await docsExport(context, 'table-cell-background-baseline', 'html'))
+  const table = selectDocsTable(baseline, args.table)
+  const { edits, targets } = docsTableCellBackgroundEdits(baseline, table, args.edits)
+  const results = edits.map((edit, index) => ({ index, row: edit.row, column: edit.column, value: edit.value, status: 'unattempted' }))
+  let current = baseline
+  let attemptedCount = 0
+  let verifiedCount = 0
+  let appliedCount = 0
+  let alreadyAppliedCount = 0
+  let failure
+  for (const [index, edit] of edits.entries()) {
+    attemptedCount = index + 1
+    context.attemptedCount = attemptedCount
+    context.menuMutationPossible = false
+    const result = results[index]
+    const before = selectDocsTable(current, args.table).rows[edit.row - 1]?.[edit.column - 1]
+    if (before?.background === edit.value) {
+      Object.assign(result, { status: 'already_applied', verifiedBy: 'export' })
+      verifiedCount += 1
+      alreadyAppliedCount += 1
+      continue
+    }
+    try {
+      await docsApplyCellBackground(context, edit)
+      const { blocks: actual, verification } = await docsTableVerifiedExport(context, 'table-cell-background-verify', candidate => verifyDocsTableCellBackground(current, candidate, table.index, edit))
+      current = actual
+      if (!verification.ok) throw docsFailure('table-cell-background-verify', verification.code, verification.message)
+      Object.assign(result, { status: 'applied', verifiedBy: 'export' })
+      context.mutationPossible = true
+      verifiedCount += 1
+      appliedCount += 1
+    } catch (error) {
+      const detail = { code: error?.code ?? 'DOCS_TABLE_CELL_BACKGROUND_FAILED', message: error instanceof Error ? error.message : String(error) }
+      Object.assign(result, { status: 'failed', error: detail })
+      failure = { index, row: edit.row, column: edit.column, ...detail, mutationPossible: context.menuMutationPossible === true }
+      break
+    }
+  }
+  const status = !failure ? 'completed' : verifiedCount > 0 ? 'partial' : 'failed'
+  let tables
+  try { tables = [publicDocsTable(selectDocsTable(current, args.table))] } catch {}
+  return docsTableResult(context, {
+    tableAction: 'format',
+    tableIndex: table.index,
+    targets,
+    status,
+    editCount: edits.length,
+    attemptedCount,
+    verifiedCount,
+    appliedCount,
+    alreadyAppliedCount,
+    remainingCount: edits.length - verifiedCount,
+    results,
+    verifiedBy: 'export',
+    ...failure ? { failure } : {},
+  }, tables)
+}
+
 async function docsTableFormatFlow(context, args) {
+  if (args.edits.some(edit => edit.cell_background !== undefined)) return docsTableCellBackgroundFlow(context, args)
   const baseline = parseDocStructure(await docsExport(context, 'table-format-baseline', 'html'))
   const table = selectDocsTable(baseline, args.table)
   const { edits, targets } = docsTableFormatEdits(baseline, table, args.edits)
@@ -9042,6 +9803,8 @@ function docsTableCommand(request) {
   if (request.action === 'insert_columns') return request.position === 'before' ? 'Insert column left' : 'Insert column right'
   if (request.action === 'delete_rows') return 'Delete row'
   if (request.action === 'delete_columns') return 'Delete column'
+  if (request.action === 'merge') return 'Merge cells'
+  if (request.action === 'unmerge') return 'Unmerge cells'
   return 'Delete table'
 }
 
@@ -9062,6 +9825,8 @@ async function docsTableStructureFlow(context, args) {
     for (const row of request.rows) operations.push({ action: args.action, rows: [row] })
   } else if (args.action === 'delete_columns') {
     for (const column of request.columns) operations.push({ action: args.action, columns: [column] })
+  } else if (args.action === 'merge' || args.action === 'unmerge') {
+    operations.push({ action: args.action, row: request.row, column: request.column, count: request.count })
   } else operations.push({ action: 'delete_table' })
 
   let completedCount = 0
@@ -9071,16 +9836,27 @@ async function docsTableStructureFlow(context, args) {
     context.menuMutationPossible = false
     try {
       const table = selectDocsTable(current, args.table)
+      const merging = operation.action === 'merge' || operation.action === 'unmerge'
       const kind = operation.action === 'insert_rows' || operation.action === 'delete_rows' ? 'row'
         : operation.action === 'insert_columns' || operation.action === 'delete_columns' ? 'column' : 'table'
       const targetIndex = operation.row ?? operation.column ?? operation.rows?.[0] ?? operation.columns?.[0]
-      const plan = docsTableAnchor(current, table, kind, targetIndex)
+      const plan = merging
+        ? docsTableCellPlan(current, table, operation.row, operation.column)
+        : docsTableAnchor(current, table, kind, targetIndex)
       await docsTableSelectPlan(context, plan)
-      await docsKey(context, 'table-structure-collapse', KEY_SPECS.ArrowRight)
+      if (operation.action === 'merge') {
+        await docsKey(context, 'table-merge-extend', KEY_SPECS.ArrowRight, MODIFIER_BITS.shift)
+        await docsKey(context, 'table-merge-extend', KEY_SPECS.ArrowRight, MODIFIER_BITS.shift)
+      } else {
+        await docsKey(context, 'table-structure-collapse', KEY_SPECS.ArrowRight)
+      }
       await docsMenuCommand(context, docsTableCommand({ ...request, ...operation }))
-      const { blocks: actual, verification } = await docsTableVerifiedExport(context, 'table-structure-verify', candidate => operation.action === 'delete_table'
-        ? verifyDocsTableDelete(current, candidate, table.index)
-        : verifyDocsTableStructure(current, candidate, table.index, operation))
+      const { blocks: actual, verification } = await docsTableVerifiedExport(context, 'table-structure-verify', candidate => {
+        if (operation.action === 'delete_table') return verifyDocsTableDelete(current, candidate, table.index)
+        if (operation.action === 'merge') return verifyDocsTableMerge(current, candidate, table.index, operation)
+        if (operation.action === 'unmerge') return verifyDocsTableUnmerge(current, candidate, table.index, operation)
+        return verifyDocsTableStructure(current, candidate, table.index, operation)
+      })
       latest = actual
       if (!verification.ok) throw docsFailure('table-structure-verify', verification.code, verification.message)
       current = actual
@@ -9623,7 +10399,7 @@ const BATCH_ACTION_FIELDS = [
   'changed', 'signals', 'clicked', 'hovered', 'selected', 'selectedIndex',
   'typed', 'pressed', 'points', 'trusted', 'changedCount', 'offScreenCount', 'clickMs',
   'scroll', 'moved', 'wheel', 'requestedPixels', 'container', 'waited', 'navigated',
-  'staleScroll', 'scrolledIntoView', 'reResolved',
+  'staleScroll', 'scrolledIntoView', 'reResolved', 'newText',
 ]
 const BATCH_ARG_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u
 
@@ -9653,6 +10429,8 @@ async function batch(settings, args) {
   if (!Array.isArray(rawActions) || rawActions.length === 0 || rawActions.length > 20) {
     throw new BrowserError('BAD_BATCH', 'actions must be an array of 1 to 20 action objects')
   }
+  const initialTab = await getActiveTab(await getWindowId())
+  const batchBeforeView = actionBeforeView(initialTab)
   const preparedActions = []
   for (const [index, action] of rawActions.entries()) {
     if (!action || typeof action !== 'object' || Array.isArray(action)) {
@@ -9672,10 +10450,15 @@ async function batch(settings, args) {
       prepared[phase] = parseBatchGuardArgs(prepared.args[phase], index, phase)
       delete prepared.args[phase]
     }
+    const expectation = parseOperationExpect(op, prepared.args.expect, initialTab.url, { batch: true, path: `actions[${index}].expect` })
+    if (expectation !== undefined) {
+      prepared.args.expect = expectation
+      prepared.expect = expectation
+    }
     preparedActions.push(prepared)
   }
+  assertBatchExpectSequence(preparedActions)
   const stopOnError = args.stop_on_error !== false
-  const initialTab = await getActiveTab(await getWindowId())
   const canvasError = canvasBatchError(initialTab.url ?? '', rawActions)
   if (canvasError) throw new BrowserError(canvasError.code, canvasError.message)
   const requestedView = actionViewForTab(initialTab, parseViewArg(args, 'full'))
@@ -9694,19 +10477,24 @@ async function batch(settings, args) {
         op: action.op,
         ok: false,
         ...(guarded ? { attempted: false, mutationPossible: false } : {}),
+        ...(action.expect ? { expect: action.expect } : {}),
       }
+      let inner
       try {
         if (action.before) item.before = await waitForBatchGuard(action.before, 'before')
         if (guarded) {
           item.attempted = true
           item.mutationPossible = true
         }
-        const inner = await executeOperation(action.op, action.args, settings)
+        inner = await executeOperationUnchecked(action.op, action.args, settings)
         for (const field of BATCH_ACTION_FIELDS) {
           if (inner && inner[field] !== undefined) item[field] = inner[field]
         }
+        if (inner?._actionEvidence) item._actionEvidence = inner._actionEvidence
+        if (inner?.expect) item.expect = inner.expect
         if (action.after) item.after = await waitForBatchGuard(action.after, 'after')
         item.ok = true
+        Object.assign(item, finalizeActionEvidence(item, item.expect))
         actions.push(item)
       } catch (error) {
         const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'BATCH_ACTION_FAILED'
@@ -9714,6 +10502,8 @@ async function batch(settings, args) {
         const guard = error?.batchGuard
         if (guard?.waited) item[guard.phase] = guard.waited
         item.error = { code, message }
+        if (inner?._actionEvidence) item._actionEvidence = inner._actionEvidence
+        Object.assign(item, finalizeActionEvidence(item, item.expect))
         actions.push(item)
         ok = false
         failedIndex = index + 1
@@ -9754,6 +10544,10 @@ async function batch(settings, args) {
     },
     actions,
     ...viewPayload,
+    _actionEvidence: {
+      beforeView: batchBeforeView,
+      newText: actions.flatMap(item => Array.isArray(item.newText) ? item.newText : []),
+    },
   }
 }
 
@@ -9796,6 +10590,147 @@ async function resolveDialog(args) {
     tab: tabSummary(current),
     dialog: resolved,
     capture: { status: 'skipped', reason: 'DIALOG_RESOLVED' },
+  }
+}
+
+function assertDownloadApi() {
+  if (!chrome.downloads?.search) {
+    throw new BrowserError('DOWNLOAD_UNAVAILABLE', 'Chrome downloads access is unavailable. Reload the extension and allow the downloads permission.')
+  }
+}
+
+async function waitForDownload(id, request) {
+  const deadline = request.deadline ?? Date.now() + request.timeoutMs
+  for (;;) {
+    let item
+    try {
+      const items = await chrome.downloads.search({ id })
+      item = items?.[0]
+    } catch (error) {
+      throw new BrowserError('DOWNLOAD_STATUS_FAILED', `Chrome could not inspect download ${id}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (!item) throw new BrowserError('DOWNLOAD_NOT_FOUND', `Chrome lost track of download ${id}; inspect the browser's download history before retrying.`)
+    if (item.state === 'complete') {
+      if (!pathInsideRoot(request.root, item.filename)) {
+        throw new BrowserError('DOWNLOAD_OUTSIDE_FOLDER', `The browser saved the file outside the configured Downloads folder: ${item.filename}`)
+      }
+      const size = Number(item.fileSize)
+      if (!Number.isSafeInteger(size) || size < 0) throw new BrowserError('DOWNLOAD_SIZE_UNKNOWN', `Chrome completed ${item.filename} but did not report a valid file size.`)
+      return { path: item.filename, size, mime: item.mime ?? '', finalUrl: item.finalUrl ?? item.url ?? request.url }
+    }
+    if (item.state === 'interrupted') {
+      throw new BrowserError('DOWNLOAD_INTERRUPTED', `Chrome interrupted the download${item.error ? ` (${item.error})` : ''}; no completed file was reported.`)
+    }
+    if (Date.now() >= deadline) {
+      await chrome.downloads.cancel?.(id).catch(() => {})
+      throw new BrowserError('DOWNLOAD_TIMEOUT', `The download did not complete within ${request.timeoutMs}ms and was cancelled; inspect Downloads before retrying.`)
+    }
+    await sleep(100)
+  }
+}
+
+async function downloadToFolder(request) {
+  assertDownloadApi()
+  if (typeof chrome.downloads.download !== 'function') throw new BrowserError('DOWNLOAD_UNAVAILABLE', 'Chrome cannot start direct downloads in this extension context.')
+  let id
+  try {
+    id = await chrome.downloads.download({
+      url: request.url,
+      saveAs: false,
+      conflictAction: 'uniquify',
+      ...(request.filename === undefined ? {} : { filename: request.filename }),
+    })
+  } catch (error) {
+    throw new BrowserError('DOWNLOAD_START_FAILED', `Chrome could not start the download: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  return waitForDownload(id, request)
+}
+
+async function downloadByClick(settings, label, request) {
+  assertDownloadApi()
+  if (!chrome.downloads.onCreated?.addListener) throw new BrowserError('DOWNLOAD_UNAVAILABLE', 'Chrome cannot observe downloads started by page controls.')
+  const deadline = Date.now() + request.timeoutMs
+  let created
+  let multiple = false
+  let notify
+  const detected = new Promise(resolve => { notify = resolve })
+  const listener = item => {
+    if (created === undefined) {
+      created = item
+      notify(item)
+    } else if (created.id !== item.id) {
+      multiple = true
+    }
+  }
+  chrome.downloads.onCreated.addListener(listener)
+  try {
+    const clickOutcome = click(settings, { label, view: 'none' }).then(
+      value => ({ value }),
+      error => ({ error }),
+    )
+    await Promise.race([clickOutcome, detected])
+    const clicked = await clickOutcome
+    if (created === undefined && Date.now() < deadline) {
+      await Promise.race([detected, sleep(Math.max(0, deadline - Date.now()))])
+    }
+    if (created === undefined) {
+      if (clicked.error) throw clicked.error
+      throw new BrowserError('DOWNLOAD_NOT_STARTED', `No new Chrome download was reported within ${request.timeoutMs}ms. Use browser_downloads to inspect actual downloaded files before retrying.`)
+    }
+    if (multiple) throw new BrowserError('DOWNLOAD_AMBIGUOUS', 'The download control started multiple downloads; no single file was selected. Inspect browser_downloads and choose an exact filename.')
+    const downloaded = await waitForDownload(created.id, { ...request, deadline })
+    if (multiple) throw new BrowserError('DOWNLOAD_AMBIGUOUS', 'The download control started multiple downloads; no single file was selected. Inspect browser_downloads and choose an exact filename.')
+    return downloaded
+  } finally {
+    chrome.downloads.onCreated.removeListener(listener)
+  }
+}
+
+async function setFileInputByToken(tabId, token, path) {
+  await withDebugger(tabId, async () => {
+    let assignmentSent = false
+    try {
+      await chrome.debugger.sendCommand({ tabId }, 'DOM.enable')
+      const document = await chrome.debugger.sendCommand({ tabId }, 'DOM.getDocument', { depth: -1, pierce: true })
+      const matches = []
+      const visit = node => {
+        const attributes = Array.isArray(node?.attributes) ? node.attributes : []
+        for (let index = 0; index + 1 < attributes.length; index += 2) {
+          if (attributes[index] === 'data-crazyagent-upload' && attributes[index + 1] === token) matches.push(node)
+        }
+        for (const child of node?.children ?? []) visit(child)
+        for (const shadow of node?.shadowRoots ?? []) visit(shadow)
+        if (node?.contentDocument) visit(node.contentDocument)
+        if (node?.templateContent) visit(node.templateContent)
+      }
+      visit(document.root)
+      if (matches.length !== 1) throw new BrowserError('UPLOAD_STALE', `Expected one marked file input, found ${matches.length}; no file was assigned.`)
+      const nodeId = matches[0].nodeId
+      if (!Number.isSafeInteger(nodeId) || nodeId <= 0) throw new BrowserError('UPLOAD_STALE', 'Chrome did not return a usable file-input node; no file was assigned.')
+      assignmentSent = true
+      await chrome.debugger.sendCommand({ tabId }, 'DOM.setFileInputFiles', { files: [path], nodeId })
+    } catch (error) {
+      const failure = error instanceof BrowserError
+        ? error
+        : new BrowserError('UPLOAD_CDP_FAILED', `Chrome could not assign the file input: ${error instanceof Error ? error.message : String(error)}`)
+      if (!assignmentSent) failure.mutationPossible = false
+      throw failure
+    }
+  })
+}
+
+function filesDriver(settings) {
+  return {
+    getActiveTab: async () => getActiveTab(await getWindowId()),
+    assertCapturable: async tab => assertCapturable(tab),
+    runInAllFrames,
+    runInFrame,
+    resolveLabelTarget,
+    tabSummary,
+    download: downloadToFolder,
+    downloadClick: ({ label, ...request }) => downloadByClick(settings, label, request),
+    setFileInput: setFileInputByToken,
+    actionView: async (tab, view, outcome) => buildActionView(tab, settings, actionViewForTab(tab, view), outcome),
   }
 }
 
@@ -9849,9 +10784,10 @@ function findDriver(settings) {
  * Execute one bridge command.
  * @param {string} op
  * @param {Record<string, any>} args
- * @param {import('./protocol.js').Settings} settings
+ * @param {import('./protocol.js').Settings} normalized
+ * @param {Record<string, any>} [io]
  */
-async function executeOperation(op, args, normalized) {
+async function executeOperationUnchecked(op, args, normalized, io = {}) {
   if (op === 'snapshot') {
     const request = parseScreenshotArgs(args)
     return snapshot(request.detail, normalized, false, request.delayMs, request)
@@ -9883,6 +10819,9 @@ async function executeOperation(op, args, normalized) {
   if (op === 'click_at') {
     return clickAt(normalized, args)
   }
+  if (op === 'drag') {
+    return drag(normalized, args)
+  }
   if (op === 'select') {
     return selectRange(normalized, args)
   }
@@ -9895,6 +10834,12 @@ async function executeOperation(op, args, normalized) {
   if (op === 'find') {
     return executeFind(args, findDriver(normalized))
   }
+  if (op === 'download') {
+    return executeDownload(args, filesDriver(normalized))
+  }
+  if (op === 'upload') {
+    return executeUpload(args, filesDriver(normalized))
+  }
   if (op === 'docs') {
     if (args.action === 'replace_text') return docsReplaceText(normalized, args)
     if (args.action === 'replace_many') return docsReplaceMany(normalized, args)
@@ -9904,7 +10849,7 @@ async function executeOperation(op, args, normalized) {
     if (args.action === 'select_text') return docsSelectText(normalized, args)
     if (args.action === 'read') return docsRead(normalized, args)
     if (args.action === 'write') return docsWrite(normalized, args)
-    if (args.action === 'table') return docsTable(normalized, { ...args, action: args.tableAction })
+    if (args.action === 'table') return docsTable(normalized, args, io)
     if (args.action === 'page_setup') return docsPageSetup(normalized, args)
     return docsSetFont(normalized, args)
   }
@@ -9945,6 +10890,19 @@ async function executeOperation(op, args, normalized) {
   throw new BrowserError('BAD_OP', `Unknown browser operation: ${String(op)}`)
 }
 
+export async function executeOperation(op, args, normalized, io = {}) {
+  const result = await executeOperationUnchecked(op, args, normalized, io)
+  if (op === 'batch') return finalizeBatchEvidence(result)
+  if (supportsActionEvidence(op)) return finalizeActionEvidence(result, result.expect ?? args?.expect)
+  return result
+}
+
+function refreshActionEvidence(op, result) {
+  if (op === 'batch') return finalizeBatchEvidence(result)
+  if (supportsActionEvidence(op)) return finalizeActionEvidence(result, result?.expect)
+  return result
+}
+
 function addDialogReports(result, reports) {
   if (!result || typeof result !== 'object') return result
   const dialogs = [...reports]
@@ -9962,7 +10920,7 @@ async function finishDialogResult(op, result, cursor) {
   const reports = dialogManager.takeReports(cursor)
   const tab = await getActiveTab(await getWindowId()).catch(() => undefined)
   const pending = tab ? dialogManager.pending(tab.id) : undefined
-  if (pending) return addDialogReports(pendingDialogResult(op, tab, pending), reports)
+  if (pending) return addDialogReports({ ...result, ...pendingDialogResult(op, tab, pending) }, reports)
   return addDialogReports(result, reports)
 }
 
@@ -9973,8 +10931,9 @@ export async function execute(op, args = {}, settings) {
   const cursor = dialogManager.cursor()
   try {
     const result = await executeOperation(op, args, normalized)
-    return await finishDialogResult(op, result, cursor)
+    return refreshActionEvidence(op, await finishDialogResult(op, result, cursor))
   } catch (error) {
+    if (error?.name === 'ActionExpectError' || ['BAD_EXPECT', 'EXPECT_UNSUPPORTED', 'EXPECT_BASELINE_UNAVAILABLE'].includes(error?.code)) throw error
     if (op === 'dialog' && error?.code !== 'DIALOG_PENDING') throw error
     let pending = error?.dialog
     if (!pending) {
@@ -9984,7 +10943,9 @@ export async function execute(op, args = {}, settings) {
     if (!pending) throw error
     const reports = dialogManager.takeReports(cursor)
     const tab = await chrome.tabs.get(pending.tabId).catch(() => undefined)
-    return addDialogReports(pendingDialogResult(op, tab, pending), reports)
+    const pendingResult = addDialogReports(pendingDialogResult(op, tab, pending), reports)
+    if (supportsActionEvidence(op) && args.expect !== undefined && pendingResult.expect === undefined) pendingResult.expect = args.expect
+    return refreshActionEvidence(op, pendingResult)
   }
 }
 

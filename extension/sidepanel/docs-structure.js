@@ -265,6 +265,7 @@ export function parseDocStructure(html) {
               paragraphs: table.cell.paragraphs.length > 0 ? table.cell.paragraphs : [{ kind: 'para', style: 'P', text: '', marked: '', runs: [] }],
               colspan: table.cell.colspan,
               rowspan: table.cell.rowspan,
+              background: table.cell.background,
             })
             table.cell = undefined
           }
@@ -275,6 +276,7 @@ export function parseDocStructure(html) {
             paragraphs: [],
             colspan: Math.max(1, Number(attr(attrs, 'colspan') ?? 1) || 1),
             rowspan: Math.max(1, Number(attr(attrs, 'rowspan') ?? 1) || 1),
+            background: marksOf(attrs, classMarks).highlight ?? 'none',
           }
         }
         break

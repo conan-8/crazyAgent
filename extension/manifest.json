@@ -12,6 +12,7 @@
     "clipboardRead",
     "clipboardWrite",
     "debugger",
+    "downloads",
     "webNavigation",
     "topSites",
     "bookmarks",

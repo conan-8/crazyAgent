@@ -10,14 +10,17 @@ import { DEFAULT_SETTINGS, execute, testCapture, imageDataUrl, beginDebuggerRun,
 import { ClientLogger } from './logger.js'
 import { renderMarkdown } from './markdown.js'
 import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protocol.js'
+import { matchSlashCommands, nextSlashIndex, resolveSlashCommand, slashQuery } from './slash.js'
 
 const SETTINGS_KEY = 'crazyagent.settings'
+const DISCLAIMER_KEY = 'crazyagent.disclaimerPending'
 const RECONNECT_MS = 2_500
 const STOP_CONFIRM_TIMEOUT_MS = 15_000
 const DEFAULT_MODEL_BASE_URL = 'https://openrouter.ai/api/v1'
 const RECOMMENDED_MODEL_ID = 'deepseek/deepseek-v4.1-flash-1017'
 const HISTORY_KEY = 'crazyagent.history'
 const MAX_HISTORY = 12
+const MAX_RECENT_SESSIONS = 3
 const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 5_000_000
 const MAX_TOTAL_IMAGE_BYTES = 12_000_000
@@ -26,6 +29,7 @@ let settingsDraftEffort = 'auto'
 let conversationHistory = []
 let currentConversationId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 let newChatOnNextConnect = true
+let newChatDraft = false
 let historySaveTimer = null
 let attachedImages = []
 /** @type {Array<{id: string, text: string, images: Array<{name: string, size: number, mimeType: string, data: string}>}>} */
@@ -114,12 +118,16 @@ const els = {
   activityLog: $('activity-log'),
   activityEmpty: $('activity-empty'),
   activityTimer: $('activity-timer'),
+  recentSessions: $('recent-sessions'),
+  recentSessionsList: $('recent-sessions-list'),
+  recentSessionsAll: $('recent-sessions-all'),
   banner: $('banner'),
   bannerText: $('banner-text'),
   bannerAction: $('banner-action'),
   sessionInfo: $('session-info'),
   timing: $('timing'),
   newChat: $('new-chat'),
+  backHome: $('back-home'),
   settings: $('settings'),
   settingsModal: $('settings-modal'),
   settingsClose: $('settings-close'),
@@ -144,6 +152,8 @@ const els = {
   imageModal: $('image-modal'),
   imageModalImg: $('image-modal-img'),
   imageClose: $('image-close'),
+  disclaimer: $('disclaimer'),
+  disclaimerDismiss: $('disclaimer-dismiss'),
   toast: $('toast'),
   debugLog: $('debug-log'),
   logModal: $('log-modal'),
@@ -173,7 +183,11 @@ const els = {
   modelMenu: $('model-menu'),
   modelMenuList: $('model-menu-list'),
   modelSearch: $('model-search'),
+  slashMenu: $('slash-menu'),
+  slashMenuList: $('slash-menu-list'),
   mic: $('mic'),
+  pause: $('pause'),
+  dictationIndicator: $('dictation-indicator'),
   imageChips: $('image-chips'),
   messageQueue: $('message-queue'),
   promptRail: $('prompt-rail'),
@@ -214,7 +228,7 @@ async function loadSettings() {
     const stored = await chrome.storage.local.get(SETTINGS_KEY)
     const value = stored?.[SETTINGS_KEY]
     if (value && typeof value === 'object') {
-      settings = { ...DEFAULT_SETTINGS, ...value, paused: false }
+      settings = { ...DEFAULT_SETTINGS, ...value }
     }
   } catch {
     settings = { ...DEFAULT_SETTINGS }
@@ -301,9 +315,25 @@ function renderComposerModel() {
   els.composerModel.disabled = busy
 }
 
-function closeModelMenu() {
+/**
+ * Close the composer model picker. `focusComposer` is set by the dismissal
+ * paths (Escape, outside click, row selection) so the composer is ready for
+ * typing again; toggling the picker closed from its own button keeps focus there.
+ */
+function closeModelMenu({ focusComposer = false } = {}) {
+  const hadFocus = els.modelMenu.contains(document.activeElement)
   els.modelMenu.classList.add('hidden')
   els.composerModel.setAttribute('aria-expanded', 'false')
+  if (focusComposer || hadFocus) els.input.focus({ preventScroll: true })
+}
+
+function openModelMenu() {
+  closeSlashMenu()
+  els.modelSearch.value = ''
+  renderModelMenu()
+  els.modelMenu.classList.remove('hidden')
+  els.composerModel.setAttribute('aria-expanded', 'true')
+  setTimeout(() => els.modelSearch.focus(), 0)
 }
 
 function renderModelMenu() {
@@ -342,7 +372,7 @@ function renderModelMenu() {
     button.append(copy, check)
     button.addEventListener('click', () => {
       if (!compatible) return
-      closeModelMenu()
+      closeModelMenu({ focusComposer: true })
       if (model.id === llmState.model?.id || busy) return
       sendLlmConfigure({
         baseUrl: llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL,
@@ -352,6 +382,111 @@ function renderModelMenu() {
       })
     })
     els.modelMenuList.appendChild(button)
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* slash commands                                                      */
+/* ------------------------------------------------------------------ */
+
+/** Palette state: open while the composer holds a `/name` filter token. */
+let slashMenuOpen = false
+let slashMenuQuery = ''
+/** @type {Array<{id: string, usage: string, description: string}>} */
+let slashMenuMatches = []
+let slashMenuIndex = 0
+
+function closeSlashMenu() {
+  if (!slashMenuOpen && els.slashMenu.classList.contains('hidden')) return
+  slashMenuOpen = false
+  slashMenuQuery = ''
+  slashMenuMatches = []
+  slashMenuIndex = 0
+  els.slashMenu.classList.add('hidden')
+  els.slashMenuList.replaceChildren()
+  els.input.setAttribute('aria-expanded', 'false')
+  els.input.removeAttribute('aria-activedescendant')
+}
+
+function updateSlashSelection() {
+  const options = [...els.slashMenuList.children]
+  options.forEach((option, index) => option.setAttribute('aria-selected', String(index === slashMenuIndex)))
+  const selected = options[slashMenuIndex]
+  if (!selected) return
+  els.input.setAttribute('aria-activedescendant', selected.id)
+  selected.scrollIntoView({ block: 'nearest' })
+}
+
+/** Show commands matching the current draft; hide the palette for prose. */
+function renderSlashMenu() {
+  const query = slashQuery(els.input.value)
+  const matches = query === null ? [] : matchSlashCommands(query)
+  if (matches.length === 0) {
+    closeSlashMenu()
+    return
+  }
+  if (!slashMenuOpen || slashMenuQuery !== query) slashMenuIndex = 0
+  slashMenuOpen = true
+  slashMenuQuery = query
+  slashMenuMatches = matches
+  slashMenuIndex = Math.min(slashMenuIndex, matches.length - 1)
+  els.slashMenuList.replaceChildren()
+  matches.forEach((command, index) => {
+    const option = document.createElement('div')
+    option.id = `slash-command-${command.id}`
+    option.className = 'slash-command'
+    option.dataset.command = command.id
+    option.setAttribute('role', 'option')
+    option.setAttribute('aria-selected', String(index === slashMenuIndex))
+    const name = document.createElement('span')
+    name.className = 'slash-command-name'
+    name.textContent = command.usage
+    const description = document.createElement('span')
+    description.className = 'slash-command-description'
+    description.textContent = command.description
+    option.append(name, description)
+    // Keep the textarea focused so the click never races the blur handler, and
+    // keep the click from bubbling to the outside-click closers after the
+    // palette has already detached this option.
+    option.addEventListener('pointerdown', event => event.preventDefault())
+    option.addEventListener('click', event => {
+      event.stopPropagation()
+      executeSlashCommand(command)
+    })
+    els.slashMenuList.appendChild(option)
+  })
+  els.slashMenu.classList.remove('hidden')
+  els.input.setAttribute('aria-expanded', 'true')
+  updateSlashSelection()
+}
+
+function moveSlashSelection(delta) {
+  if (!slashMenuOpen || slashMenuMatches.length === 0) return
+  slashMenuIndex = nextSlashIndex(slashMenuIndex, slashMenuMatches.length, delta)
+  updateSlashSelection()
+}
+
+/** Drop the typed command without touching attachments; the command decides their fate. */
+function clearSlashDraft() {
+  els.input.value = ''
+  resizeInput()
+}
+
+function executeSlashCommand(command) {
+  if (!command) return
+  closeSlashMenu()
+  clearSlashDraft()
+  logger.log('ui.slash', { command: command.id }, 'info')
+  if (command.id === 'new') {
+    newChat()
+    return
+  }
+  if (command.id === 'model') {
+    if (busy) {
+      toast('Wait for the current operation to finish')
+      return
+    }
+    openModelMenu()
   }
 }
 
@@ -445,6 +580,7 @@ async function loadHistory() {
   } catch {
     conversationHistory = []
   }
+  renderRecentSessions()
 }
 
 function persistHistory() {
@@ -464,10 +600,13 @@ function hasConversation() {
   return Boolean(els.activityLog.querySelector('.activity-turn'))
 }
 
+function conversationDate(item) {
+  return new Date(item.updatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 function archiveCurrentConversation() {
   if (!hasConversation()) return
   const html = [...els.activityLog.children]
-    .filter(child => child !== els.activityEmpty)
     .map(child => child.outerHTML)
     .join('')
   const record = {
@@ -475,10 +614,59 @@ function archiveCurrentConversation() {
     title: conversationTitle(),
     updatedAt: Date.now(),
     turnNumber,
+    sessionId,
     html,
   }
   conversationHistory = [record, ...conversationHistory.filter(item => item.id !== record.id)].slice(0, MAX_HISTORY)
   persistHistory()
+  renderRecentSessions()
+}
+
+function renderRecentSessions() {
+  const recent = conversationHistory.slice(0, MAX_RECENT_SESSIONS)
+  els.recentSessions.classList.toggle('hidden', recent.length === 0)
+  els.recentSessionsList.replaceChildren()
+  for (const item of recent) {
+    const running = busy && stopAvailable && (item.id === currentConversationId || (sessionId && item.sessionId === sessionId))
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.className = `recent-session-open${running ? ' running' : ''}`
+    open.setAttribute('aria-label', `${item.title}${running ? ', running' : ''}`)
+    const copy = document.createElement('span')
+    copy.className = 'recent-session-copy'
+    const title = document.createElement('span')
+    title.className = 'recent-session-title'
+    title.textContent = item.title
+    title.title = item.title
+    const when = document.createElement('small')
+    when.textContent = conversationDate(item)
+    copy.append(title, when)
+    open.appendChild(copy)
+    if (running) {
+      const status = document.createElement('span')
+      status.className = 'recent-session-running'
+      const spinner = document.createElement('span')
+      spinner.className = 'recent-session-spinner'
+      spinner.setAttribute('aria-hidden', 'true')
+      status.append(spinner, document.createTextNode('Running'))
+      open.appendChild(status)
+    }
+    open.addEventListener('click', () => restoreConversation(item.id))
+    els.recentSessionsList.appendChild(open)
+  }
+}
+
+function setNewChatDraft(value) {
+  newChatDraft = value
+  els.app.classList.toggle('new-chat-draft', value)
+  if (value) els.activityEmpty.classList.remove('hidden')
+  const waitingForSession = value && busy
+  els.send.disabled = waitingForSession || (busy && !stopAvailable)
+  const sendLabel = waitingForSession ? 'Wait for the running session' : busy && stopAvailable ? 'Queue message' : 'Send'
+  els.send.title = sendLabel
+  els.send.setAttribute('aria-label', sendLabel)
+  renderPromptRail()
+  renderRecentSessions()
 }
 
 function renderHistory() {
@@ -496,7 +684,7 @@ function renderHistory() {
     const title = document.createElement('span')
     title.textContent = item.title
     const when = document.createElement('small')
-    when.textContent = new Date(item.updatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    when.textContent = conversationDate(item)
     open.append(title, when)
     open.addEventListener('click', () => restoreConversation(item.id))
     const remove = document.createElement('button')
@@ -509,6 +697,7 @@ function renderHistory() {
       conversationHistory = conversationHistory.filter(entry => entry.id !== item.id)
       persistHistory()
       renderHistory()
+      renderRecentSessions()
     })
     row.append(open, remove)
     els.historyList.appendChild(row)
@@ -524,20 +713,29 @@ function openHistory() {
 }
 
 function closeHistory() {
+  const hadFocus = els.historyModal.contains(document.activeElement)
   els.historyModal.classList.add('hidden')
   els.historySearch.value = ''
+  if (hadFocus) els.input.focus({ preventScroll: true })
 }
 
 function restoreConversation(id) {
+  const item = conversationHistory.find(entry => entry.id === id)
+  if (!item) return
+  if (busy && newChatDraft && item.id === currentConversationId) {
+    setNewChatDraft(false)
+    els.activityEmpty.classList.add('hidden')
+    closeHistory()
+    scrollActivity()
+    return
+  }
   if (busy) {
     toast('Wait for the current turn to finish')
     return
   }
-  const item = conversationHistory.find(entry => entry.id === id)
-  if (!item) return
   archiveCurrentConversation()
   clearChat()
-  els.activityEmpty?.classList.add('hidden')
+  if (!newChatDraft) els.activityEmpty?.classList.add('hidden')
   els.activityLog.insertAdjacentHTML('beforeend', item.html)
   for (const head of els.activityLog.querySelectorAll('.step-head')) {
     head.addEventListener('click', () => {
@@ -851,7 +1049,9 @@ function openSettings() {
   setEffortSelection(llmState.reasoningEffort ?? 'auto')
   renderProviderStatus()
   els.settingsModal.classList.remove('hidden')
-  setTimeout(() => els.settingToken.focus(), 10)
+  // Model info leads the panel, so a configured setup opens at the top; a panel
+  // that still needs pairing jumps down to the token field instead.
+  setTimeout(() => (!settings.token || authFailed ? els.settingToken : els.settingApiKey).focus(), 10)
   if (connected && (modelsState.models.length === 0 || modelsState.baseUrl !== els.settingBaseUrl.value.trim())) {
     void refreshModels()
   } else if (modelsState.models.length > 0) {
@@ -860,7 +1060,53 @@ function openSettings() {
 }
 
 function closeSettings() {
+  const hadFocus = els.settingsModal.contains(document.activeElement)
   els.settingsModal.classList.add('hidden')
+  if (hadFocus) els.input.focus({ preventScroll: true })
+}
+
+/* ------------------------------------------------------------------ */
+/* one-time disclaimer                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The background worker flags this after the extension is installed or
+ * reloaded. Show it on the first panel use after that, then clear the flag so
+ * ordinary panel opens stay quiet until the next reload.
+ */
+async function showDisclaimerIfPending() {
+  let pending = false
+  try {
+    const stored = await chrome.storage.local.get(DISCLAIMER_KEY)
+    pending = stored?.[DISCLAIMER_KEY] === true
+  } catch (error) {
+    logger.log('disclaimer.read_failed', { message: errorMessage(error) }, 'error')
+    return false
+  }
+  if (!pending) return false
+  // Consume the flag before showing so reopening the panel cannot repeat it.
+  try {
+    await chrome.storage.local.set({ [DISCLAIMER_KEY]: false })
+  } catch (error) {
+    logger.log('disclaimer.clear_failed', { message: errorMessage(error) }, 'error')
+  }
+  showDisclaimer()
+  return true
+}
+
+function showDisclaimer() {
+  if (els.disclaimer.open) return
+  els.disclaimer.showModal()
+  els.disclaimerDismiss.focus({ preventScroll: true })
+  logger.log('disclaimer.shown', {}, 'info')
+}
+
+function dismissDisclaimer() {
+  if (!els.disclaimer.open) return
+  const hadFocus = els.disclaimer.contains(document.activeElement)
+  els.disclaimer.close()
+  if (hadFocus) els.input.focus({ preventScroll: true })
+  logger.log('disclaimer.dismissed', {}, 'info')
 }
 
 /* ------------------------------------------------------------------ */
@@ -919,13 +1165,15 @@ function toast(text) {
 function setBusy(value, options = {}) {
   busy = value
   stopAvailable = value && options.stoppable !== false
-  els.send.disabled = value && !stopAvailable
-  const sendLabel = value && stopAvailable ? 'Queue message' : 'Send'
+  const waitingForSession = value && newChatDraft
+  els.send.disabled = waitingForSession || (value && !stopAvailable)
+  const sendLabel = waitingForSession ? 'Wait for the running session' : value && stopAvailable ? 'Queue message' : 'Send'
   els.send.title = sendLabel
   els.send.setAttribute('aria-label', sendLabel)
   renderComposerModel()
   updateStopButton()
   refreshStatus()
+  renderRecentSessions()
 }
 
 /** Reflect the stop affordance: visible whenever a stoppable turn is running. */
@@ -941,6 +1189,46 @@ function updateStopButton() {
   els.stop.setAttribute('aria-label', label)
   els.stop.setAttribute('aria-busy', String(stopping))
   renderQueuedMessages()
+}
+
+/** Reflect the Pause/Resume control and its browser-access state. */
+function updatePauseButton() {
+  if (!els.pause) return
+  const paused = settings.paused === true
+  els.pause.setAttribute('aria-pressed', String(paused))
+  els.pause.setAttribute('aria-label', paused ? 'Resume browser access' : 'Pause browser access')
+  els.pause.title = paused
+    ? 'Browser access paused — resume it'
+    : 'Pause browser access without ending the chat'
+  els.pause.classList.toggle('paused', paused)
+  const use = els.pause.querySelector('use')
+  if (use) use.setAttribute('href', paused ? '#icon-play' : '#icon-pause')
+}
+
+/**
+ * Toggle browser-access pause. Paused commands are rejected with PAUSED
+ * (app.js handleBrowserCommand) without ending the chat turn; the state is
+ * persisted with the other panel settings.
+ * @param {boolean} value
+ * @param {{persist?: boolean, announce?: boolean}} [options]
+ */
+function setPaused(value, { persist = true, announce = true } = {}) {
+  const next = value === true
+  settings.paused = next
+  updatePauseButton()
+  if (next) {
+    setActivityPhase('Paused', 'paused')
+    if (announce) toast('Browser access paused. Page commands are rejected until you resume.')
+  } else {
+    setActivityPhase(
+      busy ? 'Working…' : connected ? 'Ready' : 'Companion offline',
+      busy ? 'busy' : connected ? 'online' : 'offline',
+    )
+    if (announce) toast('Browser access resumed')
+  }
+  refreshStatus()
+  logger.log('ui.pause', { paused: next }, 'info')
+  if (persist) void saveSettings()
 }
 
 function setActivity(active) {
@@ -1029,6 +1317,7 @@ function connect() {
     clearTimeout(queueDispatchTimer)
     queueDispatchTimer = null
     setBusy(false)
+    abandonLiveTurnAfterDisconnect()
     void endDebuggerRun()
     setActivity(false)
     setActivityPhase('Companion offline', 'offline')
@@ -1057,6 +1346,27 @@ function scheduleReconnect() {
     reconnectTimer = null
     if (ws === null && !authFailed) connect()
   }, RECONNECT_MS)
+}
+
+/**
+ * The bridge is gone, so a rendered turn can never finish: close the live step
+ * and its 100 ms clock, and retire the /new draft view so a later send cannot
+ * stall on "Wait for the running session to finish". Called from socket.onclose.
+ */
+function abandonLiveTurnAfterDisconnect() {
+  if (currentTurn !== null || currentStep !== null) {
+    finishTurn({})
+    if (lastAgentTurn) {
+      const summary = lastAgentTurn.querySelector('.agent-turn-summary')
+      if (summary && !summary.textContent.includes('Disconnected')) summary.textContent += ' · Disconnected'
+    }
+  } else {
+    stopLiveClocks()
+  }
+  if (newChatDraft) {
+    setNewChatDraft(false)
+    if (hasConversation()) els.activityEmpty?.classList.add('hidden')
+  }
 }
 
 function sendFrame(frame) {
@@ -1165,7 +1475,10 @@ function scrollActivity() {
 
 function renderPromptRail() {
   const prompts = [...els.activityLog.querySelectorAll('.activity-turn')]
-  els.promptRail.classList.toggle('hidden', prompts.length === 0)
+  const chatOpen = prompts.length > 0 && !newChatDraft
+  els.app.classList.toggle('chat-open', chatOpen)
+  els.backHome.classList.toggle('hidden', !chatOpen)
+  els.promptRail.classList.toggle('hidden', !chatOpen)
   els.promptRailList.replaceChildren()
   prompts.forEach((prompt, index) => {
     const button = document.createElement('button')
@@ -1329,7 +1642,7 @@ function startTurn(text, attachments = []) {
   toolRows.clear()
   streamToolEntries.clear()
   browserRows.clear()
-  els.activityEmpty?.classList.add('hidden')
+  if (!newChatDraft) els.activityEmpty?.classList.add('hidden')
 
   const divider = document.createElement('div')
   divider.className = 'activity-turn'
@@ -1562,7 +1875,7 @@ function finishTurn({ totalMs } = {}) {
  * @param {{durationMs?: number, running?: boolean, latest?: string}} [options]
  */
 function pushActivity(kind, label, text, options = {}) {
-  if (kind === 'error' || currentTurn !== null) els.activityEmpty?.classList.add('hidden')
+  if ((kind === 'error' || currentTurn !== null) && !newChatDraft) els.activityEmpty?.classList.add('hidden')
   activityContainer().querySelector(':scope > .thinking-wait')?.remove()
   const entry = document.createElement('div')
   entry.className = `activity-entry ${kind}${options.running ? ' running' : ''}`
@@ -1842,6 +2155,11 @@ function handleFrame(frame) {
       } else {
         hideBanner()
       }
+      // A reconnect after a dropped bridge must not revive a stale /new draft.
+      if (newChatDraft) {
+        setNewChatDraft(false)
+        if (hasConversation()) els.activityEmpty?.classList.add('hidden')
+      }
       if (newChatOnNextConnect) newChat()
       refreshStatus()
       return
@@ -2069,7 +2387,7 @@ function pushAnswer(text) {
   const value = String(text ?? '').trim()
   if (value.length === 0 || value === lastAnswerText) return
   lastAnswerText = value
-  els.activityEmpty?.classList.add('hidden')
+  if (!newChatDraft) els.activityEmpty?.classList.add('hidden')
   const block = document.createElement('div')
   block.className = 'activity-answer'
   const body = document.createElement('div')
@@ -2116,19 +2434,24 @@ function handleDone(frame) {
   finishTurn({ totalMs })
   const finalText = typeof frame.text === 'string' ? frame.text.trim() : ''
   if (finalText.length > 0) pushAnswer(finalText)
-  setActivityPhase('Ready', 'online')
+  const unverified = frame.docsVerification === 'unverified'
+  setActivityPhase(unverified ? 'Verification incomplete' : 'Ready', unverified ? 'error' : 'online')
   logger.log('chat.done', {
     sessionId: frame.sessionId,
     timings: frame.timings,
     stepDurations: lastStepDurations,
     textLength: typeof frame.text === 'string' ? frame.text.length : 0,
+    docsVerification: frame.docsVerification,
+    docsVerificationReason: frame.docsVerificationReason,
   }, 'info')
   if (typeof frame.sessionId === 'string' && frame.sessionId.length > 0) {
     sessionId = frame.sessionId
   }
   updateFooter()
   refreshStatus()
+  if (unverified) toast(`Docs verification incomplete${typeof frame.docsVerificationReason === 'string' ? `: ${frame.docsVerificationReason}` : ''}`)
   archiveCurrentConversation()
+  if (newChatDraft) newChat()
 }
 
 /** @param {Record<string, any>} frame */
@@ -2149,6 +2472,7 @@ function handleChatError(frame) {
   if (/companion|not connected|script|invalid pairing|dsh/i.test(message)) {
     showBanner(message, 'Open settings', openSettings)
   }
+  if (newChatDraft) newChat()
 }
 
 /** @param {Record<string, any>} frame */
@@ -2187,6 +2511,7 @@ function handleStopped(frame = {}) {
   }
   if (typeof frame.sessionId === 'string' && frame.sessionId.length > 0) sessionId = frame.sessionId
   updateFooter()
+  if (newChatDraft) newChat()
 }
 
 function updateFooter() {
@@ -2318,7 +2643,11 @@ async function handleBrowserCommand(frame) {
       durationMs: Math.round(performance.now() - started),
       error: { code, message },
     }, 'error')
-    sendBrowserResult(frame.id, false, undefined, { code, message })
+    sendBrowserResult(frame.id, false, undefined, {
+      code,
+      message,
+      ...(typeof error?.mutationPossible === 'boolean' ? { mutationPossible: error.mutationPossible } : {}),
+    })
   } finally {
     setActivity(false)
     if (!busy) refreshStatus()
@@ -2443,8 +2772,10 @@ function openImage(src) {
 }
 
 function closeImage() {
+  const hadFocus = els.imageModal.contains(document.activeElement)
   els.imageModal.classList.add('hidden')
   els.imageModalImg.removeAttribute('src')
+  if (hadFocus) els.input.focus({ preventScroll: true })
 }
 
 /* ------------------------------------------------------------------ */
@@ -2460,6 +2791,7 @@ function updateMicButton() {
   els.mic.title = label
   els.mic.setAttribute('aria-label', label)
   els.mic.setAttribute('aria-pressed', String(active))
+  els.dictationIndicator.hidden = !active
 }
 
 function stopDictation() {
@@ -2609,6 +2941,7 @@ function renderQueuedMessages() {
 }
 
 function clearComposerDraft() {
+  closeSlashMenu()
   attachedImages = []
   renderImageChips()
   els.input.value = ''
@@ -2722,8 +3055,20 @@ function steerQueuedMessage(id) {
 
 function sendMessage() {
   stopDictation()
+  // Sending an exact `/command` runs it even when the palette was dismissed,
+  // so the Send button and Enter agree with the visible command menu.
+  const slashCommand = resolveSlashCommand(els.input.value)
+  if (slashCommand) {
+    executeSlashCommand(slashCommand)
+    return
+  }
   const text = els.input.value.trim()
-  if (text.length === 0 && attachedImages.length === 0) return
+  const images = attachedImages
+  if (text.length === 0 && images.length === 0) return
+  if (newChatDraft) {
+    toast('Wait for the running session to finish')
+    return
+  }
   if (!connected) {
     showBanner('Not connected to the companion. Start it with npm run dev and reconnect.', 'Reconnect', () => connect())
     return
@@ -2754,7 +3099,7 @@ function sendMessage() {
     }, 'info')
     return
   }
-  if (dispatchMessage({ id: '', text, images: attachedImages })) clearComposerDraft()
+  if (dispatchMessage({ id: '', text, images })) clearComposerDraft()
 }
 
 /** Ask the companion to stop the running turn; the UI waits for chat.stopping/chat.stopped. */
@@ -2786,8 +3131,13 @@ function stopTurn() {
 
 function newChat() {
   logger.log('chat.new', {}, 'info')
+  if (busy && !stopAvailable) {
+    toast('Wait for the current operation to finish')
+    return
+  }
   if (busy) {
-    toast('Wait for the current turn to finish')
+    archiveCurrentConversation()
+    setNewChatDraft(true)
     return
   }
   newChatOnNextConnect = !connected
@@ -2799,14 +3149,18 @@ function newChat() {
   sendFrame({ v: PROTOCOL_VERSION, type: 'chat.new' })
   clearChat()
   currentConversationId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  attachedImages = []
-  renderImageChips()
+  // Keep unsent composer content (text and pasted images) across the reset. The
+  // /new draft view lets the user prepare the next message while the old turn
+  // finishes, so retiring it must not silently drop the attachments they added.
   sessionId = ''
   updateFooter()
+  renderRecentSessions()
   if (connected) setStatus('online', 'Connected')
 }
 
 function clearChat() {
+  newChatDraft = false
+  els.app.classList.remove('new-chat-draft')
   clearTimeout(queueDispatchTimer)
   queueDispatchTimer = null
   queuedMessages = []
@@ -2878,7 +3232,9 @@ function openLogModal() {
 }
 
 function closeLogModal() {
+  const hadFocus = els.logModal.contains(document.activeElement)
   els.logModal.classList.add('hidden')
+  if (hadFocus) els.input.focus({ preventScroll: true })
 }
 
 /** @param {Record<string, any> | null} stats */
@@ -3090,6 +3446,13 @@ els.settingsSave.addEventListener('click', () => {
   const llmUpdate = (modelChanged || effortChanged || apiKey.length > 0)
     ? { baseUrl, model, remember, reasoningEffort, ...(apiKey.length > 0 ? { apiKey } : {}) }
     : null
+  // Reconfiguring the provider mid-turn flips the panel into a non-stoppable
+  // "Configuring…" state and then reports idle when llm.configured lands, while
+  // the turn keeps streaming. Keep the live turn in charge instead.
+  if (busy && (llmUpdate !== null || reconnectNeeded)) {
+    toast('Wait for the current turn to finish before changing the connection, model, or key')
+    return
+  }
 
   settings = {
     ...settings,
@@ -3195,6 +3558,7 @@ els.settingEffort.addEventListener('click', event => {
   if (button) setEffortSelection(button.dataset.effort)
 })
 els.history.addEventListener('click', openHistory)
+els.recentSessionsAll.addEventListener('click', openHistory)
 els.historyClose.addEventListener('click', closeHistory)
 els.historyCurrent.addEventListener('click', closeHistory)
 els.historySearch.addEventListener('input', renderHistory)
@@ -3202,14 +3566,8 @@ els.historyModal.addEventListener('click', event => {
   if (event.target === els.historyModal) closeHistory()
 })
 els.composerModel.addEventListener('click', () => {
-  const opening = els.modelMenu.classList.contains('hidden')
-  if (opening) {
-    els.modelSearch.value = ''
-    renderModelMenu()
-  }
-  els.modelMenu.classList.toggle('hidden', !opening)
-  els.composerModel.setAttribute('aria-expanded', String(opening))
-  if (opening) setTimeout(() => els.modelSearch.focus(), 0)
+  if (els.modelMenu.classList.contains('hidden')) openModelMenu()
+  else closeModelMenu()
 })
 els.modelSearch.addEventListener('input', renderModelMenu)
 els.modelSearch.addEventListener('keydown', event => {
@@ -3219,6 +3577,7 @@ els.modelSearch.addEventListener('keydown', event => {
   }
 })
 els.mic.addEventListener('click', toggleDictation)
+els.pause.addEventListener('click', () => setPaused(!settings.paused))
 els.input.addEventListener('paste', event => {
   const files = [...(event.clipboardData?.items ?? [])]
     .filter(item => item.kind === 'file')
@@ -3236,12 +3595,27 @@ document.addEventListener('pointermove', event => {
   if (event.clientX < window.innerWidth - 84) els.app.classList.remove('utilities-open')
 })
 document.addEventListener('click', event => {
-  if (!els.modelMenu.contains(event.target) && !els.composerModel.contains(event.target)) closeModelMenu()
+  // A click that runs a slash command may open the model picker, so the
+  // palette itself must not count as an outside click. Dismissing the picker
+  // from outside hands focus back to the composer instead of dropping it.
+  const outsideModelMenu = !els.modelMenu.contains(event.target)
+    && !els.composerModel.contains(event.target)
+    && !els.slashMenu.contains(event.target)
+  if (outsideModelMenu && !els.modelMenu.classList.contains('hidden')) {
+    closeModelMenu({ focusComposer: true })
+  }
   if (!event.target.closest('.model-field')) els.modelOptions.classList.add('hidden')
+  if (slashMenuOpen && !els.slashMenu.contains(event.target) && event.target !== els.input) closeSlashMenu()
 })
 els.imageClose.addEventListener('click', closeImage)
 els.imageModal.addEventListener('click', event => {
   if (event.target === els.imageModal) closeImage()
+})
+els.disclaimerDismiss.addEventListener('click', dismissDisclaimer)
+els.disclaimer.addEventListener('cancel', event => {
+  // Escape while the disclaimer is open should only close the disclaimer.
+  event.preventDefault()
+  dismissDisclaimer()
 })
 els.settingsModal.addEventListener('click', event => {
   if (event.target === els.settingsModal) closeSettings()
@@ -3254,6 +3628,7 @@ els.bannerAction.addEventListener('click', () => {
 })
 
 els.newChat.addEventListener('click', newChat)
+els.backHome.addEventListener('click', newChat)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return
   if (connected) newChat()
@@ -3264,22 +3639,33 @@ els.stop.addEventListener('click', () => {
   stopTurn()
 })
 
-for (const chip of document.querySelectorAll('#activity-empty [data-prompt]')) {
-  chip.addEventListener('click', () => {
-    const prompt = chip.dataset.prompt ?? ''
-    if (prompt.length === 0) return
-    els.input.value = prompt
-    resizeInput()
-    els.input.focus()
-    logger.log('ui.suggestion', { prompt: truncate(prompt, 120) }, 'debug')
-  })
-}
-
 els.input.addEventListener('input', event => {
   resizeInput()
+  renderSlashMenu()
   if (event.isTrusted) stopDictation()
 })
+els.input.addEventListener('blur', () => closeSlashMenu())
 els.input.addEventListener('keydown', event => {
+  // Enter during IME composition confirms the candidate, not the draft.
+  if (event.isComposing) return
+  if (slashMenuOpen) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      moveSlashSelection(event.key === 'ArrowDown' ? 1 : -1)
+      return
+    }
+    if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
+      event.preventDefault()
+      executeSlashCommand(slashMenuMatches[slashMenuIndex])
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      closeSlashMenu()
+      return
+    }
+  }
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     sendMessage()
@@ -3292,7 +3678,11 @@ document.getElementById('composer').addEventListener('submit', event => {
 
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
-    if (!els.modelMenu.classList.contains('hidden')) closeModelMenu()
+    if (els.disclaimer.open) {
+      event.preventDefault()
+      dismissDisclaimer()
+    } else if (slashMenuOpen) closeSlashMenu()
+    else if (!els.modelMenu.classList.contains('hidden')) closeModelMenu({ focusComposer: true })
     else if (!els.modelOptions.classList.contains('hidden')) els.modelOptions.classList.add('hidden')
     else if (!els.imageModal.classList.contains('hidden')) closeImage()
     else if (!els.historyModal.classList.contains('hidden')) closeHistory()
@@ -3324,6 +3714,7 @@ chrome.windows.onFocusChanged.addListener(() => scheduleTabRefresh())
 
 async function boot() {
   logger.log('app.boot', { href: location.href, userAgent: navigator.userAgent }, 'info')
+  await showDisclaimerIfPending()
   await loadSettings()
   await loadHistory()
   populateSettings()
@@ -3331,6 +3722,8 @@ async function boot() {
   renderComposerModel()
   renderImageChips()
   updateMicButton()
+  updatePauseButton()
+  if (settings.paused) setActivityPhase('Paused', 'paused')
   logger.log('settings.loaded', {
     hasToken: settings.token.length > 0,
     bridgeUrl: settings.bridgeUrl,

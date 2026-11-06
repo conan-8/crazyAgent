@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>File Frame Fixture</title></head>
+<body>
+  <label for="frame-file">Frame attachment</label>
+  <input id="frame-file" type="file" aria-label="Frame attachment" />
+  <pre id="frame-state">idle</pre>
+  <script>
+    document.getElementById('frame-file').addEventListener('change', event => {
+      const input = event.currentTarget
+      document.getElementById('frame-state').textContent = `attached:${input.files[0]?.name}:${input.files[0]?.size}`
+    })
+  </script>
+</body>
+</html>

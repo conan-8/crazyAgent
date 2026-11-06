@@ -14,6 +14,7 @@ import {
   parseWaitForArgs,
   resolveLabelSignature,
   staleScrollInfo,
+  viewportCapturePlan,
 } from '../sidepanel/browser.js'
 
 /* ---------------------------------------------------------------- */
@@ -116,6 +117,11 @@ test('parsePressKeyArgs accepts composite key strings', () => {
   assert.equal(arrow.key, 'ArrowLeft')
   assert.deepEqual(arrow.modifiers, ['ctrl', 'shift'])
   assert.equal(arrow.mask, 2 | 8)
+
+  const alias = parsePressKeyArgs({ key: 'shift+Right' })
+  assert.equal(alias.key, 'ArrowRight')
+  assert.equal(alias.spec.key, 'ArrowRight')
+  assert.equal(alias.mask, 8)
 
   const meta = parsePressKeyArgs({ key: 'meta+Enter' })
   assert.equal(meta.key, 'Enter')
@@ -360,7 +366,7 @@ test('resolveLabelSignature ignores malformed candidate entries', () => {
 /* capture watchdog and cooldown circuit                             */
 /* ---------------------------------------------------------------- */
 
-test('capture timeout focuses the window once and retries before opening the circuit', async t => {
+test('capture timeout opens the circuit without stealing window focus', async t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 })
   const previousChrome = globalThis.chrome
   let resolveHung
@@ -379,14 +385,22 @@ test('capture timeout focuses the window once and retries before opening the cir
   t.after(() => { globalThis.chrome = previousChrome })
 
   const result = captureVisibleTab(1, 72)
+  const rejection = assert.rejects(result, error => error.code === 'CAPTURE_TIMEOUT')
   await Promise.resolve()
   await Promise.resolve()
   t.mock.timers.tick(5_000)
-  assert.equal((await result).dataUrl, 'data:image/jpeg;base64,capture-2')
-  assert.equal(focusCalls, 1)
+  await rejection
+  assert.equal(focusCalls, 0, 'a timed-out capture never yanks the user focus back to Chrome')
+  assert.equal(calls, 1, 'a timed-out capture does not blindly retry the same hung call')
+
+  const paused = captureVisibleTab(1, 72)
+  await assert.rejects(paused, error => error.code === 'CAPTURE_COOLDOWN')
+  assert.equal(calls, 1, 'the cooldown refuses a retry instead of piling up another hung call')
+
+  t.mock.timers.tick(30_000)
+  assert.equal((await captureVisibleTab(1, 72)).dataUrl, 'data:image/jpeg;base64,capture-2')
   assert.equal(calls, 2)
-  assert.equal((await captureVisibleTab(1, 72)).dataUrl, 'data:image/jpeg;base64,capture-3')
-  assert.equal(focusCalls, 1, 'normal captures never steal focus')
+  assert.equal(focusCalls, 0, 'recovery never steals focus either')
   resolveHung('data:image/jpeg;base64,late')
 })
 
@@ -400,7 +414,7 @@ test('persistent capture timeout releases the queue, blocks retries during coold
     tabs: {
       captureVisibleTab: () => {
         calls += 1
-        if (calls <= 2) return new Promise(resolve => hung.push(resolve))
+        if (calls <= 1) return new Promise(resolve => hung.push(resolve))
         return Promise.resolve(`data:image/jpeg;base64,capture-${calls}`)
       },
     },
@@ -417,24 +431,34 @@ test('persistent capture timeout releases the queue, blocks retries during coold
   assert.equal(calls, 1, 'the first Chrome call and its watchdog have started')
   t.mock.timers.tick(5_000)
   for (let turn = 0; turn < 5; turn += 1) await Promise.resolve()
-  assert.equal(calls, 2, 'the focused retry has started')
-  t.mock.timers.tick(5_000)
   await firstRejection
   await queuedRejection
-  assert.equal(focusCalls, 1)
-  assert.equal(calls, 2, 'the queued capture fails without another Chrome call')
+  assert.equal(focusCalls, 0, 'timed-out captures never steal focus')
+  assert.equal(calls, 1, 'the queued capture fails without another Chrome call')
 
   t.mock.timers.tick(30_000)
   const recovered = await captureVisibleTab(1, 72)
-  assert.equal(recovered.dataUrl, 'data:image/jpeg;base64,capture-3')
-  assert.equal(calls, 3, 'recovery proceeds while the original Chrome promises are still pending')
+  assert.equal(recovered.dataUrl, 'data:image/jpeg;base64,capture-2')
+  assert.equal(calls, 2, 'recovery proceeds while the original Chrome promise is still pending')
 
   for (const resolve of hung) resolve('data:image/jpeg;base64,late')
   await Promise.resolve()
   await Promise.resolve()
   const afterLateSettlement = await captureVisibleTab(1, 72)
-  assert.equal(afterLateSettlement.dataUrl, 'data:image/jpeg;base64,capture-4')
-  assert.equal(calls, 4, 'late settlement neither rejects nor blocks later captures')
+  assert.equal(afterLateSettlement.dataUrl, 'data:image/jpeg;base64,capture-3')
+  assert.equal(calls, 3, 'late settlement neither rejects nor blocks later captures')
+})
+
+test('viewport capture plan follows window focus and state', () => {
+  assert.equal(viewportCapturePlan(undefined), 'visible-first')
+  assert.equal(viewportCapturePlan({}), 'visible-first')
+  assert.equal(viewportCapturePlan({ focused: true, state: 'normal' }), 'visible-first')
+  assert.equal(viewportCapturePlan({ focused: true, state: 'maximized' }), 'visible-first')
+  assert.equal(viewportCapturePlan({ focused: false, state: 'normal' }), 'page-first')
+  assert.equal(viewportCapturePlan({ focused: false, state: 'maximized' }), 'page-first')
+  assert.equal(viewportCapturePlan({ focused: false, state: 'fullscreen' }), 'page-first')
+  assert.equal(viewportCapturePlan({ focused: false, state: 'minimized' }), 'page-only')
+  assert.equal(viewportCapturePlan({ focused: true, state: 'minimized' }), 'page-only')
 })
 
 test('capture keeps transient readback retry under the watchdog', async t => {

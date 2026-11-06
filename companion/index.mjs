@@ -234,6 +234,8 @@ let dshStatus = noDsh ? { state: 'disabled' } : { state: 'starting' }
 let runner
 let running = false
 let stopRequested = false
+/** @type {{status: string, reason?: string} | undefined} */
+let docsTurnVerification
 
 /** @param {string} baseUrl @param {boolean} [force] */
 async function getModels(baseUrl, force = false) {
@@ -485,6 +487,7 @@ async function handleChat(text, ui, message) {
   }
 
   running = true
+  docsTurnVerification = undefined
   const turnId = `turn-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`
   const turnStart = performance.now()
   const wantAutoCapture = autoCapture && message?.autoCapture !== false
@@ -566,7 +569,15 @@ async function handleChat(text, ui, message) {
       images: blocks.filter(block => block.type === 'image').length,
     }
     if (logStore.sessionId !== result.sessionId) logStore.sessionStart(result.sessionId)
-    logStore.turnEnd(turnId, { ok: true, finalText: result.finalResponse, timings, usage })
+    const verification = docsTurnVerification
+    const unverified = verification?.status === 'unverified'
+    logStore.turnEnd(turnId, {
+      ok: !unverified,
+      finalText: result.finalResponse,
+      timings,
+      usage,
+      ...unverified ? { error: `Docs verification incomplete (${verification.reason ?? 'one-nudge-only'})` } : {},
+    })
     bridge.sendToUi({
       v: PROTOCOL_VERSION,
       type: 'chat.done',
@@ -575,6 +586,8 @@ async function handleChat(text, ui, message) {
       timings,
       model: llmConfig?.model.id,
       provider: PROVIDER,
+      docsVerification: verification?.status,
+      docsVerificationReason: verification?.reason,
     })
     sendStatus('idle')
   } catch (error) {
@@ -615,6 +628,7 @@ async function handleChat(text, ui, message) {
   } finally {
     running = false
     stopRequested = false
+    docsTurnVerification = undefined
     bridge.setTurnId(undefined)
   }
 }
@@ -708,6 +722,12 @@ function forwardNotification(notification, turnId, toolCalls, toolStarts) {
   if (!isRecord(event)) return
   const data = isRecord(event.data) ? event.data : {}
 
+  if (event.type === 'turn/end') {
+    if (data.docsVerification === 'verified' || data.docsVerification === 'unverified') {
+      docsTurnVerification = { status: data.docsVerification, reason: typeof data.docsVerificationReason === 'string' ? data.docsVerificationReason : undefined }
+    }
+    return
+  }
   if (event.type === 'assistant/message') {
     const reasoning = extractReasoningText(data)
     if (reasoning.length > 0) {

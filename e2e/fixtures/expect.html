@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CrazyAgent Expect Fixture</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; max-width: 720px; }
+    label, button, input { font: inherit; }
+    label { display: block; margin: 12px 0; }
+    input { padding: 8px; min-width: 280px; }
+    button { padding: 8px 12px; margin: 6px 6px 6px 0; }
+    #status { display: block; margin-top: 12px; font-weight: 600; }
+    dialog { padding: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Expect fixture</h1>
+  <label>Name <input id="name" aria-label="Name" value="" /></label>
+  <button id="create" type="button">Create</button>
+  <button id="open-dialog" type="button">Open dialog</button>
+  <button id="noop" type="button">Does nothing</button>
+  <span id="status" role="status"></span>
+  <span id="create-count" hidden>0</span>
+  <dialog id="dialog"><p>Confirm created state</p><button id="close-dialog" type="button">Close</button></dialog>
+  <script>
+    window.__expectDispatchCount = 0
+    window.__expectInputEvents = 0
+    document.addEventListener('pointerdown', () => { window.__expectDispatchCount += 1 }, true)
+    document.getElementById('name').addEventListener('input', () => { window.__expectInputEvents += 1 })
+    const create = document.getElementById('create')
+    const count = document.getElementById('create-count')
+    create.addEventListener('click', () => {
+      count.textContent = String(Number(count.textContent) + 1)
+      create.textContent = 'Created'
+      document.getElementById('status').textContent = 'Created'
+      if (!document.getElementById('follow-up')) {
+        const follow = document.createElement('button')
+        follow.id = 'follow-up'
+        follow.type = 'button'
+        follow.textContent = 'Follow up'
+        create.after(follow)
+      }
+    })
+    const dialog = document.getElementById('dialog')
+    document.getElementById('open-dialog').addEventListener('click', () => dialog.showModal())
+    document.getElementById('close-dialog').addEventListener('click', () => dialog.close())
+  </script>
+</body>
+</html>
