@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * CrazyAgent companion: the local bridge between the Chrome side panel and a
+ * crazyAgent companion: the local bridge between the Chrome side panel and a
  * DSH 0.2.1 runtime (sdk-minimal profile + browser-use provider).
  *
  * The model route is OpenRouter. The side panel supplies the API key and picks
@@ -75,7 +75,7 @@ function parseArgs(argv) {
 const cli = parseArgs(process.argv.slice(2))
 
 if (cli.help === true) {
-  process.stdout.write(`CrazyAgent companion ${VERSION}
+  process.stdout.write(`crazyAgent companion ${VERSION}
 
   --port <n>                    bridge port (default 17871)
   --token <token>               fixed pairing token (default: .dsh-home/browser-agent/token)
@@ -931,7 +931,7 @@ const bridge = new Bridge({
 await bridge.start()
 
 process.stderr.write(`
-CrazyAgent companion ${VERSION}
+crazyAgent companion ${VERSION}
   bridge:  ws://${host}:${bridge.port}/bridge
   token:   ${token}
   provider: ${PROVIDER}

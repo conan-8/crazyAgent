@@ -85,7 +85,7 @@ const server = createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'text/html' })
       res.end(`<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8" /><title>CrazyAgent Cross-Origin File Fixture</title>
+<head><meta charset="utf-8" /><title>crazyAgent Cross-Origin File Fixture</title>
 <style>body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; } iframe { width: 100%; height: 150px; border: 1px solid #aaa; }</style></head>
 <body>
   <h1>Cross-origin file frame fixture</h1>

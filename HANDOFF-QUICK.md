@@ -1,4 +1,4 @@
-# CrazyAgent — quick handoff
+# crazyAgent — quick handoff
 
 Current snapshot: **2026-11-06**. Read `HANDOFF.md` for architecture and invariants; use `e2e/checklist.md` for live acceptance.
 

@@ -1,5 +1,5 @@
 /**
- * CrazyAgent side panel: chat UI, bridge client, and browser-command executor.
+ * crazyAgent side panel: chat UI, bridge client, and browser-command executor.
  *
  * The panel owns the WebSocket to the local companion. It renders model text
  * and tool activity, executes browser commands from the DSH provider, and

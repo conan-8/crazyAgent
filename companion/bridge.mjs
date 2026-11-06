@@ -36,9 +36,9 @@ export const UI_GRACE_ENV = 'CRAZYAGENT_UI_GRACE_MS'
 export const SIDE_PANEL_CLOSED = 'SIDE_PANEL_CLOSED'
 
 /** Failure message for companion-issued commands (auto-capture). */
-const REQUEST_UI_CLOSED_MESSAGE = 'the CrazyAgent side panel is not connected; it may be reloading — retry this call (or ask the user to reopen the side panel)'
+const REQUEST_UI_CLOSED_MESSAGE = 'the crazyAgent side panel is not connected; it may be reloading — retry this call (or ask the user to reopen the side panel)'
 /** Failure message returned to the provider when its command cannot reach the side panel. */
-const PROVIDER_UI_CLOSED_MESSAGE = 'the CrazyAgent side panel is disconnected or reloading; retry this call (or ask the user to reopen the side panel)'
+const PROVIDER_UI_CLOSED_MESSAGE = 'the crazyAgent side panel is disconnected or reloading; retry this call (or ask the user to reopen the side panel)'
 
 export class Bridge {
   /**
@@ -169,14 +169,14 @@ export class Bridge {
     if (this.stopped) return Promise.reject(new Error('bridge stopped'))
     const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 0
     if (timeout === 0) {
-      return Promise.reject(sidePanelClosedError('the CrazyAgent side panel is not connected'))
+      return Promise.reject(sidePanelClosedError('the crazyAgent side panel is not connected'))
     }
     return new Promise((resolve, reject) => {
       const waiter = { resolve, reject, timer: undefined }
       waiter.timer = setTimeout(() => {
         // Deleting first makes stop() and the timeout mutually exclusive.
         if (!this.uiWaiters.delete(waiter)) return
-        reject(sidePanelClosedError(`the CrazyAgent side panel did not reconnect within ${timeout}ms`))
+        reject(sidePanelClosedError(`the crazyAgent side panel did not reconnect within ${timeout}ms`))
       }, timeout)
       waiter.timer.unref?.()
       this.uiWaiters.add(waiter)
@@ -294,10 +294,10 @@ export class Bridge {
       if (handshakeTimer !== undefined) clearTimeout(handshakeTimer)
       if (this.ui === ws) {
         this.ui = undefined
-        this.#failUpstream(new Error('the CrazyAgent side panel disconnected'))
+        this.#failUpstream(new Error('the crazyAgent side panel disconnected'))
         for (const request of this.uiRequests.values()) {
           clearTimeout(request.timer)
-          request.reject(sidePanelClosedError('the CrazyAgent side panel disconnected'))
+          request.reject(sidePanelClosedError('the crazyAgent side panel disconnected'))
         }
         this.uiRequests.clear()
         this.#emit({
@@ -332,7 +332,7 @@ export class Bridge {
   #claimUi(ws, origin) {
     if (this.ui !== undefined && this.ui !== ws) {
       this.#emit({ direction: 'event', role: 'companion', frame: { type: 'bridge.ui.replaced' } })
-      this.#failUpstream(new Error('the CrazyAgent side panel was replaced'))
+      this.#failUpstream(new Error('the crazyAgent side panel was replaced'))
       close(this.ui, 4000, 'replaced by a newer side panel')
     }
     this.ui = ws

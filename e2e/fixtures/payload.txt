@@ -1,2 +1,2 @@
-CrazyAgent file-transfer acceptance payload.
+crazyAgent file-transfer acceptance payload.
 SHAPE: download -> local file -> multipart upload.

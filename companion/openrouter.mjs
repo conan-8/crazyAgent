@@ -83,7 +83,7 @@ export async function fetchModels(baseUrl = DEFAULT_BASE_URL, options = {}) {
       headers: {
         accept: 'application/json',
         'HTTP-Referer': 'http://localhost',
-        'X-Title': 'CrazyAgent',
+        'X-Title': 'crazyAgent',
       },
       signal: AbortSignal.timeout(options.timeoutMs ?? 20_000),
     })
@@ -198,7 +198,7 @@ export function buildLlmPatch(config) {
     baseURL: normalizeBaseUrl(config.baseUrl),
     headers: {
       'HTTP-Referer': 'http://localhost',
-      'X-Title': 'CrazyAgent',
+      'X-Title': 'crazyAgent',
     },
     // DSH has no infinite setting; its maximum prevents the five-minute
     // idle watchdog from cutting off slow reasoning. No HTTP timeout is set.

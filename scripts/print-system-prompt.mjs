@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Print the exact system prompt CrazyAgent sends to the model.
+ * Print the exact system prompt crazyAgent sends to the model.
  *
  * The prompt is assembled from exactly two places:
  *   - `system-prompt.personaPrefix` in config/browser.patch.yml

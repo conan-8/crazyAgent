@@ -136,7 +136,7 @@ const assertCompactCells = html => {
 const started = Date.now()
 const evidence = []
 try {
-  const title = `CrazyAgent Docs Table Acceptance ${new Date().toISOString()}`
+  const title = `crazyAgent Docs Table Acceptance ${new Date().toISOString()}`
   await evaluate(panel, `(async () => { ${prefix}
     const result = await mod.execute('docs', { action: 'rename', title: ${JSON.stringify(title)} }, settings)
     if (result.docs?.status !== 'renamed') throw new Error(JSON.stringify(result.docs))

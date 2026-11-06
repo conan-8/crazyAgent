@@ -1,6 +1,6 @@
 # Privacy
 
-CrazyAgent is a local developer tool with a remote model provider. It sends page content and user-supplied content to the configured provider when needed for a turn. This document describes what is captured, stored, and shared.
+crazyAgent is a local developer tool with a remote model provider. It sends page content and user-supplied content to the configured provider when needed for a turn. This document describes what is captured, stored, and shared.
 
 ## Data flow
 
@@ -25,9 +25,9 @@ Provider retention and training policies apply. Do not use the agent on content 
 
 With auto-view enabled, ordinary pages attach bounded rendered text and labels without a screenshot. Known canvas editors attach a viewport screenshot. Explicit screenshot tools can capture the viewport, a bounded full page, or an in-viewport region; full-page capture temporarily changes viewport metrics and then restores them.
 
-CrazyAgent does not continuously capture background tabs, other windows, or the side panel. Capture and page inspection happen for a user message or model tool call. Browser-internal pages and other protected surfaces may be inaccessible.
+crazyAgent does not continuously capture background tabs, other windows, or the side panel. Capture and page inspection happen for a user message or model tool call. Browser-internal pages and other protected surfaces may be inaccessible.
 
-Pasted composer images are read after your paste gesture and sent only when their message is dispatched. Browser speech recognition starts only after you click the microphone; audio is handled by the browser/vendor speech service, not the CrazyAgent companion. Recognized text is sent only if you send the draft.
+Pasted composer images are read after your paste gesture and sent only when their message is dispatched. Browser speech recognition starts only after you click the microphone; audio is handled by the browser/vendor speech service, not the crazyAgent companion. Recognized text is sent only if you send the draft.
 
 ## Clipboard
 

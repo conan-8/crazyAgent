@@ -1,4 +1,4 @@
-# CrazyAgent Phase 1 profile overlay.
+# crazyAgent Phase 1 profile overlay.
 #
 # Composes on @deepseek-ai/dsh-sdk-minimal: a full, explicit DSH tree with the
 # SDK stdio server, agent loop, sessions, attachments, compaction, and JSONL
