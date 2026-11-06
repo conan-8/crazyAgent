@@ -1,4 +1,4 @@
-# CrazyAgent
+# crazyAgent
 
 **Control Chrome or Edge from a local side panel with guarded browser actions, file transfer, and semantic Google Docs editing.** Built on **DSH 0.2.1-rc.2**.
 
@@ -6,6 +6,7 @@
 
 ## What it can do
 
+- **Generally everything a human can do on a browser, including filling forms, doing work, planning, and research.**
 - Read and act on ordinary web pages through labelled controls, trusted coordinates, bounded batches, and guarded drag and drop.
 - Create and edit Google Docs content and native tables with exact targeting and export verification.
 - Download files and attach Downloads-folder files to page inputs with filesystem readback.
@@ -24,7 +25,7 @@ There are **33 model-facing tools**: 25 general browser tools and 8 guarded Docs
 - An [OpenRouter](https://openrouter.ai/) API key. Model usage is billed by your configured provider.
 - A normal HTTP(S) website tab; browser-internal and Web Store pages are protected.
 
-Paste this prompt into a coding agent on the computer where Chrome or Edge is installed:
+**Paste this prompt into a coding agent on the computer where Chrome or Edge is installed:**
 
 ```text
 Install CrazyAgent v2.0.0-beta on this computer from https://github.com/conan-8/crazyAgent. First verify Git, Node.js 22.19 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Stop and tell me if anything required is missing; do not use sudo or replace my runtimes. Clone the v2.0.0-beta tag into a new crazyAgent directory, then run npm ci and npm run setup in that checkout. If the directory already exists, do not overwrite or delete it; ask me for another location. Start npm run dev -- --model deepseek/deepseek-v4.1-flash --reasoning-effort auto as a persistent background process and verify http://127.0.0.1:17871/health responds successfully. If that port is already occupied, stop and report it instead of killing an existing process. Then give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions and open the CrazyAgent side panel. Guide me to copy the local pairing token into Settings, enter my own OpenRouter API key there, select DeepSeek V4.1 Flash, and save. Never ask for my API key in chat, print it, commit it, or send it anywhere except CrazyAgent's local Settings. Keep the companion running. Finish with the install path, health status, and restart command. Do not run any website tasks or model-spending tests until I confirm installation is complete.
@@ -32,18 +33,22 @@ Install CrazyAgent v2.0.0-beta on this computer from https://github.com/conan-8/
 
 `setup` initializes `.dsh-home/profiles/sdk-minimal`, links the local DSH plugins, and validates profile composition. `dev` starts the loopback-only companion and prints bridge pairing information.
 
-> [!IMPORTANT]
+> [!NOTE]
 > **Finish the browser setup**
 >
 > 1. **Open your browser's extension page:** go to `chrome://extensions` or `edge://extensions`.
-> 2. **Load CrazyAgent:** enable **Developer mode**, choose **Load unpacked**, and select the checkout's `extension/` directory.
-> 3. **Open the side panel:** click the **CrazyAgent** toolbar icon.
+> 2. **Load crazyAgent:** enable **Developer mode**, choose **Load unpacked**, and select the checkout's `extension/` directory.
+> 3. **Open the side panel:** click the **crazyAgent** toolbar icon in the extension menu(puzzle piece icon), and PIN it.
 > 4. **Connect your model:** in **Settings**, enter the pairing token and your OpenRouter API key, refresh models, select **DeepSeek V4.1 Flash**, and save. **Never share the API key or pairing token publicly.**
 > 5. **Start a task:** wait for **Connected**, open a normal page, and ask a question or request an action.
 
-Keep the companion and side panel open while the agent runs; the panel is also the browser executor. **Do not touch the browser while a task is running:** clicking, typing, scrolling, or switching tabs can invalidate the agent's targets. After an install or extension reload, dismiss the one-time safety notice with **Got it** or Escape.
+> [!IMPORTANT]
+> Keep the companion and side panel open while the agent runs; the panel is also the browser executor. **Do not touch the browser while a task is running:** clicking, typing, scrolling, or switching tabs can invalidate the agent's targets. 
 
-Page content, screenshots, prompts, and explicit tool results can be sent to the configured model provider. CrazyAgent requests broad browser permissions and can change real pages and files; review [Privacy and permissions](#privacy-and-permissions) and `PRIVACY.md` before use.
+Page content, screenshots, prompts, and explicit tool results can be sent to the configured model provider. crazyAgent requests broad browser permissions and can change real pages and files; review [Privacy and permissions](#privacy-and-permissions) and `PRIVACY.md` before use.
+
+> [!TIP]
+> crazyAgent is able to screenshot page elements and download files which can be sent to other chatbots for cross reference or better reliability. You can prompt it to consult another AI chatbot when a task is too difficult, or to prevent loss of focus on the greater task.
 
 ## How it works
 
