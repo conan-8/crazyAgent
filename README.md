@@ -18,7 +18,9 @@
 
 There are **33 model-facing tools**: 25 general browser tools and 8 guarded Docs tools. The detailed reference is below.
 
-## Requirements
+## Install with an agent
+
+**Requirements:**
 
 - Git and npm.
 - Node **22.19+**.
@@ -26,22 +28,10 @@ There are **33 model-facing tools**: 25 general browser tools and 8 guarded Docs
 - An [OpenRouter](https://openrouter.ai/) API key. Model usage is billed by your configured provider.
 - A normal HTTP(S) website tab; browser-internal and Web Store pages are protected.
 
-## Install with an agent
-
 Paste this prompt into a coding agent on the computer where Chrome or Edge is installed:
 
 ```text
 Install CrazyAgent v2.0.0-beta on this computer from https://github.com/conan-8/crazyAgent. First verify Git, Node.js 22.19 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Stop and tell me if anything required is missing; do not use sudo or replace my runtimes. Clone the v2.0.0-beta tag into a new crazyAgent directory, then run npm ci and npm run setup in that checkout. If the directory already exists, do not overwrite or delete it; ask me for another location. Start npm run dev -- --model deepseek/deepseek-v4.1-flash-1017 --reasoning-effort auto as a persistent background process and verify http://127.0.0.1:17871/health responds successfully. If that port is already occupied, stop and report it instead of killing an existing process. Then give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions and open the CrazyAgent side panel. Guide me to copy the local pairing token into Settings, enter my own OpenRouter API key there, select DeepSeek V4.1 Flash, and save. Never ask for my API key in chat, print it, commit it, or send it anywhere except CrazyAgent's local Settings. Keep the companion running. Finish with the install path, health status, and restart command. Do not run any website tasks or model-spending tests until I confirm installation is complete.
-```
-
-### Manual installation
-
-```sh
-git clone --depth 1 --branch v2.0.0-beta https://github.com/conan-8/crazyAgent.git
-cd crazyAgent
-npm ci
-npm run setup
-npm run dev -- --model deepseek/deepseek-v4.1-flash-1017 --reasoning-effort auto
 ```
 
 `setup` initializes `.dsh-home/profiles/sdk-minimal`, links the local DSH plugins, and validates profile composition. `dev` starts the loopback-only companion and prints bridge pairing information.
