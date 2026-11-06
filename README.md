@@ -4,10 +4,6 @@
 
 **Optimised for DeepSeek V4.1 Flash** on OpenRouter (`deepseek/deepseek-v4.1-flash`). Other image-capable, tool-capable models remain available. [Download v2.0.0-beta](https://github.com/conan-8/crazyAgent/releases/tag/v2.0.0-beta).
 
-<p align="center">
-  <img src="docs/ui/sidebar-activity-dark.jpeg" alt="CrazyAgent completing a browser task in the side panel" width="360">
-</p>
-
 ## What it can do
 
 - Read and act on ordinary web pages through labelled controls, trusted coordinates, bounded batches, and guarded drag and drop.
