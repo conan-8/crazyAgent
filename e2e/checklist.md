@@ -42,7 +42,7 @@ The cheap gate is `node scripts/ui-preview.mjs --scenario slash` (mocked bridge,
 - Type `/usr/local/bin`, `/new chat`, or `/new ` (trailing space) and press Enter: the palette stays closed and the text is sent to the model as an ordinary prompt.
 - While the `/new` draft view waits on a running turn, type a draft and paste an image. When the turn ends, the draft view retires but the composer text and image must remain; nothing may be silently cleared.
 - The palette is not model acceptance; inspect the resulting chat state independently (debug-log frames, History, composer label, draft view).
-- Pause and request scrolling: click the composer **Pause/Resume** toggle; the status/activity phase must show Paused, the page must not move, and each page command must return `PAUSED` instead of executing. Press Resume and retry; the page must then scroll. Close the panel or stop the companion and confirm a clear disconnected/offline state without a stranded "Working…" clock or a stuck draft view.
+- Request scrolling, then close the panel or stop the companion and confirm a clear disconnected/offline state without a stranded "Working…" clock or a stuck draft view. The composer must not expose a browser-access Pause/Resume control; any legacy saved paused state must be cleared on startup.
 
 ### Observation and basic interaction
 

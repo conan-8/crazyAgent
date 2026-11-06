@@ -11,7 +11,7 @@
 - Create and edit Google Docs content and native tables with exact targeting and export verification.
 - Download files and attach Downloads-folder files to page inputs with filesystem readback.
 - Distinguish observed changes, requested postconditions, and final outcomes instead of treating every tool result as success.
-- Keep receiving views while the browser is unfocused or minimised, with slash commands and Pause/Resume in the composer.
+- Keep receiving views while the browser is unfocused or minimised, with slash commands in the composer.
 
 There are **33 model-facing tools**: 25 general browser tools and 8 guarded Docs tools. The detailed reference is below.
 
@@ -145,7 +145,7 @@ Not supported yet include drag batching and child-frame drags, native file picke
 
 ## Side-panel UI
 
-The panel is a single activity feed with streaming reasoning/text/tool events, per-step timing, collapsible finished steps, and a pinned final answer. The composer supports queued messages, Stop, a Pause/Resume toggle that rejects page commands without ending the chat, model and reasoning settings, up to four pasted images, browser speech recognition when available, and slash commands: typing `/` opens an inline palette where `/new` starts a fresh chat (a stoppable running turn stays alive behind the draft view, while an operation that is still starting refuses with a wait message) and `/model` opens the model picker. ArrowUp/ArrowDown choose, Enter or Tab runs, and Escape dismisses; path-like text that merely starts with `/` is sent as ordinary prose. Closing the model picker (Escape, outside click, or choosing a model) returns focus to the composer, and a draft typed or attached while the `/new` view waits behind a running turn survives when that turn ends. After an extension install or reload, a one-time full-screen notice leads with an amber **Don't touch the browser** warning: while the agent runs, clicking, typing, scrolling, or switching tabs can throw off its clicks and targets and break the task. **Got it** or Escape dismisses it; it does not return on ordinary panel opens.
+The panel is a single activity feed with streaming reasoning/text/tool events, per-step timing, collapsible finished steps, and a pinned final answer. The composer supports queued messages, Stop, model and reasoning settings, up to four pasted images, browser speech recognition when available, and slash commands: typing `/` opens an inline palette where `/new` starts a fresh chat (a stoppable running turn stays alive behind the draft view, while an operation that is still starting refuses with a wait message) and `/model` opens the model picker. ArrowUp/ArrowDown choose, Enter or Tab runs, and Escape dismisses; path-like text that merely starts with `/` is sent as ordinary prose. There is no browser-access Pause/Resume control; legacy saved paused state is cleared on startup. Closing the model picker (Escape, outside click, or choosing a model) returns focus to the composer, and a draft typed or attached while the `/new` view waits behind a running turn survives when that turn ends. After an extension install or reload, a one-time full-screen notice leads with an amber **Don't touch the browser** warning: while the agent runs, clicking, typing, scrolling, or switching tabs can throw off its clicks and targets and break the task. **Got it** or Escape dismisses it; it does not return on ordinary panel opens.
 
 The **Debug log** dialog exports local run evidence. See `docs/DEBUG-LOGS.md` before sharing a bundle.
 
@@ -177,7 +177,7 @@ This deletes sessions, attachments, debug logs, tokens, and any remembered key. 
 
 Screenshots, rendered text, labels, prompts, pasted images, and explicit tool results such as personal destinations, clipboard contents, filenames, and file metadata can be sent to the configured model provider. Local file bytes are not sent to the model provider by `browser_upload`; Chrome attaches the file, and the destination site receives it when the page submits. Debug logs and DSH attachments remain local until shared, but contain sensitive page/conversation data and may contain local file paths.
 
-The extension requests broad host access plus side-panel, tabs, scripting, storage, debugger, downloads, web-navigation, clipboard, top-sites, bookmarks, and history permissions. Clipboard, download, upload, and personal-data access occur only through explicit user/model actions, not a background sync. Pause/Resume blocks browser commands without ending the chat; closing the panel disconnects the executor.
+The extension requests broad host access plus side-panel, tabs, scripting, storage, debugger, downloads, web-navigation, clipboard, top-sites, bookmarks, and history permissions. Clipboard, download, upload, and personal-data access occur only through explicit user/model actions, not a background sync. Closing the panel disconnects the executor.
 
 Read `PRIVACY.md` for storage paths, Downloads confinement, redaction limits, clipboard behavior, and controls.
 
@@ -197,7 +197,7 @@ Useful harnesses:
 - `scripts/edge-drag-e2e.mjs` — self-contained isolated provider/executor drag fixture with independent order/value/drop-receipt, clone, no-op, rerender, stale-view, and collateral-state checks.
 - `scripts/edge-files-e2e.mjs` — self-hosted file-transfer fixture with independent source/download and multipart-received byte checks; requires an isolated Edge/CDP profile with a temporary Downloads preference.
 - `scripts/edge-capture-e2e.mjs` — self-hosted isolated profile that verifies focused, unfocused, and minimized viewport captures at viewport × devicePixelRatio, with labelled-pixel checks, image-space clicks while unfocused/minimized, and unchanged window focus/state.
-- `scripts/ui-preview.mjs` — mocked-bridge side-panel screenshots and UI assertions (disclaimer, slash palette, Pause/Resume, draft-view focus/attachments, disconnect cleanup) without a companion or model spend.
+- `scripts/ui-preview.mjs` — mocked-bridge side-panel screenshots and UI assertions (disclaimer, slash palette, pause-control absence and legacy-state migration, draft-view focus/attachments, disconnect cleanup) without a companion or model spend.
 - `scripts/edge-expect-e2e.mjs` — isolated direct/batch expectation fixture with independent text, dialog, pixel, semantic, and mutation-state checks.
 - `scripts/edge-click-e2e.mjs`, `edge-work-e2e.mjs`, `edge-canvas-e2e.mjs`, `edge-advanced-e2e.mjs` — direct real-extension fixture checks.
 - `scripts/edge-find-e2e.mjs`, `edge-table-e2e.mjs`, `edge-dialog-e2e.mjs`, `edge-clipboard-e2e.mjs` — focused executor checks.
@@ -214,7 +214,7 @@ Most fixture scripts need the static server and isolated Edge/CDP setup describe
 | Invalid pairing token | Copy the current token into Settings; do not share it |
 | No model/key configured | Enter the key, refresh models, select an image/tool-capable model, and save |
 | Model list or key rejected | Check base URL, network access, account access, and key validity |
-| Browser bridge disconnected | Reopen the side panel (and press Resume if it was paused); it is the executor |
+| Browser bridge disconnected | Reopen the side panel; it is the executor |
 | Protected-page error | Switch to a normal HTTP(S) tab |
 | Trusted input unavailable | Close DevTools on the tab and check debugger permission |
 | Changes do not apply | Reload/reopen the extension; restart the companion for provider/config changes |

@@ -36,12 +36,10 @@ executes on send — other slash-leading text such as `/usr/local/bin`, `/new ch
 or a command with trailing whitespace is sent to the model as ordinary prose.
 The palette is keyboard-navigable and keeps focus in the textarea.
 
-The composer also has a **Pause/Resume** control next to dictation. Paused
-browser commands are rejected with `PAUSED` without ending the chat turn; the
-state persists with the other panel settings and is reflected in the activity
-header and status. Closing the model picker with Escape, an outside click, or by
-choosing a model returns focus to the composer rather than dropping it to the
-page body.
+The browser-access Pause/Resume control has been removed. Legacy saved paused
+state is cleared on startup. Closing the model picker with Escape, an outside
+click, or by choosing a model returns focus to the composer rather than dropping
+it to the page body.
 
 | Frame | State |
 |---|---|
@@ -70,8 +68,8 @@ SHOT_FORMAT=jpeg node scripts/ui-preview.mjs --scenario slash --out /tmp/ui
 The `disclaimer` scenario also asserts that the hands-off warning carries the
 hands-off wording, comes first in the DOM and on screen, and visually dominates
 the supporting copy (larger, heavier, warmer type on a bordered fill), plus
-full-panel coverage, flag consumption, Escape dismissal, and no repeat after a
-panel reopen.
+full-panel coverage, flag consumption, Escape dismissal, legacy paused-state
+migration, and no repeat after a panel reopen.
 
 The `slash` scenario asserts the palette trigger rules, filtering, ARIA
 (`aria-expanded`, `aria-activedescendant`, `role=option`/`aria-selected`, and the
@@ -83,10 +81,9 @@ prose fallback, palette fit at the 280 px minimum panel width, and that `/new`
 during a turn keeps the session alive in the draft view instead of retiring it
 early. It also asserts that Escape, outside clicks, and row selection return
 focus to the composer; that images pasted while the `/new` draft view waits
-survive the draft retirement; that Pause persists its setting, updates the
-status/phase, and rejects a `browser.command` with `PAUSED` until resumed; and
-that a dropped mock bridge finishes the live turn, clears the draft view, and
-reconnects without a stranded clock or a false "Wait for the running session"
+survive the draft retirement; that the browser-access pause control is absent;
+and that a dropped mock bridge finishes the live turn, clears the draft view,
+and reconnects without a stranded clock or a false "Wait for the running session"
 state. Several steps use trusted CDP key and mouse events (not synthetic DOM
 dispatch), so the `preventDefault` newline/focus guards are genuinely covered,
 and `Accessibility.getPartialAXTree` confirms the textarea exposes the combobox
