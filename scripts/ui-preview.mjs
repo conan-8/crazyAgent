@@ -988,43 +988,8 @@ async function playSlashScenario(page, capture) {
   await sleep(120)
   assert.equal(await page.evaluate(`document.querySelectorAll('.image-chip').length`), 0)
 
-  // Pause rejects page commands without ending the chat, persists the setting,
-  // and resumes cleanly.
-  await page.evaluate(`document.getElementById('pause').click()`)
-  await sleep(220)
-  const pausedState = await page.evaluate(`(async () => {
-    const stored = await chrome.storage.local.get('crazyagent.settings');
-    return {
-      pressed: document.getElementById('pause').getAttribute('aria-pressed'),
-      label: document.getElementById('pause').getAttribute('aria-label'),
-      status: document.getElementById('status-text').textContent,
-      phase: document.getElementById('activity-phase').textContent,
-      stored: stored['crazyagent.settings']?.paused,
-    };
-  })()`)
-  assert.deepEqual(pausedState, {
-    pressed: 'true',
-    label: 'Resume browser access',
-    status: 'Paused',
-    phase: 'Paused',
-    stored: true,
-  })
-  await recv({ v: 1, type: 'browser.command', id: 'paused-view', callId: 'paused-1', turnId: 'turn-paused', command: { op: 'snapshot', args: {} } })
-  await sleep(250)
-  const pausedResult = await page.evaluate(`window.__frames.filter(frame => frame.type === 'browser.result' && frame.id === 'paused-view').at(-1)`)
-  assert.equal(pausedResult?.ok, false)
-  assert.equal(pausedResult?.error?.code, 'PAUSED', 'paused browser commands must be rejected before the executor runs')
-  await page.evaluate(`document.getElementById('pause').click()`)
-  await sleep(220)
-  const resumedState = await page.evaluate(`(async () => {
-    const stored = await chrome.storage.local.get('crazyagent.settings');
-    return {
-      pressed: document.getElementById('pause').getAttribute('aria-pressed'),
-      status: document.getElementById('status-text').textContent,
-      stored: stored['crazyagent.settings']?.paused,
-    };
-  })()`)
-  assert.deepEqual(resumedState, { pressed: 'false', status: 'Connected', stored: false })
+  assert.equal(await page.evaluate(`document.getElementById('pause')`), null)
+  assert.equal(await page.evaluate(`document.querySelector('.pause-toggle')`), null)
 
   // A dropped bridge ends the live turn instead of stranding a "Working…" clock
   // or a /new draft whose sends would report a session that no longer exists.
@@ -1274,7 +1239,7 @@ async function main() {
         pending: stored['crazyagent.disclaimerPending'],
       };
     })()`)
-    await page.evaluate(`chrome.storage.local.set({ 'crazyagent.disclaimerPending': true })`)
+    await page.evaluate(`chrome.storage.local.set({ 'crazyagent.disclaimerPending': true, 'crazyagent.settings': ${JSON.stringify({ ...settings, paused: true })} })`)
     await page.send('Page.reload')
     await sleep(1400)
     const opened = await noticeState()
@@ -1320,6 +1285,14 @@ async function main() {
     assert.equal(reopened.open, false)
     assert.equal(reopened.pending, false)
     assert.equal(await page.evaluate(`Boolean(window.__mockSocket)`), true)
+    const pauseMigration = await page.evaluate(`(async () => {
+      const stored = await chrome.storage.local.get('crazyagent.settings');
+      return {
+        present: document.getElementById('pause') !== null,
+        paused: stored['crazyagent.settings']?.paused,
+      };
+    })()`)
+    assert.deepEqual(pauseMigration, { present: false, paused: false })
   } else if (SCENARIO === 'interactions') {
     await page.evaluate(`window.__mockBatch(${JSON.stringify(HELLO_FRAMES)})`)
     await sleep(400)

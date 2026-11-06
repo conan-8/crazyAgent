@@ -1159,38 +1159,6 @@ input::placeholder {
   color: #4f4f4f;
 }
 
-/* Pause/Resume browser access. Lives beside dictation so the user can stop the
-   agent touching the page without ending the chat turn. */
-.pause-toggle {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 auto;
-  margin: 0 0 2px 0;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: #999;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-
-.pause-toggle:hover {
-  background: #252525;
-  color: #d0d0d0;
-}
-
-.pause-toggle[aria-pressed="true"] {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.pause-toggle .icon {
-  width: 15px;
-  height: 15px;
-}
-
 .composer-model {
   display: flex;
   flex: 1 1 auto;

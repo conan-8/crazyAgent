@@ -87,7 +87,6 @@ The side-panel export dialog can omit screenshots and the raw DSH session. Bundl
 
 ## Controls
 
-- **Pause/Resume** (composer toggle, persisted with the other settings) rejects browser commands with `PAUSED` without ending the chat.
 - Disable **Attach a fresh view to every message** to turn off auto-view; explicit screenshot tools remain available.
 - Closing the side panel disconnects browser execution.
 - Uninstalling the extension clears its extension storage.

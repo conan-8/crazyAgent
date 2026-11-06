@@ -186,7 +186,6 @@ const els = {
   slashMenu: $('slash-menu'),
   slashMenuList: $('slash-menu-list'),
   mic: $('mic'),
-  pause: $('pause'),
   dictationIndicator: $('dictation-indicator'),
   imageChips: $('image-chips'),
   messageQueue: $('message-queue'),
@@ -233,6 +232,9 @@ async function loadSettings() {
   } catch {
     settings = { ...DEFAULT_SETTINGS }
   }
+  const clearLegacyPause = settings.paused === true
+  settings.paused = false
+  if (clearLegacyPause) void saveSettings()
 }
 
 async function saveSettings() {
@@ -1189,46 +1191,6 @@ function updateStopButton() {
   els.stop.setAttribute('aria-label', label)
   els.stop.setAttribute('aria-busy', String(stopping))
   renderQueuedMessages()
-}
-
-/** Reflect the Pause/Resume control and its browser-access state. */
-function updatePauseButton() {
-  if (!els.pause) return
-  const paused = settings.paused === true
-  els.pause.setAttribute('aria-pressed', String(paused))
-  els.pause.setAttribute('aria-label', paused ? 'Resume browser access' : 'Pause browser access')
-  els.pause.title = paused
-    ? 'Browser access paused — resume it'
-    : 'Pause browser access without ending the chat'
-  els.pause.classList.toggle('paused', paused)
-  const use = els.pause.querySelector('use')
-  if (use) use.setAttribute('href', paused ? '#icon-play' : '#icon-pause')
-}
-
-/**
- * Toggle browser-access pause. Paused commands are rejected with PAUSED
- * (app.js handleBrowserCommand) without ending the chat turn; the state is
- * persisted with the other panel settings.
- * @param {boolean} value
- * @param {{persist?: boolean, announce?: boolean}} [options]
- */
-function setPaused(value, { persist = true, announce = true } = {}) {
-  const next = value === true
-  settings.paused = next
-  updatePauseButton()
-  if (next) {
-    setActivityPhase('Paused', 'paused')
-    if (announce) toast('Browser access paused. Page commands are rejected until you resume.')
-  } else {
-    setActivityPhase(
-      busy ? 'Working…' : connected ? 'Ready' : 'Companion offline',
-      busy ? 'busy' : connected ? 'online' : 'offline',
-    )
-    if (announce) toast('Browser access resumed')
-  }
-  refreshStatus()
-  logger.log('ui.pause', { paused: next }, 'info')
-  if (persist) void saveSettings()
 }
 
 function setActivity(active) {
@@ -3578,7 +3540,6 @@ els.modelSearch.addEventListener('keydown', event => {
   }
 })
 els.mic.addEventListener('click', toggleDictation)
-els.pause.addEventListener('click', () => setPaused(!settings.paused))
 els.input.addEventListener('paste', event => {
   const files = [...(event.clipboardData?.items ?? [])]
     .filter(item => item.kind === 'file')
@@ -3723,8 +3684,6 @@ async function boot() {
   renderComposerModel()
   renderImageChips()
   updateMicButton()
-  updatePauseButton()
-  if (settings.paused) setActivityPhase('Paused', 'paused')
   logger.log('settings.loaded', {
     hasToken: settings.token.length > 0,
     bridgeUrl: settings.bridgeUrl,
