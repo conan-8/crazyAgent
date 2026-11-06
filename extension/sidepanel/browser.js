@@ -7982,7 +7982,7 @@ async function docsCloseFind(context, stage, awaitDocumentFocus = false) {
   await docsKey(context, stage, KEY_SPECS.Escape)
   await docsWait(context, stage, 'find', {}, state => !state.open)
   if (awaitDocumentFocus) {
-    await docsWait(context, `${stage}-document-focus`, 'documentContent', {}, state => state.present && state.focused)
+    await docsFocusDocument(context, `${stage}-document-focus`)
     await context.driver.sleep(80)
   }
 }
@@ -9266,12 +9266,12 @@ async function docsFrameProbe(context, frameId, stage, command) {
   }
 }
 
-async function docsFocusDocument(context) {
+async function docsFocusDocument(context, stage = 'write-focus-document') {
   const frames = await listFrames(context.tab.id).catch(() => [{ frameId: 0 }])
   for (const frame of frames) {
     const probe = frame.frameId === 0
-      ? command => docsProbe(context, 'write-focus-document', command)
-      : command => docsFrameProbe(context, frame.frameId, 'write-focus-document', command)
+      ? command => docsProbe(context, stage, command)
+      : command => docsFrameProbe(context, frame.frameId, stage, command)
     try {
       const current = await probe('documentContent')
       if (!current.present) continue
@@ -9283,7 +9283,7 @@ async function docsFocusDocument(context) {
       if (verified.focused) return
     } catch {}
   }
-  throw docsFailure('write-focus-document', 'DOCS_FOCUS_FAILED', `Document content editor was not found or could not be focused in ${frames.length} frame(s)`)
+  throw docsFailure(stage, 'DOCS_FOCUS_FAILED', `Document content editor was not found or could not be focused in ${frames.length} frame(s)`)
 }
 
 function docsWritePositionMatches(baseline, positioned, reused) {

@@ -544,7 +544,7 @@ test('Docs table formatting waits for document focus before trusting the selecte
   const result = await docsTable({}, { action: 'format', edits: [{ row: 1, bold: true }] }, fake.io)
   assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
   assert.ok(selectDocsTable(fake.state.blocks).rows[0].every(item => item.paragraphs[0].runs.every(run => run.bold)))
-  assert.equal(focusProbes, 3)
+  assert.equal(focusProbes, 6)
 })
 
 test('Docs table applies exact cell backgrounds without changing text highlights or data cells', async () => {

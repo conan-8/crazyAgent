@@ -40,7 +40,7 @@ import {
 } from './openrouter.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const VERSION = '0.1.0'
+const VERSION = '2.0.0-beta'
 const PROVIDER = 'openrouter'
 
 /** @param {string[]} argv */

@@ -116,5 +116,5 @@ Next:
   5. Visit a normal website and ask "What is on this page?"
 
 The companion is local-only (127.0.0.1). Screenshots are sent to the configured
-model provider; see README.md for the Phase 1 limits.
+model provider; see README.md for capabilities, privacy, and current limits.
 `)

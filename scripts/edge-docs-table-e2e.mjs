@@ -152,7 +152,7 @@ try {
   const created = await readExport()
   assertCompactCells(created.html)
   evidence.push(completed(await execute('format', { edits: [{ row: 1, bold: true, highlight: '#ffff00' }] })))
-  evidence.push(completed(await execute('format', { edits: [{ row: 1, cell_background: '#cccccc' }] })))
+  evidence.push(completed(await execute('format', { edits: [{ row: 1, cell_background: '#d9d9d9' }] })))
   evidence.push(completed(await execute('insert_rows', { count: 2 })))
   evidence.push(completed(await execute('insert_columns', { count: 1 })))
   evidence.push(completed(await execute('write', { edits: [
@@ -189,7 +189,7 @@ try {
   ])
   assert.ok(finalTable.rows.every(row => row.every(item => item.rowspan === 1 && item.colspan === 1)), 'unmerge leaves a fully unmerged table')
   for (const headerCell of finalTable.rows[0]) {
-    assert.equal(headerCell.background, '#cccccc', 'native header cell background persists after reload')
+    assert.equal(headerCell.background, '#d9d9d9', 'native header cell background persists after reload')
     for (const paragraph of headerCell.paragraphs) {
       for (const run of paragraph.runs) {
         if (!run.text) continue
@@ -200,7 +200,7 @@ try {
   }
   for (const row of finalTable.rows.slice(1)) {
     for (const item of row) {
-      assert.notEqual(item.background, '#cccccc', 'no collateral native cell background')
+      assert.notEqual(item.background, '#d9d9d9', 'no collateral native cell background')
       for (const paragraph of item.paragraphs) {
         for (const run of paragraph.runs) assert.notEqual(run.highlight, '#ffff00', 'no collateral header highlight')
       }

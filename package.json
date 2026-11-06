@@ -1,9 +1,9 @@
 {
   "name": "crazyagent",
-  "version": "0.1.0",
+  "version": "2.0.0-beta",
   "private": true,
   "type": "module",
-  "description": "Phase 1: DSH-powered vision browser agent in a Chrome side panel",
+  "description": "DeepSeek-optimised Chrome/Edge browser agent with guarded actions and Google Docs editing",
   "workspaces": [
     "packages/*"
   ],

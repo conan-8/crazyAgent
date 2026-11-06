@@ -1,37 +1,70 @@
 # CrazyAgent
 
-A Chrome/Edge side-panel browser agent built on **DSH 0.2.1-rc.2**. It reads the active tab, acts through labelled DOM controls or trusted surface coordinates, types and presses keys, navigates, handles bounded semantic find/table operations, and provides guarded Google Docs editing. DSH owns the agent loop, sessions, tools, prompt assembly, attachments, and model routing.
+**Control Chrome or Edge from a local side panel with guarded browser actions, file transfer, and semantic Google Docs editing.** Built on **DSH 0.2.1-rc.2**.
+
+**Optimised for DeepSeek V4.1 Flash** on OpenRouter (`deepseek/deepseek-v4.1-flash-1017`). Other image-capable, tool-capable models remain available. [Download v2.0.0-beta](https://github.com/conan-8/crazyAgent/releases/tag/v2.0.0-beta).
+
+<p align="center">
+  <img src="docs/ui/sidebar-activity-dark.jpeg" alt="CrazyAgent completing a browser task in the side panel" width="360">
+</p>
+
+## What it can do
+
+- Read and act on ordinary web pages through labelled controls, trusted coordinates, bounded batches, and guarded drag and drop.
+- Create and edit Google Docs content and native tables with exact targeting and export verification.
+- Download files and attach Downloads-folder files to page inputs with filesystem readback.
+- Distinguish observed changes, requested postconditions, and final outcomes instead of treating every tool result as success.
+- Keep receiving views while the browser is unfocused or minimised, with slash commands and Pause/Resume in the composer.
+
+There are **33 model-facing tools**: 25 general browser tools and 8 guarded Docs tools. The detailed reference is below.
+
+## Requirements
+
+- Git and npm.
+- Node **22.19+**.
+- Chrome/Chromium/Edge **116+** with the Side Panel API.
+- An [OpenRouter](https://openrouter.ai/) API key. Model usage is billed by your configured provider.
+- A normal HTTP(S) website tab; browser-internal and Web Store pages are protected.
+
+## Install with an agent
+
+Paste this prompt into a coding agent on the computer where Chrome or Edge is installed:
+
+```text
+Install CrazyAgent v2.0.0-beta on this computer from https://github.com/conan-8/crazyAgent. First verify Git, Node.js 22.19 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Stop and tell me if anything required is missing; do not use sudo or replace my runtimes. Clone the v2.0.0-beta tag into a new crazyAgent directory, then run npm ci and npm run setup in that checkout. If the directory already exists, do not overwrite or delete it; ask me for another location. Start npm run dev -- --model deepseek/deepseek-v4.1-flash-1017 --reasoning-effort auto as a persistent background process and verify http://127.0.0.1:17871/health responds successfully. If that port is already occupied, stop and report it instead of killing an existing process. Then give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions and open the CrazyAgent side panel. Guide me to copy the local pairing token into Settings, enter my own OpenRouter API key there, select DeepSeek V4.1 Flash, and save. Never ask for my API key in chat, print it, commit it, or send it anywhere except CrazyAgent's local Settings. Keep the companion running. Finish with the install path, health status, and restart command. Do not run any website tasks or model-spending tests until I confirm installation is complete.
+```
+
+### Manual installation
+
+```sh
+git clone --depth 1 --branch v2.0.0-beta https://github.com/conan-8/crazyAgent.git
+cd crazyAgent
+npm ci
+npm run setup
+npm run dev -- --model deepseek/deepseek-v4.1-flash-1017 --reasoning-effort auto
+```
+
+`setup` initializes `.dsh-home/profiles/sdk-minimal`, links the local DSH plugins, and validates profile composition. `dev` starts the loopback-only companion and prints bridge pairing information.
+
+1. Open `chrome://extensions` or `edge://extensions`.
+2. Enable Developer mode, choose **Load unpacked**, and select the checkout's `extension/` directory.
+3. Click the CrazyAgent toolbar icon to open the side panel.
+4. In **Settings**, enter the pairing token and your OpenRouter API key, refresh models, select **DeepSeek V4.1 Flash 1017**, and save. Never share the API key or pairing token publicly.
+5. Wait for **Connected**, open a normal page, and ask a question or request an action.
+
+Keep the companion and side panel open while the agent runs; the panel is also the browser executor. **Do not touch the browser while a task is running:** clicking, typing, scrolling, or switching tabs can invalidate the agent's targets. After an install or extension reload, dismiss the one-time safety notice with **Got it** or Escape.
+
+Page content, screenshots, prompts, and explicit tool results can be sent to the configured model provider. CrazyAgent requests broad browser permissions and can change real pages and files; review [Privacy and permissions](#privacy-and-permissions) and `PRIVACY.md` before use.
+
+## How it works
 
 ```text
 Active tab ↔ side panel ↔ loopback companion ↔ DSH ↔ configured model provider
 ```
 
-The extension is a normal MV3 side panel. The local companion connects it to DSH over a token-authenticated loopback WebSocket.
+The extension is a normal MV3 side panel. The local companion connects it to DSH over a token-authenticated loopback WebSocket. DSH owns the agent loop, sessions, tools, prompt assembly, attachments, and model routing.
 
-## Requirements
-
-- Chrome/Chromium/Edge **116+** with the Side Panel API.
-- Node **22.19+**.
-- An OpenRouter API key and an image-capable, tool-capable model.
-- A normal website tab; browser-internal and Web Store pages are protected.
-
-## Quick start
-
-```sh
-npm install
-npm run setup
-npm run dev
-```
-
-`setup` initializes `.dsh-home/profiles/sdk-minimal`, links the local DSH plugins, and validates profile composition. `dev` starts the companion and prints bridge pairing information.
-
-1. Open `chrome://extensions` or `edge://extensions`.
-2. Enable Developer mode, choose **Load unpacked**, and select `extension/`.
-3. Click the CrazyAgent toolbar icon to open the side panel.
-4. In **Settings**, enter the pairing token and OpenRouter API key, keep or edit the base URL, refresh models, select an image/tool-capable model, and save.
-5. Wait for **Connected**, open a normal page, and ask a question or request an action.
-
-Keep the panel open while the agent runs; it is also the browser executor. Reload the extension and reopen the panel after extension changes. Restart the companion after companion, provider, or config changes. After an install or extension reload, the panel shows a one-time full-screen notice that some actions may be unexpected; dismiss it with **Got it** (or Escape) — it will not appear again until the next install/reload.
+Reload the extension and reopen the panel after extension changes. Restart the companion after companion, provider, or config changes.
 
 ## Operating behavior
 
@@ -91,10 +124,10 @@ Direct Docs export checks and six toolbar attributes (`paragraph_style`, `font_s
 | `browser_docs_rename` | Rename with title-field focus/value checks and committed-title verification |
 | `browser_docs_replace` | Delete or replace 1–200 ordered exact unique matches with counters and partial reporting |
 | `browser_docs_format` | Format 1–50 exact ranges with unique or explicit-occurrence targeting and eight supported attributes |
-| `browser_docs_select_text` | Select exact text or its containing paragraph; no `all` or persistent multi-select |
+| `browser_docs_select_text` | Select exact text or its containing paragraph with Find-counter evidence and a document-focus barrier; no `all` or persistent multi-select |
 | `browser_docs_page_setup` | Verify and set Letter paper, portrait/landscape orientation, and inch margins |
 | `browser_docs_write` | Append bounded formatted paragraphs, inline runs, flat lists/checklists, blanks, and page breaks at document end |
-| `browser_docs_table` | Create compact tables, read values and native cell backgrounds, write exact cells, format text, apply native backgrounds with dedicated `cell_background`-only calls, edit structure, merge/unmerge exactly two horizontal cells with a guarded native-menu fallback, or delete tables with export verification |
+| `browser_docs_table` | Create compact tables, read values and native cell backgrounds, write exact cells, format text, apply exact native background presets or custom hex colors with dedicated `cell_background`-only calls, edit structure, merge/unmerge exactly two horizontal cells with a guarded hover-driven native-menu fallback, or delete tables with export verification |
 | `browser_docs_read` | Authenticated export as outline, text, or bounded HTML with pagination and no screenshot |
 
 `browser_docs_replace` and `browser_docs_format` internally route to legacy executor actions; those internal names are not additional model tools.
@@ -163,7 +196,7 @@ npm run system-prompt          # exact composed prompt; -- --json for counts
 npm run bench                  # local bridge benchmark
 ```
 
-Last recorded implementation verification: **800/800 tests**, prompt composition, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs. The drag fixture used real provider/executor calls to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. Independent checks inspected DOM order, values, parentage, drop receipts, and collateral application state; refused and intentional no-op cases preserved every semantic application value. Earlier expectation, click, capture, and file-transfer fixtures retained their evidence. These are direct executor checks, not real-model acceptance. **A real-sidebar/model drag workflow and expectation workflow, download→upload workflow, authenticated Docs export/toolbar expectations and Docs table acceptance, authenticated Pivot, real-model HTML-table selection, normal authenticated docked-panel Docs acceptance, and a real docked-panel turn that keeps receiving views after the user switches apps or minimizes the browser remain pending.** No connected Docs browser or isolated live-model acceptance profile is currently configured.
+Last recorded implementation verification: **767/767 tests**, prompt composition, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs. The drag fixture used real provider/executor calls to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. Independent checks inspected DOM order, values, parentage, drop receipts, and collateral application state; refused and intentional no-op cases preserved every semantic application value. Earlier expectation, click, capture, and file-transfer fixtures retained their evidence. These are direct executor checks, not real-model acceptance. **A real-sidebar/model drag workflow and expectation workflow, download→upload workflow, authenticated Docs export/toolbar expectations and Docs table acceptance, authenticated Pivot, real-model HTML-table selection, normal authenticated docked-panel Docs acceptance, and a real docked-panel turn that keeps receiving views after the user switches apps or minimizes the browser remain pending.** No connected Docs browser or isolated live-model acceptance profile is currently configured.
 
 Useful harnesses:
 

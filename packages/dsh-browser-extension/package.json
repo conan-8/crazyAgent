@@ -1,6 +1,6 @@
 {
   "name": "dsh-browser-extension",
-  "version": "0.1.0",
+  "version": "2.0.0-beta",
   "private": true,
   "description": "DSH browser-use provider for the user's current Chrome window via the CrazyAgent bridge",
   "type": "module",

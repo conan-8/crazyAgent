@@ -1,6 +1,6 @@
 # CrazyAgent — quick handoff
 
-Current snapshot: **2026-11-05**. Read `HANDOFF.md` for architecture and invariants; use `e2e/checklist.md` for live acceptance.
+Current snapshot: **2026-11-06**. Read `HANDOFF.md` for architecture and invariants; use `e2e/checklist.md` for live acceptance.
 
 ## Resume
 
@@ -17,12 +17,13 @@ Restart the companion after companion/provider/config changes. After `extension/
 
 | Item | State |
 |---|---|
+| Release | **v2.0.0-beta** GitHub prerelease; Chrome manifest `version_name` is `2.0.0-beta` |
 | Tools | **33 model-facing:** 25 general + 8 guarded Docs tools |
-| Last recorded tests | **800/800**, prompt composition, direct expectation/provider wire and schema-parity regressions, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs |
+| Last recorded tests | **767/767**, prompt composition, direct expectation/provider wire and schema-parity regressions, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs |
 | Latest live evidence | `scripts/edge-drag-e2e.mjs` used the real provider/executor bridge in a fresh isolated Edge profile to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. It independently checked DOM order, values, parents, drop receipts, and collateral application state; refused/no-op cases retained all semantic state. `scripts/edge-expect-e2e.mjs` and `scripts/edge-click-e2e.mjs` retained full regression passes. These are direct executor checks, not real-model acceptance. |
 | Pending acceptance | Real-sidebar/model drag and expectation workflows, download→upload, authenticated Docs export/toolbar expectations and Docs tables, authenticated Pivot, real-model HTML-table selection, normal authenticated docked-panel Docs, and a real docked-panel turn that keeps receiving views after the user switches to another app or minimizes the browser |
 | Model used for find acceptance | OpenRouter `deepseek/deepseek-v4.1-flash`, fixed medium effort |
-| Prompt at last composition | **17,987 chars total / 16,993 guidance**; size only, not a latency claim |
+| Prompt at last composition | **17,995 chars total / 17,001 guidance**; size only, not a latency claim |
 | Parallelism | Maximum 4; only `browser_tabs`, `browser_places`, `browser_read_text`, `browser_docs_read`, and `browser_downloads` overlap |
 | Repeat guards | 3 consecutive mutating repeats, 30 observations, 10 unmodified navigation keys; no per-turn call cap |
 | Extension | Unpacked `extension/`; reload required after changes |
@@ -46,8 +47,8 @@ These are recorded results, not a substitute for rerunning checks after new chan
 
 - `browser_download` saves direct URLs/links and labelled Download controls with completion/filesystem verification. `browser_downloads` lists actual regular files newest first (including bounded subfolders) and normalizes spaces/+ for search only. `browser_upload` confines real paths to regular files inside Downloads, verifies CDP attachment by File name/size, and returns exact alternatives after a missing name. Hidden inputs, open shadow roots, and same-origin accessible frames are covered; cross-origin site-isolated frames fail closed with `UPLOAD_FRAME_UNSUPPORTED`, and Chrome owns the download directory (the confined folder must match Chrome's download location, with "Ask where to save" off). Arbitrary filesystem access remains unsupported.
 - `scripts/edge-files-e2e.mjs` independently checks direct/link/dynamic downloads, ambiguity refusal, hidden/visible/shadow/frame inputs, picker-click guards, and actual multipart receipt. It and the existing click fixture pass; a real-sidebar/model workflow is still pending.
-- `browser_docs_table` creates compact native tables, accepts the preserved empty paragraph during fresh-document verification, reads bounded grids and native backgrounds, writes exact cells, formats cell/row/column/table text, applies native cell backgrounds through dedicated `cell_background`-only format calls, inserts/deletes rows and columns, merges/unmerges exactly two horizontal cells with a guarded native-menu fallback, or deletes tables. Provider-envelope normalization, explicit custom-color OK commits, and add/create intent are covered by regressions. Export retries use five bounded exponential-backoff attempts.
-- `browser_docs_format` verifies exact ranges inside table-cell paragraphs, including color/highlight and collateral runs. Custom colors require exact hex readback and a scoped OK-button commit. Final unverified Docs turns carry metadata through `turn/end` and `chat.done`, and the panel reports verification incomplete instead of plain Ready.
+- `browser_docs_table` creates compact native tables, accepts the preserved empty paragraph during fresh-document verification, reads bounded grids and native backgrounds, writes exact cells, formats cell/row/column/table text, applies native backgrounds through dedicated `cell_background`-only calls using an exact unique visible preset or the custom-color dialog, inserts/deletes rows and columns, merges/unmerges exactly two horizontal cells with a guarded hover-driven native-menu fallback, or deletes tables. Unavailable colors fail explicitly without substitution. Provider-envelope normalization, custom-color OK commits, exact presets, stale-toolbar selection, and add/create intent are covered by regressions. Export retries use five bounded exponential-backoff attempts.
+- `browser_docs_format` verifies exact ranges inside table-cell paragraphs, including color/highlight and collateral runs. Find-driven selection waits for document focus and an 80 ms toolbar-settling interval before desired-state decisions. Custom colors require exact hex readback and a scoped OK-button commit. Final unverified Docs turns carry metadata through `turn/end` and `chat.done`, and the panel reports verification incomplete instead of plain Ready.
 - `scripts/edge-docs-table-e2e.mjs` covers direct real-extension creation, compact paragraph CSS, text and native cell formatting, structure edits, deletion, independent export, and reload persistence when an isolated Docs profile is signed in. No connected Docs browser or isolated Docs profile is currently available for the post-fix rerun.
 - `browser_find` searches bounded rendered text, accessible names, and non-password values across frames/open shadow roots. Reveal requires a unique or explicit occurrence, scrolls without editing, invalidates old coordinates, and returns a fresh full view.
 - `browser_table` reads editable HTML tables and writes validated semantic cell targets with readback verification. Server persistence still needs independent inspection.

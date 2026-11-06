@@ -1396,9 +1396,10 @@ function sendLogFrame(frame) {
 
 /** Environment and safe settings sent with the debug context. No token value. */
 function clientContext() {
-  let extensionVersion = '0.1.0'
+  let extensionVersion = '2.0.0-beta'
   try {
-    extensionVersion = chrome.runtime.getManifest().version
+    const manifest = chrome.runtime.getManifest()
+    extensionVersion = manifest.version_name || manifest.version
   } catch {
     // Development fallback.
   }
