@@ -6,7 +6,7 @@
  * attaches a fresh DOM/text or screenshot view to each user turn.
  */
 
-import { DEFAULT_SETTINGS, execute, testCapture, imageDataUrl, beginDebuggerRun, endDebuggerRun } from './browser.js'
+import { DEFAULT_SETTINGS, execute, testCapture, imageDataUrl, beginDebuggerRun, endDebuggerRun, cleanImageFor, displayImageField } from './browser.js'
 import { foreignPrompt, helpNotice, isBusyRefusal } from './remote-turn.js'
 import { ClientLogger } from './logger.js'
 import { renderMarkdown } from './markdown.js'
@@ -34,6 +34,7 @@ let currentConversationId = `chat-${Date.now()}-${Math.random().toString(36).sli
 let newChatOnNextConnect = true
 let newChatDraft = false
 let historySaveTimer = null
+let conversationStopped = false
 let attachedImages = []
 let planModeArmed = false
 /** @type {Array<{id: string, text: string, planMode?: boolean, images: Array<{name: string, size: number, mimeType: string, data: string}>}>} */
@@ -156,7 +157,6 @@ const els = {
   settingWidth: $('setting-width'),
   settingQuality: $('setting-quality'),
   settingAutoCapture: $('setting-autocapture'),
-  settingHitboxes: $('setting-hitboxes'),
   settingsSave: $('settings-save'),
   testCapture: $('test-capture'),
   imageModal: $('image-modal'),
@@ -263,7 +263,6 @@ function populateSettings() {
   els.settingWidth.value = String(settings.captureWidth)
   els.settingQuality.value = String(settings.quality)
   els.settingAutoCapture.checked = settings.autoCapture !== false
-  els.settingHitboxes.checked = settings.showHitboxes !== false
 }
 
 function setEffortSelection(value) {
@@ -610,13 +609,16 @@ async function loadHistory() {
   renderRecentSessions()
 }
 
-function persistHistory() {
+function persistHistory(immediate = false) {
   clearTimeout(historySaveTimer)
-  historySaveTimer = setTimeout(() => {
+  historySaveTimer = null
+  const save = () => {
     void chrome.storage.local.set({ [HISTORY_KEY]: conversationHistory }).catch(error => {
       toast(`Could not save chat history: ${errorMessage(error)}`)
     })
-  }, 100)
+  }
+  if (immediate) save()
+  else historySaveTimer = setTimeout(save, 100)
 }
 
 function conversationTitle() {
@@ -631,10 +633,18 @@ function conversationDate(item) {
   return new Date(item.updatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function archiveCurrentConversation() {
+/** Serialize one feed child without elements that exist only for a running animation. */
+function archivableHtml(child) {
+  if (!child.querySelector('.motion-ghost, .leaving')) return child.outerHTML
+  const copy = child.cloneNode(true)
+  copy.querySelectorAll('.motion-ghost, .leaving').forEach(node => node.remove())
+  return copy.outerHTML
+}
+
+function archiveCurrentConversation({ immediate = false } = {}) {
   if (!hasConversation()) return
   const html = [...els.activityLog.children]
-    .map(child => child.outerHTML)
+    .map(archivableHtml)
     .join('')
   const record = {
     id: currentConversationId,
@@ -642,10 +652,11 @@ function archiveCurrentConversation() {
     updatedAt: Date.now(),
     turnNumber,
     sessionId,
+    stopped: conversationStopped,
     html,
   }
   conversationHistory = [record, ...conversationHistory.filter(item => item.id !== record.id)].slice(0, MAX_HISTORY)
-  persistHistory()
+  persistHistory(immediate)
   renderRecentSessions()
 }
 
@@ -764,6 +775,7 @@ function restoreConversation(id) {
   clearChat()
   if (!newChatDraft) els.activityEmpty?.classList.add('hidden')
   els.activityLog.insertAdjacentHTML('beforeend', item.html)
+  if (!reducedMotion.matches) els.activityLog.animate({ opacity: [0, 1] }, { duration: MOTION.base, easing: MOTION.ease })
   for (const head of els.activityLog.querySelectorAll('.step-head')) {
     head.addEventListener('click', () => {
       const block = head.closest('.activity-step')
@@ -780,8 +792,25 @@ function restoreConversation(id) {
   lastAgentTurn = els.activityLog.querySelector('.agent-turn:last-of-type')
   turnNumber = item.turnNumber || els.activityLog.querySelectorAll('.activity-turn').length
   currentConversationId = item.id
-  sessionId = ''
-  sendFrame({ v: PROTOCOL_VERSION, type: 'chat.new' })
+  conversationStopped = item.stopped === true
+  if (conversationStopped) {
+    for (const entry of els.activityLog.querySelectorAll('.running, .streaming')) entry.classList.remove('running', 'streaming')
+    if (lastAgentTurn) {
+      lastAgentTurn.classList.add('collapsed')
+      const summary = lastAgentTurn.querySelector('.agent-turn-summary')
+      if (summary) {
+        summary.textContent = summary.textContent.includes('Stopped') ? summary.textContent : 'Stopped'
+        summary.setAttribute('aria-expanded', 'false')
+      }
+    }
+  }
+  const resume = conversationStopped && typeof item.sessionId === 'string' && item.sessionId.length > 0
+  sessionId = resume ? item.sessionId : ''
+  sendFrame(resume
+    ? { v: PROTOCOL_VERSION, type: 'chat.resume', sessionId: item.sessionId }
+    : { v: PROTOCOL_VERSION, type: 'chat.new' })
+  if (conversationStopped && !resume) toast('This stopped chat has no saved model session; starting a new chat.')
+  updateFooter()
   closeHistory()
   renderPromptRail()
   scrollActivity()
@@ -1254,8 +1283,15 @@ function claimExecutor() {
         clearTimeout(timer)
         resolve()
       })
-      // The worker stopped; a new one must still see this panel.
-      port.onDisconnect.addListener(() => { setTimeout(attach, 500) })
+      // The worker stopped; a new one must still see this panel. Reading
+      // lastError consumes Chrome's expected "receiving end does not exist"
+      // warning while the worker is restarting, rather than leaving it unchecked.
+      port.onDisconnect.addListener(() => {
+        if (chrome.runtime.lastError) {
+          logger.log('executor.claim.disconnected', { message: chrome.runtime.lastError.message }, 'debug')
+        }
+        setTimeout(attach, 500)
+      })
     }
     attach()
   })
@@ -1488,11 +1524,119 @@ function setActivityPhase(phase, state = 'online', latest) {
   }
 }
 
-function scrollActivity() {
-  requestAnimationFrame(() => {
-    els.activityLog.scrollTop = els.activityLog.scrollHeight
-  })
+/* Shared motion: quick enough to never feel like waiting, long enough to read as movement. */
+const MOTION = Object.freeze({ fast: 120, base: 180, slow: 240, ease: 'cubic-bezier(0.2, 0, 0, 1)' })
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+
+/**
+ * Bring a just-created row in by growing its height and fading it, so the rows
+ * around it glide instead of jumping. Web Animations, not a CSS animation: it
+ * runs once at creation and never replays when a collapsed parent reopens or a
+ * saved chat is restored.
+ */
+function enterRow(element, duration = MOTION.base) {
+  if (reducedMotion.matches) return
+  const { height } = element.getBoundingClientRect()
+  element.animate(
+    [
+      { opacity: 0, height: '0px', minHeight: '0px', marginTop: '0px', marginBottom: '0px', transform: 'translateY(4px)', overflow: 'clip' },
+      { height: `${height}px`, overflow: 'clip' },
+    ],
+    { duration, easing: MOTION.ease },
+  )
 }
+
+/** Fade and shrink a row, then remove it. `.leaving` keeps it out of later queries and saved chats. */
+function removeRow(element) {
+  if (!element?.isConnected || element.classList.contains('leaving')) return
+  if (reducedMotion.matches) {
+    element.remove()
+    return
+  }
+  element.classList.add('leaving')
+  element.animate(
+    [
+      { opacity: 1, height: `${element.offsetHeight}px`, minHeight: '0px', overflow: 'clip' },
+      { opacity: 0, height: '0px', minHeight: '0px', marginTop: '0px', marginBottom: '0px', overflow: 'clip' },
+    ],
+    { duration: MOTION.base, easing: MOTION.ease, fill: 'forwards' },
+  ).finished.catch(() => {}).finally(() => element.remove())
+}
+
+const labelGhosts = new WeakMap()
+
+/**
+ * Change a label so the old words fade out as the new ones fade in. textContent
+ * is updated at once; the old words live on a short-lived aria-hidden sibling.
+ */
+function crossfadeLabel(element, text) {
+  const previous = element.textContent
+  if (previous === text) return
+  element.textContent = text
+  if (reducedMotion.matches || !previous || !element.isConnected || element.offsetParent === null) return
+  labelGhosts.get(element)?.remove()
+  const ghost = element.cloneNode(false)
+  ghost.removeAttribute('id')
+  ghost.removeAttribute('title')
+  ghost.setAttribute('aria-hidden', 'true')
+  ghost.classList.add('motion-ghost')
+  ghost.textContent = previous
+  ghost.style.left = `${element.offsetLeft}px`
+  ghost.style.top = `${element.offsetTop}px`
+  element.after(ghost)
+  labelGhosts.set(element, ghost)
+  ghost.animate(
+    { opacity: [1, 0], transform: ['none', 'translateY(-3px)'] },
+    { duration: MOTION.fast, easing: MOTION.ease, fill: 'forwards' },
+  ).finished.catch(() => {}).finally(() => ghost.remove())
+  element.animate(
+    { opacity: [0, 1], transform: ['translateY(3px)', 'none'] },
+    { duration: MOTION.base, easing: MOTION.ease },
+  )
+}
+
+/** Fade the whole feed out over its replacement when a chat is cleared. */
+function fadeOutFeed() {
+  if (reducedMotion.matches || !els.activityLog.querySelector('.activity-turn')) return
+  const feed = els.activityLog
+  const ghost = feed.cloneNode(true)
+  ghost.removeAttribute('id')
+  ghost.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'))
+  ghost.classList.add('feed-ghost')
+  ghost.setAttribute('aria-hidden', 'true')
+  ghost.inert = true
+  ghost.style.left = `${feed.offsetLeft}px`
+  ghost.style.top = `${feed.offsetTop}px`
+  ghost.style.width = `${feed.offsetWidth}px`
+  ghost.style.height = `${feed.offsetHeight}px`
+  feed.after(ghost)
+  ghost.scrollTop = feed.scrollTop
+  ghost.animate({ opacity: [1, 0] }, { duration: MOTION.base, easing: MOTION.ease, fill: 'forwards' })
+    .finished.catch(() => {}).finally(() => ghost.remove())
+}
+
+const SCROLL_FOLLOW_MS = MOTION.slow + 40
+let scrollFollowFrame = null
+let scrollFollowUntil = 0
+
+function stopScrollFollow() {
+  if (scrollFollowFrame !== null) cancelAnimationFrame(scrollFollowFrame)
+  scrollFollowFrame = null
+}
+
+/** Stay pinned to the bottom for as long as new rows are still growing in. */
+function scrollActivity() {
+  scrollFollowUntil = performance.now() + SCROLL_FOLLOW_MS
+  if (scrollFollowFrame !== null) return
+  const follow = () => {
+    els.activityLog.scrollTo({ top: els.activityLog.scrollHeight, behavior: 'instant' })
+    scrollFollowFrame = performance.now() < scrollFollowUntil ? requestAnimationFrame(follow) : null
+  }
+  scrollFollowFrame = requestAnimationFrame(follow)
+}
+
+// A wheel gesture wins over a follow still in flight.
+els.activityLog.addEventListener('wheel', stopScrollFollow, { passive: true })
 
 function renderPromptRail() {
   const prompts = [...els.activityLog.querySelectorAll('.activity-turn')]
@@ -1701,6 +1845,7 @@ function startTurn(text, attachments = [], options = {}) {
   duration.className = 'turn-duration hidden'
   divider.append(label, bubble, duration)
   els.activityLog.appendChild(divider)
+  enterRow(divider)
   renderPromptRail()
 
   const agentTurn = document.createElement('section')
@@ -1724,6 +1869,7 @@ function startTurn(text, attachments = [], options = {}) {
   }
   agentTurn.append(summary, steps)
   els.activityLog.appendChild(agentTurn)
+  enterRow(agentTurn)
   lastAgentTurn = agentTurn
   currentTurn = {
     number: turnNumber,
@@ -1749,6 +1895,8 @@ function startTurn(text, attachments = [], options = {}) {
 function renderTurnPlan(turn) {
   if (!turn?.planModel || !turn.planRoot) return
   const state = turn.planModel.getState()
+  const heightBefore = els.planDock.hidden ? 0 : els.planDock.offsetHeight
+  const statusesBefore = new Map([...turn.planRoot.querySelectorAll('.plan-panel-item')].map((row, index) => [index, row.dataset.status]))
   renderPlanPanel(turn.planRoot, state, {
     onToggle() {
       turn.planModel.toggle()
@@ -1756,6 +1904,20 @@ function renderTurnPlan(turn) {
     },
   })
   els.planDock.hidden = !state.visible
+  if (reducedMotion.matches || !state.visible) return
+  const heightAfter = els.planDock.offsetHeight
+  if (heightBefore !== heightAfter) {
+    els.planDock.animate(
+      { height: [`${heightBefore}px`, `${heightAfter}px`], overflow: ['clip', 'clip'] },
+      { duration: MOTION.base, easing: MOTION.ease },
+    )
+  }
+  turn.planRoot.querySelectorAll('.plan-panel-item').forEach((row, index) => {
+    const before = statusesBefore.get(index)
+    if (before !== undefined && before !== row.dataset.status) {
+      row.animate({ opacity: [0.35, 1] }, { duration: MOTION.slow, easing: MOTION.ease })
+    }
+  })
 }
 
 function createStepIcon() {
@@ -1766,6 +1928,12 @@ function createStepIcon() {
   use.setAttribute('href', '#icon-step-think')
   icon.appendChild(use)
   return icon
+}
+
+/** Show what the step is doing now. `settled` means the action is over and this is only its outcome. */
+function setStepTitle(step, text, { settled = false } = {}) {
+  crossfadeLabel(step.titleEl, text)
+  step.block.classList.toggle('settled', settled)
 }
 
 function setStepKind(step, kind) {
@@ -1785,7 +1953,7 @@ function beginStep(frame) {
   const index = Number.isFinite(frame?.step) ? frame.step : (currentTurn?.stepCount ?? 0) + 1
 
   const block = document.createElement('div')
-  block.className = 'activity-step running'
+  block.className = 'activity-step running entering'
   block.dataset.kind = 'think'
   const head = document.createElement('button')
   head.type = 'button'
@@ -1846,6 +2014,7 @@ function beginStep(frame) {
   })
 
   ;(currentTurn?.stepsEl ?? activityContainer()).appendChild(block)
+  enterRow(block)
   currentStep = step
   if (currentTurn) currentTurn.stepCount = Math.max(currentTurn.stepCount ?? 0, index)
   refreshLiveClocks()
@@ -1874,6 +2043,7 @@ function closeStep(at = now()) {
   // expand any step again by clicking it.
   step.collapsed = true
   step.block.classList.add('collapsed')
+  step.block.classList.remove('entering')
   step.head.setAttribute('aria-expanded', 'false')
   step.totalMs = Math.max(0, at - step.startedAt)
   step.block.classList.remove('running')
@@ -1896,7 +2066,7 @@ function closeStep(at = now()) {
  * and render the final per-step + total footer.
  * @param {{totalMs?: number}} [options]
  */
-function finishTurn({ totalMs } = {}) {
+function finishTurn({ totalMs, usage, failedCalls } = {}) {
   const at = now()
   closeStep(at)
   const total = Number.isFinite(totalMs) ? totalMs : (currentTurn ? at - currentTurn.startedAt : undefined)
@@ -1910,10 +2080,12 @@ function finishTurn({ totalMs } = {}) {
     currentTurn.root.classList.add('collapsed')
     currentTurn.summaryEl.setAttribute('aria-expanded', 'false')
     const actions = currentTurn.root.querySelectorAll('.activity-entry.tool, .activity-entry.browser').length
-    const failures = currentTurn.root.querySelectorAll('.activity-entry.fail').length
+    const observedFailures = currentTurn.root.querySelectorAll('.activity-entry.fail').length
+    const failures = Number.isFinite(failedCalls) ? Math.max(0, Math.round(failedCalls)) : observedFailures
     const summary = actions > 0 ? `${actions} action${actions === 1 ? '' : 's'}` : `${currentTurn.stepCount} step${currentTurn.stepCount === 1 ? '' : 's'}`
-    currentTurn.summaryEl.textContent = `${summary}${failures ? ` · ${failures} failed` : ''} · ${formatDuration(total)}`
-    currentTurn.summaryEl.setAttribute('aria-label', `${summary}, ${formatDuration(total)}. Toggle activity details`)
+    const tokens = turnTokenText(usage)
+    currentTurn.summaryEl.textContent = `${summary}${failures ? ` · ${failures} failed` : ''}${tokens ? ` · ${tokens}` : ''} · ${formatDuration(total)}`
+    currentTurn.summaryEl.setAttribute('aria-label', `${summary}${tokens ? `, ${tokens}` : ''}, ${formatDuration(total)}. Toggle activity details`)
   }
   renderTiming({ steps: lastStepDurations, totalMs: total })
   updateActivityTimer(undefined)
@@ -1932,7 +2104,7 @@ function finishTurn({ totalMs } = {}) {
  */
 function pushActivity(kind, label, text, options = {}) {
   if ((kind === 'error' || currentTurn !== null) && !newChatDraft) els.activityEmpty?.classList.add('hidden')
-  activityContainer().querySelector(':scope > .thinking-wait')?.remove()
+  removeRow(activityContainer().querySelector(':scope > .thinking-wait:not(.leaving)'))
   const entry = document.createElement('div')
   entry.className = `activity-entry ${kind}${options.running ? ' running' : ''}`
   const kindEl = document.createElement('span')
@@ -1945,6 +2117,7 @@ function pushActivity(kind, label, text, options = {}) {
   const created = { entry, kindEl, textEl, kind, durationEl: null }
   if (Number.isFinite(options.durationMs)) setEntryDuration(created, options.durationMs)
   activityContainer().appendChild(entry)
+  enterRow(entry)
   trimActivity()
   const latest = options.latest ?? `${label}: ${text}`
   els.activityLatest.textContent = activityPreview(latest)
@@ -1974,7 +2147,10 @@ function finishActivityEntry(created, result = {}) {
   created.entry.classList.remove('running')
   if (result.ok === true) created.entry.classList.add('ok')
   if (result.ok === false) created.entry.classList.add('fail')
-  if (typeof result.text === 'string') created.textEl.textContent = result.text
+  if (typeof result.text === 'string' && result.text !== created.textEl.textContent) {
+    created.textEl.textContent = result.text
+    if (!reducedMotion.matches) created.textEl.animate({ opacity: [0.3, 1] }, { duration: MOTION.base, easing: MOTION.ease })
+  }
   if (Number.isFinite(result.durationMs)) setEntryDuration(created, result.durationMs)
 }
 
@@ -2007,7 +2183,7 @@ function appendStreamActivity(kind, text) {
     created.kind = kind
     created.entry.classList.add('streaming')
     lastStreamEntry = created
-    if (currentStep) currentStep.titleEl.textContent = kind === 'reasoning' ? 'thinking' : 'responding'
+    if (currentStep) setStepTitle(currentStep, kind === 'reasoning' ? 'thinking' : 'responding')
   }
   if (kind === 'reasoning') {
     sawReasoningStream = true
@@ -2025,6 +2201,7 @@ function finalizeStreamActivity() {
 }
 
 function clearActivity() {
+  fadeOutFeed()
   for (const child of [...els.activityLog.children]) {
     if (child !== els.activityEmpty) child.remove()
   }
@@ -2051,6 +2228,18 @@ function clearActivity() {
   latestContextTokens = 0
   renderComposerModel()
   renderPromptRail()
+}
+
+/** Compact per-turn token count for the turn divider; '' when absent. */
+function turnTokenText(usage) {
+  if (!usage || typeof usage !== 'object') return ''
+  let value = Number(usage.totalTokens)
+  if (!Number.isFinite(value) || value <= 0) {
+    const input = Number(usage.inputTokens)
+    const output = Number(usage.outputTokens)
+    value = (Number.isFinite(input) ? input : 0) + (Number.isFinite(output) ? output : 0)
+  }
+  return Number.isFinite(value) && value > 0 ? `${Math.round(value).toLocaleString('en-US')} tok` : ''
 }
 
 function formatTokenUsage(usage) {
@@ -2113,7 +2302,7 @@ function handleActivity(frame) {
       const label = toolLabel(frame.name)
       setActivityPhase(`Using ${label}…`, 'busy')
       if (currentStep) {
-        currentStep.titleEl.textContent = label
+        setStepTitle(currentStep, label)
         setStepKind(currentStep, toolKind(frame.name))
       }
       if (lastStreamEntry !== null && lastStreamEntry.kind === 'tool' && lastStreamEntry.id === frame.id) {
@@ -2414,7 +2603,7 @@ function handleToolCall(frame) {
     toolRows.set(frame.callId, { row, startedAt: startedAtOverride ?? now() })
   }
   if (currentStep) {
-    currentStep.titleEl.textContent = label
+    setStepTitle(currentStep, label)
     setStepKind(currentStep, toolKind(frame.name))
   }
   setBusy(true)
@@ -2444,7 +2633,7 @@ function handleToolResult(frame) {
   if (currentStep !== null) {
     // The collapsed step header carries the latest outcome, so a finished step
     // stays readable as a one-line summary without expanding it.
-    currentStep.titleEl.textContent = activityPreview(summary, 66)
+    setStepTitle(currentStep, activityPreview(summary, 66), { settled: true })
     currentStep.titleEl.title = summary
   }
   setActivityPhase('Thinking…', 'busy')
@@ -2469,6 +2658,7 @@ function pushAnswer(text) {
   renderMarkdown(body, value)
   block.appendChild(body)
   ;(lastAgentTurn ?? activityContainer()).appendChild(block)
+  enterRow(block, MOTION.slow)
   trimActivity()
   els.activityLatest.textContent = activityPreview(value)
   els.activityLatest.title = value
@@ -2478,6 +2668,7 @@ function pushAnswer(text) {
 
 /** Reset per-turn state and open the turn divider when a message is sent. */
 function beginUserTurn(text, attachments = [], options = {}) {
+  conversationStopped = false
   planTerminalPhase = null
   lastAssistantText = ''
   lastAnswerText = ''
@@ -2568,11 +2759,12 @@ function cleanupAfterTurn() {
 
 /** @param {Record<string, any>} frame */
 function handleDone(frame) {
+  conversationStopped = false
   cleanupAfterTurn()
   dshState = 'ready'
   const timing = frame.timings
   const totalMs = Number.isFinite(timing?.totalMs) ? timing.totalMs : undefined
-  finishTurn({ totalMs })
+  finishTurn({ totalMs, usage: frame.usage, failedCalls: timing?.failedCalls })
   const finalText = typeof frame.text === 'string' ? frame.text.trim() : ''
   if (finalText.length > 0) pushAnswer(finalText)
   const unverified = frame.docsVerification === 'unverified'
@@ -2589,6 +2781,8 @@ function handleDone(frame) {
   logger.log('chat.done', {
     sessionId: frame.sessionId,
     timings: frame.timings,
+    usage: frame.usage,
+    label: frame.label,
     stepDurations: lastStepDurations,
     textLength: typeof frame.text === 'string' ? frame.text.length : 0,
     docsVerification: frame.docsVerification,
@@ -2611,6 +2805,14 @@ function handleDone(frame) {
 
 /** @param {Record<string, any>} frame */
 function handleChatError(frame) {
+  if (frame.code === 'SESSION_NOT_RESUMABLE') {
+    const message = typeof frame.message === 'string' ? frame.message : 'This saved chat can no longer be continued.'
+    logger.log('chat.resume.error', { message }, 'warn')
+    newChat()
+    showBanner(message, 'Open history', openHistory)
+    toast('The saved model session is unavailable; started a new chat.')
+    return
+  }
   if (isBusyRefusal(frame) && lastDispatchedItem !== null) {
     handleRefusedSend(frame)
     return
@@ -2648,17 +2850,18 @@ function handleStopping(frame = {}) {
 function handleStopped(frame = {}) {
   const wasActive = busy || stopping
   const reason = frame.reason === 'idle' ? 'idle' : 'user'
+  conversationStopped = reason === 'user'
   if (frame.local === true) steeringMessageId = null
   cleanupAfterTurn()
   dshState = 'ready'
-  finishTurn({})
+  finishTurn({ totalMs: frame.timings?.totalMs, usage: frame.usage, failedCalls: frame.timings?.failedCalls })
   if (lastAgentTurn) {
     const summary = lastAgentTurn.querySelector('.agent-turn-summary')
     if (summary && !summary.textContent.includes('Stopped')) summary.textContent += ' · Stopped'
   }
   setActivityPhase('Stopped', 'idle')
   setStatus('idle', 'Stopped')
-  logger.log('chat.stopped', { turnId: frame.turnId, reason, stepDurations: lastStepDurations }, 'info')
+  logger.log('chat.stopped', { turnId: frame.turnId, reason, timings: frame.timings, usage: frame.usage, stepDurations: lastStepDurations }, 'info')
   if (wasActive) {
     if (frame.local === true) {
       toast('Stop requested — no confirmation from the companion')
@@ -2670,6 +2873,7 @@ function handleStopped(frame = {}) {
   }
   if (typeof frame.sessionId === 'string' && frame.sessionId.length > 0) sessionId = frame.sessionId
   updateFooter()
+  archiveCurrentConversation({ immediate: true })
   if (newChatDraft) newChat()
 }
 
@@ -2750,7 +2954,7 @@ async function handleBrowserCommand(frame) {
       toolRecord.uiMs = uiMs
       toolRecord.row.textEl.textContent = truncate(`${summary} · ui ${formatDuration(uiMs)}`, 340)
     }
-    if (op === 'snapshot' && toolRecord !== undefined) showStepScreenshot(result.image)
+    if (op === 'snapshot' && toolRecord !== undefined) showStepScreenshot(cleanImageFor(result.image) ?? result.image)
     setActivityPhase('Thinking…', 'busy')
     logger.log('browser.command.result', {
       commandId: frame.id,
@@ -2911,6 +3115,7 @@ function showStepScreenshot(image) {
   button.append(img, caption)
   button.addEventListener('click', () => openImage(src))
   container.appendChild(button)
+  enterRow(button)
   scrollActivity()
 }
 
@@ -2922,6 +3127,7 @@ function sendBrowserResult(id, ok, result, error) {
     id,
     ok,
     ...(ok ? { result } : { error }),
+    ...displayImageField(result),
   })
 }
 
@@ -3288,10 +3494,12 @@ function stopTurn() {
   }
   if (!sendFrame({ v: PROTOCOL_VERSION, type: 'chat.stop' })) return
   stopping = true
+  conversationStopped = true
   updateStopButton()
   setStatus('busy', 'Stopping…')
   setActivityPhase('Stopping…', 'busy')
   logger.log('chat.stop.request', { sessionId }, 'info')
+  archiveCurrentConversation({ immediate: true })
   clearTimeout(stopTimer)
   stopTimer = setTimeout(() => {
     stopTimer = null
@@ -3337,6 +3545,7 @@ function newChat() {
 
 function clearChat() {
   newChatDraft = false
+  conversationStopped = false
   setPlanModeArmed(false)
   els.app.classList.remove('new-chat-draft')
   clearTimeout(queueDispatchTimer)
@@ -3640,7 +3849,6 @@ els.settingsSave.addEventListener('click', () => {
     captureWidth: Math.round(width),
     quality: Math.round(quality),
     autoCapture: els.settingAutoCapture.checked,
-    showHitboxes: els.settingHitboxes.checked,
     modelBaseUrl: baseUrl,
     modelId: model,
   }
@@ -3660,7 +3868,6 @@ els.settingsSave.addEventListener('click', () => {
   }, 'info')
   logger.setContext(clientContext())
   void saveSettings()
-  if (!settings.showHitboxes) void execute('labels.clear', {}, settings).catch(() => {})
   els.settingApiKey.value = ''
   closeSettings()
   if (reconnectNeeded || !connected) {
@@ -3678,7 +3885,7 @@ els.testCapture.addEventListener('click', async () => {
   logger.log('testCapture.start', {}, 'info')
   try {
     const result = await testCapture(settings)
-    const src = imageDataUrl(result.image)
+    const src = imageDataUrl(cleanImageFor(result.image) ?? result.image)
     if (src) openImage(src)
     logger.log('testCapture.result', {
       width: result.image.width,
@@ -3875,6 +4082,8 @@ document.addEventListener('keydown', event => {
 })
 
 window.addEventListener('beforeunload', () => {
+  if (stopping || conversationStopped) archiveCurrentConversation({ immediate: true })
+  else if (historySaveTimer !== null) persistHistory(true)
   stopDictation()
   manualDisconnect = true
   try {

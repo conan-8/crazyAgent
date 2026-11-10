@@ -4,6 +4,65 @@
 
 **Optimised for DeepSeek V4.1 Flash** on OpenRouter (`deepseek/deepseek-v4.1-flash`). Other image-capable, tool-capable models remain available. [Download v2.1.0-beta](https://github.com/conan-8/crazyAgent/releases/tag/v2.1.0-beta) · [Patch notes](RELEASE-NOTES.md).
 
+## Install with an agent
+
+**Requirements:**
+
+- Git and npm.
+- Node **24.9+**.
+- Chrome/Chromium/Edge **116+** with the Side Panel API.
+- An [OpenRouter](https://openrouter.ai/) API key. Model usage is billed by your configured provider.
+- A normal HTTP(S) website tab; browser-internal and Web Store pages are protected.
+
+**Paste this prompt into a coding agent on the computer where Chrome or Edge is installed:**
+
+```text
+Install crazyAgent v2.1.0-beta on this computer from https://github.com/conan-8/crazyAgent. Own the setup end to end: when you need my input or a manual browser step, give me exact instructions, wait for me, and then continue with verification instead of ending the installation early.
+
+1. Verify Git, Node.js 24.9 or newer, npm, and Chrome/Chromium/Edge 116 or newer. If anything required is missing or outdated, explain what you propose to install or update and ask for my permission. Once I approve, make the changes and continue; do not hand me a prerequisite installation guide unless I decline or no safe installation method is available. Ask separately before using sudo or replacing an existing runtime. If you install a user-level runtime, use its bin directory in PATH consistently for npm ci, npm run setup, the companion process, and the restart command you give me.
+2. Clone the v2.1.0-beta tag into a new crazyAgent directory. If that directory already exists, do not overwrite or delete it; ask me for another location. Run npm ci and npm run setup in the checkout.
+3. Check whether port 17871 is occupied before starting anything. If it is occupied, stop and report it instead of killing an existing process. Otherwise, start npm run dev -- --model deepseek/deepseek-v4.1-flash --reasoning-effort medium as a persistent background process. Verify that http://127.0.0.1:17871/health returns HTTP 200 with ok:true, but do not mistake that alone for a completed installation.
+4. Give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions, pin crazyAgent, and open its side panel. In Settings, have me confirm the bridge URL is ws://127.0.0.1:17871/bridge. Proactively copy the pairing token from .dsh-home/browser-agent/token to my clipboard with an OS-appropriate command that does not display it; if you cannot access my clipboard, give me the exact command to run myself. Tell me to paste it into the pairing-token field. I will enter my own OpenRouter API key directly in Settings.
+5. Before my first Save, tell me to type deepseek/deepseek-v4.1-flash manually into the Model field even if the model list is empty. Do not tell me to click Refresh models before this first Save: Refresh requires a companion connection, while Save accepts the manually entered model ID and establishes that connection. Have me save and wait for the real side panel to show Connected.
+6. After I save, ask me to confirm the side-panel status and independently poll /health for a bounded period. Do not create a synthetic WebSocket, ui, or tools client to test the bridge: it can replace the real extension connection and is not installation acceptance. Do not declare installation complete until the real side panel shows Connected and /health reports ok:true, ui:true, and tools:true. If the panel does not connect or either health flag remains false, inspect the relevant logs and settings flow without exposing credentials, give me exact corrective steps, and continue troubleshooting rather than merely repeating generic instructions.
+7. Once connected, tell me to click Refresh models, select DeepSeek V4.1 Flash from the loaded list, and Save again to confirm the model ID. Keep the companion running. Finish with the install path, verified health and side-panel status, and an exact restart command that includes any required PATH override. Never ask me to paste the API key or pairing token into chat, and never print, log, commit, or transmit either credential yourself. Do not run website tasks or model-spending tests until I confirm installation is complete.
+```
+
+`setup` initializes `.dsh-home/profiles/sdk-minimal`, links the local DSH plugins, and validates profile composition. `dev` starts the loopback-only companion and prints bridge pairing information.
+
+> [!NOTE]
+> **Finish the browser setup**
+>
+> 1. **Open your browser's extension page:** go to `chrome://extensions` or `edge://extensions`.
+> 2. **Load crazyAgent:** enable **Developer mode**, choose **Load unpacked**, and select the checkout's `extension/` directory.
+> 3. **Open the side panel:** click the **crazyAgent** toolbar icon in the extension menu(puzzle piece icon), and PIN it.
+> 4. **Connect your model:** in **Settings**, confirm the bridge URL is `ws://127.0.0.1:17871/bridge`, paste the pairing token from `.dsh-home/browser-agent/token`, and enter your own OpenRouter API key. Manually type `deepseek/deepseek-v4.1-flash` into **Model** and click **Save**. Do not click **Refresh models** before this first save; loading the list requires the connection established by saving these settings. **Never share the API key or pairing token publicly.**
+> 5. **Verify the connection:** wait for **Connected**, then click **Refresh models**, select **DeepSeek V4.1 Flash** from the loaded list, and save again. The agent should confirm that `/health` reports `ok:true`, `ui:true`, and `tools:true` from the real extension connection.
+> 6. **Start a task:** open a normal page and ask a question or request an action.
+
+> [!IMPORTANT]
+> Keep the companion and Edge running while the agent runs. With the side panel open it runs the browser actions; with it closed, the extension's background worker does (system-clipboard actions, including Docs rich paste, still need the panel). **Do not touch the browser while a task is running:** clicking, typing, scrolling, or switching tabs can invalidate the agent's targets.
+
+Page content, screenshots, prompts, and explicit tool results can be sent to the configured model provider. crazyAgent requests broad browser permissions and can change real pages and files; review [Privacy and permissions](#privacy-and-permissions) and `PRIVACY.md` before use.
+
+> [!TIP]
+> crazyAgent is able to screenshot page elements and download files which can be sent to other chatbots for cross reference or better reliability. You can prompt it to consult another AI chatbot when a task is too difficult, or to prevent loss of focus on the greater task.
+
+## Update with an agent
+
+Use this prompt to update an existing crazyAgent checkout to **v2.1.0-beta** without replacing its configuration or local data:
+
+```text
+Update my existing crazyAgent installation to v2.1.0-beta from https://github.com/conan-8/crazyAgent. Own the update end to end. Preserve my configuration, API key, pairing token, sessions, downloaded files, and unrelated local changes; this is an in-place update, not a fresh installation.
+
+1. Locate my existing crazyAgent checkout and ask me for its path only if you cannot find it. Verify that it is the expected Git repository, inspect its current version and startup method, and identify the Node runtime used by its companion. Verify Git, Node.js 24.9 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Reuse an existing compatible user-level Node runtime when available. If a prerequisite is missing or outdated, explain what you propose to install or update and ask for my permission; once I approve, make the changes and continue. Ask separately before using sudo or replacing an existing runtime.
+2. Inspect git status before changing the checkout. Never use git reset --hard, git clean, npm run clean, or any other command that discards local changes or deletes .dsh-home. Do not delete or replace the checkout with a fresh clone. If local changes could be overwritten, explain them and ask me how to proceed. Fetch the repository's tags, check out v2.1.0-beta without forcing, and verify that HEAD exactly matches that tag. If the checkout is already on the target tag, say so and continue with verification rather than claiming you changed the version.
+3. Using the compatible Node runtime and any required PATH override, run npm ci, npm run setup, and npm test in the existing checkout. Do not run live-model, website, or other model-spending tests.
+4. Restart the companion using its existing startup method, whether that is a background process or a user service. Identify and stop only the companion process belonging to this checkout; never kill an unknown process merely because it uses port 17871, and do not start a second conflicting companion. Preserve the existing model, base URL, reasoning effort, API key, and pairing token instead of overriding them with defaults. Include any required PATH override in the restart command.
+5. Give me exact instructions to reload the existing unpacked extension in chrome://extensions or edge://extensions and reopen its side panel. Do not remove or reinstall the extension, because that can discard its saved settings. Ask me to confirm that the real side panel shows Connected, then independently poll http://127.0.0.1:17871/health for a bounded period. Do not create a synthetic WebSocket, ui, or tools client as a substitute for the extension. Do not declare the update complete until the real side panel shows Connected and /health reports ok:true, ui:true, and tools:true. If anything remains disconnected, inspect the relevant logs and settings flow without exposing credentials and continue troubleshooting with exact corrective steps.
+6. Finish with the previous and resulting versions or commits, install path, test result, verified health and side-panel status, and the exact restart command. Never ask me to paste credentials into chat, and never print, log, commit, or transmit them yourself. Keep the updated companion running and do not run website tasks or model-spending tests until I confirm the update is complete.
+```
+
 ## What it can do
 
 - **Generally everything a human can do on a browser, including filling forms, doing work, planning, and research.**
@@ -25,41 +84,6 @@ There are **34 standing model-facing tools**: 25 general browser tools, 8 guarde
 - **Updated defaults and security:** medium reasoning for new configurations, the standard DeepSeek V4.1 Flash model ID, compatible dependency security updates, and **0 vulnerabilities** in the release audit.
 
 See the complete [v2.1.0-beta patch notes](RELEASE-NOTES.md). This is a prerelease: physical-phone acceptance of the newest screens, real FCM delivery, a real reboot test, and live-model `/plan`/Docs outcome acceptance remain pending.
-
-## Install with an agent
-
-**Requirements:**
-
-- Git and npm.
-- Node **24.9+**.
-- Chrome/Chromium/Edge **116+** with the Side Panel API.
-- An [OpenRouter](https://openrouter.ai/) API key. Model usage is billed by your configured provider.
-- A normal HTTP(S) website tab; browser-internal and Web Store pages are protected.
-
-**Paste this prompt into a coding agent on the computer where Chrome or Edge is installed:**
-
-```text
-Install crazyAgent v2.1.0-beta on this computer from https://github.com/conan-8/crazyAgent. First verify Git, Node.js 24.9 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Stop and tell me if anything required is missing; do not use sudo or replace my runtimes. Clone the v2.1.0-beta tag into a new crazyAgent directory, then run npm ci and npm run setup in that checkout. If the directory already exists, do not overwrite or delete it; ask me for another location. Start npm run dev -- --model deepseek/deepseek-v4.1-flash --reasoning-effort medium as a persistent background process and verify http://127.0.0.1:17871/health responds successfully. If that port is already occupied, stop and report it instead of killing an existing process. Then give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions and open the crazyAgent side panel. Guide me to copy the local pairing token into Settings, enter my own OpenRouter API key there, select DeepSeek V4.1 Flash, and save. Never ask for my API key in chat, print it, commit it, or send it anywhere except crazyAgent's local Settings. Keep the companion running. Finish with the install path, health status, and restart command. Do not run any website tasks or model-spending tests until I confirm installation is complete.
-```
-
-`setup` initializes `.dsh-home/profiles/sdk-minimal`, links the local DSH plugins, and validates profile composition. `dev` starts the loopback-only companion and prints bridge pairing information.
-
-> [!NOTE]
-> **Finish the browser setup**
->
-> 1. **Open your browser's extension page:** go to `chrome://extensions` or `edge://extensions`.
-> 2. **Load crazyAgent:** enable **Developer mode**, choose **Load unpacked**, and select the checkout's `extension/` directory.
-> 3. **Open the side panel:** click the **crazyAgent** toolbar icon in the extension menu(puzzle piece icon), and PIN it.
-> 4. **Connect your model:** in **Settings**, enter the pairing token and your OpenRouter API key, refresh models, select **DeepSeek V4.1 Flash**, and save. **Never share the API key or pairing token publicly.**
-> 5. **Start a task:** wait for **Connected**, open a normal page, and ask a question or request an action.
-
-> [!IMPORTANT]
-> Keep the companion and Edge running while the agent runs. With the side panel open it runs the browser actions; with it closed, the extension's background worker does (system-clipboard actions, including Docs rich paste, still need the panel). **Do not touch the browser while a task is running:** clicking, typing, scrolling, or switching tabs can invalidate the agent's targets.
-
-Page content, screenshots, prompts, and explicit tool results can be sent to the configured model provider. crazyAgent requests broad browser permissions and can change real pages and files; review [Privacy and permissions](#privacy-and-permissions) and `PRIVACY.md` before use.
-
-> [!TIP]
-> crazyAgent is able to screenshot page elements and download files which can be sent to other chatbots for cross reference or better reliability. You can prompt it to consult another AI chatbot when a task is too difficult, or to prevent loss of focus on the greater task.
 
 ## crazyAgent Remote app setup
 
@@ -195,7 +219,7 @@ Direct Docs export checks and six toolbar attributes (`paragraph_style`, `font_s
 - **Keyboard safety:** `browser_press_key` and batch key steps reject ctrl/cmd+W in code (not just guidance); closing or listing tabs is left to `browser_tabs`/`browser_switch_tab`.
 - **Reasoning:** Medium is the default and recommended effort for new configurations. Saved choices are preserved; Auto requests `low` from the first model step when selected, and Off/Low/High remain available manually.
 - **Image context:** exact duplicate images are omitted only at model admission within the same session/turn. Older images are durably offloaded while attachments remain on disk. Capture and debug storage still occur.
-- **Stop and queue:** Stop interrupts the current runtime and resumes the session on the next message when possible. Messages sent during a turn are queued and can redirect the turn.
+- **Stop, save, and queue:** Stop interrupts the current runtime and resumes the session on the next message when possible. The stopped transcript and session ID are saved immediately in **Recent sessions**, so selecting that stopped chat after closing or reopening the sidebar resumes its saved model session. If that session is no longer available, the panel reports it and starts a new chat instead of silently mixing contexts. Messages sent during a turn are queued and can redirect the turn.
 
 Not supported yet include drag batching and child-frame drags, native file pickers, arbitrary JavaScript, native print dialogs, and general browser-chrome automation. File access is confined to the configured Downloads folder; arbitrary filesystem paths are unavailable. Protected pages, closed shadow roots, inaccessible frames, and the built-in PDF viewer can remain inaccessible.
 
@@ -264,7 +288,7 @@ npm run system-prompt          # exact composed prompt; -- --json for counts
 npm run bench                  # local bridge benchmark
 ```
 
-Last recorded implementation verification: **935/935 tests**, clean `npm ci` and `npm run setup`, an isolated real DSH `0.2.2-rc.1` runtime startup without model calls, `npm audit` with **0 vulnerabilities**, prompt composition (**18,025 total / 17,031 guidance chars**), mock-bridge `ui-preview --scenario plan` with fixed-viewport sticky-position and expanded/collapsed-height assertions plus inspected sticky/collapsed screenshots, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs. The drag fixture used real provider/executor calls to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. Independent checks inspected DOM order, values, parentage, drop receipts, and collateral application state; refused and intentional no-op cases preserved every semantic application value. Earlier expectation, click, capture, and file-transfer fixtures retained their evidence. These are direct executor checks, not real-model acceptance. **A real-sidebar/model `/plan` workflow, drag workflow and expectation workflow, download→upload workflow, authenticated Docs export/toolbar expectations and Docs table acceptance, authenticated Pivot, real-model HTML-table selection, normal authenticated docked-panel Docs acceptance, and a real docked-panel turn that keeps receiving views after the user switches apps or minimizes the browser remain pending.** No connected Docs browser or isolated live-model acceptance profile is currently configured.
+Last recorded implementation verification: **962/962 tests**, clean `npm ci` and `npm run setup`, an isolated real DSH `0.2.2-rc.1` runtime startup without model calls, `npm audit` with **0 vulnerabilities**, prompt composition (**18,076 total / 17,082 guidance chars**), mock-bridge `ui-preview --scenario plan` with fixed-viewport sticky-position and expanded/collapsed-height assertions plus inspected sticky/collapsed screenshots, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs. The drag fixture used real provider/executor calls to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. Independent checks inspected DOM order, values, parentage, drop receipts, and collateral application state; refused and intentional no-op cases preserved every semantic application value. Earlier expectation, click, capture, and file-transfer fixtures retained their evidence. Track A's A3 records each turn's model-reported DONE/PARTIAL/BLOCKED label, per-turn token usage (shown in the panel's finished-turn summary), and stopped-turn duration/failed-call stats in `chat.done`/`chat.stopped`; `scripts/analyze-failures.mjs` reports their distribution. These are direct executor and scripted-fixture checks, not real-model acceptance. **A real-sidebar/model `/plan` workflow, drag workflow and expectation workflow, download→upload workflow, authenticated Docs export/toolbar expectations and Docs table acceptance, authenticated Pivot, real-model HTML-table selection, normal authenticated docked-panel Docs acceptance, and a real docked-panel turn that keeps receiving views after the user switches apps or minimizes the browser remain pending.** No connected Docs browser is available; the new `scripts/model-eval.mjs` harness supplies an isolated real-model evaluation profile on demand for scripted scenarios, which is measurement and not a substitute for the pending docked-panel scenarios.
 
 Useful harnesses:
 
@@ -277,8 +301,10 @@ Useful harnesses:
 - `scripts/edge-find-e2e.mjs`, `edge-table-e2e.mjs`, `edge-dialog-e2e.mjs`, `edge-clipboard-e2e.mjs` — focused executor checks.
 - `scripts/edge-docs-table-e2e.mjs` — disposable-document table workflow with independent compact-spacing, native-background, collateral, export, and reload-persistence checks; requires an isolated signed-in Docs profile.
 - `scripts/edge-find-live-e2e.mjs`, `edge-table-live-e2e.mjs` — isolated real-sidebar acceptance harnesses.
+- `scripts/model-eval.mjs` — real-model scenario harness: a recording fixture server, a second companion with its own temporary `.dsh-home`, and a fresh headless Edge with the unpacked extension, driven through the authenticated remote API. Each run gets a fresh chat, page load, and request log; checkers read independent page/fixture-server evidence and record wall time, steps, calls, failed calls, tokens, and final status. `--self-test` mutation-checks every checker without model spend; batch JSON goes under `e2e/baselines/`. Contract and coverage: `e2e/scenarios/README.md`.
+- `scripts/analyze-failures.mjs` — reproducible failure report from the real run logs (per-tool failure rates, codes and normalized messages, repeated failures, stopped turns, percentiles, tokens, sites); `--logs`, `--since`, `--runs`, and `--json` are supported and the parser has synthetic-log tests.
 
-Most fixture scripts need the static server and isolated Edge/CDP setup described in `HANDOFF.md`; the file-transfer script starts its own server. Direct executor success is not model-driven acceptance. Use `e2e/checklist.md` for the real docked side panel and independent final-state checks.
+Most fixture scripts need the static server and isolated Edge/CDP setup described in `HANDOFF.md`; the file-transfer script and the real-model harness start their own servers, and the model harness also starts its own companion, isolated DSH home, and Edge profile. Direct executor success is not model-driven acceptance. Use `e2e/checklist.md` for the real docked side panel and independent final-state checks.
 
 ## Troubleshooting
 
@@ -300,7 +326,7 @@ companion/                         loopback bridge, DSH lifecycle, model config,
 packages/dsh-browser-extension/   DSH provider, tools, guidance, provider guards
 extension/                        MV3 side panel and browser executor
 config/browser.patch.yml          DSH profile composition
-e2e/                              fixtures and live acceptance checklist
+e2e/                              fixtures, scripted real-model scenarios, live acceptance checklist
 scripts/                          setup, development, benchmarks, Edge harnesses
 docs/                             debug-log, benchmark, and UI references
 ```

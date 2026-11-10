@@ -73,6 +73,7 @@ function fakeExpectBrowser(t, options = {}) {
     getContext() {
       return {
         drawImage: bitmap => { this.pixel = bitmap.pixel },
+        save() {}, restore() {}, scale() {}, strokeRect() {}, fillRect() {}, fillText() {}, measureText: () => ({ width: 8 }),
         getImageData: () => ({ data: new Uint8ClampedArray(this.width * this.height * 4).fill(this.pixel) }),
       }
     }

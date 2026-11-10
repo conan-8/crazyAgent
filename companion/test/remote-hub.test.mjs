@@ -165,6 +165,78 @@ test('chat.done preserves Docs and plan outcome metadata for remote clients', ()
   assert.equal(done.body.planRevision, 2)
 })
 
+test('chat.done carries per-turn usage and the model-reported label', () => {
+  const h = hub()
+  startTurn(h)
+  h.ingest({
+    type: 'chat.done',
+    text: 'DONE — clicked once',
+    sessionId: 'session-1',
+    timings: { totalMs: 1_234, failedCalls: 2 },
+    usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15, cacheReadTokens: 3 },
+    label: 'done',
+  })
+  const done = h.projection().messages.at(-1)
+  assert.equal(done.type, 'chat.done')
+  assert.equal(done.body.label, 'done')
+  assert.deepEqual(done.body.usage, { inputTokens: 10, outputTokens: 5, totalTokens: 15, cacheReadTokens: 3 })
+  assert.equal(done.body.timings.failedCalls, 2)
+
+  // Foreign values are dropped rather than forwarded or guessed.
+  h.ingest({ type: 'chat.done', text: 'x', label: 'success', usage: { inputTokens: -1, outputTokens: 'nope' } })
+  const invalid = h.projection().messages.at(-1)
+  assert.equal(invalid.body.label, null)
+  assert.equal(invalid.body.usage, null)
+})
+
+test('turnEnded stores label, usage, and failed calls in the turn projection', () => {
+  const h = hub()
+  startTurn(h)
+  h.ingest({ type: 'chat.done', text: 'PARTIAL — one cell left', sessionId: 'session-1' })
+  h.turnEnded({
+    turnId: 'turn-1',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: 'partial',
+    usage: { inputTokens: 40, outputTokens: 9, totalTokens: 49 },
+    timings: { totalMs: 2_000, failedCalls: 3 },
+  })
+  const turn = h.projection().turn
+  assert.equal(turn.status, 'idle')
+  assert.equal(turn.outcome, 'done')
+  assert.equal(turn.label, 'partial')
+  assert.deepEqual(turn.usage, { inputTokens: 40, outputTokens: 9, totalTokens: 49 })
+  assert.equal(turn.failedCalls, 3)
+
+  // A new turn never inherits the previous turn's stats, and only the three
+  // known labels are accepted.
+  startTurn(h, 'turn-2', 'again')
+  assert.equal(h.turn.label, null)
+  assert.equal(h.turn.usage, null)
+  assert.equal(h.turn.failedCalls, null)
+  h.turnEnded({ turnId: 'turn-2', outcome: 'stopped', label: 'success', usage: { inputTokens: -2 }, timings: {} })
+  assert.equal(h.turn.label, null)
+  assert.equal(h.turn.usage, null)
+  assert.equal(h.turn.failedCalls, null)
+})
+
+test('chat.stopped carries stop duration, failed calls, and partial usage', () => {
+  const h = hub()
+  startTurn(h)
+  h.ingest({
+    type: 'chat.stopped',
+    reason: 'user',
+    message: 'Stopped by user.',
+    timings: { totalMs: 5_000, failedCalls: 3, toolCalls: 4 },
+    usage: { inputTokens: 9, outputTokens: 1, totalTokens: 10 },
+  })
+  const stopped = h.projection().messages.at(-1)
+  assert.equal(stopped.type, 'chat.stopped')
+  assert.equal(stopped.body.timings.failedCalls, 3)
+  assert.equal(stopped.body.timings.totalMs, 5_000)
+  assert.deepEqual(stopped.body.usage, { inputTokens: 9, outputTokens: 1, totalTokens: 10 })
+})
+
 test('catchUp replays in order, and resyncs on instance change, unknown, or expired sequence', () => {
   const h = hub({ journalLimit: 5 })
   for (let i = 0; i < 3; i += 1) h.publish('chat.status', { i }, { turnId: null })

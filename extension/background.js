@@ -4,7 +4,7 @@
 // agent. It also flags the one-time disclaimer shown after an install/reload.
 
 import { BackgroundExecutor, EXECUTOR_ALARM, PANEL_PORT_NAME, SETTINGS_KEY } from './background-executor.js'
-import { DEFAULT_SETTINGS, beginDebuggerRun, endDebuggerRun, execute } from './sidepanel/browser.js'
+import { DEFAULT_SETTINGS, beginDebuggerRun, displayImageField, endDebuggerRun, execute } from './sidepanel/browser.js'
 
 const DISCLAIMER_PENDING_KEY = 'crazyagent.disclaimerPending'
 
@@ -44,6 +44,7 @@ const executor = new BackgroundExecutor({
     return contexts.some(context => context.documentUrl?.includes('/sidepanel/index.html'))
   },
   execute,
+  displayImageField,
   beginRun: beginDebuggerRun,
   endRun: endDebuggerRun,
   setBadge,

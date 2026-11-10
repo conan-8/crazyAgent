@@ -47,6 +47,7 @@ import {
 } from './docs-table.js'
 import { DialogManager } from './dialogs.js'
 import { executeFind, findProbe } from './find.js'
+import { createAgentCursor } from './agent-cursor.js'
 import { executeDrag as executeTrustedDrag, docsDragError, parseDragArgs } from './drag.js'
 import { executeDownload, executeUpload, pathInsideRoot } from './files.js'
 import { clickRole } from './role-click.js'
@@ -74,7 +75,6 @@ export const DEFAULT_SETTINGS = {
   captureWidth: 1280,
   quality: 72,
   autoCapture: true,
-  showHitboxes: true,
   paused: false,
   modelBaseUrl: 'https://openrouter.ai/api/v1',
   modelId: '',
@@ -528,6 +528,7 @@ export function beginDebuggerRun() {
   const previousCleanup = debuggerCleanup
   const run = { active: true, attachments: new Map(), operations: new Set(), started: null }
   activeDebuggerRun = run
+  agentCursor.start()
   run.started = (async () => {
     if (previousCleanup) await previousCleanup.catch(() => {})
     if (!run.active || activeDebuggerRun !== run) return
@@ -563,6 +564,7 @@ export async function endDebuggerRun() {
   }
   run.active = false
   if (activeDebuggerRun === run) activeDebuggerRun = null
+  agentCursor.stop()
   const cleanup = (async () => {
     await run.started.catch(() => {})
     await Promise.allSettled([...run.operations])
@@ -615,53 +617,57 @@ export async function withDebugger(tabId, fn) {
   }
 }
 
-export function showClickRipple(x, y) {
-  const id = '__crazyagent_click_ripple_style'
-  const style = document.getElementById(id) ?? document.createElement('style')
-  style.id = id
-  style.textContent = '@keyframes __crazyagent_click_ripple{0%{transform:scale(.65);opacity:.7}65%{opacity:.35}100%{transform:scale(2.1);opacity:0}}@keyframes __crazyagent_click_crosshair{0%{transform:scale(.85);opacity:1}55%{opacity:.8}100%{transform:scale(1);opacity:0}}'
-  if (!style.isConnected) (document.head || document.documentElement).appendChild(style)
-  const ripple = document.createElement('div')
-  ripple.setAttribute('aria-hidden', 'true')
-  ripple.setAttribute('data-crazyagent-click-ripple', '')
-  ripple.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:2147483647;pointer-events:none;`
-  for (let index = 0; index < 2; index += 1) {
-    const ring = document.createElement('div')
-    ring.setAttribute('data-crazyagent-click-ring', '')
-    ring.style.cssText = `position:absolute;left:-9px;top:-9px;width:18px;height:18px;box-sizing:border-box;border:1px solid rgba(255,195,0,.85);border-radius:50%;background:transparent;box-shadow:0 0 6px rgba(255,195,0,.12);animation:__crazyagent_click_ripple .65s cubic-bezier(.2,.55,.3,1) ${index * 0.12}s forwards;`
-    ripple.appendChild(ring)
+const agentCursor = createAgentCursor({
+  run: (tabId, func, args, timeoutMs) => {
+    // A native dialog blocks every script in the page; waiting on it only adds delay.
+    if (dialogManager.pending(tabId)) throw new BrowserError('DIALOG_PENDING', 'A native dialog is open')
+    return runInTab(tabId, func, args, timeoutMs)
+  },
+  activeTabId: async () => (await getActiveTab(await getWindowId())).id,
+})
+
+/** Rough centre of a label in its own frame; the click itself re-measures everything. */
+function labelCentrePage(label) {
+  const element = globalThis.__crazyagent?.byId?.get(label)
+  if (!element?.isConnected) return null
+  const rect = element.getBoundingClientRect()
+  return {
+    x: Math.max(0, Math.min(window.innerWidth - 1, rect.left + rect.width / 2)),
+    y: Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2)),
   }
-  const crosshair = document.createElement('div')
-  crosshair.setAttribute('data-crazyagent-click-crosshair', '')
-  crosshair.style.cssText = 'position:absolute;left:-7px;top:-7px;width:14px;height:14px;animation:__crazyagent_click_crosshair .6s ease-out forwards;'
-  const parts = [
-    'left:6px;top:0;width:2px;height:4px',
-    'left:6px;bottom:0;width:2px;height:4px',
-    'left:0;top:6px;width:4px;height:2px',
-    'right:0;top:6px;width:4px;height:2px',
-    'left:6px;top:6px;width:2px;height:2px;border-radius:50%',
-  ]
-  for (const part of parts) {
-    const tick = document.createElement('div')
-    tick.style.cssText = `position:absolute;${part};background:#ffc300;box-shadow:0 0 4px rgba(255,195,0,.2);`
-    crosshair.appendChild(tick)
+}
+
+/** Glide the visible cursor to a label before acting on it. */
+async function glideToLabel(tab, target, options) {
+  if (!agentCursor.isActive()) return
+  const centre = await runInFrame(tab.id, target.frameId, labelCentrePage, [target.localId], 400).catch(() => null)
+  if (!centre) return
+  let { x, y } = centre
+  if (target.frameId !== 0) {
+    const frames = await listRoleClickFrames(tab.id).catch(() => [])
+    const frame = frames.find(item => item.frameId === target.frameId)
+    if (!Number.isFinite(frame?.viewportX)) return
+    x += frame.viewportX
+    y += frame.viewportY
   }
-  ripple.appendChild(crosshair)
-  ;(document.body || document.documentElement).appendChild(ripple)
-  setTimeout(() => ripple.remove(), 900)
+  await agentCursor.moveTo(tab.id, x, y, options)
 }
 
 /** Dispatch a trusted left click at CSS viewport coordinates. */
-async function trustedClick(tabId, x, y) {
-  await runInTab(tabId, showClickRipple, [x, y], 500).catch(() => {})
+async function trustedClick(tabId, x, y, { glideMs } = {}) {
+  await agentCursor.moveTo(tabId, x, y, { press: true, maxMs: glideMs })
   const base = { x, y, button: 'left', clickCount: 1 }
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', clickCount: 0 })
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...base })
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...base })
 }
 
-/** Dispatch a trusted left click without adding overlays to the document. */
+/**
+ * Dispatch a trusted left click. The cursor is not awaited here: Docs measures
+ * these coordinates and needs the click to follow with no added delay.
+ */
 async function docsTrustedClick(tabId, x, y) {
+  void agentCursor.moveTo(tabId, x, y, { press: true, maxMs: 220 })
   const base = { x, y, button: 'left', clickCount: 1 }
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', clickCount: 0 })
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...base })
@@ -669,11 +675,13 @@ async function docsTrustedClick(tabId, x, y) {
 }
 
 async function docsTrustedHover(tabId, x, y) {
+  void agentCursor.moveTo(tabId, x, y, { maxMs: 220 })
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', clickCount: 0 })
 }
 
 /** Revalidate after hover, then dispatch or settle the complete trusted click. */
 async function roleTrustedClick(tabId, x, y, hooks = {}) {
+  await agentCursor.moveTo(tabId, x, y, { press: true })
   const base = { x, y, button: 'left', clickCount: 1 }
   const release = () => chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...base })
   let pressed = false
@@ -1024,15 +1032,14 @@ function roleClickDriver() {
  * @param {number} tabId
  * @param {number} limit
  */
-async function labelAllFrames(tabId, limit, options = {}) {
+async function labelAllFrames(tabId, limit) {
   const frames = await listFrames(tabId)
   const topIndex = frames.findIndex(frame => frame.frameId === 0)
   if (topIndex > 0) frames.unshift(frames.splice(topIndex, 1)[0])
-  const paint = options.paint !== false
   const outcomes = await Promise.all(frames.map(async frame => {
     const cap = frame.frameId === 0 ? limit : Math.min(40, limit)
     try {
-      const result = await runInFrame(tabId, frame.frameId, labelPage, [cap, paint], 2_000)
+      const result = await runInFrame(tabId, frame.frameId, labelPage, [cap], 2_000)
       return { frameId: frame.frameId, result }
     } catch (error) {
       return { frameId: frame.frameId, error }
@@ -1307,10 +1314,11 @@ function pageMetrics() {
 /**
  * Label the interactive elements in the current viewport and return view
  * metrics plus the label list. Persistent ids survive relabelling.
- * @param {number} limit maximum labels to render
- * @param {boolean} [paint] wait for the overlay to paint (needed before a capture)
+ * Nothing is drawn on the page: the boxes and numbers exist only on the model's
+ * copy of the screenshot (see drawHitboxes).
+ * @param {number} limit maximum labels to report
  */
-async function labelPage(limit, paint = true) {
+async function labelPage(limit) {
   try {
     return await (async () => {
   const LABEL_SELECTOR = [
@@ -1335,8 +1343,6 @@ async function labelPage(limit, paint = true) {
     '[onclick]',
     '[tabindex]:not([tabindex="-1"])',
   ].join(',')
-  const OVERLAY_ID = '__crazyagent_label_overlay'
-  document.getElementById(OVERLAY_ID)?.remove()
   const state = globalThis.__crazyagent ??= {
     nextId: 1,
     idsByElement: new WeakMap(),
@@ -1392,11 +1398,6 @@ async function labelPage(limit, paint = true) {
   const vw = window.innerWidth
   const vh = window.innerHeight
 
-  const overlay = document.createElement('div')
-  overlay.id = OVERLAY_ID
-  overlay.setAttribute('aria-hidden', 'true')
-  overlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483646;'
-
   const labels = []
   const cap = Math.max(1, Math.min(200, Math.floor(Number(limit) || 120)))
   // Include open shadow roots: web components keep their controls there.
@@ -1413,7 +1414,6 @@ async function labelPage(limit, paint = true) {
   for (const el of candidates) {
     if (labels.length >= cap) break
     if (!(el instanceof Element)) continue
-    if (el.closest(`#${OVERLAY_ID}`)) continue
     if (el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert')) continue
     const tag = el.tagName.toLowerCase()
     if (tag === 'input' && el.type === 'hidden') continue
@@ -1463,21 +1463,6 @@ async function labelPage(limit, paint = true) {
       h: Math.round(rect.height),
     })
 
-    const badge = document.createElement('div')
-    badge.textContent = String(id)
-    const bx = Math.max(0, Math.min(vw - 18, rect.left - 7))
-    const by = Math.max(0, Math.min(vh - 16, rect.top - 7))
-    badge.style.cssText = `position:fixed;left:${bx}px;top:${by}px;min-width:14px;height:15px;padding:0 3px;`
-      + 'background:#ffd400;color:#000;border:1px solid #111;border-radius:3px;'
-      + 'font:700 10px/14px ui-sans-serif,system-ui,sans-serif;text-align:center;'
-      + 'box-shadow:0 1px 2px rgba(0,0,0,.45);pointer-events:none;z-index:2147483647;'
-    overlay.appendChild(badge)
-
-    const box = document.createElement('div')
-    box.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;`
-      + `width:${rect.width}px;height:${rect.height}px;box-sizing:border-box;`
-      + 'border:1px solid rgba(255,196,0,.7);border-radius:2px;pointer-events:none;z-index:2147483646;'
-    overlay.appendChild(box)
   }
 
   const surfaces = []
@@ -1493,18 +1478,6 @@ async function labelPage(limit, paint = true) {
       w: Math.round(box.width),
       h: Math.round(box.height),
     })
-  }
-
-  ;(document.body || document.documentElement).appendChild(overlay)
-
-  // Let the compositor paint the overlay before the screenshot is captured.
-  // A timeout fallback keeps this progressing where rAF is throttled. Labels-only
-  // views skip this: no capture follows, so waiting would only add latency.
-  if (paint !== false) {
-    await Promise.race([
-      new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-      new Promise(resolve => setTimeout(resolve, 60)),
-    ])
   }
 
   // Drop ids whose elements are gone so the map does not grow forever.
@@ -1663,7 +1636,7 @@ async function hoverLabelled(label) {
   return { ok: true, hovered: { label, tag: info.tag ?? el.tagName.toLowerCase(), role: info.role ?? '', text: info.text ?? '' } }
 }
 
-/** Remove the label overlay from the active tab. */
+/** Remove a label overlay left on a page by an older extension version. */
 function clearLabelsPage() {
   document.getElementById('__crazyagent_label_overlay')?.remove()
   return { ok: true }
@@ -1969,40 +1942,6 @@ async function clickLabelled(label) {
     }
   }
 
-  const rippleStyleId = '__crazyagent_click_ripple_style'
-  const style = document.getElementById(rippleStyleId) ?? document.createElement('style')
-  style.id = rippleStyleId
-  style.textContent = '@keyframes __crazyagent_click_ripple{0%{transform:scale(.65);opacity:.7}65%{opacity:.35}100%{transform:scale(2.1);opacity:0}}@keyframes __crazyagent_click_crosshair{0%{transform:scale(.85);opacity:1}55%{opacity:.8}100%{transform:scale(1);opacity:0}}'
-  if (!style.isConnected) (document.head || document.documentElement).appendChild(style)
-  const ripple = document.createElement('div')
-  ripple.setAttribute('aria-hidden', 'true')
-  ripple.setAttribute('data-crazyagent-click-ripple', '')
-  ripple.style.cssText = `position:fixed;left:${cx}px;top:${cy}px;z-index:2147483647;pointer-events:none;`
-  for (let index = 0; index < 2; index += 1) {
-    const ring = document.createElement('div')
-    ring.setAttribute('data-crazyagent-click-ring', '')
-    ring.style.cssText = `position:absolute;left:-9px;top:-9px;width:18px;height:18px;box-sizing:border-box;border:1px solid rgba(255,195,0,.85);border-radius:50%;background:transparent;box-shadow:0 0 6px rgba(255,195,0,.12);animation:__crazyagent_click_ripple .65s cubic-bezier(.2,.55,.3,1) ${index * 0.12}s forwards;`
-    ripple.appendChild(ring)
-  }
-  const crosshair = document.createElement('div')
-  crosshair.setAttribute('data-crazyagent-click-crosshair', '')
-  crosshair.style.cssText = 'position:absolute;left:-7px;top:-7px;width:14px;height:14px;animation:__crazyagent_click_crosshair .6s ease-out forwards;'
-  const parts = [
-    'left:6px;top:0;width:2px;height:4px',
-    'left:6px;bottom:0;width:2px;height:4px',
-    'left:0;top:6px;width:4px;height:2px',
-    'right:0;top:6px;width:4px;height:2px',
-    'left:6px;top:6px;width:2px;height:2px;border-radius:50%',
-  ]
-  for (const part of parts) {
-    const tick = document.createElement('div')
-    tick.style.cssText = `position:absolute;${part};background:#ffc300;box-shadow:0 0 4px rgba(255,195,0,.2);`
-    crosshair.appendChild(tick)
-  }
-  ripple.appendChild(crosshair)
-  ;(document.body || document.documentElement).appendChild(ripple)
-  setTimeout(() => ripple.remove(), 900)
-
   const fingerprint = () => ({
     url: location.href,
     title: document.title,
@@ -2011,25 +1950,14 @@ async function clickLabelled(label) {
     dialogs: document.querySelectorAll('dialog[open],[role="dialog"]:not([aria-hidden="true"]),[role="alertdialog"]').length,
   })
   const before = fingerprint()
-  // Every click injects its own ripple/crosshair overlay and removes it 900ms
-  // later. That removal can land inside a later click's observation window (a
-  // batch, or two clicks in quick succession), so counting it as a page mutation
-  // reported changed:true for a click that changed nothing. Self-injected nodes
-  // are bookkeeping, not page response: drop records that only add/remove them.
-  const rippleSelector = '[data-crazyagent-click-ripple]'
-  const selfInjectedNode = node => {
-    if (!node || node.nodeType !== 1) return false
-    if (node.id === rippleStyleId) return true
-    if (typeof node.matches === 'function'
-      && node.matches(`${rippleSelector},[data-crazyagent-click-ring],[data-crazyagent-click-crosshair]`)) return true
-    return typeof node.closest === 'function' && node.closest(rippleSelector) !== null
-  }
+  // The agent cursor's one host element is bookkeeping, not page response. It can
+  // be re-added here if the page swapped its root; everything else about the
+  // cursor happens in a closed shadow root no observer can see.
+  const cursorSelector = '[data-crazyagent-cursor]'
+  const selfInjectedNode = node => node?.nodeType === 1 && typeof node.matches === 'function' && node.matches(cursorSelector)
   const selfInjectedRecord = record => {
     const target = record?.target
-    if (target && target.nodeType === 1) {
-      if (target.id === rippleStyleId) return true
-      if (typeof target.closest === 'function' && target.closest(rippleSelector)) return true
-    }
+    if (target?.nodeType === 1 && typeof target.matches === 'function' && target.matches(cursorSelector)) return true
     const nodes = [...record?.addedNodes ?? [], ...record?.removedNodes ?? []]
     return nodes.length > 0 && nodes.every(selfInjectedNode)
   }
@@ -2999,7 +2927,7 @@ function bytesToBase64(bytes) {
  * @param {number} maxWidth
  * @param {number} quality
  */
-async function compressDataUrl(dataUrl, maxWidth, quality) {
+async function compressDataUrl(dataUrl, maxWidth, quality, hitboxes) {
   const started = performance.now()
   const comma = dataUrl.indexOf(',')
   if (comma < 0) throw new BrowserError('CAPTURE_FORMAT', 'The screenshot data URL is malformed')
@@ -3017,7 +2945,8 @@ async function compressDataUrl(dataUrl, maxWidth, quality) {
   const sourceHeight = bitmap.height
   const target = scaleDimensions(sourceWidth, sourceHeight, maxWidth)
 
-  if (sourceIsJpeg && target.width === sourceWidth && target.height === sourceHeight) {
+  const unchanged = sourceIsJpeg && target.width === sourceWidth && target.height === sourceHeight
+  if (unchanged && !hitboxes) {
     bitmap.close?.()
     return {
       data: sourceBase64,
@@ -3048,25 +2977,98 @@ async function compressDataUrl(dataUrl, maxWidth, quality) {
   context.drawImage(bitmap, 0, 0, target.width, target.height)
   bitmap.close?.()
 
-  let blob
-  if (typeof canvas.convertToBlob === 'function') {
-    blob = await canvas.convertToBlob({ type: 'image/jpeg', quality })
-  } else {
-    blob = await new Promise((resolve, reject) => {
-      canvas.toBlob(value => value ? resolve(value) : reject(new Error('canvas.toBlob returned null')), 'image/jpeg', quality)
-    })
+  const encode = async () => {
+    let blob
+    if (typeof canvas.convertToBlob === 'function') {
+      blob = await canvas.convertToBlob({ type: 'image/jpeg', quality })
+    } else {
+      blob = await new Promise((resolve, reject) => {
+        canvas.toBlob(value => value ? resolve(value) : reject(new Error('canvas.toBlob returned null')), 'image/jpeg', quality)
+      })
+    }
+    const buffer = await blob.arrayBuffer()
+    return {
+      data: bytesToBase64(new Uint8Array(buffer)),
+      mimeType: 'image/jpeg',
+      width: target.width,
+      height: target.height,
+      bytes: buffer.byteLength,
+      encodeMs: Math.round(performance.now() - started),
+      reencoded: true,
+    }
   }
-  const buffer = await blob.arrayBuffer()
-  const bytes = new Uint8Array(buffer)
-  return {
-    data: bytesToBase64(bytes),
-    mimeType: 'image/jpeg',
-    width: target.width,
-    height: target.height,
-    bytes: buffer.byteLength,
-    encodeMs: Math.round(performance.now() - started),
-    reencoded: true,
+  if (!hitboxes) return encode()
+  const clean = unchanged
+    ? { data: sourceBase64, mimeType: 'image/jpeg', width: sourceWidth, height: sourceHeight, bytes: Math.floor((sourceBase64.length * 3) / 4) }
+    : await encode()
+  drawHitboxes(context, hitboxes.labels, target.width / hitboxes.viewportWidth)
+  return { ...await encode(), clean }
+}
+
+/**
+ * Draw the numbered boxes onto the model's copy of a screenshot.
+ * @param {CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D} context
+ * @param {Array<{id: number, x: number, y: number, w: number, h: number}>} labels top-viewport CSS pixels
+ * @param {number} scale image pixels per CSS pixel
+ */
+function drawHitboxes(context, labels, scale) {
+  context.save()
+  context.scale(scale, scale)
+  context.lineWidth = 1
+  context.strokeStyle = 'rgba(255,196,0,.7)'
+  for (const label of labels) context.strokeRect(label.x + 0.5, label.y + 0.5, Math.max(0, label.w - 1), Math.max(0, label.h - 1))
+  context.font = '700 10px ui-sans-serif, system-ui, sans-serif'
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  for (const label of labels) {
+    const text = String(label.id)
+    const width = Math.max(14, context.measureText(text).width) + 8
+    const left = Math.max(0, label.x - 7)
+    const top = Math.max(0, label.y - 7)
+    context.fillStyle = '#ffd400'
+    context.fillRect(left, top, width, 17)
+    context.strokeStyle = '#111'
+    context.strokeRect(left + 0.5, top + 0.5, width - 1, 16)
+    context.fillStyle = '#000'
+    context.fillText(text, left + width / 2, top + 9)
   }
+  context.restore()
+}
+
+/**
+ * What people are shown for a capture: the same picture without the agent's
+ * boxes. Keyed by the model image's bytes so it survives any copying of the
+ * result, and kept out of the result itself so it can never reach the model.
+ */
+const cleanImages = new Map()
+
+function rememberCleanImage(image, clean) {
+  cleanImages.set(image.data, clean)
+  while (cleanImages.size > 4) cleanImages.delete(cleanImages.keys().next().value)
+}
+
+/** @returns {{data: string, mimeType: string, width: number, height: number, bytes: number} | undefined} */
+export function cleanImageFor(image) {
+  return image?.data ? cleanImages.get(image.data) : undefined
+}
+
+/** Top-level `browser.result` field carrying the clean copy, when there is one. */
+export function displayImageField(result) {
+  const clean = cleanImageFor(result?.image)
+  return clean ? { displayImage: clean } : {}
+}
+
+/** Labels in top-viewport coordinates; a child frame's are dropped if its offset is unknown. */
+async function hitboxesForImage(tabId, labels) {
+  if (!labels.some(label => label.frame !== undefined)) return labels
+  const frames = await listRoleClickFrames(tabId).catch(() => [])
+  const offsets = new Map(frames.map(frame => [frame.frameId, frame]))
+  return labels.flatMap(label => {
+    if (label.frame === undefined) return [label]
+    const frame = offsets.get(label.frame)
+    if (!Number.isFinite(frame?.viewportX)) return []
+    return [{ ...label, x: label.x + frame.viewportX, y: label.y + frame.viewportY }]
+  })
 }
 
 /**
@@ -3274,11 +3276,9 @@ async function snapshot(detail, settings, retried = false, delayMs = 0, captureR
   const resolved = special ? resolveScreenshotRegion(tab, metrics, request) : {}
   let captured
   if (special) {
-    await clearAllFrames(tab.id)
-    captured = await capturePageImage(tab, metrics, request, resolved.region)
+    captured = await agentCursor.whileHidden(tab.id, () => capturePageImage(tab, metrics, request, resolved.region))
   } else {
-    captured = await captureViewportImage(windowId, tab, quality)
-    if (settings.showHitboxes === false) await clearAllFrames(tab.id)
+    captured = await agentCursor.whileHidden(tab.id, () => captureViewportImage(windowId, tab, quality))
   }
 
   const tabAfter = await getActiveTab(windowId)
@@ -3289,7 +3289,11 @@ async function snapshot(detail, settings, retried = false, delayMs = 0, captureR
     throw new BrowserError('STALE_TAB', 'The tab changed during capture; no clipboard content was stored.')
   }
 
-  const image = await compressDataUrl(captured.dataUrl, maxWidth, quality)
+  const hitboxes = !special && metrics.labels.length > 0
+    ? { labels: await hitboxesForImage(tab.id, metrics.labels), viewportWidth: metrics.viewport.width }
+    : undefined
+  const { clean: cleanImage, ...image } = await compressDataUrl(captured.dataUrl, maxWidth, quality, hitboxes)
+  if (cleanImage) rememberCleanImage(image, cleanImage)
   const scroll = lastScrollFor(tab.id, metrics.url) ?? metrics.scroll
   const isViewport = request.scope === 'viewport'
   const cssWidth = isViewport ? metrics.viewport.width : captured.cssSize.width
@@ -3730,10 +3734,9 @@ function autoEscalate(stored, metrics) {
  * Labels-only view pass: no capture, no re-encode.
  * @param {chrome.tabs.Tab} tab
  */
-async function labelOnly(tab, showHitboxes = true) {
+async function labelOnly(tab) {
   const started = performance.now()
-  const labelled = await labelAllFrames(tab.id, LABEL_LIMIT, { paint: false })
-  if (!showHitboxes) await clearAllFrames(tab.id)
+  const labelled = await labelAllFrames(tab.id, LABEL_LIMIT)
   return { metrics: labelled.metrics, labels: labelled.labels, labelMs: Math.round(performance.now() - started) }
 }
 
@@ -3864,7 +3867,7 @@ async function buildActionView(tab, settings, requested, options = {}) {
     return { mode: 'full', payload: shot }
   }
   // compact or auto: one labels-only pass decides and feeds the delta
-  const labelled = await labelOnly(tab, settings.showHitboxes !== false)
+  const labelled = await labelOnly(tab)
   const stored = lastViewByTab.get(tab.id)
   if (requested === 'auto' && autoEscalate(stored, labelled.metrics)) {
     const shot = await snapshot('normal', settings)
@@ -3932,7 +3935,7 @@ async function buildBatchView(tab, settings, requested) {
     const shot = await snapshot('normal', settings)
     return { mode: 'full', payload: shot }
   }
-  const labelled = await labelOnly(tab, settings.showHitboxes !== false)
+  const labelled = await labelOnly(tab)
   const stored = lastViewByTab.get(tab.id)
   if (requested === 'auto' && autoEscalate(stored, labelled.metrics)) {
     const shot = await snapshot('normal', settings)
@@ -4355,7 +4358,7 @@ async function autoView(settings) {
   assertCapturable(tab)
   const text = await runInTab(tab.id, readPageText, ['page', 0, 6_000, CANVAS_EDITOR_PATTERNS])
   if (text.textUnreliable === true) return snapshot('normal', settings)
-  const labelled = await labelAllFrames(tab.id, LABEL_LIMIT, { paint: false })
+  const labelled = await labelAllFrames(tab.id, LABEL_LIMIT)
   await clearAllFrames(tab.id)
   const metrics = labelled.metrics
   const current = await getActiveTab(windowId)
@@ -5146,7 +5149,7 @@ async function clickAt(settings, args) {
     try {
       // One attach for the whole burst: the debugger handshake is not paid per point.
       await withDebugger(tab.id, async () => {
-        for (const target of onScreen) await trustedClick(tab.id, target.cssX, target.cssY)
+        for (const target of onScreen) await trustedClick(tab.id, target.cssX, target.cssY, { glideMs: onScreen.length > 1 ? 100 : undefined })
       })
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'DEBUGGER_BUSY') throw error
@@ -5310,6 +5313,7 @@ async function click(settings, args) {
   const expectSession = await startActionExpect('click', args, tab, settings)
   if (expectSession.expectation?.pixel_changed === true) viewMode = 'full'
   const clickOnce = async labelTarget => {
+    await glideToLabel(tab, labelTarget, { press: true })
     try {
       return await runInFrame(tab.id, labelTarget.frameId, clickLabelled, [labelTarget.localId], 1_200)
     } catch (error) {
@@ -5445,6 +5449,7 @@ async function hover(settings, args) {
   const pageUrl = tab.url ?? ''
   const target = resolveLabelTarget(tab, label)
   if (!target) throw await decorateStaleLabelError(tab, missingLabelError(tab, label))
+  await glideToLabel(tab, target)
   let hovered = await runInFrame(tab.id, target.frameId, hoverLabelled, [target.localId], 3_000)
   // Recover a re-rendered target once by its recorded signature; a failed
   // recovery keeps the original stale-label error.
@@ -6257,6 +6262,7 @@ function dragDriver(tabId) {
     resolveLabelTarget,
     runInFrame,
     withDebugger,
+    moveCursor: (id, x, y, options) => agentCursor.moveTo(id, x, y, options),
     sendCommand: (tabId, method, params) => chrome.debugger.sendCommand({ tabId }, method, params),
     onDragIntercepted: (tabId, listener) => {
       const event = (source, method, params) => {
@@ -6435,6 +6441,8 @@ async function settleDragSelection(tabId, previous) {
  * @param {boolean} [awaitSelection]
  */
 async function trustedDrag(tabId, fromX, fromY, toX, toY, awaitSelection = false) {
+  await agentCursor.moveTo(tabId, fromX, fromY, { press: true, maxMs: 300 })
+  void agentCursor.moveTo(tabId, toX, toY, { maxMs: 300 })
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
     type: 'mouseMoved', x: fromX, y: fromY, button: 'none', clickCount: 0,
   })
@@ -9292,12 +9300,61 @@ async function docsFocusDocument(context, stage = 'write-focus-document') {
 }
 
 function docsWritePositionMatches(baseline, positioned, reused) {
-  if (reused) return JSON.stringify(positioned) === JSON.stringify(baseline)
+  if (reused) {
+    if (positioned.length !== baseline.length) return false
+    const last = positioned.at(-1)
+    if (last?.kind !== 'para' || last.style === 'LI' || last.text.trim()) return false
+    return baseline.slice(0, -1).every((block, index) => JSON.stringify(block) === JSON.stringify(positioned[index]))
+  }
   if (baseline.length === 0) return positioned.length === 0
   if (positioned.length !== baseline.length + 1) return false
   const last = positioned.at(-1)
   if (last?.kind !== 'para' || last.text.trim()) return false
   return baseline.every((block, index) => JSON.stringify(block) === JSON.stringify(positioned[index]))
+}
+
+function docsWritePrefixMatches(baseline, current, count) {
+  return current.length >= count && baseline.slice(0, count).every((block, index) => JSON.stringify(block) === JSON.stringify(current[index]))
+}
+
+function docsWriteListStartMatches(baseline, current, list) {
+  const prefixLength = Math.max(0, baseline.length - 1)
+  if (current.length !== prefixLength + 1 || !docsWritePrefixMatches(baseline, current, prefixLength)) return false
+  const previous = baseline.at(-1)
+  if (previous && (previous.kind !== 'para' || previous.style === 'LI' || previous.text.trim())) return false
+  const last = current.at(-1)
+  return last?.kind === 'para' && last.style === 'LI' && !last.text.trim() && last.listLevel === 0
+    && last.ordered === (list === 'numbered')
+    && (list !== 'numbered' || last.number === 1)
+    && (list === 'checklist' ? last.checklist === true && last.checked === false : last.checklist !== true)
+}
+
+function docsWriteListCompletionMatches(baseline, current, block) {
+  const prefixLength = Math.max(0, baseline.length - 1)
+  if (current.length !== prefixLength + block.items.length + 1 || !docsWritePrefixMatches(baseline, current, prefixLength)) return false
+  const itemsMatch = block.items.every((entry, index) => {
+    const item = current[prefixLength + index]
+    const text = typeof entry === 'string' ? entry : entry.text
+    return item?.kind === 'para' && item.style === 'LI' && item.text === text && item.listLevel === 0
+      && item.ordered === (block.list === 'numbered')
+      && (block.list !== 'numbered' || item.number === index + 1)
+      && (block.list === 'checklist' ? item.checklist === true && item.checked === (typeof entry === 'object' && entry.checked === true) : item.checklist !== true)
+  })
+  const last = current.at(-1)
+  return itemsMatch && last?.kind === 'para' && last.style === 'P' && !last.text.trim()
+}
+
+async function docsWriteWaitStructure(context, stage, matches, message) {
+  const end = Math.min(context.deadline, context.driver.now() + 4_000)
+  let retryDelay = 100
+  while (true) {
+    const current = parseDocStructure(await docsExport(context, stage, 'html'))
+    if (matches(current)) return current
+    if (context.driver.now() + retryDelay > end) break
+    await context.driver.sleep(retryDelay)
+    retryDelay = Math.min(1_000, retryDelay * 2)
+  }
+  throw docsFailure(stage, 'DOCS_FORMAT_MISMATCH', message)
 }
 
 async function docsWriteStart(context, baseline) {
@@ -9349,13 +9406,19 @@ async function docsWriteFlow(context, args) {
       }
       if (block.list) {
         await apply(wanted, index)
+        const beforeList = parseDocStructure(await docsExport(context, 'write-list-start-baseline', 'html'))
         const key = { numbered: '7', bulleted: '8', checklist: '9' }[block.list]
         await docsKey(context, 'write-list-start', {
           key,
           code: `Digit${key}`,
           keyCode: Number(key) + 48,
         }, MODIFIER_BITS.ctrl | MODIFIER_BITS.shift)
-        await docsWaitFormat(context, 'write-list-start-verify', [block.list], { [block.list]: true })
+        const started = await docsWriteWaitStructure(
+          context,
+          'write-list-start-verify',
+          current => docsWriteListStartMatches(beforeList, current, block.list),
+          `The exported document did not contain one new empty ${block.list} item at the append position`,
+        )
         if (block.list === 'checklist') {
           for (const [itemIndex, item] of block.items.entries()) {
             await docsInsertText(context, 'write-checklist-item', item.text)
@@ -9367,7 +9430,12 @@ async function docsWriteFlow(context, args) {
         }
         await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
         await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
-        await docsWaitFormat(context, 'write-list-exit-verify', ['numbered', 'bulleted', 'checklist'], { numbered: false, bulleted: false, checklist: false })
+        await docsWriteWaitStructure(
+          context,
+          'write-list-exit-verify',
+          current => docsWriteListCompletionMatches(started, current, block),
+          'The exported document did not contain the exact requested list items followed by one empty Normal paragraph',
+        )
       } else {
         if (block.runs) {
           for (const [runIndex, run] of block.runs.entries()) {
@@ -10933,6 +11001,7 @@ export async function execute(op, args = {}, settings) {
   const normalized = normalizeSettings(settings)
   if (normalized.paused) throw new BrowserError('PAUSED', 'Browser access is paused in the side panel.')
   await prepareDebuggerCommand().catch(() => {})
+  await agentCursor.follow()
   const cursor = dialogManager.cursor()
   try {
     const result = await executeOperation(op, args, normalized)
@@ -10951,6 +11020,9 @@ export async function execute(op, args = {}, settings) {
     const pendingResult = addDialogReports(pendingDialogResult(op, tab, pending), reports)
     if (supportsActionEvidence(op) && args.expect !== undefined && pendingResult.expect === undefined) pendingResult.expect = args.expect
     return refreshActionEvidence(op, pendingResult)
+  } finally {
+    // A navigation replaced the page; bring the cursor back without waiting for it.
+    void agentCursor.follow()
   }
 }
 

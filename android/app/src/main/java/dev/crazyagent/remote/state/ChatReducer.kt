@@ -127,15 +127,30 @@ object ChatReducer {
             )
             "chat.tool_result" -> attachToolResult(state, key, turnId, body)
             "chat.done" -> state.copy(
-                items = state.items + ChatItem.Done(key, turnId, body.string("text").orEmpty(), body.string("model")),
+                items = state.items + ChatItem.Done(
+                    key, turnId,
+                    text = body.string("text").orEmpty(),
+                    model = body.string("model"),
+                    usage = usageOf(body),
+                ),
                 draft = null,
                 phase = Phase(),
             )
-            "chat.stopped" -> state.copy(
-                items = state.items + ChatItem.Stopped(key, turnId, body.string("reason"), body.string("message")),
-                draft = null,
-                phase = Phase(),
-            )
+            "chat.stopped" -> {
+                val timings = body.obj("timings")
+                state.copy(
+                    items = state.items + ChatItem.Stopped(
+                        key, turnId,
+                        reason = body.string("reason"),
+                        message = body.string("message"),
+                        usage = usageOf(body),
+                        elapsedMs = timings?.long("totalMs"),
+                        failedCalls = timings?.int("failedCalls"),
+                    ),
+                    draft = null,
+                    phase = Phase(),
+                )
+            }
             "chat.error" -> withoutDraft(state).copy(
                 items = state.items + ChatItem.Error(key, turnId, body.string("message").orEmpty().ifEmpty { "The turn failed." }),
             )
@@ -207,6 +222,21 @@ object ChatReducer {
             else -> current
         } ?: return Reduction(state, ResyncReason.DRAFT_GAP)
         return Reduction(state.copy(draft = updated))
+    }
+
+    /**
+     * Token usage on `chat.done`/`chat.stopped` bodies. An absent, null, or
+     * wholly foreign-typed object is null so older frames and future shapes
+     * never fabricate a count.
+     */
+    private fun usageOf(body: JsonObject): TurnUsage? {
+        val usage = body.obj("usage") ?: return null
+        val parsed = TurnUsage(
+            inputTokens = usage.long("inputTokens"),
+            outputTokens = usage.long("outputTokens"),
+            totalTokens = usage.long("totalTokens"),
+        )
+        return parsed.takeIf { it.inputTokens != null || it.outputTokens != null || it.totalTokens != null }
     }
 
     private fun turnOf(body: JsonObject) = TurnInfo(

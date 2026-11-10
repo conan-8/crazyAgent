@@ -76,11 +76,35 @@ export class FakeRunner {
     return sessionId
   }
 
-  /** Emit a committed assistant message notification. */
-  assistant(text) {
+  /** Emit any committed session event. */
+  event(type, data) {
     this.current?.notify({
       method: 'session.event',
-      params: { sessionId: this.sessionId, event: { type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } } },
+      params: { sessionId: this.sessionId, event: { type, data } },
+    })
+  }
+
+  /** Emit a committed assistant message notification. */
+  assistant(text, usage) {
+    this.event('assistant/message', {
+      message: { content: [{ type: 'text', text }] },
+      ...(usage === undefined ? {} : { usage }),
+    })
+  }
+
+  /** Emit a tool call/result pair (the result counts as failed when isError). */
+  toolCall(callId, name = 'browser_click', args = '{}') {
+    this.event('tool/call', { callId, name, arguments: args })
+  }
+
+  toolResult({ callId = 'call-1', isError = false, text = 'result' } = {}) {
+    this.event('tool/result', {
+      message: {
+        source: { kind: 'tool', callId },
+        toolCallId: callId,
+        content: [{ type: 'text', text }],
+        isError,
+      },
     })
   }
 }

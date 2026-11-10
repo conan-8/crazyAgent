@@ -111,7 +111,7 @@ export class RemoteHub {
     this.messages = []
     /** @type {string | null} */
     this.sessionId = null
-    /** @type {{status: string, turnId: string | null, origin: string | null, clientMessageId: string | null, startedAt: string | null, endedAt: string | null, outcome: string | null, error: string | null}} */
+    /** @type {{status: string, turnId: string | null, origin: string | null, clientMessageId: string | null, startedAt: string | null, endedAt: string | null, outcome: string | null, error: string | null, label: 'done' | 'partial' | 'blocked' | null, usage: Record<string, number> | null, failedCalls: number | null}} */
     this.turn = {
       status: 'starting',
       turnId: null,
@@ -121,6 +121,9 @@ export class RemoteHub {
       endedAt: null,
       outcome: null,
       error: null,
+      label: null,
+      usage: null,
+      failedCalls: null,
     }
     /** Activity phase from chat.status (capturing/thinking/tool/...). */
     this.phase = { status: null, tool: null }
@@ -246,6 +249,8 @@ export class RemoteHub {
         this.publish('chat.done', {
           text: clip(frame.text, MAX_TEXT_CHARS),
           timings: isRecord(frame.timings) ? frame.timings : null,
+          usage: usageOf(frame.usage),
+          label: reportedLabel(frame.label),
           model: stringOrNull(frame.model),
           docsVerification: stringOrNull(frame.docsVerification),
           docsVerificationReason: stringOrNull(frame.docsVerificationReason),
@@ -268,7 +273,12 @@ export class RemoteHub {
         // An idle stop is a reply to one client, not a lifecycle event.
         if (frame.reason === 'idle') return
         this.#takeDraft()
-        this.publish('chat.stopped', { reason: stringOrNull(frame.reason), message: stringOrNull(frame.message) })
+        this.publish('chat.stopped', {
+          reason: stringOrNull(frame.reason),
+          message: stringOrNull(frame.message),
+          timings: isRecord(frame.timings) ? frame.timings : null,
+          usage: usageOf(frame.usage),
+        })
         return
       case 'chat.error': {
         const replaces = this.#takeDraft()
@@ -383,7 +393,10 @@ export class RemoteHub {
    * @param {{turnId: string, origin: string, clientMessageId?: string | null, text: string, imageCount?: number, sessionId?: string | null}} info
    */
   turnStarted(info) {
-    if (typeof info.sessionId === 'string' && this.sessionId === null) this.sessionId = info.sessionId
+    if (typeof info.sessionId === 'string' && this.sessionId !== info.sessionId) {
+      if (this.sessionId === null) this.sessionId = info.sessionId
+      else this.setSession(info.sessionId)
+    }
     this.turn = {
       status: 'running',
       turnId: info.turnId,
@@ -393,6 +406,9 @@ export class RemoteHub {
       endedAt: null,
       outcome: null,
       error: null,
+      label: null,
+      usage: null,
+      failedCalls: null,
     }
     this.phase = { status: null, tool: null }
     this.draft = null
@@ -435,12 +451,18 @@ export class RemoteHub {
       this.publish('remote.help', { ...this.help }, { turnId: info.turnId })
     }
     this.helpShot = null
+    const failedCalls = Number(info.timings?.failedCalls)
     this.turn = {
       ...this.turn,
       status: info.outcome === 'error' ? 'error' : help !== null ? 'waiting_for_user' : 'idle',
       endedAt: new Date(this.now()).toISOString(),
       outcome: info.outcome,
       error: info.outcome === 'error' ? clip(info.error, 4_000) : null,
+      // Model-reported completion word, per-turn cost, and the failed-call
+      // count; diagnostic evidence, never independent verification.
+      label: reportedLabel(info.label),
+      usage: usageOf(info.usage),
+      failedCalls: Number.isFinite(failedCalls) && failedCalls >= 0 ? failedCalls : null,
     }
     this.phase = { status: null, tool: null }
     this.publish('chat.turn', { ...this.turnProjection() }, { turnId: info.turnId })
@@ -696,6 +718,29 @@ function clip(value, max) {
 }
 
 /** @param {unknown} value */
+const REPORTED_TURN_LABELS = new Set(['done', 'partial', 'blocked'])
+
+/** @param {unknown} value */
+function reportedLabel(value) {
+  return typeof value === 'string' && REPORTED_TURN_LABELS.has(value) ? value : null
+}
+
+/**
+ * Keep only finite, non-negative token counters. Anything else is null rather
+ * than a fabricated number.
+ * @param {unknown} value
+ */
+function usageOf(value) {
+  if (!isRecord(value)) return null
+  /** @type {Record<string, number>} */
+  const totals = {}
+  for (const key of ['inputTokens', 'outputTokens', 'totalTokens', 'cacheReadTokens']) {
+    const number = Number(value[key])
+    if (Number.isFinite(number) && number >= 0) totals[key] = Math.round(number)
+  }
+  return Object.keys(totals).length > 0 ? totals : null
+}
+
 function stringOrNull(value) {
   return typeof value === 'string' ? value : null
 }

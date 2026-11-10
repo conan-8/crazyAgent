@@ -180,11 +180,11 @@ async function run() {
   // A phone turn's lifecycle: one debugger lease, labels gone at the end.
   bridge.sendToUi({ v: 1, type: 'chat.user', turnId: 'turn-e2e', origin: 'remote', text: 'x', imageCount: 0 })
   await command('snapshot', { detail: 'normal' })
-  const labelled = await until('labels on the page', () => read(`document.querySelectorAll('#__crazyagent_label_overlay').length`))
-  assert.ok(labelled > 0)
+  assert.equal(await read(`document.querySelectorAll('#__crazyagent_label_overlay').length`), 0, 'hitboxes never touch the page')
+  await until('the agent cursor on the page', async () => await read(`document.querySelectorAll('[data-crazyagent-cursor]').length`) === 1)
   bridge.sendToUi({ v: 1, type: 'chat.done', text: 'done' })
-  await until('labels cleared after the turn', async () => await read(`document.querySelectorAll('#__crazyagent_label_overlay').length`) === 0)
-  pass('a turn end clears the page labels')
+  await until('the cursor gone after the turn', async () => await read(`document.querySelectorAll('[data-crazyagent-cursor]').length`) === 0)
+  pass('a turn shows the cursor, keeps hitboxes off the page, and cleans up')
 
   // Longer than Chrome's 30 s idle limit, with nothing to do.
   await sleep(45_000)

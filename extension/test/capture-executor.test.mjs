@@ -42,7 +42,7 @@ function fakeCaptureBrowser(t, {
   globalThis.createImageBitmap = async () => ({ ...bitmap, close: () => {} })
   globalThis.OffscreenCanvas = class {
     constructor(width, height) { this.width = width; this.height = height }
-    getContext() { return { drawImage: () => {}, imageSmoothingEnabled: true, imageSmoothingQuality: 'medium' } }
+    getContext() { return { drawImage: () => {}, imageSmoothingEnabled: true, imageSmoothingQuality: 'medium', save() {}, restore() {}, scale() {}, strokeRect() {}, fillRect() {}, fillText() {}, measureText: () => ({ width: 8 }) } }
     async convertToBlob({ type }) { return new Blob(['display-image'], { type }) }
   }
   globalThis.chrome = {

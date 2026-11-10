@@ -207,7 +207,7 @@ export class BackgroundExecutor {
     this.inFlight -= 1
     if (this.inFlight === 0) this.deps.setBadge?.(false)
     if (typeof frame.id === 'string' && this.socket === socket && socket.readyState === 1) {
-      socket.send(JSON.stringify({ v: PROTOCOL_VERSION, type: 'browser.result', id: frame.id, ...reply }))
+      socket.send(JSON.stringify({ v: PROTOCOL_VERSION, type: 'browser.result', id: frame.id, ...reply, ...(reply.ok ? this.deps.displayImageField?.(reply.result) : {}) }))
     }
     this.#yieldIfPanelWaiting()
   }

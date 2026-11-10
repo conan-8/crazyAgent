@@ -13,6 +13,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,6 +34,7 @@ import dev.crazyagent.remote.app.MainViewModel
 import dev.crazyagent.remote.app.RemoteController
 import dev.crazyagent.remote.app.Screen
 import dev.crazyagent.remote.ui.ChatActions
+import dev.crazyagent.remote.ui.Motion
 import dev.crazyagent.remote.ui.ChatScreen
 import dev.crazyagent.remote.ui.PairingScreen
 import dev.crazyagent.remote.ui.RemoteTheme
@@ -72,10 +77,17 @@ class MainActivity : ComponentActivity() {
             RemoteTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val screen by viewModel.screen.collectAsStateWithLifecycle()
-                    when (val current = screen) {
-                        Screen.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                        is Screen.Pairing -> PairingScreen(current, onPair = viewModel::pair, onCancel = viewModel::cancelPairing)
-                        is Screen.Chat -> Chat(current.controller)
+                    AnimatedContent(
+                        targetState = screen,
+                        contentKey = { it::class },
+                        transitionSpec = { fadeIn(Motion.slow()) togetherWith fadeOut(Motion.fast()) },
+                        label = "screen",
+                    ) { current ->
+                        when (current) {
+                            Screen.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                            is Screen.Pairing -> PairingScreen(current, onPair = viewModel::pair, onCancel = viewModel::cancelPairing)
+                            is Screen.Chat -> Chat(current.controller)
+                        }
                     }
                 }
             }

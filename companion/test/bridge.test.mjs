@@ -443,6 +443,22 @@ test('routes chat.stop to onStop exactly once without touching onChat', async t 
   assert.equal(chats.length, 0, 'chat.stop must not be delivered as a prompt')
 })
 
+test('routes chat.resume with its saved session ID without starting a prompt or new chat', async t => {
+  const resumed = []
+  const { url, chats } = await setup(t, {
+    onResumeChat: (sessionId, ws) => { resumed.push({ sessionId, ws }) },
+  })
+  const ui = await connect(url, 'ui')
+  t.after(() => ui.ws.close())
+
+  ui.ws.send(JSON.stringify({ v: 1, type: 'chat.resume', sessionId: 'session-stopped-1' }))
+  await sleep(50)
+  assert.equal(resumed.length, 1)
+  assert.equal(resumed[0].sessionId, 'session-stopped-1')
+  assert.ok(resumed[0].ws !== undefined)
+  assert.equal(chats.length, 0)
+})
+
 test('survives a failing onStop handler and keeps the bridge alive', async t => {
   const { url } = await setup(t, {
     onStop: () => { throw new Error('stop handler exploded') },

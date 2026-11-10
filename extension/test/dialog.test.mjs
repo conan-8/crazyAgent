@@ -219,7 +219,8 @@ function fakeBrowserChrome(t) {
       onRemoved,
     },
     scripting: {
-      executeScript: (...args) => fake.onExecuteScript?.(...args) ?? Promise.resolve([{ result: {} }]),
+      // The agent cursor is decoration; these tests are about the page's own scripts.
+      executeScript: (...args) => (args[0]?.func?.name === 'agentCursorPage' ? undefined : fake.onExecuteScript?.(...args)) ?? Promise.resolve([{ result: {} }]),
     },
     debugger: {
       attach: async ({ tabId }) => { lifecycle.push(`attach:${tabId}`) },

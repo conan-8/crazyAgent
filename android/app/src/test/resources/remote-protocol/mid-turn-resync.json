@@ -28,7 +28,10 @@
             "startedAt": "2026-11-06T12:00:04.000Z",
             "endedAt": null,
             "outcome": null,
-            "error": null
+            "error": null,
+            "label": null,
+            "usage": null,
+            "failedCalls": null
           },
           "phase": {
             "status": "thinking",
@@ -137,6 +140,12 @@
       "body": {
         "text": "The page lists three products.",
         "timings": null,
+        "usage": {
+          "inputTokens": 20,
+          "outputTokens": 8,
+          "totalTokens": 28
+        },
+        "label": null,
         "model": "fixture/model",
         "docsVerification": null,
         "docsVerificationReason": null,
@@ -161,7 +170,14 @@
         "startedAt": "2026-11-06T12:00:04.000Z",
         "endedAt": "2026-11-06T12:00:15.000Z",
         "outcome": "done",
-        "error": null
+        "error": null,
+        "label": null,
+        "usage": {
+          "inputTokens": 20,
+          "outputTokens": 8,
+          "totalTokens": 28
+        },
+        "failedCalls": 0
       }
     }
   ],
@@ -183,7 +199,14 @@
       "startedAt": "2026-11-06T12:00:04.000Z",
       "endedAt": "2026-11-06T12:00:15.000Z",
       "outcome": "done",
-      "error": null
+      "error": null,
+      "label": null,
+      "usage": {
+        "inputTokens": 20,
+        "outputTokens": 8,
+        "totalTokens": 28
+      },
+      "failedCalls": 0
     },
     "phase": {
       "status": null,
@@ -240,6 +263,12 @@
         "body": {
           "text": "The page lists three products.",
           "timings": null,
+          "usage": {
+            "inputTokens": 20,
+            "outputTokens": 8,
+            "totalTokens": 28
+          },
+          "label": null,
           "model": "fixture/model",
           "docsVerification": null,
           "docsVerificationReason": null,

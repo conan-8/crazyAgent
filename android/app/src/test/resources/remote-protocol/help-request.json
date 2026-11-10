@@ -28,7 +28,10 @@
             "startedAt": null,
             "endedAt": null,
             "outcome": null,
-            "error": null
+            "error": null,
+            "label": null,
+            "usage": null,
+            "failedCalls": null
           },
           "phase": {
             "status": null,
@@ -124,6 +127,12 @@
       "body": {
         "text": "I need you to sign in.",
         "timings": null,
+        "usage": {
+          "inputTokens": 30,
+          "outputTokens": 6,
+          "totalTokens": 36
+        },
+        "label": null,
         "model": "fixture/model",
         "docsVerification": null,
         "docsVerificationReason": null,
@@ -169,7 +178,14 @@
         "startedAt": "2026-11-06T12:00:05.000Z",
         "endedAt": "2026-11-06T12:00:14.000Z",
         "outcome": "done",
-        "error": null
+        "error": null,
+        "label": null,
+        "usage": {
+          "inputTokens": 30,
+          "outputTokens": 6,
+          "totalTokens": 36
+        },
+        "failedCalls": 0
       }
     },
     {
@@ -240,8 +256,14 @@
       "turnId": "turn-6",
       "occurredAt": "2026-11-06T12:00:22.000Z",
       "body": {
-        "text": "You have 3 new messages.",
+        "text": "DONE — you have 3 new messages.",
         "timings": null,
+        "usage": {
+          "inputTokens": 25,
+          "outputTokens": 7,
+          "totalTokens": 32
+        },
+        "label": "done",
         "model": "fixture/model",
         "docsVerification": null,
         "docsVerificationReason": null,
@@ -266,7 +288,14 @@
         "startedAt": "2026-11-06T12:00:18.000Z",
         "endedAt": "2026-11-06T12:00:23.000Z",
         "outcome": "done",
-        "error": null
+        "error": null,
+        "label": "done",
+        "usage": {
+          "inputTokens": 25,
+          "outputTokens": 7,
+          "totalTokens": 32
+        },
+        "failedCalls": 0
       }
     },
     {
@@ -307,8 +336,14 @@
       "turnId": "turn-7",
       "occurredAt": "2026-11-06T12:00:28.000Z",
       "body": {
-        "text": "A CAPTCHA is in the way.",
+        "text": "BLOCKED — a CAPTCHA is in the way.",
         "timings": null,
+        "usage": {
+          "inputTokens": 18,
+          "outputTokens": 4,
+          "totalTokens": 22
+        },
+        "label": "blocked",
         "model": "fixture/model",
         "docsVerification": null,
         "docsVerificationReason": null,
@@ -354,7 +389,14 @@
         "startedAt": "2026-11-06T12:00:25.000Z",
         "endedAt": "2026-11-06T12:00:31.000Z",
         "outcome": "done",
-        "error": null
+        "error": null,
+        "label": "blocked",
+        "usage": {
+          "inputTokens": 18,
+          "outputTokens": 4,
+          "totalTokens": 22
+        },
+        "failedCalls": 1
       }
     },
     {
@@ -387,7 +429,14 @@
       "startedAt": "2026-11-06T12:00:25.000Z",
       "endedAt": "2026-11-06T12:00:31.000Z",
       "outcome": "done",
-      "error": null
+      "error": null,
+      "label": "blocked",
+      "usage": {
+        "inputTokens": 18,
+        "outputTokens": 4,
+        "totalTokens": 22
+      },
+      "failedCalls": 1
     },
     "phase": {
       "status": null,
@@ -429,7 +478,14 @@
         "startedAt": "2026-11-06T12:00:05.000Z",
         "endedAt": "2026-11-06T12:00:14.000Z",
         "outcome": "done",
-        "error": null
+        "error": null,
+        "label": null,
+        "usage": {
+          "inputTokens": 30,
+          "outputTokens": 6,
+          "totalTokens": 36
+        },
+        "failedCalls": 0
       },
       "phase": {
         "status": null,
@@ -485,6 +541,12 @@
           "body": {
             "text": "I need you to sign in.",
             "timings": null,
+            "usage": {
+              "inputTokens": 30,
+              "outputTokens": 6,
+              "totalTokens": 36
+            },
+            "label": null,
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
@@ -537,7 +599,14 @@
         "startedAt": "2026-11-06T12:00:05.000Z",
         "endedAt": "2026-11-06T12:00:14.000Z",
         "outcome": "done",
-        "error": null
+        "error": null,
+        "label": null,
+        "usage": {
+          "inputTokens": 30,
+          "outputTokens": 6,
+          "totalTokens": 36
+        },
+        "failedCalls": 0
       },
       "phase": {
         "status": null,
@@ -593,6 +662,12 @@
           "body": {
             "text": "I need you to sign in.",
             "timings": null,
+            "usage": {
+              "inputTokens": 30,
+              "outputTokens": 6,
+              "totalTokens": 36
+            },
+            "label": null,
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
@@ -645,7 +720,14 @@
         "startedAt": "2026-11-06T12:00:18.000Z",
         "endedAt": "2026-11-06T12:00:23.000Z",
         "outcome": "done",
-        "error": null
+        "error": null,
+        "label": "done",
+        "usage": {
+          "inputTokens": 25,
+          "outputTokens": 7,
+          "totalTokens": 32
+        },
+        "failedCalls": 0
       },
       "phase": {
         "status": null,
@@ -701,6 +783,12 @@
           "body": {
             "text": "I need you to sign in.",
             "timings": null,
+            "usage": {
+              "inputTokens": 30,
+              "outputTokens": 6,
+              "totalTokens": 36
+            },
+            "label": null,
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
@@ -749,8 +837,14 @@
           "turnId": "turn-6",
           "occurredAt": "2026-11-06T12:00:22.000Z",
           "body": {
-            "text": "You have 3 new messages.",
+            "text": "DONE — you have 3 new messages.",
             "timings": null,
+            "usage": {
+              "inputTokens": 25,
+              "outputTokens": 7,
+              "totalTokens": 32
+            },
+            "label": "done",
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
@@ -792,7 +886,14 @@
         "startedAt": "2026-11-06T12:00:25.000Z",
         "endedAt": "2026-11-06T12:00:31.000Z",
         "outcome": "done",
-        "error": null
+        "error": null,
+        "label": "blocked",
+        "usage": {
+          "inputTokens": 18,
+          "outputTokens": 4,
+          "totalTokens": 22
+        },
+        "failedCalls": 1
       },
       "phase": {
         "status": null,
@@ -848,6 +949,12 @@
           "body": {
             "text": "I need you to sign in.",
             "timings": null,
+            "usage": {
+              "inputTokens": 30,
+              "outputTokens": 6,
+              "totalTokens": 36
+            },
+            "label": null,
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
@@ -896,8 +1003,14 @@
           "turnId": "turn-6",
           "occurredAt": "2026-11-06T12:00:22.000Z",
           "body": {
-            "text": "You have 3 new messages.",
+            "text": "DONE — you have 3 new messages.",
             "timings": null,
+            "usage": {
+              "inputTokens": 25,
+              "outputTokens": 7,
+              "totalTokens": 32
+            },
+            "label": "done",
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
@@ -930,8 +1043,14 @@
           "turnId": "turn-7",
           "occurredAt": "2026-11-06T12:00:28.000Z",
           "body": {
-            "text": "A CAPTCHA is in the way.",
+            "text": "BLOCKED — a CAPTCHA is in the way.",
             "timings": null,
+            "usage": {
+              "inputTokens": 18,
+              "outputTokens": 4,
+              "totalTokens": 22
+            },
+            "label": "blocked",
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,

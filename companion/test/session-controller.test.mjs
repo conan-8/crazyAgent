@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BUSY_MESSAGE, NOT_READY_MESSAGE, STOPPING_MESSAGE, SessionController, uiRejectionFrame } from '../session-controller.mjs'
+import { BUSY_MESSAGE, NOT_READY_MESSAGE, STOPPING_MESSAGE, SessionController, parseReportedLabel, uiRejectionFrame } from '../session-controller.mjs'
 import { FakeRunner, fakeBridge, fakeLogStore } from './remote-fixtures.mjs'
 
 function setup(options = {}) {
@@ -8,18 +8,19 @@ function setup(options = {}) {
   const bridge = fakeBridge()
   const frames = []
   const observed = []
+  const logStore = fakeLogStore()
   const controller = new SessionController({
     bridge,
     getRunner: () => runner,
     isDisabled: () => options.disabled === true,
-    logStore: fakeLogStore(),
+    logStore,
     autoCapture: options.autoCapture ?? false,
     provider: 'openrouter',
     getModelId: () => 'model-x',
     publish: frame => frames.push(frame),
     observers: [{ turnStarted: info => observed.push(['start', info]), turnEnded: info => observed.push(['end', info]) }],
   })
-  return { controller, runner, bridge, frames, observed }
+  return { controller, runner, bridge, frames, observed, logStore }
 }
 
 test('submit reserves the single turn slot synchronously', async () => {
@@ -38,7 +39,13 @@ test('submit reserves the single turn slot synchronously', async () => {
   runner.current.resolve('final')
   await first.done
   assert.equal(controller.running, false)
-  assert.deepEqual(observed.at(-1), ['end', { turnId: first.turnId, outcome: 'done', sessionId: 'session-1' }])
+  const ended = observed.at(-1)
+  assert.equal(ended[0], 'end')
+  assert.equal(ended[1].turnId, first.turnId)
+  assert.equal(ended[1].outcome, 'done')
+  assert.equal(ended[1].sessionId, 'session-1')
+  assert.equal(ended[1].label, null)
+  assert.equal(ended[1].timings.failedCalls, 0)
   const types = frames.map(frame => frame.type)
   assert.ok(types.includes('chat.assistant'))
   assert.ok(types.includes('chat.done'))
@@ -53,9 +60,17 @@ test('empty prompts, bad attachments, and an unready runtime are rejected withou
   assert.equal(setup({ disabled: true }).controller.submit({ text: 'x' }).code, 'RUNTIME_NOT_READY')
 })
 
-test('stop interrupts once, reports stopping then stopped, and the slot frees afterwards', async () => {
+test('stop interrupts once, preserves the session ID, reports stopping then stopped, and frees the slot', async () => {
   const { controller, runner, frames, observed } = setup()
   const turn = controller.submit({ text: 'work' })
+  assert.deepEqual(frames[0], { v: 1, type: 'chat.session', sessionId: 'session-1' })
+  const interrupt = runner.interrupt.bind(runner)
+  runner.interrupt = async () => {
+    const result = await interrupt()
+    runner.resumeSessionId = result.sessionId
+    runner.sessionId = undefined
+    return result
+  }
   const stop = controller.stop()
   assert.equal(stop.state, 'stopping')
   assert.equal(controller.submit({ text: 'during stop' }).message, STOPPING_MESSAGE)
@@ -65,8 +80,11 @@ test('stop interrupts once, reports stopping then stopped, and the slot frees af
   assert.equal(runner.interrupts, 1)
   const types = frames.map(frame => frame.type)
   assert.ok(types.indexOf('chat.stopping') < types.indexOf('chat.stopped'))
-  assert.equal(frames.find(frame => frame.type === 'chat.stopped').reason, 'user')
+  const stopped = frames.find(frame => frame.type === 'chat.stopped')
+  assert.equal(stopped.reason, 'user')
+  assert.equal(stopped.sessionId, 'session-1')
   assert.equal(observed.at(-1)[1].outcome, 'stopped')
+  assert.equal(observed.at(-1)[1].sessionId, 'session-1')
   assert.equal(controller.running, false)
   assert.equal(controller.stop().state, 'idle')
 })
@@ -77,7 +95,12 @@ test('a run error publishes chat.error and ends the turn as error', async () => 
   runner.current.reject(new Error('model failed'))
   await turn.done
   assert.equal(frames.find(frame => frame.type === 'chat.error').message, 'model failed')
-  assert.deepEqual(observed.at(-1)[1], { turnId: turn.turnId, outcome: 'error', error: 'model failed' })
+  const ended = observed.at(-1)[1]
+  assert.equal(ended.turnId, turn.turnId)
+  assert.equal(ended.outcome, 'error')
+  assert.equal(ended.error, 'model failed')
+  assert.equal(ended.label, null)
+  assert.equal(ended.timings.failedCalls, 0)
 })
 
 test('stop during auto-capture ends the turn without starting the model', async () => {
@@ -246,7 +269,7 @@ test('steer stops the running turn and starts the new message in the freed slot'
   ])
   assert.equal(observed[2][1].clientMessageId, 'client-0002')
   const types = frames.map(frame => frame.type).filter(type => type !== 'chat.status')
-  assert.deepEqual(types, ['chat.stopping', 'chat.stopped', 'chat.user', 'chat.done'])
+  assert.deepEqual(types, ['chat.session', 'chat.stopping', 'chat.stopped', 'chat.session', 'chat.user', 'chat.done'])
 })
 
 test('steer while idle is an ordinary send, and a steer after Stop does not interrupt twice', async () => {
@@ -307,4 +330,91 @@ test('resume switches to a saved session only when idle and keeps the current on
   assert.equal((await controller.resumeChat('session-1')).code, 'TURN_BUSY')
   runner.current.resolve()
   await turn.done
+})
+
+test('reported completion label is parsed only from a leading word', () => {
+  assert.equal(parseReportedLabel('DONE — clicked once'), 'done')
+  assert.equal(parseReportedLabel('**Partial** because the sidebar did not answer'), 'partial')
+  assert.equal(parseReportedLabel('blocked: sign-in required'), 'blocked')
+  assert.equal(parseReportedLabel('  Done.'), 'done')
+  assert.equal(parseReportedLabel('`BLOCKED` by CAPTCHA'), 'blocked')
+  assert.equal(parseReportedLabel('Donegal is a county'), null)
+  assert.equal(parseReportedLabel('The page says done.'), null)
+  assert.equal(parseReportedLabel('All set.'), null)
+  assert.equal(parseReportedLabel('OK — done'), null)
+  assert.equal(parseReportedLabel('PARTIALLY done'), null)
+  assert.equal(parseReportedLabel(''), null)
+  assert.equal(parseReportedLabel(undefined), null)
+})
+
+test('turn.end and chat.done report the model label, failed calls, and token usage', async () => {
+  const { controller, runner, frames, observed, logStore } = setup()
+  const turn = controller.submit({ text: 'work' })
+  await runner.started()
+  runner.toolCall('call-1', 'browser_click', '{}')
+  runner.toolResult({ callId: 'call-1', isError: true, text: 'target moved' })
+  runner.toolCall('call-2', 'browser_click', '{}')
+  runner.toolResult({ callId: 'call-2', isError: false, text: 'clicked' })
+  const usage = { inputTokens: 120, outputTokens: 30, totalTokens: 150, cacheReadTokens: 40 }
+  runner.assistant('PARTIAL — did most of it', usage)
+  runner.current.resolve('PARTIAL — did most of it')
+  await turn.done
+
+  const done = frames.find(frame => frame.type === 'chat.done')
+  assert.equal(done.label, 'partial')
+  assert.deepEqual(done.usage, usage)
+  assert.equal(done.timings.failedCalls, 1)
+  assert.equal(done.timings.toolCalls, 2)
+
+  const ended = observed.at(-1)[1]
+  assert.equal(ended.label, 'partial')
+  assert.deepEqual(ended.usage, usage)
+  assert.equal(ended.timings.failedCalls, 1)
+
+  const logged = logStore.calls.filter(([name]) => name === 'turnEnd').at(-1)[2]
+  assert.equal(logged.label, 'partial')
+  assert.deepEqual(logged.usage, usage)
+  assert.equal(logged.timings.failedCalls, 1)
+})
+
+test('an answer without a leading completion label records null', async () => {
+  const { controller, runner, frames, observed } = setup()
+  const turn = controller.submit({ text: 'work' })
+  await runner.started()
+  runner.assistant('All set.')
+  runner.current.resolve('All set.')
+  await turn.done
+  assert.equal(frames.find(frame => frame.type === 'chat.done').label, null)
+  assert.equal(observed.at(-1)[1].label, null)
+})
+
+test('a stopped turn records elapsed time, failed calls, and partial usage without a label', async () => {
+  const { controller, runner, frames, observed, logStore } = setup()
+  const turn = controller.submit({ text: 'long task' })
+  await runner.started()
+  runner.toolCall('call-1', 'browser_click', '{}')
+  runner.toolResult({ callId: 'call-1', isError: true, text: 'failed' })
+  const usage = { inputTokens: 60, outputTokens: 10, totalTokens: 70, cacheReadTokens: 5 }
+  runner.assistant('working on it', usage)
+  const stop = controller.stop()
+  await stop.done
+  await turn.done
+
+  const stopped = frames.find(frame => frame.type === 'chat.stopped')
+  assert.equal(stopped.reason, 'user')
+  assert.deepEqual(stopped.usage, usage)
+  assert.equal(stopped.timings.failedCalls, 1)
+  assert.ok(Number.isFinite(stopped.timings.totalMs) && stopped.timings.totalMs >= 0)
+
+  const ended = observed.at(-1)[1]
+  assert.equal(ended.outcome, 'stopped')
+  assert.equal(ended.label, null)
+  assert.deepEqual(ended.usage, usage)
+  assert.equal(ended.timings.failedCalls, 1)
+
+  const logged = logStore.calls.filter(([name]) => name === 'turnEnd').at(-1)[2]
+  assert.equal(logged.aborted, true)
+  assert.equal(logged.label, null)
+  assert.deepEqual(logged.usage, usage)
+  assert.equal(logged.timings.failedCalls, 1)
 })

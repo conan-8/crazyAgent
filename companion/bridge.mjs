@@ -49,6 +49,7 @@ export class Bridge {
    *   log: (message: string) => void,
    *   onChat: (text: string, ui: import('ws').WebSocket, message: Record<string, unknown>) => void | Promise<void>,
    *   onNewChat: (ui: import('ws').WebSocket) => void | Promise<void>,
+   *   onResumeChat?: (sessionId: string, ui: import('ws').WebSocket) => void | Promise<void>,
    *   onStop?: (ui: import('ws').WebSocket, message: Record<string, unknown>) => void | Promise<void>,
    *   onConnectionChange?: () => void,
    *   onLog?: (entry: {direction: 'in'|'out'|'event', role?: string, frame: Record<string, any>}) => void,
@@ -65,6 +66,7 @@ export class Bridge {
     this.log = options.log
     this.onChat = options.onChat
     this.onNewChat = options.onNewChat
+    this.onResumeChat = options.onResumeChat
     this.onStop = options.onStop
     this.onConnectionChange = options.onConnectionChange
     this.onLog = options.onLog
@@ -450,6 +452,12 @@ export class Bridge {
         })
         return
       }
+      if (message.type === 'chat.resume' && typeof message.sessionId === 'string') {
+        Promise.resolve(this.onResumeChat?.(message.sessionId, ws)).catch(error => {
+          this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'chat.error', message: errorMessage(error), recoverable: true })
+        })
+        return
+      }
       if (message.type === 'chat.stop') {
         // A stop is a lifecycle request, not a prompt: route it to its own
         // callback so it cannot be mistaken for chat.send (and vice versa).
@@ -552,7 +560,10 @@ export class Bridge {
   }
 
   /** @param {Record<string, any>} message */
-  #onBrowserResult(message) {
+  #onBrowserResult(frame) {
+    // People see `displayImage`, the capture without the model's numbered boxes.
+    // It stops here: the model, the logs, and later clients get the normal frame.
+    const { displayImage, ...message } = frame
     const id = typeof message.id === 'string' ? message.id : undefined
     if (id === undefined) return
     const request = this.uiRequests.get(id)
@@ -574,7 +585,7 @@ export class Bridge {
     if (this.onImage !== undefined && isRecord(image) && typeof image.data === 'string') {
       try {
         this.onImage({
-          image,
+          image: isRecord(displayImage) && typeof displayImage.data === 'string' ? displayImage : image,
           turnId: annotated.turnId,
           callId: annotated.callId,
           source: request !== undefined ? (request.source ?? 'auto') : 'tool',

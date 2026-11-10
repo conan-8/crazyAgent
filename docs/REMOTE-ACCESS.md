@@ -289,12 +289,14 @@ Code: `companion/remote-server.mjs` (listener, auth, routes), `companion/remote-
 - `chat.draft{streamId,channel:"text"|"reasoning"|"tool",offset,delta,toolCallId?,name?}`.
 - `chat.assistant`, `chat.tool_call`, `chat.done`, and `chat.error` carry `replacesStreamId` when they supersede a draft.
 - `chat.status{status,tool,turnStatus}`: during a turn it is deduplicated activity phases; outside a turn it is derived from runtime health, because panel status frames only flow while a panel is connected.
-- `chat.turn{...turn}` is new: the authoritative end-of-turn projection with `outcome` `done`, `stopped`, or `error`.
+- `chat.done` carries `usage` (`inputTokens`/`outputTokens`/`totalTokens`/`cacheReadTokens`) and `label` (`done`|`partial`|`blocked`|`null`, the model's own leading word; model-reported evidence, never verification); its `timings` includes `failedCalls`. `chat.stopped` carries `timings` (elapsed + failed calls) and the partial `usage` collected before the stop, so an aborted turn still reports cost and failures. Only finite, non-negative counters are forwarded; anything else is `null`.
+- `chat.turn{...turn}` is new: the authoritative end-of-turn projection with `outcome` `done`, `stopped`, or `error`; it also carries the last turn's `label`, `usage`, and `failedCalls` (reset to `null` at the next turn start).
 - `remote.health` is emitted only when health changes.
 - `chat.session{sessionId}` starts an empty chat. With `resumed:true,restoredMessages:n` a saved chat became live again; its earlier messages are only in the projection, so a client resyncs when `n > 0`.
 - Steering: `POST /messages` accepts `steer:true` (part of the idempotency fingerprint). When a turn is running, the companion stops it exactly as Stop does and starts this message as the next turn in the resumed session, in the same tick the stopped turn releases the slot. The reply is `202` with `steered:true` and the new turn's ID; the `chat.user` event follows `chat.stopped`. Only one message may wait (`409 STEER_PENDING`). When idle, `steer:true` is an ordinary send. If the runtime is gone when the slot frees, a `chat.error` reports that the steering message was not sent.
 - `remote.screenshot{screenshotId,callId,capturedAt,width,height,mimeType,bytes,source:"auto"|"tool"|"manual"|"help"}` is emitted for every image the side panel returns to the companion: an auto view, a tool result, a capture a phone asked for, or the capture taken for a help request. It carries metadata only; it is not part of the committed transcript or saved history.
 - `chat.stopped{reason:"idle"}` replies and panel-only busy errors are not journaled.
+- Clients: the side panel shows the finished turn's token count in its summary; the Android app shows tokens in the Done note and duration/failed-call/token meta in the Stopped note. Missing usage is omitted, never invented.
 - `remote.state` is not used; `remote.resync` plays that role.
 - The turn states in use are `starting`, `idle`, `running`, `stopping`, `waiting_for_user`, and `error`. An error state persists until the next turn.
 - `remote.help{turnId,category,reason,screenshotId,captureError,requestedAt}` is published when a finished turn carried a help request, immediately before that turn's `chat.turn{status:"waiting_for_user",outcome:"done"}`. `chat.done` for that turn carries `help{category,reason}`. `chat.user` (any origin) and `chat.session` clear the request; `chat.session` also returns a waiting status to `idle` without a separate `chat.turn`.
@@ -874,7 +876,7 @@ These are existing implementation facts, not the proposed remote API:
 
 **Added in Milestone 1:**
 
-- `companion/remote-server.mjs`, `remote-hub.mjs`, `remote-token.mjs`, `session-controller.mjs` — listener/auth/routes, journal/projection/idempotency, credential, and the shared chat/new/stop controller.
+- `companion/remote-server.mjs`, `remote-hub.mjs`, `remote-token.mjs`, `session-controller.mjs` — listener/auth/routes, journal/projection/idempotency, credential, and the shared chat/new/stop/resume controller.
 - `companion/test/remote-server.test.mjs`, `remote-hub.test.mjs`, `remote-token.test.mjs`, `session-controller.test.mjs`, `remote-fixtures.mjs` — no live model or real FCM.
 
 **Added in Milestone 2:**

@@ -20,6 +20,12 @@
   --font: "Geist", "Segoe UI", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  --motion-fast: 120ms;
+  --motion: 180ms;
+  --motion-slow: 240ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Lets height/keyframes interpolate to and from `auto`. */
+  interpolate-size: allow-keywords;
 }
 
 * {
@@ -420,7 +426,6 @@ textarea {
   justify-content: flex-end;
   gap: 7px;
   margin: 6px 0 16px;
-  animation: rise 0.25s ease-out;
 }
 
 .turn-label {
@@ -456,10 +461,10 @@ textarea {
 .activity-step {
   margin: 0 0 3px;
   overflow: visible;
-  animation: rise 0.28s ease-out;
 }
 
 .step-head {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -539,6 +544,13 @@ textarea {
   padding: 2px 0 2px 18px;
   overflow-y: auto;
   border-left: 1px dashed #333;
+  transition:
+    height var(--motion-slow) var(--ease),
+    max-height var(--motion-slow) var(--ease),
+    margin-bottom var(--motion-slow) var(--ease),
+    padding var(--motion-slow) var(--ease),
+    opacity var(--motion) var(--ease),
+    display var(--motion-slow) allow-discrete;
 }
 
 .thinking-wait {
@@ -549,6 +561,8 @@ textarea {
   color: #8f8157;
   font-size: 12px;
   letter-spacing: 0.01em;
+  /* A short delay so an instant first token never flashes the waiting row. */
+  animation: fade-in var(--motion) var(--ease) 80ms both;
 }
 
 .thinking-ball-scene {
@@ -617,6 +631,24 @@ textarea {
 
 .activity-step.collapsed .step-body {
   display: none;
+  height: 0;
+  max-height: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+}
+
+/* Reopening only: a brand-new step is already grown in as a whole (.entering). */
+@starting-style {
+  .activity-step:not(.collapsed, .entering) .step-body {
+    height: 0;
+    max-height: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+  }
 }
 
 .activity-step.collapsed .step-caret {
@@ -627,13 +659,25 @@ textarea {
   color: #a0a0a0;
 }
 
-.activity-step.running .step-title {
-  background: linear-gradient(90deg, #7a7a7a 0%, #7a7a7a 35%, #f2f2f2 50%, #7a7a7a 65%, #7a7a7a 100%);
-  background-size: 200% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  animation: shimmer 1.8s linear infinite;
+/* The current action. The sweep is a mask, so the color itself stays the highlight
+   yellow and can still ease back to grey when the step ends. */
+.activity-step.running:not(.settled) .step-title {
+  color: var(--accent);
+  mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.86) 20%, #000 50%, rgba(0, 0, 0, 0.86) 80%);
+  mask-size: 200% 100%;
+  animation: shimmer-mask 1.8s linear infinite;
+}
+
+.motion-ghost {
+  position: absolute;
+  margin: 0;
+  pointer-events: none;
+}
+
+.feed-ghost {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
 }
 
 .activity-step.abandoned {
@@ -649,7 +693,6 @@ textarea {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.65;
-  animation: rise 0.18s ease-out;
 }
 
 .act-kind {
@@ -750,7 +793,6 @@ textarea {
   color: #e4e4e4;
   font-size: 14px;
   line-height: 1.65;
-  animation: rise 0.35s ease-out;
 }
 
 .answer-label {
@@ -2486,6 +2528,21 @@ input::placeholder {
   }
 }
 
+@keyframes shimmer-mask {
+  from {
+    mask-position: 150% 0;
+  }
+  to {
+    mask-position: -50% 0;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;
@@ -2885,6 +2942,7 @@ input::placeholder {
   color: var(--muted);
   font-size: 14px;
   text-align: left;
+  transition: color var(--motion) var(--ease);
 }
 
 .agent-turn-summary::after {
@@ -2900,18 +2958,32 @@ input::placeholder {
 
 .agent-turn.collapsed .agent-turn-steps {
   display: none;
+  height: 0;
+  opacity: 0;
+}
+
+@starting-style {
+  .agent-turn:not(.collapsed) .agent-turn-steps {
+    height: 0;
+    opacity: 0;
+  }
 }
 
 .agent-turn.running .agent-turn-summary {
-  background: linear-gradient(90deg, #777 20%, #eee 50%, #777 80%);
-  background-size: 200% 100%;
-  color: transparent;
-  background-clip: text;
-  animation: shimmer 1.8s linear infinite;
+  color: #e6e6e6;
+  mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.5) 20%, #000 50%, rgba(0, 0, 0, 0.5) 80%);
+  mask-size: 200% 100%;
+  animation: shimmer-mask 1.8s linear infinite;
 }
 
 .agent-turn-steps {
   min-height: 0;
+  overflow: clip;
+  overflow-clip-margin: 4px;
+  transition:
+    height var(--motion-slow) var(--ease),
+    opacity var(--motion) var(--ease),
+    display var(--motion-slow) allow-discrete;
 }
 
 .step-icon {
@@ -2935,14 +3007,7 @@ input::placeholder {
   color: #c4c4c4;
   font-size: 14px;
   text-transform: capitalize;
-}
-
-.activity-step.running .step-title {
-  background: linear-gradient(90deg, #777 20%, #eee 50%, #777 80%);
-  background-size: 200% 100%;
-  color: transparent;
-  background-clip: text;
-  animation: shimmer 1.8s linear infinite;
+  transition: color var(--motion) var(--ease);
 }
 
 .activity-step .step-meta {
@@ -3458,6 +3523,46 @@ input::placeholder {
 @keyframes recent-session-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* Anything toggled with .hidden fades instead of popping. `display` stays on through
+   the exit, so a closing surface must also stop taking clicks. */
+:is(
+  .activity-empty, .recent-sessions, .prompt-rail, .back-home, .banner, .message-queue,
+  .plan-mode, .slash-menu, .model-menu, .model-options, .modal, .toast, .history-current,
+  .activity-timer, .stop
+) {
+  transition:
+    opacity var(--motion) var(--ease),
+    display var(--motion) allow-discrete;
+}
+
+:is(
+  .activity-empty, .recent-sessions, .prompt-rail, .back-home, .banner, .message-queue,
+  .plan-mode, .slash-menu, .model-menu, .model-options, .modal, .toast, .history-current,
+  .activity-timer, .stop
+).hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.back-home {
+  transition:
+    color var(--motion-fast) ease,
+    background var(--motion-fast) ease,
+    transform var(--motion-fast) ease,
+    opacity var(--motion) var(--ease),
+    display var(--motion) allow-discrete;
+}
+
+@starting-style {
+  :is(
+    .activity-empty, .recent-sessions, .prompt-rail, .back-home, .banner, .message-queue,
+    .plan-mode, .slash-menu, .model-menu, .model-options, .modal, .toast, .history-current,
+    .activity-timer, .stop
+  ):not(.hidden) {
+    opacity: 0;
   }
 }
 

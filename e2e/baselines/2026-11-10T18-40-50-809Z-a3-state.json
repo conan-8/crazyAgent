@@ -1,0 +1,92 @@
+{
+  "startedAt": "2026-11-10T18:40:50.809Z",
+  "finishedAt": "2026-11-10T18:41:17.013Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 1,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 67903,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "click-once",
+      "fixture": "click.html",
+      "prompt": "Click the Increment button on this page exactly once, then tell me what the count is.",
+      "file": "click-once.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwb1cul1-508e",
+          "status": "pass",
+          "reasons": [
+            "count is exactly 1 and no other counter changed"
+          ],
+          "evidence": {
+            "count": "1",
+            "roleCount": "0",
+            "semanticCount": "0",
+            "checkState": "unchecked"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 24940,
+            "error": null,
+            "outcome": "done",
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_click",
+                "message": "Error: browser_click.expect.text_landed is incompatible with this action's available evidence; reject it before dispatch"
+              }
+            ],
+            "toolCounts": {
+              "browser_click": 2
+            },
+            "inputTokens": 43858,
+            "outputTokens": 2740,
+            "cacheReadTokens": 21305,
+            "totalTokens": 67903,
+            "usage": {
+              "inputTokens": 43858,
+              "outputTokens": 2740,
+              "totalTokens": 67903,
+              "cacheReadTokens": 21305
+            },
+            "finalText": "DONE — Clicked the Increment button once; the count is now **1**.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwb1cul1-508e",
+              "origin": "remote",
+              "clientMessageId": "bc4a773c-46b8-4185-b38a-c172c6ff7325",
+              "startedAt": "2026-11-10T18:40:51.925Z",
+              "endedAt": "2026-11-10T18:41:16.865Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 43858,
+                "outputTokens": 2740,
+                "totalTokens": 67903,
+                "cacheReadTokens": 21305
+              },
+              "failedCalls": 1
+            }
+          },
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}
