@@ -1,0 +1,15 @@
+.gradle/
+.kotlin/
+build/
+/local.properties
+/captures/
+.idea/
+*.iml
+.cxx/
+.externalNativeBuild/
+# Signing and Firebase configuration stay local.
+*.jks
+*.keystore
+keystore.properties
+google-services.json
+firebase.properties

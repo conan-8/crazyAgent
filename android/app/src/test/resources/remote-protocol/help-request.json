@@ -1,0 +1,940 @@
+{
+  "name": "help-request",
+  "frames": [
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 3,
+      "type": "remote.resync",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:04.000Z",
+      "body": {
+        "reason": "no-instance",
+        "state": {
+          "protocol": 1,
+          "server": {
+            "name": "crazyagent-companion",
+            "version": "fixture"
+          },
+          "instanceId": "companion-fixture-d",
+          "sessionId": "session-1",
+          "latestSequence": 3,
+          "oldestSequence": 1,
+          "turn": {
+            "status": "idle",
+            "turnId": null,
+            "origin": null,
+            "clientMessageId": null,
+            "startedAt": null,
+            "endedAt": null,
+            "outcome": null,
+            "error": null
+          },
+          "phase": {
+            "status": null,
+            "tool": null
+          },
+          "health": {
+            "uiConnected": true,
+            "toolsConnected": true,
+            "dsh": "ready",
+            "dshMessage": null,
+            "provider": "openrouter",
+            "model": "fixture/model",
+            "autoCapture": true,
+            "contextWindow": null,
+            "contextTokens": null
+          },
+          "messages": [],
+          "draft": null,
+          "latestScreenshotId": null,
+          "latestScreenshot": null,
+          "help": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 4,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-5",
+      "occurredAt": "2026-11-06T12:00:06.000Z",
+      "body": {
+        "text": "Check my inbox",
+        "origin": "remote",
+        "clientMessageId": "client-turn-5",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 5,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-5",
+      "occurredAt": "2026-11-06T12:00:07.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 6,
+      "type": "chat.assistant",
+      "sessionId": "session-1",
+      "turnId": "turn-5",
+      "occurredAt": "2026-11-06T12:00:08.000Z",
+      "body": {
+        "text": "I need you to sign in."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 7,
+      "type": "remote.screenshot",
+      "sessionId": "session-1",
+      "turnId": "turn-5",
+      "occurredAt": "2026-11-06T12:00:10.000Z",
+      "body": {
+        "screenshotId": "shot-fixture-1",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:09.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "help"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 8,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-5",
+      "occurredAt": "2026-11-06T12:00:11.000Z",
+      "body": {
+        "text": "I need you to sign in.",
+        "timings": null,
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "help": {
+          "category": "login",
+          "reason": "Sign in to the mail site, then tell me to continue."
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 9,
+      "type": "remote.help",
+      "sessionId": "session-1",
+      "turnId": "turn-5",
+      "occurredAt": "2026-11-06T12:00:13.000Z",
+      "body": {
+        "turnId": "turn-5",
+        "category": "login",
+        "reason": "Sign in to the mail site, then tell me to continue.",
+        "screenshotId": "shot-fixture-1",
+        "captureError": null,
+        "requestedAt": "2026-11-06T12:00:12.000Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 10,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-5",
+      "occurredAt": "2026-11-06T12:00:15.000Z",
+      "body": {
+        "status": "waiting_for_user",
+        "turnId": "turn-5",
+        "origin": "remote",
+        "clientMessageId": "client-turn-5",
+        "startedAt": "2026-11-06T12:00:05.000Z",
+        "endedAt": "2026-11-06T12:00:14.000Z",
+        "outcome": "done",
+        "error": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 11,
+      "type": "remote.screenshot",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:17.000Z",
+      "body": {
+        "screenshotId": "shot-fixture-2",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:16.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "manual"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 12,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-6",
+      "occurredAt": "2026-11-06T12:00:19.000Z",
+      "body": {
+        "text": "Signed in, continue",
+        "origin": "remote",
+        "clientMessageId": "client-turn-6",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 13,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-6",
+      "occurredAt": "2026-11-06T12:00:20.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 14,
+      "type": "chat.assistant",
+      "sessionId": "session-1",
+      "turnId": "turn-6",
+      "occurredAt": "2026-11-06T12:00:21.000Z",
+      "body": {
+        "text": "You have 3 new messages."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 15,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-6",
+      "occurredAt": "2026-11-06T12:00:22.000Z",
+      "body": {
+        "text": "You have 3 new messages.",
+        "timings": null,
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 16,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-6",
+      "occurredAt": "2026-11-06T12:00:24.000Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-6",
+        "origin": "remote",
+        "clientMessageId": "client-turn-6",
+        "startedAt": "2026-11-06T12:00:18.000Z",
+        "endedAt": "2026-11-06T12:00:23.000Z",
+        "outcome": "done",
+        "error": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 17,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-7",
+      "occurredAt": "2026-11-06T12:00:26.000Z",
+      "body": {
+        "text": "Open the attachment",
+        "origin": "remote",
+        "clientMessageId": "client-turn-7",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 18,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-7",
+      "occurredAt": "2026-11-06T12:00:27.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 19,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-7",
+      "occurredAt": "2026-11-06T12:00:28.000Z",
+      "body": {
+        "text": "A CAPTCHA is in the way.",
+        "timings": null,
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "help": {
+          "category": "captcha",
+          "reason": "Solve the CAPTCHA on the download page."
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 20,
+      "type": "remote.help",
+      "sessionId": "session-1",
+      "turnId": "turn-7",
+      "occurredAt": "2026-11-06T12:00:30.000Z",
+      "body": {
+        "turnId": "turn-7",
+        "category": "captcha",
+        "reason": "Solve the CAPTCHA on the download page.",
+        "screenshotId": null,
+        "captureError": "The browser side panel is not connected, so the screen cannot be captured.",
+        "requestedAt": "2026-11-06T12:00:29.000Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 21,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-7",
+      "occurredAt": "2026-11-06T12:00:32.000Z",
+      "body": {
+        "status": "waiting_for_user",
+        "turnId": "turn-7",
+        "origin": "remote",
+        "clientMessageId": "client-turn-7",
+        "startedAt": "2026-11-06T12:00:25.000Z",
+        "endedAt": "2026-11-06T12:00:31.000Z",
+        "outcome": "done",
+        "error": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-d",
+      "seq": 22,
+      "type": "chat.session",
+      "sessionId": "session-2",
+      "occurredAt": "2026-11-06T12:00:33.000Z",
+      "body": {
+        "sessionId": "session-2"
+      }
+    }
+  ],
+  "final": {
+    "protocol": 1,
+    "server": {
+      "name": "crazyagent-companion",
+      "version": "fixture"
+    },
+    "instanceId": "companion-fixture-d",
+    "sessionId": "session-2",
+    "latestSequence": 22,
+    "oldestSequence": 1,
+    "turn": {
+      "status": "idle",
+      "turnId": "turn-7",
+      "origin": "remote",
+      "clientMessageId": "client-turn-7",
+      "startedAt": "2026-11-06T12:00:25.000Z",
+      "endedAt": "2026-11-06T12:00:31.000Z",
+      "outcome": "done",
+      "error": null
+    },
+    "phase": {
+      "status": null,
+      "tool": null
+    },
+    "health": {
+      "uiConnected": true,
+      "toolsConnected": true,
+      "dsh": "ready",
+      "dshMessage": null,
+      "provider": "openrouter",
+      "model": "fixture/model",
+      "autoCapture": true,
+      "contextWindow": null,
+      "contextTokens": null
+    },
+    "messages": [],
+    "draft": null,
+    "latestScreenshotId": null,
+    "latestScreenshot": null,
+    "help": null
+  },
+  "checkpoints": {
+    "waiting": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-d",
+      "sessionId": "session-1",
+      "latestSequence": 10,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "waiting_for_user",
+        "turnId": "turn-5",
+        "origin": "remote",
+        "clientMessageId": "client-turn-5",
+        "startedAt": "2026-11-06T12:00:05.000Z",
+        "endedAt": "2026-11-06T12:00:14.000Z",
+        "outcome": "done",
+        "error": null
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 4,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:06.000Z",
+          "body": {
+            "text": "Check my inbox",
+            "origin": "remote",
+            "clientMessageId": "client-turn-5",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 6,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:08.000Z",
+          "body": {
+            "text": "I need you to sign in."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 8,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:11.000Z",
+          "body": {
+            "text": "I need you to sign in.",
+            "timings": null,
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "help": {
+              "category": "login",
+              "reason": "Sign in to the mail site, then tell me to continue."
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-fixture-1",
+      "latestScreenshot": {
+        "screenshotId": "shot-fixture-1",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:09.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "help"
+      },
+      "help": {
+        "turnId": "turn-5",
+        "category": "login",
+        "reason": "Sign in to the mail site, then tell me to continue.",
+        "screenshotId": "shot-fixture-1",
+        "captureError": null,
+        "requestedAt": "2026-11-06T12:00:12.000Z"
+      }
+    },
+    "waitingAfterCapture": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-d",
+      "sessionId": "session-1",
+      "latestSequence": 11,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "waiting_for_user",
+        "turnId": "turn-5",
+        "origin": "remote",
+        "clientMessageId": "client-turn-5",
+        "startedAt": "2026-11-06T12:00:05.000Z",
+        "endedAt": "2026-11-06T12:00:14.000Z",
+        "outcome": "done",
+        "error": null
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 4,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:06.000Z",
+          "body": {
+            "text": "Check my inbox",
+            "origin": "remote",
+            "clientMessageId": "client-turn-5",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 6,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:08.000Z",
+          "body": {
+            "text": "I need you to sign in."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 8,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:11.000Z",
+          "body": {
+            "text": "I need you to sign in.",
+            "timings": null,
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "help": {
+              "category": "login",
+              "reason": "Sign in to the mail site, then tell me to continue."
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-fixture-2",
+      "latestScreenshot": {
+        "screenshotId": "shot-fixture-2",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:16.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "manual"
+      },
+      "help": {
+        "turnId": "turn-5",
+        "category": "login",
+        "reason": "Sign in to the mail site, then tell me to continue.",
+        "screenshotId": "shot-fixture-1",
+        "captureError": null,
+        "requestedAt": "2026-11-06T12:00:12.000Z"
+      }
+    },
+    "afterReply": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-d",
+      "sessionId": "session-1",
+      "latestSequence": 16,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-6",
+        "origin": "remote",
+        "clientMessageId": "client-turn-6",
+        "startedAt": "2026-11-06T12:00:18.000Z",
+        "endedAt": "2026-11-06T12:00:23.000Z",
+        "outcome": "done",
+        "error": null
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 4,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:06.000Z",
+          "body": {
+            "text": "Check my inbox",
+            "origin": "remote",
+            "clientMessageId": "client-turn-5",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 6,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:08.000Z",
+          "body": {
+            "text": "I need you to sign in."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 8,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:11.000Z",
+          "body": {
+            "text": "I need you to sign in.",
+            "timings": null,
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "help": {
+              "category": "login",
+              "reason": "Sign in to the mail site, then tell me to continue."
+            }
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 12,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-6",
+          "occurredAt": "2026-11-06T12:00:19.000Z",
+          "body": {
+            "text": "Signed in, continue",
+            "origin": "remote",
+            "clientMessageId": "client-turn-6",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 14,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-6",
+          "occurredAt": "2026-11-06T12:00:21.000Z",
+          "body": {
+            "text": "You have 3 new messages."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 15,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-6",
+          "occurredAt": "2026-11-06T12:00:22.000Z",
+          "body": {
+            "text": "You have 3 new messages.",
+            "timings": null,
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-fixture-2",
+      "latestScreenshot": {
+        "screenshotId": "shot-fixture-2",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:16.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "manual"
+      },
+      "help": null
+    },
+    "waitingNoCapture": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-d",
+      "sessionId": "session-1",
+      "latestSequence": 21,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "waiting_for_user",
+        "turnId": "turn-7",
+        "origin": "remote",
+        "clientMessageId": "client-turn-7",
+        "startedAt": "2026-11-06T12:00:25.000Z",
+        "endedAt": "2026-11-06T12:00:31.000Z",
+        "outcome": "done",
+        "error": null
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 4,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:06.000Z",
+          "body": {
+            "text": "Check my inbox",
+            "origin": "remote",
+            "clientMessageId": "client-turn-5",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 6,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:08.000Z",
+          "body": {
+            "text": "I need you to sign in."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 8,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-5",
+          "occurredAt": "2026-11-06T12:00:11.000Z",
+          "body": {
+            "text": "I need you to sign in.",
+            "timings": null,
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "help": {
+              "category": "login",
+              "reason": "Sign in to the mail site, then tell me to continue."
+            }
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 12,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-6",
+          "occurredAt": "2026-11-06T12:00:19.000Z",
+          "body": {
+            "text": "Signed in, continue",
+            "origin": "remote",
+            "clientMessageId": "client-turn-6",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 14,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-6",
+          "occurredAt": "2026-11-06T12:00:21.000Z",
+          "body": {
+            "text": "You have 3 new messages."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 15,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-6",
+          "occurredAt": "2026-11-06T12:00:22.000Z",
+          "body": {
+            "text": "You have 3 new messages.",
+            "timings": null,
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 17,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-7",
+          "occurredAt": "2026-11-06T12:00:26.000Z",
+          "body": {
+            "text": "Open the attachment",
+            "origin": "remote",
+            "clientMessageId": "client-turn-7",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-d",
+          "seq": 19,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-7",
+          "occurredAt": "2026-11-06T12:00:28.000Z",
+          "body": {
+            "text": "A CAPTCHA is in the way.",
+            "timings": null,
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "help": {
+              "category": "captcha",
+              "reason": "Solve the CAPTCHA on the download page."
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-fixture-2",
+      "latestScreenshot": {
+        "screenshotId": "shot-fixture-2",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:16.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "manual"
+      },
+      "help": {
+        "turnId": "turn-7",
+        "category": "captcha",
+        "reason": "Solve the CAPTCHA on the download page.",
+        "screenshotId": null,
+        "captureError": "The browser side panel is not connected, so the screen cannot be captured.",
+        "requestedAt": "2026-11-06T12:00:29.000Z"
+      }
+    }
+  }
+}

@@ -1,0 +1,418 @@
+{
+  "name": "turn-stream",
+  "frames": [
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 3,
+      "type": "remote.resync",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:04.000Z",
+      "body": {
+        "reason": "no-instance",
+        "state": {
+          "protocol": 1,
+          "server": {
+            "name": "crazyagent-companion",
+            "version": "fixture"
+          },
+          "instanceId": "companion-fixture-a",
+          "sessionId": "session-1",
+          "latestSequence": 3,
+          "oldestSequence": 1,
+          "turn": {
+            "status": "idle",
+            "turnId": null,
+            "origin": null,
+            "clientMessageId": null,
+            "startedAt": null,
+            "endedAt": null,
+            "outcome": null,
+            "error": null
+          },
+          "phase": {
+            "status": null,
+            "tool": null
+          },
+          "health": {
+            "uiConnected": true,
+            "toolsConnected": true,
+            "dsh": "ready",
+            "dshMessage": null,
+            "provider": "openrouter",
+            "model": "fixture/model",
+            "autoCapture": true,
+            "contextWindow": null,
+            "contextTokens": null
+          },
+          "messages": [],
+          "draft": null,
+          "latestScreenshotId": null,
+          "latestScreenshot": null,
+          "help": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 4,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:06.000Z",
+      "body": {
+        "text": "Open the cart",
+        "origin": "remote",
+        "clientMessageId": "client-turn-1",
+        "imageCount": 1
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 5,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:07.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 6,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:08.000Z",
+      "body": {
+        "streamId": "turn-1:s1",
+        "channel": "reasoning",
+        "offset": 0,
+        "delta": "The user wants the cart."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 7,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:09.000Z",
+      "body": {
+        "streamId": "turn-1:s1",
+        "channel": "text",
+        "offset": 0,
+        "delta": "I'll open"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 8,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:10.000Z",
+      "body": {
+        "streamId": "turn-1:s1",
+        "channel": "text",
+        "offset": 9,
+        "delta": " the cart."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 9,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:11.000Z",
+      "body": {
+        "streamId": "turn-1:s1",
+        "channel": "tool",
+        "toolCallId": "call-1",
+        "name": "browser_click",
+        "offset": 0,
+        "delta": "{\"lab"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 10,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:12.000Z",
+      "body": {
+        "streamId": "turn-1:s1",
+        "channel": "tool",
+        "toolCallId": "call-1",
+        "name": "browser_click",
+        "offset": 5,
+        "delta": "el\":3}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 11,
+      "type": "chat.assistant",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:13.000Z",
+      "body": {
+        "text": "I'll open the cart.",
+        "replacesStreamId": "turn-1:s1"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 12,
+      "type": "chat.tool_call",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:14.000Z",
+      "body": {
+        "callId": "call-1",
+        "name": "browser_click",
+        "args": "{\"label\":3}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 13,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:15.000Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_click",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 14,
+      "type": "chat.tool_result",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:16.000Z",
+      "body": {
+        "callId": "call-1",
+        "ok": true,
+        "text": "clicked \"Cart\""
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 15,
+      "type": "remote.screenshot",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:18.000Z",
+      "body": {
+        "screenshotId": "shot-fixture-1",
+        "callId": "call-1",
+        "capturedAt": "2026-11-06T12:00:17.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "tool"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 16,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:19.000Z",
+      "body": {
+        "streamId": "turn-1:s3",
+        "channel": "text",
+        "offset": 0,
+        "delta": "The cart has 2 items."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 17,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:20.000Z",
+      "body": {
+        "text": "The cart has 2 items.",
+        "timings": {
+          "totalMs": 1234
+        },
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "replacesStreamId": "turn-1:s3"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-a",
+      "seq": 18,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-1",
+      "occurredAt": "2026-11-06T12:00:22.000Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-1",
+        "origin": "remote",
+        "clientMessageId": "client-turn-1",
+        "startedAt": "2026-11-06T12:00:05.000Z",
+        "endedAt": "2026-11-06T12:00:21.000Z",
+        "outcome": "done",
+        "error": null
+      }
+    }
+  ],
+  "final": {
+    "protocol": 1,
+    "server": {
+      "name": "crazyagent-companion",
+      "version": "fixture"
+    },
+    "instanceId": "companion-fixture-a",
+    "sessionId": "session-1",
+    "latestSequence": 18,
+    "oldestSequence": 1,
+    "turn": {
+      "status": "idle",
+      "turnId": "turn-1",
+      "origin": "remote",
+      "clientMessageId": "client-turn-1",
+      "startedAt": "2026-11-06T12:00:05.000Z",
+      "endedAt": "2026-11-06T12:00:21.000Z",
+      "outcome": "done",
+      "error": null
+    },
+    "phase": {
+      "status": null,
+      "tool": null
+    },
+    "health": {
+      "uiConnected": true,
+      "toolsConnected": true,
+      "dsh": "ready",
+      "dshMessage": null,
+      "provider": "openrouter",
+      "model": "fixture/model",
+      "autoCapture": true,
+      "contextWindow": null,
+      "contextTokens": null
+    },
+    "messages": [
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-a",
+        "seq": 4,
+        "type": "chat.user",
+        "sessionId": "session-1",
+        "turnId": "turn-1",
+        "occurredAt": "2026-11-06T12:00:06.000Z",
+        "body": {
+          "text": "Open the cart",
+          "origin": "remote",
+          "clientMessageId": "client-turn-1",
+          "imageCount": 1
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-a",
+        "seq": 11,
+        "type": "chat.assistant",
+        "sessionId": "session-1",
+        "turnId": "turn-1",
+        "occurredAt": "2026-11-06T12:00:13.000Z",
+        "body": {
+          "text": "I'll open the cart.",
+          "replacesStreamId": "turn-1:s1"
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-a",
+        "seq": 12,
+        "type": "chat.tool_call",
+        "sessionId": "session-1",
+        "turnId": "turn-1",
+        "occurredAt": "2026-11-06T12:00:14.000Z",
+        "body": {
+          "callId": "call-1",
+          "name": "browser_click",
+          "args": "{\"label\":3}"
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-a",
+        "seq": 14,
+        "type": "chat.tool_result",
+        "sessionId": "session-1",
+        "turnId": "turn-1",
+        "occurredAt": "2026-11-06T12:00:16.000Z",
+        "body": {
+          "callId": "call-1",
+          "ok": true,
+          "text": "clicked \"Cart\""
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-a",
+        "seq": 17,
+        "type": "chat.done",
+        "sessionId": "session-1",
+        "turnId": "turn-1",
+        "occurredAt": "2026-11-06T12:00:20.000Z",
+        "body": {
+          "text": "The cart has 2 items.",
+          "timings": {
+            "totalMs": 1234
+          },
+          "model": "fixture/model",
+          "docsVerification": null,
+          "docsVerificationReason": null,
+          "replacesStreamId": "turn-1:s3"
+        }
+      }
+    ],
+    "draft": null,
+    "latestScreenshotId": "shot-fixture-1",
+    "latestScreenshot": {
+      "screenshotId": "shot-fixture-1",
+      "callId": "call-1",
+      "capturedAt": "2026-11-06T12:00:17.000Z",
+      "width": 1,
+      "height": 1,
+      "mimeType": "image/png",
+      "bytes": 70,
+      "source": "tool"
+    },
+    "help": null
+  }
+}

@@ -1,0 +1,251 @@
+{
+  "name": "mid-turn-resync",
+  "frames": [
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-b",
+      "seq": 8,
+      "type": "remote.resync",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:10.000Z",
+      "body": {
+        "reason": "expired-sequence",
+        "state": {
+          "protocol": 1,
+          "server": {
+            "name": "crazyagent-companion",
+            "version": "fixture"
+          },
+          "instanceId": "companion-fixture-b",
+          "sessionId": "session-1",
+          "latestSequence": 8,
+          "oldestSequence": 1,
+          "turn": {
+            "status": "running",
+            "turnId": "turn-2",
+            "origin": "remote",
+            "clientMessageId": "client-turn-2",
+            "startedAt": "2026-11-06T12:00:04.000Z",
+            "endedAt": null,
+            "outcome": null,
+            "error": null
+          },
+          "phase": {
+            "status": "thinking",
+            "tool": null
+          },
+          "health": {
+            "uiConnected": true,
+            "toolsConnected": true,
+            "dsh": "ready",
+            "dshMessage": null,
+            "provider": "openrouter",
+            "model": "fixture/model",
+            "autoCapture": true,
+            "contextWindow": null,
+            "contextTokens": null
+          },
+          "messages": [
+            {
+              "v": 1,
+              "instanceId": "companion-fixture-b",
+              "seq": 4,
+              "type": "chat.user",
+              "sessionId": "session-1",
+              "turnId": "turn-2",
+              "occurredAt": "2026-11-06T12:00:05.000Z",
+              "body": {
+                "text": "Summarize the page",
+                "origin": "remote",
+                "clientMessageId": "client-turn-2",
+                "imageCount": 0
+              }
+            }
+          ],
+          "draft": {
+            "turnId": "turn-2",
+            "streamId": "turn-2:s1",
+            "text": "The page lists ",
+            "reasoning": "",
+            "tools": [
+              {
+                "id": "call-9",
+                "name": "browser_read_text",
+                "args": "{\"max"
+              }
+            ]
+          },
+          "latestScreenshotId": null,
+          "latestScreenshot": null,
+          "help": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-b",
+      "seq": 9,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-2",
+      "occurredAt": "2026-11-06T12:00:11.000Z",
+      "body": {
+        "streamId": "turn-2:s1",
+        "channel": "text",
+        "offset": 15,
+        "delta": "three products."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-b",
+      "seq": 10,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-2",
+      "occurredAt": "2026-11-06T12:00:12.000Z",
+      "body": {
+        "streamId": "turn-2:s1",
+        "channel": "tool",
+        "toolCallId": "call-9",
+        "name": "browser_read_text",
+        "offset": 5,
+        "delta": "_chars\":4000}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-b",
+      "seq": 11,
+      "type": "chat.assistant",
+      "sessionId": "session-1",
+      "turnId": "turn-2",
+      "occurredAt": "2026-11-06T12:00:13.000Z",
+      "body": {
+        "text": "The page lists three products.",
+        "replacesStreamId": "turn-2:s1"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-b",
+      "seq": 12,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-2",
+      "occurredAt": "2026-11-06T12:00:14.000Z",
+      "body": {
+        "text": "The page lists three products.",
+        "timings": null,
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-b",
+      "seq": 13,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-2",
+      "occurredAt": "2026-11-06T12:00:16.000Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-2",
+        "origin": "remote",
+        "clientMessageId": "client-turn-2",
+        "startedAt": "2026-11-06T12:00:04.000Z",
+        "endedAt": "2026-11-06T12:00:15.000Z",
+        "outcome": "done",
+        "error": null
+      }
+    }
+  ],
+  "final": {
+    "protocol": 1,
+    "server": {
+      "name": "crazyagent-companion",
+      "version": "fixture"
+    },
+    "instanceId": "companion-fixture-b",
+    "sessionId": "session-1",
+    "latestSequence": 13,
+    "oldestSequence": 1,
+    "turn": {
+      "status": "idle",
+      "turnId": "turn-2",
+      "origin": "remote",
+      "clientMessageId": "client-turn-2",
+      "startedAt": "2026-11-06T12:00:04.000Z",
+      "endedAt": "2026-11-06T12:00:15.000Z",
+      "outcome": "done",
+      "error": null
+    },
+    "phase": {
+      "status": null,
+      "tool": null
+    },
+    "health": {
+      "uiConnected": true,
+      "toolsConnected": true,
+      "dsh": "ready",
+      "dshMessage": null,
+      "provider": "openrouter",
+      "model": "fixture/model",
+      "autoCapture": true,
+      "contextWindow": null,
+      "contextTokens": null
+    },
+    "messages": [
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-b",
+        "seq": 4,
+        "type": "chat.user",
+        "sessionId": "session-1",
+        "turnId": "turn-2",
+        "occurredAt": "2026-11-06T12:00:05.000Z",
+        "body": {
+          "text": "Summarize the page",
+          "origin": "remote",
+          "clientMessageId": "client-turn-2",
+          "imageCount": 0
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-b",
+        "seq": 11,
+        "type": "chat.assistant",
+        "sessionId": "session-1",
+        "turnId": "turn-2",
+        "occurredAt": "2026-11-06T12:00:13.000Z",
+        "body": {
+          "text": "The page lists three products.",
+          "replacesStreamId": "turn-2:s1"
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-b",
+        "seq": 12,
+        "type": "chat.done",
+        "sessionId": "session-1",
+        "turnId": "turn-2",
+        "occurredAt": "2026-11-06T12:00:14.000Z",
+        "body": {
+          "text": "The page lists three products.",
+          "timings": null,
+          "model": "fixture/model",
+          "docsVerification": null,
+          "docsVerificationReason": null
+        }
+      }
+    ],
+    "draft": null,
+    "latestScreenshotId": null,
+    "latestScreenshot": null,
+    "help": null
+  }
+}

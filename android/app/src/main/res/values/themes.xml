@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.CrazyAgentRemote" parent="android:Theme.Material.NoActionBar" />
+</resources>
