@@ -1,0 +1,424 @@
+{
+  "name": "lifecycle",
+  "frames": [
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 3,
+      "type": "remote.resync",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:04.000Z",
+      "body": {
+        "reason": "no-instance",
+        "state": {
+          "protocol": 1,
+          "server": {
+            "name": "crazyagent-companion",
+            "version": "fixture"
+          },
+          "instanceId": "companion-fixture-c",
+          "sessionId": "session-1",
+          "latestSequence": 3,
+          "oldestSequence": 1,
+          "turn": {
+            "status": "idle",
+            "turnId": null,
+            "origin": null,
+            "clientMessageId": null,
+            "startedAt": null,
+            "endedAt": null,
+            "outcome": null,
+            "error": null
+          },
+          "phase": {
+            "status": null,
+            "tool": null
+          },
+          "health": {
+            "uiConnected": true,
+            "toolsConnected": true,
+            "dsh": "ready",
+            "dshMessage": null,
+            "provider": "openrouter",
+            "model": "fixture/model",
+            "autoCapture": true,
+            "contextWindow": null,
+            "contextTokens": null
+          },
+          "messages": [],
+          "draft": null,
+          "latestScreenshotId": null,
+          "latestScreenshot": null,
+          "help": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 4,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-3",
+      "occurredAt": "2026-11-06T12:00:06.000Z",
+      "body": {
+        "text": "Long task",
+        "origin": "remote",
+        "clientMessageId": "client-turn-3",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 5,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-3",
+      "occurredAt": "2026-11-06T12:00:07.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 6,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-3",
+      "occurredAt": "2026-11-06T12:00:08.000Z",
+      "body": {
+        "streamId": "turn-3:s1",
+        "channel": "text",
+        "offset": 0,
+        "delta": "Working"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 7,
+      "type": "remote.screenshot",
+      "sessionId": "session-1",
+      "turnId": "turn-3",
+      "occurredAt": "2026-11-06T12:00:10.000Z",
+      "body": {
+        "screenshotId": "shot-fixture-1",
+        "callId": null,
+        "capturedAt": "2026-11-06T12:00:09.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "auto"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 8,
+      "type": "chat.stopping",
+      "sessionId": "session-1",
+      "turnId": "turn-3",
+      "occurredAt": "2026-11-06T12:00:11.000Z",
+      "body": {
+        "message": "Stopping…"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 9,
+      "type": "chat.stopped",
+      "sessionId": "session-1",
+      "turnId": "turn-3",
+      "occurredAt": "2026-11-06T12:00:12.000Z",
+      "body": {
+        "reason": "user",
+        "message": "Stopped."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 10,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-3",
+      "occurredAt": "2026-11-06T12:00:14.000Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-3",
+        "origin": "remote",
+        "clientMessageId": "client-turn-3",
+        "startedAt": "2026-11-06T12:00:05.000Z",
+        "endedAt": "2026-11-06T12:00:13.000Z",
+        "outcome": "stopped",
+        "error": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 11,
+      "type": "remote.health",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:15.000Z",
+      "body": {
+        "uiConnected": false,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 12,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-4",
+      "occurredAt": "2026-11-06T12:00:17.000Z",
+      "body": {
+        "text": "Click buy",
+        "origin": "remote",
+        "clientMessageId": "client-turn-4",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 13,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-4",
+      "occurredAt": "2026-11-06T12:00:18.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 14,
+      "type": "chat.error",
+      "sessionId": "session-1",
+      "turnId": "turn-4",
+      "occurredAt": "2026-11-06T12:00:19.000Z",
+      "body": {
+        "message": "The side panel is not connected.",
+        "recoverable": true
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 15,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-4",
+      "occurredAt": "2026-11-06T12:00:21.000Z",
+      "body": {
+        "status": "error",
+        "turnId": "turn-4",
+        "origin": "remote",
+        "clientMessageId": "client-turn-4",
+        "startedAt": "2026-11-06T12:00:16.000Z",
+        "endedAt": "2026-11-06T12:00:20.000Z",
+        "outcome": "error",
+        "error": "The side panel is not connected."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 16,
+      "type": "remote.health",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:22.000Z",
+      "body": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-c",
+      "seq": 17,
+      "type": "chat.session",
+      "sessionId": "session-2",
+      "occurredAt": "2026-11-06T12:00:23.000Z",
+      "body": {
+        "sessionId": "session-2"
+      }
+    }
+  ],
+  "final": {
+    "protocol": 1,
+    "server": {
+      "name": "crazyagent-companion",
+      "version": "fixture"
+    },
+    "instanceId": "companion-fixture-c",
+    "sessionId": "session-2",
+    "latestSequence": 17,
+    "oldestSequence": 1,
+    "turn": {
+      "status": "error",
+      "turnId": "turn-4",
+      "origin": "remote",
+      "clientMessageId": "client-turn-4",
+      "startedAt": "2026-11-06T12:00:16.000Z",
+      "endedAt": "2026-11-06T12:00:20.000Z",
+      "outcome": "error",
+      "error": "The side panel is not connected."
+    },
+    "phase": {
+      "status": null,
+      "tool": null
+    },
+    "health": {
+      "uiConnected": true,
+      "toolsConnected": true,
+      "dsh": "ready",
+      "dshMessage": null,
+      "provider": "openrouter",
+      "model": "fixture/model",
+      "autoCapture": true,
+      "contextWindow": null,
+      "contextTokens": null
+    },
+    "messages": [],
+    "draft": null,
+    "latestScreenshotId": null,
+    "latestScreenshot": null,
+    "help": null
+  },
+  "checkpoints": {
+    "afterError": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-c",
+      "sessionId": "session-1",
+      "latestSequence": 16,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "error",
+        "turnId": "turn-4",
+        "origin": "remote",
+        "clientMessageId": "client-turn-4",
+        "startedAt": "2026-11-06T12:00:16.000Z",
+        "endedAt": "2026-11-06T12:00:20.000Z",
+        "outcome": "error",
+        "error": "The side panel is not connected."
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-c",
+          "seq": 4,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-3",
+          "occurredAt": "2026-11-06T12:00:06.000Z",
+          "body": {
+            "text": "Long task",
+            "origin": "remote",
+            "clientMessageId": "client-turn-3",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-c",
+          "seq": 9,
+          "type": "chat.stopped",
+          "sessionId": "session-1",
+          "turnId": "turn-3",
+          "occurredAt": "2026-11-06T12:00:12.000Z",
+          "body": {
+            "reason": "user",
+            "message": "Stopped."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-c",
+          "seq": 12,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-4",
+          "occurredAt": "2026-11-06T12:00:17.000Z",
+          "body": {
+            "text": "Click buy",
+            "origin": "remote",
+            "clientMessageId": "client-turn-4",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-c",
+          "seq": 14,
+          "type": "chat.error",
+          "sessionId": "session-1",
+          "turnId": "turn-4",
+          "occurredAt": "2026-11-06T12:00:19.000Z",
+          "body": {
+            "message": "The side panel is not connected.",
+            "recoverable": true
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-fixture-1",
+      "latestScreenshot": {
+        "screenshotId": "shot-fixture-1",
+        "callId": null,
+        "capturedAt": "2026-11-06T12:00:09.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "auto"
+      },
+      "help": null
+    }
+  }
+}
