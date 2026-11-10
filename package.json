@@ -13,7 +13,7 @@
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "dev": "node scripts/dev.mjs",
-    "test": "node --test companion/test extension/test packages/dsh-browser-extension/test",
+    "test": "node --test \"companion/test/**/*.test.mjs\" \"extension/test/**/*.test.mjs\" \"packages/dsh-browser-extension/test/**/*.test.mjs\"",
     "bench": "node scripts/bench.mjs",
     "clean": "node scripts/clean.mjs",
     "system-prompt": "node scripts/print-system-prompt.mjs"
