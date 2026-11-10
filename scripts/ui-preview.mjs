@@ -1452,7 +1452,7 @@ async function main() {
     const row = '.activity-step.running .activity-entry.reasoning.streaming'
     const growth = page.evaluate(`(async () => {
       const seen = [];
-      const end = performance.now() + 1400;
+      const end = performance.now() + 3000;
       while (performance.now() < end) {
         const node = document.querySelector(${JSON.stringify(row)});
         const chunk = node?.querySelector('.stream-chunk:last-child');
@@ -1469,7 +1469,10 @@ async function main() {
     const heights = frames.map(([height]) => height)
     const steps = heights.slice(1).map((height, index) => Math.abs(height - heights[index]))
     assert.ok(heights.at(-1) - heights[0] >= 90, `row should grow by four lines: ${heights[0]} → ${heights.at(-1)}`)
-    assert.ok(Math.max(...steps) < 14, `row should grow smoothly, largest frame jump ${Math.max(...steps)}px`)
+    assert.ok(Math.max(...steps) < 6, `row should glide, largest frame jump ${Math.max(...steps)}px`)
+    assert.ok(heights.every((height, index) => index === 0 || height >= heights[index - 1] - 0.5), 'row never shrinks while streaming')
+    const accel = steps.slice(1).map((step, index) => Math.abs(step - steps[index]))
+    log('stream glide', JSON.stringify({ grewPx: Math.round(heights.at(-1) - heights[0]), maxFramePx: Math.max(...steps).toFixed(2), maxFrameChangePx: Math.max(...accel).toFixed(2), frames: steps.length }))
     assert.ok(frames.some(([, opacity]) => opacity > 0.05 && opacity < 0.95), 'new words should fade in')
 
     // A long thought keeps the step's own scroll box at its newest line.
@@ -1477,11 +1480,14 @@ async function main() {
       await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text: `\nLine ${line} of the streamed reasoning keeps going.` })
       await sleep(40)
     }
-    await sleep(MOTION_SETTLE_MS + 100)
-    const body = await page.evaluate(`(() => {
+    // The glide may trail the stream, but it catches up and ends on the newest line.
+    const body = await page.evaluate(`(async () => {
       const body = document.querySelector('.activity-step.running .step-body');
-      return { overflow: body.scrollHeight > body.clientHeight, gap: body.scrollHeight - body.scrollTop - body.clientHeight };
+      const end = performance.now() + 8000;
+      while (performance.now() < end && document.querySelector('.activity-entry.gliding')) await new Promise(requestAnimationFrame);
+      return { overflow: body.scrollHeight > body.clientHeight, gap: body.scrollHeight - body.scrollTop - body.clientHeight, gliding: document.querySelector('.gliding') !== null };
     })()`)
+    assert.equal(body.gliding, false, 'the glide finishes')
     assert.ok(body.overflow && body.gap < 2, `step body should follow its newest line: ${JSON.stringify(body)}`)
     await shot('streaming')
     await recv({ v: 1, type: 'chat.tool_call', callId: 'after-thought', name: 'browser_screenshot', args: '{}' })
@@ -1579,6 +1585,44 @@ async function main() {
     assert.equal(await page.evaluate(`document.querySelectorAll('.feed-ghost').length`), 0, 'feed ghost cleans up')
 
     log('motion samples', JSON.stringify({ stepHeights, waitOpacity, ghostOpacity, bodyHeights, modalOpacity, stepsHeights, feedOpacity }))
+  } else if (SCENARIO === 'answer') {
+    const { recv, batch } = makePage(page)
+    await batch(HELLO_FRAMES)
+    await sleep(300)
+    const answerView = () => page.evaluate(`(() => {
+      const feed = document.getElementById('activity-log');
+      const answers = feed.querySelectorAll('.activity-answer');
+      const answer = answers[answers.length - 1];
+      const f = feed.getBoundingClientRect();
+      const a = answer.getBoundingClientRect();
+      return {
+        answerTop: Math.round(a.top - f.top),
+        answerBottom: Math.round(a.bottom - f.top),
+        feedHeight: Math.round(f.height),
+        fromBottom: Math.round(feed.scrollHeight - feed.scrollTop - feed.clientHeight),
+      };
+    })()`)
+    const playAnswer = async (turn, text) => {
+      await sendPrompt(page, `Question ${turn}`)
+      await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn, step: 1, attemptId: `answer-${turn}` })
+      for (let line = 1; line <= 12; line += 1) {
+        await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text: `Reasoning line ${line} before answering.\n` })
+      }
+      await recv({ v: 1, type: 'chat.done', text, timings: { totalMs: 2000 }, sessionId: 'session-answer' })
+      await recv({ v: 1, type: 'status', status: 'idle' })
+      await sleep(1_500)
+      return answerView()
+    }
+    const long = Array.from({ length: 40 }, (_, index) => `Paragraph ${index + 1} of a long answer that does not fit on one screen.`).join('\n\n')
+    const longView = await playAnswer(1, `DONE The first line of the long answer.\n\n${long}`)
+    await shot('long')
+    assert.ok(longView.answerBottom > longView.feedHeight, `the long answer is taller than the view: ${JSON.stringify(longView)}`)
+    assert.ok(longView.answerTop >= 0 && longView.answerTop <= 40, `a long answer rests at its top: ${JSON.stringify(longView)}`)
+    const shortView = await playAnswer(2, 'DONE A short answer.')
+    assert.equal(shortView.fromBottom, 0, `a short answer ends at the bottom: ${JSON.stringify(shortView)}`)
+    assert.ok(shortView.answerTop >= 0 && shortView.answerBottom <= shortView.feedHeight, `the short answer is fully in view: ${JSON.stringify(shortView)}`)
+    await shot('short')
+    log('answer anchor', JSON.stringify({ longView, shortView }))
   } else if (SCENARIO === 'wait') {
     const { recv, batch } = makePage(page)
     await batch(HELLO_FRAMES)
