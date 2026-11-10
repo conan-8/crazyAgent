@@ -923,7 +923,7 @@ test('push devices register, replace, and unregister over the authenticated API'
   const bad = await ctx.call({ method: 'PUT', path, body: { fcmToken: 'short', platform: 'android' } })
   assert.equal(bad.status, 422)
   assert.equal(bad.body.error.code, 'INVALID_PUSH_TOKEN')
-  const first = await ctx.call({ method: 'PUT', path, body: { fcmToken, platform: 'android', appVersion: '0.3.0' } })
+  const first = await ctx.call({ method: 'PUT', path, body: { fcmToken, platform: 'android', appVersion: '0.4.0' } })
   assert.equal(first.status, 200)
   assert.deepEqual([first.body.registered, first.body.created], [true, true])
   const replaced = await ctx.call({ method: 'PUT', path, body: { fcmToken: `fcm-token-B:${'b'.repeat(120)}`, platform: 'android' } })

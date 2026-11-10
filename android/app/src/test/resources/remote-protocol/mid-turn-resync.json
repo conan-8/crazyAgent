@@ -139,7 +139,10 @@
         "timings": null,
         "model": "fixture/model",
         "docsVerification": null,
-        "docsVerificationReason": null
+        "docsVerificationReason": null,
+        "planMode": false,
+        "planOutcome": null,
+        "planRevision": null
       }
     },
     {
@@ -239,7 +242,10 @@
           "timings": null,
           "model": "fixture/model",
           "docsVerification": null,
-          "docsVerificationReason": null
+          "docsVerificationReason": null,
+          "planMode": false,
+          "planOutcome": null,
+          "planRevision": null
         }
       }
     ],

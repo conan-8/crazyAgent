@@ -105,6 +105,7 @@ async function setup(t, respond = () => undefined, options = {}) {
   const port = server.address().port
   const commands = []
   const logEvents = []
+  const activities = []
   server.on('connection', ws => {
     ws.on('message', data => {
       const message = JSON.parse(data.toString())
@@ -114,6 +115,10 @@ async function setup(t, respond = () => undefined, options = {}) {
       }
       if (message.type === 'log.event') {
         logEvents.push(message.event)
+        return
+      }
+      if (message.type === 'activity') {
+        activities.push(message.activity)
         return
       }
       if (message.type !== 'browser.command') return
@@ -150,7 +155,7 @@ async function setup(t, respond = () => undefined, options = {}) {
   })
   const session = { id: 'session-1', surface: { nodes: [] }, append: () => {} }
   const steered = []
-  const fixture = { fake, session, steered, commands, logEvents }
+  const fixture = { fake, session, steered, commands, logEvents, activities }
   t.after(async () => {
     fake.dispose()
     for (const client of server.clients) client.terminate()
@@ -200,10 +205,16 @@ async function stop(fixture, { turn = 1, session = fixture.session, aborted = fa
   })
 }
 
-function finish(fixture, { turn = 1, session = fixture.session } = {}) {
-  const data = { turn, reason: { kind: 'completed' } }
-  fixture.fake.listeners.get('session/event')(session, { type: 'turn/end', data })
-  return data
+/**
+ * End the turn with an event frozen the way DSH commits it, and return the
+ * `turn-outcome` activity the provider sends to the companion for it.
+ */
+async function finish(fixture, { turn = 1, session = fixture.session } = {}) {
+  const before = fixture.activities.length
+  const event = Object.freeze({ type: 'turn/end', data: Object.freeze({ turn, reason: Object.freeze({ kind: 'completed' }) }) })
+  fixture.fake.listeners.get('session/event')(session, event)
+  await waitFor(() => fixture.activities.slice(before).some(activity => activity.kind === 'turn-outcome' && activity.turn === turn))
+  return fixture.activities.slice(before).find(activity => activity.kind === 'turn-outcome' && activity.turn === turn)
 }
 
 async function waitFor(predicate, timeoutMs = 1_000) {
@@ -280,7 +291,7 @@ test('completed export-verified mutation does not request a redundant read', asy
   await waitFor(() => finalLogs(fixture).length === 1)
   assert.equal(finalLogs(fixture)[0].data.outcome, 'satisfied')
   assert.equal(finalLogs(fixture)[0].data.reason, 'mutation-export')
-  const ended = finish(fixture)
+  const ended = await finish(fixture)
   assert.equal(ended.docsVerification, 'verified')
   assert.equal(ended.docsVerificationReason, 'mutation-export')
 })
@@ -403,7 +414,7 @@ test('a failed final read allows stopping after the single nudge', async t => {
   await waitFor(() => finalLogs(fixture).length === 2)
   assert.equal(finalLogs(fixture)[1].data.outcome, 'allowed-unverified')
   assert.equal(finalLogs(fixture)[1].data.reason, 'read-error')
-  const ended = finish(fixture)
+  const ended = await finish(fixture)
   assert.equal(ended.docsVerification, 'unverified')
   assert.equal(ended.docsVerificationReason, 'read-error')
 })

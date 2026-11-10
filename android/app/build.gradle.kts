@@ -24,8 +24,8 @@ android {
         applicationId = "dev.crazyagent.remote"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.3.0"
+        versionCode = 3
+        versionName = "0.4.0"
 
         // Blank when firebase.properties is absent: the app then builds and runs with push off.
         buildConfigField("String", "FIREBASE_PROJECT_ID", quoted(firebase.getProperty("projectId")))

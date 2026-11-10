@@ -127,7 +127,7 @@ test('a remote-origin turn tells the panel its prompt; a panel turn does not ech
   await own.done
 })
 
-test('panel plan mode reaches the turn, prompt, and done metadata', async () => {
+test('provider turn-outcome reaches plan and Docs metadata without annotating turn/end', async () => {
   const { controller, runner, bridge, frames, observed } = setup()
   const turn = controller.submit({ text: 'complete the long task', origin: 'ui', planMode: true })
   assert.deepEqual(bridge.turnModes[0], { id: turn.turnId, planMode: true })
@@ -135,12 +135,15 @@ test('panel plan mode reaches the turn, prompt, and done metadata', async () => 
   assert.match(runner.runs[0][0].text, /<plan_mode>/)
   assert.match(runner.runs[0][0].text, /browser_plan/)
 
-  runner.current.notify({
-    method: 'session.event',
-    params: {
-      sessionId: runner.sessionId,
-      event: { type: 'turn/end', data: { turn: 1, planOutcome: 'unfinished', planRevision: 2 } },
-    },
+  controller.noteActivity({
+    kind: 'turn-outcome',
+    turnId: turn.turnId,
+    sessionId: runner.sessionId,
+    turn: 1,
+    planOutcome: 'unfinished',
+    planRevision: 2,
+    docsVerification: 'unverified',
+    docsVerificationReason: 'read-error',
   })
   runner.current.resolve('Open work remains')
   await turn.done
@@ -148,7 +151,40 @@ test('panel plan mode reaches the turn, prompt, and done metadata', async () => 
   assert.equal(done.planMode, true)
   assert.equal(done.planOutcome, 'unfinished')
   assert.equal(done.planRevision, 2)
+  assert.equal(done.docsVerification, 'unverified')
+  assert.equal(done.docsVerificationReason, 'read-error')
   assert.deepEqual(bridge.turnModes.at(-1), { id: undefined, planMode: false })
+})
+
+test('turn-outcome ignores stale turns, sessions, and malformed values and resets between turns', async () => {
+  const { controller, runner, frames } = setup()
+  const first = controller.submit({ text: 'first planned task', planMode: true })
+  controller.noteActivity({ kind: 'turn-outcome', turnId: 'turn-old', sessionId: runner.sessionId, turn: 1, planOutcome: 'blocked', docsVerification: 'unverified' })
+  controller.noteActivity({ kind: 'turn-outcome', turnId: first.turnId, sessionId: 'session-old', turn: 1, planOutcome: 'blocked', docsVerification: 'unverified' })
+  controller.noteActivity({ kind: 'turn-outcome', turnId: first.turnId, sessionId: runner.sessionId, turn: 'one', planOutcome: 'blocked', docsVerification: 'unverified' })
+  controller.noteActivity({ kind: 'turn-outcome', turnId: first.turnId, sessionId: runner.sessionId, turn: 1, planOutcome: 'success', planRevision: -1, docsVerification: 'unknown' })
+  runner.current.resolve('first response')
+  await first.done
+  const firstDone = frames.find(frame => frame.type === 'chat.done')
+  assert.equal(firstDone.planOutcome, undefined)
+  assert.equal(firstDone.planRevision, undefined)
+  assert.equal(firstDone.docsVerification, undefined)
+
+  const second = controller.submit({ text: 'second planned task', planMode: true })
+  controller.noteActivity({ kind: 'turn-outcome', turnId: second.turnId, sessionId: runner.sessionId, turn: 2, planOutcome: 'blocked', planRevision: 3 })
+  runner.current.resolve('second response')
+  await second.done
+  const secondDone = frames.filter(frame => frame.type === 'chat.done').at(-1)
+  assert.equal(secondDone.planOutcome, 'blocked')
+  assert.equal(secondDone.planRevision, 3)
+
+  const third = controller.submit({ text: 'ordinary task' })
+  runner.current.resolve('ordinary response')
+  await third.done
+  const thirdDone = frames.filter(frame => frame.type === 'chat.done').at(-1)
+  assert.equal(thirdDone.planOutcome, undefined)
+  assert.equal(thirdDone.planRevision, undefined)
+  assert.equal(thirdDone.docsVerification, undefined)
 })
 
 test('remote prompts opt into plan mode only explicitly and ordinary prompts stay unarmed', async () => {

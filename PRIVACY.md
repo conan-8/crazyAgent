@@ -29,6 +29,14 @@ crazyAgent does not continuously capture background tabs, other windows, or the 
 
 Pasted composer images are read after your paste gesture and sent only when their message is dispatched. Browser speech recognition starts only after you click the microphone; audio is handled by the browser/vendor speech service, not the crazyAgent companion. Recognized text is sent only if you send the draft.
 
+## Phone remote access
+
+The phone API is off unless the companion is started with `--remote`. It listens only on loopback and is intended to be reached through tailnet-only Tailscale Serve with its own bearer token. Phone prompts and replies enter the same DSH/model conversation as desktop prompts, so the configured model provider receives their text and images under the same rules above.
+
+The companion keeps at most 12 bounded canonical transcripts in `browser-agent/remote-history.json` and push registrations in `browser-agent/push-devices.json`, both written with mode `0600`. The separate `browser-agent/remote-token` and optional FCM service-account key are also local-only secrets. Android stores the remote token encrypted with Android Keystore.
+
+Mirrored screenshots are held in companion and app memory only, bounded to 24 images or 48 MiB on the companion, and cleared on a new chat or companion restart. They are fetched through authenticated opaque IDs, not file paths. Optional FCM notifications contain only turn type, turn ID, companion instance ID, and sequence—never prompt/assistant text, help reasons, page URLs, screenshots, or bearer tokens. Firebase delivery has its own provider terms.
+
 ## Clipboard
 
 - **Virtual clipboard (default):** text or one captured PNG in `chrome.storage.session`, never `chrome.storage.local` or disk. It is session-scoped and size-bounded.
@@ -59,6 +67,10 @@ Generated state is under ignored `.dsh-home/`:
 | `sessions/` | DSH JSONL conversations, tool calls, and attachment references |
 | `attachments/v1/` | Screenshot and pasted-image bytes; not automatically garbage-collected |
 | `browser-agent/token` | Loopback pairing token, mode `0600` |
+| `browser-agent/remote-token` | Separate optional phone pairing token, mode `0600` |
+| `browser-agent/remote-history.json` | Bounded phone/desktop canonical transcripts, mode `0600` |
+| `browser-agent/push-devices.json` | Bounded FCM device registrations, mode `0600` |
+| `browser-agent/fcm-service-account.json` | Optional local FCM credential; never committed |
 | `browser-agent/api-key` | Optional remembered API key, mode `0600` |
 | `browser-agent/llm.json`, `llm.patch.yml` | Non-secret model/base-URL/reasoning configuration |
 | `browser-agent/logs/<runId>/` | Events, screenshots, summaries, and exported debug bundles |
