@@ -635,9 +635,16 @@ function conversationDate(item) {
 
 /** Serialize one feed child without elements that exist only for a running animation. */
 function archivableHtml(child) {
-  if (!child.querySelector('.motion-ghost, .leaving')) return child.outerHTML
+  if (!child.querySelector('.motion-ghost, .leaving, .gliding')) return child.outerHTML
   const copy = child.cloneNode(true)
   copy.querySelectorAll('.motion-ghost, .leaving').forEach(node => node.remove())
+  // A row still gliding open is saved at its full height.
+  copy.querySelectorAll('.gliding').forEach(node => {
+    node.classList.remove('gliding')
+    node.style.removeProperty('height')
+    node.style.removeProperty('overflow')
+    if (node.getAttribute('style') === '') node.removeAttribute('style')
+  })
   return copy.outerHTML
 }
 
@@ -1620,11 +1627,28 @@ let scrollFollowFrame = null
 let scrollFollowUntil = 0
 /** The running step's own scroll box, followed too while it is at its bottom. */
 let scrollFollowBody = null
+/**
+ * The turn's final answer. While set, the feed never scrolls past the
+ * answer's first line: a short answer still ends at the bottom, a long one
+ * stays anchored at its top. Cleared by the next turn or the user's own scroll.
+ */
+let answerAnchor = null
+const ANSWER_TOP_GAP = 12
 
 function stopScrollFollow() {
   if (scrollFollowFrame !== null) cancelAnimationFrame(scrollFollowFrame)
   scrollFollowFrame = null
   scrollFollowBody = null
+  answerAnchor = null
+}
+
+/** Where the feed should rest: its bottom, or no lower than the answer's top. */
+function feedScrollTarget() {
+  const feed = els.activityLog
+  const bottom = Math.max(0, feed.scrollHeight - feed.clientHeight)
+  if (!answerAnchor?.isConnected) return { top: bottom, anchored: false }
+  const answerTop = answerAnchor.getBoundingClientRect().top - feed.getBoundingClientRect().top + feed.scrollTop
+  return { top: Math.min(bottom, Math.max(0, answerTop - ANSWER_TOP_GAP)), anchored: true }
 }
 
 /** Stay pinned to the bottom for as long as new rows are still growing in. */
@@ -1634,9 +1658,23 @@ function scrollActivity() {
   if (body && body.scrollHeight - body.scrollTop - body.clientHeight < 32) scrollFollowBody = body
   if (scrollFollowFrame !== null) return
   const follow = () => {
-    els.activityLog.scrollTo({ top: els.activityLog.scrollHeight, behavior: 'instant' })
+    const feed = els.activityLog
+    const target = feedScrollTarget()
+    let settling = false
+    if (target.anchored && !reducedMotion.matches) {
+      // Glide to the answer rather than jumping; at least 1px a frame so rounding never stalls it.
+      const gap = target.top - feed.scrollTop
+      if (Math.abs(gap) > 1) {
+        feed.scrollTop += Math.sign(gap) * Math.max(1, Math.abs(gap) * 0.2)
+        settling = true
+      } else {
+        feed.scrollTop = target.top
+      }
+    } else {
+      feed.scrollTop = target.top
+    }
     if (scrollFollowBody?.isConnected) scrollFollowBody.scrollTop = scrollFollowBody.scrollHeight
-    if (performance.now() < scrollFollowUntil) {
+    if (settling || performance.now() < scrollFollowUntil) {
       scrollFollowFrame = requestAnimationFrame(follow)
     } else {
       scrollFollowFrame = null
@@ -2120,7 +2158,12 @@ function pushActivity(kind, label, text, options = {}) {
   const created = { entry, kindEl, textEl, kind, durationEl: null }
   if (Number.isFinite(options.durationMs)) setEntryDuration(created, options.durationMs)
   activityContainer().appendChild(entry)
-  enterRow(entry)
+  if (options.glide === true && !reducedMotion.matches) {
+    entry.animate({ opacity: [0, 1] }, { duration: MOTION.slow, easing: MOTION.ease })
+    glideStreamRow(entry, 0)
+  } else {
+    enterRow(entry)
+  }
   trimActivity()
   const latest = options.latest ?? `${label}: ${text}`
   els.activityLatest.textContent = activityPreview(latest)
@@ -2182,7 +2225,7 @@ function appendStreamActivity(kind, text) {
   } else {
     finalizeStreamActivity()
     const label = kind === 'reasoning' ? 'thinking' : 'reply'
-    const created = pushActivity(kind, label, text)
+    const created = pushActivity(kind, label, text, { glide: true })
     created.kind = kind
     created.entry.classList.add('streaming')
     lastStreamEntry = created
@@ -2197,13 +2240,12 @@ function appendStreamActivity(kind, text) {
 }
 
 /**
- * Add streamed words to a row without re-laying out what is already there:
- * the new words fade in, and the row grows to its new height instead of
- * jumping a line at a time.
+ * Add streamed words to a row without re-laying out what is already there.
+ * The new words fade in, and the row glides open to show them (`glideStreamRow`).
  */
 function appendStreamText(created, text) {
   const { entry, textEl } = created
-  const before = entry.getBoundingClientRect().height
+  const shownHeight = entry.getBoundingClientRect().height
   if (textEl.textContent.length + text.length > 40_000) {
     textEl.textContent = truncate(textEl.textContent + text, 40_000)
   } else {
@@ -2212,16 +2254,73 @@ function appendStreamText(created, text) {
     chunk.textContent = text
     textEl.appendChild(chunk)
   }
+  glideStreamRow(entry, shownHeight)
+}
+
+/*
+ * Streamed text arrives in bursts. Rather than showing each burst at once, a
+ * row's visible height glides toward its real height: the speed follows how
+ * far behind it is (a ~0.2 s catch-up), with limited acceleration so it never
+ * lurches, and the feed and the step's own scroll box ride along with it,
+ * trailing the stream only slightly.
+ */
+const GLIDE = Object.freeze({ catchUpSeconds: 0.2, minSpeed: 40, acceleration: 2600, pinSlack: 32 })
+const streamGlides = new Map()
+let streamGlideFrame = null
+let streamGlideLast = 0
+
+function glideStreamRow(entry, shownHeight) {
   if (reducedMotion.matches) return
-  for (const animation of entry.getAnimations()) {
-    if (animation.id === 'stream-grow') animation.cancel()
+  if (!streamGlides.has(entry)) {
+    streamGlides.set(entry, { height: shownHeight, velocity: 0 })
+    entry.classList.add('gliding')
+    entry.style.height = `${shownHeight}px`
+    entry.style.overflow = 'clip'
   }
-  const after = entry.scrollHeight
-  if (after <= before + 0.5) return
-  entry.animate(
-    [{ height: `${before}px`, overflow: 'clip' }, { height: `${after}px`, overflow: 'clip' }],
-    { id: 'stream-grow', duration: MOTION.slow, easing: MOTION.ease },
-  )
+  if (streamGlideFrame === null) {
+    streamGlideLast = performance.now()
+    streamGlideFrame = requestAnimationFrame(stepStreamGlides)
+  }
+}
+
+function endStreamGlide(entry) {
+  streamGlides.delete(entry)
+  entry.classList.remove('gliding')
+  entry.style.removeProperty('height')
+  entry.style.removeProperty('overflow')
+}
+
+function stepStreamGlides(time) {
+  const dt = Math.min(0.05, Math.max(0, (time - streamGlideLast) / 1000))
+  streamGlideLast = time
+  const feed = els.activityLog
+  const feedPinned = feed.scrollHeight - feed.scrollTop - feed.clientHeight < GLIDE.pinSlack
+  for (const [entry, glide] of streamGlides) {
+    if (!entry.isConnected) {
+      streamGlides.delete(entry)
+      continue
+    }
+    const body = entry.closest('.step-body')
+    const bodyPinned = body !== null && body.scrollHeight - body.scrollTop - body.clientHeight < GLIDE.pinSlack
+    const target = entry.scrollHeight
+    const gap = target - glide.height
+    if (gap <= 0.5) {
+      endStreamGlide(entry)
+      if (bodyPinned) body.scrollTop = body.scrollHeight
+      continue
+    }
+    const desired = Math.max(GLIDE.minSpeed, gap / GLIDE.catchUpSeconds)
+    const change = GLIDE.acceleration * dt
+    glide.velocity += Math.max(-change, Math.min(change, desired - glide.velocity))
+    glide.height = Math.min(target, glide.height + Math.max(0, glide.velocity) * dt)
+    entry.style.height = `${glide.height}px`
+    if (bodyPinned) body.scrollTop = body.scrollHeight
+  }
+  if (feedPinned) {
+    if (answerAnchor?.isConnected) scrollActivity()
+    else feed.scrollTop = feed.scrollHeight
+  }
+  streamGlideFrame = streamGlides.size > 0 ? requestAnimationFrame(stepStreamGlides) : null
 }
 
 function finalizeStreamActivity() {
@@ -2242,6 +2341,7 @@ function clearActivity() {
   els.planDock.replaceChildren()
   els.planDock.hidden = true
   els.activityEmpty?.classList.remove('hidden')
+  answerAnchor = null
   lastStreamEntry = null
   lastReasoningStreamText = ''
   sawReasoningStream = false
@@ -2792,6 +2892,7 @@ function pushAnswer(text) {
   renderMarkdown(body, value)
   block.appendChild(body)
   ;(lastAgentTurn ?? activityContainer()).appendChild(block)
+  answerAnchor = block
   enterRow(block, MOTION.slow)
   trimActivity()
   els.activityLatest.textContent = activityPreview(value)
@@ -2802,6 +2903,7 @@ function pushAnswer(text) {
 
 /** Reset per-turn state and open the turn divider when a message is sent. */
 function beginUserTurn(text, attachments = [], options = {}) {
+  answerAnchor = null
   conversationStopped = false
   planTerminalPhase = null
   lastAssistantText = ''
