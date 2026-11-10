@@ -1665,13 +1665,14 @@ function scrollActivity() {
       // Glide to the answer rather than jumping; at least 1px a frame so rounding never stalls it.
       const gap = target.top - feed.scrollTop
       if (Math.abs(gap) > 1) {
-        feed.scrollTop += Math.sign(gap) * Math.max(1, Math.abs(gap) * 0.2)
+        feed.scrollTo({ top: feed.scrollTop + Math.sign(gap) * Math.max(1, Math.abs(gap) * 0.2), behavior: 'instant' })
         settling = true
       } else {
-        feed.scrollTop = target.top
+        feed.scrollTo({ top: target.top, behavior: 'instant' })
       }
     } else {
-      feed.scrollTop = target.top
+      // The feed has CSS scroll-behavior:smooth; per-frame positioning must be instant.
+      feed.scrollTo({ top: target.top, behavior: 'instant' })
     }
     if (scrollFollowBody?.isConnected) scrollFollowBody.scrollTop = scrollFollowBody.scrollHeight
     if (settling || performance.now() < scrollFollowUntil) {
@@ -2318,7 +2319,7 @@ function stepStreamGlides(time) {
   }
   if (feedPinned) {
     if (answerAnchor?.isConnected) scrollActivity()
-    else feed.scrollTop = feed.scrollHeight
+    else feed.scrollTo({ top: feed.scrollHeight, behavior: 'instant' })
   }
   streamGlideFrame = streamGlides.size > 0 ? requestAnimationFrame(stepStreamGlides) : null
 }
