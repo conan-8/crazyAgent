@@ -276,14 +276,18 @@ function normalizeSettings(settings) {
 
 /** @returns {Promise<number>} */
 async function getWindowId() {
-  try {
-    const current = await chrome.windows.getCurrent()
-    if (current?.id !== undefined) return current.id
-  } catch {
-    // Fall through to the last focused window.
+  // A side panel belongs to its window. The background executor has none, so
+  // it works in the browser window the user last used.
+  if (typeof ServiceWorkerGlobalScope === 'undefined') {
+    try {
+      const current = await chrome.windows.getCurrent()
+      if (current?.id !== undefined) return current.id
+    } catch {
+      // Fall through to the last focused window.
+    }
   }
-  const last = await chrome.windows.getLastFocused()
-  if (last?.id === undefined) throw new BrowserError('NO_WINDOW', 'Chrome did not report a window for this side panel')
+  const last = await chrome.windows.getLastFocused({ windowTypes: ['normal'] })
+  if (last?.id === undefined) throw new BrowserError('NO_WINDOW', 'Chrome did not report an open browser window')
   return last.id
 }
 

@@ -494,7 +494,7 @@ private fun healthIssue(state: UiState): String? {
     if (state.link.status != LinkStatus.LIVE || !state.chat.synced) return null
     val health = state.chat.health
     return when {
-        health.uiConnected == false -> "The browser side panel is closed. Browser actions cannot run."
+        health.uiConnected == false -> "The browser extension is not connected. Is Edge running? Browser actions cannot run."
         // After a Stop the runtime is torn down on purpose and its tools reconnect when the
         // next turn starts, so idle + ready is not a fault. Mid-turn it is.
         health.toolsConnected == false && (state.busy || health.dsh != "ready") -> "The browser tools are offline. Browser actions cannot run."
@@ -958,10 +958,11 @@ private fun DiagnosticsContent(state: UiState, onReconnect: () -> Unit) {
         InfoCard {
             HealthRow("Companion", connectionLabel(state.link.status), if (state.link.status == LinkStatus.LIVE) Level.OK else if (state.link.status == LinkStatus.AUTH_FAILED || state.link.status == LinkStatus.HOST_REJECTED) Level.BAD else Level.WARN)
             HealthRow("Model runtime", runtimeLabel(health, live), runtimeLevel(health, live))
-            HealthRow("Browser side panel", when {
+            HealthRow("Browser", when {
                 !live || health.uiConnected == null -> "Unknown"
-                health.uiConnected -> "Open"
-                else -> "Closed"
+                !health.uiConnected -> "Not connected"
+                health.executorHost == "background" -> "Connected, side panel closed"
+                else -> "Connected, side panel open"
             }, when {
                 !live || health.uiConnected == null -> Level.UNKNOWN
                 health.uiConnected -> Level.OK

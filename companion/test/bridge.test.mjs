@@ -529,3 +529,14 @@ test('a companion capture carries its own image source and can refuse to wait fo
   await pending
   assert.deepEqual(images.map(info => [info.source, info.image.data]), [['manual', 'CCCC']])
 })
+
+test('the bridge reports whether the side panel or the background worker is the executor', async t => {
+  const { bridge, url } = await setup(t)
+  assert.equal(bridge.executorHost(), null)
+  const panel = await connect(url, 'ui')
+  t.after(() => panel.ws.close())
+  assert.equal(bridge.executorHost(), 'panel')
+  panel.ws.close()
+  await new Promise(resolve => setTimeout(resolve, 30))
+  assert.equal(bridge.executorHost(), null)
+})

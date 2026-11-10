@@ -54,7 +54,7 @@ Install crazyAgent v2.1.0-beta on this computer from https://github.com/conan-8/
 > 5. **Start a task:** wait for **Connected**, open a normal page, and ask a question or request an action.
 
 > [!IMPORTANT]
-> Keep the companion and side panel open while the agent runs; the panel is also the browser executor. **Do not touch the browser while a task is running:** clicking, typing, scrolling, or switching tabs can invalidate the agent's targets. 
+> Keep the companion and Edge running while the agent runs. With the side panel open it runs the browser actions; with it closed, the extension's background worker does (system-clipboard actions, including Docs rich paste, still need the panel). **Do not touch the browser while a task is running:** clicking, typing, scrolling, or switching tabs can invalidate the agent's targets.
 
 Page content, screenshots, prompts, and explicit tool results can be sent to the configured model provider. crazyAgent requests broad browser permissions and can change real pages and files; review [Privacy and permissions](#privacy-and-permissions) and `PRIVACY.md` before use.
 
@@ -68,7 +68,7 @@ Use the optional Android app with an existing crazyAgent desktop installation. B
 **Requirements:**
 
 - A working crazyAgent **v2.1.0-beta** installation on the host computer.
-- Chrome/Edge and the crazyAgent side panel open and connected for browser execution.
+- Chrome/Edge running. Keep the side panel open for system-clipboard/Docs rich-paste actions or when using a build without the background executor.
 - An Android **8.0/API 26+** phone.
 - Tailscale installed and signed into the same tailnet on the host and phone, with MagicDNS and HTTPS certificates enabled.
 - Optional: `adb` and USB debugging for agent-driven APK installation. Otherwise, install the APK directly on the phone.
@@ -243,7 +243,7 @@ systemctl --user enable --now crazyagent.service
 tailscale serve --bg http://127.0.0.1:17873
 ```
 
-Linger lets the API start at boot before a desktop login. Tailscale must remain connected on the phone, and **Edge plus the crazyAgent side panel must be opened once after login/restart for browser execution**; the companion cannot open the panel itself. On this host AC suspend is disabled while battery suspend remains unchanged. Never publish the privileged bridge port `17871` or enable Funnel.
+Linger lets the API start at boot before a desktop login. Tailscale must remain connected on the phone, and **Edge must be running with the extension paired once for browser execution**. The side panel is optional while the background executor is available; keep it open for system-clipboard/Docs rich-paste actions or when using a build without that executor. On this host AC suspend is disabled while battery suspend remains unchanged. Never publish the privileged bridge port `17871` or enable Funnel.
 
 Generated state is under ignored `.dsh-home/`. To remove it:
 
@@ -258,7 +258,7 @@ This deletes sessions, attachments, debug logs, tokens, and any remembered key. 
 
 Screenshots, rendered text, labels, prompts, pasted images, and explicit tool results such as personal destinations, clipboard contents, filenames, and file metadata can be sent to the configured model provider. Local file bytes are not sent to the model provider by `browser_upload`; Chrome attaches the file, and the destination site receives it when the page submits. Debug logs and DSH attachments remain local until shared, but contain sensitive page/conversation data and may contain local file paths.
 
-The extension requests broad host access plus side-panel, tabs, scripting, storage, debugger, downloads, web-navigation, clipboard, top-sites, bookmarks, and history permissions. Clipboard, download, upload, and personal-data access occur only through explicit user/model actions, not a background sync. Closing the panel disconnects the executor.
+The extension requests broad host access plus side-panel, alarms, tabs, scripting, storage, debugger, downloads, web-navigation, clipboard, top-sites, bookmarks, and history permissions. Alarms wake and reconnect the background executor. Clipboard, download, upload, and personal-data access occur only through explicit user/model actions, not a background sync. Closing the panel hands execution back to the background worker; closing Edge stops browser execution.
 
 Read `PRIVACY.md` for storage paths, Downloads confinement, redaction limits, clipboard behavior, and controls.
 
@@ -271,7 +271,7 @@ npm run system-prompt          # exact composed prompt; -- --json for counts
 npm run bench                  # local bridge benchmark
 ```
 
-Last recorded implementation verification: **922/922 tests**, clean `npm ci` and `npm run setup`, `npm audit` with **0 vulnerabilities**, prompt composition (**18,025 total / 17,031 guidance chars**), mock-bridge `ui-preview --scenario plan` with fixed-viewport sticky-position and expanded/collapsed-height assertions plus inspected sticky/collapsed screenshots, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs. The drag fixture used real provider/executor calls to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. Independent checks inspected DOM order, values, parentage, drop receipts, and collateral application state; refused and intentional no-op cases preserved every semantic application value. Earlier expectation, click, capture, and file-transfer fixtures retained their evidence. These are direct executor checks, not real-model acceptance. **A real-sidebar/model `/plan` workflow, drag workflow and expectation workflow, download→upload workflow, authenticated Docs export/toolbar expectations and Docs table acceptance, authenticated Pivot, real-model HTML-table selection, normal authenticated docked-panel Docs acceptance, and a real docked-panel turn that keeps receiving views after the user switches apps or minimizes the browser remain pending.** No connected Docs browser or isolated live-model acceptance profile is currently configured.
+Last recorded implementation verification: **935/935 tests**, clean `npm ci` and `npm run setup`, `npm audit` with **0 vulnerabilities**, prompt composition (**18,025 total / 17,031 guidance chars**), mock-bridge `ui-preview --scenario plan` with fixed-viewport sticky-position and expanded/collapsed-height assertions plus inspected sticky/collapsed screenshots, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs. The drag fixture used real provider/executor calls to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. Independent checks inspected DOM order, values, parentage, drop receipts, and collateral application state; refused and intentional no-op cases preserved every semantic application value. Earlier expectation, click, capture, and file-transfer fixtures retained their evidence. These are direct executor checks, not real-model acceptance. **A real-sidebar/model `/plan` workflow, drag workflow and expectation workflow, download→upload workflow, authenticated Docs export/toolbar expectations and Docs table acceptance, authenticated Pivot, real-model HTML-table selection, normal authenticated docked-panel Docs acceptance, and a real docked-panel turn that keeps receiving views after the user switches apps or minimizes the browser remain pending.** No connected Docs browser or isolated live-model acceptance profile is currently configured.
 
 Useful harnesses:
 

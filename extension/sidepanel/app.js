@@ -15,6 +15,7 @@ import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protoco
 import { matchSlashCommands, nextSlashIndex, resolveSlashCommand, slashQuery } from './slash.js'
 
 const SETTINGS_KEY = 'crazyagent.settings'
+const EXECUTOR_CLAIM_TIMEOUT_MS = 15_000
 const DISCLAIMER_KEY = 'crazyagent.disclaimerPending'
 const RECONNECT_MS = 2_500
 const STOP_CONFIRM_TIMEOUT_MS = 15_000
@@ -1228,6 +1229,37 @@ function setActivity(active) {
 /* ------------------------------------------------------------------ */
 /* websocket                                                           */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Tell the background worker this panel exists, so it stops executing browser
+ * commands. Resolves once it has let go (after any command in flight) or after
+ * a bound, so a stuck worker cannot keep the panel offline. The port stays
+ * open for the panel's lifetime: closing it hands execution back.
+ * @returns {Promise<void>}
+ */
+function claimExecutor() {
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, EXECUTOR_CLAIM_TIMEOUT_MS)
+    const attach = () => {
+      let port
+      try {
+        port = chrome.runtime.connect({ name: 'crazyagent-panel' })
+      } catch {
+        clearTimeout(timer)
+        resolve()
+        return
+      }
+      port.onMessage.addListener(message => {
+        if (message?.type !== 'executor.released') return
+        clearTimeout(timer)
+        resolve()
+      })
+      // The worker stopped; a new one must still see this panel.
+      port.onDisconnect.addListener(() => { setTimeout(attach, 500) })
+    }
+    attach()
+  })
+}
 
 function connect() {
   manualDisconnect = false
@@ -3886,6 +3918,7 @@ async function boot() {
   updateFooter()
   setStatus('offline', 'Connecting…')
   if (!settings.token) openSettings()
+  await claimExecutor()
   connect()
   logger.log('app.boot.ready', {}, 'info')
 }

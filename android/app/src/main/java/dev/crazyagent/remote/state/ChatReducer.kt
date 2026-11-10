@@ -228,6 +228,7 @@ object ChatReducer {
         contextWindow = body.long("contextWindow"),
         contextTokens = body.long("contextTokens"),
         pushConfigured = body.bool("pushConfigured"),
+        executorHost = body.string("executorHost"),
     )
 
     private fun screenshotOf(body: JsonObject): Screenshot? {

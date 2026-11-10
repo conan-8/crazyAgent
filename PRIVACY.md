@@ -91,6 +91,7 @@ The side-panel export dialog can omit screenshots and the raw DSH session. Bundl
 ## Permissions
 
 - `sidePanel`, `tabs`, `scripting`, `storage` — panel UI, active-tab operations, and local settings.
+- `alarms` — wake and reconnect the background executor when no panel is open.
 - `debugger`, `webNavigation` — trusted surface input, coordinate mapping, frame ownership, and file-input assignment.
 - `downloads` — explicit direct-URL/link downloads and completion/path inspection.
 - `clipboardRead`, `clipboardWrite` — explicit system clipboard operations and temporary virtual-image staging/restoration.
@@ -100,7 +101,7 @@ The side-panel export dialog can omit screenshots and the raw DSH session. Bundl
 ## Controls
 
 - Disable **Attach a fresh view to every message** to turn off auto-view; explicit screenshot tools remain available.
-- Closing the side panel disconnects browser execution.
+- Closing the side panel hands browser execution back to the extension's background worker; closing Edge stops browser execution.
 - Uninstalling the extension clears its extension storage.
 - `npm run clean -- --yes` deletes `.dsh-home`, including sessions, attachments, logs, token, and remembered key; run `npm run setup` afterward.
 - Incognito and `file://` access require explicit browser permission and may still be restricted.

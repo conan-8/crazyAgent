@@ -4,6 +4,8 @@ A native Kotlin + Jetpack Compose app for controlling the crazyAgent browser age
 
 Status: the app implements Milestones 2–5 of `docs/REMOTE-ACCESS.md`: pairing, the shared chat, stop/new, reconnect with replay, the live screenshot view with on-demand capture, continue and steer, the help card for a waiting agent, and push registration with notifications. **Verified on a phone:** only the Milestone 2 scope (pairing, send/stream, stop, new, reconnect, a Wi-Fi → cellular switch). **Not verified on a phone:** the live view, capture, continue, steer, the help card, and notification settings; these have JVM coverage and a JVM run against the real Node remote API only. **Never run at all:** anything that needs Firebase, because no Firebase project exists.
 
+The desktop side panel does not have to be open: with Edge running and the extension paired once, the extension's background worker runs the agent's browser actions. Diagnostics shows which one is connected.
+
 ## Toolchain
 
 Nothing is installed system-wide. On the development host the tools live under `~/Android`:

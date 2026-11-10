@@ -1,7 +1,10 @@
-// Side panel behavior and activity badge. The side panel owns the bridge
-// WebSocket; this worker only makes the panel easy to open, shows when the
-// agent is actively looking at the page, and flags the one-time disclaimer
-// that the panel shows after the extension is installed or reloaded.
+// Side panel behavior, activity badge, and the panel-less executor. An open
+// side panel owns the bridge WebSocket; when none is open this worker runs the
+// browser commands itself (background-executor.js) so a phone can use the
+// agent. It also flags the one-time disclaimer shown after an install/reload.
+
+import { BackgroundExecutor, EXECUTOR_ALARM, PANEL_PORT_NAME, SETTINGS_KEY } from './background-executor.js'
+import { DEFAULT_SETTINGS, beginDebuggerRun, endDebuggerRun, execute } from './sidepanel/browser.js'
 
 const DISCLAIMER_PENDING_KEY = 'crazyagent.disclaimerPending'
 
@@ -25,6 +28,43 @@ async function flagDisclaimerPending(reason) {
     console.warn('could not flag the one-time disclaimer', error)
   }
 }
+
+function setBadge(active) {
+  void chrome.action.setBadgeBackgroundColor({ color: '#e8590c' })
+  void chrome.action.setBadgeText({ text: active ? 'ON' : '' })
+}
+
+const executor = new BackgroundExecutor({
+  loadSettings: async () => {
+    const stored = await chrome.storage.local.get(SETTINGS_KEY)
+    return { ...DEFAULT_SETTINGS, ...(stored[SETTINGS_KEY] ?? {}), paused: false }
+  },
+  isPanelOpen: async () => {
+    const contexts = await chrome.runtime.getContexts({})
+    return contexts.some(context => context.documentUrl?.includes('/sidepanel/index.html'))
+  },
+  execute,
+  beginRun: beginDebuggerRun,
+  endRun: endDebuggerRun,
+  setBadge,
+})
+
+// Registered synchronously: these are what wake a stopped worker.
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name !== PANEL_PORT_NAME) return
+  executor.panelConnected(port)
+  port.onDisconnect.addListener(() => executor.panelDisconnected(port))
+})
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === EXECUTOR_ALARM) void executor.tick()
+})
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes[SETTINGS_KEY]) void executor.tick()
+})
+
+// Wakes the worker after Chrome stops it, and notices a companion that started later.
+void chrome.alarms.create(EXECUTOR_ALARM, { periodInMinutes: 0.5 })
+void executor.tick()
 
 chrome.runtime.onInstalled.addListener(details => {
   void enablePanelOnAction()

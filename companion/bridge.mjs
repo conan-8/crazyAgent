@@ -156,6 +156,11 @@ export class Bridge {
     return this.ui !== undefined && this.ui.readyState === 1
   }
 
+  /** Where the browser executor runs: the side panel, the background worker, or nowhere. */
+  executorHost() {
+    return this.hasUi() ? this.uiHost ?? 'panel' : null
+  }
+
   hasTools() {
     return this.tools !== undefined && this.tools.readyState === 1
   }
@@ -302,7 +307,7 @@ export class Bridge {
       handshakeTimer = undefined
       role = message.role
       ws.off('message', onFirst)
-      if (role === 'ui') this.#claimUi(ws, origin)
+      if (role === 'ui') this.#claimUi(ws, origin, message.host === 'background' ? 'background' : 'panel')
       else this.#claimTools(ws, origin)
       this.#emit({ direction: 'in', role, frame: { ...message, token: '[redacted]' } })
       this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'hello.ok', version: PROTOCOL_VERSION })
@@ -351,15 +356,16 @@ export class Bridge {
   }
 
   /** @param {import('ws').WebSocket} ws */
-  #claimUi(ws, origin) {
+  #claimUi(ws, origin, host) {
     if (this.ui !== undefined && this.ui !== ws) {
       this.#emit({ direction: 'event', role: 'companion', frame: { type: 'bridge.ui.replaced' } })
       this.#failUpstream(new Error('the crazyAgent side panel was replaced'))
       close(this.ui, 4000, 'replaced by a newer side panel')
     }
     this.ui = ws
+    this.uiHost = host
     this.#resolveUiWaiters()
-    this.log(`bridge: side panel connected${origin === undefined ? '' : ` (${origin})`}`)
+    this.log(`bridge: ${host === 'background' ? 'background executor' : 'side panel'} connected${origin === undefined ? '' : ` (${origin})`}`)
     this.#emit({ direction: 'event', role: 'companion', frame: { type: 'bridge.connected', role: 'ui', origin } })
   }
 

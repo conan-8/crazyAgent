@@ -375,6 +375,7 @@ function setDshStatus(next) {
 function remoteHealth() {
   return {
     uiConnected: bridge.hasUi(),
+    executorHost: bridge.executorHost(),
     toolsConnected: bridge.hasTools(),
     dsh: dshStatus.state,
     dshMessage: dshStatus.message ?? null,
@@ -794,7 +795,8 @@ crazyAgent companion ${VERSION}
 
 Load extension/ unpacked in chrome://extensions, open the side panel, and paste
 the token into Settings. Enter your OpenRouter API key, refresh/select a model,
-and Save. Keep the side panel open while the agent runs.
+and Save. After that the panel can be closed: the extension keeps running
+browser actions in the background while Edge is open.
 The side panel's Debug log button exports a detailed ZIP bundle.
 `)
 
