@@ -47,12 +47,14 @@ test('ordinary prose and token-like text never open the menu', () => {
 /* ---------------------------------------------------------------- */
 
 test('commands filter by name prefix in display order', () => {
-  assert.deepEqual(matchSlashCommands('').map(command => command.id), ['new', 'model'])
+  assert.deepEqual(matchSlashCommands('').map(command => command.id), ['new', 'model', 'plan'])
   assert.deepEqual(matchSlashCommands('n').map(command => command.id), ['new'])
   assert.deepEqual(matchSlashCommands('M').map(command => command.id), ['model'])
   assert.deepEqual(matchSlashCommands('mo').map(command => command.id), ['model'])
+  assert.deepEqual(matchSlashCommands('p').map(command => command.id), ['plan'])
+  assert.deepEqual(matchSlashCommands('PL').map(command => command.id), ['plan'])
   assert.deepEqual(matchSlashCommands('x'), [])
-  assert.deepEqual(matchSlashCommands().map(command => command.id), ['new', 'model'])
+  assert.deepEqual(matchSlashCommands().map(command => command.id), ['new', 'model', 'plan'])
 })
 
 test('command definitions are unique, display-ready slash tokens', () => {
@@ -77,7 +79,9 @@ test('only an exact slash token resolves to a command on send', () => {
   assert.equal(resolveSlashCommand('/new')?.id, 'new')
   assert.equal(resolveSlashCommand('/NEW')?.id, 'new')
   assert.equal(resolveSlashCommand('/model')?.id, 'model')
-  for (const value of ['', '/', '/n', '/new ', ' /new', '/new chat', '/model\n', 'new', '/models']) {
+  assert.equal(resolveSlashCommand('/plan')?.id, 'plan')
+  assert.equal(resolveSlashCommand('/PLAN')?.id, 'plan')
+  for (const value of ['', '/', '/n', '/new ', ' /new', '/new chat', '/model\n', 'new', '/models', '/plan ', ' /plan', '/plan task', '/plan\n', 'plan', '/plans']) {
     assert.equal(resolveSlashCommand(value), null, JSON.stringify(value))
   }
   assert.equal(resolveSlashCommand(undefined), null)

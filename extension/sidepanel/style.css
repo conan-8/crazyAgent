@@ -2606,6 +2606,266 @@ input::placeholder {
   display: none;
 }
 
+.plan-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 4px 8px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.plan-mode-badge,
+.queued-message-plan {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 195, 0, 0.35);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.plan-mode-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.plan-mode-cancel {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.plan-mode-cancel:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.queued-message-plan {
+  font-size: 9px;
+}
+
+.plan-turn-badge {
+  border-color: rgba(255, 195, 0, 0.35);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.plan-dock {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex: 0 0 auto;
+  padding: 0 20px;
+  background: var(--bg);
+}
+
+.plan-dock[hidden] {
+  display: none;
+}
+
+.app.chat-open .plan-dock:not([hidden]) {
+  padding-top: 56px;
+}
+
+.app.chat-open .plan-dock:not([hidden]) + .activity-log {
+  padding-top: 12px;
+}
+
+.plan-dock .plan-panel {
+  margin: 0 0 4px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+}
+
+.plan-panel {
+  margin: 4px 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.plan-panel[hidden],
+.plan-panel-details[hidden] {
+  display: none;
+}
+
+.plan-panel-toggle {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px 9px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.plan-panel-toggle:hover {
+  background: var(--panel-hover);
+}
+
+.plan-panel-heading {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.plan-panel-heading::after {
+  content: "▾";
+  display: inline-block;
+  margin-left: 5px;
+  color: var(--faint);
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+
+.plan-panel-toggle[aria-expanded="false"] .plan-panel-heading::after {
+  transform: rotate(-90deg);
+}
+
+.plan-panel-count,
+.plan-panel-blocked,
+.plan-panel-current {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.plan-panel-blocked {
+  color: #e58b85;
+}
+
+.plan-panel-current {
+  grid-column: 4;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-panel-progress {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--border);
+  color: var(--accent);
+  appearance: none;
+}
+
+.plan-panel-progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.plan-panel-progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.plan-panel-progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.plan-panel-details {
+  border-top: 1px solid var(--border-soft);
+}
+
+.plan-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 320px;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+  counter-reset: plan-item;
+}
+
+.plan-panel-item {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 7px 12px;
+  counter-increment: plan-item;
+}
+
+.plan-panel-item::before {
+  content: counter(plan-item) ".";
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.plan-panel-item-status {
+  padding-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.plan-panel-item-content {
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.plan-panel-item--completed .plan-panel-item-status {
+  color: var(--ok);
+}
+
+.plan-panel-item--completed .plan-panel-item-content {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--faint);
+}
+
+.plan-panel-item--in_progress {
+  background: var(--accent-soft);
+}
+
+.plan-panel-item--in_progress .plan-panel-item-status,
+.plan-panel-item--in_progress .plan-panel-item-content {
+  color: var(--accent);
+}
+
+.plan-panel-item--blocked .plan-panel-item-status {
+  color: #e58b85;
+}
+
+.plan-panel-overflow {
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .agent-turn {
   display: flex;
   flex-direction: column;
@@ -2913,6 +3173,16 @@ input::placeholder {
   font-size: 12px;
 }
 
+.user-origin {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
 .history-item {
   display: flex;
   align-items: center;
@@ -3026,6 +3296,10 @@ input::placeholder {
   .activity-head {
     min-height: 24px;
     padding-top: 4px;
+  }
+
+  .plan-dock .plan-panel-list {
+    max-height: 180px;
   }
 
   #input {
