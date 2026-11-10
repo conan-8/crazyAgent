@@ -1618,19 +1618,30 @@ function fadeOutFeed() {
 const SCROLL_FOLLOW_MS = MOTION.slow + 40
 let scrollFollowFrame = null
 let scrollFollowUntil = 0
+/** The running step's own scroll box, followed too while it is at its bottom. */
+let scrollFollowBody = null
 
 function stopScrollFollow() {
   if (scrollFollowFrame !== null) cancelAnimationFrame(scrollFollowFrame)
   scrollFollowFrame = null
+  scrollFollowBody = null
 }
 
 /** Stay pinned to the bottom for as long as new rows are still growing in. */
 function scrollActivity() {
   scrollFollowUntil = performance.now() + SCROLL_FOLLOW_MS
+  const body = currentStep?.bodyEl
+  if (body && body.scrollHeight - body.scrollTop - body.clientHeight < 32) scrollFollowBody = body
   if (scrollFollowFrame !== null) return
   const follow = () => {
     els.activityLog.scrollTo({ top: els.activityLog.scrollHeight, behavior: 'instant' })
-    scrollFollowFrame = performance.now() < scrollFollowUntil ? requestAnimationFrame(follow) : null
+    if (scrollFollowBody?.isConnected) scrollFollowBody.scrollTop = scrollFollowBody.scrollHeight
+    if (performance.now() < scrollFollowUntil) {
+      scrollFollowFrame = requestAnimationFrame(follow)
+    } else {
+      scrollFollowFrame = null
+      scrollFollowBody = null
+    }
   }
   scrollFollowFrame = requestAnimationFrame(follow)
 }
@@ -1804,6 +1815,7 @@ function startTurn(text, attachments = [], options = {}) {
   activityTurnStart = now()
   lastStepDurations = []
   footerLiveEl = null
+  stopAllWaitCountdowns()
   toolRows.clear()
   streamToolEntries.clear()
   browserRows.clear()
@@ -1976,17 +1988,7 @@ function beginStep(frame) {
   const waiting = document.createElement('div')
   waiting.className = 'thinking-wait'
   waiting.setAttribute('role', 'status')
-  const ballScene = document.createElement('span')
-  ballScene.className = 'thinking-ball-scene'
-  ballScene.setAttribute('aria-hidden', 'true')
-  const shadow = document.createElement('span')
-  shadow.className = 'thinking-ball-shadow'
-  const ball = document.createElement('span')
-  ball.className = 'thinking-ball'
-  ballScene.append(shadow, ball)
-  const waitingLabel = document.createElement('span')
-  waitingLabel.textContent = 'gathering thoughts'
-  waiting.append(ballScene, waitingLabel)
+  waiting.textContent = 'gathering thoughts'
   body.appendChild(waiting)
   block.append(head, body)
 
@@ -2067,6 +2069,7 @@ function closeStep(at = now()) {
  * @param {{totalMs?: number}} [options]
  */
 function finishTurn({ totalMs, usage, failedCalls } = {}) {
+  stopAllWaitCountdowns()
   const at = now()
   closeStep(at)
   const total = Number.isFinite(totalMs) ? totalMs : (currentTurn ? at - currentTurn.startedAt : undefined)
@@ -2174,7 +2177,7 @@ function takeStreamedToolEntry(id) {
 function appendStreamActivity(kind, text) {
   if (typeof text !== 'string' || text.length === 0) return
   if (lastStreamEntry !== null && lastStreamEntry.kind === kind) {
-    lastStreamEntry.textEl.textContent = truncate(lastStreamEntry.textEl.textContent + text, 40_000)
+    appendStreamText(lastStreamEntry, text)
     lastStreamEntry.entry.classList.add('streaming')
   } else {
     finalizeStreamActivity()
@@ -2193,9 +2196,40 @@ function appendStreamActivity(kind, text) {
   scrollActivity()
 }
 
+/**
+ * Add streamed words to a row without re-laying out what is already there:
+ * the new words fade in, and the row grows to its new height instead of
+ * jumping a line at a time.
+ */
+function appendStreamText(created, text) {
+  const { entry, textEl } = created
+  const before = entry.getBoundingClientRect().height
+  if (textEl.textContent.length + text.length > 40_000) {
+    textEl.textContent = truncate(textEl.textContent + text, 40_000)
+  } else {
+    const chunk = document.createElement('span')
+    chunk.className = 'stream-chunk'
+    chunk.textContent = text
+    textEl.appendChild(chunk)
+  }
+  if (reducedMotion.matches) return
+  for (const animation of entry.getAnimations()) {
+    if (animation.id === 'stream-grow') animation.cancel()
+  }
+  const after = entry.scrollHeight
+  if (after <= before + 0.5) return
+  entry.animate(
+    [{ height: `${before}px`, overflow: 'clip' }, { height: `${after}px`, overflow: 'clip' }],
+    { id: 'stream-grow', duration: MOTION.slow, easing: MOTION.ease },
+  )
+}
+
 function finalizeStreamActivity() {
   for (const entry of els.activityLog.querySelectorAll('.activity-entry.streaming')) {
     entry.classList.remove('streaming')
+    // Plain text again, so saved chats carry no per-chunk markup.
+    const textEl = entry.querySelector('.activity-text')
+    if (textEl?.querySelector('.stream-chunk')) textEl.textContent = textEl.textContent
   }
   lastStreamEntry = null
 }
@@ -2219,6 +2253,7 @@ function clearActivity() {
   currentStep = null
   lastStepDurations = []
   footerLiveEl = null
+  stopAllWaitCountdowns()
   toolRows.clear()
   streamToolEntries.clear()
   browserRows.clear()
@@ -2506,6 +2541,7 @@ function handleStatus(frame) {
   if (status === 'ready' || status === 'idle') {
     connected = true
     if (dshState === 'unknown' || dshState === 'starting') dshState = 'ready'
+    stopAllWaitCountdowns()
     setBusy(false)
     setActivityPhase(planTerminalPhase?.label ?? 'Ready', planTerminalPhase?.kind ?? 'online')
     finalizeStreamActivity()
@@ -2530,6 +2566,7 @@ function handleStatus(frame) {
     return
   }
   if (status === 'error') {
+    stopAllWaitCountdowns()
     setStatus('error', 'Error')
     setActivityPhase('Error', 'error')
     finalizeStreamActivity()
@@ -2570,6 +2607,96 @@ function toolLabel(name) {
   }
 }
 
+/** Running wait countdowns by tool call ID: `{ timer, ms, endsAt }`. */
+const waitCountdowns = new Map()
+
+/** Tool arguments arrive as a JSON string from the model and as an object in browser commands. */
+function parseToolArgs(raw) {
+  if (raw !== null && typeof raw === 'object') return raw
+  if (typeof raw !== 'string') return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+/** What a browser_wait_for call waits for, in words, or its fixed time. Null for anything else. */
+function describeWait(args) {
+  if (args === null || typeof args !== 'object') return null
+  if (typeof args.text === 'string' && args.text.length > 0) return { title: `Wait for “${truncate(args.text, 48)}”` }
+  if (typeof args.url === 'string' && args.url.length > 0) return { title: `Wait for URL “${truncate(args.url, 48)}”` }
+  if (args.idle === true) return { title: 'Wait for the page to settle' }
+  if (Number.isFinite(args.ms) && args.ms >= 0) return { ms: args.ms }
+  return null
+}
+
+/**
+ * Show a wait as words on the step title and the activity phase. A fixed wait
+ * of a second or more counts down once a second. The tool row stays hidden, so
+ * the title is the only text; only a failed wait reveals it (`revealWaitRow`). Calling it
+ * again for the same call keeps the original end time. Returns whether the
+ * arguments were a wait it could describe.
+ */
+function startWaitCountdown(callId, row, rawArgs, step = currentStep) {
+  const wait = describeWait(parseToolArgs(rawArgs))
+  if (wait === null || typeof callId !== 'string' || !row) return false
+  const previous = waitCountdowns.get(callId)
+  stopWaitCountdown(callId)
+  row.entry.classList.add('wait-hidden')
+  const show = (title, first) => {
+    if (step) {
+      if (first) setStepTitle(step, title)
+      else step.titleEl.textContent = title
+    }
+    setActivityPhase(`${title}…`, 'busy')
+  }
+  if (wait.ms === undefined) {
+    show(wait.title, true)
+    return true
+  }
+  if (wait.ms < 1000) {
+    show(`Wait ${Number((wait.ms / 1000).toFixed(2))}s`, true)
+    return true
+  }
+  const endsAt = previous?.ms === wait.ms ? previous.endsAt : now() + wait.ms
+  let shown = -1
+  const tick = (first = false) => {
+    const left = Math.max(0, Math.ceil((endsAt - now()) / 1000))
+    if (left === shown) return
+    shown = left
+    show(`Wait ${left}s`, first)
+  }
+  tick(true)
+  waitCountdowns.set(callId, { timer: setInterval(tick, 200), ms: wait.ms, endsAt })
+  return true
+}
+
+/** A finished wait's step title: just "Done", or "Timed out" when its condition never came. */
+function waitOutcome(wait, text) {
+  if (!wait) return null
+  return /\btimed out after\b/u.test(String(text ?? '')) ? 'Timed out' : 'Done'
+}
+
+/** Grow a finished wait's row in, now that it has its result to show. */
+function revealWaitRow(row) {
+  if (!row?.entry.classList.contains('wait-hidden')) return
+  row.entry.classList.remove('wait-hidden')
+  enterRow(row.entry)
+}
+
+function stopWaitCountdown(callId) {
+  const countdown = waitCountdowns.get(callId)
+  if (countdown === undefined) return
+  clearInterval(countdown.timer)
+  waitCountdowns.delete(callId)
+}
+
+function stopAllWaitCountdowns() {
+  for (const countdown of waitCountdowns.values()) clearInterval(countdown.timer)
+  waitCountdowns.clear()
+}
+
 function toolKind(name) {
   if (/click/.test(name)) return 'click'
   if (/type|press_key/.test(name)) return 'type'
@@ -2608,12 +2735,16 @@ function handleToolCall(frame) {
   }
   setBusy(true)
   setStatus('busy', `Using ${label}…`)
+  if (frame.name === 'browser_wait_for' && startWaitCountdown(frame.callId, row, frame.args)) {
+    toolRows.get(frame.callId).wait = describeWait(parseToolArgs(frame.args))
+  }
   scrollActivity()
 }
 
 /** @param {Record<string, any>} frame */
 function handleToolResult(frame) {
   logger.log('ui.tool_result', { callId: frame.callId, ok: frame.ok !== false, text: truncate(frame.text, 500) }, 'debug')
+  stopWaitCountdown(frame.callId)
   const ok = frame.ok !== false
   const at = now()
   const summary = truncate(frame.text || (ok ? 'completed' : 'failed'), 320)
@@ -2625,6 +2756,8 @@ function handleToolResult(frame) {
       durationMs: at - record.startedAt,
     })
     record.row.entry.title = String(frame.text ?? '')
+    // A wait that worked says only "Done"; a failed one shows why.
+    if (!ok) revealWaitRow(record.row)
     toolRows.delete(frame.callId)
   } else {
     const created = pushActivity('tool', ok ? 'done' : 'failed', summary)
@@ -2633,7 +2766,8 @@ function handleToolResult(frame) {
   if (currentStep !== null) {
     // The collapsed step header carries the latest outcome, so a finished step
     // stays readable as a one-line summary without expanding it.
-    setStepTitle(currentStep, activityPreview(summary, 66), { settled: true })
+    const outcome = ok ? waitOutcome(record?.wait, frame.text) : null
+    setStepTitle(currentStep, outcome ?? activityPreview(summary, 66), { settled: true })
     currentStep.titleEl.title = summary
   }
   setActivityPhase('Thinking…', 'busy')
@@ -2917,7 +3051,8 @@ async function handleBrowserCommand(frame) {
     ? pushActivity('browser', op === 'tabs.list' ? 'tabs' : op, argsPreview(JSON.stringify(args)), { running: true })
     : null
   if (ownRow !== null) browserRows.set(rowKey, { row: ownRow, startedAt: started })
-  if (toolRecord !== undefined) {
+  const waitShown = op === 'wait_for' && startWaitCountdown(rowKey, ownRow ?? toolRecord?.row, args)
+  if (toolRecord !== undefined && !waitShown) {
     toolRecord.row.textEl.textContent = argsPreview(JSON.stringify(args)) || 'running…'
   }
   logger.log('browser.command.start', {
@@ -2945,6 +3080,7 @@ async function handleBrowserCommand(frame) {
   setStatus('busy', 'Seeing the page…')
   try {
     const result = await execute(op, args, settings)
+    stopWaitCountdown(rowKey)
     const uiMs = now() - started
     const summary = browserActivitySummary(op, result)
     if (ownRow !== null) {
@@ -2989,10 +3125,12 @@ async function handleBrowserCommand(frame) {
     }, 'info')
     sendBrowserResult(frame.id, true, result)
   } catch (error) {
+    stopWaitCountdown(rowKey)
     const message = errorMessage(error)
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'BROWSER_ERROR'
     if (ownRow !== null) {
       finishActivityEntry(ownRow, { text: `${op}: ${message}`, ok: false, durationMs: now() - started })
+      revealWaitRow(ownRow)
       browserRows.delete(rowKey)
     } else if (!isAutoCapture) {
       pushActivity('error', 'browser', `${op}: ${message}`)
@@ -3553,6 +3691,7 @@ function clearChat() {
   queuedMessages = []
   steeringMessageId = null
   renderQueuedMessages()
+  stopAllWaitCountdowns()
   toolRows.clear()
   streamToolEntries.clear()
   browserRows.clear()
