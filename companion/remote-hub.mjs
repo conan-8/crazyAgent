@@ -249,6 +249,9 @@ export class RemoteHub {
           model: stringOrNull(frame.model),
           docsVerification: stringOrNull(frame.docsVerification),
           docsVerificationReason: stringOrNull(frame.docsVerificationReason),
+          planMode: frame.planMode === true,
+          planOutcome: stringOrNull(frame.planOutcome),
+          planRevision: Number.isSafeInteger(frame.planRevision) ? frame.planRevision : null,
           ...(isRecord(frame.help) && typeof frame.help.reason === 'string' && typeof frame.help.category === 'string'
             ? { help: { category: frame.help.category, reason: clip(frame.help.reason, 500) } }
             : {}),

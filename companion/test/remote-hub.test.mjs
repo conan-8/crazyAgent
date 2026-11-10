@@ -143,6 +143,28 @@ test('a new session clears the committed projection', () => {
   assert.equal(h.journal.at(-1).type, 'chat.session')
 })
 
+test('chat.done preserves Docs and plan outcome metadata for remote clients', () => {
+  const h = hub()
+  startTurn(h)
+  h.ingest({
+    type: 'chat.done',
+    text: 'Open work remains',
+    sessionId: 'session-1',
+    docsVerification: 'unverified',
+    docsVerificationReason: 'read-error',
+    planMode: true,
+    planOutcome: 'unfinished',
+    planRevision: 2,
+  })
+  const done = h.projection().messages.at(-1)
+  assert.equal(done.type, 'chat.done')
+  assert.equal(done.body.docsVerification, 'unverified')
+  assert.equal(done.body.docsVerificationReason, 'read-error')
+  assert.equal(done.body.planMode, true)
+  assert.equal(done.body.planOutcome, 'unfinished')
+  assert.equal(done.body.planRevision, 2)
+})
+
 test('catchUp replays in order, and resyncs on instance change, unknown, or expired sequence', () => {
   const h = hub({ journalLimit: 5 })
   for (let i = 0; i < 3; i += 1) h.publish('chat.status', { i }, { turnId: null })

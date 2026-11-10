@@ -154,15 +154,37 @@ export class SessionController {
 
   /**
    * Provider activity that concerns the turn itself. `help-request` is the
-   * agent_request_help tool's signal; it counts only for the turn it was sent
-   * in, and the last one in a turn wins.
+   * agent_request_help tool's signal; `turn-outcome` carries Docs/plan metadata
+   * that cannot be written onto DSH's frozen committed turn/end event.
    * @param {Record<string, any>} frame
    */
   noteActivity(frame) {
-    if (!isRecord(frame) || frame.kind !== 'help-request') return
-    if (!this.running || this.turnId === undefined || frame.turnId !== this.turnId) return
-    const help = normalizeHelpRequest(frame)
-    if (help !== undefined) this.helpTurnRequest = help
+    if (!isRecord(frame) || !this.running || this.turnId === undefined || frame.turnId !== this.turnId) return
+    if (frame.kind === 'help-request') {
+      const help = normalizeHelpRequest(frame)
+      if (help !== undefined) this.helpTurnRequest = help
+      return
+    }
+    if (frame.kind !== 'turn-outcome' || !Number.isSafeInteger(frame.turn)) return
+    const sessionId = this.getRunner()?.sessionId
+    if (typeof frame.sessionId === 'string' && typeof sessionId === 'string' && frame.sessionId !== sessionId) return
+    this.noteOutcome(frame)
+  }
+
+  /** @param {Record<string, any>} frame */
+  noteOutcome(frame) {
+    if (frame.docsVerification === 'verified' || frame.docsVerification === 'unverified') {
+      this.docsTurnVerification = {
+        status: frame.docsVerification,
+        reason: typeof frame.docsVerificationReason === 'string' ? frame.docsVerificationReason : undefined,
+      }
+    }
+    if (['unfinished', 'blocked', 'reported-complete', 'not-assessed', 'aborted', 'user-input-needed'].includes(frame.planOutcome)) {
+      this.planTurnOutcome = {
+        outcome: frame.planOutcome,
+        revision: Number.isSafeInteger(frame.planRevision) && frame.planRevision >= 0 ? frame.planRevision : undefined,
+      }
+    }
   }
 
   /** @param {TurnObserver} observer */
@@ -598,15 +620,7 @@ export class SessionController {
     const data = isRecord(event.data) ? event.data : {}
 
     if (event.type === 'turn/end') {
-      if (data.docsVerification === 'verified' || data.docsVerification === 'unverified') {
-        this.docsTurnVerification = { status: data.docsVerification, reason: typeof data.docsVerificationReason === 'string' ? data.docsVerificationReason : undefined }
-      }
-      if (typeof data.planOutcome === 'string') {
-        this.planTurnOutcome = {
-          outcome: data.planOutcome,
-          revision: Number.isSafeInteger(data.planRevision) ? data.planRevision : undefined,
-        }
-      }
+      this.noteOutcome(data)
       return
     }
     if (event.type === 'assistant/message') {

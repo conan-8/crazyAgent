@@ -127,6 +127,9 @@
         "model": "fixture/model",
         "docsVerification": null,
         "docsVerificationReason": null,
+        "planMode": false,
+        "planOutcome": null,
+        "planRevision": null,
         "help": {
           "category": "login",
           "reason": "Sign in to the mail site, then tell me to continue."
@@ -241,7 +244,10 @@
         "timings": null,
         "model": "fixture/model",
         "docsVerification": null,
-        "docsVerificationReason": null
+        "docsVerificationReason": null,
+        "planMode": false,
+        "planOutcome": null,
+        "planRevision": null
       }
     },
     {
@@ -306,6 +312,9 @@
         "model": "fixture/model",
         "docsVerification": null,
         "docsVerificationReason": null,
+        "planMode": false,
+        "planOutcome": null,
+        "planRevision": null,
         "help": {
           "category": "captcha",
           "reason": "Solve the CAPTCHA on the download page."
@@ -479,6 +488,9 @@
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
             "help": {
               "category": "login",
               "reason": "Sign in to the mail site, then tell me to continue."
@@ -584,6 +596,9 @@
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
             "help": {
               "category": "login",
               "reason": "Sign in to the mail site, then tell me to continue."
@@ -689,6 +704,9 @@
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
             "help": {
               "category": "login",
               "reason": "Sign in to the mail site, then tell me to continue."
@@ -735,7 +753,10 @@
             "timings": null,
             "model": "fixture/model",
             "docsVerification": null,
-            "docsVerificationReason": null
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null
           }
         }
       ],
@@ -830,6 +851,9 @@
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
             "help": {
               "category": "login",
               "reason": "Sign in to the mail site, then tell me to continue."
@@ -876,7 +900,10 @@
             "timings": null,
             "model": "fixture/model",
             "docsVerification": null,
-            "docsVerificationReason": null
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null
           }
         },
         {
@@ -908,6 +935,9 @@
             "model": "fixture/model",
             "docsVerification": null,
             "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
             "help": {
               "category": "captcha",
               "reason": "Solve the CAPTCHA on the download page."

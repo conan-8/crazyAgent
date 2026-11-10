@@ -15,7 +15,7 @@ import {
 
 const TOKEN_A = `fcm-token-A:${'a'.repeat(120)}`
 const TOKEN_B = `fcm-token-B:${'b'.repeat(120)}`
-const reg = fcmToken => ({ fcmToken, platform: 'android', appVersion: '0.3.0' })
+const reg = fcmToken => ({ fcmToken, platform: 'android', appVersion: '0.4.0' })
 
 function tempDir(t) {
   const dir = mkdtempSync(join(tmpdir(), 'crazyagent-push-'))

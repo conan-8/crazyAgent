@@ -67,7 +67,7 @@ The live view sits directly below the top icons. Its chevron collapses it to a s
 
 The composer supports `/new`, `/model`, and `/plan` with the same single-token matching rules as the sidebar. `/new` opens the guarded new-chat confirmation, `/model` opens model details, and `/plan` toggles plan mode for the next prompt only. Other slash-leading text is sent as prose. The plan flag survives pending-message encryption, reconciliation, and deliberate resend.
 
-Model selection, live DSH session switching, on-demand screenshots, and debug-log export are not exposed by the remote API, so the app does not offer nonfunctional controls for them. The image picker replaces the desktop microphone button. The launcher uses the extension's yellow cursor with a safe margin inside adaptive and density-specific legacy icons. Both light and dark Android system themes use the sidebar's dark color scheme.
+Model administration, live DSH session switching outside the explicit Continue action, and debug-log export are not exposed by the remote API, so the app does not offer nonfunctional controls for them. The image picker replaces the desktop microphone button. The launcher uses the extension's yellow cursor with a safe margin inside adaptive and density-specific legacy icons. Both light and dark Android system themes use the sidebar's dark color scheme.
 
 ## Rules the client follows
 

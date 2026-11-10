@@ -266,6 +266,9 @@
         "model": "fixture/model",
         "docsVerification": null,
         "docsVerificationReason": null,
+        "planMode": false,
+        "planOutcome": null,
+        "planRevision": null,
         "replacesStreamId": "turn-1:s3"
       }
     },
@@ -397,6 +400,9 @@
           "model": "fixture/model",
           "docsVerification": null,
           "docsVerificationReason": null,
+          "planMode": false,
+          "planOutcome": null,
+          "planRevision": null,
           "replacesStreamId": "turn-1:s3"
         }
       }

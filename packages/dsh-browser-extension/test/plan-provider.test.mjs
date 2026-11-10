@@ -115,11 +115,18 @@ test('a real plan.mode frame activates browser_plan before assembly and retires 
   await waitFor(() => activities.some(activity => activity.kind === 'plan'))
   assert.deepEqual(activities.at(-1).items.map(item => item.status), ['in_progress', 'pending', 'pending'])
 
-  const ending = { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }
+  // DSH deep-freezes committed session events, so the outcome cannot be
+  // written onto turn/end: it travels as a turn-outcome activity instead.
+  const ending = Object.freeze({ type: 'turn/end', data: Object.freeze({ turn: 1, reason: Object.freeze({ kind: 'completed' }) }) })
   fake.listeners.get('session/event')(session, ending)
-  assert.equal(fake.tools.has('browser_plan'), false)
-  assert.equal(ending.data.planOutcome, 'unfinished')
-  assert.equal(ending.data.planRevision, 1)
+  assert.equal(fake.tools.has('browser_plan'), false, 'the plan tool is retired even though the event is frozen')
+  await waitFor(() => activities.some(activity => activity.kind === 'turn-outcome'))
+  const outcome = activities.find(activity => activity.kind === 'turn-outcome')
+  assert.deepEqual(
+    { sessionId: outcome.sessionId, turn: outcome.turn, planOutcome: outcome.planOutcome, planRevision: outcome.planRevision },
+    { sessionId: 'session-plan', turn: 1, planOutcome: 'unfinished', planRevision: 1 },
+  )
+  assert.deepEqual(Object.keys(ending.data), ['turn', 'reason'])
 
   let visibleNextTurn = true
   await fake.listeners.get('agent/request')({ agent, turn: 2 }, async () => {

@@ -4599,8 +4599,23 @@ export function apply(ctx, config = {}) {
           const turn = event.data?.turn
           if (maxTokenStepsBySession.get(String(session.id))?.turn === turn) maxTokenStepsBySession.delete(String(session.id))
           if (Number.isSafeInteger(turn)) {
-            planRuntime.endTurn(session, turn, event.data)
-            docsFinalCheck.endTurn(session?.id, turn, event.data)
+            // DSH deep-freezes committed session events, so this turn's
+            // outcome cannot be written onto `event.data` (the assignment
+            // throws). It is collected here and sent to the companion as a
+            // `turn-outcome` activity, one per turn end, even when empty, so
+            // the companion knows nothing more is coming for this turn.
+            const outcome = {}
+            try {
+              planRuntime.endTurn(session, turn, outcome)
+            } catch (error) {
+              bridge.logEvent('turn.outcome.error', { part: 'plan', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
+            }
+            try {
+              docsFinalCheck.endTurn(session?.id, turn, outcome)
+            } catch (error) {
+              bridge.logEvent('turn.outcome.error', { part: 'docs', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
+            }
+            bridge.activity({ kind: 'turn-outcome', sessionId: session?.id === undefined ? undefined : String(session.id), turn, ...outcome })
           }
           scheduleImagePrune(session, 'turn')
         }

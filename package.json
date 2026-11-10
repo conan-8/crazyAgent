@@ -1,6 +1,6 @@
 {
   "name": "crazyagent",
-  "version": "2.0.0-beta",
+  "version": "2.1.0-beta",
   "private": true,
   "type": "module",
   "description": "DeepSeek-optimised Chrome/Edge browser agent with guarded actions and Google Docs editing",
@@ -28,5 +28,14 @@
     "google-auth-library": "^10.9.1",
     "js-yaml": "^4.3.2",
     "ws": "^8.18.0"
+  },
+  "overrides": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/core": "2.4.0",
+    "@deepseek-ai/libreoffice-kit": {
+      "fflate": "0.8.3"
+    },
+    "undici": "8.12.4",
+    "zod": "4.6.7"
   }
 }
