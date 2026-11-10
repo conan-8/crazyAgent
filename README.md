@@ -15,6 +15,17 @@
 
 There are **34 standing model-facing tools**: 25 general browser tools, 8 guarded Docs tools, and `agent_request_help`, plus a conditional 35th `browser_plan` tool exposed only during explicitly planned turns. The detailed reference is below.
 
+## New in v2.1.0-beta
+
+- **Control the agent from Android:** pair the native app through tailnet-only Tailscale Serve, send prompts and images, stream activity, stop or steer turns, and continue saved chats.
+- **See what the agent sees:** mirrored live screenshots, on-demand captures, and a full-screen zoom/pan viewer on the phone.
+- **Plan and execute multi-step work:** exact `/plan` on desktop or Android arms one turn with a revisioned checklist, stale reminders, and a sticky desktop progress dock.
+- **Ask for help explicitly:** `agent_request_help` captures the blocker and enters `waiting_for_user`; a reply continues the same session.
+- **More reliable outcomes:** plan results and Docs verification now travel through a dedicated activity instead of DSH's frozen `turn/end` event.
+- **Updated defaults and security:** medium reasoning for new configurations, the standard DeepSeek V4.1 Flash model ID, compatible dependency security updates, and **0 vulnerabilities** in the release audit.
+
+See the complete [v2.1.0-beta patch notes](RELEASE-NOTES.md). This is a prerelease: physical-phone acceptance of the newest screens, real FCM delivery, a real reboot test, and live-model `/plan`/Docs outcome acceptance remain pending.
+
 ## Install with an agent
 
 **Requirements:**
@@ -166,7 +177,9 @@ File transfer is confined to one Downloads folder. The extension cannot change C
 
 ## Phone remote access
 
-The native Android app pairs with the scoped remote API over tailnet-only Tailscale Serve. It shares the desktop chat, streams activity, sends images, stops/starts turns, shows real context usage, renders Markdown, opens bounded read-only saved-chat history, and supports `/new`, `/model`, and `/plan` composer commands. `/model` opens model details on the phone; `/plan` arms only the next prompt. See `android/README.md` and `docs/REMOTE-ACCESS.md` for pairing and security details.
+The native Android app pairs with the scoped remote API over tailnet-only Tailscale Serve. It shares the desktop chat, streams activity, sends images, stops/starts turns, shows real context usage, renders Markdown, opens bounded saved-chat history, and supports Continue and Steer. Its live view mirrors agent captures, offers on-demand screenshots, and opens a full-screen zoom/pan viewer. A structured help request displays the reason and current page, and the user's reply continues the same session. The composer supports `/new`, `/model`, and `/plan`; `/model` opens read-only model details, while `/plan` arms only the next prompt.
+
+Remote access is opt-in with `--remote` and a separate pairing credential; the privileged browser bridge is never exposed to the phone. Optional FCM notifications contain turn metadata only and remain disabled until Firebase is configured on both the host and app. See `android/README.md` and `docs/REMOTE-ACCESS.md` for APK installation, pairing, security, and current acceptance limits.
 
 `config/crazyagent.service` is the configured user-service example for this host. It starts the companion with `--remote`, restarts it on failure, and uses the saved model configuration. Install or update it with:
 
