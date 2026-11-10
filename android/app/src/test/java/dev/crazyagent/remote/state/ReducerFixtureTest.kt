@@ -3,8 +3,11 @@ package dev.crazyagent.remote.state
 import dev.crazyagent.remote.data.RemoteJson
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -148,5 +151,33 @@ class ReducerFixtureTest {
             assertEquals("\"remote.resync\"", all.first())
             assertTrue(all.drop(1).none { it == "\"remote.resync\"" })
         }
+    }
+
+    /**
+     * A3: the recorded frames must actually reach the phone state, not merely be
+     * ignored by both the replay and the projection.
+     */
+    @Test fun regeneratedFixturesCarryPerTurnMeta() {
+        val turnFrames = frames(fixture("turn-stream"))
+        val doneBody = turnFrames.first { it["type"].toString() == "\"chat.done\"" }["body"]!!.jsonObject
+        val reportedUsage = doneBody["usage"]!!.jsonObject
+        val done = replay(turnFrames).items.filterIsInstance<ChatItem.Done>().single()
+        assertEquals(
+            TurnUsage(
+                inputTokens = reportedUsage.getValue("inputTokens").jsonPrimitive.long,
+                outputTokens = reportedUsage.getValue("outputTokens").jsonPrimitive.long,
+                totalTokens = reportedUsage.getValue("totalTokens").jsonPrimitive.long,
+            ),
+            done.usage,
+        )
+
+        val lifecycleFrames = frames(fixture("lifecycle"))
+        val beforeNewChat = lifecycleFrames.take(lifecycleFrames.indexOfLast { it["type"].toString() == "\"chat.session\"" })
+        val stoppedBody = beforeNewChat.first { it["type"].toString() == "\"chat.stopped\"" }["body"]!!.jsonObject
+        val timings = stoppedBody["timings"]!!.jsonObject
+        val stopped = replay(beforeNewChat).items.filterIsInstance<ChatItem.Stopped>().last()
+        assertEquals(timings.getValue("totalMs").jsonPrimitive.long, stopped.elapsedMs)
+        assertEquals(timings.getValue("failedCalls").jsonPrimitive.int, stopped.failedCalls)
+        assertEquals(stoppedBody["usage"]!!.jsonObject.getValue("totalTokens").jsonPrimitive.long, stopped.usage?.totalTokens)
     }
 }

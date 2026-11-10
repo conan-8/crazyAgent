@@ -37,8 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import dev.crazyagent.remote.app.ArchivedChat
 import dev.crazyagent.remote.state.SessionSummary
 import dev.crazyagent.remote.state.displayRows
@@ -131,63 +129,61 @@ fun ArchivedChatDialog(
     onDismiss: () -> Unit,
 ) {
     val rows = remember(chat.items) { displayRows(chat.items) }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = AgentBackground) {
-            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 14.dp, top = 12.dp, bottom = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(chat.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            "Saved transcript${if (chat.updatedAt.isNotEmpty()) " · ${historyDate(chat.updatedAt)}" else ""}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = AgentFaint,
-                        )
-                    }
-                    Surface(shape = CircleShape, color = AgentPanelRaised, border = BorderStroke(1.dp, AgentBorder)) {
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(38.dp)) {
-                            Icon(AppIcons.Close, contentDescription = "Close saved chat", modifier = Modifier.size(17.dp))
-                        }
-                    }
-                }
-                if (rows.isEmpty()) {
-                    Text("This saved chat has no messages.", color = AgentMuted, modifier = Modifier.padding(20.dp))
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                    ) {
-                        items(rows, key = { it.key }) { row -> RowView(row) }
-                    }
-                }
-                if (rows.isEmpty()) Spacer(Modifier.weight(1f))
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(
-                        onClick = if (isCurrent) onDismiss else onContinue,
-                        enabled = isCurrent || (canContinue && !continuing),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = AgentYellow, contentColor = AgentBackground),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (continuing) {
-                            CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = AgentBackground)
-                        } else {
-                            Text(if (isCurrent) "This is the current chat · Back to it" else "Continue this chat")
-                        }
-                    }
+    Surface(Modifier.fillMaxSize(), color = AgentBackground) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 14.dp, top = 12.dp, bottom = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(chat.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        when {
-                            isCurrent -> "Your next message continues this conversation."
-                            busy -> "Wait for the running turn to finish, or stop it, before switching chats."
-                            else -> "Switches the agent, and the desktop side panel's next turn, to this conversation. Very old chats may no longer be continuable."
-                        },
-                        style = MaterialTheme.typography.labelSmall,
+                        "Saved transcript${if (chat.updatedAt.isNotEmpty()) " · ${historyDate(chat.updatedAt)}" else ""}",
+                        style = MaterialTheme.typography.labelMedium,
                         color = AgentFaint,
                     )
                 }
+                Surface(shape = CircleShape, color = AgentPanelRaised, border = BorderStroke(1.dp, AgentBorder)) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(38.dp)) {
+                        Icon(AppIcons.Close, contentDescription = "Close saved chat", modifier = Modifier.size(17.dp))
+                    }
+                }
+            }
+            if (rows.isEmpty()) {
+                Text("This saved chat has no messages.", color = AgentMuted, modifier = Modifier.padding(20.dp))
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    items(rows, key = { it.key }) { row -> RowView(row) }
+                }
+            }
+            if (rows.isEmpty()) Spacer(Modifier.weight(1f))
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(
+                    onClick = if (isCurrent) onDismiss else onContinue,
+                    enabled = isCurrent || (canContinue && !continuing),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AgentYellow, contentColor = AgentBackground),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (continuing) {
+                        CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = AgentBackground)
+                    } else {
+                        Text(if (isCurrent) "This is the current chat · Back to it" else "Continue this chat")
+                    }
+                }
+                Text(
+                    when {
+                        isCurrent -> "Your next message continues this conversation."
+                        busy -> "Wait for the running turn to finish, or stop it, before switching chats."
+                        else -> "Switches the agent, and the desktop side panel's next turn, to this conversation. Very old chats may no longer be continuable."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AgentFaint,
+                )
             }
         }
     }

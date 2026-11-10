@@ -1,5 +1,7 @@
 package dev.crazyagent.remote.state
 
+import java.util.Locale
+
 /** What the chat list renders, derived from committed items. */
 sealed interface DisplayRow {
     val key: String
@@ -41,14 +43,52 @@ fun displayRows(items: List<ChatItem>): List<DisplayRow> {
                 val text = item.text.trim()
                 val repeated = lastAssistant?.let { (turn, last) -> (turn == null || turn == item.turnId) && last == text } ?: false
                 if (text.isNotEmpty() && !repeated) rows += DisplayRow.Assistant("${item.key}:text", item.text)
-                rows += DisplayRow.Note(item.key, listOfNotNull("Done", item.model).joinToString(" · "), NoteKind.DONE)
+                val note = listOfNotNull("Done", item.model, tokenText(item.usage)).joinToString(" · ")
+                rows += DisplayRow.Note(item.key, note, NoteKind.DONE)
             }
-            is ChatItem.Stopped -> rows += DisplayRow.Note(item.key, item.message?.takeIf { it.isNotBlank() } ?: "Stopped", NoteKind.STOPPED)
+            is ChatItem.Stopped -> {
+                val parts = mutableListOf(item.message?.takeIf { it.isNotBlank() } ?: "Stopped")
+                durationText(item.elapsedMs)?.let(parts::add)
+                failedText(item.failedCalls)?.let(parts::add)
+                tokenText(item.usage)?.let(parts::add)
+                rows += DisplayRow.Note(item.key, parts.joinToString(" · "), NoteKind.STOPPED)
+            }
             is ChatItem.Error -> rows += DisplayRow.Note(item.key, item.message, NoteKind.ERROR)
         }
     }
     return rows
 }
+
+/**
+ * Compact per-turn token count, matching the side panel's turn divider: prefer
+ * `totalTokens`, otherwise input+output, and never show a zero count.
+ */
+private fun tokenText(usage: TurnUsage?): String? {
+    val tokens = tokenCount(usage) ?: return null
+    return "${String.format(Locale.US, "%,d", tokens)} tok"
+}
+
+private fun tokenCount(usage: TurnUsage?): Long? {
+    if (usage == null) return null
+    val total = usage.totalTokens
+    if (total != null && total > 0) return total
+    val sum = (usage.inputTokens ?: 0L) + (usage.outputTokens ?: 0L)
+    return sum.takeIf { it > 0 }
+}
+
+/** `850ms` under a second, `12.3s` under a minute, then `3m 12s` (panel parity). */
+private fun durationText(ms: Long?): String? {
+    if (ms == null || ms < 0) return null
+    if (ms < 1_000) return "${maxOf(1L, ms)}ms"
+    if (ms < 60_000) return String.format(Locale.US, "%.1fs", ms / 1000.0)
+    val minutes = ms / 60_000
+    val seconds = Math.round((ms % 60_000) / 1000.0)
+    return String.format(Locale.US, "%dm %02ds", minutes, seconds)
+}
+
+/** Only failures are worth a note; `0 failed` is noise on a stopped turn. */
+private fun failedText(failedCalls: Int?): String? =
+    failedCalls?.takeIf { it > 0 }?.let { "$it failed" }
 
 /** Short heading for a help request; unknown categories read as a generic request. */
 fun helpTitle(category: String?): String = when (category) {

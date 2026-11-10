@@ -25,12 +25,37 @@ sealed interface ChatItem {
         val result: ToolResult?,
     ) : ChatItem
 
-    data class Done(override val key: String, override val turnId: String?, val text: String, val model: String?) : ChatItem
+    data class Done(
+        override val key: String,
+        override val turnId: String?,
+        val text: String,
+        val model: String?,
+        /** Tokens the companion reported for this turn; null on older frames. */
+        val usage: TurnUsage? = null,
+    ) : ChatItem
 
-    data class Stopped(override val key: String, override val turnId: String?, val reason: String?, val message: String?) : ChatItem
+    data class Stopped(
+        override val key: String,
+        override val turnId: String?,
+        val reason: String?,
+        val message: String?,
+        /** Partial token usage when the companion reported it; null otherwise. */
+        val usage: TurnUsage? = null,
+        /** How long the stopped turn had been running, from `timings.totalMs`. */
+        val elapsedMs: Long? = null,
+        /** Failed tool calls before the stop, from `timings.failedCalls`. */
+        val failedCalls: Int? = null,
+    ) : ChatItem
 
     data class Error(override val key: String, override val turnId: String?, val message: String) : ChatItem
 }
+
+/** Token usage the companion recorded for one turn; absent fields stay null. */
+data class TurnUsage(
+    val inputTokens: Long? = null,
+    val outputTokens: Long? = null,
+    val totalTokens: Long? = null,
+)
 
 data class ToolResult(val ok: Boolean, val text: String)
 

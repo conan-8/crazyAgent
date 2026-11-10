@@ -88,8 +88,23 @@ function turnStream() {
   s.hub.addScreenshot({ data: PIXEL_PNG, mimeType: 'image/png', turnId: 'turn-1', callId: 'call-1', source: 'tool' })
   s.modelStart()
   s.text('The cart has 2 items.')
-  s.hub.ingest({ type: 'chat.done', sessionId: 'session-1', text: 'The cart has 2 items.', model: 'fixture/model', timings: { totalMs: 1234 } })
-  s.hub.turnEnded({ turnId: 'turn-1', outcome: 'done', sessionId: 'session-1' })
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'DONE — the cart has 2 items.',
+    label: 'done',
+    model: 'fixture/model',
+    timings: { totalMs: 1234, toolCalls: 1, failedCalls: 0 },
+    usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150, cacheReadTokens: 40 },
+  })
+  s.hub.turnEnded({
+    turnId: 'turn-1',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: 'done',
+    usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150, cacheReadTokens: 40 },
+    timings: { totalMs: 1234, toolCalls: 1, failedCalls: 0 },
+  })
   return s.done('turn-stream')
 }
 
@@ -105,8 +120,22 @@ function midTurnResync() {
   s.text('three products.')
   s.toolDelta('call-9', null, '_chars":4000}')
   s.hub.ingest({ type: 'chat.assistant', text: 'The page lists three products.' })
-  s.hub.ingest({ type: 'chat.done', sessionId: 'session-1', text: 'The page lists three products.', model: 'fixture/model' })
-  s.hub.turnEnded({ turnId: 'turn-2', outcome: 'done', sessionId: 'session-1' })
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'The page lists three products.',
+    label: null,
+    model: 'fixture/model',
+    usage: { inputTokens: 20, outputTokens: 8, totalTokens: 28 },
+  })
+  s.hub.turnEnded({
+    turnId: 'turn-2',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: null,
+    usage: { inputTokens: 20, outputTokens: 8, totalTokens: 28 },
+    timings: { totalMs: 900, toolCalls: 1, failedCalls: 0 },
+  })
   return s.done('mid-turn-resync')
 }
 
@@ -119,12 +148,32 @@ function lifecycle() {
   s.text('Working')
   s.hub.addScreenshot({ data: PIXEL_PNG, mimeType: 'image/png', turnId: 'turn-3', source: 'auto' })
   s.hub.ingest({ type: 'chat.stopping', message: 'Stopping…' })
-  s.hub.ingest({ type: 'chat.stopped', reason: 'user', message: 'Stopped.' })
-  s.hub.turnEnded({ turnId: 'turn-3', outcome: 'stopped', sessionId: 'session-1' })
+  s.hub.ingest({
+    type: 'chat.stopped',
+    reason: 'user',
+    message: 'Stopped.',
+    timings: { totalMs: 4321, toolCalls: 2, failedCalls: 2 },
+    usage: { inputTokens: 15, outputTokens: 3, totalTokens: 18 },
+  })
+  s.hub.turnEnded({
+    turnId: 'turn-3',
+    outcome: 'stopped',
+    sessionId: 'session-1',
+    label: null,
+    usage: { inputTokens: 15, outputTokens: 3, totalTokens: 18 },
+    timings: { totalMs: 4321, toolCalls: 2, failedCalls: 2 },
+  })
   s.setHealth({ uiConnected: false })
   startTurn(s, 'turn-4', 'Click buy')
   s.hub.ingest({ type: 'chat.error', message: 'The side panel is not connected.', recoverable: true })
-  s.hub.turnEnded({ turnId: 'turn-4', outcome: 'error', error: 'The side panel is not connected.' })
+  s.hub.turnEnded({
+    turnId: 'turn-4',
+    outcome: 'error',
+    error: 'The side panel is not connected.',
+    label: null,
+    usage: { inputTokens: 4, outputTokens: 0, totalTokens: 4 },
+    timings: { totalMs: 300, toolCalls: 1, failedCalls: 1 },
+  })
   s.setHealth({ uiConnected: true })
   const afterError = s.hub.projection()
   s.hub.setSession('session-2')
@@ -144,20 +193,51 @@ function helpRequest() {
   s.hub.ingest({ type: 'chat.assistant', text: 'I need you to sign in.' })
   s.hub.addScreenshot({ data: PIXEL_PNG, mimeType: 'image/png', turnId: 'turn-5', callId: 'auto', source: 'help' })
   const help = { category: 'login', reason: 'Sign in to the mail site, then tell me to continue.' }
-  s.hub.ingest({ type: 'chat.done', sessionId: 'session-1', text: 'I need you to sign in.', model: 'fixture/model', help })
-  s.hub.turnEnded({ turnId: 'turn-5', outcome: 'done', sessionId: 'session-1', help: { ...help, captureError: null } })
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'I need you to sign in.',
+    label: null,
+    model: 'fixture/model',
+    usage: { inputTokens: 30, outputTokens: 6, totalTokens: 36 },
+    help,
+  })
+  s.hub.turnEnded({ turnId: 'turn-5', outcome: 'done', sessionId: 'session-1', label: null, usage: { inputTokens: 30, outputTokens: 6, totalTokens: 36 }, timings: { totalMs: 800, failedCalls: 0 }, help: { ...help, captureError: null } })
   const waiting = s.hub.projection()
   s.hub.addScreenshot({ data: PIXEL_PNG, mimeType: 'image/png', callId: 'auto', source: 'manual' })
   const waitingAfterCapture = s.hub.projection()
   startTurn(s, 'turn-6', 'Signed in, continue')
   s.hub.ingest({ type: 'chat.assistant', text: 'You have 3 new messages.' })
-  s.hub.ingest({ type: 'chat.done', sessionId: 'session-1', text: 'You have 3 new messages.', model: 'fixture/model' })
-  s.hub.turnEnded({ turnId: 'turn-6', outcome: 'done', sessionId: 'session-1' })
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'DONE — you have 3 new messages.',
+    label: 'done',
+    model: 'fixture/model',
+    usage: { inputTokens: 25, outputTokens: 7, totalTokens: 32 },
+  })
+  s.hub.turnEnded({ turnId: 'turn-6', outcome: 'done', sessionId: 'session-1', label: 'done', usage: { inputTokens: 25, outputTokens: 7, totalTokens: 32 }, timings: { totalMs: 700, failedCalls: 0 } })
   const afterReply = s.hub.projection()
   startTurn(s, 'turn-7', 'Open the attachment')
   const blocked = { category: 'captcha', reason: 'Solve the CAPTCHA on the download page.' }
-  s.hub.ingest({ type: 'chat.done', sessionId: 'session-1', text: 'A CAPTCHA is in the way.', model: 'fixture/model', help: blocked })
-  s.hub.turnEnded({ turnId: 'turn-7', outcome: 'done', sessionId: 'session-1', help: { ...blocked, captureError: 'The browser side panel is not connected, so the screen cannot be captured.' } })
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'BLOCKED — a CAPTCHA is in the way.',
+    label: 'blocked',
+    model: 'fixture/model',
+    usage: { inputTokens: 18, outputTokens: 4, totalTokens: 22 },
+    help: blocked,
+  })
+  s.hub.turnEnded({
+    turnId: 'turn-7',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: 'blocked',
+    usage: { inputTokens: 18, outputTokens: 4, totalTokens: 22 },
+    timings: { totalMs: 600, failedCalls: 1 },
+    help: { ...blocked, captureError: 'The browser side panel is not connected, so the screen cannot be captured.' },
+  })
   const waitingNoCapture = s.hub.projection()
   s.hub.setSession('session-2')
   const fixture = s.done('help-request')

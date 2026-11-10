@@ -11,6 +11,7 @@
  *   node scripts/ui-preview.mjs --scenario turn       # finished turn: dark/narrow/wide/light
  *   node scripts/ui-preview.mjs --scenario live       # mid-turn live clocks
  *   node scripts/ui-preview.mjs --scenario waiting    # pre-stream bouncing ball
+ *   node scripts/ui-preview.mjs --scenario motion     # frame-sampled enter/exit transitions and yellow action label
  *   node scripts/ui-preview.mjs --scenario states     # finished feed / expanded step / new chat
  *   node scripts/ui-preview.mjs --scenario tools      # browser-command rows + tab-list card
  *   node scripts/ui-preview.mjs --scenario modals     # settings + debug log modals
@@ -21,6 +22,7 @@
  *   node scripts/ui-preview.mjs --scenario slash      # slash-command palette: filter, keys, execution
  *   node scripts/ui-preview.mjs --scenario plan       # /plan arm, live checklist, queue/race preservation
  *   node scripts/ui-preview.mjs --scenario remote     # phone-started turns: render, queue, lost-race requeue
+ *   node scripts/ui-preview.mjs --scenario stopped    # stop, reload, restore, and continue a saved chat
  *
  * Options: --out DIR (default /tmp/crazyagent-ui-preview) and SHOT_FORMAT=jpeg.
  * Needs Node >= 22 (global WebSocket) and microsoft-edge or (set EDGE_BIN) on PATH.
@@ -58,6 +60,8 @@ const extensionId = (() => {
 })()
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+/** Longer than the panel's slowest enter/exit transition, for layout measurements. */
+const MOTION_SETTLE_MS = 320
 const log = (...parts) => process.stderr.write(`[ui-preview] ${parts.join(' ')}\n`)
 
 async function waitForCdp() {
@@ -328,12 +332,15 @@ async function playTurn(page, options = {}) {
     type: 'chat.done',
     sessionId: 'session-preview0001',
     text: 'Done — **I clicked Increment twice**. The counter now reads **2**.\n\n- First bullet\n- Second bullet\n\n1. First numbered item\n2. Second numbered item\n\n| Plan | Price |\n| --- | ---: |\n| Pro | $24 |\n| Team | $39 |',
-    timings: { totalMs: 28400, autoCaptureMs: 412, firstEventMs: 910, toolCalls: 3, promptTextBytes: 18422, imageBytes: 182000, images: 1 },
+    timings: { totalMs: 28400, autoCaptureMs: 412, firstEventMs: 910, toolCalls: 3, failedCalls: 0, promptTextBytes: 18422, imageBytes: 182000, images: 1 },
+    usage: { inputTokens: 21000, outputTokens: 480, totalTokens: 65509, cacheReadTokens: 44029 },
+    label: 'done',
     model: 'deepseek/deepseek-v4.1-flash',
     provider: 'openrouter',
   })
   await recv({ v: 1, type: 'chat.status', status: 'idle' })
-  assert.match(await page.evaluate(`document.querySelector('.agent-turn-summary').textContent`), /^3 actions · 28.4s/)
+  // A3: the finished turn reports its per-turn token count in the summary.
+  assert.match(await page.evaluate(`document.querySelector('.agent-turn-summary').textContent`), /^3 actions · 65,509 tok · 28\.4s$/)
   assert.equal(await page.evaluate(`document.querySelectorAll('.activity-entry.policy, .activity-entry.done, .activity-entry.usage, .answer-label, .step-index').length`), 0)
   assert.equal(await page.evaluate(`document.querySelector('.agent-turn').classList.contains('collapsed')`), true)
   assert.equal(await page.evaluate(`document.querySelectorAll('.answer-text strong').length`), 2)
@@ -426,6 +433,7 @@ async function playToolScenario(page) {
   await recv({ v: 1, type: 'chat.tool_result', callId: 'call-tabs', ok: true, text: 'tabs listed · current window' })
   await recv({ v: 1, type: 'chat.activity', kind: 'model-end', outcome: { kind: 'committed' } })
   await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 2, attemptId: 'a2' })
+  await sleep(MOTION_SETTLE_MS)
   assert.equal(await page.evaluate(`document.querySelector('.activity-screenshot').getClientRects().length`), 0)
   await sleep(500)
   await recv({ v: 1, type: 'chat.activity', kind: 'text', text: 'I can see the fixture page in the tab list.' })
@@ -692,6 +700,7 @@ async function playPlanScenario(page, capture) {
   for (let index = 0; index < 18; index += 1) {
     await recv({ v: 1, type: 'chat.assistant', text: `Scroll filler ${index + 1}: the plan must remain pinned while this conversation moves.` })
   }
+  await sleep(MOTION_SETTLE_MS)
   const sticky = await page.evaluate(`(async () => {
     const dock = document.getElementById('plan-dock');
     const log = document.getElementById('activity-log');
@@ -721,6 +730,7 @@ async function playPlanScenario(page, capture) {
 
   await page.evaluate(`document.querySelector('#plan-dock .plan-panel-toggle').click()`)
   assert.equal((await panel()).detailsHidden, true)
+  await sleep(MOTION_SETTLE_MS)
   const collapsedDockHeight = await page.evaluate(`document.getElementById('plan-dock').offsetHeight`)
   assert.ok(collapsedDockHeight < expandedDockHeight, 'collapse must shrink the sticky dock')
   await capture('collapsed')
@@ -740,6 +750,7 @@ async function playPlanScenario(page, capture) {
   assert.equal((await panel()).count, '2/4 done')
   await page.evaluate(`document.querySelector('#plan-dock .plan-panel-toggle').click()`)
   assert.equal((await panel()).detailsHidden, false)
+  await sleep(MOTION_SETTLE_MS)
   assert.ok(await page.evaluate(`document.getElementById('plan-dock').offsetHeight`) > collapsedDockHeight, 'expansion must restore the checklist')
   await recv({
     v: 1,
@@ -1445,7 +1456,102 @@ async function main() {
     await shot('dark')
     await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text: 'The first streamed thought.' })
     await assertVisibleReasoning(page, '.activity-step.running .activity-entry.reasoning.streaming', 'The first streamed thought.')
+    // It leaves by fading and shrinking, then is removed.
+    assert.equal(await page.evaluate(`document.querySelectorAll('.thinking-wait:not(.leaving)').length`), 0)
+    await sleep(MOTION_SETTLE_MS)
     assert.equal(await page.evaluate(`document.querySelector('.thinking-wait') === null`), true)
+  } else if (SCENARIO === 'motion') {
+    const { recv, batch } = makePage(page)
+    await batch(HELLO_FRAMES)
+    await sleep(300)
+    await sendPrompt(page, 'Show me the motion.')
+    // Samples every animation frame, then reports what the user would have seen.
+    const sample = (selector, read, ms = 260) => page.evaluate(`(async () => {
+      const seen = [];
+      const end = performance.now() + ${ms};
+      while (performance.now() < end) {
+        const node = document.querySelector(${JSON.stringify(selector)});
+        seen.push(node ? (${read})(node) : null);
+        await new Promise(requestAnimationFrame);
+      }
+      return seen;
+    })()`)
+    const distinct = values => new Set(values.filter(value => value !== null)).size
+    const YELLOW = 'rgb(255, 195, 0)'
+    const titleColor = () => page.evaluate(`getComputedStyle(document.querySelector('.activity-step.running .step-title')).color`)
+
+    // Step arrival grows from nothing instead of popping.
+    const arriving = sample('.activity-step', `node => Math.round(node.getBoundingClientRect().height)`)
+    await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 1, attemptId: 'motion' })
+    const stepHeights = await arriving
+    assert.ok(distinct(stepHeights) >= 3, `step should grow in: ${stepHeights}`)
+    await sleep(MOTION_SETTLE_MS)
+    assert.equal(await titleColor(), YELLOW, 'thinking label is the highlight yellow')
+
+    // The waiting row fades out rather than vanishing, and the feed keeps it until then.
+    const leaving = sample('.thinking-wait', `node => Number(getComputedStyle(node).opacity).toFixed(2)`)
+    await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text: 'A thought.' })
+    const waitOpacity = await leaving
+    assert.ok(distinct(waitOpacity) >= 3, `waiting row should fade: ${waitOpacity}`)
+    await sleep(MOTION_SETTLE_MS)
+    assert.equal(await page.evaluate(`document.querySelector('.thinking-wait') === null`), true)
+
+    // A label change crossfades, and the DOM has the new words at once.
+    const ghosts = sample('.motion-ghost', `node => Number(getComputedStyle(node).opacity).toFixed(2)`, 200)
+    await recv({ v: 1, type: 'chat.tool_call', callId: 'motion-1', name: 'browser_screenshot', args: '{}' })
+    assert.equal(await page.evaluate(`document.querySelector('.activity-step.running .step-title').textContent`), 'screenshot')
+    const ghostOpacity = await ghosts
+    assert.ok(distinct(ghostOpacity) >= 2, `old label should fade: ${ghostOpacity}`)
+    await sleep(MOTION_SETTLE_MS)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.motion-ghost').length`), 0, 'ghosts clean up')
+    assert.equal(await titleColor(), YELLOW, 'tool label is the highlight yellow')
+    await shot('action-label')
+
+    // A finished step collapses by shrinking, and its label leaves yellow.
+    await recv({ v: 1, type: 'chat.tool_result', callId: 'motion-1', ok: true, text: 'Captured the page' })
+    const collapsing = sample('.activity-step .step-body', `node => Math.round(node.getBoundingClientRect().height)`)
+    await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 2, attemptId: 'motion-2' })
+    const bodyHeights = await collapsing
+    assert.ok(distinct(bodyHeights) >= 3, `step body should shrink: ${bodyHeights}`)
+    await sleep(MOTION_SETTLE_MS)
+    assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.activity-step .step-body')).display`), 'none')
+    assert.notEqual(await page.evaluate(`getComputedStyle(document.querySelector('.activity-step.collapsed .step-title')).color`), YELLOW)
+
+    // Reopening does not replay row entrances inside the step.
+    await page.evaluate(`document.querySelector('.activity-step.collapsed .step-head').click()`)
+    await sleep(MOTION_SETTLE_MS)
+    assert.equal(await page.evaluate(`document.querySelector('.activity-step .activity-entry').getAnimations().length`), 0)
+
+    // A .hidden overlay stays on screen while it fades, and cannot be clicked meanwhile.
+    await page.evaluate(`document.getElementById('settings').click()`)
+    await sleep(MOTION_SETTLE_MS)
+    const closing = sample('#settings-modal', `node => Number(getComputedStyle(node).opacity).toFixed(2)`)
+    await page.evaluate(`document.getElementById('settings-modal').classList.add('hidden')`)
+    const modalOpacity = await closing
+    assert.ok(distinct(modalOpacity) >= 3, `modal should fade: ${modalOpacity}`)
+    assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('settings-modal')).display`), 'none')
+    await page.evaluate(`document.getElementById('settings-modal').classList.remove('hidden')`)
+    await page.evaluate(`document.getElementById('settings-modal').classList.add('hidden')`)
+
+    // Ending the turn collapses the steps; the saved chat carries no motion leftovers.
+    const ending = sample('.agent-turn-steps', `node => Math.round(node.getBoundingClientRect().height)`)
+    await recv({ v: 1, type: 'chat.activity', kind: 'tool-call-delta', id: 'late', name: 'browser_click', argumentsDelta: '{}' })
+    await recv({ v: 1, type: 'chat.done', text: 'All done.', timings: { totalMs: 1200 }, sessionId: 'session-motion' })
+    const stepsHeights = await ending
+    assert.ok(distinct(stepsHeights) >= 3, `turn should collapse: ${stepsHeights}`)
+    await sleep(MOTION_SETTLE_MS)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.feed-ghost, .motion-ghost, .leaving').length`), 0)
+    await shot('finished')
+
+    // Clearing the chat fades the old feed out; the saved copy has no ghost in it.
+    const clearing = sample('.feed-ghost', `node => Number(getComputedStyle(node).opacity).toFixed(2)`)
+    await page.evaluate(`document.getElementById('new-chat').click()`)
+    const feedOpacity = await clearing
+    assert.ok(distinct(feedOpacity) >= 3, `old feed should fade: ${feedOpacity}`)
+    await sleep(MOTION_SETTLE_MS)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.feed-ghost').length`), 0, 'feed ghost cleans up')
+
+    log('motion samples', JSON.stringify({ stepHeights, waitOpacity, ghostOpacity, bodyHeights, modalOpacity, stepsHeights, feedOpacity }))
   } else if (SCENARIO === 'states') {
     await playTurn(page)
     await sleep(300)
@@ -1685,7 +1791,7 @@ async function main() {
       await sendPrompt(page, title)
       await finishPrompt(page, `session-${title.toLowerCase().replaceAll(' ', '-')}`, `${title} complete`)
       await page.evaluate(`document.getElementById('new-chat').click()`)
-      await sleep(180)
+      await sleep(MOTION_SETTLE_MS)
     }
     const recentTitles = () => page.evaluate(`[...document.querySelectorAll('.recent-session-title')].map(node => node.textContent)`)
     assert.deepEqual(await recentTitles(), ['Fourth task', 'Third task', 'Second task'])
@@ -1712,7 +1818,7 @@ async function main() {
     assert.equal(await page.evaluate(`document.querySelectorAll('.history-item').length`), 4)
     await page.evaluate(`document.getElementById('history-close').click()`)
     await page.evaluate(`document.querySelector('.recent-session-open').click()`)
-    await sleep(180)
+    await sleep(MOTION_SETTLE_MS)
     assert.equal(await page.evaluate(`document.querySelector('.turn-prompt').textContent`), 'Fourth task')
     assert.equal(await page.evaluate(`document.getElementById('activity-empty').getClientRects().length`), 0)
     const backLayout = await page.evaluate(`(() => {
@@ -1734,7 +1840,7 @@ async function main() {
     assert.ok(backLayout.firstTurnTop >= backLayout.bottom, 'back button must not cover the first message')
     await shot('chat')
     await page.evaluate(`document.getElementById('back-home').click()`)
-    await sleep(180)
+    await sleep(MOTION_SETTLE_MS)
     assert.equal(await page.evaluate(`document.getElementById('back-home').getClientRects().length`), 0)
     assert.equal(await page.evaluate(`document.getElementById('activity-empty').getClientRects().length > 0`), true)
 
@@ -1742,7 +1848,7 @@ async function main() {
     assert.equal(await page.evaluate(`document.getElementById('back-home').getClientRects().length > 0`), true)
     const newChatsBeforeDraft = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`)
     await page.evaluate(`document.getElementById('back-home').click()`)
-    await sleep(180)
+    await sleep(MOTION_SETTLE_MS)
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`), newChatsBeforeDraft)
     assert.equal(await page.evaluate(`document.querySelectorAll('.activity-turn').length`), 1)
     assert.equal(await page.evaluate(`document.getElementById('back-home').getClientRects().length`), 0)
@@ -1767,13 +1873,13 @@ async function main() {
     await setWidth(420)
 
     await page.evaluate(`document.querySelector('.recent-session-open.running').click()`)
-    await sleep(180)
+    await sleep(MOTION_SETTLE_MS)
     assert.equal(await page.evaluate(`document.getElementById('activity-empty').getClientRects().length`), 0)
     assert.equal(await page.evaluate(`document.querySelector('.turn-prompt').textContent`), 'Keep this task running')
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`), newChatsBeforeDraft)
 
     await page.evaluate(`document.getElementById('new-chat').click()`)
-    await sleep(180)
+    await sleep(MOTION_SETTLE_MS)
     await finishPrompt(page, 'session-running', 'Running task complete')
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`), newChatsBeforeDraft + 1)
     assert.equal(await page.evaluate(`document.querySelectorAll('.activity-turn').length`), 0)
@@ -1781,6 +1887,56 @@ async function main() {
     assert.equal(await page.evaluate(`document.querySelectorAll('.recent-session-open.running, .recent-session-spinner').length`), 0)
     assert.deepEqual(await recentTitles(), ['Keep this task running', 'Fourth task', 'Third task'])
     await shot('finished')
+  } else if (SCENARIO === 'stopped') {
+    const initialFrames = HELLO_FRAMES.filter(frame => frame.type !== 'chat.session')
+    const { batch, recv } = makePage(page)
+    await batch(initialFrames)
+    await sleep(300)
+    await sendPrompt(page, 'Stop and keep this task')
+    await recv({ v: 1, type: 'chat.session', sessionId: 'session-stopped-1' })
+    await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 1 })
+    await recv({ v: 1, type: 'chat.activity', kind: 'text', text: 'Partial work that must survive.' })
+    await page.evaluate(`document.getElementById('stop').click()`)
+    await page.send('Page.reload')
+    await sleep(1300)
+    await batch(initialFrames)
+    await sleep(350)
+
+    let saved
+    for (let i = 0; i < 40; i += 1) {
+      saved = await page.evaluate(`(async () => (await chrome.storage.local.get('crazyagent.history'))['crazyagent.history']?.[0])()`)
+      if (saved?.stopped === true) break
+      await sleep(50)
+    }
+    assert.equal(saved?.title, 'Stop and keep this task')
+    assert.equal(saved?.stopped, true)
+    assert.equal(saved?.sessionId, 'session-stopped-1')
+    assert.match(saved?.html ?? '', /Partial work that must survive/)
+    assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`), 1)
+    assert.equal(await page.evaluate(`document.querySelector('.recent-session-title').textContent`), 'Stop and keep this task')
+    await shot('reopened')
+
+    await page.evaluate(`document.getElementById('history').click()`)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.history-item').length`), 1)
+    await page.evaluate(`document.querySelector('.history-open').click()`)
+    await sleep(200)
+    const resume = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.resume').at(-1)`)
+    assert.equal(resume?.sessionId, 'session-stopped-1')
+    assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.new').length`), 1)
+    assert.equal(await page.evaluate(`document.querySelector('.agent-turn-summary').textContent`), 'Stopped')
+    assert.equal(await page.evaluate(`document.querySelectorAll('#activity-log .running, #activity-log .streaming').length`), 0)
+
+    await recv({ v: 1, type: 'chat.session', sessionId: 'session-stopped-1', resumed: true })
+    await sendPrompt(page, 'Continue after reopen')
+    const continued = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1)`)
+    assert.equal(continued?.text, 'Continue after reopen')
+    await finishPrompt(page, 'session-stopped-1', 'Continued after reopen.')
+    const completed = await page.evaluate(`(async () => (await chrome.storage.local.get('crazyagent.history'))['crazyagent.history']?.[0])()`)
+    assert.equal(completed?.sessionId, 'session-stopped-1')
+    assert.equal(completed?.stopped, false)
+    assert.match(completed?.html ?? '', /Continue after reopen/)
+    assert.match(completed?.html ?? '', /Continued after reopen\./)
+    await shot('continued')
   } else if (SCENARIO === 'queue') {
     await playQueueScenario(page, shot)
   } else if (SCENARIO === 'composer') {

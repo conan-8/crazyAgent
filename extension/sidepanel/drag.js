@@ -293,6 +293,7 @@ export async function dispatchTrustedDrag(rawRequest, io = {}) {
       interceptAttempted = true
       await send('Input.setInterceptDrags', { enabled: true })
     }
+    if (typeof io.moveCursor === 'function') await io.moveCursor(request.from, { press: true, maxMs: 300 })
     if (typeof io.beforeHover === 'function') await io.beforeHover()
     inputAttempted = true
     await mouse('mouseMoved', request.from)
@@ -300,6 +301,7 @@ export async function dispatchTrustedDrag(rawRequest, io = {}) {
     pressAttempted = true
     await mouse('mousePressed', request.from, true)
     await io.sleep(request.holdMs)
+    if (typeof io.moveCursor === 'function') void io.moveCursor(request.to, { maxMs: Math.max(190, steps * request.stepMs) })
     if (distance > 0) {
       current = activation
       await mouse('mouseMoved', current, true)
@@ -734,6 +736,7 @@ export async function executeDrag(args, io = {}) {
         sendCommand: (method, params) => io.sendCommand(tab.id, method, params),
         onDragIntercepted: listener => io.onDragIntercepted(tab.id, listener),
         sleep: io.sleep,
+        moveCursor: (point, options) => io.moveCursor?.(tab.id, point.x, point.y, options),
         beforeHover: async () => {
           await revalidateTarget(tab, source, 'source', token, true, false, io)
           await revalidateTarget(tab, destination, 'destination', token, true, false, io)

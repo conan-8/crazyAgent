@@ -124,7 +124,12 @@ function fakeWrite(options = {}) {
       if (options.exportError) throw options.exportError
       if (options.mutatePrefixOnVerify && exports.length > 2) state.blocks[0].text = 'Changed sentinel'
       const stale = options.staleVerifyReads && exports.length > 2 && exports.length - 2 <= options.staleVerifyReads
-      return { body: exportHtml(stale ? (options.blocks ?? [para('Sentinel')]) : state.blocks) }
+      const positioned = options.whitespaceOnlyTrailingRunOnPosition && exports.length === 2
+        ? state.blocks.map((block, index) => index === state.blocks.length - 1 && block.kind === 'para' && !block.text.trim()
+          ? { ...block, text: ' ', runsData: [{ text: ' ', format: block.format ?? NORMAL }] }
+          : block)
+        : state.blocks
+      return { body: exportHtml(stale ? (options.blocks ?? [para('Sentinel')]) : positioned) }
     },
     dispatchTrustedKey: async (_tabId, spec, mask) => {
       events.push(`key:${spec.key}:${mask}`)
@@ -160,6 +165,10 @@ function fakeWrite(options = {}) {
           state.numbered = kind === 'numbered'
           state.bulleted = kind === 'bulleted'
           state.checklist = kind === 'checklist'
+          const emptyItem = () => item('', kind === 'numbered', kind === 'numbered' ? 1 : undefined, currentFormat(), kind === 'checklist' ? { checklist: true, checked: false } : {})
+          const last = state.blocks.at(-1)
+          if (last?.style === 'P' && !last.text) state.blocks[state.blocks.length - 1] = emptyItem()
+          else if (!last) state.blocks.push(emptyItem())
         }
         return
       }
@@ -256,6 +265,9 @@ function fakeWrite(options = {}) {
     runInTab: async (_tabId, _func, [command, args]) => {
       events.push(`probe:${command}`)
       if (command === 'format') {
+        if (options.listProbeFails && args.attributes.some(attribute => ['numbered', 'bulleted', 'checklist'].includes(attribute))) {
+          return { ok: false, code: 'CONTROL_NOT_FOUND', message: 'Main toolbar list control is unavailable' }
+        }
         if (options.listControlsHidden && !state.controlsRevealed && args.attributes.some(attribute => ['numbered', 'bulleted', 'checklist'].includes(attribute))) {
           return { ok: true, revealPoint: { x: 15, y: 20 } }
         }
@@ -383,17 +395,16 @@ test('Docs write composes formatted paragraphs, blank space, and adjacent lists 
   const bulleted = fake.events.indexOf('key:8:10')
   const bulletedItems = fake.events.indexOf('insert:alpha\nbeta')
   assert.ok(numbered >= 0 && numbered < numberedItems && numberedItems < bulleted && bulleted < bulletedItems)
-  assert.equal(fake.exports.length, 3)
+  assert.equal(fake.exports.length, 9)
   assert.equal(fake.snapshots(), 0)
   assert.equal(fake.events.some(event => event.startsWith('hex:')), false)
 })
 
-test('Docs write reveals collapsed list controls for pressed-state verification', async () => {
-  const fake = fakeWrite({ listControlsHidden: true })
+test('Docs write verifies lists by export when toolbar controls are unavailable', async () => {
+  const fake = fakeWrite({ listProbeFails: true })
   const result = await runWrite(fake, [{ items: ['first', 'second'], list: 'numbered' }])
   assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
-  assert.ok(fake.events.indexOf('key:7:10') < fake.events.indexOf('click:15'))
-  assert.ok(fake.events.indexOf('click:15') < fake.events.indexOf('insert:first\nsecond'))
+  assert.ok(fake.events.indexOf('key:7:10') < fake.events.indexOf('insert:first\nsecond'))
   assert.deepEqual(fake.state.blocks.slice(1, 3).map(block => [block.text, block.number]), [['first', 1], ['second', 2]])
 })
 
@@ -429,7 +440,7 @@ test('Docs write inserts a page break and verifies checked checklist items', asy
   assert.ok(fake.events.indexOf('insert:Completed task') < fake.events.indexOf('key:Enter:10'))
   assert.ok(fake.events.indexOf('key:Enter:10') < fake.events.indexOf('insert:Pending task'))
   assert.equal(fake.events.filter(event => event === 'insert:Completed task').length, 1)
-  assert.equal(fake.exports.length, 3)
+  assert.equal(fake.exports.length, 6)
   assert.equal(fake.snapshots(), 0)
 })
 
@@ -498,6 +509,13 @@ test('Docs write reuses a fresh document empty paragraph without a stray leading
   assert.equal(fake.events.slice(first, second).filter(event => event === 'key:Enter:0').length, 1)
 })
 
+test('Docs write allows whitespace-only normalization in the reused trailing paragraph', async () => {
+  const fake = fakeWrite({ blocks: [para('')], whitespaceOnlyTrailingRunOnPosition: true })
+  const result = await runWrite(fake, [{ text: 'First' }])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.deepEqual(fake.state.blocks.map(block => [block.style, block.text]), [['P', 'First']])
+})
+
 test('Docs write exits a preexisting list before appending and preserves it', async () => {
   const fake = fakeWrite({ blocks: [item('existing', true, 1)] })
   const result = await runWrite(fake, [{ text: 'After list' }])
@@ -507,6 +525,14 @@ test('Docs write exits a preexisting list before appending and preserves it', as
   assert.equal(fake.state.blocks[1].text, 'After list')
   assert.ok(fake.events.indexOf('key:Enter:0') < fake.events.indexOf('insert:After list'))
   assert.equal(fake.state.blocks.some(block => block.style === 'LI' && !block.text), false)
+})
+
+test('Docs write reuses a trailing empty list item after exiting the list', async () => {
+  const fake = fakeWrite({ blocks: [item('', false, undefined)] })
+  const result = await runWrite(fake, [{ text: 'After list' }])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.deepEqual(fake.state.blocks.map(block => [block.style, block.text]), [['P', 'After list']])
+  assert.ok(fake.events.indexOf('key:Enter:0') < fake.events.indexOf('insert:After list'))
 })
 
 test('Docs write validates every block before any tab or export access', async () => {

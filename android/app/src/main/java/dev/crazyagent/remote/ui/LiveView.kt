@@ -1,6 +1,10 @@
 package dev.crazyagent.remote.ui
 
 import android.graphics.BitmapFactory
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -44,8 +48,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import dev.crazyagent.remote.app.LiveImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -165,7 +167,9 @@ internal fun LiveCollapsedBar(loading: Boolean, onExpand: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (loading) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = AgentYellow)
+        AnimatedVisibility(loading, enter = fadeIn(Motion.fast()), exit = fadeOut(Motion.fast())) {
+            CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = AgentYellow)
+        }
         Text("Live view hidden", style = MaterialTheme.typography.labelMedium, color = AgentMuted, modifier = Modifier.weight(1f))
         Text("Show", style = MaterialTheme.typography.labelMedium, color = AgentYellow)
         Icon(AppIcons.Chevron, contentDescription = null, tint = AgentYellow, modifier = Modifier.size(14.dp))
@@ -220,15 +224,17 @@ internal fun LivePane(
             .background(Color.Black)
             .clickable(onClickLabel = "View full screen", role = Role.Image, onClick = onOpen),
     ) {
-        Image(
-            bitmap,
-            contentDescription = "Latest browser screenshot",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize(),
-        )
-        if (loading) {
+        Crossfade(targetState = bitmap, animationSpec = Motion.base(), label = "live-image", modifier = Modifier.fillMaxSize()) { shown ->
+            Image(
+                shown,
+                contentDescription = "Latest browser screenshot",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        AnimatedVisibility(loading, modifier = Modifier.align(Alignment.TopStart), enter = fadeIn(Motion.fast()), exit = fadeOut(Motion.fast())) {
             CircularProgressIndicator(
-                Modifier.align(Alignment.TopStart).padding(8.dp).size(14.dp),
+                Modifier.padding(8.dp).size(14.dp),
                 strokeWidth = 2.dp,
                 color = AgentYellow,
             )
@@ -256,25 +262,27 @@ internal fun LivePane(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onCapture, enabled = canCapture && !capturing, modifier = Modifier.size(36.dp)) {
-                    if (capturing) {
-                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = AgentYellow)
-                    } else {
-                        Icon(
-                            AppIcons.Refresh,
-                            contentDescription = if (canCapture) "Capture the screen now" else "A fresh capture is not available right now",
-                            tint = if (canCapture) Color.White else Color.White.copy(alpha = 0.35f),
-                            modifier = Modifier.size(16.dp),
-                        )
+                    Crossfade(targetState = capturing, animationSpec = Motion.fast(), label = "capture-icon") { busy ->
+                        if (busy) {
+                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = AgentYellow)
+                        } else {
+                            Icon(
+                                AppIcons.Refresh,
+                                contentDescription = if (canCapture) "Capture the screen now" else "A fresh capture is not available right now",
+                                tint = if (canCapture) Color.White else Color.White.copy(alpha = 0.35f),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
                     }
                 }
                 val text = if (stale) "Newest capture unavailable" else caption
                 if (text != null) {
-                    Text(
+                    SmoothText(
                         text,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (stale) AgentYellow else Color.White.copy(alpha = 0.85f),
-                        maxLines = 1,
+                        MaterialTheme.typography.labelSmall,
+                        if (stale) AgentYellow else Color.White.copy(alpha = 0.85f),
                         modifier = Modifier.padding(end = 12.dp),
+                        maxLines = 1,
                     )
                 }
             }
@@ -289,79 +297,77 @@ internal fun LivePane(
  */
 @Composable
 internal fun LiveViewer(bitmap: ImageBitmap, loading: Boolean, onClose: () -> Unit) {
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        val shape = bitmap.width to bitmap.height
-        var scale by remember(shape) { mutableFloatStateOf(1f) }
-        var offset by remember(shape) { mutableStateOf(Offset.Zero) }
-        var box by remember { mutableStateOf(IntSize.Zero) }
+    val shape = bitmap.width to bitmap.height
+    var scale by remember(shape) { mutableFloatStateOf(1f) }
+    var offset by remember(shape) { mutableStateOf(Offset.Zero) }
+    var box by remember { mutableStateOf(IntSize.Zero) }
 
-        fun clamp(candidate: Offset, atScale: Float): Offset {
-            if (box.width == 0 || box.height == 0) return Offset.Zero
-            val fit = min(box.width.toFloat() / bitmap.width, box.height.toFloat() / bitmap.height)
-            val maxX = LiveViewMath.maxPan(box.width.toFloat(), bitmap.width * fit, atScale)
-            val maxY = LiveViewMath.maxPan(box.height.toFloat(), bitmap.height * fit, atScale)
-            return Offset(candidate.x.coerceIn(-maxX, maxX), candidate.y.coerceIn(-maxY, maxY))
+    fun clamp(candidate: Offset, atScale: Float): Offset {
+        if (box.width == 0 || box.height == 0) return Offset.Zero
+        val fit = min(box.width.toFloat() / bitmap.width, box.height.toFloat() / bitmap.height)
+        val maxX = LiveViewMath.maxPan(box.width.toFloat(), bitmap.width * fit, atScale)
+        val maxY = LiveViewMath.maxPan(box.height.toFloat(), bitmap.height * fit, atScale)
+        return Offset(candidate.x.coerceIn(-maxX, maxX), candidate.y.coerceIn(-maxY, maxY))
+    }
+
+    /** Zoom to [target] keeping the content under [focus] (viewport pixels) in place. */
+    fun zoomTo(target: Float, focus: Offset, pan: Offset = Offset.Zero) {
+        val next = target.coerceIn(1f, LiveViewMath.MAX_ZOOM)
+        val ratio = next / scale
+        val fromCenter = focus - Offset(box.width / 2f, box.height / 2f)
+        offset = clamp(offset * ratio + fromCenter * (1f - ratio) + pan, next)
+        scale = next
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .clipToBounds()
+                .onSizeChanged { box = it }
+                .pointerInput(shape) {
+                    detectTransformGestures { centroid, pan, zoom, _ -> zoomTo(scale * zoom, centroid, pan) }
+                }
+                .pointerInput(shape) {
+                    detectTapGestures(onDoubleTap = { tap ->
+                        if (scale > 1.01f) {
+                            scale = 1f
+                            offset = Offset.Zero
+                        } else {
+                            zoomTo(LiveViewMath.DOUBLE_TAP_ZOOM, tap)
+                        }
+                    })
+                },
+        ) {
+            Image(
+                bitmap,
+                contentDescription = "Browser screenshot. Pinch to zoom, double tap to zoom in or reset.",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offset.x
+                    translationY = offset.y
+                },
+            )
         }
-
-        /** Zoom to [target] keeping the content under [focus] (viewport pixels) in place. */
-        fun zoomTo(target: Float, focus: Offset, pan: Offset = Offset.Zero) {
-            val next = target.coerceIn(1f, LiveViewMath.MAX_ZOOM)
-            val ratio = next / scale
-            val fromCenter = focus - Offset(box.width / 2f, box.height / 2f)
-            offset = clamp(offset * ratio + fromCenter * (1f - ratio) + pan, next)
-            scale = next
-        }
-
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .safeDrawingPadding()
-                    .clipToBounds()
-                    .onSizeChanged { box = it }
-                    .pointerInput(shape) {
-                        detectTransformGestures { centroid, pan, zoom, _ -> zoomTo(scale * zoom, centroid, pan) }
-                    }
-                    .pointerInput(shape) {
-                        detectTapGestures(onDoubleTap = { tap ->
-                            if (scale > 1.01f) {
-                                scale = 1f
-                                offset = Offset.Zero
-                            } else {
-                                zoomTo(LiveViewMath.DOUBLE_TAP_ZOOM, tap)
-                            }
-                        })
-                    },
-            ) {
-                Image(
-                    bitmap,
-                    contentDescription = "Browser screenshot. Pinch to zoom, double tap to zoom in or reset.",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        translationX = offset.x
-                        translationY = offset.y
-                    },
+        Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+            if (loading) {
+                CircularProgressIndicator(
+                    Modifier.align(Alignment.TopStart).padding(18.dp).size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = AgentYellow,
                 )
             }
-            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-                if (loading) {
-                    CircularProgressIndicator(
-                        Modifier.align(Alignment.TopStart).padding(18.dp).size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = AgentYellow,
-                    )
-                }
-                Surface(
-                    shape = CircleShape,
-                    color = Color.Black.copy(alpha = 0.6f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-                    modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
-                ) {
-                    IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
-                        Icon(AppIcons.Close, contentDescription = "Close full screen view", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
+            Surface(
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+            ) {
+                IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
+                    Icon(AppIcons.Close, contentDescription = "Close full screen view", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
             }
         }

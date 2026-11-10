@@ -589,6 +589,12 @@ async function handleNewChat(_ui) {
   if (!result.ok) bridge.sendToUi(uiRejectionFrame(result))
 }
 
+/** @param {string} sessionId @param {import('ws').WebSocket} _ui */
+async function handleResumeChat(sessionId, _ui) {
+  const result = await controller.resumeChat(sessionId)
+  if (!result.ok) bridge.sendToUi(uiRejectionFrame(result))
+}
+
 /** @param {Record<string, any>} message */
 async function handleControl(message) {
   try {
@@ -681,6 +687,7 @@ const bridge = new Bridge({
   log,
   onChat: handleChat,
   onNewChat: handleNewChat,
+  onResumeChat: handleResumeChat,
   onStop: handleStop,
   onLog: entry => logStore.recordBridge(entry),
   onControl: handleControl,

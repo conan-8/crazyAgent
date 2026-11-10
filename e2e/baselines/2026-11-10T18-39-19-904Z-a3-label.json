@@ -1,0 +1,80 @@
+{
+  "startedAt": "2026-11-10T18:39:19.904Z",
+  "finishedAt": "2026-11-10T18:39:30.964Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 1,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 65509,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "click-once",
+      "fixture": "click.html",
+      "prompt": "Click the Increment button on this page exactly once, then tell me what the count is.",
+      "file": "click-once.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwb1awg6-9a9a",
+          "status": "pass",
+          "reasons": [
+            "count is exactly 1 and no other counter changed"
+          ],
+          "evidence": {
+            "count": "1",
+            "roleCount": "0",
+            "semanticCount": "0",
+            "checkState": "unchecked"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 9771,
+            "error": null,
+            "outcome": "done",
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "click",
+                "code": "EXPECT_UNSUPPORTED",
+                "message": "expect.export_contains requires an active Google Docs document export scope; no input was dispatched"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_click",
+                "message": "Error: expect.export_contains requires an active Google Docs document export scope; no input was dispatched"
+              }
+            ],
+            "toolCounts": {
+              "browser_click": 2
+            },
+            "inputTokens": 22785,
+            "outputTokens": 142,
+            "cacheReadTokens": 42582,
+            "totalTokens": 65509,
+            "usage": {
+              "inputTokens": 22785,
+              "outputTokens": 142,
+              "totalTokens": 65509,
+              "cacheReadTokens": 42582
+            },
+            "finalText": "DONE — clicked **Increment** once; the page now shows **count: 1**.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1
+          },
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}

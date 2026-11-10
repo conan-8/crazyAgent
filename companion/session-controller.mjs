@@ -1,5 +1,5 @@
 /**
- * Transport-independent chat/new/stop operations.
+ * Transport-independent chat/new/stop/resume operations.
  *
  * Both the side-panel bridge transport and the opt-in remote API call this one
  * controller, so there is still exactly one DSH runner, one active turn, and
@@ -23,7 +23,7 @@ export const NOT_READY_MESSAGE = 'OpenRouter is not ready. Open Settings, enter 
 /**
  * @typedef {{
  *   turnStarted?: (info: {turnId: string, origin: string, clientMessageId?: string | null, text: string, imageCount: number, planMode: boolean, sessionId?: string | null}) => void,
- *   turnEnded?: (info: {turnId: string, outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}}) => void,
+ *   turnEnded?: (info: {turnId: string, outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}, label?: 'done' | 'partial' | 'blocked' | null, usage?: Record<string, number>, timings?: Record<string, number | null>}) => void,
  * }} TurnObserver
  */
 
@@ -268,6 +268,9 @@ export class SessionController {
       planMode,
       sessionId: runner.sessionId ?? null,
     })
+    if (typeof runner.sessionId === 'string') {
+      this.publish({ v: PROTOCOL_VERSION, type: 'chat.session', sessionId: runner.sessionId })
+    }
     if (origin !== 'ui') {
       // The panel renders its own prompts locally; it only needs prompts that
       // another client (the phone) started, so it can show the turn and queue
@@ -418,6 +421,9 @@ export class SessionController {
     let firstEventMs = null
     const toolCalls = new Set()
     const toolStarts = new Map()
+    // Incremental per-turn stats: they also survive an aborted run, where the
+    // runner rejects and never returns its collected event list.
+    const turnStats = { failedCalls: 0, usage: emptyUsageTotals() }
     /** @type {{outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}}} */
     let ending = { outcome: 'error', error: 'turn ended unexpectedly' }
 
@@ -482,7 +488,7 @@ export class SessionController {
       const result = await runner.run(blocks, notification => {
         if (firstEventMs === null) firstEventMs = Math.round(performance.now() - turnStart)
         logStore.recordDshNotification(notification, turnId)
-        this.forwardNotification(notification, turnId, toolCalls, toolStarts)
+        this.forwardNotification(notification, turnId, toolCalls, toolStarts, turnStats)
       })
 
       // The model asked for the user. Its run has finished, so one capture of
@@ -502,12 +508,15 @@ export class SessionController {
         if (this.stopRequested) throw new Error('turn stopped by user during the help capture')
       }
 
-      const usage = collectUsage(result.events)
+      const collectedUsage = collectUsage(result.events)
+      const usage = hasUsageTotals(collectedUsage) ? collectedUsage : { ...turnStats.usage }
+      const label = parseReportedLabel(result.finalResponse)
       const timings = {
         totalMs: Math.round(performance.now() - turnStart),
         autoCaptureMs: Math.round(autoCaptureMs),
         firstEventMs,
         toolCalls: toolCalls.size,
+        failedCalls: turnStats.failedCalls,
         promptTextBytes,
         imageBytes,
         images: blocks.filter(block => block.type === 'image').length,
@@ -525,6 +534,7 @@ export class SessionController {
         finalText: result.finalResponse,
         timings,
         usage,
+        label,
         planOutcome: plan?.outcome,
         planRevision: plan?.revision,
         ...completionError ? { error: completionError } : {},
@@ -535,6 +545,8 @@ export class SessionController {
         sessionId: result.sessionId,
         text: result.finalResponse,
         timings,
+        usage,
+        label,
         model: this.getModelId(),
         provider: this.provider,
         docsVerification: verification?.status,
@@ -545,7 +557,7 @@ export class SessionController {
         ...(help === undefined ? {} : { help: { category: help.category, reason: help.reason } }),
       })
       this.sendStatus('idle')
-      ending = { outcome: 'done', sessionId: result.sessionId, ...(help === undefined ? {} : { help }) }
+      ending = { outcome: 'done', sessionId: result.sessionId, label, usage, timings, ...(help === undefined ? {} : { help }) }
     } catch (error) {
       const message = errorMessage(error)
       const timings = {
@@ -553,9 +565,13 @@ export class SessionController {
         autoCaptureMs: Math.round(autoCaptureMs),
         firstEventMs,
         toolCalls: toolCalls.size,
+        failedCalls: turnStats.failedCalls,
         promptTextBytes,
         imageBytes,
       }
+      // There is no final text on a stopped/failed turn, so no reported label.
+      const usage = { ...turnStats.usage }
+      const label = null
       const current = this.getRunner()
       if (this.stopRequested) {
         // A user stop tears the runtime down; the transport error is expected and
@@ -566,7 +582,7 @@ export class SessionController {
           elapsedMs: Math.round(performance.now() - turnStart),
         }, { turnId, severity: 'info' })
         // log-store.turnEnd() records the TURN_STOPPED signal for aborted turns.
-        logStore.turnEnd(turnId, { ok: false, aborted: true, reason: 'user', timings })
+        logStore.turnEnd(turnId, { ok: false, aborted: true, reason: 'user', timings, usage, label })
         const sessionId = current?.sessionId ?? current?.resumeSessionId
         this.publish({
           v: PROTOCOL_VERSION,
@@ -575,15 +591,17 @@ export class SessionController {
           reason: 'user',
           sessionId,
           message: 'Stopped by user.',
+          timings,
+          usage,
         })
         this.sendStatus('idle')
-        ending = { outcome: 'stopped', sessionId: sessionId ?? null }
+        ending = { outcome: 'stopped', sessionId: sessionId ?? null, label, usage, timings }
       } else {
         logStore.error(message, { turnId, code: 'TURN_ERROR' })
-        logStore.turnEnd(turnId, { ok: false, error: message, timings })
+        logStore.turnEnd(turnId, { ok: false, error: message, timings, usage, label })
         this.publish({ v: PROTOCOL_VERSION, type: 'chat.error', message, recoverable: true })
         this.sendStatus('error')
-        ending = { outcome: 'error', error: message }
+        ending = { outcome: 'error', error: message, label, usage, timings }
       }
     } finally {
       this.#notify('turnEnded', { turnId, ...ending })
@@ -603,8 +621,9 @@ export class SessionController {
    * @param {string} turnId
    * @param {Set<string>} toolCalls
    * @param {Map<string, number>} toolStarts
+   * @param {{failedCalls: number, usage: Record<string, number>}} [turnStats]
    */
-  forwardNotification(notification, turnId, toolCalls, toolStarts) {
+  forwardNotification(notification, turnId, toolCalls, toolStarts, turnStats = { failedCalls: 0, usage: emptyUsageTotals() }) {
     const { method, params } = notification
     if (method === 'session.status') {
       const status = params.status
@@ -628,6 +647,8 @@ export class SessionController {
       if (reasoning.length > 0) {
         this.publish({ v: PROTOCOL_VERSION, type: 'chat.activity', kind: 'reasoning-committed', text: reasoning })
       }
+      const usage = isRecord(data.usage) ? data.usage : undefined
+      if (usage !== undefined) addUsageTotals(turnStats.usage, usage)
       const text = extractAssistantText(data)
       if (text.length > 0) {
         this.logStore.assistant(turnId, text)
@@ -671,6 +692,7 @@ export class SessionController {
           : isRecord(raw[0]) && typeof raw[0].toolCallId === 'string' ? raw[0].toolCallId : undefined
       const text = extractToolResultText(blocks)
       const isError = message.isError === true || (isRecord(raw[0]) && raw[0].isError === true)
+      if (isError) turnStats.failedCalls += 1
       const started = callId ? toolStarts.get(callId) : undefined
       const durationMs = started === undefined ? undefined : Math.round(performance.now() - started)
       if (callId) toolStarts.delete(callId)
@@ -724,6 +746,38 @@ function newTurnId() {
  */
 export function uiRejectionFrame(result) {
   return { v: PROTOCOL_VERSION, type: 'chat.error', code: result.code, message: result.message, recoverable: true }
+}
+
+export const REPORTED_LABELS = Object.freeze(['done', 'partial', 'blocked'])
+
+/**
+ * The model's own completion word, parsed conservatively: only the first word
+ * of the final answer, case-insensitively, with optional leading whitespace or
+ * markdown emphasis. Anything else is null. This is model-reported evidence,
+ * never independent verification.
+ * @param {unknown} text
+ * @returns {'done' | 'partial' | 'blocked' | null}
+ */
+export function parseReportedLabel(text) {
+  if (typeof text !== 'string') return null
+  const match = /^\s*(?:[*_~`]{1,3})?\s*(done|partial|blocked)\b/iu.exec(text)
+  return match === null ? null : /** @type {'done' | 'partial' | 'blocked'} */ (match[1].toLowerCase())
+}
+
+function emptyUsageTotals() {
+  return { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0 }
+}
+
+/** @param {Record<string, number>} target @param {Record<string, unknown>} usage */
+function addUsageTotals(target, usage) {
+  for (const key of Object.keys(target)) target[key] += Number(usage[key]) || 0
+  return target
+}
+
+/** @param {Record<string, number> | undefined | null} usage */
+function hasUsageTotals(usage) {
+  if (!isRecord(usage)) return false
+  return Object.values(usage).some(value => Number(value) > 0)
 }
 
 /** @param {unknown[]} events */

@@ -1,6 +1,18 @@
 package dev.crazyagent.remote.ui
 
 import android.graphics.BitmapFactory
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -47,14 +59,19 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -72,8 +89,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import dev.crazyagent.remote.app.LinkStatus
 import dev.crazyagent.remote.app.PendingPhase
 import dev.crazyagent.remote.app.PendingPrompt
@@ -86,6 +101,7 @@ import dev.crazyagent.remote.state.Health
 import dev.crazyagent.remote.state.NoteKind
 import dev.crazyagent.remote.state.activityLine
 import dev.crazyagent.remote.state.displayRows
+import kotlinx.coroutines.flow.conflate
 
 class ChatActions(
     val onComposer: (String) -> Unit,
@@ -113,6 +129,7 @@ class ChatActions(
 
 private enum class UtilityPanel { SETTINGS, DIAGNOSTICS, HISTORY }
 private enum class Level { OK, WARN, BAD, UNKNOWN }
+private enum class LiveSlot { NONE, OPEN, COLLAPSED, EMPTY }
 
 @Composable
 fun ChatScreen(state: UiState, actions: ChatActions) {
@@ -125,8 +142,14 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
     val empty = rows.isEmpty() && state.chat.draft == null && state.pending == null && activity == null
     val tail = rows.size + (if (state.chat.draft != null) 1 else 0) + (if (state.pending != null) 1 else 0) + (if (activity != null) 1 else 0)
 
-    LaunchedEffect(tail, state.chat.draft?.text?.length) {
-        if (tail > 0) listState.scrollToItem(tail - 1)
+    // One long-lived follower: a glide in progress finishes, then goes to wherever
+    // the end has moved to, so streaming text does not restart it on every token.
+    val currentTail by rememberUpdatedState(tail)
+    val draftLength by rememberUpdatedState(state.chat.draft?.text?.length)
+    LaunchedEffect(listState) {
+        snapshotFlow { currentTail to draftLength }
+            .conflate()
+            .collect { (count, _) -> if (count > 0) listState.glideToItem(count - 1) }
     }
 
     LaunchedEffect(empty) {
@@ -162,16 +185,16 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
         liveSlot()
         StatusLine(state, onClick = { panel = UtilityPanel.DIAGNOSTICS })
         LinkBanner(state, actions)
-        state.notice?.let { Banner(it, "Dismiss", actions.onDismissNotice, danger = false) }
-        healthIssue(state)?.let { Banner(it, "Details", { panel = UtilityPanel.DIAGNOSTICS }, danger = true) }
-        if (state.historyLoading) {
+        SmoothPresence(state.notice) { Banner(it, "Dismiss", actions.onDismissNotice, danger = false) }
+        SmoothPresence(healthIssue(state)) { Banner(it, "Details", { panel = UtilityPanel.DIAGNOSTICS }, danger = true) }
+        AnimatedVisibility(state.historyLoading, enter = Motion.rowEnter, exit = Motion.rowExit) {
             Row(Modifier.padding(horizontal = 20.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = AgentYellow)
                 Text("Loading saved chat…", style = MaterialTheme.typography.bodySmall, color = AgentMuted)
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (empty) {
+        Crossfade(targetState = empty, animationSpec = Motion.base(), label = "chat-body", modifier = Modifier.weight(1f).fillMaxWidth()) { isEmpty ->
+            if (isEmpty) {
                 EmptyState(
                     state = state,
                     onOpenHistory = actions.onOpenHistory,
@@ -183,29 +206,32 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    // Nothing a row draws may leave the list's own area.
+                    modifier = Modifier.fillMaxSize().clipToBounds(),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
-                    items(rows, key = { it.key }) { row -> RowView(row) }
-                    state.chat.draft?.let { draft -> item(key = "draft:${draft.streamId}") { DraftView(draft) } }
-                    state.pending?.let { pending -> item(key = "pending:${pending.clientMessageId}") { PendingView(pending, state, actions) } }
+                    items(rows, key = { it.key }) { row -> SmoothItem { RowView(row) } }
+                    state.chat.draft?.let { draft -> item(key = "draft:${draft.streamId}") { SmoothItem { DraftView(draft) } } }
+                    state.pending?.let { pending -> item(key = "pending:${pending.clientMessageId}") { SmoothItem { PendingView(pending, state, actions) } } }
                     activity?.let { line ->
                         item(key = "activity") {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.padding(vertical = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
-                            ) {
-                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = AgentYellow)
-                                Text(line, style = MaterialTheme.typography.bodySmall, color = AgentYellow)
+                            SmoothItem {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(vertical = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                                ) {
+                                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = AgentYellow)
+                                    SmoothText(line, MaterialTheme.typography.bodySmall, AgentYellow)
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        state.chat.help?.takeIf { state.chat.turn.isWaiting }?.let { help ->
+        SmoothPresence(state.chat.help?.takeIf { state.chat.turn.isWaiting }) { help ->
             HelpCard(
                 help = help,
                 // Only offer the view when the capture made for this request is the one on screen.
@@ -242,32 +268,45 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
         val paneHeight = bitmap?.let { LiveViewMath.paneHeightDp(maxWidth.value, maxHeight.value, it.width.toFloat() / it.height) }
         // Below the top icons: the open pane, or a slim bar to reopen it. The
         // slot keeps its place in the column, so the composer keeps focus.
+        val slot = when {
+            bitmap != null && liveCollapsed -> LiveSlot.COLLAPSED
+            bitmap != null && !beside && paneHeight != null -> LiveSlot.OPEN
+            bitmap == null && state.link.status == LinkStatus.LIVE && state.chat.synced && state.liveImage == null && !state.liveImageLoading -> LiveSlot.EMPTY
+            else -> LiveSlot.NONE
+        }
         val liveSlot: @Composable () -> Unit = {
-            if (bitmap != null) {
-                if (liveCollapsed) {
-                    LiveCollapsedBar(state.liveImageLoading) { liveCollapsed = false }
-                } else if (!beside && paneHeight != null) {
-                    LivePane(
-                        bitmap,
-                        state.liveImageLoading,
-                        Modifier.fillMaxWidth().height(paneHeight.dp),
-                        caption = liveCaption,
-                        stale = state.liveImageUnavailable,
+            AnimatedContent(
+                targetState = slot,
+                transitionSpec = {
+                    (fadeIn(Motion.base()) togetherWith fadeOut(Motion.fast())).using(SizeTransform(clip = true) { _, _ -> Motion.slow() })
+                },
+                label = "live-slot",
+            ) { mode ->
+                when (mode) {
+                    LiveSlot.COLLAPSED -> LiveCollapsedBar(state.liveImageLoading) { liveCollapsed = false }
+                    LiveSlot.OPEN -> if (bitmap != null && paneHeight != null) {
+                        LivePane(
+                            bitmap,
+                            state.liveImageLoading,
+                            Modifier.fillMaxWidth().height(paneHeight.dp),
+                            caption = liveCaption,
+                            stale = state.liveImageUnavailable,
+                            canCapture = state.canCapture,
+                            capturing = state.snapshotInFlight,
+                            onCapture = actions.onCaptureScreen,
+                            onCollapse = { liveCollapsed = true },
+                            onOpen = { viewerOpen = true },
+                        )
+                    }
+                    // Nothing on screen: say why, and offer a fresh capture.
+                    LiveSlot.EMPTY -> LiveEmptyBar(
+                        message = if (state.liveImageUnavailable) "The last screenshot is no longer available" else "No live view yet",
                         canCapture = state.canCapture,
                         capturing = state.snapshotInFlight,
                         onCapture = actions.onCaptureScreen,
-                        onCollapse = { liveCollapsed = true },
-                        onOpen = { viewerOpen = true },
                     )
+                    LiveSlot.NONE -> Unit
                 }
-            } else if (state.link.status == LinkStatus.LIVE && state.chat.synced && state.liveImage == null && !state.liveImageLoading) {
-                // Nothing on screen: say why, and offer a fresh capture.
-                LiveEmptyBar(
-                    message = if (state.liveImageUnavailable) "The last screenshot is no longer available" else "No live view yet",
-                    canCapture = state.canCapture,
-                    capturing = state.snapshotInFlight,
-                    onCapture = actions.onCaptureScreen,
-                )
             }
         }
         if (bitmap != null && beside) {
@@ -291,11 +330,11 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
         }
     }
 
-    liveBitmap?.let { bitmap ->
-        if (viewerOpen) LiveViewer(bitmap, state.liveImageLoading) { viewerOpen = false }
+    SmoothFullScreenDialog(liveBitmap?.takeIf { viewerOpen }, onDismiss = { viewerOpen = false }) { bitmap ->
+        LiveViewer(bitmap, state.liveImageLoading) { viewerOpen = false }
     }
 
-    panel?.let { current ->
+    SmoothFullScreenDialog(panel, onDismiss = { panel = null }) { current ->
         UtilityDialog(
             panel = current,
             state = state,
@@ -316,7 +355,7 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
             onEnableNotifications = actions.onEnableNotifications,
         )
     }
-    state.historyOpen?.let { archived ->
+    SmoothFullScreenDialog(state.historyOpen, onDismiss = actions.onCloseHistory) { archived ->
         ArchivedChatDialog(
             chat = archived,
             isCurrent = archived.sessionId == state.chat.sessionId,
@@ -365,10 +404,12 @@ private fun Header(state: UiState, onNew: () -> Unit, onHistory: () -> Unit, onD
         Surface(shape = CircleShape, color = AgentPanelRaised, border = BorderStroke(1.dp, AgentBorder)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onNew, enabled = state.canStartNew, modifier = Modifier.size(38.dp)) {
-                    if (state.newInFlight) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(AppIcons.Plus, contentDescription = "New chat", modifier = Modifier.size(19.dp))
+                    Crossfade(targetState = state.newInFlight, animationSpec = Motion.fast(), label = "new-chat-icon") { inFlight ->
+                        if (inFlight) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(AppIcons.Plus, contentDescription = "New chat", modifier = Modifier.size(19.dp))
+                        }
                     }
                 }
                 IconButton(onClick = onHistory, modifier = Modifier.size(38.dp)) {
@@ -396,20 +437,22 @@ private fun StatusLine(state: UiState, onClick: () -> Unit) {
         LinkStatus.AUTH_FAILED -> "Token rejected"
         LinkStatus.HOST_REJECTED -> "Address rejected"
     }
-    val color = when {
+    val target = when {
         state.busy -> AgentYellow
         state.link.status == LinkStatus.LIVE && state.chat.synced && state.chat.turn.isWaiting -> AgentYellow
         state.link.status == LinkStatus.LIVE && state.chat.synced -> AgentGreen
         state.link.status == LinkStatus.AUTH_FAILED || state.link.status == LinkStatus.HOST_REJECTED -> AgentDanger
         else -> AgentFaint
     }
+    val color by animateColorAsState(target, Motion.base(), label = "status-dot")
+    val labelColor by animateColorAsState(if (activity != null) AgentYellow else AgentMuted, Motion.base(), label = "status-label")
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Box(Modifier.size(6.dp).background(color, CircleShape))
-        Text(label, style = MaterialTheme.typography.labelMedium, color = AgentMuted, maxLines = 1)
+        SmoothText(label, MaterialTheme.typography.labelMedium, labelColor, maxLines = 1)
         Text(
             state.host,
             style = MaterialTheme.typography.labelSmall,
@@ -424,18 +467,20 @@ private fun StatusLine(state: UiState, onClick: () -> Unit) {
 
 @Composable
 private fun EmptyState(state: UiState, onOpenHistory: (String) -> Unit, onViewAll: () -> Unit) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (!state.chat.synced) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircularProgressIndicator(color = AgentYellow, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
-                Text("Connecting to your companion…", style = MaterialTheme.typography.bodySmall, color = AgentMuted)
-            }
-        } else {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
-            ) {
-                RecentSessions(state.chat.sessions, onOpenHistory, onViewAll)
+    Crossfade(targetState = state.chat.synced, animationSpec = Motion.base(), label = "empty-state", modifier = Modifier.fillMaxSize()) { synced ->
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (!synced) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator(color = AgentYellow, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+                    Text("Connecting to your companion…", style = MaterialTheme.typography.bodySmall, color = AgentMuted)
+                }
+            } else {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth().animateContentSize(Motion.base()).verticalScroll(rememberScrollState()).padding(24.dp),
+                ) {
+                    RecentSessions(state.chat.sessions, onOpenHistory, onViewAll)
+                }
             }
         }
     }
@@ -481,13 +526,13 @@ private fun HelpCard(help: dev.crazyagent.remote.state.HelpRequest, canShowScree
 @Composable
 private fun LinkBanner(state: UiState, actions: ChatActions) {
     val link = state.link
-    val (message, action) = when (link.status) {
-        LinkStatus.AUTH_FAILED -> (link.detail ?: "The token was rejected.") to ("Pair again" to actions.onEditPairing)
-        LinkStatus.HOST_REJECTED -> (link.detail ?: "The server refused this address.") to ("Retry" to actions.onReconnect)
-        LinkStatus.RECONNECTING -> (link.detail ?: "Reconnecting…") to ("Retry now" to actions.onReconnect)
-        else -> return
+    val banner = when (link.status) {
+        LinkStatus.AUTH_FAILED -> Triple(link.detail ?: "The token was rejected.", "Pair again", actions.onEditPairing)
+        LinkStatus.HOST_REJECTED -> Triple(link.detail ?: "The server refused this address.", "Retry", actions.onReconnect)
+        LinkStatus.RECONNECTING -> Triple(link.detail ?: "Reconnecting…", "Retry now", actions.onReconnect)
+        else -> null
     }
-    Banner(message, action.first, action.second, danger = true)
+    SmoothPresence(banner) { (message, label, action) -> Banner(message, label, action, danger = true) }
 }
 
 private fun healthIssue(state: UiState): String? {
@@ -561,7 +606,7 @@ private fun UserBubble(label: String, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxWidth().padding(start = 44.dp, top = 6.dp, bottom = 12.dp), contentAlignment = Alignment.CenterEnd) {
         Surface(shape = RoundedCornerShape(16.dp), color = AgentPanelRaised, border = BorderStroke(1.dp, AgentBorder)) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = AgentMuted)
+                SmoothText(label, MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), AgentMuted)
                 content()
             }
         }
@@ -576,11 +621,18 @@ private fun ToolView(row: DisplayRow.Tool) {
         false -> "Failed"
         null -> "Running"
     }
-    val statusColor = when (row.result?.ok) {
-        true -> AgentFaint
-        false -> AgentDanger
-        null -> AgentYellow
-    }
+    val statusColor by animateColorAsState(
+        when (row.result?.ok) {
+            true -> AgentFaint
+            false -> AgentDanger
+            null -> AgentYellow
+        },
+        Motion.base(),
+        label = "tool-status",
+    )
+    // The tool still running is the current action.
+    val titleColor by animateColorAsState(if (row.result == null) AgentYellow else AgentTextSoft, Motion.base(), label = "tool-title")
+    val chevronAngle by animateFloatAsState(if (open) 0f else -90f, Motion.base(), label = "tool-chevron")
     Column(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
         Row(
             Modifier
@@ -593,11 +645,11 @@ private fun ToolView(row: DisplayRow.Tool) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(AppIcons.Tool, contentDescription = null, tint = if (row.result?.ok == false) AgentDanger else AgentMuted, modifier = Modifier.size(17.dp))
-            Text(toolTitle(row.name), style = MaterialTheme.typography.bodyMedium, color = AgentTextSoft, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text(status, style = MaterialTheme.typography.labelSmall, color = statusColor)
-            Icon(AppIcons.Chevron, contentDescription = if (open) "Collapse" else "Expand", tint = AgentFaint, modifier = Modifier.size(14.dp).rotate(if (open) 0f else -90f))
+            Text(toolTitle(row.name), style = MaterialTheme.typography.bodyMedium, color = titleColor, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            SmoothText(status, MaterialTheme.typography.labelSmall, statusColor)
+            Icon(AppIcons.Chevron, contentDescription = if (open) "Collapse" else "Expand", tint = AgentFaint, modifier = Modifier.size(14.dp).rotate(chevronAngle))
         }
-        if (open) {
+        AnimatedVisibility(open, enter = Motion.rowEnter, exit = Motion.rowExit) {
             Surface(
                 shape = RoundedCornerShape(10.dp),
                 color = AgentPanel,
@@ -620,17 +672,23 @@ private fun toolTitle(name: String): String = name
 
 @Composable
 private fun DraftView(draft: Draft) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(if (draft.text.isEmpty()) "Thinking…" else "Responding", style = MaterialTheme.typography.labelMedium, color = AgentYellow)
-        if (draft.text.isNotEmpty()) {
-            SelectionContainer { MarkdownContent(draft.text) }
-        } else if (draft.reasoning.isNotEmpty()) {
-            Text(draft.reasoning.takeLast(400), style = MaterialTheme.typography.bodySmall, color = AgentMuted)
+    Column(Modifier.fillMaxWidth().animateContentSize(Motion.fast()).padding(vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SmoothText(if (draft.text.isEmpty()) "Thinking…" else "Responding", MaterialTheme.typography.labelMedium, AgentYellow)
+        Crossfade(targetState = draft.text.isNotEmpty(), animationSpec = Motion.base(), label = "draft-body") { hasText ->
+            if (hasText) {
+                SelectionContainer { MarkdownContent(draft.text) }
+            } else if (draft.reasoning.isNotEmpty()) {
+                Text(draft.reasoning.takeLast(400), style = MaterialTheme.typography.bodySmall, color = AgentMuted)
+            }
         }
         for (tool in draft.tools) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(AppIcons.Tool, contentDescription = null, tint = AgentYellow, modifier = Modifier.size(16.dp))
-                Text("${toolTitle(tool.name ?: "tool")}…", style = MaterialTheme.typography.bodySmall, color = AgentMuted)
+            key(tool.id) {
+                EnterOnce {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(AppIcons.Tool, contentDescription = null, tint = AgentYellow, modifier = Modifier.size(16.dp))
+                        Text("${toolTitle(tool.name ?: "tool")}…", style = MaterialTheme.typography.bodySmall, color = AgentYellow)
+                    }
+                }
             }
         }
     }
@@ -646,8 +704,8 @@ private fun PendingView(pending: PendingPrompt, state: UiState, actions: ChatAct
     }) {
         Text(pending.text, style = MaterialTheme.typography.bodyMedium)
         if (pending.imageCount > 0) Text("${pending.imageCount} image(s)", style = MaterialTheme.typography.labelSmall, color = AgentMuted)
-        pending.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AgentYellow, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
-        if (pending.phase == PendingPhase.NEEDS_REVIEW) {
+        SmoothPresence(pending.note) { Text(it, style = MaterialTheme.typography.bodySmall, color = AgentYellow, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+        AnimatedVisibility(pending.phase == PendingPhase.NEEDS_REVIEW, enter = Motion.rowEnter, exit = Motion.rowExit) {
             val sameInstance = pending.instanceId == state.chat.instanceId && pending.images.size == pending.imageCount
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (sameInstance) TextButton(onClick = actions.onRetryPending) { Text("Retry") }
@@ -665,29 +723,32 @@ private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, o
     val contextWindow = state.chat.health.contextWindow?.takeIf { it > 0 }
     val contextTokens = (state.chat.health.contextTokens ?: 0).coerceAtLeast(0)
     val slashMatches = slashQuery(state.composer)?.let(::matchSlashCommands).orEmpty()
-    SlashPalette(
-        commands = slashMatches,
-        enabledFor = { command ->
-            when (command.id) {
-                "new" -> state.canStartNew
-                "model" -> !state.busy
-                "plan" -> !state.busy && state.pending == null
-                else -> false
-            }
-        },
-        onSelect = { command -> onSlashCommand(command.id) },
-    )
+    SmoothPresence(slashMatches.takeIf { it.isNotEmpty() }) { matches ->
+        SlashPalette(
+            commands = matches,
+            enabledFor = { command ->
+                when (command.id) {
+                    "new" -> state.canStartNew
+                    "model" -> !state.busy
+                    "plan" -> !state.busy && state.pending == null
+                    else -> false
+                }
+            },
+            onSelect = { command -> onSlashCommand(command.id) },
+        )
+    }
+    val composerBorder by animateColorAsState(if (highlight) AgentYellow else AgentBorder, Motion.slow(), label = "composer-border")
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = AgentPanel,
-        border = BorderStroke(1.dp, if (highlight) AgentYellow else AgentBorder),
+        border = BorderStroke(1.dp, composerBorder),
         modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 5.dp),
     ) {
         Column(Modifier.padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            if (state.planMode) PlanModeChip(actions.onTogglePlanMode)
-            if (state.attachments.isNotEmpty()) {
+            AnimatedVisibility(state.planMode, enter = Motion.rowEnter, exit = Motion.rowExit) { PlanModeChip(actions.onTogglePlanMode) }
+            SmoothPresence(state.attachments.takeIf { it.isNotEmpty() }) { attachments ->
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    state.attachments.forEachIndexed { index, image -> Attachment(image, index, actions.onRemoveImage) }
+                    attachments.forEachIndexed { index, image -> Attachment(image, index, actions.onRemoveImage) }
                 }
             }
             val hint = when {
@@ -707,7 +768,8 @@ private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, o
                 maxLines = 6,
                 decorationBox = { innerTextField ->
                     Box {
-                        if (state.composer.isEmpty()) Text(hint, style = MaterialTheme.typography.bodyMedium, color = AgentFaint)
+                        val hintAlpha by animateFloatAsState(if (state.composer.isEmpty()) 1f else 0f, Motion.fast(), label = "composer-hint")
+                        if (hintAlpha > 0f) SmoothText(hint, MaterialTheme.typography.bodyMedium, AgentFaint, modifier = Modifier.alpha(hintAlpha))
                         innerTextField()
                     }
                 },
@@ -721,7 +783,7 @@ private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, o
                     Icon(AppIcons.Attachment, contentDescription = if (state.attachments.isEmpty()) "Add images" else "Add images, ${state.attachments.size} of 4 attached", modifier = Modifier.size(19.dp))
                 }
                 if (contextWindow != null) {
-                    val ratio = contextTokens.toFloat() / contextWindow.toFloat()
+                    val ratio by animateFloatAsState(contextTokens.toFloat() / contextWindow.toFloat(), Motion.slow(), label = "context-ring")
                     IconButton(
                         onClick = { showContext = true },
                         modifier = Modifier.size(28.dp).semantics {
@@ -749,45 +811,55 @@ private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, o
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 7.dp).weight(1f),
                 )
-                if (state.busy && state.composer.isNotBlank() && resolveSlashCommand(state.composer) == null) {
+                val steerBackground by animateColorAsState(if (state.canSteer) AgentYellow else AgentPanelHover, Motion.base(), label = "steer-background")
+                val steerTint by animateColorAsState(if (state.canSteer) AgentBackground else AgentMuted, Motion.base(), label = "steer-tint")
+                AnimatedVisibility(
+                    visible = state.busy && state.composer.isNotBlank() && resolveSlashCommand(state.composer) == null,
+                    enter = fadeIn(Motion.base()) + expandHorizontally(Motion.base()),
+                    exit = fadeOut(Motion.fast()) + shrinkHorizontally(Motion.base()),
+                ) {
                     IconButton(
                         onClick = actions.onSend,
                         enabled = state.canSteer,
-                        modifier = Modifier.padding(end = 6.dp).size(40.dp).background(if (state.canSteer) AgentYellow else AgentPanelHover, CircleShape).semantics {
+                        modifier = Modifier.padding(end = 6.dp).size(40.dp).background(steerBackground, CircleShape).semantics {
                             contentDescription = "Steer: stop the current turn and send this message"
                         },
                     ) {
-                        Icon(AppIcons.ArrowUp, contentDescription = null, tint = if (state.canSteer) AgentBackground else AgentMuted, modifier = Modifier.size(20.dp))
+                        Icon(AppIcons.ArrowUp, contentDescription = null, tint = steerTint, modifier = Modifier.size(20.dp))
                     }
                 }
-                if (state.busy) {
-                    IconButton(
-                        onClick = actions.onStop,
-                        enabled = state.canStop,
-                        modifier = Modifier.size(40.dp).semantics {
-                            contentDescription = if (state.chat.turn.status == "stopping" || state.stopInFlight) "Stopping current turn" else "Stop current turn"
-                        },
-                    ) {
-                        Surface(shape = CircleShape, color = AgentPanelHover, modifier = Modifier.size(38.dp)) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Box(Modifier.size(12.dp).background(AgentDanger, RoundedCornerShape(3.dp)))
+                Crossfade(targetState = state.busy, animationSpec = Motion.fast(), label = "send-or-stop") { busy ->
+                    if (busy) {
+                        IconButton(
+                            onClick = actions.onStop,
+                            enabled = state.canStop,
+                            modifier = Modifier.size(40.dp).semantics {
+                                contentDescription = if (state.chat.turn.status == "stopping" || state.stopInFlight) "Stopping current turn" else "Stop current turn"
+                            },
+                        ) {
+                            Surface(shape = CircleShape, color = AgentPanelHover, modifier = Modifier.size(38.dp)) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Box(Modifier.size(12.dp).background(AgentDanger, RoundedCornerShape(3.dp)))
+                                }
                             }
                         }
-                    }
-                } else {
-                    val exactCommand = resolveSlashCommand(state.composer)
-                    val sendEnabled = if (exactCommand == null) state.canSend else when (exactCommand.id) {
-                        "new" -> state.canStartNew
-                        "model" -> !state.busy
-                        "plan" -> !state.busy && state.pending == null
-                        else -> false
-                    }
-                    IconButton(
-                        onClick = { if (exactCommand == null) actions.onSend() else onSlashCommand(exactCommand.id) },
-                        enabled = sendEnabled,
-                        modifier = Modifier.size(40.dp).background(if (sendEnabled) AgentYellow else AgentPanelHover, CircleShape),
-                    ) {
-                        Icon(AppIcons.ArrowUp, contentDescription = "Send", tint = if (sendEnabled) AgentBackground else AgentMuted, modifier = Modifier.size(20.dp))
+                    } else {
+                        val exactCommand = resolveSlashCommand(state.composer)
+                        val sendEnabled = if (exactCommand == null) state.canSend else when (exactCommand.id) {
+                            "new" -> state.canStartNew
+                            "model" -> !state.busy
+                            "plan" -> !state.busy && state.pending == null
+                            else -> false
+                        }
+                        val sendBackground by animateColorAsState(if (sendEnabled) AgentYellow else AgentPanelHover, Motion.base(), label = "send-background")
+                        val sendTint by animateColorAsState(if (sendEnabled) AgentBackground else AgentMuted, Motion.base(), label = "send-tint")
+                        IconButton(
+                            onClick = { if (exactCommand == null) actions.onSend() else onSlashCommand(exactCommand.id) },
+                            enabled = sendEnabled,
+                            modifier = Modifier.size(40.dp).background(sendBackground, CircleShape),
+                        ) {
+                            Icon(AppIcons.ArrowUp, contentDescription = "Send", tint = sendTint, modifier = Modifier.size(20.dp))
+                        }
                     }
                 }
             }
@@ -853,38 +925,36 @@ private fun UtilityDialog(
     onForget: () -> Unit,
     onEnableNotifications: () -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = AgentBackground) {
-            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 14.dp, top = 12.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        when (panel) {
-                            UtilityPanel.SETTINGS -> "Settings"
-                            UtilityPanel.DIAGNOSTICS -> "Diagnostics"
-                            UtilityPanel.HISTORY -> "History"
-                        },
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Surface(shape = CircleShape, color = AgentPanelRaised, border = BorderStroke(1.dp, AgentBorder)) {
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(38.dp)) {
-                            Icon(AppIcons.Close, contentDescription = "Close", modifier = Modifier.size(17.dp))
-                        }
+    Surface(Modifier.fillMaxSize(), color = AgentBackground) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 14.dp, top = 12.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    when (panel) {
+                        UtilityPanel.SETTINGS -> "Settings"
+                        UtilityPanel.DIAGNOSTICS -> "Diagnostics"
+                        UtilityPanel.HISTORY -> "History"
+                    },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                Surface(shape = CircleShape, color = AgentPanelRaised, border = BorderStroke(1.dp, AgentBorder)) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(38.dp)) {
+                        Icon(AppIcons.Close, contentDescription = "Close", modifier = Modifier.size(17.dp))
                     }
                 }
-                Column(
-                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(22.dp),
-                ) {
-                    when (panel) {
-                        UtilityPanel.SETTINGS -> SettingsContent(state, onEditPairing, onForget, onEnableNotifications)
-                        UtilityPanel.DIAGNOSTICS -> DiagnosticsContent(state, onReconnect)
-                        UtilityPanel.HISTORY -> HistoryPanel(state.chat.sessions, onOpenHistory)
-                    }
+            }
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(22.dp),
+            ) {
+                when (panel) {
+                    UtilityPanel.SETTINGS -> SettingsContent(state, onEditPairing, onForget, onEnableNotifications)
+                    UtilityPanel.DIAGNOSTICS -> DiagnosticsContent(state, onReconnect)
+                    UtilityPanel.HISTORY -> HistoryPanel(state.chat.sessions, onOpenHistory)
                 }
             }
         }

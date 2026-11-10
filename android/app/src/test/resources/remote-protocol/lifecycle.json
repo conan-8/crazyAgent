@@ -28,7 +28,10 @@
             "startedAt": null,
             "endedAt": null,
             "outcome": null,
-            "error": null
+            "error": null,
+            "label": null,
+            "usage": null,
+            "failedCalls": null
           },
           "phase": {
             "status": null,
@@ -138,7 +141,17 @@
       "occurredAt": "2026-11-06T12:00:12.000Z",
       "body": {
         "reason": "user",
-        "message": "Stopped."
+        "message": "Stopped.",
+        "timings": {
+          "totalMs": 4321,
+          "toolCalls": 2,
+          "failedCalls": 2
+        },
+        "usage": {
+          "inputTokens": 15,
+          "outputTokens": 3,
+          "totalTokens": 18
+        }
       }
     },
     {
@@ -157,7 +170,14 @@
         "startedAt": "2026-11-06T12:00:05.000Z",
         "endedAt": "2026-11-06T12:00:13.000Z",
         "outcome": "stopped",
-        "error": null
+        "error": null,
+        "label": null,
+        "usage": {
+          "inputTokens": 15,
+          "outputTokens": 3,
+          "totalTokens": 18
+        },
+        "failedCalls": 2
       }
     },
     {
@@ -237,7 +257,14 @@
         "startedAt": "2026-11-06T12:00:16.000Z",
         "endedAt": "2026-11-06T12:00:20.000Z",
         "outcome": "error",
-        "error": "The side panel is not connected."
+        "error": "The side panel is not connected.",
+        "label": null,
+        "usage": {
+          "inputTokens": 4,
+          "outputTokens": 0,
+          "totalTokens": 4
+        },
+        "failedCalls": 1
       }
     },
     {
@@ -289,7 +316,14 @@
       "startedAt": "2026-11-06T12:00:16.000Z",
       "endedAt": "2026-11-06T12:00:20.000Z",
       "outcome": "error",
-      "error": "The side panel is not connected."
+      "error": "The side panel is not connected.",
+      "label": null,
+      "usage": {
+        "inputTokens": 4,
+        "outputTokens": 0,
+        "totalTokens": 4
+      },
+      "failedCalls": 1
     },
     "phase": {
       "status": null,
@@ -331,7 +365,14 @@
         "startedAt": "2026-11-06T12:00:16.000Z",
         "endedAt": "2026-11-06T12:00:20.000Z",
         "outcome": "error",
-        "error": "The side panel is not connected."
+        "error": "The side panel is not connected.",
+        "label": null,
+        "usage": {
+          "inputTokens": 4,
+          "outputTokens": 0,
+          "totalTokens": 4
+        },
+        "failedCalls": 1
       },
       "phase": {
         "status": null,
@@ -374,7 +415,17 @@
           "occurredAt": "2026-11-06T12:00:12.000Z",
           "body": {
             "reason": "user",
-            "message": "Stopped."
+            "message": "Stopped.",
+            "timings": {
+              "totalMs": 4321,
+              "toolCalls": 2,
+              "failedCalls": 2
+            },
+            "usage": {
+              "inputTokens": 15,
+              "outputTokens": 3,
+              "totalTokens": 18
+            }
           }
         },
         {

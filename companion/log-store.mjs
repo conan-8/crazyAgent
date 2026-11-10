@@ -489,6 +489,7 @@ export class LogStore {
     turn.aborted = aborted
     turn.timings = end.timings ?? turn.timings
     turn.usage = end.usage ?? turn.usage
+    turn.label = end.label ?? null
     turn.finalText = end.finalText
     turn.error = end.error
     this.record('companion', 'turn.end', end, {

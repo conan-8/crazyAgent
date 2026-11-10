@@ -28,7 +28,10 @@
             "startedAt": null,
             "endedAt": null,
             "outcome": null,
-            "error": null
+            "error": null,
+            "label": null,
+            "usage": null,
+            "failedCalls": null
           },
           "phase": {
             "status": null,
@@ -259,10 +262,19 @@
       "turnId": "turn-1",
       "occurredAt": "2026-11-06T12:00:20.000Z",
       "body": {
-        "text": "The cart has 2 items.",
+        "text": "DONE — the cart has 2 items.",
         "timings": {
-          "totalMs": 1234
+          "totalMs": 1234,
+          "toolCalls": 1,
+          "failedCalls": 0
         },
+        "usage": {
+          "inputTokens": 120,
+          "outputTokens": 30,
+          "totalTokens": 150,
+          "cacheReadTokens": 40
+        },
+        "label": "done",
         "model": "fixture/model",
         "docsVerification": null,
         "docsVerificationReason": null,
@@ -288,7 +300,15 @@
         "startedAt": "2026-11-06T12:00:05.000Z",
         "endedAt": "2026-11-06T12:00:21.000Z",
         "outcome": "done",
-        "error": null
+        "error": null,
+        "label": "done",
+        "usage": {
+          "inputTokens": 120,
+          "outputTokens": 30,
+          "totalTokens": 150,
+          "cacheReadTokens": 40
+        },
+        "failedCalls": 0
       }
     }
   ],
@@ -310,7 +330,15 @@
       "startedAt": "2026-11-06T12:00:05.000Z",
       "endedAt": "2026-11-06T12:00:21.000Z",
       "outcome": "done",
-      "error": null
+      "error": null,
+      "label": "done",
+      "usage": {
+        "inputTokens": 120,
+        "outputTokens": 30,
+        "totalTokens": 150,
+        "cacheReadTokens": 40
+      },
+      "failedCalls": 0
     },
     "phase": {
       "status": null,
@@ -393,10 +421,19 @@
         "turnId": "turn-1",
         "occurredAt": "2026-11-06T12:00:20.000Z",
         "body": {
-          "text": "The cart has 2 items.",
+          "text": "DONE — the cart has 2 items.",
           "timings": {
-            "totalMs": 1234
+            "totalMs": 1234,
+            "toolCalls": 1,
+            "failedCalls": 0
           },
+          "usage": {
+            "inputTokens": 120,
+            "outputTokens": 30,
+            "totalTokens": 150,
+            "cacheReadTokens": 40
+          },
+          "label": "done",
           "model": "fixture/model",
           "docsVerification": null,
           "docsVerificationReason": null,
