@@ -1432,27 +1432,13 @@ async function main() {
     const waiting = await page.evaluate(`(() => {
       const loader = document.querySelector('.activity-step.running .thinking-wait');
       if (!loader) return null;
-      const ball = loader.querySelector('.thinking-ball');
-      const shadow = loader.querySelector('.thinking-ball-shadow');
       return {
         visible: loader.getClientRects().length > 0,
         label: loader.textContent,
-        ballAnimation: getComputedStyle(ball).animationName,
-        shadowAnimation: getComputedStyle(shadow).animationName,
-        glossy: getComputedStyle(ball).backgroundImage.includes('radial-gradient'),
+        ball: document.querySelector('.thinking-ball, .thinking-ball-scene') !== null,
       };
     })()`)
-    assert.deepEqual(waiting, {
-      visible: true,
-      label: 'gathering thoughts',
-      ballAnimation: 'thinking-ball-bounce',
-      shadowAnimation: 'thinking-ball-shadow',
-      glossy: true,
-    })
-    const firstBallTransform = await page.evaluate(`getComputedStyle(document.querySelector('.thinking-ball')).transform`)
-    await sleep(180)
-    const nextBallTransform = await page.evaluate(`getComputedStyle(document.querySelector('.thinking-ball')).transform`)
-    assert.notEqual(nextBallTransform, firstBallTransform)
+    assert.deepEqual(waiting, { visible: true, label: 'gathering thoughts', ball: false })
     await shot('dark')
     await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text: 'The first streamed thought.' })
     await assertVisibleReasoning(page, '.activity-step.running .activity-entry.reasoning.streaming', 'The first streamed thought.')
@@ -1460,6 +1446,47 @@ async function main() {
     assert.equal(await page.evaluate(`document.querySelectorAll('.thinking-wait:not(.leaving)').length`), 0)
     await sleep(MOTION_SETTLE_MS)
     assert.equal(await page.evaluate(`document.querySelector('.thinking-wait') === null`), true)
+
+    // Each new line grows the row over several frames instead of jumping a whole line,
+    // and the new words fade in.
+    const row = '.activity-step.running .activity-entry.reasoning.streaming'
+    const growth = page.evaluate(`(async () => {
+      const seen = [];
+      const end = performance.now() + 1400;
+      while (performance.now() < end) {
+        const node = document.querySelector(${JSON.stringify(row)});
+        const chunk = node?.querySelector('.stream-chunk:last-child');
+        seen.push([node ? node.getBoundingClientRect().height : 0, chunk ? Number(getComputedStyle(chunk).opacity) : 1]);
+        await new Promise(requestAnimationFrame);
+      }
+      return seen;
+    })()`)
+    for (let line = 1; line <= 4; line += 1) {
+      await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text: `\nLine ${line} of the streamed reasoning keeps going.` })
+      await sleep(300)
+    }
+    const frames = await growth
+    const heights = frames.map(([height]) => height)
+    const steps = heights.slice(1).map((height, index) => Math.abs(height - heights[index]))
+    assert.ok(heights.at(-1) - heights[0] >= 90, `row should grow by four lines: ${heights[0]} → ${heights.at(-1)}`)
+    assert.ok(Math.max(...steps) < 14, `row should grow smoothly, largest frame jump ${Math.max(...steps)}px`)
+    assert.ok(frames.some(([, opacity]) => opacity > 0.05 && opacity < 0.95), 'new words should fade in')
+
+    // A long thought keeps the step's own scroll box at its newest line.
+    for (let line = 5; line <= 14; line += 1) {
+      await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text: `\nLine ${line} of the streamed reasoning keeps going.` })
+      await sleep(40)
+    }
+    await sleep(MOTION_SETTLE_MS + 100)
+    const body = await page.evaluate(`(() => {
+      const body = document.querySelector('.activity-step.running .step-body');
+      return { overflow: body.scrollHeight > body.clientHeight, gap: body.scrollHeight - body.scrollTop - body.clientHeight };
+    })()`)
+    assert.ok(body.overflow && body.gap < 2, `step body should follow its newest line: ${JSON.stringify(body)}`)
+    await shot('streaming')
+    await recv({ v: 1, type: 'chat.tool_call', callId: 'after-thought', name: 'browser_screenshot', args: '{}' })
+    assert.equal(await page.evaluate(`document.querySelectorAll('.stream-chunk').length`), 0, 'finished text is plain again')
+    assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.activity-step.running .step-icon')).color`), 'rgb(255, 195, 0)', 'running icon is yellow')
   } else if (SCENARIO === 'motion') {
     const { recv, batch } = makePage(page)
     await batch(HELLO_FRAMES)
@@ -1552,6 +1579,53 @@ async function main() {
     assert.equal(await page.evaluate(`document.querySelectorAll('.feed-ghost').length`), 0, 'feed ghost cleans up')
 
     log('motion samples', JSON.stringify({ stepHeights, waitOpacity, ghostOpacity, bodyHeights, modalOpacity, stepsHeights, feedOpacity }))
+  } else if (SCENARIO === 'wait') {
+    const { recv, batch } = makePage(page)
+    await batch(HELLO_FRAMES)
+    await sleep(300)
+    await sendPrompt(page, 'Wait a few seconds.')
+    const read = () => page.evaluate(`({
+      title: document.querySelector('.activity-step:last-child .step-title')?.textContent,
+      row: document.querySelector('.activity-step:last-child .activity-entry.tool .activity-text')?.textContent,
+      phase: document.getElementById('activity-phase').textContent,
+      color: getComputedStyle(document.querySelector('.activity-step:last-child .step-title')).color,
+      icon: getComputedStyle(document.querySelector('.activity-step:last-child .step-icon')).color,
+    })`)
+    await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 1, attemptId: 'wait-1' })
+    await recv({ v: 1, type: 'chat.tool_call', callId: 'wait-ms', name: 'browser_wait_for', args: '{"ms":3000}' })
+    const start = await read()
+    assert.deepEqual({ title: start.title, phase: start.phase }, { title: 'Wait 3s', phase: 'Wait 3s…' })
+    const rowShown = () => page.evaluate(`document.querySelector('.activity-step:last-child .activity-entry.tool')?.getClientRects().length > 0`)
+    assert.equal(await rowShown(), false, 'no subtext while waiting')
+    await sleep(MOTION_SETTLE_MS)
+    assert.equal((await read()).color, 'rgb(255, 195, 0)', 'the countdown is the running label')
+    assert.equal((await read()).icon, 'rgb(255, 195, 0)', 'the running icon is yellow too')
+    await shot('counting')
+    await sleep(1_100)
+    const later = await read()
+    assert.deepEqual({ title: later.title, phase: later.phase }, { title: 'Wait 2s', phase: 'Wait 2s…' })
+    await recv({ v: 1, type: 'chat.tool_result', callId: 'wait-ms', ok: true, text: 'waited for ms 3000 · found after 3004ms' })
+    assert.equal((await read()).title, 'Done')
+    assert.equal(await rowShown(), false, 'a finished wait says only Done')
+    await sleep(1_100)
+    assert.equal((await read()).title, 'Done', 'the countdown stopped with the result')
+
+    await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 2, attemptId: 'wait-2' })
+    await recv({ v: 1, type: 'chat.tool_call', callId: 'wait-text', name: 'browser_wait_for', args: '{"text":"Saved"}' })
+    assert.equal((await read()).title, 'Wait for “Saved”')
+    await recv({ v: 1, type: 'chat.tool_result', callId: 'wait-text', ok: true, text: 'waited for text "Saved" · found after 812ms' })
+    assert.equal((await read()).title, 'Done')
+
+    await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 3, attemptId: 'wait-3' })
+    await recv({ v: 1, type: 'chat.tool_call', callId: 'wait-stop', name: 'browser_wait_for', args: '{"ms":20000}' })
+    assert.equal((await read()).title, 'Wait 20s')
+    await recv({ v: 1, type: 'chat.done', text: 'Done.', timings: { totalMs: 5000 }, sessionId: 'session-wait' })
+    await recv({ v: 1, type: 'status', status: 'idle' })
+    const titleAtEnd = await page.evaluate(`document.querySelector('.activity-step:last-child .step-title').textContent`)
+    await sleep(1_100)
+    assert.equal(await page.evaluate(`document.querySelector('.activity-step:last-child .step-title').textContent`), titleAtEnd, 'an ended turn stops counting')
+    await sleep(MOTION_SETTLE_MS)
+    await shot('finished')
   } else if (SCENARIO === 'states') {
     await playTurn(page)
     await sleep(300)
