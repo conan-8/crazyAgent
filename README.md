@@ -95,23 +95,14 @@ Do not print, read, copy, log, commit, or transmit the remote token yourself. Gi
    ```sh
    echo 'f08eadce79b61adeaadb5aad20f6d50a0cfb23875808ccdf59115fbcb082b3ed  app-release.apk' | sha256sum -c -
    ```
-   On macOS, use
-    ```sh
-   shasum -a 256 app-release.apk
-    ```
-    on Windows, use
-    ```sh
-   Get-FileHash .\app-release.apk -Algorithm SHA256
-    ```
-    in PowerShell. Compare the result with the hash above before installing.
-   
-4. **Create the phone credential:** from the crazyAgent checkout on the host, run:
+   On macOS, use `shasum -a 256 app-release.apk`; on Windows, use `Get-FileHash .\app-release.apk -Algorithm SHA256` in PowerShell. Compare the result with the hash above before installing.
+3. **Create the phone credential:** from the crazyAgent checkout on the host, run:
    ```sh
    npm run dev -- --pair-remote
    ```
    This prints the server URL and a 64-character remote token without starting another companion. Keep this credential private.
-5. **Pair:** enter the printed server URL and token in the app. The URL may include `/remote/v1`; the app normalizes it automatically. The token is encrypted on the phone with Android Keystore.
-6. **Test safely:** keep the host awake, Tailscale connected on both devices, and Edge plus the side panel open. Send a harmless prompt and confirm the response streams on both devices. Browser actions require the desktop executor; Tailscale alone is not enough.
+4. **Pair:** enter the printed server URL and token in the app. The URL may include `/remote/v1`; the app normalizes it automatically. The token is encrypted on the phone with Android Keystore.
+5. **Test safely:** keep the host awake, Tailscale connected on both devices, and Edge plus the side panel open. Send a harmless prompt and confirm the response streams on both devices. Browser actions require the desktop executor; Tailscale alone is not enough.
 
 For token rotation, background behavior, push notifications, diagnostics, and troubleshooting, see `android/README.md` and `docs/REMOTE-ACCESS.md`. Never enable Tailscale Funnel for the companion or remote API.
 
