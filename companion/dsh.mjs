@@ -185,7 +185,7 @@ export class DshRunner {
   }
 
   /**
-   * Abort the active turn. DSH SDK 0.2.1-rc.2 exposes no turn-cancel RPC, so
+   * Abort the active turn. The DSH SDK in this integration exposes no turn-cancel RPC, so
    * the only reliable cancellation is tearing down the runtime subprocess:
    * the pending `session.run()` rejects with a transport-closed error. The
    * interrupted session id is remembered so the next `ensureStarted()` starts

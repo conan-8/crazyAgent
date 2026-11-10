@@ -79,7 +79,7 @@ What already exists on this machine **[verified 2026-11-06]**:
 
 - **Tailscale is installed and running.** Host `conan-expertbook` = `100.96.64.4`, tailnet `tail11f47e.ts.net`; there is an Android device on the tailnet (offline 72 days), plus a macOS laptop and a Windows PC. No `tailscale serve`/`funnel` config yet.
 - **RustDesk 1.4.9 is installed**, `rustdesk.service` enabled and running for ~3 months.
-- **DSH web GUI** is running as `dsh web` on `127.0.0.1:3080`, spawned by the Kimi Code app. Note: the global CLI is DSH **0.2.1-rc.5**; crazyAgent's repo bundles **0.2.1-rc.2** — relevant only for option F.
+- **DSH web GUI** is running as `dsh web` on `127.0.0.1:3080`, spawned by the Kimi Code app. Note: the global CLI is DSH **0.2.1-rc.5**; crazyAgent's repo bundles **0.2.2-rc.1** — relevant only for option F.
 - **The crazyAgent companion** runs from `scripts/dev.mjs` under the Kimi Code process tree, logging to `logs/companion.log`. That parentage matters for keep-alive (§12).
 - Ubuntu 26.04 GNOME on Wayland; on AC the machine does not suspend (`sleep-inactive-ac-type='nothing'`).
 
