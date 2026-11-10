@@ -19,6 +19,8 @@
  *   node scripts/ui-preview.mjs --scenario recent     # new-chat recents + running session indicator
  *   node scripts/ui-preview.mjs --scenario composer   # image paste + model search + dictation dots
  *   node scripts/ui-preview.mjs --scenario slash      # slash-command palette: filter, keys, execution
+ *   node scripts/ui-preview.mjs --scenario plan       # /plan arm, live checklist, queue/race preservation
+ *   node scripts/ui-preview.mjs --scenario remote     # phone-started turns: render, queue, lost-race requeue
  *
  * Options: --out DIR (default /tmp/crazyagent-ui-preview) and SHOT_FORMAT=jpeg.
  * Needs Node >= 22 (global WebSocket) and microsoft-edge or (set EDGE_BIN) on PATH.
@@ -524,6 +526,309 @@ async function playQueueScenario(page, capture) {
   assert.equal(await page.evaluate(`document.getElementById('message-queue').classList.contains('hidden')`), true)
 }
 
+async function playRemoteScenario(page, capture) {
+  const { recv, batch } = makePage(page)
+  const sends = () => page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').map(frame => frame.text)`)
+  const queued = () => page.evaluate(`[...document.querySelectorAll('.queued-message-preview')].map(node => node.textContent)`)
+  await batch(HELLO_FRAMES)
+  await sleep(300)
+
+  // 1. An idle panel shows a phone-started turn and goes busy.
+  await recv({ v: 1, type: 'chat.user', turnId: 'turn-remote-1', origin: 'remote', text: 'Find the cheapest flight', imageCount: 1 })
+  await sleep(150)
+  const shown = await page.evaluate(`(() => {
+    const dividers = [...document.querySelectorAll('.activity-turn')];
+    const last = dividers.at(-1);
+    return {
+      turns: dividers.length,
+      origin: last?.dataset.origin,
+      label: last?.querySelector('.user-origin')?.textContent,
+      prompt: last?.querySelector('.turn-prompt')?.textContent,
+      images: last?.querySelector('.user-images')?.textContent,
+      send: document.getElementById('send').getAttribute('aria-label'),
+      stopVisible: !document.getElementById('stop').hidden,
+      running: document.querySelectorAll('.agent-turn.running').length,
+    };
+  })()`)
+  assert.deepEqual(shown, {
+    turns: 1,
+    origin: 'remote',
+    label: 'From phone',
+    prompt: 'Find the cheapest flight',
+    images: 'phone image 1',
+    send: 'Queue message',
+    stopVisible: true,
+    running: 1,
+  })
+  assert.deepEqual(await sends(), [], 'showing a phone prompt sends nothing')
+  await recv({ v: 1, type: 'chat.status', status: 'thinking' })
+  await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 1, attemptId: 'a1' })
+  await recv({ v: 1, type: 'chat.activity', kind: 'text', text: 'Checking fares…' })
+  await sleep(150)
+  await capture('phone-turn')
+
+  // 2. Desktop input during the phone turn queues, then dispatches when it ends.
+  await sendPrompt(page, 'Desktop follow-up')
+  assert.deepEqual(await sends(), [])
+  assert.deepEqual(await queued(), ['Desktop follow-up'])
+  await finishPrompt(page, 'session-preview0001', 'Cheapest: 129 EUR')
+  await sleep(150)
+  assert.deepEqual(await sends(), ['Desktop follow-up'])
+  assert.deepEqual(await queued(), [])
+  await finishPrompt(page, 'session-preview0001', 'Noted')
+
+  // 3. Lost race: our send is refused because the phone took the slot first.
+  await sendPrompt(page, 'Race me')
+  assert.deepEqual(await sends(), ['Desktop follow-up', 'Race me'])
+  await recv({ v: 1, type: 'chat.user', turnId: 'turn-remote-2', origin: 'remote', text: 'Phone wins', imageCount: 0 })
+  await recv({ v: 1, type: 'chat.error', code: 'TURN_BUSY', message: 'A turn is already running. Wait for it to finish.', recoverable: true })
+  await sleep(200)
+  const raced = await page.evaluate(`(() => {
+    const dividers = [...document.querySelectorAll('.activity-turn')];
+    return {
+      lastPrompt: dividers.at(-1)?.querySelector('.turn-prompt')?.textContent,
+      lastLabel: dividers.at(-1)?.querySelector('.user-origin')?.textContent,
+      refused: [...document.querySelectorAll('.agent-turn.refused .agent-turn-summary')].map(node => node.textContent),
+      errors: document.querySelectorAll('.activity-entry.error').length,
+      send: document.getElementById('send').getAttribute('aria-label'),
+      running: document.querySelectorAll('.agent-turn.running').length,
+    };
+  })()`)
+  assert.deepEqual(raced, {
+    lastPrompt: 'Phone wins',
+    lastLabel: 'From phone',
+    refused: ['Not sent · queued until the other turn finishes'],
+    errors: 0,
+    send: 'Queue message',
+    running: 1,
+  })
+  assert.deepEqual(await queued(), ['Race me'], 'the refused message is requeued, not lost')
+  await capture('lost-race')
+  await finishPrompt(page, 'session-preview0001', 'Phone task done')
+  await sleep(150)
+  assert.deepEqual(await sends(), ['Desktop follow-up', 'Race me', 'Race me'], 'the requeued message is sent once the phone turn ends')
+  assert.deepEqual(await queued(), [])
+
+  // 4. A real failure on our own send still shows as an error.
+  await finishPrompt(page, 'session-preview0001', 'ok')
+  await sendPrompt(page, 'Will fail')
+  await recv({ v: 1, type: 'chat.error', message: 'model failed', recoverable: true })
+  await sleep(150)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.activity-entry.error').length`), 1)
+  assert.deepEqual(await queued(), [])
+}
+
+async function playPlanScenario(page, capture) {
+  const { recv, batch } = makePage(page)
+  const sends = () => page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send')`)
+  const arm = () => sendPrompt(page, '/plan')
+  const armed = () => page.evaluate(`(() => ({
+    visible: !document.getElementById('plan-mode').classList.contains('hidden'),
+    placeholder: document.getElementById('input').placeholder,
+    input: document.getElementById('input').value,
+  }))()`)
+  const panel = () => page.evaluate(`(() => {
+    const turn = [...document.querySelectorAll('.agent-turn')].at(-1);
+    const root = document.querySelector('#plan-dock .plan-panel');
+    return {
+      badge: [...document.querySelectorAll('.activity-turn')].at(-1)?.querySelector('.plan-turn-badge')?.textContent,
+      present: Boolean(root),
+      visible: Boolean(root && !root.hidden && root.getClientRects().length > 0),
+      expanded: root?.querySelector('.plan-panel-toggle')?.getAttribute('aria-expanded'),
+      detailsHidden: root?.querySelector('.plan-panel-details')?.hidden,
+      count: root?.querySelector('.plan-panel-count')?.textContent,
+      current: root?.querySelector('.plan-panel-current')?.textContent,
+      statuses: [...(root?.querySelectorAll('.plan-panel-item') ?? [])].map(row => row.dataset.status),
+      phase: document.getElementById('activity-phase').textContent,
+      collapsed: turn?.classList.contains('collapsed'),
+    };
+  })()`)
+  await batch(HELLO_FRAMES)
+  await sleep(300)
+
+  await arm()
+  assert.deepEqual(await armed(), {
+    visible: true,
+    placeholder: 'Describe a long task to plan and complete…',
+    input: '',
+  })
+  assert.equal((await sends()).length, 0, '/plan is a command, never a prompt')
+  await page.evaluate(`document.getElementById('plan-mode-cancel').click()`)
+  assert.equal((await armed()).visible, false)
+
+  await arm()
+  await sendPrompt(page, 'Research the options, apply the best one, and verify it.')
+  assert.equal((await armed()).visible, false, 'sending consumes the one-shot arm')
+  assert.equal((await sends()).at(-1).planMode, true)
+  assert.equal((await panel()).present, true)
+  assert.equal((await panel()).visible, false, 'the checklist opens on its first update')
+  await recv({
+    v: 1,
+    type: 'chat.activity',
+    kind: 'plan',
+    revision: 1,
+    items: [
+      { content: 'Research the options', status: 'completed' },
+      { content: 'Choose and apply the best option', status: 'in_progress' },
+      { content: 'Verify the resulting state', status: 'pending' },
+      { content: 'Resolve any remaining blocker', status: 'blocked' },
+    ],
+  })
+  await sleep(150)
+  assert.deepEqual(await panel(), {
+    badge: 'Plan',
+    present: true,
+    visible: true,
+    expanded: 'true',
+    detailsHidden: false,
+    count: '1/4 done',
+    current: 'Current: Choose and apply the best option',
+    statuses: ['completed', 'in_progress', 'pending', 'blocked'],
+    phase: 'Plan 1/4',
+    collapsed: false,
+  })
+  await capture('live')
+
+  for (let index = 0; index < 18; index += 1) {
+    await recv({ v: 1, type: 'chat.assistant', text: `Scroll filler ${index + 1}: the plan must remain pinned while this conversation moves.` })
+  }
+  const sticky = await page.evaluate(`(async () => {
+    const dock = document.getElementById('plan-dock');
+    const log = document.getElementById('activity-log');
+    const before = dock.getBoundingClientRect().top;
+    log.scrollTop = log.scrollHeight;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const after = dock.getBoundingClientRect().top;
+    const style = getComputedStyle(dock);
+    return {
+      before,
+      after,
+      position: style.position,
+      top: style.top,
+      visible: dock.getClientRects().length > 0,
+      scrollable: log.scrollHeight > log.clientHeight,
+      besideLog: dock.nextElementSibling === log,
+    };
+  })()`)
+  assert.equal(sticky.scrollable, true)
+  assert.equal(sticky.visible, true)
+  assert.equal(sticky.besideLog, true)
+  assert.equal(sticky.position, 'sticky')
+  assert.equal(sticky.top, '0px')
+  assert.ok(Math.abs(sticky.after - sticky.before) < 1, `plan dock moved with the feed: ${JSON.stringify(sticky)}`)
+  await capture('sticky')
+  const expandedDockHeight = await page.evaluate(`document.getElementById('plan-dock').offsetHeight`)
+
+  await page.evaluate(`document.querySelector('#plan-dock .plan-panel-toggle').click()`)
+  assert.equal((await panel()).detailsHidden, true)
+  const collapsedDockHeight = await page.evaluate(`document.getElementById('plan-dock').offsetHeight`)
+  assert.ok(collapsedDockHeight < expandedDockHeight, 'collapse must shrink the sticky dock')
+  await capture('collapsed')
+  await recv({
+    v: 1,
+    type: 'chat.activity',
+    kind: 'plan',
+    revision: 2,
+    items: [
+      { content: 'Research the options', status: 'completed' },
+      { content: 'Choose and apply the best option', status: 'completed' },
+      { content: 'Verify the resulting state', status: 'in_progress' },
+      { content: 'Resolve any remaining blocker', status: 'pending' },
+    ],
+  })
+  assert.equal((await panel()).expanded, 'false', 'updates preserve a manual collapse')
+  assert.equal((await panel()).count, '2/4 done')
+  await page.evaluate(`document.querySelector('#plan-dock .plan-panel-toggle').click()`)
+  assert.equal((await panel()).detailsHidden, false)
+  assert.ok(await page.evaluate(`document.getElementById('plan-dock').offsetHeight`) > collapsedDockHeight, 'expansion must restore the checklist')
+  await recv({
+    v: 1,
+    type: 'chat.done',
+    sessionId: 'session-preview0001',
+    text: 'Two items still need attention.',
+    timings: { totalMs: 1 },
+    planMode: true,
+    planOutcome: 'unfinished',
+    planRevision: 2,
+  })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(200)
+  const finished = await panel()
+  assert.equal(finished.phase, 'Plan unfinished')
+  assert.equal(finished.visible, true, 'the checklist stays visible after tool steps collapse')
+  assert.equal(finished.collapsed, true)
+  assert.match(await page.evaluate(`document.querySelector('.agent-turn:last-of-type .activity-answer').textContent`), /Two items still need attention/)
+  await capture('unfinished')
+
+  // A lost race requeues the same planned message, then dispatches it once the
+  // phone-originated turn releases the single turn slot.
+  await arm()
+  await sendPrompt(page, 'Planned desktop follow-up')
+  await recv({ v: 1, type: 'chat.user', turnId: 'turn-phone-plan', origin: 'remote', text: 'Phone wins this race', imageCount: 0 })
+  await recv({ v: 1, type: 'chat.error', code: 'TURN_BUSY', message: 'A turn is already running. Wait for it to finish.', recoverable: true })
+  await sleep(200)
+  assert.equal(await page.evaluate(`document.querySelector('.queued-message-plan').textContent`), 'Plan')
+  const raceSendCount = (await sends()).length
+  await finishPrompt(page, 'session-preview0001', 'Phone task complete')
+  await sleep(250)
+  assert.equal((await sends()).length, raceSendCount + 1)
+  assert.equal((await sends()).at(-1).text, 'Planned desktop follow-up')
+  assert.equal((await sends()).at(-1).planMode, true)
+  await finishPrompt(page, 'session-preview0001', 'Planned follow-up complete')
+
+  // Restoring a queued planned draft also restores its one-shot composer mode.
+  await sendPrompt(page, 'Ordinary busy turn')
+  assert.equal('planMode' in (await sends()).at(-1), false)
+  await arm()
+  await sendPrompt(page, 'Restore this planned draft')
+  assert.equal(await page.evaluate(`document.querySelector('.queued-message-plan').textContent`), 'Plan')
+  await page.evaluate(`document.querySelector('.queued-message-cancel').click()`)
+  assert.deepEqual(await armed(), {
+    visible: true,
+    placeholder: 'Describe a long task to plan and complete…',
+    input: 'Restore this planned draft',
+  })
+  await page.evaluate(`document.getElementById('composer').requestSubmit()`)
+  await finishPrompt(page, 'session-preview0001', 'Ordinary turn complete')
+  await sleep(250)
+  assert.equal((await sends()).at(-1).text, 'Restore this planned draft')
+  assert.equal((await sends()).at(-1).planMode, true)
+  await finishPrompt(page, 'session-preview0001', 'Planned draft complete')
+
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 280, height: 940, deviceScaleFactor: 2, mobile: false })
+  await sleep(200)
+  await arm()
+  const narrow = await page.evaluate(`(() => {
+    const mode = document.getElementById('plan-mode');
+    const rect = mode.getBoundingClientRect();
+    return {
+      left: rect.left,
+      right: rect.right,
+      viewport: innerWidth,
+      overflow: mode.scrollWidth > mode.clientWidth + 1,
+    };
+  })()`)
+  assert.ok(narrow.left >= 0 && narrow.right <= narrow.viewport)
+  assert.equal(narrow.overflow, false)
+  await capture('armed-narrow')
+
+  await sendPrompt(page, 'Verify plan dock cleanup')
+  await recv({
+    v: 1,
+    type: 'chat.activity',
+    kind: 'plan',
+    revision: 1,
+    items: [{ content: 'Check the dock before clearing the chat', status: 'in_progress' }],
+  })
+  assert.equal((await panel()).visible, true)
+  await page.evaluate(`document.getElementById('new-chat').click()`)
+  await finishPrompt(page, 'session-preview0001', 'Cleanup complete')
+  assert.deepEqual(await page.evaluate(`(() => ({
+    hidden: document.getElementById('plan-dock').hidden,
+    children: document.getElementById('plan-dock').children.length,
+  }))()`), { hidden: true, children: 0 })
+}
+
 async function playComposerScenario(page, capture) {
   const { recv, batch } = makePage(page)
   await batch(HELLO_FRAMES)
@@ -765,16 +1070,16 @@ async function playSlashScenario(page, capture) {
   await type('hello')
   assert.equal((await menuState()).visible, false)
 
-  // A bare slash lists both commands, first selected, with ARIA wiring.
+  // A bare slash lists all commands, first selected, with ARIA wiring.
   await type('/')
   const open = await menuState()
   assert.equal(open.visible, true)
   assert.equal(open.expanded, 'true')
   assert.equal(open.activeDescendant, 'slash-command-new')
-  assert.deepEqual(open.items.map(item => item.name), ['/new', '/model'])
-  assert.deepEqual(open.items.map(item => item.description), ['Start a new chat', 'Choose the model for your next turn'])
-  assert.deepEqual(open.items.map(item => item.selected), [true, false])
-  assert.deepEqual(open.items.map(item => item.role), ['option', 'option'])
+  assert.deepEqual(open.items.map(item => item.name), ['/new', '/model', '/plan'])
+  assert.deepEqual(open.items.map(item => item.description), ['Start a new chat', 'Choose the model for your next turn', 'Plan the next turn with a live checklist'])
+  assert.deepEqual(open.items.map(item => item.selected), [true, false, false])
+  assert.deepEqual(open.items.map(item => item.role), ['option', 'option', 'option'])
   assert.match(open.hint, /↑↓ navigate · Enter run · Esc dismiss/)
   assert.equal(open.controls, 'slash-menu-list')
   assert.equal(open.listRole, 'listbox')
@@ -806,13 +1111,14 @@ async function playSlashScenario(page, capture) {
 
   // Arrow keys move and wrap the active option without rewriting the draft.
   await press('#input', 'ArrowDown')
-  assert.deepEqual((await menuState()).items.map(item => item.selected), [false, true])
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [false, true, false])
   assert.equal((await menuState()).activeDescendant, 'slash-command-model')
   assert.equal(await inputValue(), '/')
   await press('#input', 'ArrowUp')
-  assert.deepEqual((await menuState()).items.map(item => item.selected), [true, false])
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [true, false, false])
   await press('#input', 'ArrowUp')
-  assert.deepEqual((await menuState()).items.map(item => item.selected), [false, true])
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [false, false, true])
+  assert.equal((await menuState()).activeDescendant, 'slash-command-plan')
 
   // Filtering narrows the list and resets the selection.
   await type('/m')
@@ -850,10 +1156,10 @@ async function playSlashScenario(page, capture) {
   await type('/')
   await focusComposer()
   await trustedKey('ArrowDown')
-  assert.deepEqual((await menuState()).items.map(item => item.selected), [false, true])
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [false, true, false])
   assert.equal(await page.evaluate(`document.activeElement.id`), 'input')
   await trustedKey('ArrowUp')
-  assert.deepEqual((await menuState()).items.map(item => item.selected), [true, false])
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [true, false, false])
 
   // Trusted Escape closes the palette and drops activedescendant wiring.
   await trustedKey('Escape')
@@ -1481,6 +1787,10 @@ async function main() {
     await playComposerScenario(page, shot)
   } else if (SCENARIO === 'slash') {
     await playSlashScenario(page, shot)
+  } else if (SCENARIO === 'plan') {
+    await playPlanScenario(page, shot)
+  } else if (SCENARIO === 'remote') {
+    await playRemoteScenario(page, shot)
   } else {
     await playTurn(page)
     await sleep(400)

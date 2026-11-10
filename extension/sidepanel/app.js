@@ -7,8 +7,10 @@
  */
 
 import { DEFAULT_SETTINGS, execute, testCapture, imageDataUrl, beginDebuggerRun, endDebuggerRun } from './browser.js'
+import { foreignPrompt, helpNotice, isBusyRefusal } from './remote-turn.js'
 import { ClientLogger } from './logger.js'
 import { renderMarkdown } from './markdown.js'
+import { createPlanPanelModel, renderPlanPanel } from './plan-panel.js'
 import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protocol.js'
 import { matchSlashCommands, nextSlashIndex, resolveSlashCommand, slashQuery } from './slash.js'
 
@@ -32,11 +34,16 @@ let newChatOnNextConnect = true
 let newChatDraft = false
 let historySaveTimer = null
 let attachedImages = []
-/** @type {Array<{id: string, text: string, images: Array<{name: string, size: number, mimeType: string, data: string}>}>} */
+let planModeArmed = false
+/** @type {Array<{id: string, text: string, planMode?: boolean, images: Array<{name: string, size: number, mimeType: string, data: string}>}>} */
 let queuedMessages = []
 let dictation = null
 let queuedMessageSequence = 0
 let steeringMessageId = null
+/** The panel's last sent chat.send item, kept until the companion accepts or refuses it. */
+let lastDispatchedItem = null
+/** A phone/remote prompt that won the turn slot while our own send was in flight. */
+let pendingForeignPrompt = null
 let queueDispatchTimer = null
 let renderedQueueKey = ''
 
@@ -88,6 +95,7 @@ let turnNumber = 0
 /** @type {{number: number, startedAt: number, root: HTMLElement, divider: HTMLElement, durationEl: HTMLElement, stepCount: number, totalMs: number | null, done: boolean} | null} */
 let currentTurn = null
 let lastAgentTurn = null
+let planTerminalPhase = null
 /** @type {{index: number, block: HTMLElement, head: HTMLElement, titleEl: HTMLElement, metaEl: HTMLElement, durationEl: HTMLElement, bodyEl: HTMLElement, startedAt: number, modelStartedAt: number, modelMs?: number, liveMs: number, open: boolean, collapsed: boolean, finish?: string, totalMs?: number} | null} */
 let currentStep = null
 /** Completed step durations for the current turn (ms), rendered in the footer. */
@@ -116,6 +124,7 @@ const els = {
   activityPhase: $('activity-phase'),
   activityLatest: $('activity-latest'),
   activityLog: $('activity-log'),
+  planDock: $('plan-dock'),
   activityEmpty: $('activity-empty'),
   activityTimer: $('activity-timer'),
   recentSessions: $('recent-sessions'),
@@ -189,6 +198,8 @@ const els = {
   dictationIndicator: $('dictation-indicator'),
   imageChips: $('image-chips'),
   messageQueue: $('message-queue'),
+  planMode: $('plan-mode'),
+  planModeCancel: $('plan-mode-cancel'),
   promptRail: $('prompt-rail'),
   promptRailList: $('prompt-rail-list'),
   settingsStatus: $('settings-status'),
@@ -474,6 +485,17 @@ function clearSlashDraft() {
   resizeInput()
 }
 
+function setPlanModeArmed(value) {
+  planModeArmed = value === true
+  els.planMode.classList.toggle('hidden', !planModeArmed)
+  els.input.placeholder = planModeArmed ? 'Describe a long task to plan and complete…' : 'Ask or tell me what to do…'
+}
+
+function togglePlanMode() {
+  setPlanModeArmed(!planModeArmed)
+  toast(planModeArmed ? 'Plan mode armed for the next turn' : 'Plan mode canceled')
+}
+
 function executeSlashCommand(command) {
   if (!command) return
   closeSlashMenu()
@@ -489,7 +511,9 @@ function executeSlashCommand(command) {
       return
     }
     openModelMenu()
+    return
   }
+  if (command.id === 'plan') togglePlanMode()
 }
 
 function formatFileSize(bytes) {
@@ -1274,6 +1298,8 @@ function connect() {
     connected = false
     stopping = false
     steeringMessageId = null
+    lastDispatchedItem = null
+    pendingForeignPrompt = null
     clearTimeout(stopTimer)
     stopTimer = null
     clearTimeout(queueDispatchTimer)
@@ -1596,7 +1622,7 @@ function updateFooterLive(stepMs) {
  * live clocks. Called when the user sends a message.
  * @param {string} text
  */
-function startTurn(text, attachments = []) {
+function startTurn(text, attachments = [], options = {}) {
   closeStep()
   turnNumber += 1
   activityTurnStart = now()
@@ -1618,6 +1644,20 @@ function startTurn(text, attachments = []) {
   prompt.className = 'turn-prompt'
   prompt.textContent = text || 'Attached images'
   prompt.title = String(text ?? '')
+  if (options.planMode === true) {
+    divider.dataset.planMode = 'true'
+    const planBadge = document.createElement('span')
+    planBadge.className = 'user-origin plan-turn-badge'
+    planBadge.textContent = 'Plan'
+    bubble.append(planBadge)
+  }
+  if (typeof options.originLabel === 'string') {
+    divider.dataset.origin = options.origin ?? 'remote'
+    const origin = document.createElement('span')
+    origin.className = 'user-origin'
+    origin.textContent = options.originLabel
+    bubble.append(origin)
+  }
   bubble.append(prompt)
   if (attachments.length > 0) {
     const images = document.createElement('span')
@@ -1644,6 +1684,12 @@ function startTurn(text, attachments = []) {
   })
   const steps = document.createElement('div')
   steps.className = 'agent-turn-steps'
+  const planModel = options.planMode === true ? createPlanPanelModel() : null
+  const planRoot = options.planMode === true ? document.createElement('div') : null
+  if (planRoot) {
+    els.planDock.replaceChildren(planRoot)
+    els.planDock.hidden = true
+  }
   agentTurn.append(summary, steps)
   els.activityLog.appendChild(agentTurn)
   lastAgentTurn = agentTurn
@@ -1655,14 +1701,29 @@ function startTurn(text, attachments = []) {
     summaryEl: summary,
     divider,
     durationEl: duration,
+    planModel,
+    planRoot,
     stepCount: 0,
     totalMs: null,
     done: false,
   }
+  if (currentTurn.planRoot) renderTurnPlan(currentTurn)
   renderTiming({})
   trimActivity()
   startLiveClocks()
   scrollActivity()
+}
+
+function renderTurnPlan(turn) {
+  if (!turn?.planModel || !turn.planRoot) return
+  const state = turn.planModel.getState()
+  renderPlanPanel(turn.planRoot, state, {
+    onToggle() {
+      turn.planModel.toggle()
+      renderTurnPlan(turn)
+    },
+  })
+  els.planDock.hidden = !state.visible
 }
 
 function createStepIcon() {
@@ -1935,6 +1996,8 @@ function clearActivity() {
   for (const child of [...els.activityLog.children]) {
     if (child !== els.activityEmpty) child.remove()
   }
+  els.planDock.replaceChildren()
+  els.planDock.hidden = true
   els.activityEmpty?.classList.remove('hidden')
   lastStreamEntry = null
   lastReasoningStreamText = ''
@@ -1943,6 +2006,7 @@ function clearActivity() {
   liveClockTimer !== null && stopLiveClocks()
   currentTurn = null
   lastAgentTurn = null
+  planTerminalPhase = null
   currentStep = null
   lastStepDurations = []
   footerLiveEl = null
@@ -1982,6 +2046,18 @@ function argsPreview(raw) {
 
 function handleActivity(frame) {
   switch (frame.kind) {
+    case 'plan': {
+      const turn = currentTurn
+      const update = turn?.planModel?.update(frame.items)
+      if (!update?.accepted) return
+      renderTurnPlan(turn)
+      const state = update.state
+      const latest = frame.awaitingUser === true
+        ? 'Plan is waiting for your input'
+        : state.current ? `Plan: ${state.current.content}` : `Plan: ${state.done}/${state.total} done`
+      setActivityPhase(frame.awaitingUser === true ? 'Waiting for you…' : `Plan ${state.done}/${state.total}`, 'busy', latest)
+      return
+    }
     case 'policy':
       return
     case 'model-start':
@@ -2157,6 +2233,9 @@ function handleFrame(frame) {
     case 'chat.stopped':
       handleStopped(frame)
       return
+    case 'chat.user':
+      handleForeignPrompt(frame)
+      return
     case 'chat.session':
       if (typeof frame.sessionId === 'string') {
         sessionId = frame.sessionId
@@ -2207,7 +2286,7 @@ function handleStatus(frame) {
     connected = true
     if (dshState === 'unknown' || dshState === 'starting') dshState = 'ready'
     setBusy(false)
-    setActivityPhase('Ready', 'online')
+    setActivityPhase(planTerminalPhase?.label ?? 'Ready', planTerminalPhase?.kind ?? 'online')
     finalizeStreamActivity()
     refreshStatus()
     scheduleQueuedMessage()
@@ -2366,7 +2445,8 @@ function pushAnswer(text) {
 }
 
 /** Reset per-turn state and open the turn divider when a message is sent. */
-function beginUserTurn(text, attachments = []) {
+function beginUserTurn(text, attachments = [], options = {}) {
+  planTerminalPhase = null
   lastAssistantText = ''
   lastAnswerText = ''
   sawReasoningStream = false
@@ -2374,11 +2454,77 @@ function beginUserTurn(text, attachments = []) {
   lastReasoningStreamText = ''
   finalizeStreamActivity()
   setActivityPhase('Sending…', 'busy')
-  startTurn(text, attachments)
+  startTurn(text, attachments, options)
+}
+
+/**
+ * Another client (the phone) started a turn. Show it like a normal turn and go
+ * busy so desktop input queues instead of colliding with the shared turn slot.
+ * @param {Record<string, any>} frame
+ */
+function handleForeignPrompt(frame) {
+  const prompt = foreignPrompt(frame)
+  if (prompt === null) return
+  logger.log('chat.user.foreign', {
+    origin: prompt.origin,
+    turnId: prompt.turnId,
+    textLength: prompt.text.length,
+    images: prompt.attachments.length,
+    pendingLocalSend: lastDispatchedItem !== null,
+  }, 'info')
+  if (busy || stopping) {
+    // Our own chat.send is in flight and the companion will refuse it as busy;
+    // start this turn when that refusal arrives (handleRefusedSend).
+    pendingForeignPrompt = prompt
+    return
+  }
+  startForeignTurn(prompt)
+}
+
+/** @param {{text: string, attachments: Array<{name: string}>, label: string, origin: string}} prompt */
+function startForeignTurn(prompt) {
+  pendingForeignPrompt = null
+  clearTimeout(queueDispatchTimer)
+  queueDispatchTimer = null
+  void beginDebuggerRun().catch(() => {})
+  beginUserTurn(prompt.text, prompt.attachments, { originLabel: prompt.label, origin: prompt.origin })
+  setActivityPhase('Working…', 'busy')
+  setBusy(true)
+  setStatus('busy', 'Working…')
+}
+
+/**
+ * The companion refused our send because another client holds the turn slot.
+ * Nothing ran for it: put it back at the front of the queue (it dispatches when
+ * the other turn ends) and show the other turn instead.
+ * @param {Record<string, any>} frame
+ */
+function handleRefusedSend(frame) {
+  const item = lastDispatchedItem
+  lastDispatchedItem = null
+  queuedMessages.unshift({ ...item, id: `queue-${Date.now().toString(36)}-${++queuedMessageSequence}` })
+  finishTurn({})
+  if (lastAgentTurn) {
+    lastAgentTurn.classList.add('refused')
+    const summary = lastAgentTurn.querySelector('.agent-turn-summary')
+    if (summary) summary.textContent = 'Not sent · queued until the other turn finishes'
+  }
+  renderQueuedMessages()
+  logger.log('chat.send.refused', { code: frame.code, requeued: true, foreign: pendingForeignPrompt !== null }, 'info')
+  toast('Another turn is running; your message is queued')
+  if (pendingForeignPrompt !== null) {
+    startForeignTurn(pendingForeignPrompt)
+  } else {
+    setBusy(true)
+    setStatus('busy', 'Waiting for another turn…')
+    setActivityPhase('Waiting for another turn…', 'busy')
+  }
 }
 
 /** Shared terminal cleanup for a turn: clear busy, pending stop, streaming markers, labels. */
 function cleanupAfterTurn() {
+  lastDispatchedItem = null
+  pendingForeignPrompt = null
   stopping = false
   clearTimeout(stopTimer)
   stopTimer = null
@@ -2398,7 +2544,16 @@ function handleDone(frame) {
   const finalText = typeof frame.text === 'string' ? frame.text.trim() : ''
   if (finalText.length > 0) pushAnswer(finalText)
   const unverified = frame.docsVerification === 'unverified'
-  setActivityPhase(unverified ? 'Verification incomplete' : 'Ready', unverified ? 'error' : 'online')
+  const planOutcome = typeof frame.planOutcome === 'string' ? frame.planOutcome : undefined
+  const planIncomplete = planOutcome === 'unfinished' || planOutcome === 'blocked'
+  // A structured agent_request_help from this turn: the chat now waits for the user.
+  const help = helpNotice(frame)
+  const phase = unverified ? 'Verification incomplete'
+    : planOutcome === 'unfinished' ? 'Plan unfinished'
+      : planOutcome === 'blocked' ? 'Plan blocked'
+        : help !== null ? 'Waiting for you' : 'Ready'
+  planTerminalPhase = planIncomplete ? { label: phase, kind: 'error' } : null
+  setActivityPhase(phase, unverified || planIncomplete ? 'error' : 'online')
   logger.log('chat.done', {
     sessionId: frame.sessionId,
     timings: frame.timings,
@@ -2406,6 +2561,8 @@ function handleDone(frame) {
     textLength: typeof frame.text === 'string' ? frame.text.length : 0,
     docsVerification: frame.docsVerification,
     docsVerificationReason: frame.docsVerificationReason,
+    planOutcome,
+    planRevision: frame.planRevision,
   }, 'info')
   if (typeof frame.sessionId === 'string' && frame.sessionId.length > 0) {
     sessionId = frame.sessionId
@@ -2413,12 +2570,19 @@ function handleDone(frame) {
   updateFooter()
   refreshStatus()
   if (unverified) toast(`Docs verification incomplete${typeof frame.docsVerificationReason === 'string' ? `: ${frame.docsVerificationReason}` : ''}`)
+  else if (planOutcome === 'unfinished') toast('Plan unfinished: open checklist items remain')
+  else if (planOutcome === 'blocked') toast('Plan blocked: review the checklist for the reason')
+  else if (help !== null) toast(`${help.label}: ${help.reason}`)
   archiveCurrentConversation()
   if (newChatDraft) newChat()
 }
 
 /** @param {Record<string, any>} frame */
 function handleChatError(frame) {
+  if (isBusyRefusal(frame) && lastDispatchedItem !== null) {
+    handleRefusedSend(frame)
+    return
+  }
   if (stopping) {
     // A stop can race an in-flight error; the user asked to stop, so report a stop.
     logger.log('chat.error.after_stop', { message: frame.message }, 'info')
@@ -2860,7 +3024,7 @@ function queueIcon(symbol) {
 }
 
 function renderQueuedMessages() {
-  const renderKey = JSON.stringify([queuedMessages.map(item => item.id), busy, stopAvailable, stopping, connected])
+  const renderKey = JSON.stringify([queuedMessages.map(item => [item.id, item.planMode === true]), busy, stopAvailable, stopping, connected])
   if (renderKey === renderedQueueKey) return
   renderedQueueKey = renderKey
   els.messageQueue.replaceChildren()
@@ -2882,7 +3046,7 @@ function renderQueuedMessages() {
 
     const body = document.createElement('div')
     body.className = 'queued-message-body'
-    body.title = preview
+    body.title = item.planMode === true ? `Plan mode · ${preview}` : preview
     const grip = document.createElement('span')
     grip.className = 'queued-message-grip'
     grip.setAttribute('aria-hidden', 'true')
@@ -2897,7 +3061,14 @@ function renderQueuedMessages() {
     cancel.appendChild(queueIcon('icon-close'))
     cancel.addEventListener('click', () => restoreQueuedMessage(item.id))
 
-    body.append(grip, text, cancel)
+    body.append(grip)
+    if (item.planMode === true) {
+      const plan = document.createElement('span')
+      plan.className = 'queued-message-plan'
+      plan.textContent = 'Plan'
+      body.append(plan)
+    }
+    body.append(text, cancel)
     row.append(steer, body)
     els.messageQueue.appendChild(row)
   }
@@ -2925,6 +3096,7 @@ function restoreQueuedMessage(id) {
   const existing = els.input.value
   els.input.value = item.text && existing.trim() ? `${item.text}\n\n${existing}` : item.text || existing
   attachedImages = images
+  setPlanModeArmed(item.planMode === true)
   renderImageChips()
   renderQueuedMessages()
   resizeInput()
@@ -2955,6 +3127,7 @@ function dispatchMessage(item) {
     type: 'chat.send',
     text: prompt,
     autoCapture: settings.autoCapture !== false,
+    ...item.planMode === true ? { planMode: true } : {},
     ...images.length > 0 ? { images } : {},
   }
   void beginDebuggerRun().catch(() => {})
@@ -2965,10 +3138,12 @@ function dispatchMessage(item) {
   logger.log('chat.send', {
     textLength: prompt.length,
     autoCapture: settings.autoCapture !== false,
+    planMode: item.planMode === true,
     images: item.images.map(image => ({ name: image.name, size: image.size, mimeType: image.mimeType })),
     preview: truncate(item.text, 300),
   }, 'info')
-  beginUserTurn(item.text, item.images)
+  lastDispatchedItem = { text: item.text, images: item.images, planMode: item.planMode === true }
+  beginUserTurn(item.text, item.images, { planMode: item.planMode === true })
   setBusy(true)
   setStatus('busy', 'Sending…')
   return true
@@ -3027,6 +3202,7 @@ function sendMessage() {
   }
   const text = els.input.value.trim()
   const images = attachedImages
+  const planMode = planModeArmed
   if (text.length === 0 && images.length === 0) return
   if (newChatDraft) {
     toast('Wait for the running session to finish')
@@ -3050,19 +3226,25 @@ function sendMessage() {
       id: `queue-${Date.now().toString(36)}-${++queuedMessageSequence}`,
       text,
       images: attachedImages,
+      planMode,
     }
     queuedMessages.push(item)
     clearComposerDraft()
+    setPlanModeArmed(false)
     renderQueuedMessages()
     logger.log('chat.queue.add', {
       queueId: item.id,
       textLength: text.length,
+      planMode,
       images: item.images.map(image => ({ name: image.name, size: image.size, mimeType: image.mimeType })),
       queued: queuedMessages.length,
     }, 'info')
     return
   }
-  if (dispatchMessage({ id: '', text, images })) clearComposerDraft()
+  if (dispatchMessage({ id: '', text, images, planMode })) {
+    clearComposerDraft()
+    setPlanModeArmed(false)
+  }
 }
 
 /** Ask the companion to stop the running turn; the UI waits for chat.stopping/chat.stopped. */
@@ -3123,6 +3305,7 @@ function newChat() {
 
 function clearChat() {
   newChatDraft = false
+  setPlanModeArmed(false)
   els.app.classList.remove('new-chat-draft')
   clearTimeout(queueDispatchTimer)
   queueDispatchTimer = null
@@ -3137,6 +3320,7 @@ function clearChat() {
   turnNumber = 0
   currentTurn = null
   lastAgentTurn = null
+  planTerminalPhase = null
   currentStep = null
   lastStepDurations = []
   footerLiveEl = null
@@ -3540,6 +3724,11 @@ els.modelSearch.addEventListener('keydown', event => {
   }
 })
 els.mic.addEventListener('click', toggleDictation)
+els.planModeCancel.addEventListener('click', () => {
+  setPlanModeArmed(false)
+  els.input.focus({ preventScroll: true })
+  logger.log('ui.plan.cancel', {}, 'info')
+})
 els.input.addEventListener('paste', event => {
   const files = [...(event.clipboardData?.items ?? [])]
     .filter(item => item.kind === 'file')

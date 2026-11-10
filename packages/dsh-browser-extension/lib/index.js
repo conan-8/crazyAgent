@@ -19,6 +19,7 @@ import { ImageDedupe } from './image-dedupe.js'
 import { planImageOffload, planMidTurnOffload } from './image-budget.js'
 import { classifyPrompt, effortFor, escalateEffort, shouldEscalate } from './reasoning.js'
 import { createDownloadsFolder } from './downloads.js'
+import { createPlanRuntime } from './plan-runtime.js'
 import {
   ACTION_EXPECT_BATCH_CHECKS,
   ACTION_EXPECT_DIRECT_CHECKS,
@@ -152,7 +153,7 @@ class BridgeClient {
   #logBuffer = []
 
   /**
-   * @param {{url: string, token: string, timeoutMs: number, log: (message: string) => void, onDocsOutcome?: (command: Record<string, any>, callId: string | undefined, error: Error | undefined, result: Record<string, any> | undefined, sessionId: unknown) => void}} options
+   * @param {{url: string, token: string, timeoutMs: number, log: (message: string) => void, onDocsOutcome?: (command: Record<string, any>, callId: string | undefined, error: Error | undefined, result: Record<string, any> | undefined, sessionId: unknown) => void, onPlanMode?: (frame: Record<string, unknown>) => void}} options
    */
   constructor(options) {
     this.url = options.url
@@ -160,6 +161,7 @@ class BridgeClient {
     this.timeoutMs = options.timeoutMs
     this.log = options.log
     this.onDocsOutcome = options.onDocsOutcome
+    this.onPlanMode = options.onPlanMode
   }
 
   start() {
@@ -411,6 +413,14 @@ class BridgeClient {
       this.log('bridge: connected')
       this.logEvent('bridge.connected', { url: this.url }, 'info')
       this.#flushLogs()
+      return
+    }
+    if (message.type === 'plan.mode' && ws === this.#ws) {
+      try {
+        this.onPlanMode?.(message)
+      } catch (error) {
+        this.logEvent('plan.mode.error', { message: error instanceof Error ? error.message : String(error) }, 'warn')
+      }
       return
     }
     if (message.type === 'browser.result' && typeof message.id === 'string') {
@@ -4362,13 +4372,16 @@ export function apply(ctx, config = {}) {
     yield ctx.browserUse.register(BrowserUseProviderName('extension-current-window'))
 
     const docsFinalCheck = createDocsFinalCheck()
+    let planRuntime
     const bridge = new BridgeClient({
       url: bridgeUrl ?? DEFAULT_BRIDGE_URL,
       token: bridgeToken ?? '',
       timeoutMs,
       log,
       onDocsOutcome: docsFinalCheck.observeBridge,
+      onPlanMode: frame => planRuntime?.setMode(frame),
     })
+    planRuntime = createPlanRuntime({ ctx, bridge })
     // Repeat guard: fails an identical runaway call with a normal tool error
     // before it reaches the bridge, and resets whenever a new turn starts. There
     // is no per-turn call limit.
@@ -4406,8 +4419,9 @@ export function apply(ctx, config = {}) {
     // still drive the committed transcript.
     // The loop claims the user message before it resolves the request config,
     // so this is the earliest reliable signal for the current turn's prompt.
-    ctx.on('agent/inbox/claimed', ({ message, turn }) => {
+    ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
       try {
+        planRuntime.claim(agent, turn)
         if (Number.isSafeInteger(turn)) {
           const messageId = isRecord(message) && typeof message.id === 'string' ? message.id : undefined
           guard.setTurn(messageId ? `message:${messageId}` : `turn:${turn}`)
@@ -4546,9 +4560,14 @@ export function apply(ctx, config = {}) {
           }
           return
         }
+        if (type === 'tool/call') {
+          planRuntime.observeToolCall(session, isRecord(event.data) ? event.data : {})
+          return
+        }
         if (type === 'tool/result') {
           const data = isRecord(event.data) ? event.data : {}
           docsFinalCheck.observeToolResult(session?.id, data)
+          planRuntime.observeToolResult(session, data)
           const turn = Number.isSafeInteger(data.turn) ? data.turn : undefined
           if (turn !== undefined) {
             // Consecutive results without visible progress count toward
@@ -4566,7 +4585,10 @@ export function apply(ctx, config = {}) {
           imageDedupe.clear(session?.id)
           const turn = event.data?.turn
           if (maxTokenStepsBySession.get(String(session.id))?.turn === turn) maxTokenStepsBySession.delete(String(session.id))
-          if (Number.isSafeInteger(turn)) docsFinalCheck.endTurn(session?.id, turn, event.data)
+          if (Number.isSafeInteger(turn)) {
+            planRuntime.endTurn(session, turn, event.data)
+            docsFinalCheck.endTurn(session?.id, turn, event.data)
+          }
           scheduleImagePrune(session, 'turn')
         }
       } catch {
@@ -4604,6 +4626,7 @@ export function apply(ctx, config = {}) {
           }, 'info')
           return
         }
+        if (planRuntime.stopping({ agent, turn, signal })) return
         const state = docsFinalCheck.forTurn(sessionId, turn)
         if (state === undefined) return
         const details = {
@@ -4653,6 +4676,7 @@ export function apply(ctx, config = {}) {
     // Reasoning policy: classify the turn once and hold that effort for every
     // step of the turn. Only routes that declare reasoning efforts participate.
     ctx.on('agent/request', async ({ agent, turn }, next) => {
+      planRuntime.claim(agent, turn)
       const config = await next()
       try {
         // Session identity prevents separate chats from sharing turn-1 fingerprints.
@@ -4714,6 +4738,9 @@ export function apply(ctx, config = {}) {
       text: GUIDANCE,
       order: ctx.systemPrompt.getSectionOrder('TOOL_COMPUTER_USE'),
     })
-    yield () => bridge.close()
+    yield () => {
+      planRuntime.dispose()
+      bridge.close()
+    }
   }, 'browser-use-extension.runtime')
 }

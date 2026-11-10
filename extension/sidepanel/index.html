@@ -61,6 +61,7 @@
           <span id="activity-timer" class="activity-timer hidden" aria-hidden="true"></span>
           <span id="activity-latest" class="activity-latest">Waiting for a turn</span>
         </div>
+        <div id="plan-dock" class="plan-dock" hidden></div>
         <div id="activity-log" class="activity-log" role="log" aria-label="Activity timeline"></div>
         <div class="activity-empty" id="activity-empty">
           <h1 class="visually-hidden">See the page with crazyAgent</h1>
@@ -85,6 +86,11 @@
 
       <form id="composer" class="composer">
         <div id="message-queue" class="message-queue hidden" aria-label="Queued messages" aria-live="polite"></div>
+        <div id="plan-mode" class="plan-mode hidden" role="status">
+          <span class="plan-mode-badge">Plan</span>
+          <span class="plan-mode-copy">Next turn uses a live checklist</span>
+          <button id="plan-mode-cancel" class="plan-mode-cancel" type="button" title="Cancel plan mode" aria-label="Cancel plan mode">×</button>
+        </div>
         <div class="composer-field">
           <div id="image-chips" class="image-chips" aria-live="polite"></div>
           <div class="composer-input">

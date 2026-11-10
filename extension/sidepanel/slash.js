@@ -16,6 +16,7 @@
 export const SLASH_COMMANDS = Object.freeze([
   Object.freeze({ id: 'new', usage: '/new', description: 'Start a new chat' }),
   Object.freeze({ id: 'model', usage: '/model', description: 'Choose the model for your next turn' }),
+  Object.freeze({ id: 'plan', usage: '/plan', description: 'Plan the next turn with a live checklist' }),
 ])
 
 /** Longest command prefix that still counts as a slash draft (chars after `/`). */
