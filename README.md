@@ -61,6 +61,58 @@ Page content, screenshots, prompts, and explicit tool results can be sent to the
 > [!TIP]
 > crazyAgent is able to screenshot page elements and download files which can be sent to other chatbots for cross reference or better reliability. You can prompt it to consult another AI chatbot when a task is too difficult, or to prevent loss of focus on the greater task.
 
+## crazyAgent Remote app setup
+
+Use the optional Android app with an existing crazyAgent desktop installation. Basic chat, screenshots, help, and reconnects do **not** require Firebase; metadata-only push notifications are a separate optional setup.
+
+**Requirements:**
+
+- A working crazyAgent **v2.1.0-beta** installation on the host computer.
+- Chrome/Edge and the crazyAgent side panel open and connected for browser execution.
+- An Android **8.0/API 26+** phone.
+- Tailscale installed and signed into the same tailnet on the host and phone, with MagicDNS and HTTPS certificates enabled.
+- Optional: `adb` and USB debugging for agent-driven APK installation. Otherwise, install the APK directly on the phone.
+
+### Agent-driven Remote setup
+
+**Paste this prompt into a coding agent on the host computer after completing the desktop installation:**
+
+```text
+Set up crazyAgent Remote v2.1.0-beta on this computer and my Android phone. I already installed crazyAgent on this host.
+
+First verify the existing installation is v2.1.0-beta and http://127.0.0.1:17871/health responds successfully. Do not use sudo, replace my runtimes, kill existing processes, or run model-spending tests. If the installation is missing or unhealthy, stop and tell me.
+
+Verify that Tailscale is running, identify this host's Tailscale DNS name, and confirm MagicDNS and HTTPS certificates are enabled. Inspect any existing Tailscale Serve configuration without overwriting unrelated routes.
+
+Enable the scoped remote API on the existing crazyAgent companion with --remote and --remote-public-host <this-host>.<tailnet>.ts.net. Preserve my existing model/settings and use the existing startup/service method rather than starting a conflicting second companion. The remote listener must remain on 127.0.0.1:17873; never expose port 17871.
+
+Publish only the remote listener with tailscale serve --bg http://127.0.0.1:17873. Do not enable Funnel or public port forwarding. Verify that the Serve route is tailnet-only, unauthenticated /remote/v1/state returns 401, and /bridge through that route returns 404.
+
+Download the official APK from https://github.com/conan-8/crazyAgent/releases/download/v2.1.0-beta/app-release.apk into a new empty temporary directory and require SHA-256 f08eadce79b61adeaadb5aad20f6d50a0cfb23875808ccdf59115fbcb082b3ed before installing it. Do not use a different APK or build unless I explicitly ask for a source build.
+
+If adb is available and authorized, install that verified APK with adb install -r. If no usable adb device exists, give me short manual instructions to download and open the same APK on my Android phone. If Android rejects an update because the existing app has a different signature, stop and explain that uninstalling deletes the old pairing; do not uninstall or erase app data automatically.
+
+Do not print, read, copy, log, commit, or transmit the remote token yourself. Give me the exact npm run dev -- --pair-remote command to run in my own terminal, then tell me to paste the printed server URL and token directly into the crazyAgent Remote app. Finish with the server address, APK hash, health status, and the remaining manual pairing steps. Keep Edge and the side panel open, and do not send a test prompt until I confirm pairing is complete.
+```
+
+### Finish on the phone
+
+1. **Install the app:** if the agent did not install through `adb`, download the official [crazyAgent Remote APK](https://github.com/conan-8/crazyAgent/releases/download/v2.1.0-beta/app-release.apk) onto the phone and open it. Android may ask permission to install apps from the browser or file manager.
+2. **Verify the download:** on Linux, run:
+   ```sh
+   echo 'f08eadce79b61adeaadb5aad20f6d50a0cfb23875808ccdf59115fbcb082b3ed  app-release.apk' | sha256sum -c -
+   ```
+   On macOS, use `shasum -a 256 app-release.apk`; on Windows, use `Get-FileHash .\app-release.apk -Algorithm SHA256` in PowerShell. Compare the result with the hash above before installing.
+3. **Create the phone credential:** from the crazyAgent checkout on the host, run:
+   ```sh
+   npm run dev -- --pair-remote
+   ```
+   This prints the server URL and a 64-character remote token without starting another companion. Keep this credential private.
+4. **Pair:** enter the printed server URL and token in the app. The URL may include `/remote/v1`; the app normalizes it automatically. The token is encrypted on the phone with Android Keystore.
+5. **Test safely:** keep the host awake, Tailscale connected on both devices, and Edge plus the side panel open. Send a harmless prompt and confirm the response streams on both devices. Browser actions require the desktop executor; Tailscale alone is not enough.
+
+For token rotation, background behavior, push notifications, diagnostics, and troubleshooting, see `android/README.md` and `docs/REMOTE-ACCESS.md`. Never enable Tailscale Funnel for the companion or remote API.
+
 ## How it works
 
 ```text
