@@ -13,7 +13,7 @@
 - Distinguish observed changes, requested postconditions, and final outcomes instead of treating every tool result as success.
 - Keep receiving views while the browser is unfocused or minimised, with slash commands in the composer.
 
-There are **33 model-facing tools**: 25 general browser tools and 8 guarded Docs tools. The detailed reference is below.
+There are **34 standing model-facing tools**: 25 general browser tools, 8 guarded Docs tools, and `agent_request_help`, plus a conditional 35th `browser_plan` tool exposed only during explicitly planned turns. The detailed reference is below.
 
 ## Install with an agent
 
@@ -69,7 +69,7 @@ Reload the extension and reopen the panel after extension changes. Restart the c
 
 ## Capabilities
 
-There are **33 model-facing tools**: 25 general browser tools and 8 Docs tools.
+There are **34 standing model-facing tools**: 25 general browser tools, 8 Docs tools, and `agent_request_help` (the agent's structured "I am blocked and need you" signal). For long tasks, exact `/plan` arms the next turn only and exposes a conditional 35th tool, `browser_plan`. It maintains a complete, revisioned checklist with `pending`, `in_progress`, `completed`, and `blocked` states. Stale plans receive at most two reminders, and an attempted finish with open work receives at most two continuation nudges. Removing open work requires acknowledgement and a reason; `user_input_needed:true` allows an honest question without pretending the work is complete. Checklist completion is model-reported and is not independent browser verification. Long prompts never activate this automatically, and phone-originated turns cannot opt in.
 
 ### General browser tools
 
@@ -145,7 +145,7 @@ Not supported yet include drag batching and child-frame drags, native file picke
 
 ## Side-panel UI
 
-The panel is a single activity feed with streaming reasoning/text/tool events, per-step timing, collapsible finished steps, and a pinned final answer. The composer supports queued messages, Stop, model and reasoning settings, up to four pasted images, browser speech recognition when available, and slash commands: typing `/` opens an inline palette where `/new` starts a fresh chat (a stoppable running turn stays alive behind the draft view, while an operation that is still starting refuses with a wait message) and `/model` opens the model picker. ArrowUp/ArrowDown choose, Enter or Tab runs, and Escape dismisses; path-like text that merely starts with `/` is sent as ordinary prose. There is no browser-access Pause/Resume control; legacy saved paused state is cleared on startup. Closing the model picker (Escape, outside click, or choosing a model) returns focus to the composer, and a draft typed or attached while the `/new` view waits behind a running turn survives when that turn ends. After an extension install or reload, a one-time full-screen notice leads with an amber **Don't touch the browser** warning: while the agent runs, clicking, typing, scrolling, or switching tabs can throw off its clicks and targets and break the task. **Got it** or Escape dismisses it; it does not return on ordinary panel opens.
+The panel is a single activity feed with streaming reasoning/text/tool events, per-step timing, collapsible finished steps, and a pinned final answer. The composer supports queued messages, Stop, model and reasoning settings, up to four pasted images, browser speech recognition when available, and slash commands: typing `/` opens an inline palette where `/new` starts a fresh chat (a stoppable running turn stays alive behind the draft view, while an operation that is still starting refuses with a wait message), `/model` opens the model picker, and `/plan` toggles a one-shot checklist mode for the next accepted message. Sending or queueing consumes the armed state; queued, restored, and busy-requeued messages retain their own setting. Planned turns show progress, current work, and all checklist states in a sticky dock above the scrolling conversation. The checklist stays pinned while scrolling and after tool steps collapse, and its chevron collapses it to the summary header without losing later updates. Blocked and unfinished outcomes stay visible instead of being replaced by the following idle status. ArrowUp/ArrowDown choose, Enter or Tab runs, and Escape dismisses; only exact `/new`, `/model`, or `/plan` tokens execute, while path-like or trailing-space text is sent as ordinary prose. There is no browser-access Pause/Resume control; legacy saved paused state is cleared on startup. Closing the model picker (Escape, outside click, or choosing a model) returns focus to the composer, and a draft typed or attached while the `/new` view waits behind a running turn survives when that turn ends. After an extension install or reload, a one-time full-screen notice leads with an amber **Don't touch the browser** warning: while the agent runs, clicking, typing, scrolling, or switching tabs can throw off its clicks and targets and break the task. **Got it** or Escape dismisses it; it does not return on ordinary panel opens.
 
 The **Debug log** dialog exports local run evidence. See `docs/DEBUG-LOGS.md` before sharing a bundle.
 
@@ -163,6 +163,22 @@ npm run dev -- --base-url https://openrouter.ai/api/v1 \
 Output tokens default to the selected model’s advertised maximum; `--max-tokens` sets a lower explicit cap. API-key resolution order is `CRAZYAGENT_API_KEY`, the optional stored key, `OPENROUTER_API_KEY`, then the DSH credential store.
 
 File transfer is confined to one Downloads folder. The extension cannot change Chrome's download directory: set Chrome's download location to that folder (default `$HOME/Downloads`) and disable "Ask where to save", otherwise page-control downloads stall on Chrome's save dialog. Set `CRAZYAGENT_DOWNLOADS_DIR` to the same absolute path before `npm run dev` to select a different confined folder (for example an isolated test profile's folder); only regular files whose real paths remain inside it are accepted. Restart the companion after changing it.
+
+## Phone remote access
+
+The native Android app pairs with the scoped remote API over tailnet-only Tailscale Serve. It shares the desktop chat, streams activity, sends images, stops/starts turns, shows real context usage, renders Markdown, opens bounded read-only saved-chat history, and supports `/new`, `/model`, and `/plan` composer commands. `/model` opens model details on the phone; `/plan` arms only the next prompt. See `android/README.md` and `docs/REMOTE-ACCESS.md` for pairing and security details.
+
+`config/crazyagent.service` is the configured user-service example for this host. It starts the companion with `--remote`, restarts it on failure, and uses the saved model configuration. Install or update it with:
+
+```sh
+cp config/crazyagent.service ~/.config/systemd/user/crazyagent.service
+loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now crazyagent.service
+tailscale serve --bg http://127.0.0.1:17873
+```
+
+Linger lets the API start at boot before a desktop login. Tailscale must remain connected on the phone, and **Edge plus the crazyAgent side panel must be opened once after login/restart for browser execution**; the companion cannot open the panel itself. On this host AC suspend is disabled while battery suspend remains unchanged. Never publish the privileged bridge port `17871` or enable Funnel.
 
 Generated state is under ignored `.dsh-home/`. To remove it:
 
@@ -190,14 +206,14 @@ npm run system-prompt          # exact composed prompt; -- --json for counts
 npm run bench                  # local bridge benchmark
 ```
 
-Last recorded implementation verification: **767/767 tests**, prompt composition, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs. The drag fixture used real provider/executor calls to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. Independent checks inspected DOM order, values, parentage, drop receipts, and collateral application state; refused and intentional no-op cases preserved every semantic application value. Earlier expectation, click, capture, and file-transfer fixtures retained their evidence. These are direct executor checks, not real-model acceptance. **A real-sidebar/model drag workflow and expectation workflow, download→upload workflow, authenticated Docs export/toolbar expectations and Docs table acceptance, authenticated Pivot, real-model HTML-table selection, normal authenticated docked-panel Docs acceptance, and a real docked-panel turn that keeps receiving views after the user switches apps or minimizes the browser remain pending.** No connected Docs browser or isolated live-model acceptance profile is currently configured.
+Last recorded implementation verification: **920/920 tests**, prompt composition (**18,025 total / 17,031 guidance chars**), mock-bridge `ui-preview --scenario plan` with fixed-viewport sticky-position and expanded/collapsed-height assertions plus inspected sticky/collapsed screenshots, and fresh isolated `edge-expect-e2e.mjs`, `edge-click-e2e.mjs`, and `edge-drag-e2e.mjs` runs. The drag fixture used real provider/executor calls to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. Independent checks inspected DOM order, values, parentage, drop receipts, and collateral application state; refused and intentional no-op cases preserved every semantic application value. Earlier expectation, click, capture, and file-transfer fixtures retained their evidence. These are direct executor checks, not real-model acceptance. **A real-sidebar/model `/plan` workflow, drag workflow and expectation workflow, download→upload workflow, authenticated Docs export/toolbar expectations and Docs table acceptance, authenticated Pivot, real-model HTML-table selection, normal authenticated docked-panel Docs acceptance, and a real docked-panel turn that keeps receiving views after the user switches apps or minimizes the browser remain pending.** No connected Docs browser or isolated live-model acceptance profile is currently configured.
 
 Useful harnesses:
 
 - `scripts/edge-drag-e2e.mjs` — self-contained isolated provider/executor drag fixture with independent order/value/drop-receipt, clone, no-op, rerender, stale-view, and collateral-state checks.
 - `scripts/edge-files-e2e.mjs` — self-hosted file-transfer fixture with independent source/download and multipart-received byte checks; requires an isolated Edge/CDP profile with a temporary Downloads preference.
 - `scripts/edge-capture-e2e.mjs` — self-hosted isolated profile that verifies focused, unfocused, and minimized viewport captures at viewport × devicePixelRatio, with labelled-pixel checks, image-space clicks while unfocused/minimized, and unchanged window focus/state.
-- `scripts/ui-preview.mjs` — mocked-bridge side-panel screenshots and UI assertions (disclaimer, slash palette, pause-control absence and legacy-state migration, draft-view focus/attachments, disconnect cleanup) without a companion or model spend.
+- `scripts/ui-preview.mjs` — mocked-bridge side-panel screenshots and UI assertions (disclaimer, slash palette, `/plan` activation/checklist/queue/race/outcome flows, pause-control absence and legacy-state migration, draft-view focus/attachments, disconnect cleanup) without a companion or model spend.
 - `scripts/edge-expect-e2e.mjs` — isolated direct/batch expectation fixture with independent text, dialog, pixel, semantic, and mutation-state checks.
 - `scripts/edge-click-e2e.mjs`, `edge-work-e2e.mjs`, `edge-canvas-e2e.mjs`, `edge-advanced-e2e.mjs` — direct real-extension fixture checks.
 - `scripts/edge-find-e2e.mjs`, `edge-table-e2e.mjs`, `edge-dialog-e2e.mjs`, `edge-clipboard-e2e.mjs` — focused executor checks.
