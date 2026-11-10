@@ -21,8 +21,12 @@ import { fileURLToPath } from 'node:url'
 import { Bridge } from './bridge.mjs'
 import { DshRunner } from './dsh.mjs'
 import { LogStore } from './log-store.mjs'
-import { buildPromptBlocks, normalizeImageAttachments, promptStats } from './prompt.mjs'
-import { PROTOCOL_VERSION, errorMessage, isRecord } from './protocol.mjs'
+import { SessionController, uiRejectionFrame } from './session-controller.mjs'
+import { RemoteHub } from './remote-hub.mjs'
+import { DEFAULT_REMOTE_PORT, RemoteServer } from './remote-server.mjs'
+import { createRemoteTokenSource, resolveRemoteToken } from './remote-token.mjs'
+import { PushRegistry, PushService, createFcmProvider, pushTypeForTurn } from './remote-push.mjs'
+import { PROTOCOL_VERSION, errorMessage } from './protocol.mjs'
 import { clearKeyFile, resolveApiKey, writeKeyFile } from './credentials.mjs'
 import {
   DEFAULT_BASE_URL,
@@ -43,6 +47,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const VERSION = '2.0.0-beta'
 const PROVIDER = 'openrouter'
 
+const BOOLEAN_FLAGS = new Set(['no-dsh', 'no-auto-capture', 'new-token', 'help', 'remote', 'pair-remote', 'new-remote-token'])
+
 /** @param {string[]} argv */
 function parseArgs(argv) {
   /** @type {Record<string, string | boolean>} */
@@ -57,7 +63,7 @@ function parseArgs(argv) {
       out[raw.slice(0, eq)] = raw.slice(eq + 1)
       continue
     }
-    if (raw === 'no-dsh' || raw === 'no-auto-capture' || raw === 'new-token' || raw === 'help') {
+    if (BOOLEAN_FLAGS.has(raw)) {
       out[raw] = true
       continue
     }
@@ -91,6 +97,17 @@ if (cli.help === true) {
   --credentials <path>         fallback DSH credential file
   --no-dsh                      bridge-only test mode
   --no-auto-capture             do not attach a fresh DOM/text or screenshot view
+  --remote                      also serve the phone remote API on 127.0.0.1
+                                (opt-in; publish only via tailnet-only Tailscale Serve)
+  --remote-port <n>             remote API port (default ${DEFAULT_REMOTE_PORT})
+  --remote-public-host <host>   accepted Tailscale Serve authority, e.g.
+                                host.tailnet.ts.net
+  --fcm-credentials <path>      Firebase service-account key for phone push
+                                (default .dsh-home/browser-agent/fcm-service-account.json
+                                when present; without one, push is off)
+  --pair-remote                 print the remote token and pairing details, then exit
+  --new-remote-token            rotate the remote token (revokes paired phones; a
+                                running companion picks it up), then exit
   --help                        this text
 
 The OpenRouter API key is entered in the side panel, or supplied through
@@ -162,6 +179,48 @@ if (maxTokens !== undefined && (!Number.isFinite(maxTokens) || maxTokens <= 0)) 
 mkdirSync(workspace, { recursive: true })
 mkdirSync(browserDir, { recursive: true })
 
+const remoteEnabled = cli.remote === true
+const remotePort = Number(cli['remote-port'] ?? process.env.CRAZYAGENT_REMOTE_PORT ?? DEFAULT_REMOTE_PORT)
+const remotePublicHost = typeof cli['remote-public-host'] === 'string'
+  ? cli['remote-public-host']
+  : process.env.CRAZYAGENT_REMOTE_PUBLIC_HOST ?? undefined
+const remoteTokenFile = join(browserDir, 'remote-token')
+const defaultFcmCredentials = join(browserDir, 'fcm-service-account.json')
+const fcmCredentialsFile = typeof cli['fcm-credentials'] === 'string'
+  ? resolve(cli['fcm-credentials'])
+  : process.env.CRAZYAGENT_FCM_CREDENTIALS?.trim()
+    ? resolve(process.env.CRAZYAGENT_FCM_CREDENTIALS.trim())
+    : existsSync(defaultFcmCredentials) ? defaultFcmCredentials : undefined
+
+if (!Number.isInteger(remotePort) || remotePort < 0 || remotePort > 65535 || (remotePort === port && port !== 0)) {
+  log(`invalid remote port ${String(cli['remote-port'])}`)
+  process.exit(2)
+}
+
+// One-shot remote credential operations; they never start the companion.
+if (cli['pair-remote'] === true || cli['new-remote-token'] === true) {
+  const rotate = cli['new-remote-token'] === true
+  const { token: remoteToken, created, rotated } = resolveRemoteToken(remoteTokenFile, { rotate })
+  if (rotated) process.stderr.write('[crazyagent] remote token rotated; previously paired phones are revoked (a running companion picks this up within a few seconds)\n')
+  else if (created) process.stderr.write('[crazyagent] remote token created\n')
+  if (cli['pair-remote'] === true) {
+    const base = remotePublicHost ? `https://${remotePublicHost}/remote/v1` : `https://<your-host>.<tailnet>.ts.net/remote/v1`
+    process.stdout.write(`crazyAgent remote pairing
+
+  server URL:   ${base}
+  remote token: ${remoteToken}
+
+Paste both into the Android app. The token is a bearer credential for this
+browser agent: do not share, screenshot, or commit it. Rotate it with
+--new-remote-token. Start the companion with --remote and publish only
+127.0.0.1:${remotePort} through tailnet-only Tailscale Serve (never Funnel).
+`)
+  } else {
+    process.stderr.write('[crazyagent] run --pair-remote to show the new token\n')
+  }
+  process.exit(0)
+}
+
 /** @returns {string} */
 function resolveToken() {
   if (typeof cli.token === 'string' && cli.token.length > 0) return cli.token
@@ -232,10 +291,12 @@ if (!existsSync(patchFile)) {
 let dshStatus = noDsh ? { state: 'disabled' } : { state: 'starting' }
 /** @type {DshRunner | undefined} */
 let runner
-let running = false
-let stopRequested = false
-/** @type {{status: string, reason?: string} | undefined} */
-let docsTurnVerification
+/** @type {RemoteHub | undefined} */
+let remoteHub
+/** @type {RemoteServer | undefined} */
+let remoteServer
+/** @type {PushService | undefined} */
+let pushService
 
 /** @param {string} baseUrl @param {boolean} [force] */
 async function getModels(baseUrl, force = false) {
@@ -291,20 +352,38 @@ function sendCompanionHello(_ui) {
 
 /** @param {string} status @param {Record<string, unknown>} [extra] */
 function sendStatus(status, extra = {}) {
-  bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.status', status, ...extra })
+  publish({ v: PROTOCOL_VERSION, type: 'chat.status', status, ...extra })
 }
 
-/** @param {unknown[]} events */
-function collectUsage(events) {
-  const totals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0 }
-  for (const event of events) {
-    if (!isRecord(event) || event.type !== 'assistant/message') continue
-    const data = isRecord(event.data) ? event.data : {}
-    const usage = isRecord(data.usage) ? data.usage : undefined
-    if (!usage) continue
-    for (const key of Object.keys(totals)) totals[key] += Number(usage[key]) || 0
+/**
+ * Chat broadcaster for allowlisted lifecycle frames: the side panel receives
+ * exactly the frame it always did, and the remote hub a normalized copy.
+ * Browser commands never pass through here (they stay on bridge.sendToUi).
+ * @param {Record<string, any>} frame
+ */
+function publish(frame) {
+  bridge.sendToUi(frame)
+  remoteHub?.ingest(frame)
+}
+
+/** @param {{state: 'starting' | 'ready' | 'error' | 'disabled', message?: string}} next */
+function setDshStatus(next) {
+  dshStatus = next
+  remoteHub?.updateHealth()
+}
+
+function remoteHealth() {
+  return {
+    uiConnected: bridge.hasUi(),
+    toolsConnected: bridge.hasTools(),
+    dsh: dshStatus.state,
+    dshMessage: dshStatus.message ?? null,
+    provider: PROVIDER,
+    model: llmConfig?.model.id ?? null,
+    contextWindow: llmConfig?.model.contextWindow ?? null,
+    autoCapture,
+    pushConfigured: pushService?.configured === true,
   }
-  return totals
 }
 
 function makeRunner() {
@@ -333,7 +412,7 @@ function makeRunner() {
 async function warmRunner(resumeSessionId) {
   if (!llmConfig) throw new Error('No OpenRouter model is configured')
   if (!apiKey) throw new Error('No OpenRouter API key is configured')
-  dshStatus = { state: 'starting' }
+  setDshStatus({ state: 'starting' })
   logStore.record('dsh', 'startup', {
     provider: PROVIDER,
     model: llmConfig.model.id,
@@ -356,7 +435,7 @@ async function warmRunner(resumeSessionId) {
     runner = next
     if (!resumed) logStore.sessionStart(next.sessionId)
     else logStore.sessionStart(resumeSessionId)
-    dshStatus = { state: 'ready' }
+    setDshStatus({ state: 'ready' })
     logStore.meta.provider = PROVIDER
     logStore.meta.model = llmConfig.model.id
     logStore.meta.baseUrl = llmConfig.baseUrl
@@ -379,7 +458,7 @@ async function warmRunner(resumeSessionId) {
  * @param {{baseUrl: string, model: string, apiKey: string, remember: boolean, reasoningEffort?: string}} input
  */
 async function configureLlm(input) {
-  if (running) throw new Error('A turn is running. Wait for it to finish before changing the model or key.')
+  if (controller.running) throw new Error('A turn is running. Wait for it to finish before changing the model or key.')
   const baseUrl = normalizeBaseUrl(input.baseUrl)
   const modelId = input.model.trim()
   const newKey = input.apiKey.trim()
@@ -415,7 +494,7 @@ async function configureLlm(input) {
     }
   }
 
-  dshStatus = { state: 'starting' }
+  setDshStatus({ state: 'starting' })
   sendCompanionHello(bridge.ui)
   sendStatus('starting')
   logStore.record('companion', 'llm.configured', {
@@ -444,7 +523,7 @@ async function configureLlm(input) {
     })
   } catch (error) {
     const message = errorMessage(error)
-    dshStatus = { state: 'error', message }
+    setDshStatus({ state: 'error', message })
     logStore.error(`OpenRouter configuration failed: ${message}`, { code: 'LLM_CONFIGURE_FAILED' })
     sendCompanionHello(bridge.ui)
     sendStatus('error')
@@ -460,190 +539,38 @@ async function configureLlm(input) {
   }
 }
 
-/** @param {string} text @param {import('ws').WebSocket} ui @param {Record<string, unknown>} [message] */
-async function handleChat(text, ui, message) {
-  const prompt = text.trim()
-  if (prompt.length === 0) return
-  const images = normalizeImageAttachments(message?.images)
-  if (running) {
-    bridge.sendToUi({
-      v: PROTOCOL_VERSION,
-      type: 'chat.error',
-      message: stopRequested
-        ? 'A turn is still stopping. Wait a moment, then send your message again.'
-        : 'A turn is already running. Wait for it to finish.',
-      recoverable: true,
-    })
-    return
-  }
-  if (noDsh || runner === undefined) {
-    bridge.sendToUi({
-      v: PROTOCOL_VERSION,
-      type: 'chat.error',
-      message: 'OpenRouter is not ready. Open Settings, enter your API key, choose an image-capable model, and Save.',
-      recoverable: true,
-    })
-    return
-  }
-
-  running = true
-  docsTurnVerification = undefined
-  const turnId = `turn-${Date.now().toString(36)}-${randomBytes(2).toString('hex')}`
-  const turnStart = performance.now()
-  const wantAutoCapture = autoCapture && message?.autoCapture !== false
-  let autoCaptureMs = 0
-  let imageBytes = 0
-  let promptTextBytes = 0
-  let firstEventMs = null
-  const toolCalls = new Set()
-  const toolStarts = new Map()
-
-  bridge.setTurnId(turnId)
-  logStore.turnStart(turnId, prompt, {
-    autoCapture: wantAutoCapture,
-    provider: PROVIDER,
-    model: llmConfig?.model.id,
-    sessionId: runner.sessionId,
+/**
+ * Side-panel transport for chat.send. Rejections reply to the panel only; the
+ * accepted turn's lifecycle is published to the panel and remote clients.
+ * @param {string} text @param {import('ws').WebSocket} _ui @param {Record<string, unknown>} [message]
+ */
+async function handleChat(text, _ui, message) {
+  const result = controller.submit({
+    text,
+    images: message?.images,
+    autoCapture: message?.autoCapture,
+    planMode: message?.planMode === true,
+    origin: 'ui',
   })
-
-  try {
-    sendStatus(wantAutoCapture ? 'capturing' : 'thinking')
-    let view = null
-    if (wantAutoCapture) {
-      logStore.record('companion', 'autoCapture.start', { detail: 'normal' }, { turnId, severity: 'info' })
-      const captureStart = performance.now()
-      try {
-        view = await bridge.requestUi({ op: 'auto_view', args: {} }, 'auto', 5_000)
-      } catch (error) {
-        logStore.record('companion', 'autoCapture.error', { message: errorMessage(error) }, { turnId, severity: 'warn' })
-        log(`auto-capture: ${errorMessage(error)}`)
-      }
-      autoCaptureMs = performance.now() - captureStart
-      logStore.record('companion', 'autoCapture.end', {
-        ok: view !== null,
-        autoCaptureMs: Math.round(autoCaptureMs),
-        image: view?.image
-          ? { width: view.image.width, height: view.image.height, bytes: view.image.bytes, mimeType: view.image.mimeType }
-          : undefined,
-        tab: view?.tab,
-      }, { turnId, severity: 'info' })
-    }
-
-    // The user may press Stop while the auto-capture round trip is in flight.
-    // The runtime was never asked to run, so there is nothing to interrupt;
-    // finish the turn as a user abort instead of starting the model.
-    if (stopRequested) {
-      logStore.record('companion', 'turn.stop.duringCapture', {
-        turnId,
-        autoCaptureMs: Math.round(autoCaptureMs),
-      }, { turnId, severity: 'info' })
-      throw new Error('turn stopped by user before the model run')
-    }
-
-    const blocks = buildPromptBlocks(view, prompt, new Date(), images)
-    const stats = promptStats(blocks)
-    promptTextBytes = stats.textBytes
-    imageBytes = stats.imageBytes
-    logStore.record('companion', 'prompt.build', {
-      textBytes: promptTextBytes,
-      imageBytes,
-      images: stats.images,
-      text: blocks[0]?.text,
-    }, { turnId, severity: 'debug' })
-
-    sendStatus('thinking')
-    const result = await runner.run(blocks, notification => {
-      if (firstEventMs === null) firstEventMs = Math.round(performance.now() - turnStart)
-      logStore.recordDshNotification(notification, turnId)
-      forwardNotification(notification, turnId, toolCalls, toolStarts)
-    })
-
-    const usage = collectUsage(result.events)
-    const timings = {
-      totalMs: Math.round(performance.now() - turnStart),
-      autoCaptureMs: Math.round(autoCaptureMs),
-      firstEventMs,
-      toolCalls: toolCalls.size,
-      promptTextBytes,
-      imageBytes,
-      images: blocks.filter(block => block.type === 'image').length,
-    }
-    if (logStore.sessionId !== result.sessionId) logStore.sessionStart(result.sessionId)
-    const verification = docsTurnVerification
-    const unverified = verification?.status === 'unverified'
-    logStore.turnEnd(turnId, {
-      ok: !unverified,
-      finalText: result.finalResponse,
-      timings,
-      usage,
-      ...unverified ? { error: `Docs verification incomplete (${verification.reason ?? 'one-nudge-only'})` } : {},
-    })
-    bridge.sendToUi({
-      v: PROTOCOL_VERSION,
-      type: 'chat.done',
-      sessionId: result.sessionId,
-      text: result.finalResponse,
-      timings,
-      model: llmConfig?.model.id,
-      provider: PROVIDER,
-      docsVerification: verification?.status,
-      docsVerificationReason: verification?.reason,
-    })
-    sendStatus('idle')
-  } catch (error) {
-    const message = errorMessage(error)
-    const timings = {
-      totalMs: Math.round(performance.now() - turnStart),
-      autoCaptureMs: Math.round(autoCaptureMs),
-      firstEventMs,
-      toolCalls: toolCalls.size,
-      promptTextBytes,
-      imageBytes,
-    }
-    if (stopRequested) {
-      // A user stop tears the runtime down; the transport error is expected and
-      // must not surface as a tool failure to the model/user.
-      logStore.record('companion', 'turn.stop.done', {
-        turnId,
-        sessionId: runner?.resumeSessionId ?? runner?.sessionId,
-        elapsedMs: Math.round(performance.now() - turnStart),
-      }, { turnId, severity: 'info' })
-      // log-store.turnEnd() records the TURN_STOPPED signal for aborted turns.
-      logStore.turnEnd(turnId, { ok: false, aborted: true, reason: 'user', timings })
-      bridge.sendToUi({
-        v: PROTOCOL_VERSION,
-        type: 'chat.stopped',
-        turnId,
-        reason: 'user',
-        sessionId: runner?.sessionId ?? runner?.resumeSessionId,
-        message: 'Stopped by user.',
-      })
-      sendStatus('idle')
-    } else {
-      logStore.error(message, { turnId, code: 'TURN_ERROR' })
-      logStore.turnEnd(turnId, { ok: false, error: message, timings })
-      bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.error', message, recoverable: true })
-      sendStatus('error')
-    }
-  } finally {
-    running = false
-    stopRequested = false
-    docsTurnVerification = undefined
-    bridge.setTurnId(undefined)
+  if (result.ok) {
+    await result.done
+    return
   }
+  if (result.code === 'EMPTY_PROMPT') return
+  // The bridge reports a thrown error to the panel as chat.error.
+  if (result.code === 'INVALID_ATTACHMENT') throw new Error(result.message)
+  bridge.sendToUi(uiRejectionFrame(result))
 }
 
 /**
- * Stop the active turn. DSH has no turn-cancel RPC, so the runner interrupts
- * the runtime subprocess and the companion reports the abort via chat.stopped
- * when the in-flight run() rejects. The next turn resumes the same session.
+ * Side-panel transport for chat.stop. The shared controller owns the single
+ * stop path (runtime interrupt + resume).
  * @param {import('ws').WebSocket} _ui
  * @param {Record<string, unknown>} [_message]
  */
 async function handleStop(_ui, _message) {
-  const turnId = bridge.currentTurnId
-  if (!running) {
-    logStore.record('companion', 'turn.stop.idle', { turnId }, { turnId, severity: 'info' })
+  const result = controller.stop()
+  if (result.state === 'idle') {
     bridge.sendToUi({
       v: PROTOCOL_VERSION,
       type: 'chat.stopped',
@@ -652,177 +579,13 @@ async function handleStop(_ui, _message) {
     })
     return
   }
-  if (stopRequested) {
-    // The first chat.stop already sent chat.stopping and owns the teardown;
-    // duplicate presses (double click) must not interrupt twice.
-    logStore.record('companion', 'turn.stop.duplicate', { turnId }, { turnId, severity: 'debug' })
-    return
-  }
-  stopRequested = true
-  logStore.record('companion', 'turn.stop.request', {
-    turnId,
-    sessionId: runner?.sessionId,
-  }, { turnId, severity: 'info' })
-  bridge.sendToUi({
-    v: PROTOCOL_VERSION,
-    type: 'chat.stopping',
-    turnId,
-    message: 'Stopping…',
-  })
-  try {
-    const result = await runner?.interrupt()
-    logStore.record('companion', 'turn.stop.interrupted', {
-      turnId,
-      sessionId: result?.sessionId,
-      interrupted: result?.interrupted === true,
-    }, { turnId, severity: 'info' })
-  } catch (error) {
-    logStore.record('companion', 'turn.stop.error', {
-      turnId,
-      message: errorMessage(error),
-    }, { turnId, severity: 'warn' })
-    log(`stop: ${errorMessage(error)}`)
-  }
+  await result.done
 }
 
 /** @param {import('ws').WebSocket} _ui */
 async function handleNewChat(_ui) {
-  if (running) {
-    bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.error', message: 'A turn is already running.', recoverable: true })
-    return
-  }
-  if (runner === undefined || noDsh) {
-    bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.error', message: 'OpenRouter is not configured yet. Open Settings.', recoverable: true })
-    return
-  }
-  const sessionId = await runner.newSession()
-  logStore.sessionStart(sessionId)
-  bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.session', sessionId })
-  sendStatus('idle')
-}
-
-/**
- * @param {{ method: string, params: Record<string, unknown> }} notification
- * @param {string} turnId
- * @param {Set<string>} toolCalls
- * @param {Map<string, number>} toolStarts
- */
-function forwardNotification(notification, turnId, toolCalls, toolStarts) {
-  const { method, params } = notification
-  if (method === 'session.status') {
-    const status = params.status
-    if (status === 'running') sendStatus('thinking')
-    if (status === 'idle') sendStatus('idle')
-    return
-  }
-  if (method !== 'session.event') return
-  const rootSessionId = runner?.sessionId
-  if (typeof params.sessionId === 'string' && rootSessionId !== undefined && params.sessionId !== rootSessionId) return
-  const event = params.event
-  if (!isRecord(event)) return
-  const data = isRecord(event.data) ? event.data : {}
-
-  if (event.type === 'turn/end') {
-    if (data.docsVerification === 'verified' || data.docsVerification === 'unverified') {
-      docsTurnVerification = { status: data.docsVerification, reason: typeof data.docsVerificationReason === 'string' ? data.docsVerificationReason : undefined }
-    }
-    return
-  }
-  if (event.type === 'assistant/message') {
-    const reasoning = extractReasoningText(data)
-    if (reasoning.length > 0) {
-      bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.activity', kind: 'reasoning-committed', text: reasoning })
-    }
-    const text = extractAssistantText(data)
-    if (text.length > 0) {
-      logStore.assistant(turnId, text)
-      bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.assistant', text })
-    }
-    return
-  }
-  if (event.type === 'tool/call') {
-    const callId = typeof data.callId === 'string' ? data.callId : undefined
-    if (callId !== undefined) {
-      toolCalls.add(callId)
-      toolStarts.set(callId, performance.now())
-    }
-    let args = data.arguments
-    if (typeof args === 'string') {
-      try {
-        args = JSON.parse(args)
-      } catch {
-        // Keep raw.
-      }
-    }
-    logStore.toolCall(turnId, { callId, name: data.name, args })
-    bridge.sendToUi({
-      v: PROTOCOL_VERSION,
-      type: 'chat.tool_call',
-      callId,
-      name: data.name,
-      args: data.arguments,
-    })
-    sendStatus('tool', { tool: data.name })
-    return
-  }
-  if (event.type === 'tool/result') {
-    const message = isRecord(data.message) ? data.message : {}
-    const raw = Array.isArray(message.content) ? message.content : []
-    const legacy = raw.length === 1 && isRecord(raw[0]) && Array.isArray(raw[0].content)
-    const blocks = legacy ? raw[0].content : raw
-    const callId = isRecord(message.source) && typeof message.source.callId === 'string'
-      ? message.source.callId
-      : typeof message.toolCallId === 'string' ? message.toolCallId
-        : isRecord(raw[0]) && typeof raw[0].toolCallId === 'string' ? raw[0].toolCallId : undefined
-    const text = extractToolResultText(blocks)
-    const isError = message.isError === true || (isRecord(raw[0]) && raw[0].isError === true)
-    const started = callId ? toolStarts.get(callId) : undefined
-    const durationMs = started === undefined ? undefined : Math.round(performance.now() - started)
-    if (callId) toolStarts.delete(callId)
-    logStore.toolResult(turnId, { callId, ok: !isError, text, durationMs })
-    bridge.sendToUi({
-      v: PROTOCOL_VERSION,
-      type: 'chat.tool_result',
-      callId,
-      ok: !isError,
-      text,
-    })
-    sendStatus('thinking')
-  }
-}
-
-/** @param {Record<string, any>} data */
-function extractReasoningText(data) {
-  const message = isRecord(data.message) ? data.message : {}
-  const content = Array.isArray(message.content) ? message.content : []
-  const parts = []
-  for (const block of content) {
-    if (isRecord(block) && block.type === 'reasoning' && typeof block.text === 'string') parts.push(block.text)
-  }
-  return parts.join('')
-}
-
-/** @param {Record<string, any>} data */
-function extractAssistantText(data) {
-  const message = isRecord(data.message) ? data.message : {}
-  const content = Array.isArray(message.content) ? message.content : []
-  const parts = []
-  for (const block of content) {
-    if (isRecord(block) && block.type === 'text' && typeof block.text === 'string') parts.push(block.text)
-  }
-  return parts.join('')
-}
-
-/** @param {unknown[]} blocks */
-function extractToolResultText(blocks) {
-  if (!Array.isArray(blocks)) return ''
-  const parts = []
-  for (const block of blocks) {
-    if (!isRecord(block)) continue
-    if (block.type === 'text' && typeof block.text === 'string') parts.push(block.text)
-    else if (block.type === 'image') parts.push('[image]')
-  }
-  return parts.join('\n').slice(0, 4_000)
+  const result = await controller.newChat()
+  if (!result.ok) bridge.sendToUi(uiRejectionFrame(result))
 }
 
 /** @param {Record<string, any>} message */
@@ -920,7 +683,15 @@ const bridge = new Bridge({
   onStop: handleStop,
   onLog: entry => logStore.recordBridge(entry),
   onControl: handleControl,
+  onActivity: frame => {
+    controller.noteActivity(frame)
+    remoteHub?.ingest(frame)
+  },
+  onImage: ({ image, turnId, callId, source }) => {
+    remoteHub?.addScreenshot({ data: image.data, mimeType: image.mimeType, width: image.width, height: image.height, turnId, callId, source })
+  },
   onConnectionChange: () => {
+    remoteHub?.updateHealth()
     if (bridge.hasUi()) {
       sendCompanionHello(bridge.ui)
       sendStatus(dshStatus.state === 'ready' ? 'ready' : dshStatus.state === 'error' ? 'error' : 'starting')
@@ -928,7 +699,83 @@ const bridge = new Bridge({
   },
 })
 
+const controller = new SessionController({
+  bridge,
+  getRunner: () => runner,
+  isDisabled: () => noDsh,
+  logStore,
+  log,
+  autoCapture,
+  provider: PROVIDER,
+  getModelId: () => llmConfig?.model.id,
+  publish,
+})
+
+if (remoteEnabled) {
+  remoteHub = new RemoteHub({ serverVersion: VERSION, getHealth: remoteHealth, historyFile: join(browserDir, 'remote-history.json'), log })
+  controller.addObserver({
+    turnStarted: info => remoteHub?.turnStarted(info),
+    turnEnded: info => remoteHub?.turnEnded(info),
+  })
+  let pushProvider
+  try {
+    pushProvider = await createFcmProvider({ credentialsFile: fcmCredentialsFile })
+  } catch (error) {
+    log(`push: disabled, the FCM credentials could not be used (${errorMessage(error)})`)
+  }
+  pushService = new PushService({
+    registry: new PushRegistry({ file: join(browserDir, 'push-devices.json'), log }),
+    provider: pushProvider,
+    log,
+    audit: (event, data) => {
+      try {
+        logStore.record('remote', event, data, { severity: 'info', noSignal: true })
+      } catch {
+        // Logging must never break a turn.
+      }
+    },
+  })
+  // Registered after the hub's observer: the state a notification points at
+  // is already committed when the push goes out.
+  controller.addObserver({
+    turnEnded: info => {
+      const type = pushTypeForTurn(info)
+      if (type === null || remoteHub === undefined) return
+      void pushService?.notify({ type, turnId: info.turnId, instanceId: remoteHub.instanceId, sequence: remoteHub.seq })
+    },
+  })
+}
+
 await bridge.start()
+
+if (remoteHub !== undefined) {
+  // Ensure a credential exists without printing it.
+  resolveRemoteToken(remoteTokenFile)
+  remoteServer = new RemoteServer({
+    host,
+    port: remotePort,
+    getToken: createRemoteTokenSource(remoteTokenFile),
+    publicHost: remotePublicHost,
+    hub: remoteHub,
+    controller,
+    push: pushService,
+    log,
+    audit: (event, data) => {
+      try {
+        logStore.record('remote', event, data, { severity: event === 'request' ? 'debug' : 'info', noSignal: true })
+      } catch {
+        // Logging must never break the remote API.
+      }
+    },
+  })
+  try {
+    await remoteServer.start()
+    remoteHub.updateHealth()
+  } catch (error) {
+    log(`remote: failed to listen on ${host}:${remotePort}: ${errorMessage(error)}`)
+    remoteServer = undefined
+  }
+}
 
 process.stderr.write(`
 crazyAgent companion ${VERSION}
@@ -940,6 +787,8 @@ crazyAgent companion ${VERSION}
   effort:  ${llmConfig?.model?.reasoning ? effortPolicy() : 'n/a (model has no reasoning)'}
   api key: ${credentialsInfo().configured ? `configured (${apiKeySource})` : 'not configured — enter it in the side panel'}
   dsh:     ${noDsh ? 'disabled (--no-dsh)' : !llmConfig ? 'waiting for model selection' : !apiKey ? 'waiting for API key' : 'warming...'}
+  push:    ${pushService?.configured ? `FCM (${pushService.registry.size} device${pushService.registry.size === 1 ? '' : 's'})` : remoteEnabled ? 'off (no FCM service-account key)' : 'off'}
+  remote:  ${remoteServer ? `${remoteServer.address} (instance ${remoteHub?.instanceId}; token via --pair-remote)` : remoteEnabled ? 'failed to start' : 'off (enable with --remote)'}
   logs:    ${logStore.path}
   run:     ${runId}
 
@@ -966,17 +815,17 @@ if (!noDsh) {
     }
   }
   if (!llmConfig) {
-    dshStatus = { state: 'error', message: 'No OpenRouter model selected. Open Settings and choose one.' }
+    setDshStatus({ state: 'error', message: 'No OpenRouter model selected. Open Settings and choose one.' })
     log('dsh: no model selected; waiting for side-panel configuration')
   } else if (!apiKey) {
-    dshStatus = { state: 'error', message: 'No OpenRouter API key. Open Settings and enter one.' }
+    setDshStatus({ state: 'error', message: 'No OpenRouter API key. Open Settings and enter one.' })
     log('dsh: no OpenRouter API key; waiting for side-panel configuration')
   } else {
     try {
       await warmRunner(undefined)
       log('dsh: warm start complete')
     } catch (error) {
-      dshStatus = { state: 'error', message: errorMessage(error) }
+      setDshStatus({ state: 'error', message: errorMessage(error) })
       logStore.error(`dsh warm start failed: ${errorMessage(error)}`, { code: 'DSH_START_FAILED' })
       log(`dsh: warm start failed: ${errorMessage(error)}`)
       log('dsh: check the OpenRouter model, key, and generated patch')
@@ -994,6 +843,8 @@ if (!noDsh) {
 async function shutdown(signal) {
   log(`shutting down (${signal})`)
   logStore.record('companion', 'shutdown', { signal }, { severity: 'info' })
+  await remoteServer?.stop().catch(() => {})
+  remoteHub?.close()
   await bridge.stop().catch(() => {})
   await runner?.close().catch(() => {})
   await logStore.close().catch(() => {})

@@ -20,6 +20,7 @@ import { planImageOffload, planMidTurnOffload } from './image-budget.js'
 import { classifyPrompt, effortFor, escalateEffort, shouldEscalate } from './reasoning.js'
 import { createDownloadsFolder } from './downloads.js'
 import { createPlanRuntime } from './plan-runtime.js'
+import { AGENT_HELP_TOOL, createHelpRuntime } from './help.js'
 import {
   ACTION_EXPECT_BATCH_CHECKS,
   ACTION_EXPECT_DIRECT_CHECKS,
@@ -84,7 +85,7 @@ Operating rules (highest priority):
 - Exact Google Docs deletion/replacement is a direct tool task, not a reading task: with exact targets, make browser_docs_replace your FIRST tool call. Do not call browser_read_text or browser_screenshot first; unique-match/counter checks need no preliminary confirmation.
 - Verify only claims you will make. Before finishing, reconcile every item and explicit constraint with the latest evidence. DONE means the original target and every pass criterion are satisfied; PARTIAL means any part is missing, approximate, or violates a constraint; BLOCKED means the original target cannot be completed. Never label a substitute site, target, workflow, or relaxed requirement as DONE; name substitutions/violations. This reconciliation is a reporting check, not proof of success. Report anything unverified. End with 1-3 short bullets: done, verified, left/assumed; never dump raw page text.
 - Never close tabs (ctrl/cmd+W). Do not clear formatting, select-all/delete, erase content, or repeatedly Backspace as failure recovery. Inspect and fix the exact target. One scoped Ctrl+Z is allowed only for a known accidental immediately preceding mutation; verify with a fresh view/export and never chain blind undos. User-requested deletion/undo is allowed after target confirmation.
-- If login, CAPTCHA/2FA, payment, browser permission, or a file picker blocks progress, stop and ask; only use credentials the user provided. Never paste secrets or passwords into a page, and read the system clipboard only when the user asks.
+- If login, CAPTCHA/2FA, payment, browser permission, or a file picker blocks progress, call agent_request_help, then stop and ask; only use credentials the user provided. Never paste secrets or passwords into a page, and read the system clipboard only when the user asks.
 - There is no per-turn call limit: finish in one turn without asking to continue. Never repeat no-ops or an identical failure without new page evidence; after two failures, change approach or report the blocker.
 
 Views and actions:
@@ -208,11 +209,13 @@ class BridgeClient {
    * @param {Record<string, unknown>} activity
    */
   activity(activity) {
-    if (this.#closed || !this.#ready || this.#ws === null || this.#ws.readyState !== WebSocket.OPEN) return
+    if (this.#closed || !this.#ready || this.#ws === null || this.#ws.readyState !== WebSocket.OPEN) return false
     try {
       this.#ws.send(JSON.stringify({ v: 1, type: 'activity', activity }))
+      return true
     } catch {
-      // Activity is best-effort.
+      // Activity is best-effort; callers that depend on it check the result.
+      return false
     }
   }
 
@@ -2713,7 +2716,7 @@ function placesContent(result) {
  * @param {ImageDedupe} [imageDedupe]
  * @param {ReturnType<typeof createDownloadsFolder>} downloadsFolder
  */
-function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), downloadsFolder) {
+function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), downloadsFolder, helpRuntime) {
   const names = []
   /**
    * Wrap one tool definition: the guard runs before the tool body and throws a
@@ -4238,6 +4241,15 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
     },
   }))
 
+  if (helpRuntime !== undefined) {
+    ctx.tools.register(define({
+      ...AGENT_HELP_TOOL,
+      async call(args, exec) {
+        return helpRuntime.request(args, exec)
+      },
+    }))
+  }
+
   ctx.tools.register(define({
     name: 'browser_batch',
     rawName: 'browser_batch',
@@ -4411,7 +4423,8 @@ export function apply(ctx, config = {}) {
       downloadsFolder = createDownloadsFolder(undefined)
     }
     bridge.start()
-    const toolNames = registerTools(ctx, bridge, guard, imageDedupe, downloadsFolder)
+    const helpRuntime = createHelpRuntime({ bridge })
+    const toolNames = registerTools(ctx, bridge, guard, imageDedupe, downloadsFolder, helpRuntime)
     /** @type {Map<number, number>} consecutive no-progress tool results per turn */
     const noProgressByTurn = new Map()
     // Transient live model activity: reasoning/thinking deltas, visible text,

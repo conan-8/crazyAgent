@@ -185,7 +185,7 @@ test('empty, whitespace, or invalid downloadsDir never blocks provider registrat
   for (const downloadsDir of ['', '   ']) {
     const fake = context()
     apply(fake.ctx, { bridgeUrl: fakeBridge.url, bridgeToken: 'test', requestTimeoutMs: 500, downloadsDir })
-    assert.equal(fake.tools.size, 33, `downloadsDir ${JSON.stringify(downloadsDir)} must not remove tools`)
+    assert.equal(fake.tools.size, 34, `downloadsDir ${JSON.stringify(downloadsDir)} must not remove tools`)
     fake.dispose()
   }
   // A syntactically invalid value falls back to the default with a warned
@@ -193,7 +193,7 @@ test('empty, whitespace, or invalid downloadsDir never blocks provider registrat
   const rejectedFake = context()
   apply(rejectedFake.ctx, { bridgeUrl: fakeBridge.url, bridgeToken: 'test', requestTimeoutMs: 500, downloadsDir: 'relative/Downloads' })
   t.after(() => rejectedFake.dispose())
-  assert.equal(rejectedFake.tools.size, 33)
+  assert.equal(rejectedFake.tools.size, 34)
   await waitFor(() => fakeBridge.logEvents.some(event => event.type === 'downloads.config.rejected'))
   const rejected = fakeBridge.logEvents.find(event => event.type === 'downloads.config.rejected')
   assert.equal(rejected.data.configured, 'relative/Downloads')
@@ -203,7 +203,7 @@ test('empty, whitespace, or invalid downloadsDir never blocks provider registrat
   const missingFake = context()
   apply(missingFake.ctx, { bridgeUrl: fakeBridge.url, bridgeToken: 'test', requestTimeoutMs: 500, downloadsDir: join(parent, 'missing-downloads') })
   t.after(() => missingFake.dispose())
-  assert.equal(missingFake.tools.size, 33)
+  assert.equal(missingFake.tools.size, 34)
   await assert.rejects(
     missingFake.tools.get('browser_downloads').execute({}, exec),
     error => error.code === 'DOWNLOADS_FOLDER_UNAVAILABLE',

@@ -53,6 +53,8 @@ export class Bridge {
    *   onConnectionChange?: () => void,
    *   onLog?: (entry: {direction: 'in'|'out'|'event', role?: string, frame: Record<string, any>}) => void,
    *   onControl?: (message: Record<string, any>, ui: import('ws').WebSocket) => void | Promise<void>,
+   *   onActivity?: (frame: Record<string, any>) => void,
+   *   onImage?: (info: {image: Record<string, any>, turnId?: string, callId?: string, source: 'auto' | 'tool'}) => void,
    *   uiGraceMs?: number,
    * }} options
    */
@@ -67,6 +69,10 @@ export class Bridge {
     this.onConnectionChange = options.onConnectionChange
     this.onLog = options.onLog
     this.onControl = options.onControl
+    /** Observer for provider chat.activity frames (remote hub copy; never browser commands). */
+    this.onActivity = options.onActivity
+    /** Observer for images the side panel captured (remote hub mirror; read-only copy). */
+    this.onImage = options.onImage
     /** Reconnect grace window before browser commands fail with SIDE_PANEL_CLOSED. */
     this.uiGraceMs = resolveUiGraceMs(options.uiGraceMs)
     /** @type {import('ws').WebSocket | undefined} */
@@ -75,6 +81,7 @@ export class Bridge {
     this.tools = undefined
     this.port = options.port
     this.currentTurnId = undefined
+    this.currentPlanMode = false
     /** @type {Map<string, {ws: import('ws').WebSocket, turnId?: string, callId?: string, command?: Record<string, unknown>}>} */
     this.upstream = new Map()
     /** @type {Map<string, {resolve: (v: any) => void, reject: (e: Error) => void, timer: NodeJS.Timeout, turnId?: string, callId?: string, command?: Record<string, unknown>}>} */
@@ -183,9 +190,20 @@ export class Bridge {
     })
   }
 
-  /** @param {string | undefined} turnId */
-  setTurnId(turnId) {
+  /** @param {string | undefined} turnId @param {{planMode?: boolean}} [options] */
+  setTurnId(turnId, options = {}) {
     this.currentTurnId = turnId
+    this.currentPlanMode = turnId !== undefined && options.planMode === true
+    this.#syncPlanMode()
+  }
+
+  #syncPlanMode() {
+    this.sendToTools({
+      v: PROTOCOL_VERSION,
+      type: 'plan.mode',
+      turnId: this.currentTurnId ?? null,
+      enabled: this.currentPlanMode,
+    })
   }
 
   /** @param {Record<string, unknown>} frame */
@@ -211,9 +229,12 @@ export class Bridge {
    * @param {{op: string, args?: Record<string, unknown>}} command
    * @param {string} callId
    * @param {number} [timeoutMs]
+   * @param {{source?: string, wait?: boolean}} [options] `source` labels an image
+   *   result for the image observer; `wait: false` fails at once without a panel
    * @returns {Promise<Record<string, any>>}
    */
-  async requestUi(command, callId, timeoutMs = UI_COMMAND_TIMEOUT_MS) {
+  async requestUi(command, callId, timeoutMs = UI_COMMAND_TIMEOUT_MS, options = {}) {
+    if (!this.hasUi() && options.wait === false) throw sidePanelClosedError(REQUEST_UI_CLOSED_MESSAGE)
     if (!this.hasUi()) {
       const { connected, error } = await this.#awaitUiGrace(command)
       if (!connected) {
@@ -235,7 +256,7 @@ export class Bridge {
         reject(new Error(`side panel did not answer ${command.op} within ${timeoutMs}ms`))
       }, timeoutMs)
       timer.unref?.()
-      this.uiRequests.set(id, { resolve, reject, timer, turnId, callId, command })
+      this.uiRequests.set(id, { resolve, reject, timer, turnId, callId, command, source: options.source })
       const sent = this.sendToUi({
         v: PROTOCOL_VERSION,
         type: 'browser.command',
@@ -285,6 +306,7 @@ export class Bridge {
       else this.#claimTools(ws, origin)
       this.#emit({ direction: 'in', role, frame: { ...message, token: '[redacted]' } })
       this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'hello.ok', version: PROTOCOL_VERSION })
+      if (role === 'tools') this.#syncPlanMode()
       ws.on('message', data2 => this.#onMessage(ws, role, data2))
       this.onConnectionChange?.()
     }
@@ -447,7 +469,13 @@ export class Bridge {
     if (message.type === 'activity' && isRecord(message.activity)) {
       const activity = { ...message.activity, turnId: this.currentTurnId }
       this.#emit({ direction: 'in', role: 'tools', frame: { ...message, activity } })
-      this.sendToUi({ v: PROTOCOL_VERSION, type: 'chat.activity', ...activity })
+      const frame = { v: PROTOCOL_VERSION, type: 'chat.activity', ...activity }
+      this.sendToUi(frame)
+      try {
+        this.onActivity?.(frame)
+      } catch {
+        // An observer must never break provider activity forwarding.
+      }
       return
     }
 
@@ -536,6 +564,19 @@ export class Bridge {
         : {}),
     }
     this.#emit({ direction: 'in', role: 'ui', frame: annotated })
+    const image = message.ok === true && isRecord(message.result) ? message.result.image : undefined
+    if (this.onImage !== undefined && isRecord(image) && typeof image.data === 'string') {
+      try {
+        this.onImage({
+          image,
+          turnId: annotated.turnId,
+          callId: annotated.callId,
+          source: request !== undefined ? (request.source ?? 'auto') : 'tool',
+        })
+      } catch {
+        // An observer must never break result delivery.
+      }
+    }
     if (request !== undefined) {
       this.uiRequests.delete(id)
       clearTimeout(request.timer)

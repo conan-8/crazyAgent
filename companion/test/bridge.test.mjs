@@ -455,3 +455,77 @@ test('survives a failing onStop handler and keeps the bridge alive', async t => 
   const pong = await ui.messages.next(message => message.type === 'pong')
   assert.equal(pong.type, 'pong')
 })
+
+test('plan mode follows the current turn and synchronizes on provider connect', async t => {
+  const { bridge, url } = await setup(t)
+  bridge.setTurnId('turn-planned', { planMode: true })
+  const tools = await connect(url, 'tools')
+  t.after(() => tools.ws.close())
+  const initial = await tools.messages.next(message => message.type === 'plan.mode')
+  assert.deepEqual(initial, { v: 1, type: 'plan.mode', turnId: 'turn-planned', enabled: true })
+
+  bridge.setTurnId('turn-ordinary', { planMode: false })
+  const ordinary = await tools.messages.next(message => message.type === 'plan.mode')
+  assert.deepEqual(ordinary, { v: 1, type: 'plan.mode', turnId: 'turn-ordinary', enabled: false })
+
+  bridge.setTurnId('turn-resumed', { planMode: true })
+  await tools.messages.next(message => message.type === 'plan.mode' && message.turnId === 'turn-resumed')
+  tools.ws.close()
+  await sleep(50)
+  const resumed = await connect(url, 'tools')
+  t.after(() => resumed.ws.close())
+  const replayed = await resumed.messages.next(message => message.type === 'plan.mode')
+  assert.deepEqual(replayed, { v: 1, type: 'plan.mode', turnId: 'turn-resumed', enabled: true })
+
+  bridge.setTurnId(undefined)
+  const cleared = await resumed.messages.next(message => message.type === 'plan.mode')
+  assert.deepEqual(cleared, { v: 1, type: 'plan.mode', turnId: null, enabled: false })
+})
+
+test('captured images are reported to the image observer for both auto views and tool results', async t => {
+  const images = []
+  const { bridge, url } = await setup(t, { onImage: info => images.push(info) })
+  const ui = await connect(url, 'ui')
+  const tools = await connect(url, 'tools')
+  t.after(() => { ui.ws.close(); tools.ws.close() })
+  bridge.setTurnId('turn-9')
+
+  const pending = bridge.requestUi({ op: 'auto_view', args: {} }, 'auto', 1_000)
+  const auto = await ui.messages.next(message => message.type === 'browser.command')
+  ui.ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: auto.id, ok: true, result: { image: { data: 'AAAA', mimeType: 'image/jpeg', width: 4, height: 2 } } }))
+  await pending
+
+  tools.ws.send(JSON.stringify({ v: 1, type: 'browser.command', id: 'cmd-img', callId: 'call-img', command: { op: 'snapshot', args: {} } }))
+  await ui.messages.next(message => message.type === 'browser.command')
+  ui.ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: 'cmd-img', ok: true, result: { image: { data: 'BBBB', mimeType: 'image/png' } } }))
+  const result = await tools.messages.next(message => message.type === 'browser.result')
+  // The provider still receives the untouched image.
+  assert.equal(result.result.image.data, 'BBBB')
+
+  // No image, and a failed result, are not reported.
+  tools.ws.send(JSON.stringify({ v: 1, type: 'browser.command', id: 'cmd-text', callId: 'call-text', command: { op: 'scroll', args: {} } }))
+  await ui.messages.next(message => message.type === 'browser.command')
+  ui.ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: 'cmd-text', ok: true, result: { text: 'page' } }))
+  await tools.messages.next(message => message.type === 'browser.result' && message.id === 'cmd-text')
+
+  assert.deepEqual(images.map(info => [info.source, info.callId, info.turnId, info.image.data]), [
+    ['auto', 'auto', 'turn-9', 'AAAA'],
+    ['tool', 'call-img', 'turn-9', 'BBBB'],
+  ])
+})
+
+test('a companion capture carries its own image source and can refuse to wait for a missing panel', async t => {
+  const images = []
+  const { bridge, url } = await setup(t, { onImage: info => images.push(info) })
+  const started = Date.now()
+  await assert.rejects(bridge.requestUi({ op: 'snapshot', args: {} }, 'auto', 1_000, { source: 'manual', wait: false }), /side panel/iu)
+  assert.ok(Date.now() - started < 500, 'wait:false must not sit through the reconnect grace period')
+
+  const ui = await connect(url, 'ui')
+  t.after(() => ui.ws.close())
+  const pending = bridge.requestUi({ op: 'snapshot', args: { detail: 'normal' } }, 'auto', 1_000, { source: 'manual', wait: false })
+  const command = await ui.messages.next(message => message.type === 'browser.command')
+  ui.ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: command.id, ok: true, result: { image: { data: 'CCCC', mimeType: 'image/jpeg' } } }))
+  await pending
+  assert.deepEqual(images.map(info => [info.source, info.image.data]), [['manual', 'CCCC']])
+})

@@ -11,6 +11,13 @@ const MAX_PROMPT_IMAGE_BYTES = 5_000_000
 const MAX_PROMPT_TOTAL_IMAGE_BYTES = 12_000_000
 const PROMPT_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 
+export const PLAN_MODE_GUIDANCE = `<plan_mode>
+This turn was explicitly armed by the user's exact /plan command. Use browser_plan for this multi-step task; it is available only for this turn.
+Before browser work, create a concise 2-7 item checklist with expected_revision:0 and exactly one in_progress item. Include an independent final-state verification item. Do not substitute narration or a prose to-do list for the tool, and do not stop after planning: execute the plan.
+After real work, replace the COMPLETE list with the latest returned revision. Keep one item in_progress while pending work remains. Report completed only after the item's own evidence supports it; completion is still a model report, not independent verification. Preserve open items unless acknowledge_open_removal:true and a specific reason honestly record a scope change.
+If genuinely blocked after real attempts, mark the affected item blocked with the reason. If user input is needed, call browser_plan with the unchanged complete list and user_input_needed:true, then ask the user. Finish only when every item is completed or blocked, or report remaining work honestly after the bounded harness nudges.
+</plan_mode>`
+
 export function normalizeImageAttachments(value) {
   if (value === undefined) return []
   if (!Array.isArray(value)) throw new Error('images must be an array')
@@ -91,14 +98,16 @@ function formatTimeContext(now) {
  * @param {string} text
  * @param {Date} now
  * @param {Array<{mimeType: string, data: string}>} images
+ * @param {{planMode?: boolean}} [options]
  * @returns {Array<Record<string, unknown>>}
  */
-export function buildPromptBlocks(view, text, now = new Date(), images = []) {
+export function buildPromptBlocks(view, text, now = new Date(), images = [], options = {}) {
   const header = view?.image?.data === undefined
     ? `${formatViewText(view)}\n(No screenshot is attached for this turn. Use browser_screenshot if you need to see the page.)`
     : formatViewText(view)
+  const planGuidance = options.planMode === true ? `\n\n${PLAN_MODE_GUIDANCE}` : ''
   /** @type {Array<Record<string, unknown>>} */
-  const blocks = [{ type: 'text', text: `${header}\n\n${formatTimeContext(now)}\n\n${text}` }]
+  const blocks = [{ type: 'text', text: `${header}\n\n${formatTimeContext(now)}${planGuidance}\n\n${text}` }]
   for (const image of images) blocks.push({ type: 'image', data: image.data, mimeType: image.mimeType })
   if (typeof view?.image?.data === 'string' && view.image.data.length > 0 && typeof view.image.mimeType === 'string') {
     blocks.push({ type: 'image', data: view.image.data, mimeType: view.image.mimeType })
