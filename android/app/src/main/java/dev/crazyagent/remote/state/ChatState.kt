@@ -72,6 +72,8 @@ data class Health(
     val contextTokens: Long? = null,
     /** Whether the computer can send pushes at all (it has an FCM key). */
     val pushConfigured: Boolean? = null,
+    /** Where browser commands run: `panel`, `background`, or null when nothing is connected. */
+    val executorHost: String? = null,
 )
 
 /** Metadata for the newest view the agent captured; the bytes are fetched by [id]. */

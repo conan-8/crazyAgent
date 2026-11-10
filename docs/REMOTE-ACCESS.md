@@ -71,7 +71,7 @@ Active tab  ↔  side panel (browser executor, chrome.debugger)
 
 Three consequences matter for remote access:
 
-1. **The side panel is the executor.** It owns `chrome.debugger`, tabs, capture, downloads. If it is closed, browser tools fail. At the initial audit for this document, `/health` reported `ui:false`; recheck the live value rather than treating that snapshot as current. Any remote design must keep the panel open and connected (or move the executor into an extension offscreen document in a separate later project — see §12).
+1. **The extension owns browser execution.** An open side panel is the preferred executor and owns `chrome.debugger`, tabs, capture, and downloads. When no panel is open, the extension's background service worker runs the same executor; when neither is connected, browser tools fail. See §12 for lifecycle and system-clipboard limits.
 2. **The bridge has exactly two singleton roles: `ui` and `tools`.** `ui` is the side panel; `tools` is the DSH browser-use provider. Both are single-slot: a newer client replaces the old one (`companion/bridge.mjs` `#claimUi` / `#claimTools`). The panel auto-reconnects every 2.5 s on anything except an auth failure, so a phone client that connected as `ui` would fight the panel and tear down the executor mid-turn. The selected design therefore uses a **separate remote HTTP/WSS API and RemoteHub**, not a second `ui` or a third privileged role on this bridge.
 3. **The companion is loopback-only and token-authenticated with no TLS.** Good default. Remote access keeps both Node listeners on loopback and puts tailnet-only Tailscale Serve in front of the separate remote API only — never a raw public port or the privileged bridge.
 
@@ -528,10 +528,10 @@ If you do not want Tailscale on the phone (work phone, borrowed device):
 
 ## 12. Keep-it-alive checklist (the part that actually breaks)
 
-Remote control only works if all four stay alive: **machine awake → Edge running → side panel open/connected → companion running.**
+Remote control only works if all three stay alive: **machine awake → Edge running → companion running.** The side panel no longer has to be open: with none open, the extension's service worker is the executor (`extension/background-executor.js`).
 
 1. **Companion: run it as a user service, not as a child of a terminal/app.** Today it is spawned under Kimi Code (`scripts/dev.mjs … >> logs/companion.log`); if that app closes, the companion dies. Suggested `~/.config/systemd/user/crazyagent.service` with `Restart=always` and `loginctl enable-linger conan` so it survives logout/reboot. Add this only after the remote configuration is stable, and never restart the service during a live task.
-2. **Edge + side panel:** keep Edge running with the crazyAgent panel open. The panel is the executor; if it disconnects, browser tools error with `SIDE_PANEL_CLOSED` after an 8 s grace window. The panel reconnects automatically (2.5 s), but after a browser restart it must be reopened; RustDesk (A) is the recovery. Do not combine the APK work with an offscreen-executor migration.
+2. **Edge:** keep Edge running. An open panel is the preferred executor; otherwise the service worker connects on browser start, stays alive with a 20 s ping, and returns within about 30 s through an alarm if Chrome stops it. If neither is connected, browser tools error with `SIDE_PANEL_CLOSED` after the grace window. The worker works in the last-focused normal window, and system-clipboard operations (including Docs rich and table paste) need an open panel.
 3. **Do not suspend:** on AC this machine already uses `sleep-inactive-ac-type='nothing'` **[verified]**. Check the battery policy and, for a laptop, lid-close behavior; closing the lid may suspend everything until reopened.
 4. **Screen lock:** the agent can keep receiving page-level views while locked; remote desktop may not. The native remote API works while locked as long as the companion/executor remain alive **[needs test]**.
 5. **Phone health:** `/health` remains loopback-only. The proposed authenticated `/remote/v1/state` includes UI/tools/model status. Surface `uiConnected:false` prominently; a healthy companion does not imply browser actions can run.
@@ -827,7 +827,6 @@ Repeat important prompt/help/reconnect scenarios at least three times from ident
 - multiple concurrent turns, multiple DSH runners, live switching between DSH sessions, or remote model/API-key administration;
 - remote arbitrary browser commands, remote debug-log export, and arbitrary filesystem access;
 - continuous screen streaming or a custom remote mouse/keyboard implementation (use RustDesk);
-- offscreen/background executor migration and removal of the open-side-panel requirement;
 - rich reasoning viewers and QR pairing;
 - UnifiedPush, Telegram, ntfy, Cloudflare Access, iOS, and Play Store distribution;
 - changing existing Docs/browser safety guards or acceptance priorities to accommodate remote access.
