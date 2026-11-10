@@ -1,0 +1,22 @@
+[Unit]
+Description=crazyAgent companion and tailnet-only phone API
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Documents/GitHub/crazyAgent
+Environment=CRAZYAGENT_MODEL=deepseek/deepseek-v4.1-flash
+Environment=CRAZYAGENT_REMOTE_PUBLIC_HOST=conan-expertbook.tail11f47e.ts.net
+ExecStart=%h/.hermes/node/bin/node %h/Documents/GitHub/crazyAgent/companion/index.mjs --remote
+Restart=always
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=30
+StandardOutput=append:%h/Documents/GitHub/crazyAgent/logs/companion.log
+StandardError=append:%h/Documents/GitHub/crazyAgent/logs/companion.log
+
+[Install]
+WantedBy=default.target
