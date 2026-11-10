@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildPromptBlocks, formatViewText, normalizeImageAttachments, promptStats } from '../prompt.mjs'
+import { PLAN_MODE_GUIDANCE, buildPromptBlocks, formatViewText, normalizeImageAttachments, promptStats } from '../prompt.mjs'
 
 function view(overrides = {}) {
   return {
@@ -33,6 +33,23 @@ test('buildPromptBlocks puts metadata and user text before one image', () => {
   assert.equal(blocks[1].type, 'image')
   assert.equal(blocks[1].data, 'AAAA')
   assert.equal(blocks[1].mimeType, 'image/jpeg')
+})
+
+test('plan mode adds checklist instructions only when explicitly enabled', () => {
+  const now = new Date('2026-11-09T12:00:00.000Z')
+  const ordinary = buildPromptBlocks(view(), 'Complete the long task', now)[0].text
+  const plannedBlocks = buildPromptBlocks(view(), 'Complete the long task', now, [], { planMode: true })
+  const planned = plannedBlocks[0].text
+  assert.doesNotMatch(ordinary, /<plan_mode>|browser_plan/)
+  assert.ok(planned.includes(PLAN_MODE_GUIDANCE))
+  assert.match(planned, /explicitly armed by the user's exact \/plan command/)
+  assert.match(planned, /expected_revision:0/)
+  assert.match(planned, /independent final-state verification/)
+  assert.match(planned, /user_input_needed:true/)
+  assert.ok(planned.indexOf('<plan_mode>') < planned.indexOf('Complete the long task'))
+  assert.ok(planned.endsWith('Complete the long task'))
+  assert.equal(plannedBlocks.length, 2)
+  assert.equal(plannedBlocks[1].data, 'AAAA')
 })
 
 test('buildPromptBlocks falls back to text when no image is available', () => {

@@ -985,6 +985,7 @@ test('registers the provider, guidance, and the consolidated browser tools', asy
   assert.equal(String(fake.getProvider()), 'extension-current-window')
   const toolNames = [...fake.tools.keys()].sort()
   assert.deepEqual(toolNames, [
+    'agent_request_help',
     'browser_batch',
     'browser_click',
     'browser_click_at',
@@ -1029,7 +1030,7 @@ test('registers the provider, guidance, and the consolidated browser tools', asy
   }
   assert.equal(fake.sections.length, 1)
   const guidance = fake.sections[0].text
-  assert.ok(guidance.length >= 12_000 && guidance.length <= 17_000, `GUIDANCE must be 12-17K chars, got ${guidance.length}`)
+  assert.ok(guidance.length >= 12_000 && guidance.length <= 17_100, `GUIDANCE must be 12-17.1K chars, got ${guidance.length}`)
   // Every registered tool must be named by the guidance at least once
   // (browser_scroll was the last one missing).
   for (const name of toolNames) assert.match(guidance, new RegExp(`\\b${name}\\b`), `${name} must be mentioned in GUIDANCE`)
