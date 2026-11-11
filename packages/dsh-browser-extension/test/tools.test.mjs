@@ -3278,7 +3278,7 @@ test('batch validation rejects bad action lists and guard conditions before the 
     [{ before: { ms: 15_000, timeout_ms: 10_000 } }, /before timeout_ms must be greater than or equal to ms/],
     [{ after: { text: '' } }, /after text must be a non-empty string/],
     [{ after: { idle: 'yes' } }, /after idle must be true or false/],
-    [{ after: { text: 'x', surprise: true } }, /after received an unknown argument/],
+    [{ after: { text: 'x', surprise: true } }, /after received unknown argument "surprise"\. Allowed: text, url, idle, ms, timeout_ms/],
   ]
   for (const [guard, pattern] of invalidGuards) {
     await assert.rejects(() => definition.execute({ actions: [{ op: 'click', label: 3, ...guard }] }, exec), pattern)
@@ -4455,6 +4455,159 @@ test('bridge failures keep the companion error code', async t => {
       return true
     },
   )
+})
+
+test('two consecutive closed-panel results open a circuit that fails later calls at once', async t => {
+  const closed = { code: 'SIDE_PANEL_CLOSED', message: 'the crazyAgent side panel is disconnected or reloading. Retry this call once; if it fails again, stop and report BLOCKED so the user can reopen the side panel' }
+  const { server, url, commands } = await startFakeBridge({ failures: { click: closed, type: closed } })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const claim = turn => fake.listeners.get('agent/inbox/claimed')({ message: { id: `closed-${turn}`, content: [{ type: 'text', text: 'go' }] }, turn })
+  let sequence = 0
+  const click = label => fake.tools.get('browser_click').execute({ label }, { callId: `closed-${++sequence}`, signal: new AbortController().signal })
+  claim(1)
+
+  await assert.rejects(() => click(1), error => {
+    assert.equal(error.code, 'SIDE_PANEL_CLOSED')
+    assert.match(error.message, /Retry this call once/u)
+    assert.equal(error.circuitOpen, undefined)
+    return true
+  })
+  await assert.rejects(() => click(2), error => {
+    assert.equal(error.code, 'SIDE_PANEL_CLOSED')
+    assert.match(error.message, /browser executor unavailable/u)
+    assert.match(error.message, /Do not call browser tools again this turn/u)
+    return true
+  })
+  assert.equal(commands.length, 2, 'the first two calls reached the bridge')
+  for (const label of [3, 4, 5]) {
+    const started = Date.now()
+    await assert.rejects(() => click(label), error => {
+      assert.equal(error.code, 'SIDE_PANEL_CLOSED')
+      assert.equal(error.circuitOpen, true)
+      assert.match(error.message, /Reply BLOCKED/u)
+      return true
+    })
+    assert.ok(Date.now() - started < 200, 'an open circuit never waits for the panel')
+  }
+  assert.equal(commands.length, 2, 'an open circuit sends nothing to the bridge')
+  // Other browser tools are covered by the same circuit.
+  await assert.rejects(
+    () => fake.tools.get('browser_scroll').execute({ direction: 'down' }, { callId: 'closed-scroll', signal: new AbortController().signal }),
+    error => error.circuitOpen === true,
+  )
+  assert.equal(commands.length, 2)
+
+  // A new turn starts clean, and one success clears the count.
+  claim(2)
+  await assert.rejects(() => click(6), /Retry this call once/u)
+  await fake.tools.get('browser_scroll').execute({ direction: 'down' }, { callId: 'closed-ok', signal: new AbortController().signal })
+  await assert.rejects(() => click(7), error => {
+    assert.match(error.message, /Retry this call once/u, 'a success between failures resets the count')
+    return true
+  })
+  assert.equal(commands.length, 5)
+})
+
+test('every tool names an unknown argument and lists the accepted ones before the bridge', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  assert.ok(fake.tools.size >= 34, `expected the standing tool set, got ${fake.tools.size}`)
+  let sequence = 0
+  for (const [name, tool] of fake.tools) {
+    const allowed = Object.keys(tool.inputSchema?.properties ?? {})
+    await assert.rejects(
+      () => tool.execute({ bogus_key: 1 }, { callId: `unknown-${++sequence}`, signal: new AbortController().signal }),
+      error => {
+        assert.ok(error.message.includes(`${name} received unknown argument "bogus_key". Allowed: ${allowed.join(', ')}`), `${name}: ${error.message}`)
+        return true
+      },
+      name,
+    )
+  }
+  assert.equal(commands.length, 0, 'no unknown-argument call reached the bridge')
+})
+
+test('the invented from:{x,y} drag shape names the key, and a repeat says it was just rejected', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  fake.listeners.get('agent/inbox/claimed')({ message: { id: 'reject-1', content: [{ type: 'text', text: 'drag it' }] }, turn: 1 })
+  const drag = (args, id) => fake.tools.get('browser_drag').execute(args, { callId: id, signal: new AbortController().signal })
+  const invented = { from: { x: 1, y: 2 }, to_x: 5, to_y: 6 }
+  await assert.rejects(() => drag(invented, 'r1'), error => {
+    assert.match(error.message, /browser_drag received unknown argument "from"\. Allowed: label, ref, x, y, to_label/u)
+    assert.doesNotMatch(error.message, /just rejected/u)
+    return true
+  })
+  await assert.rejects(() => drag(invented, 'r2'), /received unknown argument "from".*This exact call was just rejected for the same reason/u)
+  // A different problem is reported plainly, with a literal example.
+  await assert.rejects(() => drag({ to_x: 5, to_y: 6 }, 'r3'), error => {
+    assert.match(error.message, /requires exactly one source.*Example: \{"x":120/u)
+    assert.doesNotMatch(error.message, /just rejected/u)
+    return true
+  })
+  // A new turn forgets the previous rejection.
+  await assert.rejects(() => drag(invented, 'r4'), /unknown argument "from"/u)
+  fake.listeners.get('agent/inbox/claimed')({ message: { id: 'reject-2', content: [{ type: 'text', text: 'again' }] }, turn: 2 })
+  await assert.rejects(() => drag(invented, 'r5'), error => {
+    assert.doesNotMatch(error.message, /just rejected/u)
+    return true
+  })
+  assert.equal(commands.length, 0)
+})
+
+test('a coordinate refusal that carries a fresh view reads as a refusal with its image and view id', async t => {
+  const refusal = {
+    ...SNAPSHOT,
+    viewId: 12,
+    attempted: false,
+    ok: false,
+    changed: false,
+    signals: [],
+    mutationPossible: false,
+    refused: { code: 'STALE_VIEW', message: 'The page controls or layout changed since the canvas view was captured. Take a full fresh view and measure the coordinates again.' },
+  }
+  const { server, url } = await startFakeBridge({
+    respond: op => ['click_at', 'drag', 'select'].includes(op) ? { ...refusal, op } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  const calls = [
+    ['browser_click_at', { x: 10, y: 20, view_id: 11 }],
+    ['browser_drag', { x: 10, y: 20, to_x: 40, to_y: 20, view_id: 11 }],
+    ['browser_select', { from: { x: 1, y: 2 }, to: { x: 30, y: 2 }, view_id: 11 }],
+  ]
+  for (const [name, args] of calls) {
+    const result = await fake.tools.get(name).execute(args, { callId: `refused-${name}`, signal: new AbortController().signal })
+    const text = result.content.find(block => block.type === 'text').text
+    assert.match(text, /^refused STALE_VIEW: The page controls or layout changed/u, name)
+    assert.match(text, /no input was dispatched \(attempted=false, mutationPossible=false\)/u)
+    assert.match(text, /Fresh view #12 is attached.*pass view_id:12\. No separate screenshot call is needed/u)
+    assert.doesNotMatch(text, /clicked|selected \d+ chars|drag: status/u, 'a refusal is never worded as an action')
+    assert.equal(result.content.filter(block => block.type === 'image').length, 1, 'the fresh view image is attached')
+  }
 })
 
 test('there is no per-turn call limit', async t => {

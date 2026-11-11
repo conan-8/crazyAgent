@@ -1,0 +1,395 @@
+{
+  "startedAt": "2026-11-11T00:38:11.513Z",
+  "finishedAt": "2026-11-11T00:38:55.176Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": 2500000,
+  "totalTokens": 461705,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "frame-canvas-slider",
+      "fixture": "frame-canvas.html",
+      "prompt": "In the embedded pendulum lab on this page, set the Length slider to 70.",
+      "file": "frame-canvas-slider.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwbe4eku-ede4",
+          "status": "pass",
+          "reasons": [
+            "Length is 70 by trusted drag; Mass untouched"
+          ],
+          "evidence": {
+            "length": 70,
+            "mass": 50,
+            "drags": 1,
+            "trustedPresses": 1,
+            "missedPresses": 0,
+            "synthetic": 0,
+            "history": [
+              {
+                "key": "length",
+                "from": 20,
+                "to": 70
+              }
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 8896,
+            "error": null,
+            "outcome": "done",
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 23742,
+            "outputTokens": 714,
+            "cacheReadTokens": 62464,
+            "totalTokens": 86920,
+            "usage": {
+              "inputTokens": 23742,
+              "outputTokens": 714,
+              "totalTokens": 86920,
+              "cacheReadTokens": 62464
+            },
+            "finalText": "DONE\n- Dragged the Length slider thumb in the embedded pendulum canvas; the readout now reads **70 cm** (was 20 cm).\n- Verified in a fresh screenshot: Length = 70 cm, Mass unchanged at 50 g.\n- Canvas is an iframe surface, so the drag was coordinate-based; confirmed via the updated label rather than DOM value.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbe4eku-ede4",
+              "origin": "remote",
+              "clientMessageId": "e618483f-76f5-4376-a23d-afead7010ea2",
+              "startedAt": "2026-11-11T00:38:12.942Z",
+              "endedAt": "2026-11-11T00:38:21.838Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 23742,
+                "outputTokens": 714,
+                "totalTokens": 86920,
+                "cacheReadTokens": 62464
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwbe4lxa-20f9",
+          "status": "pass",
+          "reasons": [
+            "Length is 70 by trusted drag; Mass untouched"
+          ],
+          "evidence": {
+            "length": 70,
+            "mass": 50,
+            "drags": 1,
+            "trustedPresses": 2,
+            "missedPresses": 1,
+            "synthetic": 0,
+            "history": [
+              {
+                "key": "length",
+                "from": 20,
+                "to": 70
+              }
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 8463,
+            "error": null,
+            "outcome": "done",
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_click_at": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 5514,
+            "outputTokens": 1020,
+            "cacheReadTokens": 86144,
+            "totalTokens": 92678,
+            "usage": {
+              "inputTokens": 5514,
+              "outputTokens": 1020,
+              "totalTokens": 92678,
+              "cacheReadTokens": 86144
+            },
+            "finalText": "DONE — Length slider set to 70.\n\n- Dragged the Length thumb to the 70 position; the readout now shows \"70 cm\" and the thumb sits at the 70% mark (verified in fresh view #4).\n- Mass left unchanged at 50 g.\n- The canvas is inside an iframe with no DOM, so this was done via trusted pointer input at screenshot coordinates.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbe4lxa-20f9",
+              "origin": "remote",
+              "clientMessageId": "a1e77eef-bfab-4268-bd2a-e888f0c7792c",
+              "startedAt": "2026-11-11T00:38:22.462Z",
+              "endedAt": "2026-11-11T00:38:30.925Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 5514,
+                "outputTokens": 1020,
+                "totalTokens": 92678,
+                "cacheReadTokens": 86144
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwbe4sxz-9c46",
+          "status": "pass",
+          "reasons": [
+            "Length is 70 by trusted drag; Mass untouched"
+          ],
+          "evidence": {
+            "length": 70,
+            "mass": 50,
+            "drags": 1,
+            "trustedPresses": 1,
+            "missedPresses": 0,
+            "synthetic": 0,
+            "history": [
+              {
+                "key": "length",
+                "from": 20,
+                "to": 70
+              }
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 8947,
+            "error": null,
+            "outcome": "done",
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 3798,
+            "outputTokens": 329,
+            "cacheReadTokens": 118912,
+            "totalTokens": 123039,
+            "usage": {
+              "inputTokens": 3798,
+              "outputTokens": 329,
+              "totalTokens": 123039,
+              "cacheReadTokens": 118912
+            },
+            "finalText": "DONE\n- Length slider now reads **70 cm**; thumb sits at ~70% of the track, Mass unchanged at 50 g.\n- Verified visually in the fresh view after the drag (canvas iframe, so no DOM value readable).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbe4sxz-9c46",
+              "origin": "remote",
+              "clientMessageId": "bde2fc32-3029-4ecb-b1cb-41f2cef619b8",
+              "startedAt": "2026-11-11T00:38:31.559Z",
+              "endedAt": "2026-11-11T00:38:40.506Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3798,
+                "outputTokens": 329,
+                "totalTokens": 123039,
+                "cacheReadTokens": 118912
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwbe50cv-e0ca",
+          "status": "pass",
+          "reasons": [
+            "Length is 70 by trusted drag; Mass untouched"
+          ],
+          "evidence": {
+            "length": 70,
+            "mass": 50,
+            "drags": 1,
+            "trustedPresses": 1,
+            "missedPresses": 0,
+            "synthetic": 0,
+            "history": [
+              {
+                "key": "length",
+                "from": 20,
+                "to": 70
+              }
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6737,
+            "error": null,
+            "outcome": "done",
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 2371,
+            "outputTokens": 532,
+            "cacheReadTokens": 65280,
+            "totalTokens": 68183,
+            "usage": {
+              "inputTokens": 2371,
+              "outputTokens": 532,
+              "totalTokens": 68183,
+              "cacheReadTokens": 65280
+            },
+            "finalText": "DONE\n- Length slider dragged to 70; the canvas now displays \"70 cm\" with the thumb at the 70 mark (verified in fresh view #8).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbe50cv-e0ca",
+              "origin": "remote",
+              "clientMessageId": "44d89eb7-8564-4d54-820d-da9c24bec36c",
+              "startedAt": "2026-11-11T00:38:41.167Z",
+              "endedAt": "2026-11-11T00:38:47.904Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2371,
+                "outputTokens": 532,
+                "totalTokens": 68183,
+                "cacheReadTokens": 65280
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwbe564m-ddd7",
+          "status": "pass",
+          "reasons": [
+            "Length is 70 by trusted drag; Mass untouched"
+          ],
+          "evidence": {
+            "length": 70,
+            "mass": 50,
+            "drags": 1,
+            "trustedPresses": 1,
+            "missedPresses": 0,
+            "synthetic": 0,
+            "history": [
+              {
+                "key": "length",
+                "from": 20,
+                "to": 70
+              }
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6337,
+            "error": null,
+            "outcome": "done",
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag label must be a positive integer"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 2
+            },
+            "inputTokens": 23526,
+            "outputTokens": 543,
+            "cacheReadTokens": 66816,
+            "totalTokens": 90885,
+            "usage": {
+              "inputTokens": 23526,
+              "outputTokens": 543,
+              "totalTokens": 90885,
+              "cacheReadTokens": 66816
+            },
+            "finalText": "DONE — Length slider set to 70 cm, verified in the fresh view (thumb moved to the 70 mark, readout shows \"70 cm\"; Mass unchanged at 50 g).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbe564m-ddd7",
+              "origin": "remote",
+              "clientMessageId": "c467076f-e881-4c0e-925b-2e441fced84e",
+              "startedAt": "2026-11-11T00:38:48.646Z",
+              "endedAt": "2026-11-11T00:38:54.983Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 23526,
+                "outputTokens": 543,
+                "totalTokens": 90885,
+                "cacheReadTokens": 66816
+              },
+              "failedCalls": 1
+            }
+          },
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}

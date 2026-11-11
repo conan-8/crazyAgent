@@ -36,9 +36,9 @@ export const UI_GRACE_ENV = 'CRAZYAGENT_UI_GRACE_MS'
 export const SIDE_PANEL_CLOSED = 'SIDE_PANEL_CLOSED'
 
 /** Failure message for companion-issued commands (auto-capture). */
-const REQUEST_UI_CLOSED_MESSAGE = 'the crazyAgent side panel is not connected; it may be reloading — retry this call (or ask the user to reopen the side panel)'
+const REQUEST_UI_CLOSED_MESSAGE = 'the crazyAgent side panel is not connected; it may be reloading. Retry this call once; if it fails again, stop and ask the user to reopen the side panel'
 /** Failure message returned to the provider when its command cannot reach the side panel. */
-const PROVIDER_UI_CLOSED_MESSAGE = 'the crazyAgent side panel is disconnected or reloading; retry this call (or ask the user to reopen the side panel)'
+const PROVIDER_UI_CLOSED_MESSAGE = 'the crazyAgent side panel is disconnected or reloading. Retry this call once; if it fails again, stop and report BLOCKED so the user can reopen the side panel'
 
 export class Bridge {
   /**
@@ -231,7 +231,7 @@ export class Bridge {
   /**
    * Ask the side panel to execute one browser command (used for auto-capture).
    * When the panel is absent, wait up to `uiGraceMs` for a reconnect before
-   * failing with the retryable SIDE_PANEL_CLOSED code. The per-command timeout
+   * failing with the retry-once SIDE_PANEL_CLOSED code. The per-command timeout
    * only starts once the command has actually been sent.
    * @param {{op: string, args?: Record<string, unknown>}} command
    * @param {string} callId

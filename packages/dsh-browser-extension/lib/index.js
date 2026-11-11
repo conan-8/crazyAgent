@@ -142,6 +142,12 @@ function str(value, fallback) {
  * Minimal local WebSocket client for the companion bridge.
  * Reconnects in the background; a tool call waits briefly for a connection.
  */
+/** Consecutive closed-panel results in one turn before browser calls fail without waiting. */
+const EXECUTOR_CLOSED_LIMIT = 2
+/** While the circuit is open, one probe is allowed after this long without a browser call. */
+const EXECUTOR_CLOSED_COOLDOWN_MS = 10_000
+const EXECUTOR_UNAVAILABLE_MESSAGE = 'browser executor unavailable: the crazyAgent side panel has been unreachable for consecutive calls. Do not call browser tools again this turn. Reply BLOCKED, say the browser side panel is closed or reloading, and ask the user to reopen it and send the request again.'
+
 class BridgeClient {
   /** @type {import('ws').WebSocket | null} */
   #ws = null
@@ -152,6 +158,17 @@ class BridgeClient {
   #pending = new Map()
   /** @type {Array<Record<string, unknown>>} */
   #logBuffer = []
+  /** Consecutive SIDE_PANEL_CLOSED results; any successful result or a new turn resets it. */
+  #executorClosed = { count: 0, lastAt: 0 }
+  /** Browser commands handed to the bridge; lets callers tell argument errors from browser errors. */
+  commandsSent = 0
+  /** @type {{tool: string, message: string} | undefined} last argument rejection this turn */
+  lastRejection = undefined
+
+  /** A new turn starts with a clean executor-availability record. */
+  resetExecutorCircuit() {
+    this.#executorClosed = { count: 0, lastAt: 0 }
+  }
 
   /**
    * @param {{url: string, token: string, timeoutMs: number, log: (message: string) => void, onDocsOutcome?: (command: Record<string, any>, callId: string | undefined, error: Error | undefined, result: Record<string, any> | undefined, sessionId: unknown) => void, onPlanMode?: (frame: Record<string, unknown>) => void}} options
@@ -268,6 +285,19 @@ class BridgeClient {
       const id = randomUUID()
       const op = command.op
       const started = performance.now()
+      // Each closed-panel result already waited out the companion's reconnect
+      // grace. After two in a row, stop spending that wait on every call: fail
+      // at once until the cool-down passes, then let one probe through.
+      if (this.#executorClosed.count >= EXECUTOR_CLOSED_LIMIT
+        && Date.now() - this.#executorClosed.lastAt < EXECUTOR_CLOSED_COOLDOWN_MS) {
+        const error = new Error(EXECUTOR_UNAVAILABLE_MESSAGE)
+        error.code = 'SIDE_PANEL_CLOSED'
+        error.circuitOpen = true
+        this.logEvent('bridge.command.error', { op, callId, durationMs: 0, error: error.message, code: error.code, circuitOpen: true }, 'error', { callId })
+        reject(error)
+        return
+      }
+      this.commandsSent += 1
       this.logEvent('bridge.command.send', { op, callId, args: command.args }, 'debug', { callId })
       let cleaned = false
       const cleanup = () => {
@@ -284,6 +314,12 @@ class BridgeClient {
           this.onDocsOutcome?.(command, callId, error, value, sessionId)
         } catch {
           // Evidence tracking must not change the tool outcome.
+        }
+        if (error?.code === 'SIDE_PANEL_CLOSED') {
+          this.#executorClosed = { count: this.#executorClosed.count + 1, lastAt: Date.now() }
+          if (this.#executorClosed.count >= EXECUTOR_CLOSED_LIMIT) error.message = EXECUTOR_UNAVAILABLE_MESSAGE
+        } else if (!error) {
+          this.#executorClosed = { count: 0, lastAt: 0 }
         }
         if (error) {
           this.logEvent('bridge.command.error', {
@@ -1088,6 +1124,27 @@ function formatView(result) {
  * @param {Record<string, any>} result
  * @returns {{content: Array<Record<string, unknown>>}}
  */
+/**
+ * A coordinate guard (stale, ambiguous, or missing view) refused before input
+ * and the executor attached a fresh full view. The refusal stays a refusal; the
+ * attached view only removes the separate screenshot call recovery used to need.
+ * The leading "refused <CODE>" token is stable so log analysis can count it.
+ * @param {Record<string, any>} result
+ * @returns {{content: Array<Record<string, unknown>>} | undefined}
+ */
+function refusedWithViewContent(result) {
+  const refused = result?.refused
+  if (!isRecord(refused) || typeof refused.code !== 'string') return undefined
+  const viewId = Number.isFinite(Number(result.viewId)) ? Number(result.viewId) : undefined
+  const viewNote = viewId === undefined
+    ? 'A fresh view is attached to this result: measure the coordinates again on it.'
+    : `Fresh view #${viewId} is attached to this result: measure the coordinates again on it and pass view_id:${viewId}. No separate screenshot call is needed.`
+  return viewContent(result, [
+    `refused ${refused.code}: ${String(refused.message ?? 'the coordinates no longer match the page')}`,
+    `no input was dispatched (attempted=false, mutationPossible=false). ${viewNote} Coordinates from any earlier view are invalid.`,
+  ].join('\n'))
+}
+
 function viewContent(result, prefix) {
   const header = typeof prefix === 'string' && prefix.length > 0 ? `${prefix}\n${formatView(result)}` : formatView(result)
   /** @type {Array<Record<string, unknown>>} */
@@ -1394,6 +1451,8 @@ function selectContent(result) {
 }
 
 function dragContent(result) {
+  const refusedContent = refusedWithViewContent(result)
+  if (refusedContent) return refusedContent
   const drag = isRecord(result?.drag) ? result.drag : {}
   const source = isRecord(drag.sourceOutcome) ? drag.sourceOutcome : {}
   const destination = isRecord(drag.destinationOutcome) ? drag.destinationOutcome : {}
@@ -1409,8 +1468,20 @@ function dragContent(result) {
     `action: attempted=${flag(outcome.attempted ?? result.attempted)} · ok=${flag(outcome.ok ?? result.ok)} · mutationPossible=${flag(result.mutationPossible)}`,
   ]
   if (result.error?.code) lines.push(`error ${result.error.code}: ${result.error.message ?? 'drag failed'}`)
-  if (result.changed === null || drag.status === 'unknown') lines.push('outcome UNVERIFIED: the source or destination could not be measured after input; inspect a fresh view and do not retry blindly.')
+  const surface = isRecord(drag.surface) ? drag.surface : undefined
+  if (surface && result.changed !== true) {
+    const sides = Object.entries(surface).map(([side, tag]) => `${side} is a <${tag}>`).join(', ')
+    const pixels = isRecord(drag.pixels) ? drag.pixels : {}
+    const pixelNote = pixels.measured === true
+      ? `pixels in the drag region ${pixels.changed === true ? `changed ${pixels.percent}%` : 'look unchanged'} versus view #${pixels.comparedWithViewId ?? '?'} (diagnostic only)`
+      : 'no pixel comparison was available'
+    lines.push(`outcome UNVERIFIED: ${sides}, whose content cannot be read from the page; trusted input was dispatched and ${pixelNote}. Read the control's value in the returned view before deciding; do not repeat the drag blindly.`)
+  } else if (result.changed === null || drag.status === 'unknown') lines.push('outcome UNVERIFIED: the source or destination could not be measured after input; inspect a fresh view and do not retry blindly.')
   if (result.changed === false) lines.push('no measured drag effect: all applicable source and destination checks stayed unchanged; unrelated page mutations are not proof of a move.')
+  const distance = Number(drag.distancePx)
+  if (result.changed !== true && Number.isFinite(distance) && distance > 0 && distance < 10) {
+    lines.push(`note: this drag moved only ${distance}px; many widgets ignore movement that short. For a fine slider step, press an arrow key on the focused control or click the track instead.`)
+  }
   lines.push(...basisNoteLines(result))
   return actionContent(result, lines)
 }
@@ -1495,6 +1566,8 @@ function offScreenLine(count) {
  * @returns {{content: Array<Record<string, unknown>>}}
  */
 function clickAtContent(result) {
+  const refusedContent = refusedWithViewContent(result)
+  if (refusedContent) return refusedContent
   const points = Array.isArray(result?.points) ? result.points : []
   const lines = []
   if (points.length > 1) {
@@ -1712,7 +1785,7 @@ function pressKeyContent(result) {
  * @returns {{x: number, y: number}}
  */
 function selectPoint(value, name) {
-  if (!isRecord(value)) throw new Error(`browser_select requires a ${name} point {x, y}`)
+  if (!isRecord(value)) throw new Error(`browser_select requires a ${name} point {x, y}. Example: {"from":{"x":100,"y":200},"to":{"x":300,"y":200}}`)
   const x = Number(value.x)
   const y = Number(value.y)
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`browser_select ${name} requires finite x and y`)
@@ -1727,6 +1800,8 @@ function selectPoint(value, name) {
  * @returns {{content: Array<Record<string, unknown>>}}
  */
 function selectRangeContent(result, requested) {
+  const refusedContent = refusedWithViewContent(result)
+  if (refusedContent) return refusedContent
   const selected = result?.selected ?? {}
   const from = isRecord(selected.from) ? selected.from : requested.from
   const to = isRecord(selected.to) ? selected.to : requested.to
@@ -1775,6 +1850,29 @@ function navigateContent(result) {
   return viewContent(result, parts.join(' · '))
 }
 
+/**
+ * One wording for every unknown-argument rejection: name the offending key and
+ * list what is accepted, so the next call can be corrected without guessing.
+ * @param {string} context tool name or argument path
+ * @param {string} key
+ * @param {Iterable<string>} allowed
+ */
+export function unknownArgumentMessage(context, key, allowed) {
+  return `${context} received unknown argument ${JSON.stringify(key)}. Allowed: ${[...allowed].join(', ')}`
+}
+
+/**
+ * Throw the shared unknown-argument error for the first key outside `allowed`.
+ * @param {string} context
+ * @param {Record<string, unknown>} value
+ * @param {Iterable<string>} allowed
+ */
+function rejectUnknownArguments(context, value, allowed) {
+  const list = [...allowed]
+  const unknown = Object.keys(value).find(key => !list.includes(key))
+  if (unknown !== undefined) throw new Error(unknownArgumentMessage(context, unknown, list))
+}
+
 const TOOL_ARGUMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 /**
@@ -1811,7 +1909,7 @@ function normalizeWaitConditions(value, context, allowView = false) {
   const unknown = Object.keys(value).find(key => !allowed.includes(key))
   if (unknown !== undefined) {
     if (unknown === 'view') throw new Error(`${context} does not accept a view field`)
-    throw new Error(`${context} received an unknown argument ${JSON.stringify(unknown)}`)
+    throw new Error(unknownArgumentMessage(context, unknown, allowed))
   }
   /** @type {Record<string, unknown>} */
   const forward = {}
@@ -2068,7 +2166,7 @@ function normalizeDocsTableArgs(args) {
   const actions = ['read', 'create', 'write', 'format', 'insert_rows', 'insert_columns', 'delete_rows', 'delete_columns', 'merge', 'unmerge', 'delete_table']
   if (!actions.includes(args.action)) throw new Error(`browser_docs_table action must be one of ${actions.join(', ')}`)
   const allowed = new Set(['action', 'table', 'rows', 'columns', 'values', 'edits', 'row', 'column', 'position', 'count'])
-  if (Object.keys(args).some(key => !allowed.has(key))) throw new Error('browser_docs_table received an unknown argument')
+  rejectUnknownArguments('browser_docs_table', args, allowed)
   const forward = { action: 'table', tableAction: args.action }
   const positive = (value, label, maximum = 1_000) => {
     if (!Number.isSafeInteger(value) || value < 1 || value > maximum) throw new Error(`${label} must be a positive one-based index no greater than ${maximum}`)
@@ -2076,7 +2174,7 @@ function normalizeDocsTableArgs(args) {
   }
   if (args.table !== undefined) forward.table = positive(args.table, 'browser_docs_table table')
   const only = keys => {
-    if (Object.keys(args).some(key => !['action', ...keys].includes(key))) throw new Error(`browser_docs_table ${args.action} received an unknown argument`)
+    rejectUnknownArguments(`browser_docs_table ${args.action}`, args, ['action', ...keys])
   }
   const value = (entry, path) => {
     if (typeof entry !== 'string' || entry.length > 2_000 || /[\r\n\t]/u.test(entry)) throw new Error(`${path} must be a single-line string of at most 2000 characters without tabs`)
@@ -2129,13 +2227,13 @@ function normalizeDocsTableArgs(args) {
       if (!isRecord(edit)) throw new Error(`browser_docs_table edits[${index}] must be an object`)
       const path = `browser_docs_table edits[${index}]`
       if (args.action === 'write') {
-        if (Object.keys(edit).some(key => !['row', 'column', 'value'].includes(key))) throw new Error(`${path} has an unknown argument`)
+        rejectUnknownArguments(path, edit, ['row', 'column', 'value'])
         const checked = value(edit.value, `${path}.value`)
         total += checked.length
         return { row: positive(edit.row, `${path}.row`, 100), column: positive(edit.column, `${path}.column`, 20), value: checked }
       }
       const editAllowed = new Set(['row', 'column', ...DOCS_FORMAT_MANY_ATTRIBUTES, 'cell_background'])
-      if (Object.keys(edit).some(key => !editAllowed.has(key))) throw new Error(`${path} has an unknown argument`)
+      rejectUnknownArguments(path, edit, editAllowed)
       const requested = DOCS_FORMAT_MANY_ATTRIBUTES.filter(attribute => edit[attribute] !== undefined)
       const background = edit.cell_background !== undefined
       if (requested.length === 0 && !background) throw new Error(`${path} requires at least one formatting attribute`)
@@ -2195,11 +2293,11 @@ function validateDocsWriteBlocks(blocks) {
   for (const [index, block] of blocks.entries()) {
     if (!isRecord(block)) throw new Error(`browser_docs_write blocks[${index}] must be an object`)
     const allowed = new Set(['text', 'runs', 'items', 'list', 'blank', 'page_break', ...formatFields])
-    if (Object.keys(block).some(key => !allowed.has(key))) throw new Error(`browser_docs_write blocks[${index}] has an unknown argument`)
+    rejectUnknownArguments(`browser_docs_write blocks[${index}]`, block, allowed)
     if (block.blank !== undefined && block.blank !== true) throw new Error(`browser_docs_write blocks[${index}].blank must be true when present`)
     if (block.page_break !== undefined && block.page_break !== true) throw new Error(`browser_docs_write blocks[${index}].page_break must be true when present`)
     const kinds = [block.text !== undefined, block.runs !== undefined, block.items !== undefined, block.blank === true, block.page_break === true].filter(Boolean).length
-    if (kinds !== 1) throw new Error(`browser_docs_write blocks[${index}] must contain exactly one of text, runs, items, blank:true, or page_break:true`)
+    if (kinds !== 1) throw new Error(`browser_docs_write blocks[${index}] must contain exactly one of text, runs, items, blank:true, or page_break:true. Example: {"text":"Title","paragraph_style":"heading 1"} or {"blank":true}`)
     if (block.blank === true || block.page_break === true) {
       const kind = block.blank === true ? 'blank' : 'page_break'
       if (Object.keys(block).some(key => key !== kind)) throw new Error(`browser_docs_write blocks[${index}] ${kind} cannot have text, list, or formatting attributes`)
@@ -2221,7 +2319,7 @@ function validateDocsWriteBlocks(blocks) {
         const path = `browser_docs_write blocks[${index}].runs[${runIndex}]`
         if (!isRecord(run)) throw new Error(`${path} must be an object`)
         const runAllowed = new Set(['text', 'font_size', 'font', 'bold', 'italic', 'underline', 'color', 'highlight'])
-        if (Object.keys(run).some(key => !runAllowed.has(key))) throw new Error(`${path} has an unknown argument`)
+        rejectUnknownArguments(path, run, runAllowed)
         if (typeof run.text !== 'string' || run.text.trim().length === 0 || /[\r\n]/u.test(run.text)) {
           throw new Error(`${path}.text must be one non-empty single-line string`)
         }
@@ -2727,12 +2825,21 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
   const define = definition => {
     names.push(definition.name)
     const call = definition.call
+    // Every tool schema is closed (additionalProperties:false); name the stray
+    // key and the accepted ones here so no tool needs its own vaguer message.
+    const schema = definition.inputSchema
+    const topLevelKeys = isRecord(schema) && schema.additionalProperties === false && isRecord(schema.properties)
+      ? Object.keys(schema.properties)
+      : undefined
     const tool = createMcpToolDefinition(ctx, {
       ...definition,
       async call(toolArgs, exec) {
         guard.beginCall(definition.name, toolArgs)
+        const sentBefore = bridge.commandsSent
         try {
+          if (topLevelKeys !== undefined && isRecord(toolArgs)) rejectUnknownArguments(definition.name, toolArgs, topLevelKeys)
           const result = await call(toolArgs, exec)
+          bridge.lastRejection = undefined
           let deduped = result
           if (Array.isArray(result?.content)) {
             const content = []
@@ -2759,6 +2866,17 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
           return deduped
         } catch (error) {
           guard.endCall(definition.name, toolArgs, error)
+          // A rejection that never reached the browser is an argument error. Say
+          // so when the model repeats it, instead of the same text a second time.
+          if (error instanceof Error && bridge.commandsSent === sentBefore && typeof error.code !== 'string') {
+            const message = error.message
+            if (bridge.lastRejection?.tool === definition.name && bridge.lastRejection.message === message) {
+              error.message = `${message} This exact call was just rejected for the same reason: change the arguments instead of sending it again.`
+            }
+            bridge.lastRejection = { tool: definition.name, message }
+          } else {
+            bridge.lastRejection = undefined
+          }
           throw error
         }
       },
@@ -2881,7 +2999,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
     },
     async call(args, exec) {
       const label = Number(args.label)
-      if (!Number.isSafeInteger(label) || label <= 0) throw new Error('browser_click requires a positive integer label from the current view')
+      if (!Number.isSafeInteger(label) || label <= 0) throw new Error('browser_click requires a positive integer label from the current view. Example: {"label":12}')
       const view = checkedView(args.view)
       const expect = checkedActionExpect(args.expect, 'click', 'browser_click.expect')
       const result = await bridge.request({
@@ -2999,10 +3117,10 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
           return { x: px, y: py }
         })
       } else {
-        if (args.x === undefined || args.y === undefined) throw new Error('browser_click_at requires both x and y')
+        if (args.x === undefined || args.y === undefined) throw new Error('browser_click_at requires both x and y. Example: {"x":640,"y":360}')
         const x = Number(args.x)
         const y = Number(args.y)
-        if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('browser_click_at requires finite x and y')
+        if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('browser_click_at requires finite x and y. Example: {"x":640,"y":360}')
         forward.x = x
         forward.y = y
       }
@@ -3071,20 +3189,21 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
     },
     async call(args, exec) {
       const allowed = ['label', 'ref', 'x', 'y', 'to_label', 'to_ref', 'to_x', 'to_y', 'dx', 'dy', 'to_position', 'space', 'view_id', 'hold_ms', 'settle_ms', 'view']
-      if (!isRecord(args) || Object.keys(args).some(key => !allowed.includes(key))) throw new Error('browser_drag received an unknown argument')
+      if (!isRecord(args)) throw new Error('browser_drag arguments must be an object. Example: {"x":120,"y":300,"to_x":420,"to_y":300}')
+      rejectUnknownArguments('browser_drag', args, allowed)
       const sourcePoint = args.x !== undefined || args.y !== undefined
       const sourceLabel = args.label !== undefined || args.ref !== undefined
       if (Number(sourceLabel) + Number(sourcePoint) !== 1 || (args.label !== undefined && args.ref !== undefined)) {
-        throw new Error('browser_drag requires exactly one source: label, ref, or x/y')
+        throw new Error('browser_drag requires exactly one source: label, ref, or x/y. Example: {"x":120,"y":300,"to_x":420,"to_y":300} or {"label":4,"dx":80}')
       }
       const destinationLabel = args.to_label !== undefined || args.to_ref !== undefined
       const destinationPoint = args.to_x !== undefined || args.to_y !== undefined
       const delta = args.dx !== undefined || args.dy !== undefined
       if (Number(destinationLabel) + Number(destinationPoint) + Number(delta) !== 1 || (args.to_label !== undefined && args.to_ref !== undefined)) {
-        throw new Error('browser_drag requires exactly one destination: to_label, to_ref, to_x/to_y, or dx/dy')
+        throw new Error('browser_drag requires exactly one destination: to_label, to_ref, to_x/to_y, or dx/dy. Example: {"label":4,"to_label":7} or {"x":120,"y":300,"dx":80}')
       }
-      if (sourcePoint && (args.x === undefined || args.y === undefined)) throw new Error('browser_drag source requires both x and y')
-      if (destinationPoint && (args.to_x === undefined || args.to_y === undefined)) throw new Error('browser_drag destination requires both to_x and to_y')
+      if (sourcePoint && (args.x === undefined || args.y === undefined)) throw new Error('browser_drag source requires both x and y. Example: {"x":120,"y":300,"to_x":420,"to_y":300}')
+      if (destinationPoint && (args.to_x === undefined || args.to_y === undefined)) throw new Error('browser_drag destination requires both to_x and to_y. Example: {"x":120,"y":300,"to_x":420,"to_y":300}')
       for (const key of ['x', 'y', 'to_x', 'to_y', 'dx', 'dy']) {
         if (args[key] !== undefined && (typeof args[key] !== 'number' || !Number.isFinite(args[key]))) throw new Error(`browser_drag ${key} must be a finite number`)
       }
@@ -3260,7 +3379,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       if (args.action === 'read' && args.edits !== undefined) throw new Error('browser_table edits are valid only for action:"write"')
       const forward = { action: args.action, ...(args.table === undefined ? {} : { table: Number(args.table) }) }
       if (args.action === 'write') {
-        if (!Array.isArray(args.edits) || args.edits.length < 1 || args.edits.length > 100) throw new Error('browser_table write requires 1 to 100 edits')
+        if (!Array.isArray(args.edits) || args.edits.length < 1 || args.edits.length > 100) throw new Error('browser_table write requires 1 to 100 edits. Example: {"action":"write","edits":[{"row":2,"column":3,"value":"42"}]}')
         let totalChars = 0
         forward.edits = args.edits.map((edit, index) => {
           if (!isRecord(edit) || Object.keys(edit).some(key => !['row', 'column', 'value'].includes(key))) throw new Error(`browser_table edits[${index}] must contain only row, column, and value`)
@@ -3323,9 +3442,8 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       },
     },
     async call(args, exec) {
-      if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some(key => !['query', 'occurrence', 'reveal'].includes(key))) {
-        throw new Error('browser_find accepts only query, occurrence, and reveal')
-      }
+      if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('browser_find arguments must be an object. Example: {"query":"Total due"}')
+      rejectUnknownArguments('browser_find', args, ['query', 'occurrence', 'reveal'])
       const query = typeof args.query === 'string' ? args.query.replace(/\s+/gu, ' ').trim() : ''
       if (query.length < 1 || query.length > 200) throw new Error('browser_find query must contain 1 to 200 characters')
       const occurrence = args.occurrence
@@ -3416,7 +3534,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
     async call(args, exec) {
       const hasQuery = typeof args.query === 'string' && args.query.trim().length > 0
       if (args.tab_id === undefined && !hasQuery) {
-        throw new Error('browser_switch_tab requires tab_id or query')
+        throw new Error('browser_switch_tab requires tab_id or query. Example: {"tab_id":123} or {"query":"Inbox"}')
       }
       const result = await bridge.request({
         op: 'tabs.activate',
@@ -3447,7 +3565,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       },
     },
     async call(args, exec) {
-      if (typeof args.text !== 'string') throw new Error('browser_type requires a string text (use "" to clear the field)')
+      if (typeof args.text !== 'string') throw new Error('browser_type requires a string text (use "" to clear the field). Example: {"label":5,"text":"hello"}')
       if (args.text.length > 20000) throw new Error('browser_type text must be at most 20000 characters')
       /** @type {Record<string, unknown>} */
       const forward = { text: args.text }
@@ -3641,7 +3759,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
     async call(args, exec) {
       const hasUrl = args.url !== undefined
       const hasLabel = args.label !== undefined
-      if (hasUrl === hasLabel) throw new Error('browser_download requires exactly one of url or label')
+      if (hasUrl === hasLabel) throw new Error('browser_download requires exactly one of url or label. Example: {"label":8} or {"url":"https://example.com/file.pdf"}')
       if (hasUrl) {
         let parsed
         try { parsed = new URL(args.url) } catch { throw new Error('browser_download url must be an absolute http(s) URL') }
@@ -3734,7 +3852,9 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       const target = upload.input ?? {}
       const lines = [
         `attached ${JSON.stringify(upload.filename)} · ${upload.size} bytes${upload.mime ? ` · ${upload.mime}` : ''}`,
-        `verified by file-input readback${target.index ? ` on input ${target.index}` : ''}${target.name ? ` ${JSON.stringify(target.name)}` : ''}`,
+        upload.inputClearedByPage === true
+          ? `verified at the change event${target.index ? ` on input ${target.index}` : ''}${target.name ? ` ${JSON.stringify(target.name)}` : ''}: the input held exactly this file, then the page emptied the input (upload widgets do this after taking the file). Do not attach it again; check the page for the file it took.`
+          : `verified by file-input readback${target.index ? ` on input ${target.index}` : ''}${target.name ? ` ${JSON.stringify(target.name)}` : ''}`,
         'attachment is verified; server submission/persistence is not. Submit with the page control if required and independently inspect the result.',
       ]
       return viewContent(result, lines.join('\n'))
@@ -3768,7 +3888,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       /** @type {Record<string, unknown>} */
       const forward = {}
       if (hasUrl) {
-        if (typeof args.url !== 'string' || args.url.trim().length === 0) throw new Error('browser_navigate requires a non-empty http(s) url')
+        if (typeof args.url !== 'string' || args.url.trim().length === 0) throw new Error('browser_navigate requires a non-empty http(s) url. Example: {"url":"https://example.com"}')
         let parsed
         try {
           parsed = new URL(args.url)
@@ -3804,7 +3924,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       },
     },
     async call(args, exec) {
-      if (Object.keys(args).some(key => key !== 'action' && key !== 'prompt_text')) throw new Error('browser_dialog received an unknown argument')
+      rejectUnknownArguments('browser_dialog', args, ['action', 'prompt_text'])
       if (args.action !== 'accept' && args.action !== 'dismiss') throw new Error('browser_dialog action must be "accept" or "dismiss"')
       if (args.prompt_text !== undefined && args.action !== 'accept') throw new Error('browser_dialog prompt_text is valid only with action "accept"')
       if (args.prompt_text !== undefined && (typeof args.prompt_text !== 'string' || args.prompt_text.length > 20_000)) {
@@ -3866,13 +3986,13 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       },
     },
     async call(args, exec) {
-      if (Object.keys(args).some(key => key !== 'edits')) throw new Error('browser_docs_replace received an unknown argument')
+      rejectUnknownArguments('browser_docs_replace', args, ['edits'])
       if (!Array.isArray(args.edits) || args.edits.length === 0 || args.edits.length > 200) {
         throw new Error('browser_docs_replace edits must be an array of 1 to 200 replacement objects')
       }
       const edits = args.edits.map((edit, index) => {
         if (!isRecord(edit)) throw new Error(`browser_docs_replace edits[${index}] must be an object`)
-        if (Object.keys(edit).some(key => key !== 'text' && key !== 'replacement')) throw new Error(`browser_docs_replace edits[${index}] has an unknown argument`)
+        rejectUnknownArguments(`browser_docs_replace edits[${index}]`, edit, ['text', 'replacement'])
         if (typeof edit.text !== 'string' || edit.text.trim().length === 0 || edit.text.length > DOCS_TEXT_MAX_CHARS) {
           throw new Error(`browser_docs_replace edits[${index}].text must be a non-empty string of at most ${DOCS_TEXT_MAX_CHARS} characters`)
         }
@@ -3915,9 +4035,9 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
     },
     async call(args, exec) {
       const allowed = new Set(['paper_size', 'orientation', 'margins'])
-      if (Object.keys(args).some(key => !allowed.has(key))) throw new Error('browser_docs_page_setup received an unknown argument')
+      rejectUnknownArguments('browser_docs_page_setup', args, allowed)
       if (args.paper_size === undefined && args.orientation === undefined && args.margins === undefined) {
-        throw new Error('browser_docs_page_setup requires paper_size, orientation, or margins')
+        throw new Error('browser_docs_page_setup requires paper_size, orientation, or margins. Example: {"orientation":"landscape"}')
       }
       if (args.paper_size !== undefined && args.paper_size !== 'Letter') throw new Error('browser_docs_page_setup paper_size must be Letter')
       if (args.orientation !== undefined && !['portrait', 'landscape'].includes(args.orientation)) {
@@ -4012,7 +4132,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       },
     },
     async call(args, exec) {
-      if (Object.keys(args).some(key => key !== 'blocks')) throw new Error('browser_docs_write received an unknown argument')
+      rejectUnknownArguments('browser_docs_write', args, ['blocks'])
       validateDocsWriteBlocks(args.blocks)
       const normalize = entry => ({
         ...entry,
@@ -4094,7 +4214,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       },
     },
     async call(args, exec) {
-      if (Object.keys(args).some(key => !['format', 'max_chars', 'offset'].includes(key))) throw new Error('browser_docs_read received an unknown argument')
+      rejectUnknownArguments('browser_docs_read', args, ['format', 'max_chars', 'offset'])
       const format = args.format ?? 'outline'
       if (!['outline', 'text', 'html'].includes(format)) throw new Error('browser_docs_read format must be outline, text, or html')
       if (args.max_chars !== undefined && (!Number.isInteger(args.max_chars) || args.max_chars < 100 || args.max_chars > 100_000)) {
@@ -4129,7 +4249,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       if (typeof args.text !== 'string' || args.text.trim().length === 0 || args.text.length > DOCS_TEXT_MAX_CHARS) {
         throw new Error(`browser_docs_select_text text must be a non-empty string of at most ${DOCS_TEXT_MAX_CHARS} characters`)
       }
-      if (Object.keys(args).some(key => !['text', 'occurrence', 'scope'].includes(key))) throw new Error('browser_docs_select_text received an unknown argument')
+      rejectUnknownArguments('browser_docs_select_text', args, ['text', 'occurrence', 'scope'])
       if (args.scope !== undefined && args.scope !== 'text' && args.scope !== 'paragraph') throw new Error('browser_docs_select_text scope must be "text" or "paragraph"')
       const forward = { action: 'select_text', text: args.text }
       const occurrence = checkedDocsOccurrence(args.occurrence, 'browser_docs_select_text')
@@ -4183,7 +4303,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       },
     },
     async call(args, exec) {
-      if (Object.keys(args).some(key => key !== 'edits')) throw new Error('browser_docs_format received an unknown argument')
+      rejectUnknownArguments('browser_docs_format', args, ['edits'])
       if (!Array.isArray(args.edits) || args.edits.length === 0 || args.edits.length > 50) {
         throw new Error('browser_docs_format edits must be an array of 1 to 50 formatting objects')
       }
@@ -4194,7 +4314,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
           throw new Error(`${path}.text must be a non-empty string of at most ${DOCS_TEXT_MAX_CHARS} characters`)
         }
         const allowed = new Set(['text', 'occurrence', 'remove_if_missing', ...DOCS_FORMAT_MANY_ATTRIBUTES])
-        if (Object.keys(edit).some(key => !allowed.has(key))) throw new Error(`${path} has an unknown argument`)
+        rejectUnknownArguments(path, edit, allowed)
         const requested = DOCS_FORMAT_MANY_ATTRIBUTES.filter(attribute => edit[attribute] !== undefined)
         if (requested.length === 0) throw new Error(`${path} requires at least one formatting attribute`)
         const occurrence = checkedDocsOccurrence(edit.occurrence, path)
@@ -4282,8 +4402,8 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       },
     },
     async call(args, exec) {
-      if (!Array.isArray(args.actions)) throw new Error('browser_batch requires an actions array')
-      if (args.actions.length === 0) throw new Error('browser_batch requires at least one action')
+      if (!Array.isArray(args.actions)) throw new Error('browser_batch requires an actions array. Example: {"actions":[{"op":"click","args":{"label":3}}]}')
+      if (args.actions.length === 0) throw new Error('browser_batch requires at least one action. Example: {"actions":[{"op":"click","args":{"label":3}}]}')
       if (args.actions.length > 20) throw new Error(`browser_batch accepts at most 20 actions (got ${args.actions.length})`)
       /** @type {Array<Record<string, any>>} */
       const flatActions = []
@@ -4438,6 +4558,8 @@ export function apply(ctx, config = {}) {
         if (Number.isSafeInteger(turn)) {
           const messageId = isRecord(message) && typeof message.id === 'string' ? message.id : undefined
           guard.setTurn(messageId ? `message:${messageId}` : `turn:${turn}`)
+          bridge.resetExecutorCircuit()
+          bridge.lastRejection = undefined
           noProgressByTurn.delete(turn)
         }
         if (!isRecord(message)) return

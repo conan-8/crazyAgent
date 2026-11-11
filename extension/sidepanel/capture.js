@@ -1,3 +1,4 @@
+import { unknownArgumentMessage } from './arg-errors.js'
 export const SCREENSHOT_SCOPES = ['viewport', 'full_page', 'region']
 export const FULL_PAGE_MAX_DIMENSION = 16_384
 export const FULL_PAGE_MAX_PIXELS = 32_000_000
@@ -13,9 +14,8 @@ export function parseScreenshotArgs(args = {}) {
     throw captureError('BAD_SCREENSHOT', 'screenshot arguments must be an object')
   }
   const allowed = new Set(['detail', 'delay_ms', 'scope', 'region', 'space', 'view_id', 'to_clipboard'])
-  if (Object.keys(args).some(key => !allowed.has(key))) {
-    throw captureError('BAD_SCREENSHOT', 'screenshot received an unknown argument')
-  }
+  const unknown = unknownArgumentMessage('screenshot', args, allowed)
+  if (unknown) throw captureError('BAD_SCREENSHOT', unknown)
   const detail = args.detail === undefined ? 'normal' : args.detail
   if (!['normal', 'high', 'fast'].includes(detail)) {
     throw captureError('BAD_SCREENSHOT', 'detail must be normal, high, or fast')

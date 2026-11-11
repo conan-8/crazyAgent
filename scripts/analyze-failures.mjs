@@ -272,7 +272,9 @@ async function scanRun(runDir, runName) {
         case 'tool.result': {
           const callId = data.callId ?? event.callId
           const name = toolNamesByCall.get(callId) ?? '(unknown)'
-          if (data.ok === false) {
+          // A coordinate refusal that carries a fresh view arrives as an ok
+          // result whose text starts "refused <CODE>:"; it is still a failed call.
+          if (data.ok === false || /^refused [A-Z_]+:/u.test(String(data.text ?? ''))) {
             agg.failedToolCalls++
             addCount(agg.tools, name, 'failed')
             if (typeof callId === 'string') agg.failedCallIds.add(callId)

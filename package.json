@@ -1,6 +1,6 @@
 {
   "name": "crazyagent",
-  "version": "2.1.0-beta",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "description": "DeepSeek-optimised Chrome/Edge browser agent with guarded actions and Google Docs editing",

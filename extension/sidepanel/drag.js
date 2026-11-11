@@ -1,3 +1,4 @@
+import { unknownArgumentMessage } from './arg-errors.js'
 const DRAG_DEFAULT_HOLD_MS = 60
 const DRAG_DEFAULT_SETTLE_MS = 150
 const DRAG_ACTIVATION_PX = 6
@@ -55,9 +56,9 @@ function boundedMs(value, fallback, maximum, name) {
 }
 
 export function parseDragArgs(args = {}) {
-  if (!record(args) || Object.keys(args).some(key => !DRAG_KEYS.has(key))) {
-    throw dragFailure('BAD_DRAG', 'drag accepts only label/ref or x/y, one destination, optional to_position, hold/hold_ms, and settle_ms')
-  }
+  if (!record(args)) throw dragFailure('BAD_DRAG', 'drag arguments must be an object with label/ref or x/y and one destination')
+  const unknown = unknownArgumentMessage('drag', args, DRAG_KEYS)
+  if (unknown) throw dragFailure('BAD_DRAG', unknown)
   const sourceSelectors = ['label', 'ref', 'x', 'y'].filter(key => args[key] !== undefined)
   const hasSourcePoint = args.x !== undefined || args.y !== undefined
   const sourceKinds = Number(args.label !== undefined || args.ref !== undefined) + Number(hasSourcePoint)
@@ -214,6 +215,24 @@ export function evaluateDragDestinationOutcome(before, after) {
   }
 }
 
+/**
+ * A drag that starts or ends on an iframe, canvas, video, or plugin surface can
+ * change content no DOM probe in this frame can read. Unchanged DOM checks are
+ * then missing evidence, never a measured no-op.
+ */
+export function applySurfaceUncertainty(outcome, surfaces = {}) {
+  const opaque = Object.fromEntries(['source', 'destination']
+    .filter(side => typeof surfaces[side] === 'string' && surfaces[side].length > 0)
+    .map(side => [side, surfaces[side]]))
+  if (Object.keys(opaque).length === 0) return outcome
+  return {
+    ...outcome,
+    changed: outcome.changed === true ? true : null,
+    complete: false,
+    surface: opaque,
+  }
+}
+
 function combineDragOutcomes(source, destination) {
   const signals = [...new Set([...source.signals, ...destination.signals])]
   const unknown = source.changed === null || destination.changed === null
@@ -247,7 +266,24 @@ export async function dispatchTrustedDrag(rawRequest, io = {}) {
     throw dragFailure('DRAG_DRIVER', 'Trusted drag requires sendCommand, onDragIntercepted, and sleep dependencies', { mutationPossible: false })
   }
   const send = (method, params) => io.sendCommand(method, params)
-  const mouse = (type, point, pressed = false) => send('Input.dispatchMouseEvent', {
+  // A hidden tab produces no compositor frames, so a coalesced move (or drag
+  // event) can wait ~5 s for its ack and a whole drag outlives the command
+  // timeout. If an ack is slow, force one cheap frame — discarded, never shown
+  // to anyone, and no focus is stolen — so the gesture finishes on its own tab.
+  const dispatchInput = async (method, params) => {
+    const pending = send(method, params)
+    const slow = await Promise.race([pending.then(() => false), io.sleep(120).then(() => true)])
+    if (slow) {
+      try {
+        await Promise.race([
+          send('Page.captureScreenshot', { format: 'jpeg', quality: 1, optimizeForSpeed: true }),
+          io.sleep(1_000),
+        ])
+      } catch {}
+    }
+    return pending
+  }
+  const mouse = (type, point, pressed = false) => (type === 'mouseMoved' ? dispatchInput : send)('Input.dispatchMouseEvent', {
     type,
     x: point.x,
     y: point.y,
@@ -334,7 +370,7 @@ export async function dispatchTrustedDrag(rawRequest, io = {}) {
       if (!record(dragData) || !Array.isArray(dragData.items)) {
         throw dragFailure('DRAG_INTERCEPT_DATA', 'Chrome intercepted a native drag without usable DataTransfer data; inspect the page before retrying', { mutationPossible: true })
       }
-      const drag = (type, point) => send('Input.dispatchDragEvent', { type, x: point.x, y: point.y, data: dragData })
+      const drag = (type, point) => dispatchInput('Input.dispatchDragEvent', { type, x: point.x, y: point.y, data: dragData })
       await drag('dragEnter', current)
       for (let index = nextStep; index <= steps; index += 1) {
         const travelled = distance * index / steps
@@ -607,6 +643,9 @@ export function dragProbe(request) {
   session[request.side] = { element, x: point.x, y: point.y, rect: { ...rect } }
   sessions.set(request.token, session)
   const text = String(element.getAttribute('aria-label') ?? element.textContent ?? '').replace(/\s+/gu, ' ').trim().slice(0, 120)
+  // Content drawn inside these elements is invisible to DOM probes in this frame.
+  const tagName = element.tagName.toLowerCase()
+  const surface = ['iframe', 'frame', 'canvas', 'video', 'object', 'embed'].includes(tagName) ? tagName : null
   let native = false
   if (request.side === 'source') {
     const draggable = element.closest?.('[draggable]')
@@ -623,7 +662,7 @@ export function dragProbe(request) {
     y: point.y,
     coordinateSpace: window === window.top ? 'top' : 'frame',
     viewport: { width: window.innerWidth, height: window.innerHeight },
-    target: { id: identity(element), tag: element.tagName.toLowerCase(), text, native },
+    target: { id: identity(element), tag: tagName, text, native, surface },
     before: request.side === 'source' ? sourceSnapshot(element) : destinationSnapshot(element),
   }
 }
@@ -752,6 +791,10 @@ export async function executeDrag(args, io = {}) {
         },
       })
     })
+    const afterTab = await io.getActiveTab()
+    if (afterTab.id !== tab.id || afterTab.url !== tab.url) {
+      throw dragFailure('DRAG_STALE_TAB', 'The active tab changed while the drag was running. Its input finished on the original tab, but that outcome is stale/unverified; return to the original tab and take a fresh view before relying on it.', { mutationPossible: true, dispatch })
+    }
     await io.sleep(request.settleMs)
     const measuredSource = await io.runInFrame(tab.id, source.frameId, dragProbe, [{ phase: 'after', token }], 4_000)
     if (!measuredSource?.ok) {
@@ -771,10 +814,15 @@ export async function executeDrag(args, io = {}) {
     }
     const sourceOutcome = evaluateDragOutcome(source.before, measuredSource.source)
     const destinationOutcome = evaluateDragDestinationOutcome(destination.before, measuredDestination.destination)
-    const outcome = combineDragOutcomes(sourceOutcome, destinationOutcome)
+    const outcome = applySurfaceUncertainty(combineDragOutcomes(sourceOutcome, destinationOutcome), {
+      source: source.target?.surface,
+      destination: destination.target?.surface,
+    })
+    const distancePx = Math.round(Math.hypot(to.x - from.x, to.y - from.y) * 10) / 10
     if (outcome.changed === false && outcome.complete) {
       throw dragFailure('DRAG_NO_EFFECT', 'The drag was dispatched, but every applicable source, destination, value, and selection check stayed unchanged. Drop dispatch is not success evidence; inspect the target or use a semantic control instead of repeating the same drag.', {
         mutationPossible: true,
+        distancePx,
         dispatch,
         outcome,
         sourceOutcome,
@@ -792,8 +840,10 @@ export async function executeDrag(args, io = {}) {
         status: outcome.changed === true ? 'changed' : 'unknown',
         source: source.target,
         destination: destinationDescription,
+        ...(outcome.surface ? { surface: outcome.surface } : {}),
         from,
         to,
+        distancePx,
         dispatch,
         outcome,
         sourceOutcome,

@@ -89,6 +89,8 @@ const fixtureServer = createServer((request, response) => {
   response.end(readFileSync(file))
 })
 
+const fixtureServerV6 = createServer((request, response) => fixtureServer.emit('request', request, response))
+
 let edge
 let browser
 let panel
@@ -121,6 +123,7 @@ async function cleanup() {
     try { socket?.close() } catch {}
   }
   fixtureServer.close()
+  try { fixtureServerV6.close() } catch {}
   try { if (edge?.pid) process.kill(-edge.pid, 'SIGTERM') } catch {}
   if (!await waitForExit(edge, 2_500)) {
     try { if (edge?.pid) process.kill(-edge.pid, 'SIGKILL') } catch {}
@@ -159,7 +162,11 @@ async function call(name, args) {
     return { content, command, result: rawResults.get(command?.id)?.result }
   } catch (error) {
     return {
-      error: { code: error?.code ?? 'ERROR', message: error instanceof Error ? error.message : String(error) },
+      error: {
+        code: error?.code ?? 'ERROR',
+        message: error instanceof Error ? error.message : String(error),
+        ...(typeof error?.mutationPossible === 'boolean' ? { mutationPossible: error.mutationPossible } : {}),
+      },
       commandCount: commands.length - before,
       command: commands.at(-1),
     }
@@ -243,6 +250,11 @@ try {
     fixtureServer.once('error', reject)
     fixtureServer.listen(0, '127.0.0.1', resolve)
   })
+  // http://localhost frames may resolve to ::1 first; serve the same fixtures there (loopback only).
+  await new Promise(resolve => {
+    fixtureServerV6.once('error', () => resolve(false))
+    fixtureServerV6.listen(fixtureServer.address().port, '::1', () => resolve(true))
+  })
   fixtureUrl = `http://127.0.0.1:${fixtureServer.address().port}/drag.html`
 
   relayServer = new WebSocketServer({ host: '127.0.0.1', port: 0 })
@@ -304,6 +316,8 @@ try {
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-features=Translate,MediaRouter',
+    // HEADLESS=1 keeps the suite usable when no visible window is being painted.
+    ...(process.env.HEADLESS ? ['--headless=new'] : []),
     'about:blank',
   ], { detached: true, stdio: 'ignore' })
 
@@ -541,7 +555,6 @@ try {
     label: label(view, 'Pointer Gamma').id,
     to_label: label(view, 'Pointer Beta').id,
     to_position: 'top',
-    destinationHoldMs: 100,
   })
   assert.equal(sourceMoved.error.code, 'DRAG_STALE_TARGET', JSON.stringify(sourceMoved.error))
   assert.equal(sourceMoved.error.mutationPossible, true)
@@ -559,7 +572,6 @@ try {
     label: label(view, 'Pointer Gamma').id,
     to_label: label(view, 'Pointer Beta').id,
     to_position: 'top',
-    destinationHoldMs: 100,
   })
   assert.equal(destinationDetached.error.code, 'DRAG_STALE_TARGET')
   assert.equal(destinationDetached.error.mutationPossible, true)
@@ -595,14 +607,37 @@ try {
   const stale = await call('browser_drag', {
     x: alphaImage.x, y: alphaImage.y, to_x: betaImage.x, to_y: betaImage.y, view_id: view.viewId,
   })
-  assert.equal(stale.error.code, 'STALE_VIEW')
+  result = successful(stale)
+  assert.equal(result.refused.code, 'STALE_VIEW')
+  assert.equal(result.attempted, false)
+  assert.equal(result.mutationPossible, false)
+  assert.ok(result.image?.data && result.viewId > view.viewId, 'the refusal carries a newer full view')
+  assert.match(JSON.stringify(stale.content), /refused STALE_VIEW/u)
   assert.deepEqual(guardSemantic(await state()), guardBefore)
   log('PASS stale image view is refused before dispatch')
 
-  const staleCss = await call('browser_drag', {
+  let staleCss
+  // The image refusal above attached a fresh view. CSS coordinates measured on
+  // the pre-scroll view are different numbers, so they map onto the new view;
+  // what must never happen is a blind repeat of the refused call going through.
+  const blindRetry = await call('browser_drag', {
+    x: alphaImage.x, y: alphaImage.y, to_x: betaImage.x, to_y: betaImage.y, view_id: view.viewId,
+  })
+  assert.equal(blindRetry.error?.code, 'STALE_VIEW', JSON.stringify(blindRetry.error ?? blindRetry.result?.drag))
+  assert.match(blindRetry.error.message, /same coordinates that were just refused/u)
+  assert.equal(blindRetry.error.mutationPossible, false)
+  assert.deepEqual(guardSemantic(await state()), guardBefore, 'a blind repeat of refused coordinates dispatches nothing')
+  await fixtureEvaluate('window.scrollTo(0, 320)')
+  await sleep(100)
+  assert.equal(successful(staleCss = await call('browser_drag', {
+    x: alphaCss.x, y: alphaCss.y, to_x: betaCss.x, to_y: betaCss.y, space: 'css',
+  })).refused.code, 'STALE_VIEW')
+  assert.equal(staleCss.result.attempted, false)
+  const blindCss = await call('browser_drag', {
     x: alphaCss.x, y: alphaCss.y, to_x: betaCss.x, to_y: betaCss.y, space: 'css',
   })
-  assert.equal(staleCss.error.code, 'STALE_VIEW')
+  assert.equal(blindCss.error?.code, 'STALE_VIEW', 'the same CSS coordinates stay refused after the attached view')
+  assert.equal(blindCss.error.mutationPossible, false)
   assert.deepEqual(guardSemantic(await state()), guardBefore, 'scrolled CSS view must produce zero pointer input')
   log('PASS scrolled CSS view is refused with zero pointer input')
 
@@ -613,7 +648,9 @@ try {
   const scaleAmbiguous = await call('browser_drag', {
     x: firstScale.x, y: firstScale.y, to_x: firstDestination.x, to_y: firstDestination.y,
   })
-  assert.equal(scaleAmbiguous.error.code, 'AMBIGUOUS_VIEW')
+  assert.equal(successful(scaleAmbiguous).refused.code, 'AMBIGUOUS_VIEW')
+  assert.equal(scaleAmbiguous.result.attempted, false)
+  assert.ok(scaleAmbiguous.result.image?.data)
   assert.deepEqual(guardSemantic(await state()), guardBefore)
   log('PASS ambiguous image scale is refused before dispatch')
 
@@ -625,6 +662,80 @@ try {
   assert.equal(current.frameInputs, 0)
   assert.deepEqual(current.pointerEvents, [0, 0, 0])
   log('PASS unsupported child frame is refused with zero independent input counters')
+
+  // B1: content inside canvas and cross-site iframe surfaces is invisible to DOM
+  // probes, so a drag there must never be reported as a measured no-op.
+  const LAB_READ = '(() => { const lab = window.__lab; return lab?.ready ? { length: lab.length, mass: lab.mass, drags: lab.drags, trustedPresses: lab.trustedPresses, missedPresses: lab.missedPresses, synthetic: lab.synthetic } : null })()'
+  const base = fixtureUrl.replace(/\/drag\.html$/u, '')
+  const openSurface = async path => {
+    await fixture.send('Page.navigate', { url: `${base}/${path}` })
+    await sleep(900)
+    return screenshot()
+  }
+  const thumb = value => 150 + 360 * value / 100
+
+  view = await openSurface('frame-canvas-inner.html')
+  assert.deepEqual(await fixtureEvaluate(LAB_READ), { length: 20, mass: 50, drags: 0, trustedPresses: 0, missedPresses: 0, synthetic: 0 })
+  const canvasDrag = await call('browser_drag', { x: thumb(20), y: 110, to_x: thumb(70), to_y: 110, space: 'css' })
+  result = successful(canvasDrag)
+  assert.equal(result.error, undefined, 'a canvas drag is never DRAG_NO_EFFECT')
+  assert.equal(result.changed, null)
+  assert.equal(result.observed, 'unknown')
+  assert.equal(result.drag.status, 'unknown')
+  assert.deepEqual(result.drag.surface, { source: 'canvas', destination: 'canvas' })
+  assert.ok(result.image?.data, 'a surface drag always returns a full view')
+  assert.equal(result.drag.pixels.measured, true)
+  assert.equal(result.drag.pixels.changed, true)
+  assert.match(JSON.stringify(canvasDrag.content), /outcome UNVERIFIED: source is a <canvas>/u)
+  current = await fixtureEvaluate(LAB_READ)
+  assert.deepEqual(current, { length: 70, mass: 50, drags: 1, trustedPresses: 1, missedPresses: 0, synthetic: 0 }, 'independent app state: the canvas slider moved')
+  log('PASS same-document canvas drag moves the slider and reports unknown, not no-effect')
+
+  const emptyDrag = await call('browser_drag', { x: 60, y: 250, to_x: 160, to_y: 250, space: 'css', view: 'none' })
+  result = successful(emptyDrag)
+  assert.equal(result.error, undefined)
+  assert.equal(result.changed, null, 'even a real no-op on a canvas is unknown: the executor cannot see inside it')
+  assert.ok(result.image?.data, 'view:"none" is upgraded to a full view on a surface')
+  assert.equal(result.drag.pixels.measured, true)
+  assert.equal(result.drag.pixels.changed, false)
+  current = await fixtureEvaluate(LAB_READ)
+  assert.equal(current.length, 70)
+  assert.equal(current.drags, 1)
+  assert.equal(current.missedPresses, 1)
+  log('PASS canvas drag that hits nothing stays unknown with unchanged-pixel diagnostics')
+
+  view = await openSurface('frame-canvas.html')
+  const frameTargets = await (await fetch(`${CDP}/json`)).json()
+  const innerTarget = frameTargets.find(target => target.type === 'iframe' && target.url?.includes('frame-canvas-inner.html'))
+  assert.ok(innerTarget, 'the localhost frame is site-isolated into its own target')
+  const inner = await connect(innerTarget.webSocketDebuggerUrl)
+  const innerRead = async () => (await inner.send('Runtime.evaluate', { expression: LAB_READ, returnByValue: true })).result?.value
+  try {
+    assert.equal((await innerRead()).length, 20)
+    const frameOrigin = await fixtureEvaluate(`(() => {
+      const element = document.getElementById('sim')
+      const rect = element.getBoundingClientRect()
+      return { left: rect.left + element.clientLeft, top: rect.top + element.clientTop }
+    })()`)
+    const frameDrag = await call('browser_drag', {
+      x: frameOrigin.left + thumb(20), y: frameOrigin.top + 110,
+      to_x: frameOrigin.left + thumb(70), to_y: frameOrigin.top + 110,
+      space: 'css',
+    })
+    result = successful(frameDrag)
+    assert.equal(result.error, undefined, 'a cross-site frame drag is never DRAG_NO_EFFECT')
+    assert.equal(result.changed, null)
+    assert.equal(result.observed, 'unknown')
+    assert.deepEqual(result.drag.surface, { source: 'iframe', destination: 'iframe' })
+    assert.ok(result.image?.data)
+    assert.equal(result.drag.pixels.changed, true)
+    assert.deepEqual(await innerRead(), { length: 70, mass: 50, drags: 1, trustedPresses: 1, missedPresses: 0, synthetic: 0 }, 'independent OOPIF state: the inner slider moved')
+    log('PASS cross-site iframe canvas drag moves the inner slider and reports unknown, not no-effect')
+  } finally {
+    inner.close()
+  }
+  await fixture.send('Page.navigate', { url: fixtureUrl })
+  await sleep(500)
 
   view = await reset('#longpress-item')
   const switchedDrag = call('browser_drag', {
@@ -639,7 +750,7 @@ try {
   })()`)
   try {
     const switched = await switchedDrag
-    assert.equal(switched.error.code, 'DRAG_STALE_TAB')
+    assert.equal(switched.error.code, 'DRAG_STALE_TAB', JSON.stringify(switched.error))
     assert.equal(switched.error.mutationPossible, true)
     assert.equal(switched.result, undefined)
     assert.equal(switched.content, undefined, 'no other-tab success content was produced')

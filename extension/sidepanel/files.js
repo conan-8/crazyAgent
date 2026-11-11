@@ -214,6 +214,16 @@ export function fileInputProbe(request) {
       }
     }
     element.setAttribute('data-crazyagent-upload', token)
+    // Many upload widgets read the file in their change handler and clear the
+    // input at once. Record what the input held when change fired, so a
+    // cleared input afterwards is not mistaken for a failed assignment.
+    const captures = globalThis.__crazyagentUploadCaptures ??= new Map()
+    const capture = { files: null, listener: null }
+    capture.listener = () => {
+      capture.files = [...element.files ?? []].map(file => ({ name: file.name, size: file.size, type: file.type }))
+    }
+    element.addEventListener('change', capture.listener, { capture: true })
+    captures.set(token, { element, capture })
     const localIndex = allInputs().indexOf(element)
     if (localIndex < 0) return { ok: false, code: 'UPLOAD_STALE', message: 'The file input could not be re-resolved; no file was assigned.' }
     return { ok: true, ...describe(element, localIndex) }
@@ -224,6 +234,11 @@ export function fileInputProbe(request) {
   if (request.mode === 'cleanup') {
     for (const element of allInputs()) {
       if (element.getAttribute('data-crazyagent-upload') === request.token) element.removeAttribute('data-crazyagent-upload')
+    }
+    const captured = globalThis.__crazyagentUploadCaptures?.get(request.token)
+    if (captured) {
+      captured.element.removeEventListener('change', captured.capture.listener, { capture: true })
+      globalThis.__crazyagentUploadCaptures.delete(request.token)
     }
     return { ok: true }
   }
@@ -246,11 +261,21 @@ export function fileInputProbe(request) {
   }
   if (request.mode === 'verify') {
     const files = [...element.files ?? []].map(file => ({ name: file.name, size: file.size, type: file.type }))
-    if (files.length !== 1 || files[0].name !== request.expectedName || files[0].size !== request.expectedSize) {
+    const exact = list => Array.isArray(list) && list.length === 1 && list[0].name === request.expectedName && list[0].size === request.expectedSize
+    if (!exact(files)) {
+      const atChange = globalThis.__crazyagentUploadCaptures?.get(request.token)?.capture.files
+      // The input held exactly the requested file when change fired and the page
+      // emptied it afterwards: the page took the file. Anything else is a failure.
+      if (files.length === 0 && exact(atChange)) {
+        return { ok: true, files: atChange, clearedByPage: true, ...describe(element, request.localIndex) }
+      }
+      const holds = files.length === 0
+        ? 'it is empty and no change event carried the file'
+        : `it holds ${files.map(file => `${JSON.stringify(file.name)} (${file.size} bytes)`).join(', ')}`
       return {
         ok: false,
         code: 'UPLOAD_READBACK_FAILED',
-        message: `The file input did not retain exactly ${JSON.stringify(request.expectedName)} (${request.expectedSize} bytes); assignment was attempted, so do not retry blindly.`,
+        message: `The file input did not retain exactly ${JSON.stringify(request.expectedName)} (${request.expectedSize} bytes): ${holds}. Assignment was attempted, so do not retry blindly.`,
         files,
       }
     }
@@ -409,6 +434,11 @@ export async function executeUpload(args, io) {
     prepared = await io.runInFrame(tab.id, target.frameId, fileInputProbe, [target.localIndex === undefined
       ? { mode: 'label', label: target.localId ?? (request.label >= 100_000 ? request.label % 100_000 : request.label), token }
       : { mode: 'prepare', localIndex: target.localIndex, signature: target.signature, token }], 4_000)
+    if (!prepared?.ok && prepared?.code === 'NOT_FILE_INPUT') {
+      // Name the real file inputs so the next call can target one directly.
+      const choices = inputChoices(await discoverInputs(tab.id, io).catch(() => []))
+      throw fileFailure('NOT_FILE_INPUT', `${prepared.message} No file was assigned. File inputs on this page: ${choices || 'none found'}. Retry with input:<index>, an exact name, or the label of one of them.`, { mutationPossible: false })
+    }
     if (!prepared?.ok) throw fileFailure(prepared?.code ?? 'UPLOAD_TARGET_FAILED', prepared?.message ?? 'The file input could not be prepared; no file was assigned.')
     attempted = true
     await io.setFileInput(tab.id, token, request.path)
@@ -430,7 +460,8 @@ export async function executeUpload(args, io) {
         filename: verified.files[0].name,
         size: verified.files[0].size,
         mime: verified.files[0].type,
-        verifiedBy: 'file-input-readback',
+        verifiedBy: verified.clearedByPage === true ? 'change-event-capture' : 'file-input-readback',
+        ...(verified.clearedByPage === true ? { inputClearedByPage: true } : {}),
         input: {
           index: target.input,
           name: prepared.name,

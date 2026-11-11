@@ -68,6 +68,7 @@ import {
   unknownToolbarBaseline,
 } from './expect-executor.js'
 import { assertBatchExpectSequence } from './action-expect.js'
+import { unknownArgumentMessage } from './arg-errors.js'
 
 export const DEFAULT_SETTINGS = {
   bridgeUrl: 'ws://127.0.0.1:17871/bridge',
@@ -401,9 +402,28 @@ async function runInAllFrames(tabId, func, args = [], timeoutMs = 3_000) {
     .map(item => ({ frameId: Number(item.frameId) || 0, result: item.result }))
 }
 
-/** Page-side timer: the active tab is not throttled like a hidden side panel. */
+/**
+ * Page-side timer: the active tab is not throttled like a hidden side panel.
+ * A hidden tab clamps setTimeout to >=1 s, which would stretch every drag step
+ * into a multi-second wait; MessageChannel tasks are not timer-throttled, so
+ * pace with them while the tab is hidden (e.g. the user switched tabs mid-drag).
+ */
 function waitInPage(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
+  if (!document.hidden) return new Promise(resolve => setTimeout(resolve, ms))
+  return new Promise(resolve => {
+    const deadline = performance.now() + Math.max(0, Number(ms) || 0)
+    const channel = new MessageChannel()
+    channel.port1.onmessage = () => {
+      if (performance.now() >= deadline) {
+        channel.port1.close()
+        channel.port2.close()
+        resolve()
+      } else {
+        channel.port2.postMessage(0)
+      }
+    }
+    channel.port2.postMessage(0)
+  })
 }
 
 /** @param {number} tabId @param {number} ms */
@@ -1934,11 +1954,35 @@ async function clickLabelled(label) {
   const hitRoot = hit?.getRootNode?.()
   const hitHost = hitRoot instanceof ShadowRoot ? hitRoot.host : undefined
   if (!hit || (hit !== el && !el.contains(hit) && !hit.contains(el) && hitHost !== el && !el.contains(hitHost))) {
+    // Say what is on top, and its label when it has one, so the model can
+    // dismiss or click it in one step instead of taking a view to find out.
+    let cover
+    if (hit) {
+      let labelled = hit
+      let coverLabel
+      for (let depth = 0; depth < 12 && labelled && coverLabel === undefined; depth += 1) {
+        const id = state?.idsByElement?.get(labelled)
+        if (Number.isSafeInteger(id)) coverLabel = id
+        else labelled = labelled.parentElement ?? labelled.getRootNode?.()?.host ?? null
+      }
+      const described = coverLabel === undefined ? hit : labelled
+      const coverText = String(described.getAttribute?.('aria-label') ?? described.innerText ?? described.textContent ?? '').replace(/\s+/gu, ' ').trim().slice(0, 80)
+      cover = {
+        tag: described.tagName.toLowerCase(),
+        role: described.getAttribute?.('role') ?? '',
+        text: coverText,
+        ...(coverLabel === undefined ? {} : { label: coverLabel }),
+      }
+    }
+    const coverNote = !cover
+      ? 'nothing hit-testable is at its centre'
+      : `it is covered by ${cover.label === undefined ? 'an unlabelled' : `label ${cover.label}, a`} <${cover.tag}>${cover.role ? ` role=${cover.role}` : ''}${cover.text ? ` ${JSON.stringify(cover.text)}` : ''}`
     return {
       ok: false,
       code: 'OBSCURED',
-      message: `Label ${label} is covered by another element at its centre. Dismiss the overlay or take a fresh view.`,
+      message: `Label ${label} is covered by another element at its centre: ${coverNote}. No click was dispatched. ${cover?.label === undefined ? 'Dismiss the overlay (Escape or its close control) or take a fresh view.' : `Act on label ${cover.label} first (close or dismiss it), then retry.`}`,
       clicked: { label, tag, role, text },
+      ...(cover ? { cover } : {}),
     }
   }
 
@@ -2554,7 +2598,7 @@ async function syntheticDrag(fromX, fromY, toX, toY) {
  * textarea, input, or [role="textbox"]. Self-contained page function.
  * @param {number} label
  */
-function focusTypingTarget(label) {
+function focusTypingTarget(label, mode) {
   const state = globalThis.__crazyagent
   const el = state?.byId?.get(label)
   if (!el) return { ok: false, code: 'UNKNOWN_LABEL', message: `Label ${label} is not in the current view.` }
@@ -2567,6 +2611,16 @@ function focusTypingTarget(label) {
     return null
   }
   let target = typingTarget(el)
+  // A <label> names exactly one control. Resolve it before any nearby-field
+  // search, which could otherwise land on a different input in the same form.
+  const labelElement = !target ? el.closest?.('label') : null
+  if (labelElement) {
+    const control = labelElement.control
+    if (control) {
+      target = typingTarget(control)
+      if (!target) return { ok: false, code: 'NOT_EDITABLE', message: `Label ${label} belongs to a control that does not accept text.` }
+    }
+  }
   if (!target) target = el.querySelector?.(TYPING_SELECTOR) ?? null
   if (!target) {
     let ancestor = el.parentElement
@@ -2590,6 +2644,33 @@ function focusTypingTarget(label) {
     ? String(target.value ?? '')
     : String(target.innerText ?? target.textContent ?? '')
   const before = read()
+  // Trusted insertText types at the caret. For mode "replace", select the whole
+  // existing content first so the inserted text replaces it instead of joining it.
+  let replaceSelected = false
+  if (mode === 'replace' && before.length > 0) {
+    try {
+      if (tag === 'input' || tag === 'textarea') {
+        target.select()
+        replaceSelected = target.selectionStart === 0 && target.selectionEnd === before.length
+        if (!replaceSelected) {
+          target.setSelectionRange(0, String(target.value ?? '').length)
+          replaceSelected = target.selectionStart === 0 && target.selectionEnd === String(target.value ?? '').length
+        }
+      } else {
+        const range = document.createRange()
+        range.selectNodeContents(target)
+        const selection = (target.ownerDocument ?? document).getSelection()
+        selection.removeAllRanges()
+        selection.addRange(range)
+        replaceSelected = selection.isCollapsed === false
+      }
+    } catch {
+      replaceSelected = false
+    }
+    if (!replaceSelected) {
+      return { ok: false, code: 'REPLACE_UNSUPPORTED', message: `Label ${label} resolves to a field whose existing text cannot be selected for replacement; nothing was typed. Use mode:"append" or clear the field first.` }
+    }
+  }
   const active = document.activeElement
   const activeEditable = Boolean(active && (typingTarget(active) || active.isContentEditable === true))
   return {
@@ -2597,6 +2678,7 @@ function focusTypingTarget(label) {
     tag,
     type,
     isPassword,
+    replaceSelected,
     beforeChars: before.length,
     beforePreview: isPassword ? `[password ${before.length} chars]` : before.slice(0, 120),
     activeTag: active ? active.tagName.toLowerCase() : '',
@@ -5090,6 +5172,7 @@ async function clickAt(settings, args) {
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
   const request = parseClickAtArgs(args)
+  assertNotRefusedRetry(tab, 'click_at', args)
   const canvasEditor = canvasEditorForUrl(tab.url)
   const burstError = canvasBurstError(tab.url ?? '', request.points.length)
   if (burstError) throw new BrowserError(burstError.code, burstError.message)
@@ -6345,13 +6428,46 @@ async function dragCoordinates(tab, args) {
   return { args: rest, basis }
 }
 
+/** Injected: the opaque surface tag under a viewport point, or null. */
+function surfaceAtPoint(x, y) {
+  const tag = document.elementFromPoint(x, y)?.tagName?.toLowerCase()
+  return ['iframe', 'frame', 'canvas', 'video', 'object', 'embed'].includes(tag) ? tag : null
+}
+
+/**
+ * Diagnostic pixel comparison for a drag over an iframe/canvas/video surface.
+ * It never decides the drag outcome; it only tells the model whether the region
+ * looks different from the last full view of the same viewport and scroll.
+ */
+async function dragSurfacePixels(before, after, dragResult) {
+  const from = dragResult?.from
+  const to = dragResult?.to
+  if (!before?.image?.data || !after?.image?.data || !from || !to) return { measured: false, reason: 'no-previous-image' }
+  const sameScope = before.viewport?.width === after.viewport?.width && before.viewport?.height === after.viewport?.height
+    && Math.round(before.scroll?.x ?? 0) === Math.round(after.scroll?.x ?? 0)
+    && Math.round(before.scroll?.y ?? 0) === Math.round(after.scroll?.y ?? 0)
+  if (!sameScope) return { measured: false, reason: 'viewport-or-scroll-differs' }
+  try {
+    const radius = Math.max(120, Math.hypot(to.x - from.x, to.y - from.y) / 2 + 60)
+    const diff = await diffRegion(before, after, (from.x + to.x) / 2, (from.y + to.y) / 2, radius)
+    return { measured: true, changed: diff.changed, percent: diff.percent, comparedWithViewId: before.viewId }
+  } catch {
+    return { measured: false, reason: 'comparison-failed' }
+  }
+}
+
 async function drag(settings, args) {
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
   const docsError = docsDragError(tab.url)
   if (docsError) throw new BrowserError(docsError.code, docsError.message)
+  assertNotRefusedRetry(tab, 'drag', args)
   const mapped = await dragCoordinates(tab, args)
+  const viewBefore = lastViewByTab.get(tab.id)
+  const imageBefore = viewBefore?.image?.data
+    ? { viewId: viewBefore.viewId, image: viewBefore.image, viewport: viewBefore.viewport, scroll: viewBefore.scroll }
+    : undefined
   let result
   try {
     result = await executeTrustedDrag(mapped.args, dragDriver(tab.id))
@@ -6367,6 +6483,7 @@ async function drag(settings, args) {
       error: { code: error.code, message: error.message },
       drag: {
         status: 'unchanged',
+        distancePx: error.distancePx,
         dispatch: error.dispatch,
         outcome: error.outcome,
         sourceOutcome: error.sourceOutcome,
@@ -6380,12 +6497,15 @@ async function drag(settings, args) {
     error.mutationPossible = true
     throw error
   }
-  const viewMode = actionViewForTab(activeTab, parseViewArg(args, 'full'))
+  // A surface drag has no DOM evidence, so the model always gets a full view to read.
+  const surface = result.drag?.surface
+  const viewMode = surface ? 'full' : actionViewForTab(activeTab, parseViewArg(args, 'full'))
   const { payload } = await buildActionView(activeTab, settings, viewMode, {
     changed: result.changed,
     signals: result.signals,
     derive: () => ({ changed: result.changed, signals: result.signals }),
   })
+  if (surface) result.drag.pixels = await dragSurfacePixels(imageBefore, payload, result.drag)
   return {
     ...payload,
     ...result,
@@ -6480,6 +6600,7 @@ async function selectRange(settings, args) {
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
+  assertNotRefusedRetry(tab, 'select', args)
   const canvasEditor = canvasEditorForUrl(tab.url)
   const selectionError = canvasSelectionError(tab.url ?? '')
   if (selectionError) throw new BrowserError(selectionError.code, selectionError.message)
@@ -6560,7 +6681,20 @@ async function selectRange(settings, args) {
     from: { space: request.space, x: request.from.x, y: request.from.y, cssX: Math.round(fromCss.x), cssY: Math.round(fromCss.y) },
     to: { space: request.space, x: request.to.x, y: request.to.y, cssX: Math.round(toCss.x), cssY: Math.round(toCss.y) },
   }
-  const changed = canvasEditor ? null : Number(chars) > 0
+  // A collapsed page selection says nothing when the drag started on an
+  // iframe/canvas/video: any selection lives inside that surface.
+  let selectSurface = null
+  if (!canvasEditor && !(Number(chars) > 0)) {
+    selectSurface = await runInTab(tab.id, surfaceAtPoint, [fromCss.x, fromCss.y], 2_000).catch(() => null)
+    if (selectSurface) {
+      selected.collapsed = null
+      selected.verified = false
+      selected.dispatched = true
+      selected.surface = selectSurface
+      request.view = 'full'
+    }
+  }
+  const changed = canvasEditor || selectSurface ? null : Number(chars) > 0
   const signals = changed === true ? ['selection-changed'] : []
   const basisFields = basis ? { basis: basisSummary(basis) } : {}
   if (batchDepth > 0) return { changed, signals, selected, ...basisFields }
@@ -6579,7 +6713,7 @@ async function selectRange(settings, args) {
 async function trustedTypeIntoFallbackTarget(tabId, target, request) {
   let focused
   try {
-    focused = await runInFrame(tabId, target.frameId, focusTypingTarget, [target.localId], 3_000)
+    focused = await runInFrame(tabId, target.frameId, focusTypingTarget, [target.localId, request.mode], 3_000)
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
     if (code === 'SCRIPT_TIMEOUT') {
@@ -8967,7 +9101,8 @@ async function docsReadLocked(settings, args, tab, driver) {
 
 export async function docsRead(settings, args, io = {}) {
   if (args?.action !== 'read') throw docsFailure('validate', 'BAD_DOCS_ACTION', 'docs action must be read')
-  if (Object.keys(args).some(key => !['action', 'format', 'max_chars', 'offset'].includes(key))) throw docsFailure('validate', 'BAD_DOCS_READ_ARGUMENT', 'docs read received an unknown argument')
+  const unknownRead = unknownArgumentMessage('docs read', args, ['action', 'format', 'max_chars', 'offset'])
+  if (unknownRead) throw docsFailure('validate', 'BAD_DOCS_READ_ARGUMENT', unknownRead)
   if (!['outline', 'text', 'html'].includes(args.format ?? 'outline')) throw docsFailure('validate', 'BAD_DOCS_READ_FORMAT', 'format must be outline, text, or html')
   if (args.max_chars !== undefined && (!Number.isInteger(args.max_chars) || args.max_chars < 100 || args.max_chars > 100_000)) {
     throw docsFailure('validate', 'BAD_DOCS_READ_CHARS', 'max_chars must be an integer from 100 to 100000')
@@ -9040,7 +9175,8 @@ function docsWriteValidateBlocks(blocks) {
   for (const [index, block] of blocks.entries()) {
     if (!block || typeof block !== 'object' || Array.isArray(block)) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] must be an object`)
     const allowed = new Set(['text', 'runs', 'items', 'list', 'blank', 'page_break', ...DOCS_WRITE_FORMAT_FIELDS])
-    if (Object.keys(block).some(key => !allowed.has(key))) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] has an unknown argument`)
+    const unknownBlock = unknownArgumentMessage(`blocks[${index}]`, block, allowed)
+    if (unknownBlock) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', unknownBlock)
     if (block.blank !== undefined && block.blank !== true) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}].blank must be true when present`)
     if (block.page_break !== undefined && block.page_break !== true) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}].page_break must be true when present`)
     const kinds = [block.text !== undefined, block.runs !== undefined, block.items !== undefined, block.blank === true, block.page_break === true].filter(Boolean).length
@@ -9067,7 +9203,8 @@ function docsWriteValidateBlocks(blocks) {
         const path = `blocks[${index}].runs[${runIndex}]`
         if (!run || typeof run !== 'object' || Array.isArray(run)) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `${path} must be an object`)
         const runAllowed = new Set(['text', ...DOCS_WRITE_INLINE_FIELDS])
-        if (Object.keys(run).some(key => !runAllowed.has(key))) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `${path} has an unknown argument`)
+        const unknownRun = unknownArgumentMessage(path, run, runAllowed)
+        if (unknownRun) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', unknownRun)
         if (typeof run.text !== 'string' || run.text.trim().length === 0 || /[\r\n]/u.test(run.text)) {
           throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `${path}.text must be one non-empty single-line string`)
         }
@@ -10637,7 +10774,8 @@ function normalizeDelayMs(value) {
 
 export function parseDialogArgs(args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new BrowserError('BAD_DIALOG', 'dialog arguments must be an object')
-  if (Object.keys(args).some(key => !['action', 'prompt_text'].includes(key))) throw new BrowserError('BAD_DIALOG', 'dialog received an unknown argument')
+  const unknownDialog = unknownArgumentMessage('dialog', args, ['action', 'prompt_text'])
+  if (unknownDialog) throw new BrowserError('BAD_DIALOG', unknownDialog)
   if (args.action !== 'accept' && args.action !== 'dismiss') throw new BrowserError('BAD_DIALOG', "action must be 'accept' or 'dismiss'")
   if (args.prompt_text !== undefined && (args.action !== 'accept' || typeof args.prompt_text !== 'string' || args.prompt_text.length > 20_000)) {
     throw new BrowserError('BAD_DIALOG', 'prompt_text is optional text of at most 20000 characters and is valid only when accepting a prompt')
@@ -10997,6 +11135,76 @@ async function finishDialogResult(op, result, cursor) {
   return addDialogReports(result, reports)
 }
 
+/** @type {Map<number, {signature: string, viewId: number, code: string}>} coordinates refused with an attached view */
+const refusedCoordinatesByTab = new Map()
+
+/** Coordinate arguments of one call, without the view options that do not move the target. */
+function coordinateSignature(op, args) {
+  const { view: _view, view_id: _viewId, expect: _expect, ...rest } = args ?? {}
+  return JSON.stringify([op, Object.keys(rest).sort().map(key => [key, rest[key]])])
+}
+
+/**
+ * Refuse a blind repeat of coordinates that were just refused. They stay
+ * refused until the model either names the attached view (image coordinates
+ * with its view_id) or a newer view exists; different coordinates mean the
+ * model measured again, exactly as after its own screenshot.
+ * @param {chrome.tabs.Tab} tab
+ * @param {'click_at'|'select'|'drag'} op
+ * @param {Record<string, any>} args
+ */
+function assertNotRefusedRetry(tab, op, args) {
+  const entry = refusedCoordinatesByTab.get(tab.id)
+  if (!entry) return
+  const latest = lastViewByTab.get(tab.id)
+  if (Number(latest?.viewId) !== entry.viewId || coordinateSignature(op, args) !== entry.signature) {
+    refusedCoordinatesByTab.delete(tab.id)
+    return
+  }
+  if (args?.space !== 'css' && Number(args?.view_id) === entry.viewId) {
+    refusedCoordinatesByTab.delete(tab.id)
+    return
+  }
+  const error = new BrowserError(entry.code, `These are the same coordinates that were just refused (${entry.code}); they were measured on an older view. Measure the target again on view #${entry.viewId}${args?.space === 'css' ? ' or take a fresh view' : ` and pass view_id:${entry.viewId}`}; no input was dispatched.`)
+  error.mutationPossible = false
+  error.refusedRetry = true
+  throw error
+}
+
+const COORDINATE_OPS = new Set(['click_at', 'select', 'drag'])
+const COORDINATE_REFUSALS = new Set(['STALE_VIEW', 'AMBIGUOUS_VIEW', 'NO_VIEW'])
+
+/**
+ * A coordinate guard refused before any input. The guard itself is unchanged;
+ * this only saves the model the separate screenshot call it always needs next,
+ * by attaching a fresh full view to the refusal. Batches keep throwing: a
+ * refused step must stop the batch.
+ */
+async function coordinateRefusalWithView(op, args, error, settings) {
+  if (!COORDINATE_OPS.has(op) || !COORDINATE_REFUSALS.has(error?.code) || error?.mutationPossible === true) return undefined
+  if (batchDepth > 0 || error?.refusedRetry === true) return undefined
+  let shot
+  try {
+    shot = await snapshot('normal', settings)
+  } catch {
+    return undefined
+  }
+  if (!shot?.image?.data || !Number.isFinite(Number(shot.viewId)) || !Number.isFinite(Number(shot.tab?.id))) return undefined
+  // The attached view becomes the tab's coordinate basis. The refused numbers
+  // were measured on an older view, so they must not ride in on the new one.
+  refusedCoordinatesByTab.set(shot.tab.id, { signature: coordinateSignature(op, args), viewId: Number(shot.viewId), code: error.code })
+  return {
+    ...shot,
+    op,
+    attempted: false,
+    ok: false,
+    changed: false,
+    signals: [],
+    mutationPossible: false,
+    refused: { code: error.code, message: error.message },
+  }
+}
+
 export async function execute(op, args = {}, settings) {
   const normalized = normalizeSettings(settings)
   if (normalized.paused) throw new BrowserError('PAUSED', 'Browser access is paused in the side panel.')
@@ -11008,6 +11216,8 @@ export async function execute(op, args = {}, settings) {
     return refreshActionEvidence(op, await finishDialogResult(op, result, cursor))
   } catch (error) {
     if (error?.name === 'ActionExpectError' || ['BAD_EXPECT', 'EXPECT_UNSUPPORTED', 'EXPECT_BASELINE_UNAVAILABLE'].includes(error?.code)) throw error
+    const refusal = await coordinateRefusalWithView(op, args, error, normalized)
+    if (refusal) return refusal
     if (op === 'dialog' && error?.code !== 'DIALOG_PENDING') throw error
     let pending = error?.dialog
     if (!pending) {

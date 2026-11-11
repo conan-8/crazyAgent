@@ -176,7 +176,11 @@ const reveal = await evaluate(`(async () => { ${prefix}
   await preserveSelection()
   const result = await mod.execute('find', { query: 'UNIQUE-FIND-MARKER', reveal: true }, settings)
   let staleError
-  try { await mod.execute('click_at', { x: 10, y: 10, view_id: ${initial.viewId}, view: 'none' }, settings) } catch (caught) { staleError = { code: caught.code, message: caught.message } }
+  try {
+    const refusedResult = await mod.execute('click_at', { x: 10, y: 10, view_id: ${initial.viewId}, view: 'none' }, settings)
+    // The refusal now carries a fresh full view instead of throwing; it is still a refusal.
+    if (refusedResult?.refused) staleError = { ...refusedResult.refused, attempted: refusedResult.attempted, hasImage: Boolean(refusedResult.image?.data) }
+  } catch (caught) { staleError = { code: caught.code, message: caught.message } }
   return { result, state: await state(), staleError }
 })()`)
 assert.equal(reveal.result.find.revealed, true)
@@ -192,6 +196,8 @@ assert.equal(reveal.state.selection, initial.state.selection, 'reveal preserves 
 assert.equal(reveal.state.value, 'preserve this value', 'reveal preserves field content')
 assert.equal(reveal.state.clicks, 'clicks 0', 'reveal dispatches no click')
 assert.equal(reveal.staleError?.code, 'NO_VIEW', 'reveal invalidates the previous coordinate basis')
+assert.equal(reveal.staleError.attempted, false, 'the refused click was not attempted')
+assert.equal(reveal.staleError.hasImage, true, 'the refusal carries a fresh full view')
 console.log('PASS reveal scrolls only, preserves user state, returns a fresh view, and rejects old coordinates')
 
 const canvas = await evaluate(`(async () => { ${prefix}

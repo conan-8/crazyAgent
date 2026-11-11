@@ -32,11 +32,13 @@
  *   export const name; export const fixture; export const prompt;
  *   export const maxTurnSeconds?; export async function setup?(ctx);
  *   export async function check(ctx);      // -> {status,reasons,evidence}
- *   export async function tamper?(ctx);    // used by --self-test
+ *   export async function tamper?(ctx);    // used by --self-test: must not pass
+ *   export async function solve?(ctx);     // used by --self-test: must pass
  *
  * ctx = {
- *   fixtureUrl(path), currentUrl(), evaluate(expression), navigateFixture(path),
- *   requests(), resetRequests(), turn
+ *   fixtureUrl(path), crossOriginUrl(path), currentUrl(), evaluate(expression),
+ *   evaluateFrame(urlPart, expression), navigateFixture(path), requests(),
+ *   resetRequests(), downloadsDir, downloads(), cdp(method, params), turn
  * }
  * `check` must read independent ground truth: page state through the harness's
  * own CDP connection, or the fixture server request log. It never sees tool
@@ -305,7 +307,7 @@ const MIME = {
 async function startFixtureServer() {
   /** @type {Array<Record<string, any>>} */
   const requests = []
-  const server = createServer((request, response) => {
+  const handle = (request, response) => {
     const chunks = []
     request.on('data', chunk => {
       chunks.push(chunk)
@@ -321,6 +323,8 @@ async function startFixtureServer() {
         path: new URL(request.url, 'http://127.0.0.1').pathname,
         at: nowIso(),
         contentType,
+        origin: typeof request.headers.origin === 'string' ? request.headers.origin : null,
+        host: typeof request.headers.host === 'string' ? request.headers.host : null,
         bodyLength: raw.length,
         body: textLike ? raw.toString('utf8') : raw.toString('base64'),
         bodyEncoding: textLike ? 'utf8' : 'base64',
@@ -354,18 +358,30 @@ async function startFixtureServer() {
       response.writeHead(200, { 'content-type': MIME[extname(absolute)] ?? 'application/octet-stream' })
       response.end(readFileSync(absolute))
     })
-  })
+  }
+  const server = createServer(handle)
   await new Promise((resolve, reject) => {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', resolve)
   })
   const { port } = server.address()
+  // Pages on 127.0.0.1 embed frames from http://localhost:<port> so the frame
+  // is cross-site (its own OOPIF). The browser may try ::1 first for
+  // localhost, so the same handler also listens there; loopback only, never
+  // every interface. Hosts without IPv6 fall back to 127.0.0.1.
+  const serverV6 = createServer(handle)
+  const v6 = await new Promise(resolve => {
+    serverV6.once('error', () => resolve(false))
+    serverV6.listen(port, '::1', () => resolve(true))
+  })
+  const closeOne = target => new Promise(resolve => target.close(() => resolve()))
   return {
     baseUrl: `http://127.0.0.1:${port}`,
+    crossOriginBaseUrl: `http://localhost:${port}`,
     port,
     requests,
     reset: () => { requests.length = 0 },
-    close: () => new Promise(resolve => server.close(() => resolve())),
+    close: async () => { await Promise.all([closeOne(server), ...(v6 ? [closeOne(serverV6)] : [])]) },
   }
 }
 
@@ -643,7 +659,7 @@ async function injectExtensionSettings({ edge, bridgeUrl, token, verbose }) {
  * Start a second companion with its own harness home and the real model.
  * The API key is passed in the environment only.
  */
-async function startCompanion({ dshHome, bridgePort, remotePort, model, effort, apiKey, logPath }) {
+async function startCompanion({ dshHome, bridgePort, remotePort, model, effort, apiKey, logPath, downloadsDir }) {
   const stream = createWriteStream(logPath, { mode: 0o600 })
   const child = spawn(process.execPath, [
     COMPANION_ENTRY,
@@ -655,7 +671,13 @@ async function startCompanion({ dshHome, bridgePort, remotePort, model, effort, 
     '--reasoning-effort', effort,
   ], {
     cwd: ROOT,
-    env: { ...process.env, CRAZYAGENT_API_KEY: apiKey },
+    env: {
+      ...process.env,
+      CRAZYAGENT_API_KEY: apiKey,
+      // File tools are confined to this folder; it is the same one the
+      // isolated Edge downloads into, never the user's ~/Downloads.
+      ...(downloadsDir ? { CRAZYAGENT_DOWNLOADS_DIR: downloadsDir } : {}),
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let exited = null
@@ -826,7 +848,7 @@ function readTurnMetrics(eventsPath, turnId) {
       names.set(event.data?.callId, name)
       metrics.toolCounts[name] = (metrics.toolCounts[name] ?? 0) + 1
     } else if (event.type === 'tool.result') {
-      if (event.data?.ok === false) {
+      if (event.data?.ok === false || /^refused [A-Z_]+:/u.test(String(event.data?.text ?? ''))) {
         metrics.failedCalls += 1
         metrics.failed.push({
           kind: 'tool',
@@ -880,6 +902,7 @@ async function loadScenarios(selected) {
       setup: module.setup,
       check: module.check,
       tamper: module.tamper,
+      solve: module.solve,
       file,
     }
     if (typeof scenario.name !== 'string' || scenario.name.length === 0) throw new Error(`${file} exports no name`)
@@ -925,16 +948,69 @@ const EMPTY_TURN = Object.freeze({
   finalText: null,
 })
 
-function makeCtx({ fixtureServer, page, turn }) {
+/**
+ * Evaluate in a site-isolated (OOPIF) frame through its own CDP target. The
+ * page target cannot reach into a cross-site frame, so checkers read inner
+ * ground truth here, never through the agent.
+ */
+async function evaluateInFrame(edge, urlPart, expression) {
+  const frame = await until(`an iframe target matching ${urlPart}`, async () => {
+    const targets = await listTargets(edge.cdpHttp)
+    return targets.find(target => target.type === 'iframe' && String(target.url).includes(urlPart))
+  }, 10_000)
+  const connection = await connectCdp(frame.webSocketDebuggerUrl)
+  try {
+    return await connection.evaluate(expression)
+  } finally {
+    connection.close()
+  }
+}
+
+/** Regular files directly inside the harness-owned Downloads folder. */
+function listDownloads(downloadsDir) {
+  if (!downloadsDir || !existsSync(downloadsDir)) return []
+  return readdirSync(downloadsDir, { withFileTypes: true })
+    .filter(entry => entry.isFile())
+    .map(entry => {
+      const bytes = readFileSync(join(downloadsDir, entry.name))
+      return { name: entry.name, size: bytes.length, bytes }
+    })
+}
+
+/** Empty the harness-owned Downloads folder (only ever a temp path the harness created). */
+function resetDownloads(downloadsDir) {
+  if (!downloadsDir) return
+  const resolved = resolve(downloadsDir)
+  if (!resolved.startsWith(`${resolve(tmpdir())}${sep}`)) throw new Error(`refusing to clear a Downloads folder outside temp: ${resolved}`)
+  rmSync(resolved, { recursive: true, force: true })
+  mkdirSync(resolved, { recursive: true })
+}
+
+function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null }) {
   return {
     fixtureUrl: path => `${fixtureServer.baseUrl}/${String(path).replace(/^\/+/u, '')}`,
+    crossOriginUrl: path => `${fixtureServer.crossOriginBaseUrl}/${String(path).replace(/^\/+/u, '')}`,
     currentUrl: () => page.currentUrl(),
     evaluate: expression => page.evaluate(expression),
+    evaluateFrame: (urlPart, expression) => {
+      if (edge === null) throw new Error('evaluateFrame needs the harness browser')
+      return evaluateInFrame(edge, urlPart, expression)
+    },
+    /** Raw CDP on the page target; for solve()/tamper() hooks only, never check(). */
+    cdp: async (method, params) => (await page.ensure()).send(method, params),
     navigateFixture: path => page.navigate(`${fixtureServer.baseUrl}/${String(path).replace(/^\/+/u, '')}`),
     requests: () => fixtureServer.requests.map(request => ({ ...request })),
     resetRequests: () => fixtureServer.reset(),
+    downloadsDir,
+    downloads: () => listDownloads(downloadsDir),
     turn,
   }
+}
+
+/** Send browser downloads to the harness folder instead of the profile default (~/Downloads). */
+async function routeDownloads(edge, downloadsDir) {
+  mkdirSync(downloadsDir, { recursive: true })
+  await edge.browser.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloadsDir, eventsEnabled: false })
 }
 
 // ---------------------------------------------------------------------------
@@ -962,6 +1038,8 @@ async function runSelfTest(options, scenarios) {
       verbose: options.verbose,
     })
     stage(`edge CDP ready (${edge.version?.Browser ?? 'unknown'})`)
+    const downloadsDir = join(runRoot, 'Downloads')
+    await routeDownloads(edge, downloadsDir)
     await until('the initial page target', async () => {
       const targets = await listTargets(edge.cdpHttp)
       return targets.find(target => target.type === 'page')
@@ -973,8 +1051,9 @@ async function runSelfTest(options, scenarios) {
     for (const scenario of scenarios) {
       stage(`scenario ${scenario.name}`)
       const context = fixtureServer
-      const baseCtx = turn => makeCtx({ fixtureServer, page, turn: turn ?? EMPTY_TURN })
+      const baseCtx = turn => makeCtx({ fixtureServer, page, turn: turn ?? EMPTY_TURN, edge, downloadsDir })
       // 1. The untouched start state must never pass.
+      resetDownloads(downloadsDir)
       await page.reset(scenario.fixture)
       if (typeof scenario.setup === 'function') await scenario.setup(baseCtx())
       fixtureServer.reset()
@@ -994,6 +1073,7 @@ async function runSelfTest(options, scenarios) {
       let tamperedStatus = '(no tamper hook)'
       let tamperedOk = true
       if (typeof scenario.tamper === 'function') {
+        resetDownloads(downloadsDir)
         await page.reset(scenario.fixture)
         if (typeof scenario.setup === 'function') await scenario.setup(baseCtx())
         fixtureServer.reset()
@@ -1011,14 +1091,37 @@ async function runSelfTest(options, scenarios) {
           tamperedStatus = `threw: ${error.message}`
         }
       }
-      const line = `ok   ${pad(scenario.name, 22)} untouched ${pad(initial.status, 7)} tampered ${tamperedStatus}`
-      process.stdout.write(`${tamperedOk ? line : `FAIL ${line.slice(5)}`}\n`)
+      // 3. Optional positive control: a harness-made correct end state must pass,
+      // so a checker cannot be "safe" merely by rejecting everything.
+      let solvedStatus = null
+      let solvedOk = true
+      if (typeof scenario.solve === 'function') {
+        resetDownloads(downloadsDir)
+        await page.reset(scenario.fixture)
+        if (typeof scenario.setup === 'function') await scenario.setup(baseCtx())
+        fixtureServer.reset()
+        try {
+          await scenario.solve(baseCtx())
+          const solved = normalizeCheck(await scenario.check(baseCtx()))
+          solvedStatus = solved.status
+          if (solved.status !== 'pass') {
+            solvedOk = false
+            failures.push(`${scenario.name}: check() did not pass the harness-solved state: ${solved.reasons.join('; ')}`)
+          }
+        } catch (error) {
+          solvedOk = false
+          solvedStatus = `threw: ${error.message}`
+          failures.push(`${scenario.name}: solve/check threw: ${error.message}`)
+        }
+      }
+      const line = `ok   ${pad(scenario.name, 22)} untouched ${pad(initial.status, 7)} tampered ${pad(tamperedStatus, 7)}${solvedStatus === null ? '' : ` solved ${solvedStatus}`}`
+      process.stdout.write(`${tamperedOk && solvedOk ? line : `FAIL ${line.slice(5)}`}\n`)
     }
     if (failures.length > 0) {
       process.stdout.write(`\nself-test FAILED (${failures.length}):\n${failures.map(line => `  - ${line}`).join('\n')}\n`)
       return 1
     }
-    process.stdout.write(`\nself-test passed for ${scenarios.length} scenario(s): every checker rejects the untouched and tampered states.\n`)
+    process.stdout.write(`\nself-test passed for ${scenarios.length} scenario(s): every checker rejects the untouched and tampered states and passes every solved state.\n`)
     stage('scenarios done; cleaning up')
   } finally {
     try { page?.close() } catch { /* best effort */ }
@@ -1104,7 +1207,9 @@ async function runModelBatch(options, scenarios) {
   const runRoot = mkdtempSync(join(tmpdir(), 'ca-model-eval-'))
   const edgeProfile = join(runRoot, 'edge-profile')
   const companionLog = join(runRoot, 'companion.log')
+  const downloadsDir = join(runRoot, 'Downloads')
   mkdirSync(edgeProfile, { recursive: true })
+  mkdirSync(downloadsDir, { recursive: true })
   const logsRoot = join(dshHome, 'browser-agent', 'logs')
   const startedAt = nowIso()
   const results = []
@@ -1173,6 +1278,7 @@ async function runModelBatch(options, scenarios) {
       effort: options.effort,
       apiKey,
       logPath: companionLog,
+      downloadsDir,
     })
     const remote = makeRemote({ remoteUrl: companion.remoteUrl, token: companion.token })
     const initialFixture = scenarios[0]?.fixture ?? 'click.html'
@@ -1184,6 +1290,7 @@ async function runModelBatch(options, scenarios) {
       loadExtension: true,
       verbose: options.verbose,
     })
+    await routeDownloads(edge, downloadsDir)
     await injectExtensionSettings({ edge, bridgeUrl: companion.bridgeUrl, token: companion.bridgeToken, verbose: options.verbose })
     await waitForRemoteReady({ remote, bridgePort, companion })
     await until('the companion run log', () => {
@@ -1210,7 +1317,7 @@ async function runModelBatch(options, scenarios) {
         }
         // Reset page + conversation so every run starts from the same state.
         await page.reset(scenario.fixture)
-        if (typeof scenario.setup === 'function') await scenario.setup(makeCtx({ fixtureServer, page, turn: EMPTY_TURN }))
+        if (typeof scenario.setup === 'function') await scenario.setup(makeCtx({ fixtureServer, page, turn: EMPTY_TURN, edge, downloadsDir }))
         // A settled turn may be idle, waiting_for_user (help/confirmation) or
         // error; only an active turn blocks starting a fresh chat.
         await until('the companion to be settled before a new chat', async () => {
@@ -1225,8 +1332,9 @@ async function runModelBatch(options, scenarios) {
           await sleep(500)
           await remote.newChat()
         }
+        resetDownloads(downloadsDir)
         await page.reset(scenario.fixture)
-        if (typeof scenario.setup === 'function') await scenario.setup(makeCtx({ fixtureServer, page, turn: EMPTY_TURN }))
+        if (typeof scenario.setup === 'function') await scenario.setup(makeCtx({ fixtureServer, page, turn: EMPTY_TURN, edge, downloadsDir }))
         fixtureServer.reset()
 
         const maxTurnSeconds = Number(scenario.maxTurnSeconds ?? options.maxTurnSeconds)
@@ -1299,7 +1407,7 @@ async function runModelBatch(options, scenarios) {
         turn.finalTurnState = state?.turn ?? null
         totalTokens += turn.totalTokens
 
-        const ctx = makeCtx({ fixtureServer, page, turn })
+        const ctx = makeCtx({ fixtureServer, page, turn, edge, downloadsDir })
         let check
         try {
           check = normalizeCheck(await scenario.check(ctx))
