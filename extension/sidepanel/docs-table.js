@@ -1,3 +1,4 @@
+import { unknownArgumentMessage } from './arg-errors.js'
 const DOCS_TABLE_MAX_ROWS = 100
 const DOCS_TABLE_MAX_COLUMNS = 20
 const DOCS_TABLE_MAX_EDITS = 100
@@ -24,9 +25,9 @@ function boundedIndex(value, maximum, label) {
 }
 
 function checkKeys(value, allowed, label) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !allowed.includes(key))) {
-    throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', `${label} contains an unknown or invalid argument`)
-  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', `${label} must be an object with: ${allowed.join(', ')}`)
+  const unknown = unknownArgumentMessage(label, value, allowed)
+  if (unknown) throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', unknown)
 }
 
 function optionalTable(args) {
@@ -134,7 +135,8 @@ export function parseDocsTableArgs(args = {}) {
     case 'insert_rows':
     case 'insert_columns': {
       const key = args.action === 'insert_rows' ? 'row' : 'column'
-      if (Object.keys(args).some(item => !['action', 'table', key, 'position', 'count'].includes(item))) throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', `${args.action} received an unknown argument`)
+      const unknown = unknownArgumentMessage(args.action, args, ['action', 'table', key, 'position', 'count'])
+      if (unknown) throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', unknown)
       if (args[key] !== undefined) boundedIndex(args[key], key === 'row' ? DOCS_TABLE_MAX_ROWS : DOCS_TABLE_MAX_COLUMNS, key)
       if (args.position !== undefined && !['before', 'after'].includes(args.position)) throw tableFailure('DOCS_TABLE_BAD_POSITION', 'position must be before or after')
       if (args.count !== undefined) boundedIndex(args.count, 20, 'count')
@@ -143,7 +145,8 @@ export function parseDocsTableArgs(args = {}) {
     case 'delete_rows':
     case 'delete_columns': {
       const key = args.action === 'delete_rows' ? 'rows' : 'columns'
-      if (Object.keys(args).some(item => !['action', 'table', key].includes(item))) throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', `${args.action} received an unknown argument`)
+      const unknown = unknownArgumentMessage(args.action, args, ['action', 'table', key])
+      if (unknown) throw tableFailure('DOCS_TABLE_BAD_ARGUMENT', unknown)
       const maximum = key === 'rows' ? DOCS_TABLE_MAX_ROWS : DOCS_TABLE_MAX_COLUMNS
       if (!Array.isArray(args[key]) || args[key].length < 1 || args[key].length > maximum) throw tableFailure('DOCS_TABLE_BAD_INDEX', `${key} must be a non-empty array`)
       const values = args[key].map((value, index) => boundedIndex(value, maximum, `${key}[${index}]`))

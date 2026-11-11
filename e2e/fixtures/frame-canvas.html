@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>crazyAgent Embedded Simulation Fixture</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; max-width: 760px; }
+    iframe { display: block; width: 600px; height: 280px; border: 1px solid #aaa; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Pendulum lab</h1>
+  <p>The simulation below is embedded from another site. Its controls are drawn on a canvas.</p>
+  <iframe id="sim" title="Pendulum lab simulation"></iframe>
+  <script>
+    // Served from 127.0.0.1; the frame comes from localhost on the same port,
+    // a different site, so the browser isolates it into its own process (OOPIF).
+    document.getElementById('sim').src = `http://localhost:${location.port}/frame-canvas-inner.html`
+  </script>
+</body>
+</html>

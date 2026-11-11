@@ -1,6 +1,6 @@
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 const MAX_FILENAME_CHARS = 1_024
 // `browser_download` may save a relative path such as reports/q1/x.pdf, so the
@@ -64,6 +64,23 @@ function normalizedSearch(value) {
   return text.replace(/\+/gu, ' ').replace(/\s+/gu, ' ').trim().toLowerCase()
 }
 
+/** Names in one folder that equal `wanted` once "+", URL escapes, case, and spacing are ignored. */
+async function nearMissNames(folder, wanted) {
+  let entries
+  try {
+    entries = await readdir(folder, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const target = normalizedSearch(wanted)
+  if (target.length === 0) return []
+  return entries
+    .filter(entry => entry.isFile() && entry.name !== wanted && normalizedSearch(entry.name) === target)
+    .map(entry => entry.name)
+    .sort()
+    .slice(0, 5)
+}
+
 export function createDownloadsFolder(configuredRoot) {
   const root = configuredRoot ?? resolve(homedir(), 'Downloads')
   if (typeof root !== 'string' || root.trim().length === 0 || !isAbsolute(root)) {
@@ -86,7 +103,25 @@ export function createDownloadsFolder(configuredRoot) {
       if (candidate !== base && !inside(base, candidate)) {
         throw downloadsError('DOWNLOADS_OUTSIDE_FOLDER', 'filename must stay inside the Downloads folder; no file was uploaded.')
       }
-      return resolvedFile(base, candidate, filename)
+      try {
+        return await resolvedFile(base, candidate, filename)
+      } catch (error) {
+        if (error?.code !== 'DOWNLOADS_FILE_NOT_FOUND') throw error
+        // Search treats "+" and spaces alike, so a model can ask for a name that
+        // differs from the real one only by that. Never substitute: name the
+        // exact files so the next call can use one.
+        const alternatives = await nearMissNames(dirname(candidate), basename(candidate))
+        if (alternatives.length === 0) throw error
+        const folder = publicFilename(base, dirname(candidate))
+        const exact = alternatives.map(name => JSON.stringify(folder ? `${folder}/${name}` : name))
+        const failure = downloadsError(
+          'DOWNLOADS_FILE_NOT_FOUND',
+          `${error.message}. No file was uploaded. ${alternatives.length === 1 ? `The exact name on disk is ${exact[0]}` : `Files with a similar name: ${exact.join(', ')}`}; retry with that exact filename ("+" and spaces are different characters).`,
+          error,
+        )
+        failure.alternatives = alternatives
+        throw failure
+      }
     },
     async verifyDownload(path) {
       if (typeof path !== 'string' || !isAbsolute(path) || path.includes('\0')) {

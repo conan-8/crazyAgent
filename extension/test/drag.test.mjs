@@ -6,6 +6,7 @@ import {
   docsDragError,
   dragProbe,
   evaluateDragDestinationOutcome,
+  applySurfaceUncertainty,
   evaluateDragOutcome,
   executeDrag,
   parseDragArgs,
@@ -259,8 +260,35 @@ test('trusted pointer drag holds, activates by 6px, interpolates, releases, and 
   assert.ok(pressedMoves.length >= 8)
   assert.equal(pressedMoves.at(-1).params.x, 110)
   assert.equal(mouse.at(-1).params.type, 'mouseReleased')
-  assert.equal(fake.sleeps[0], 60)
+  assert.ok(fake.sleeps.includes(60), 'the hold is paced')
+  assert.ok(fake.sleeps.indexOf(60) < fake.sleeps.indexOf(16), 'the hold precedes step pacing')
   assert.equal(fake.calls.some(call => call.method === 'Input.dispatchDragEvent'), false)
+})
+
+test('slow move acks force one discarded frame each so a hidden-tab drag still finishes', async () => {
+  const calls = []
+  const resolvers = []
+  const io = {
+    sendCommand: async (method, params) => {
+      calls.push({ method, type: params.type })
+      if (method === 'Input.dispatchMouseEvent' && params.type === 'mouseMoved') {
+        // A hidden tab never acks a coalesced move until a frame is forced.
+        await new Promise(resolve => resolvers.push(resolve))
+      }
+      if (method === 'Page.captureScreenshot') {
+        assert.deepEqual(params, { format: 'jpeg', quality: 1, optimizeForSpeed: true })
+        for (const resolve of resolvers.splice(0)) resolve()
+      }
+    },
+    onDragIntercepted: () => () => {},
+    sleep: async () => {},
+  }
+  const result = await dispatchTrustedDrag({ from: { x: 10, y: 10 }, to: { x: 110, y: 10 }, holdMs: 0, intercept: false }, io)
+  assert.equal(result.mouseReleased, true)
+  const captures = calls.filter(call => call.method === 'Page.captureScreenshot')
+  const moves = calls.filter(call => call.method === 'Input.dispatchMouseEvent' && call.type === 'mouseMoved')
+  assert.ok(moves.length >= 8)
+  assert.equal(captures.length, moves.length, 'every stalled move forced exactly one frame')
 })
 
 test('pointer-only dispatch can skip HTML5 interception without weakening release evidence', async () => {
@@ -312,7 +340,7 @@ test('a zero-distance long press sends hold and release without inventing moveme
   const fake = fakeCdp()
   const result = await dispatchTrustedDrag({ from: { x: 10, y: 10 }, to: { x: 10, y: 10 }, holdMs: 350 }, fake.io)
   assert.equal(result.movementCount, 0)
-  assert.equal(fake.sleeps[0], 350)
+  assert.ok(fake.sleeps.includes(350), 'the hold is paced')
   const moves = fake.calls.filter(call => call.method === 'Input.dispatchMouseEvent' && call.params.type === 'mouseMoved' && call.params.buttons === 1)
   assert.equal(moves.length, 0)
   assert.equal(fake.calls.some(call => call.params.type === 'mouseReleased'), true)
@@ -408,6 +436,7 @@ function fakeExecution(options = {}) {
     getActiveTab: async () => {
       tabReads += 1
       if (options.changeTabBeforeInput && tabReads > 1) return { ...tab, id: 8 }
+      if (options.changeTabAfterInput && tabReads > 2) return { ...tab, id: 8 }
       return tab
     },
     assertCapturable: async () => {},
@@ -435,7 +464,7 @@ function fakeExecution(options = {}) {
           x: 20,
           y: 30,
           viewport: { width: 800, height: 600 },
-          target: { tag: 'div', text: 'Source', native: options.native === true },
+          target: { tag: 'div', text: 'Source', native: options.native === true, surface: options.sourceSurface ?? null },
           before,
         }
       }
@@ -447,7 +476,7 @@ function fakeExecution(options = {}) {
         x,
         y,
         viewport: { width: 800, height: 600 },
-        target: { tag: 'div', text: 'Destination' },
+        target: { tag: 'div', text: 'Destination', surface: options.destinationSurface ?? null },
         before: destinationBefore,
       }
     },
@@ -554,6 +583,49 @@ test('a fully measured no-op fails even when native drop dispatch completed', as
   assert.equal(fake.probes.at(-1).phase, 'cleanup')
 })
 
+test('a quiet drag over an iframe, canvas, or video surface is unknown, never DRAG_NO_EFFECT', async () => {
+  for (const options of [
+    { sourceSurface: 'iframe', destinationSurface: 'iframe' },
+    { sourceSurface: 'canvas' },
+    { destinationSurface: 'video' },
+  ]) {
+    const fake = fakeExecution({ ...options, after: measuredSnapshot() })
+    const result = await executeDrag({ x: 20, y: 30, to_x: 180, to_y: 30 }, fake.io)
+    assert.equal(result.changed, null, JSON.stringify(options))
+    assert.equal(result.ok, null)
+    assert.equal(result.drag.status, 'unknown')
+    assert.equal(result.drag.outcome.complete, false)
+    assert.equal(result.mutationPossible, true)
+    assert.deepEqual(result.drag.surface, Object.fromEntries([
+      ...(options.sourceSurface ? [['source', options.sourceSurface]] : []),
+      ...(options.destinationSurface ? [['destination', options.destinationSurface]] : []),
+    ]))
+    assert.equal(result.drag.distancePx, 160)
+    // The DOM checks themselves are still reported honestly as unchanged.
+    assert.equal(result.drag.sourceOutcome.changed, false)
+  }
+})
+
+test('surface uncertainty keeps measured changes and leaves DOM-only outcomes alone', () => {
+  const quiet = { changed: false, complete: true, signals: [], checks: {}, unknownChecks: {} }
+  assert.equal(applySurfaceUncertainty(quiet, {}), quiet)
+  assert.equal(applySurfaceUncertainty(quiet, { source: null, destination: undefined }), quiet)
+  const moved = { ...quiet, changed: true, signals: ['bounds-changed'] }
+  const kept = applySurfaceUncertainty(moved, { source: 'canvas' })
+  assert.equal(kept.changed, true)
+  assert.deepEqual(kept.signals, ['bounds-changed'])
+  assert.deepEqual(kept.surface, { source: 'canvas' })
+})
+
+test('a measured DOM no-op still reports its distance for the short-drag hint', async () => {
+  const fake = fakeExecution({ after: measuredSnapshot() })
+  await assert.rejects(executeDrag({ label: 1, dx: 3 }, fake.io), error => {
+    assert.equal(error.code, 'DRAG_NO_EFFECT')
+    assert.equal(error.distancePx, 3)
+    return true
+  })
+})
+
 test('an unmeasurable rerender returns unknown instead of throwing no-op or claiming movement', async () => {
   const fake = fakeExecution({ after: measuredSnapshot({ connected: false, bounds: null }) })
   const result = await executeDrag({ label: 1, dx: 30 }, fake.io)
@@ -657,6 +729,20 @@ test('Docs guard and stale tab reject before probes or trusted input', async () 
   await assert.rejects(executeDrag({ label: 1, dx: 10 }, stale.io), error => error.code === 'DRAG_STALE_TAB' && error.mutationPossible === false)
   assert.equal(stale.io.debuggerRuns(), 0)
   assert.equal(stale.commands.length, 0)
+})
+
+test('a tab switch during dispatch keeps the input but refuses the stale outcome', async () => {
+  const fake = fakeExecution({ changeTabAfterInput: true })
+  await assert.rejects(executeDrag({ label: 1, to_label: 2 }, fake.io), error => {
+    assert.equal(error.code, 'DRAG_STALE_TAB')
+    assert.equal(error.mutationPossible, true)
+    assert.equal(error.dispatch.mode, 'pointer')
+    assert.equal(error.dispatch.mouseReleased, true)
+    return true
+  })
+  assert.ok(fake.commands.some(call => call.method === 'Input.dispatchMouseEvent' && call.params.type === 'mouseReleased'), 'the gesture finished on the original tab')
+  assert.equal(fake.probes.some(probe => probe.phase === 'after'), false, 'no stale measurement was taken')
+  assert.equal(fake.probes.at(-1).phase, 'cleanup')
 })
 
 test('measurement failure after input preserves mutationPossible and never becomes unchanged', async () => {

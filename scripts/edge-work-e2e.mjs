@@ -136,6 +136,49 @@ assert.ok(replace.inputEvents >= 1, 'DOM typing fires an input event')
 assert.ok(replace.image > 0, 'type returns a fresh labelled view')
 console.log('PASS label type replace — value + input event recorded')
 
+// B7: mode:"replace" aimed at a non-editable <label for> must replace its own
+// control's text (not append, and not land in another field).
+const notesLabelTag = setup.labels.find(item => item.text === 'Notes' && item.tag === 'label')
+assert.ok(notesLabelTag, `the <label for="notes"> element is labelled in the view: ${JSON.stringify(setup.labels.filter(item => item.tag === 'label'))}`)
+const viaLabel = await evaluate(`(async () => { ${prefix}
+  await chrome.scripting.executeScript({ target: { tabId }, func: () => {
+    document.getElementById('notes').value = 'old notes text'
+  } })
+  const replaced = await mod.execute('type', { label: ${notesLabelTag.id}, text: 'fresh notes', mode: 'replace', view: 'none' }, settings)
+  const afterReplace = { notes: await prop('notes', 'value'), name: await prop('name', 'value') }
+  const appended = await mod.execute('type', { label: ${notesLabelTag.id}, text: ' more', mode: 'append', view: 'none' }, settings)
+  const afterAppend = { notes: await prop('notes', 'value'), name: await prop('name', 'value') }
+  await chrome.scripting.executeScript({ target: { tabId }, func: () => { document.getElementById('notes').value = '' } })
+  return { method: replaced.typed?.method, afterReplace, afterAppend, appendMethod: appended.typed?.method }
+})()`)
+assert.deepEqual(viaLabel.afterReplace, { notes: 'fresh notes', name: 'Ada Lovelace' }, `replace through a <label> replaced only its control (method ${viaLabel.method})`)
+assert.equal(viaLabel.afterAppend.name, 'Ada Lovelace')
+assert.ok(viaLabel.afterAppend.notes.includes('fresh notes') && viaLabel.afterAppend.notes.includes(' more') && viaLabel.afterAppend.notes.length === 'fresh notes more'.length, `append through a <label> kept the text: ${viaLabel.afterAppend.notes}`)
+console.log(`PASS mode:"replace" through a <label for> replaces its control (${viaLabel.method}); append still appends`)
+
+// B6: a covered label says what is on top of it, and nothing is clicked.
+const covered = await evaluate(`(async () => { ${prefix}
+  await chrome.scripting.executeScript({ target: { tabId }, func: () => {
+    const field = document.getElementById('name').getBoundingClientRect()
+    const overlay = document.createElement('div')
+    overlay.id = 'e2e-cover'
+    overlay.setAttribute('role', 'dialog')
+    overlay.textContent = 'Cookie banner'
+    overlay.style.cssText = 'position:fixed;z-index:99999;background:#fff;left:' + (field.left - 4) + 'px;top:' + (field.top - 4) + 'px;width:' + (field.width + 8) + 'px;height:' + (field.height + 8) + 'px'
+    window.__coverClicks = 0
+    overlay.addEventListener('click', () => { window.__coverClicks += 1 })
+    document.body.append(overlay)
+  } })
+  let error
+  try { await mod.execute('click', { label: ${nameLabel}, view: 'none' }, settings) } catch (caught) { error = { code: caught.code, message: caught.message } }
+  const clicks = (await chrome.scripting.executeScript({ target: { tabId }, func: () => { const n = window.__coverClicks; document.getElementById('e2e-cover').remove(); return n } }))[0].result
+  return { error, clicks }
+})()`)
+assert.equal(covered.error?.code, 'OBSCURED', JSON.stringify(covered))
+assert.match(covered.error.message, /covered by an unlabelled <div> role=dialog "Cookie banner"\. No click was dispatched/u)
+assert.equal(covered.clicks, 0, 'the overlay independently saw no click')
+console.log('PASS a covered label names what covers it and dispatches nothing')
+
 const append = await evaluate(`(async () => { ${prefix}
   const before = Number(/input=(\\d+)/.exec(await read('events'))?.[1] ?? -1)
   const result = await mod.execute('type', { label: ${nameLabel}, text: '!', mode: 'append' }, settings)

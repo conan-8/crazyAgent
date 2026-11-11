@@ -118,7 +118,7 @@ async function run() {
 
   assert.equal(bridge.hasUi(), false)
   try {
-    await until('the worker APIs', () => workerCdp.evaluate('typeof chrome.storage?.local?.set === "function" && typeof chrome.alarms?.create === "function"'), 8_000)
+    await until('the worker APIs', () => workerCdp.evaluate('typeof chrome !== "undefined" && typeof chrome.storage?.local?.set === "function" && typeof chrome.alarms?.create === "function"'), 8_000)
   } catch (error) {
     process.stderr.write(`worker chrome keys: ${await workerCdp.evaluate('Object.keys(chrome).join(",")')}\nworker url: ${worker.url}\n`)
     throw error

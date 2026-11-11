@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pendulum lab simulation</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #fff; }
+    canvas { display: block; width: 600px; height: 280px; touch-action: none; }
+  </style>
+</head>
+<body>
+  <canvas id="lab" width="600" height="280"></canvas>
+  <script>
+    // Canvas-only controls: no DOM inputs, no accessibility tree. A slider moves
+    // only when its thumb is pressed and dragged with trusted pointer input;
+    // pressing the track does nothing (like many embedded simulations).
+    // window.__lab is read by the eval harness over its own CDP connection.
+    const canvas = document.getElementById('lab')
+    const context = canvas.getContext('2d')
+    const TRACK_LEFT = 150
+    const TRACK_RIGHT = 510
+    const THUMB_RADIUS = 12
+    const HIT_RADIUS = 18
+    const STEP = 10
+    const sliders = [
+      { key: 'length', label: 'Length', unit: 'cm', y: 110, value: 20 },
+      { key: 'mass', label: 'Mass', unit: 'g', y: 200, value: 50 },
+    ]
+    const lab = {
+      ready: false,
+      length: 20,
+      mass: 50,
+      drags: 0,
+      trustedPresses: 0,
+      missedPresses: 0,
+      synthetic: 0,
+      history: [],
+      geometry: { trackLeft: TRACK_LEFT, trackRight: TRACK_RIGHT, rows: { length: 110, mass: 200 } },
+      thumbX(value) { return TRACK_LEFT + (TRACK_RIGHT - TRACK_LEFT) * value / 100 },
+    }
+    window.__lab = lab
+
+    const thumbX = slider => lab.thumbX(slider.value)
+    const snap = x => {
+      const ratio = Math.min(1, Math.max(0, (x - TRACK_LEFT) / (TRACK_RIGHT - TRACK_LEFT)))
+      return Math.round(ratio * 100 / STEP) * STEP
+    }
+
+    function draw() {
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      context.fillStyle = '#f7f7fb'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.fillStyle = '#222'
+      context.font = 'bold 18px system-ui, sans-serif'
+      context.fillText('Pendulum lab', 20, 40)
+      context.font = '13px system-ui, sans-serif'
+      context.fillStyle = '#555'
+      context.fillText('Drag a slider thumb to change a value.', 20, 62)
+      for (const slider of sliders) {
+        context.fillStyle = '#222'
+        context.font = '15px system-ui, sans-serif'
+        context.fillText(slider.label, 20, slider.y + 5)
+        context.fillStyle = '#c9c9d6'
+        context.fillRect(TRACK_LEFT, slider.y - 3, TRACK_RIGHT - TRACK_LEFT, 6)
+        for (let tick = 0; tick <= 100; tick += STEP) {
+          const x = lab.thumbX(tick)
+          context.fillStyle = '#9a9aac'
+          context.fillRect(x - 1, slider.y + 10, 2, 6)
+        }
+        context.fillStyle = '#9a9aac'
+        context.font = '11px system-ui, sans-serif'
+        context.fillText('0', TRACK_LEFT - 3, slider.y + 30)
+        context.fillText('100', TRACK_RIGHT - 9, slider.y + 30)
+        context.beginPath()
+        context.arc(thumbX(slider), slider.y, THUMB_RADIUS, 0, Math.PI * 2)
+        context.fillStyle = dragging === slider ? '#1d4ed8' : '#2563eb'
+        context.fill()
+        context.fillStyle = '#222'
+        context.font = 'bold 15px system-ui, sans-serif'
+        context.fillText(`${slider.value} ${slider.unit}`, TRACK_RIGHT + 24, slider.y + 5)
+      }
+    }
+
+    let dragging = null
+    let dragStart = null
+    const point = event => {
+      const rect = canvas.getBoundingClientRect()
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top }
+    }
+    const publish = () => {
+      for (const slider of sliders) lab[slider.key] = slider.value
+    }
+
+    canvas.addEventListener('pointerdown', event => {
+      if (!event.isTrusted) { lab.synthetic += 1; return }
+      lab.trustedPresses += 1
+      const { x, y } = point(event)
+      const hit = sliders.find(slider => Math.hypot(x - thumbX(slider), y - slider.y) <= HIT_RADIUS)
+      if (!hit) { lab.missedPresses += 1; return }
+      dragging = hit
+      dragStart = hit.value
+      canvas.setPointerCapture(event.pointerId)
+      draw()
+    })
+    canvas.addEventListener('pointermove', event => {
+      if (!event.isTrusted) { if (event.buttons) lab.synthetic += 1; return }
+      if (dragging === null) return
+      dragging.value = snap(point(event).x)
+      publish()
+      draw()
+    })
+    const release = event => {
+      if (!event.isTrusted) { lab.synthetic += 1; return }
+      if (dragging === null) return
+      if (dragging.value !== dragStart) {
+        lab.drags += 1
+        lab.history.push({ key: dragging.key, from: dragStart, to: dragging.value })
+      }
+      dragging = null
+      dragStart = null
+      publish()
+      draw()
+    }
+    canvas.addEventListener('pointerup', release)
+    canvas.addEventListener('pointercancel', release)
+
+    draw()
+    lab.ready = true
+  </script>
+</body>
+</html>

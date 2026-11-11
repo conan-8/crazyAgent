@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import WebSocket from 'ws'
@@ -240,6 +240,89 @@ try {
   assert.equal(received[0].filename, 'crazyagent-e2e.txt')
   assert.deepEqual(received[0].content, payload)
   console.log('PASS receiving server independently matched the multipart filename and payload bytes')
+
+  // B5: the exact on-disk name must round-trip, "+", spaces, and "(3)" included.
+  const oddName = 'Chapter+2 Review+Package-Oct25 (3).docx'
+  const oddPath = join(ROOT, oddName)
+  await writeFile(oddPath, payload)
+  const received0 = received.length
+  const odd = await evaluate(`(async () => { ${prefix}
+    const result = await mod.execute('upload', { filename: ${JSON.stringify(oddName)}, path: ${JSON.stringify(oddPath)}, root, size: ${payload.length}, name: 'Visible attachment', view: 'none' }, settings)
+    const held = (await chrome.scripting.executeScript({ target: { tabId }, func: () => {
+      const input = document.getElementById('visible-file')
+      return { name: input.files[0]?.name, size: input.files[0]?.size }
+    } }))[0].result
+    const view = await mod.execute('snapshot', {}, settings)
+    await mod.execute('click', { label: view.labels.find(item => item.text === 'Send attachment').id, view: 'none' }, settings)
+    return { upload: result.upload, held }
+  })()`)
+  assert.equal(odd.upload.status, 'attached')
+  assert.equal(odd.upload.verifiedBy, 'file-input-readback')
+  assert.deepEqual(odd.held, { name: oddName, size: payload.length })
+  for (let index = 0; index < 50 && received.length === received0; index += 1) await sleep(50)
+  assert.equal(received.length, received0 + 1)
+  assert.equal(received.at(-1).filename, oddName, 'the server received the exact name')
+  assert.deepEqual(received.at(-1).content, payload)
+  console.log('PASS a name with "+", spaces, and "(3)" round-trips through the input and the multipart body')
+
+  // B5: upload widgets often take the file in their change handler and empty the input.
+  const consumed = await evaluate(`(async () => { ${prefix}
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.id = 'consuming-file'
+      input.setAttribute('aria-label', 'Consuming attachment')
+      window.__consumed = []
+      input.addEventListener('change', () => {
+        for (const file of input.files) window.__consumed.push({ name: file.name, size: file.size })
+        input.value = ''
+      })
+      document.body.append(input)
+    } })
+    const result = await mod.execute('upload', { filename: ${JSON.stringify(oddName)}, path: ${JSON.stringify(oddPath)}, root, size: ${payload.length}, name: 'Consuming attachment', view: 'none' }, settings)
+    const page = (await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => {
+      const input = document.getElementById('consuming-file')
+      return { consumed: window.__consumed, left: input.files.length, marked: input.hasAttribute('data-crazyagent-upload') }
+    } }))[0].result
+    // A second, empty-handed page: the input is cleared WITHOUT ever holding the file.
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => {
+      const input = document.getElementById('consuming-file')
+      const dropper = input.cloneNode()
+      dropper.id = 'dropping-file'
+      dropper.setAttribute('aria-label', 'Dropping attachment')
+      dropper.addEventListener('change', event => { event.stopImmediatePropagation(); dropper.value = '' }, { capture: true })
+      input.replaceWith(dropper)
+    } })
+    let dropped
+    try {
+      await mod.execute('upload', { filename: ${JSON.stringify(oddName)}, path: ${JSON.stringify(oddPath)}, root, size: ${payload.length}, name: 'Dropping attachment', view: 'none' }, settings)
+      dropped = { code: 'NO_ERROR' }
+    } catch (error) { dropped = { code: error.code, message: error.message, mutationPossible: error.mutationPossible } }
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => document.getElementById('dropping-file')?.remove() })
+    return { upload: result.upload, page, dropped }
+  })()`)
+  assert.equal(consumed.upload.status, 'attached')
+  assert.equal(consumed.upload.verifiedBy, 'change-event-capture')
+  assert.equal(consumed.upload.inputClearedByPage, true)
+  assert.deepEqual(consumed.page, { consumed: [{ name: oddName, size: payload.length }], left: 0, marked: false }, 'the page independently recorded the exact file once')
+  assert.equal(consumed.dropped.code, 'UPLOAD_READBACK_FAILED', 'an input emptied before our capture ran is still a failure')
+  assert.match(consumed.dropped.message, /it is empty and no change event carried the file/u)
+  assert.equal(consumed.dropped.mutationPossible, true)
+  console.log('PASS an input the page empties after taking the file verifies by change capture; an unproven empty input still fails')
+
+  // B5: a label that is not a file input names the real inputs.
+  const notInput = await evaluate(`(async () => { ${prefix}
+    const view = await mod.execute('snapshot', {}, settings)
+    const label = view.labels.find(item => item.text === 'Send attachment').id
+    try {
+      await mod.execute('upload', { filename: ${JSON.stringify(oddName)}, path: ${JSON.stringify(oddPath)}, root, size: ${payload.length}, label, view: 'none' }, settings)
+      return { code: 'NO_ERROR' }
+    } catch (error) { return { code: error.code, message: error.message, mutationPossible: error.mutationPossible } }
+  })()`)
+  assert.equal(notInput.code, 'NOT_FILE_INPUT')
+  assert.equal(notInput.mutationPossible, false)
+  assert.match(notInput.message, /File inputs on this page: input:1 "Chat attachment".*"Visible attachment"/u)
+  console.log('PASS a non-file label fails before assignment and lists the real file inputs')
 
   const shadow = await evaluate(`(async () => { ${prefix}
     const result = await mod.execute('upload', { filename: 'crazyagent-e2e.txt', path: ${JSON.stringify(direct.path)}, root, size: ${payload.length}, name: 'Shadow attachment', view: 'none' }, settings)

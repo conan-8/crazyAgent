@@ -114,3 +114,38 @@ test('lists exact actual filenames with normalized search and bounded results', 
   await assert.rejects(folder.list({ limit: 0 }), error => error.code === 'DOWNLOADS_QUERY_INVALID')
   await assert.rejects(folder.list({ query: 'x'.repeat(201) }), error => error.code === 'DOWNLOADS_QUERY_INVALID')
 })
+
+test('a "+"/space near miss names the exact file on disk and never substitutes it', async t => {
+  const { root } = await fixture(t)
+  await mkdir(join(root, 'school'))
+  await writeFile(join(root, 'Chapter+2+Review+Package-Oct25 (3).docx'), 'docx')
+  await writeFile(join(root, 'school', 'a+b c.txt'), 'one')
+  await writeFile(join(root, 'school', 'a b+c.txt'), 'two')
+  const folder = createDownloadsFolder(root)
+
+  // The exact on-disk name, "+" and "(3)" included, resolves unchanged.
+  const exact = await folder.resolveUpload('Chapter+2+Review+Package-Oct25 (3).docx')
+  assert.equal(exact.filename, 'Chapter+2+Review+Package-Oct25 (3).docx')
+  assert.equal(exact.size, 4)
+
+  await assert.rejects(folder.resolveUpload('Chapter 2 Review Package-Oct25 (3).docx'), error => {
+    assert.equal(error.code, 'DOWNLOADS_FILE_NOT_FOUND')
+    assert.match(error.message, /No file was uploaded/u)
+    assert.ok(error.message.includes('The exact name on disk is "Chapter+2+Review+Package-Oct25 (3).docx"'), error.message)
+    assert.deepEqual(error.alternatives, ['Chapter+2+Review+Package-Oct25 (3).docx'])
+    return true
+  })
+  // Two candidates: list both, choose neither.
+  await assert.rejects(folder.resolveUpload('school/a b c.txt'), error => {
+    assert.equal(error.code, 'DOWNLOADS_FILE_NOT_FOUND')
+    assert.ok(error.message.includes('"school/a b+c.txt", "school/a+b c.txt"'), error.message)
+    return true
+  })
+  // No near miss: the plain not-found error is unchanged.
+  await assert.rejects(folder.resolveUpload('nothing like it.txt'), error => {
+    assert.equal(error.code, 'DOWNLOADS_FILE_NOT_FOUND')
+    assert.equal(error.alternatives, undefined)
+    assert.doesNotMatch(error.message, /exact name on disk/u)
+    return true
+  })
+})

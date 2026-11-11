@@ -263,7 +263,7 @@ test('requestUi rejects with SIDE_PANEL_CLOSED after the grace window', async t 
     error => {
       assert.equal(error.code, 'SIDE_PANEL_CLOSED')
       assert.match(error.message, /may be reloading/)
-      assert.match(error.message, /retry this call/)
+      assert.match(error.message, /Retry this call once; if it fails again, stop/)
       return true
     },
   )

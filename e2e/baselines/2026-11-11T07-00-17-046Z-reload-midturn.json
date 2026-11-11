@@ -1,0 +1,107 @@
+{
+  "at": "2026-11-11T07:00:17.046Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "verdict": "PASS-CONTINUE",
+  "acceptance": "continue after reconnect with correct page state, or stop/blocked within ~20 s of the reload",
+  "control": {
+    "count": "1",
+    "turn": {
+      "status": "idle",
+      "outcome": "done",
+      "label": "done",
+      "failedCalls": 1,
+      "usage": {
+        "inputTokens": 22772,
+        "outputTokens": 166,
+        "totalTokens": 66074,
+        "cacheReadTokens": 43136
+      },
+      "error": null
+    },
+    "wallMs": 4280
+  },
+  "reloadRun": {
+    "prompt": "Open http://127.0.0.1:44729/click.html and click the Increment button exactly once, then report the new count.",
+    "reloadRequested": true,
+    "reloaded": true,
+    "reloadAtMs": 1782,
+    "reloadToEndMs": 1830,
+    "wallMs": 3612,
+    "turn": {
+      "status": "idle",
+      "outcome": "done",
+      "label": "done",
+      "failedCalls": 0,
+      "usage": {
+        "inputTokens": 40309,
+        "outputTokens": 224,
+        "totalTokens": 120661,
+        "cacheReadTokens": 80128
+      },
+      "error": null
+    },
+    "count": "1",
+    "timeline": [
+      {
+        "at": 3,
+        "status": "running",
+        "phase": {
+          "status": "capturing",
+          "tool": null
+        },
+        "failedCalls": null
+      },
+      {
+        "at": 156,
+        "status": "running",
+        "phase": {
+          "status": "thinking",
+          "tool": null
+        },
+        "failedCalls": null
+      },
+      {
+        "at": 1528,
+        "status": "running",
+        "phase": {
+          "status": "tool",
+          "tool": "browser_click"
+        },
+        "failedCalls": null
+      },
+      {
+        "at": 1935,
+        "status": "running",
+        "phase": {
+          "status": "ready",
+          "tool": null
+        },
+        "failedCalls": null
+      },
+      {
+        "at": 2849,
+        "status": "running",
+        "phase": {
+          "status": "thinking",
+          "tool": null
+        },
+        "failedCalls": null
+      },
+      {
+        "at": 3611,
+        "status": "idle",
+        "phase": {
+          "status": null,
+          "tool": null
+        },
+        "failedCalls": 0
+      }
+    ],
+    "hung": false
+  },
+  "companionLogExcerpt": [
+    "[crazyagent] bridge: background executor connected (chrome-extension://kmipadgipilkdidennbhcgmoolfedgph)",
+    "[crazyagent] bridge: background executor connected (chrome-extension://kmipadgipilkdidennbhcgmoolfedgph)"
+  ]
+}

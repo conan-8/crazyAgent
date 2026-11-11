@@ -1,0 +1,878 @@
+{
+  "startedAt": "2026-11-11T00:16:22.794Z",
+  "finishedAt": "2026-11-11T00:17:59.488Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": 3000000,
+  "totalTokens": 1021764,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "download-upload",
+      "fixture": "files.html",
+      "prompt": "Download the payload file linked on this page, then attach that downloaded file to the Visible attachment input and click Send attachment.",
+      "file": "download-upload.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwbdccqh-f3a1",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 7287,
+            "error": null,
+            "outcome": "done",
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 82629,
+            "outputTokens": 438,
+            "cacheReadTokens": 81280,
+            "totalTokens": 164347,
+            "usage": {
+              "inputTokens": 82629,
+              "outputTokens": 438,
+              "totalTokens": 164347,
+              "cacheReadTokens": 81280
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes, saved in Downloads) via the \"Download payload\" link.\n- Attached it to the **Visible attachment** input (readback: `payload.txt`); the hidden and other inputs were left empty.\n- Clicked **Send attachment**; the result line changed to `uploaded:payload.txt:281`, confirming the submission.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbdccqh-f3a1",
+              "origin": "remote",
+              "clientMessageId": "72507275-bc25-4835-b024-c5364cb7e36b",
+              "startedAt": "2026-11-11T00:16:24.185Z",
+              "endedAt": "2026-11-11T00:16:31.472Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 82629,
+                "outputTokens": 438,
+                "totalTokens": 164347,
+                "cacheReadTokens": 81280
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwbdcivb-8776",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 32926,
+            "error": null,
+            "outcome": "done",
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 45217,
+            "outputTokens": 4652,
+            "cacheReadTokens": 43321,
+            "totalTokens": 93190,
+            "usage": {
+              "inputTokens": 45217,
+              "outputTokens": 4652,
+              "totalTokens": 93190,
+              "cacheReadTokens": 43321
+            },
+            "finalText": "DONE\n\nDownloaded `payload.txt` (96 bytes), attached it to the Visible attachment input, and clicked Send attachment. The page confirmed `uploaded:payload.txt:281`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbdcivb-8776",
+              "origin": "remote",
+              "clientMessageId": "5ef1d0b3-7506-46a4-8e2c-b7f0c263385a",
+              "startedAt": "2026-11-11T00:16:32.135Z",
+              "endedAt": "2026-11-11T00:17:05.061Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 45217,
+                "outputTokens": 4652,
+                "totalTokens": 93190,
+                "cacheReadTokens": 43321
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwbdd8tg-8510",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3687,
+            "error": null,
+            "outcome": "done",
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 2396,
+            "outputTokens": 396,
+            "cacheReadTokens": 84864,
+            "totalTokens": 87656,
+            "usage": {
+              "inputTokens": 2396,
+              "outputTokens": 396,
+              "totalTokens": 87656,
+              "cacheReadTokens": 84864
+            },
+            "finalText": "DONE\n\n- Downloaded `payload.txt` (96 bytes) via the \"Download payload\" link.\n- Attached it to the \"Visible attachment\" input (readback verified: payload.txt, 96 bytes) and clicked \"Send attachment\".\n- Result confirmed: page returned `uploaded:payload.txt:281`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbdd8tg-8510",
+              "origin": "remote",
+              "clientMessageId": "ec3b6df7-99cf-4e4e-8ef8-d09208a9440f",
+              "startedAt": "2026-11-11T00:17:05.764Z",
+              "endedAt": "2026-11-11T00:17:09.451Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2396,
+                "outputTokens": 396,
+                "totalTokens": 87656,
+                "cacheReadTokens": 84864
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwbddc7g-de4e",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4441,
+            "error": null,
+            "outcome": "done",
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 2965,
+            "outputTokens": 301,
+            "cacheReadTokens": 86912,
+            "totalTokens": 90178,
+            "usage": {
+              "inputTokens": 2965,
+              "outputTokens": 301,
+              "totalTokens": 90178,
+              "cacheReadTokens": 86912
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link.\n- Attached it to the visible attachment input (verified readback: `payload.txt`); page confirmed `attached:visible-file:payload.txt:96`.\n- Clicked \"Send attachment\"; page reported `uploaded:payload.txt:281`. Other inputs (hidden, other, shadow, iframe) were left untouched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbddc7g-de4e",
+              "origin": "remote",
+              "clientMessageId": "53dbfbe9-6dfd-4f54-8ac0-460a6cd4f6c6",
+              "startedAt": "2026-11-11T00:17:10.156Z",
+              "endedAt": "2026-11-11T00:17:14.597Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2965,
+                "outputTokens": 301,
+                "totalTokens": 90178,
+                "cacheReadTokens": 86912
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwbddg5y-17c8",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6092,
+            "error": null,
+            "outcome": "done",
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 24615,
+            "outputTokens": 281,
+            "cacheReadTokens": 64636,
+            "totalTokens": 89532,
+            "usage": {
+              "inputTokens": 24615,
+              "outputTokens": 281,
+              "totalTokens": 89532,
+              "cacheReadTokens": 64636
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link.\n- Attached it to the \"Visible attachment\" input (verified readback: `payload.txt`).\n- Clicked \"Send attachment\"; page confirmed `uploaded:payload.txt:281`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbddg5y-17c8",
+              "origin": "remote",
+              "clientMessageId": "d9e6c89a-bef6-45a1-bcb2-914f325e2408",
+              "startedAt": "2026-11-11T00:17:15.287Z",
+              "endedAt": "2026-11-11T00:17:21.379Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 24615,
+                "outputTokens": 281,
+                "totalTokens": 89532,
+                "cacheReadTokens": 64636
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "frame-canvas-slider",
+      "fixture": "frame-canvas.html",
+      "prompt": "In the embedded pendulum lab on this page, set the Length slider to 70.",
+      "file": "frame-canvas-slider.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwbddlfq-a4f6",
+          "status": "pass",
+          "reasons": [
+            "Length is 70 by trusted drag; Mass untouched"
+          ],
+          "evidence": {
+            "length": 70,
+            "mass": 50,
+            "drags": 1,
+            "trustedPresses": 1,
+            "missedPresses": 0,
+            "synthetic": 0,
+            "history": [
+              {
+                "key": "length",
+                "from": 20,
+                "to": 70
+              }
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 8299,
+            "error": null,
+            "outcome": "done",
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 2653,
+            "outputTokens": 652,
+            "cacheReadTokens": 120320,
+            "totalTokens": 123625,
+            "usage": {
+              "inputTokens": 2653,
+              "outputTokens": 652,
+              "totalTokens": 123625,
+              "cacheReadTokens": 120320
+            },
+            "finalText": "DONE — the embedded Pendulum lab's Length slider is set to 70 cm.\n- Dragged the Length thumb; fresh view shows the thumb repositioned and the label reading **70 cm** (Mass still 50 g).\n- Verified visually in the canvas iframe (the tool's \"unchanged\" note conflicted, but the fresh screenshot confirms the value).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbddlfq-a4f6",
+              "origin": "remote",
+              "clientMessageId": "ba5b8cec-6afc-4a91-81fb-2920406c3a13",
+              "startedAt": "2026-11-11T00:17:22.118Z",
+              "endedAt": "2026-11-11T00:17:30.417Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2653,
+                "outputTokens": 652,
+                "totalTokens": 123625,
+                "cacheReadTokens": 120320
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwbddsdu-596e",
+          "status": "pass",
+          "reasons": [
+            "Length is 70 by trusted drag; Mass untouched"
+          ],
+          "evidence": {
+            "length": 70,
+            "mass": 50,
+            "drags": 1,
+            "trustedPresses": 1,
+            "missedPresses": 0,
+            "synthetic": 0,
+            "history": [
+              {
+                "key": "length",
+                "from": 20,
+                "to": 70
+              }
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6651,
+            "error": null,
+            "outcome": "done",
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 23273,
+            "outputTokens": 519,
+            "cacheReadTokens": 43776,
+            "totalTokens": 67568,
+            "usage": {
+              "inputTokens": 23273,
+              "outputTokens": 519,
+              "totalTokens": 67568,
+              "cacheReadTokens": 43776
+            },
+            "finalText": "DONE — Length slider set to 70 cm.\n\n- Dragged the Length thumb right; the fresh view confirms the readout now shows \"70 cm\" and the thumb sits at the 70 position.\n- Mass left unchanged at 50 g.\n- Note: the drag tool reported no measured effect, but the resulting screenshot shows the value changed, so it took.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbddsdu-596e",
+              "origin": "remote",
+              "clientMessageId": "97ecebe4-bae7-422d-b66b-46e0b573181a",
+              "startedAt": "2026-11-11T00:17:31.122Z",
+              "endedAt": "2026-11-11T00:17:37.773Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 23273,
+                "outputTokens": 519,
+                "totalTokens": 67568,
+                "cacheReadTokens": 43776
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwbddxzv-1757",
+          "status": "pass",
+          "reasons": [
+            "Length is 70 by trusted drag; Mass untouched"
+          ],
+          "evidence": {
+            "length": 70,
+            "mass": 50,
+            "drags": 1,
+            "trustedPresses": 1,
+            "missedPresses": 0,
+            "synthetic": 0,
+            "history": [
+              {
+                "key": "length",
+                "from": 20,
+                "to": 70
+              }
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6229,
+            "error": null,
+            "outcome": "done",
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag received an unknown argument"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 2
+            },
+            "inputTokens": 2476,
+            "outputTokens": 547,
+            "cacheReadTokens": 87680,
+            "totalTokens": 90703,
+            "usage": {
+              "inputTokens": 2476,
+              "outputTokens": 547,
+              "totalTokens": 90703,
+              "cacheReadTokens": 87680
+            },
+            "finalText": "DONE\n- Length slider set to **70 cm** — the thumb moved to the 70 mark on the track and the readout now reads \"70 cm\" (verified in fresh screenshot; Mass unchanged at 50 g).\n- Note: the drag tool reported DRAG_NO_EFFECT, but the fresh view confirms the value changed to 70.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbddxzv-1757",
+              "origin": "remote",
+              "clientMessageId": "15e711cb-c71d-4524-bec3-2ffcbaa64082",
+              "startedAt": "2026-11-11T00:17:38.395Z",
+              "endedAt": "2026-11-11T00:17:44.624Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2476,
+                "outputTokens": 547,
+                "totalTokens": 90703,
+                "cacheReadTokens": 87680
+              },
+              "failedCalls": 1
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwbde3ae-0997",
+          "status": "pass",
+          "reasons": [
+            "Length is 70 by trusted drag; Mass untouched"
+          ],
+          "evidence": {
+            "length": 70,
+            "mass": 50,
+            "drags": 1,
+            "trustedPresses": 2,
+            "missedPresses": 1,
+            "synthetic": 0,
+            "history": [
+              {
+                "key": "length",
+                "from": 20,
+                "to": 70
+              }
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 7607,
+            "error": null,
+            "outcome": "done",
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_click_at": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 2720,
+            "outputTokens": 658,
+            "cacheReadTokens": 88064,
+            "totalTokens": 91442,
+            "usage": {
+              "inputTokens": 2720,
+              "outputTokens": 658,
+              "totalTokens": 91442,
+              "cacheReadTokens": 88064
+            },
+            "finalText": "DONE — Length slider set to 70 cm in the embedded pendulum lab (thumb now at the 70 position; display reads \"70 cm\"). Mass slider untouched at 50 g. Verified visually after the drag.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbde3ae-0997",
+              "origin": "remote",
+              "clientMessageId": "28f4f82f-019a-43e9-b134-93d37bad74be",
+              "startedAt": "2026-11-11T00:17:45.254Z",
+              "endedAt": "2026-11-11T00:17:52.861Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2720,
+                "outputTokens": 658,
+                "totalTokens": 91442,
+                "cacheReadTokens": 88064
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwbde9pb-67dd",
+          "status": "pass",
+          "reasons": [
+            "Length is 70 by trusted drag; Mass untouched"
+          ],
+          "evidence": {
+            "length": 70,
+            "mass": 50,
+            "drags": 1,
+            "trustedPresses": 1,
+            "missedPresses": 0,
+            "synthetic": 0,
+            "history": [
+              {
+                "key": "length",
+                "from": 20,
+                "to": 70
+              }
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5723,
+            "error": null,
+            "outcome": "done",
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 2481,
+            "outputTokens": 594,
+            "cacheReadTokens": 120448,
+            "totalTokens": 123523,
+            "usage": {
+              "inputTokens": 2481,
+              "outputTokens": 594,
+              "totalTokens": 123523,
+              "cacheReadTokens": 120448
+            },
+            "finalText": "DONE — Length slider set to 70.\n\n- Dragged the Length thumb right; fresh view now shows the Length readout as \"70 cm\" with the thumb at that position, Mass unchanged at 50 g.\n- Note: the drag tool reported no measurable effect (canvas has no DOM signal), but the visual readout confirms the value.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwbde9pb-67dd",
+              "origin": "remote",
+              "clientMessageId": "f2b729d8-4dd2-4108-b00d-55bbf0efe1fa",
+              "startedAt": "2026-11-11T00:17:53.567Z",
+              "endedAt": "2026-11-11T00:17:59.290Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2481,
+                "outputTokens": 594,
+                "totalTokens": 123523,
+                "cacheReadTokens": 120448
+              },
+              "failedCalls": 0
+            }
+          },
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}

@@ -44,8 +44,10 @@ function isObject(value) {
 }
 
 function checkKeys(value, allowed, path) {
-  if (!isObject(value) || Object.keys(value).some(key => !allowed.includes(key))) {
-    throw pasteFailure('DOCS_PASTE_ARGUMENT', 'contains an unknown or invalid argument', path)
+  if (!isObject(value)) throw pasteFailure('DOCS_PASTE_ARGUMENT', `must be an object with: ${allowed.join(', ')}`, path)
+  const unknown = Object.keys(value).find(key => !allowed.includes(key))
+  if (unknown !== undefined) {
+    throw pasteFailure('DOCS_PASTE_ARGUMENT', `received unknown argument ${JSON.stringify(unknown)}. Allowed: ${allowed.join(', ')}`, path)
   }
 }
 

@@ -302,6 +302,35 @@
       thumb.addEventListener('pointerup', () => { customDragging = false })
       thumb.addEventListener('pointercancel', () => { customDragging = false })
 
+      // The long-press threshold is 300 ms of real time. A hidden tab clamps
+      // setTimeout to >=1 s, which would race the mid-drag tab-switch case
+      // against Chrome's timer alignment instead of the executor; MessageChannel
+      // tasks keep the threshold honest while the tab is hidden.
+      const realDelay = (ms, fn) => {
+        if (!document.hidden) {
+          const id = setTimeout(fn, ms)
+          return () => clearTimeout(id)
+        }
+        let cancelled = false
+        const channel = new MessageChannel()
+        const deadline = performance.now() + ms
+        channel.port1.onmessage = () => {
+          if (cancelled) return
+          if (performance.now() >= deadline) {
+            channel.port1.close()
+            channel.port2.close()
+            fn()
+          } else {
+            channel.port2.postMessage(0)
+          }
+        }
+        channel.port2.postMessage(0)
+        return () => {
+          cancelled = true
+          channel.port1.close()
+          channel.port2.close()
+        }
+      }
       const longItem = byId('longpress-item')
       let longDrag = null
       longItem.addEventListener('pointerdown', event => {
@@ -310,25 +339,25 @@
         const started = performance.now()
         longItem.setPointerCapture(event.pointerId)
         longDrag = { id: event.pointerId, started, ready: false, timer: null }
-        longDrag.timer = setTimeout(() => {
+        longDrag.timer = realDelay(300, () => {
           if (!longDrag) return
           longDrag.ready = true
           longHeldMs = Math.round(performance.now() - started)
           counts.longReady += 1
           longItem.classList.add('ready')
           render()
-        }, 300)
+        })
       })
       longItem.addEventListener('pointermove', event => {
         if (longDrag && !longDrag.ready) {
           counts.longEarly += 1
-          clearTimeout(longDrag.timer)
+          longDrag.timer?.()
           longDrag.timer = null
         }
       })
       const finishLong = event => {
         if (!longDrag || event.pointerId !== longDrag.id) return
-        clearTimeout(longDrag.timer)
+        longDrag.timer?.()
         const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('#longpress-destination')
         if (longDrag.ready && event.type === 'pointerup' && target) {
           byId('longpress-destination').append(longItem)
