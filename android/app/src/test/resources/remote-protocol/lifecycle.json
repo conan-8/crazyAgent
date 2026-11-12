@@ -52,7 +52,8 @@
           "draft": null,
           "latestScreenshotId": null,
           "latestScreenshot": null,
-          "help": null
+          "help": null,
+          "confirm": null
         }
       }
     },
@@ -344,7 +345,8 @@
     "draft": null,
     "latestScreenshotId": null,
     "latestScreenshot": null,
-    "help": null
+    "help": null,
+    "confirm": null
   },
   "checkpoints": {
     "afterError": {
@@ -469,7 +471,8 @@
         "bytes": 70,
         "source": "auto"
       },
-      "help": null
+      "help": null,
+      "confirm": null
     }
   }
 }

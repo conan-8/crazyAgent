@@ -99,6 +99,8 @@ data class Health(
     val pushConfigured: Boolean? = null,
     /** Where browser commands run: `panel`, `background`, or null when nothing is connected. */
     val executorHost: String? = null,
+    /** Opt-in "ask before submitting, sending, paying, or deleting" (read-only on the phone). */
+    val confirmIrreversible: Boolean? = null,
 )
 
 /** Metadata for the newest view the agent captured; the bytes are fetched by [id]. */
@@ -108,7 +110,7 @@ data class Screenshot(
     val height: Int?,
     val mimeType: String?,
     val capturedAt: String?,
-    /** `auto`/`tool` (the agent's own view), `manual` (requested from a phone), or `help`. */
+    /** `auto`/`tool` (the agent's own view), `manual` (requested from a phone), `help`, or `confirm`. */
     val source: String? = null,
 )
 
@@ -120,6 +122,20 @@ data class HelpRequest(
     val turnId: String?,
     val category: String,
     val reason: String,
+    val screenshotId: String?,
+    val captureError: String?,
+    val requestedAt: String?,
+)
+
+/**
+ * The agent's opt-in request to perform one irreversible action (B9a). The
+ * companion waits for the user's Approve/Deny; the answer is sent as the next
+ * message with `confirm`. The Approve/Deny card itself arrives with B9b.
+ */
+data class ConfirmRequest(
+    val turnId: String?,
+    val action: String,
+    val target: String,
     val screenshotId: String?,
     val captureError: String?,
     val requestedAt: String?,
@@ -154,6 +170,8 @@ data class ChatState(
     val screenshot: Screenshot? = null,
     /** Open only while the turn status is `waiting_for_user`. */
     val help: HelpRequest? = null,
+    /** Open only while the turn status is `waiting_for_user` (B9a confirmation). */
+    val confirm: ConfirmRequest? = null,
     /** Frames that could not be understood; shown in diagnostics only. */
     val malformedFrames: Int = 0,
 ) {

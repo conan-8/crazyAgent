@@ -345,7 +345,8 @@ export class RemoteServer {
     if (body.autoCapture !== undefined && typeof body.autoCapture !== 'boolean') throw new HttpError(422, 'INVALID_AUTO_CAPTURE', 'autoCapture must be a boolean.')
     if (body.planMode !== undefined && typeof body.planMode !== 'boolean') throw new HttpError(422, 'INVALID_PLAN_MODE', 'planMode must be a boolean.')
     if (body.steer !== undefined && typeof body.steer !== 'boolean') throw new HttpError(422, 'INVALID_STEER', 'steer must be a boolean.')
-    const print = fingerprint({ text: body.text, images: body.images ?? [], autoCapture: body.autoCapture ?? null, planMode: body.planMode === true, ...(body.steer === true ? { steer: true } : {}) })
+    if (body.confirm !== undefined && body.confirm !== 'approve' && body.confirm !== 'deny') throw new HttpError(422, 'INVALID_CONFIRMATION', 'confirm must be "approve" or "deny".')
+    const print = fingerprint({ text: body.text, images: body.images ?? [], autoCapture: body.autoCapture ?? null, planMode: body.planMode === true, ...(body.steer === true ? { steer: true } : {}), ...(body.confirm !== undefined ? { confirm: body.confirm } : {}) })
     const cached = this.#cached('message', clientMessageId, print)
     if (cached !== undefined) return cached
     if (!this.messageLimiter.take()) throw new HttpError(429, 'RATE_LIMITED', 'Too many prompts. Wait a minute.', true, { 'retry-after': '60' })
@@ -356,6 +357,7 @@ export class RemoteServer {
       autoCapture: body.autoCapture,
       planMode: body.planMode === true,
       steer: body.steer === true,
+      ...(body.confirm !== undefined ? { confirm: body.confirm } : {}),
       origin: 'remote',
       clientMessageId,
     })
@@ -630,7 +632,7 @@ export class RemoteServer {
 /** @param {{code: string, message: string, retryable: boolean}} result @param {Record<string, any>} extra */
 function rejection(result, extra) {
   const status = result.code === 'RUNTIME_NOT_READY' ? 503
-    : result.code === 'INVALID_ATTACHMENT' || result.code === 'EMPTY_PROMPT' ? 422
+    : result.code === 'INVALID_ATTACHMENT' || result.code === 'EMPTY_PROMPT' || result.code === 'INVALID_CONFIRMATION' ? 422
       : 409
   return {
     status,

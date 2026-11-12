@@ -182,6 +182,7 @@ function parseCli(argv) {
     resetDshHome: false,
     model: DEFAULT_MODEL,
     effort: DEFAULT_EFFORT,
+    confirmIrreversible: false,
     verbose: false,
     help: false,
   }
@@ -206,6 +207,7 @@ function parseCli(argv) {
     else if (token === '--reset-dsh-home') options.resetDshHome = true
     else if (token === '--model') options.model = value()
     else if (token === '--effort') options.effort = value()
+    else if (token === '--confirm-irreversible') options.confirmIrreversible = true
     else if (token === '--verbose') options.verbose = true
     else if (token === '--help' || token === '-h') options.help = true
     else if (token.startsWith('--')) throw new Error(`unknown flag ${token}`)
@@ -237,6 +239,8 @@ function printHelp() {
   --reset-dsh-home        delete and re-run setup for the isolated harness home
   --model <id>            default ${DEFAULT_MODEL}
   --effort <level>        default ${DEFAULT_EFFORT} (kept fixed for comparisons)
+  --confirm-irreversible  arm the opt-in confirmation setting on the isolated
+                          companion (required by the submit-gate scenarios)
   --verbose               print companion/Edge diagnostics
   --help
 
@@ -659,7 +663,7 @@ async function injectExtensionSettings({ edge, bridgeUrl, token, verbose }) {
  * Start a second companion with its own harness home and the real model.
  * The API key is passed in the environment only.
  */
-async function startCompanion({ dshHome, bridgePort, remotePort, model, effort, apiKey, logPath, downloadsDir }) {
+async function startCompanion({ dshHome, bridgePort, remotePort, model, effort, apiKey, logPath, downloadsDir, confirmIrreversible }) {
   const stream = createWriteStream(logPath, { mode: 0o600 })
   const child = spawn(process.execPath, [
     COMPANION_ENTRY,
@@ -669,6 +673,7 @@ async function startCompanion({ dshHome, bridgePort, remotePort, model, effort, 
     '--remote-port', String(remotePort),
     '--model', model,
     '--reasoning-effort', effort,
+    ...(confirmIrreversible === true ? ['--confirm-irreversible'] : []),
   ], {
     cwd: ROOT,
     env: {
@@ -779,7 +784,7 @@ function makeRemote({ remoteUrl, token }) {
   return {
     state: () => request('GET', '/state'),
     newChat: () => request('POST', '/new', { clientCommandId: randomUUID() }),
-    send: text => request('POST', '/messages', { clientMessageId: randomUUID(), text }),
+    send: (text, extra = {}) => request('POST', '/messages', { clientMessageId: randomUUID(), text, ...extra }),
     stop: () => request('POST', '/stop', { clientCommandId: randomUUID() }),
   }
 }
@@ -903,12 +908,17 @@ async function loadScenarios(selected) {
       check: module.check,
       tamper: module.tamper,
       solve: module.solve,
+      collateral: module.collateral,
+      answer: module.answer,
+      preAnswerState: module.preAnswerState,
       file,
     }
     if (typeof scenario.name !== 'string' || scenario.name.length === 0) throw new Error(`${file} exports no name`)
     if (typeof scenario.fixture !== 'string' || scenario.fixture.length === 0) throw new Error(`${file} exports no fixture`)
     if (typeof scenario.prompt !== 'string' || scenario.prompt.length === 0) throw new Error(`${file} exports no prompt`)
     if (typeof scenario.check !== 'function') throw new Error(`${file} exports no check()`)
+    if (scenario.answer !== undefined && scenario.answer !== 'approve' && scenario.answer !== 'deny') throw new Error(`${file} answer must be "approve" or "deny"`)
+    if (scenario.answer !== undefined && typeof scenario.preAnswerState !== 'function') throw new Error(`${file} exports answer but no preAnswerState()`)
     scenarios.push(scenario)
   }
   const requested = selected.length === 0 || selected.includes('all') ? null : new Set(selected)
@@ -986,7 +996,7 @@ function resetDownloads(downloadsDir) {
   mkdirSync(resolved, { recursive: true })
 }
 
-function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null }) {
+function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null, answer = null }) {
   return {
     fixtureUrl: path => `${fixtureServer.baseUrl}/${String(path).replace(/^\/+/u, '')}`,
     crossOriginUrl: path => `${fixtureServer.crossOriginBaseUrl}/${String(path).replace(/^\/+/u, '')}`,
@@ -1004,6 +1014,12 @@ function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null }
     downloadsDir,
     downloads: () => listDownloads(downloadsDir),
     turn,
+    /**
+     * Confirmation answer phase (submit-gate scenarios): the decision the
+     * harness sent, whether the agent actually asked, and the independent
+     * ground-truth count of irreversible actions before the answer.
+     */
+    answer,
   }
 }
 
@@ -1051,7 +1067,17 @@ async function runSelfTest(options, scenarios) {
     for (const scenario of scenarios) {
       stage(`scenario ${scenario.name}`)
       const context = fixtureServer
-      const baseCtx = turn => makeCtx({ fixtureServer, page, turn: turn ?? EMPTY_TURN, edge, downloadsDir })
+      const baseCtx = (turn, answer = null) => makeCtx({ fixtureServer, page, turn: turn ?? EMPTY_TURN, edge, downloadsDir, answer })
+      // Submit-gate scenarios: the self-test synthesizes the answer phase the
+      // real harness would run. A tampered state acted BEFORE the answer (its
+      // pre-answer count is read from the fixture); a solved state acted after.
+      const answeredCtx = async (phase) => {
+        if (scenario.answer === undefined) return baseCtx()
+        const preAnswerCount = phase === 'tamper' && typeof scenario.preAnswerState === 'function'
+          ? await scenario.preAnswerState(baseCtx())
+          : 0
+        return baseCtx(EMPTY_TURN, { decision: scenario.answer, requested: true, responded: true, preAnswerCount })
+      }
       // 1. The untouched start state must never pass.
       resetDownloads(downloadsDir)
       await page.reset(scenario.fixture)
@@ -1079,7 +1105,7 @@ async function runSelfTest(options, scenarios) {
         fixtureServer.reset()
         try {
           await scenario.tamper(baseCtx())
-          const tampered = normalizeCheck(await scenario.check(baseCtx()))
+          const tampered = normalizeCheck(await scenario.check(await answeredCtx('tamper')))
           tamperedStatus = tampered.status
           if (tampered.status === 'pass') {
             tamperedOk = false
@@ -1102,7 +1128,7 @@ async function runSelfTest(options, scenarios) {
         fixtureServer.reset()
         try {
           await scenario.solve(baseCtx())
-          const solved = normalizeCheck(await scenario.check(baseCtx()))
+          const solved = normalizeCheck(await scenario.check(await answeredCtx('solve')))
           solvedStatus = solved.status
           if (solved.status !== 'pass') {
             solvedOk = false
@@ -1179,7 +1205,7 @@ async function waitForTurn({ remote, turnId, deadline }) {
 
 function turnFromState(state) {
   const turn = state.turn ?? {}
-  const waitingForUser = turn.status === 'waiting_for_user' || state.help !== null
+  const waitingForUser = turn.status === 'waiting_for_user' || state.help != null || state.confirm != null
   let status = 'unknown'
   if (turn.outcome === 'done') status = 'done'
   else if (turn.outcome === 'stopped') status = 'stopped'
@@ -1194,6 +1220,7 @@ function turnFromState(state) {
     wallMs,
     error: turn.error ?? null,
     outcome: turn.outcome ?? null,
+    confirm: state.confirm ?? null,
   }
 }
 
@@ -1224,6 +1251,7 @@ async function runModelBatch(options, scenarios) {
     finishedAt: nowIso(),
     model: options.model,
     effort: options.effort,
+    confirmIrreversible: options.confirmIrreversible === true,
     node: process.version,
     dshHome,
     repeat: options.repeat,
@@ -1244,6 +1272,7 @@ async function runModelBatch(options, scenarios) {
         evidence: run.check.evidence,
         collateral: run.collateral,
         turn: run.turn,
+        answer: run.answer ?? null,
         skipped: run.skipped ?? false,
       })),
     })),
@@ -1279,6 +1308,7 @@ async function runModelBatch(options, scenarios) {
       apiKey,
       logPath: companionLog,
       downloadsDir,
+      confirmIrreversible: options.confirmIrreversible,
     })
     const remote = makeRemote({ remoteUrl: companion.remoteUrl, token: companion.token })
     const initialFixture = scenarios[0]?.fixture ?? 'click.html'
@@ -1293,6 +1323,12 @@ async function runModelBatch(options, scenarios) {
     await routeDownloads(edge, downloadsDir)
     await injectExtensionSettings({ edge, bridgeUrl: companion.bridgeUrl, token: companion.bridgeToken, verbose: options.verbose })
     await waitForRemoteReady({ remote, bridgePort, companion })
+    if (scenarios.some(scenario => scenario.answer !== undefined)) {
+      const state = await remote.state()
+      if (state.health?.confirmIrreversible !== true) {
+        throw new Error('a submit-gate scenario needs the confirmation setting: rerun with --confirm-irreversible')
+      }
+    }
     await until('the companion run log', () => {
       const dir = newestRunDir(logsRoot)
       return dir !== null && existsSync(join(dir, 'events.jsonl')) ? dir : null
@@ -1407,7 +1443,58 @@ async function runModelBatch(options, scenarios) {
         turn.finalTurnState = state?.turn ?? null
         totalTokens += turn.totalTokens
 
-        const ctx = makeCtx({ fixtureServer, page, turn, edge, downloadsDir })
+        // Confirmation answer phase (B9a submit-gate): when the scenario arms a
+        // decision, read the independent pre-answer ground truth, then answer
+        // the waiting confirmation through the same remote API a phone uses.
+        let answer = null
+        if (scenario.answer === 'approve' || scenario.answer === 'deny') {
+          const requested = turn.waitingForUser === true && state?.confirm != null
+          let preAnswerCount = null
+          try {
+            preAnswerCount = await scenario.preAnswerState(makeCtx({ fixtureServer, page, turn, edge, downloadsDir }))
+          } catch { /* the checker reports the missing evidence */ }
+          if (requested) {
+            const answerAccepted = await remote.send('', { confirm: scenario.answer })
+            const answerDeadline = Date.now() + maxTurnSeconds * 1_000
+            let answerState = null
+            let answerTimedOut = false
+            try {
+              answerState = await waitForTurn({ remote, turnId: answerAccepted.turnId, deadline: answerDeadline })
+            } catch (error) {
+              if (error.message !== 'turn-timeout') throw error
+              answerTimedOut = true
+              await remote.stop().catch(() => {})
+              try {
+                answerState = await waitForTurn({ remote, turnId: answerAccepted.turnId, deadline: Date.now() + 60_000 })
+              } catch { answerState = null }
+            }
+            await waitForTurnEndInLog(eventsPath, answerAccepted.turnId)
+            const answerMetrics = readTurnMetrics(eventsPath, answerAccepted.turnId)
+            const answerBase = answerState === null ? { status: 'timeout' } : turnFromState(answerState)
+            const answerTokens = Number(answerMetrics.usage?.totalTokens) || 0
+            totalTokens += answerTokens
+            answer = {
+              decision: scenario.answer,
+              requested: true,
+              responded: true,
+              preAnswerCount,
+              turnId: answerAccepted.turnId,
+              status: answerTimedOut ? 'timeout' : answerBase.status,
+              wallMs: answerBase.wallMs ?? answerMetrics.logWallMs ?? null,
+              steps: answerMetrics.steps,
+              toolCalls: answerMetrics.toolCalls,
+              failedCalls: answerMetrics.failedCalls,
+              failed: answerMetrics.failed,
+              totalTokens: answerTokens,
+              finalText: answerMetrics.finalText,
+              reportedLabel: answerMetrics.reportedLabel,
+            }
+          } else {
+            answer = { decision: scenario.answer, requested: false, responded: false, preAnswerCount }
+          }
+        }
+
+        const ctx = makeCtx({ fixtureServer, page, turn, edge, downloadsDir, answer })
         let check
         try {
           check = normalizeCheck(await scenario.check(ctx))
@@ -1428,6 +1515,7 @@ async function runModelBatch(options, scenarios) {
           check,
           collateral,
           turn,
+          answer,
           finishedAt: nowIso(),
         })
         printTable([[

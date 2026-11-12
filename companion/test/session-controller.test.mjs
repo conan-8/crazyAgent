@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BUSY_MESSAGE, NOT_READY_MESSAGE, STOPPING_MESSAGE, SessionController, parseReportedLabel, uiRejectionFrame } from '../session-controller.mjs'
+import { BUSY_MESSAGE, NOT_READY_MESSAGE, STOPPING_MESSAGE, SessionController, confirmationPromptBlock, normalizeConfirmRequest, parseReportedLabel, uiRejectionFrame } from '../session-controller.mjs'
 import { FakeRunner, fakeBridge, fakeLogStore } from './remote-fixtures.mjs'
 
 function setup(options = {}) {
@@ -17,6 +17,7 @@ function setup(options = {}) {
     autoCapture: options.autoCapture ?? false,
     provider: 'openrouter',
     getModelId: () => 'model-x',
+    getConfirmIrreversible: () => options.confirmIrreversible === true,
     publish: frame => frames.push(frame),
     observers: [{ turnStarted: info => observed.push(['start', info]), turnEnded: info => observed.push(['end', info]) }],
   })
@@ -233,6 +234,173 @@ test('panel rejection frames carry the refusal code', () => {
   assert.deepEqual(uiRejectionFrame({ code: 'TURN_BUSY', message: BUSY_MESSAGE }), {
     v: 1, type: 'chat.error', code: 'TURN_BUSY', message: BUSY_MESSAGE, recoverable: true,
   })
+})
+
+test('normalizeConfirmRequest accepts only the strict shape and confirmationPromptBlock escapes the action', () => {
+  assert.deepEqual(normalizeConfirmRequest({ action: '  Submit it.  ', target: ' Submit ' }), { action: 'Submit it.', target: 'Submit' })
+  for (const bad of [null, 'x', [], {}, { action: 'x' }, { target: 'x' }, { action: '', target: 'x' }, { action: 'x', target: '  ' }, { action: 5, target: 'x' }]) {
+    assert.equal(normalizeConfirmRequest(bad), undefined, JSON.stringify(bad))
+  }
+  assert.equal(normalizeConfirmRequest({ action: 'x'.repeat(300), target: 'y' }).action.length, 200)
+  assert.equal(confirmationPromptBlock('approve', 'Submit "A" & <B>'), '<user_confirmation decision="approve" action="Submit &quot;A&quot; &amp; &lt;B&gt;"/>')
+  assert.equal(confirmationPromptBlock('deny', 'Delete it'), '<user_confirmation decision="deny" action="Delete it"/>')
+})
+
+test('a confirmation request ends the turn waiting; approve writes the companion block and consumes the request', async () => {
+  const { controller, runner, bridge, frames, observed } = setup({ confirmIrreversible: true })
+  bridge.requestUi = async command => {
+    bridge.requests.push(command)
+    return command.op === 'snapshot' ? { image: { data: 'AAAA', mimeType: 'image/jpeg' } } : {}
+  }
+  const turn = controller.submit({ text: 'fill in the form and submit it', origin: 'remote' })
+  assert.deepEqual(bridge.turnOptions[0], { id: turn.turnId, planMode: false, confirmMode: true })
+  assert.match(runner.runs[0][0].text, /<confirm_mode>/)
+  assert.match(runner.runs[0][0].text, /agent_request_confirmation/)
+
+  controller.noteActivity({ kind: 'confirm-request', turnId: turn.turnId, action: 'Submit the assignment for grading', target: 'Submit for Grading button' })
+  runner.current.resolve('BLOCKED — waiting for your approval to submit.')
+  await turn.done
+
+  const done = frames.find(frame => frame.type === 'chat.done')
+  assert.deepEqual(done.confirm, { action: 'Submit the assignment for grading', target: 'Submit for Grading button' })
+  assert.equal(done.help, undefined)
+  const ended = observed.at(-1)[1]
+  assert.equal(ended.outcome, 'done')
+  assert.deepEqual(ended.confirm, { action: 'Submit the assignment for grading', target: 'Submit for Grading button', captureError: null })
+  assert.ok(controller.pendingConfirmation, 'the chat waits for an answer')
+  assert.equal(controller.pendingConfirmation.action, 'Submit the assignment for grading')
+  // The confirm capture is a companion-made snapshot, cleaned up afterwards.
+  assert.ok(bridge.requests.some(request => request.op === 'snapshot'))
+  assert.ok(bridge.requests.some(request => request.op === 'labels.clear'))
+
+  // Approve with no extra text: the companion writes the decision block.
+  const answer = controller.submit({ text: '', confirm: 'approve', origin: 'remote' })
+  assert.equal(answer.ok, true)
+  assert.equal(controller.pendingConfirmation, undefined)
+  assert.equal(runner.runs[1][0].text.endsWith('<user_confirmation decision="approve" action="Submit the assignment for grading"/>'), true)
+  runner.current.resolve('DONE — submitted.')
+  await answer.done
+  const answerDone = frames.filter(frame => frame.type === 'chat.done').at(-1)
+  assert.equal(answerDone.confirm, undefined)
+
+  // Nothing is pending anymore: a second approve is refused, not replayed.
+  assert.deepEqual(controller.submit({ text: '', confirm: 'approve' }), {
+    ok: false, code: 'NO_CONFIRMATION_PENDING', message: 'No confirmation is waiting for an answer in this chat. Send an ordinary prompt instead.', retryable: false,
+  })
+  assert.equal(runner.runs.length, 2)
+})
+
+test('deny writes a deny block; an ordinary prompt abandons the request without deciding it', async () => {
+  const { controller, runner } = setup({ confirmIrreversible: true })
+  const turn = controller.submit({ text: 'send the message' })
+  controller.noteActivity({ kind: 'confirm-request', turnId: turn.turnId, action: 'Send the email', target: 'Send button' })
+  runner.current.resolve('Waiting for approval.')
+  await turn.done
+
+  const denied = controller.submit({ text: 'actually do not send it', confirm: 'deny' })
+  assert.equal(denied.ok, true)
+  assert.match(runner.runs[1][0].text, /<user_confirmation decision="deny" action="Send the email"\/>\n\nactually do not send it$/u)
+  runner.current.resolve('Understood, not sent.')
+  await denied.done
+
+  // A fresh request abandoned by an ordinary prompt counts as neither decision.
+  const second = controller.submit({ text: 'delete the file' })
+  controller.noteActivity({ kind: 'confirm-request', turnId: second.turnId, action: 'Delete the file', target: 'Delete button' })
+  runner.current.resolve('Waiting for approval.')
+  await second.done
+  assert.ok(controller.pendingConfirmation)
+  const ordinary = controller.submit({ text: 'never mind, do something else' })
+  assert.equal(ordinary.ok, true)
+  assert.equal(controller.pendingConfirmation, undefined)
+  assert.equal(runner.runs[3][0].text.endsWith('never mind, do something else'), true)
+  assert.doesNotMatch(runner.runs[3][0].text, /<user_confirmation decision="[a-z]+" action=/u)
+  runner.current.resolve('OK')
+  await ordinary.done
+  assert.equal(controller.submit({ text: '', confirm: 'approve' }).code, 'NO_CONFIRMATION_PENDING')
+})
+
+test('confirm answers are validated, session-scoped, and cleared by new chat or resume', async () => {
+  const { controller, runner } = setup({ confirmIrreversible: true })
+  assert.equal(controller.submit({ text: '', confirm: 'maybe' }).code, 'INVALID_CONFIRMATION')
+  assert.equal(controller.submit({ text: 'x', confirm: 'approve', steer: true }).code, 'INVALID_CONFIRMATION')
+  assert.equal(controller.submit({ text: '   ' }).code, 'EMPTY_PROMPT')
+  assert.equal(controller.submit({ text: '', confirm: 'approve' }).code, 'NO_CONFIRMATION_PENDING')
+
+  const turn = controller.submit({ text: 'publish the page' })
+  controller.noteActivity({ kind: 'confirm-request', turnId: turn.turnId, action: 'Publish the page', target: 'Publish button' })
+  runner.current.resolve('Waiting.')
+  await turn.done
+
+  // A different session cannot answer this chat's confirmation.
+  const other = new FakeRunner('session-other')
+  const savedRunner = runner
+  Object.defineProperty(controller, 'getRunner', { value: () => other, configurable: true })
+  assert.equal(controller.submit({ text: '', confirm: 'approve' }).code, 'NO_CONFIRMATION_PENDING')
+  Object.defineProperty(controller, 'getRunner', { value: () => savedRunner, configurable: true })
+
+  // New chat clears the waiting request.
+  assert.ok(controller.pendingConfirmation)
+  await controller.newChat()
+  assert.equal(controller.pendingConfirmation, undefined)
+  assert.equal(controller.submit({ text: '', confirm: 'deny' }).code, 'NO_CONFIRMATION_PENDING')
+
+  // And so does resuming another saved chat.
+  const third = controller.submit({ text: 'pay the invoice' })
+  controller.noteActivity({ kind: 'confirm-request', turnId: third.turnId, action: 'Pay the invoice', target: 'Pay button' })
+  runner.current.resolve('Waiting.')
+  await third.done
+  assert.ok(controller.pendingConfirmation)
+  await controller.resumeChat('session-saved')
+  assert.equal(controller.pendingConfirmation, undefined)
+})
+
+test('stale or malformed confirm activities are ignored and a help request wins over a confirm in the same turn', async () => {
+  const { controller, runner, frames } = setup({ confirmIrreversible: true })
+  const turn = controller.submit({ text: 'work' })
+  controller.noteActivity({ kind: 'confirm-request', turnId: 'turn-old', action: 'x', target: 'y' })
+  controller.noteActivity({ kind: 'confirm-request', turnId: turn.turnId, action: '   ', target: 'y' })
+  controller.noteActivity({ kind: 'confirm-request', turnId: turn.turnId, action: 'x', target: 5 })
+  assert.equal(controller.confirmTurnRequest, undefined)
+  controller.noteActivity({ kind: 'confirm-request', turnId: turn.turnId, action: 'Submit it', target: 'Submit button' })
+  controller.noteActivity({ kind: 'help-request', turnId: turn.turnId, category: 'login', reason: 'Sign in first.' })
+  runner.current.resolve('Blocked.')
+  await turn.done
+  const done = frames.find(frame => frame.type === 'chat.done')
+  assert.deepEqual(done.help, { category: 'login', reason: 'Sign in first.' })
+  assert.equal(done.confirm, undefined)
+  assert.equal(controller.pendingConfirmation, undefined)
+})
+
+test('stop during the confirmation capture ends as stopped, not waiting', async () => {
+  const { controller, runner, bridge, frames, observed } = setup({ confirmIrreversible: true })
+  let release
+  bridge.requestUi = command => {
+    bridge.requests.push(command)
+    if (command.op === 'snapshot') return new Promise(resolve => { release = resolve })
+    return Promise.resolve({})
+  }
+  const turn = controller.submit({ text: 'submit it' })
+  controller.noteActivity({ kind: 'confirm-request', turnId: turn.turnId, action: 'Submit it', target: 'Submit button' })
+  runner.current.resolve('Waiting.')
+  await new Promise(resolve => setTimeout(resolve, 20))
+  controller.stop()
+  release({ image: { data: 'AAAA', mimeType: 'image/jpeg' } })
+  await turn.done
+  assert.equal(observed.at(-1)[1].outcome, 'stopped')
+  assert.equal(controller.pendingConfirmation, undefined)
+  assert.ok(frames.some(frame => frame.type === 'chat.stopped'))
+  assert.ok(!frames.some(frame => frame.type === 'chat.done'))
+})
+
+test('with the setting off, turns carry no confirm mode or guidance', async () => {
+  const { controller, runner, bridge, frames } = setup()
+  const turn = controller.submit({ text: 'submit the form' })
+  assert.deepEqual(bridge.turnOptions[0], { id: turn.turnId, planMode: false, confirmMode: false })
+  assert.doesNotMatch(runner.runs[0][0].text, /<confirm_mode>|agent_request_confirmation/)
+  runner.current.resolve('DONE — submitted.')
+  await turn.done
+  assert.equal(frames.find(frame => frame.type === 'chat.done').confirm, undefined)
+  assert.equal(controller.pendingConfirmation, undefined)
 })
 
 test('steer stops the running turn and starts the new message in the freed slot', async () => {

@@ -1,0 +1,1120 @@
+{
+  "name": "confirm-request",
+  "frames": [
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 3,
+      "type": "remote.resync",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:04.000Z",
+      "body": {
+        "reason": "no-instance",
+        "state": {
+          "protocol": 1,
+          "server": {
+            "name": "crazyagent-companion",
+            "version": "fixture"
+          },
+          "instanceId": "companion-fixture-e",
+          "sessionId": "session-1",
+          "latestSequence": 3,
+          "oldestSequence": 1,
+          "turn": {
+            "status": "idle",
+            "turnId": null,
+            "origin": null,
+            "clientMessageId": null,
+            "startedAt": null,
+            "endedAt": null,
+            "outcome": null,
+            "error": null,
+            "label": null,
+            "usage": null,
+            "failedCalls": null
+          },
+          "phase": {
+            "status": null,
+            "tool": null
+          },
+          "health": {
+            "uiConnected": true,
+            "toolsConnected": true,
+            "dsh": "ready",
+            "dshMessage": null,
+            "provider": "openrouter",
+            "model": "fixture/model",
+            "autoCapture": true,
+            "contextWindow": null,
+            "contextTokens": null
+          },
+          "messages": [],
+          "draft": null,
+          "latestScreenshotId": null,
+          "latestScreenshot": null,
+          "help": null,
+          "confirm": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 4,
+      "type": "remote.health",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:05.000Z",
+      "body": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "confirmIrreversible": true,
+        "contextWindow": null,
+        "contextTokens": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 5,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-8",
+      "occurredAt": "2026-11-06T12:00:07.000Z",
+      "body": {
+        "text": "Fill in the form and submit it",
+        "origin": "remote",
+        "clientMessageId": "client-turn-8",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 6,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-8",
+      "occurredAt": "2026-11-06T12:00:08.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 7,
+      "type": "chat.assistant",
+      "sessionId": "session-1",
+      "turnId": "turn-8",
+      "occurredAt": "2026-11-06T12:00:09.000Z",
+      "body": {
+        "text": "I need your approval to submit."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 8,
+      "type": "remote.screenshot",
+      "sessionId": "session-1",
+      "turnId": "turn-8",
+      "occurredAt": "2026-11-06T12:00:11.000Z",
+      "body": {
+        "screenshotId": "shot-fixture-1",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:10.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "confirm"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 9,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-8",
+      "occurredAt": "2026-11-06T12:00:12.000Z",
+      "body": {
+        "text": "BLOCKED — waiting for your approval to submit.",
+        "timings": null,
+        "usage": {
+          "inputTokens": 32,
+          "outputTokens": 7,
+          "totalTokens": 39
+        },
+        "label": "blocked",
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": false,
+        "planOutcome": null,
+        "planRevision": null,
+        "confirm": {
+          "action": "Submit the assignment for grading",
+          "target": "Submit for Grading button"
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 10,
+      "type": "remote.confirm",
+      "sessionId": "session-1",
+      "turnId": "turn-8",
+      "occurredAt": "2026-11-06T12:00:14.000Z",
+      "body": {
+        "turnId": "turn-8",
+        "action": "Submit the assignment for grading",
+        "target": "Submit for Grading button",
+        "screenshotId": "shot-fixture-1",
+        "captureError": null,
+        "requestedAt": "2026-11-06T12:00:13.000Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 11,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-8",
+      "occurredAt": "2026-11-06T12:00:16.000Z",
+      "body": {
+        "status": "waiting_for_user",
+        "turnId": "turn-8",
+        "origin": "remote",
+        "clientMessageId": "client-turn-8",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": "2026-11-06T12:00:15.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "blocked",
+        "usage": {
+          "inputTokens": 32,
+          "outputTokens": 7,
+          "totalTokens": 39
+        },
+        "failedCalls": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 12,
+      "type": "remote.screenshot",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:18.000Z",
+      "body": {
+        "screenshotId": "shot-fixture-2",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:17.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "manual"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 13,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-9",
+      "occurredAt": "2026-11-06T12:00:20.000Z",
+      "body": {
+        "text": "<user_confirmation decision=\"approve\" action=\"Submit the assignment for grading\"/>",
+        "origin": "remote",
+        "clientMessageId": "client-turn-9",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 14,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-9",
+      "occurredAt": "2026-11-06T12:00:21.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 15,
+      "type": "chat.assistant",
+      "sessionId": "session-1",
+      "turnId": "turn-9",
+      "occurredAt": "2026-11-06T12:00:22.000Z",
+      "body": {
+        "text": "Submitted."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 16,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-9",
+      "occurredAt": "2026-11-06T12:00:23.000Z",
+      "body": {
+        "text": "DONE — the assignment was submitted.",
+        "timings": null,
+        "usage": {
+          "inputTokens": 26,
+          "outputTokens": 6,
+          "totalTokens": 32
+        },
+        "label": "done",
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": false,
+        "planOutcome": null,
+        "planRevision": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 17,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-9",
+      "occurredAt": "2026-11-06T12:00:25.000Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-9",
+        "origin": "remote",
+        "clientMessageId": "client-turn-9",
+        "startedAt": "2026-11-06T12:00:19.000Z",
+        "endedAt": "2026-11-06T12:00:24.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "done",
+        "usage": {
+          "inputTokens": 26,
+          "outputTokens": 6,
+          "totalTokens": 32
+        },
+        "failedCalls": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 18,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-10",
+      "occurredAt": "2026-11-06T12:00:27.000Z",
+      "body": {
+        "text": "Now delete the draft",
+        "origin": "remote",
+        "clientMessageId": "client-turn-10",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 19,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-10",
+      "occurredAt": "2026-11-06T12:00:28.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 20,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-10",
+      "occurredAt": "2026-11-06T12:00:29.000Z",
+      "body": {
+        "text": "BLOCKED — waiting for your approval to delete.",
+        "timings": null,
+        "usage": {
+          "inputTokens": 19,
+          "outputTokens": 5,
+          "totalTokens": 24
+        },
+        "label": "blocked",
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": false,
+        "planOutcome": null,
+        "planRevision": null,
+        "confirm": {
+          "action": "Delete the draft",
+          "target": "Delete button"
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 21,
+      "type": "remote.confirm",
+      "sessionId": "session-1",
+      "turnId": "turn-10",
+      "occurredAt": "2026-11-06T12:00:31.000Z",
+      "body": {
+        "turnId": "turn-10",
+        "action": "Delete the draft",
+        "target": "Delete button",
+        "screenshotId": null,
+        "captureError": "The browser side panel is not connected, so the screen cannot be captured.",
+        "requestedAt": "2026-11-06T12:00:30.000Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 22,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-10",
+      "occurredAt": "2026-11-06T12:00:33.000Z",
+      "body": {
+        "status": "waiting_for_user",
+        "turnId": "turn-10",
+        "origin": "remote",
+        "clientMessageId": "client-turn-10",
+        "startedAt": "2026-11-06T12:00:26.000Z",
+        "endedAt": "2026-11-06T12:00:32.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "blocked",
+        "usage": {
+          "inputTokens": 19,
+          "outputTokens": 5,
+          "totalTokens": 24
+        },
+        "failedCalls": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-e",
+      "seq": 23,
+      "type": "chat.session",
+      "sessionId": "session-2",
+      "occurredAt": "2026-11-06T12:00:34.000Z",
+      "body": {
+        "sessionId": "session-2"
+      }
+    }
+  ],
+  "final": {
+    "protocol": 1,
+    "server": {
+      "name": "crazyagent-companion",
+      "version": "fixture"
+    },
+    "instanceId": "companion-fixture-e",
+    "sessionId": "session-2",
+    "latestSequence": 23,
+    "oldestSequence": 1,
+    "turn": {
+      "status": "idle",
+      "turnId": "turn-10",
+      "origin": "remote",
+      "clientMessageId": "client-turn-10",
+      "startedAt": "2026-11-06T12:00:26.000Z",
+      "endedAt": "2026-11-06T12:00:32.000Z",
+      "outcome": "done",
+      "error": null,
+      "label": "blocked",
+      "usage": {
+        "inputTokens": 19,
+        "outputTokens": 5,
+        "totalTokens": 24
+      },
+      "failedCalls": 0
+    },
+    "phase": {
+      "status": null,
+      "tool": null
+    },
+    "health": {
+      "uiConnected": true,
+      "toolsConnected": true,
+      "dsh": "ready",
+      "dshMessage": null,
+      "provider": "openrouter",
+      "model": "fixture/model",
+      "autoCapture": true,
+      "confirmIrreversible": true,
+      "contextWindow": null,
+      "contextTokens": null
+    },
+    "messages": [],
+    "draft": null,
+    "latestScreenshotId": null,
+    "latestScreenshot": null,
+    "help": null,
+    "confirm": null
+  },
+  "checkpoints": {
+    "waiting": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-e",
+      "sessionId": "session-1",
+      "latestSequence": 11,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "waiting_for_user",
+        "turnId": "turn-8",
+        "origin": "remote",
+        "clientMessageId": "client-turn-8",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": "2026-11-06T12:00:15.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "blocked",
+        "usage": {
+          "inputTokens": 32,
+          "outputTokens": 7,
+          "totalTokens": 39
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "confirmIrreversible": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Fill in the form and submit it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-8",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 7,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:09.000Z",
+          "body": {
+            "text": "I need your approval to submit."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 9,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:12.000Z",
+          "body": {
+            "text": "BLOCKED — waiting for your approval to submit.",
+            "timings": null,
+            "usage": {
+              "inputTokens": 32,
+              "outputTokens": 7,
+              "totalTokens": 39
+            },
+            "label": "blocked",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "confirm": {
+              "action": "Submit the assignment for grading",
+              "target": "Submit for Grading button"
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-fixture-1",
+      "latestScreenshot": {
+        "screenshotId": "shot-fixture-1",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:10.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "confirm"
+      },
+      "help": null,
+      "confirm": {
+        "turnId": "turn-8",
+        "action": "Submit the assignment for grading",
+        "target": "Submit for Grading button",
+        "screenshotId": "shot-fixture-1",
+        "captureError": null,
+        "requestedAt": "2026-11-06T12:00:13.000Z"
+      }
+    },
+    "waitingAfterCapture": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-e",
+      "sessionId": "session-1",
+      "latestSequence": 12,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "waiting_for_user",
+        "turnId": "turn-8",
+        "origin": "remote",
+        "clientMessageId": "client-turn-8",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": "2026-11-06T12:00:15.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "blocked",
+        "usage": {
+          "inputTokens": 32,
+          "outputTokens": 7,
+          "totalTokens": 39
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "confirmIrreversible": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Fill in the form and submit it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-8",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 7,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:09.000Z",
+          "body": {
+            "text": "I need your approval to submit."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 9,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:12.000Z",
+          "body": {
+            "text": "BLOCKED — waiting for your approval to submit.",
+            "timings": null,
+            "usage": {
+              "inputTokens": 32,
+              "outputTokens": 7,
+              "totalTokens": 39
+            },
+            "label": "blocked",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "confirm": {
+              "action": "Submit the assignment for grading",
+              "target": "Submit for Grading button"
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-fixture-2",
+      "latestScreenshot": {
+        "screenshotId": "shot-fixture-2",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:17.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "manual"
+      },
+      "help": null,
+      "confirm": {
+        "turnId": "turn-8",
+        "action": "Submit the assignment for grading",
+        "target": "Submit for Grading button",
+        "screenshotId": "shot-fixture-1",
+        "captureError": null,
+        "requestedAt": "2026-11-06T12:00:13.000Z"
+      }
+    },
+    "afterApprove": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-e",
+      "sessionId": "session-1",
+      "latestSequence": 17,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-9",
+        "origin": "remote",
+        "clientMessageId": "client-turn-9",
+        "startedAt": "2026-11-06T12:00:19.000Z",
+        "endedAt": "2026-11-06T12:00:24.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "done",
+        "usage": {
+          "inputTokens": 26,
+          "outputTokens": 6,
+          "totalTokens": 32
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "confirmIrreversible": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Fill in the form and submit it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-8",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 7,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:09.000Z",
+          "body": {
+            "text": "I need your approval to submit."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 9,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:12.000Z",
+          "body": {
+            "text": "BLOCKED — waiting for your approval to submit.",
+            "timings": null,
+            "usage": {
+              "inputTokens": 32,
+              "outputTokens": 7,
+              "totalTokens": 39
+            },
+            "label": "blocked",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "confirm": {
+              "action": "Submit the assignment for grading",
+              "target": "Submit for Grading button"
+            }
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 13,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-9",
+          "occurredAt": "2026-11-06T12:00:20.000Z",
+          "body": {
+            "text": "<user_confirmation decision=\"approve\" action=\"Submit the assignment for grading\"/>",
+            "origin": "remote",
+            "clientMessageId": "client-turn-9",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 15,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-9",
+          "occurredAt": "2026-11-06T12:00:22.000Z",
+          "body": {
+            "text": "Submitted."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 16,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-9",
+          "occurredAt": "2026-11-06T12:00:23.000Z",
+          "body": {
+            "text": "DONE — the assignment was submitted.",
+            "timings": null,
+            "usage": {
+              "inputTokens": 26,
+              "outputTokens": 6,
+              "totalTokens": 32
+            },
+            "label": "done",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-fixture-2",
+      "latestScreenshot": {
+        "screenshotId": "shot-fixture-2",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:17.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "manual"
+      },
+      "help": null,
+      "confirm": null
+    },
+    "waitingNoCapture": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-e",
+      "sessionId": "session-1",
+      "latestSequence": 22,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "waiting_for_user",
+        "turnId": "turn-10",
+        "origin": "remote",
+        "clientMessageId": "client-turn-10",
+        "startedAt": "2026-11-06T12:00:26.000Z",
+        "endedAt": "2026-11-06T12:00:32.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "blocked",
+        "usage": {
+          "inputTokens": 19,
+          "outputTokens": 5,
+          "totalTokens": 24
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "confirmIrreversible": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Fill in the form and submit it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-8",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 7,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:09.000Z",
+          "body": {
+            "text": "I need your approval to submit."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 9,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-8",
+          "occurredAt": "2026-11-06T12:00:12.000Z",
+          "body": {
+            "text": "BLOCKED — waiting for your approval to submit.",
+            "timings": null,
+            "usage": {
+              "inputTokens": 32,
+              "outputTokens": 7,
+              "totalTokens": 39
+            },
+            "label": "blocked",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "confirm": {
+              "action": "Submit the assignment for grading",
+              "target": "Submit for Grading button"
+            }
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 13,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-9",
+          "occurredAt": "2026-11-06T12:00:20.000Z",
+          "body": {
+            "text": "<user_confirmation decision=\"approve\" action=\"Submit the assignment for grading\"/>",
+            "origin": "remote",
+            "clientMessageId": "client-turn-9",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 15,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-9",
+          "occurredAt": "2026-11-06T12:00:22.000Z",
+          "body": {
+            "text": "Submitted."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 16,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-9",
+          "occurredAt": "2026-11-06T12:00:23.000Z",
+          "body": {
+            "text": "DONE — the assignment was submitted.",
+            "timings": null,
+            "usage": {
+              "inputTokens": 26,
+              "outputTokens": 6,
+              "totalTokens": 32
+            },
+            "label": "done",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 18,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-10",
+          "occurredAt": "2026-11-06T12:00:27.000Z",
+          "body": {
+            "text": "Now delete the draft",
+            "origin": "remote",
+            "clientMessageId": "client-turn-10",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-e",
+          "seq": 20,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-10",
+          "occurredAt": "2026-11-06T12:00:29.000Z",
+          "body": {
+            "text": "BLOCKED — waiting for your approval to delete.",
+            "timings": null,
+            "usage": {
+              "inputTokens": 19,
+              "outputTokens": 5,
+              "totalTokens": 24
+            },
+            "label": "blocked",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "confirm": {
+              "action": "Delete the draft",
+              "target": "Delete button"
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-fixture-2",
+      "latestScreenshot": {
+        "screenshotId": "shot-fixture-2",
+        "callId": "auto",
+        "capturedAt": "2026-11-06T12:00:17.000Z",
+        "width": 1,
+        "height": 1,
+        "mimeType": "image/png",
+        "bytes": 70,
+        "source": "manual"
+      },
+      "help": null,
+      "confirm": {
+        "turnId": "turn-10",
+        "action": "Delete the draft",
+        "target": "Delete button",
+        "screenshotId": null,
+        "captureError": "The browser side panel is not connected, so the screen cannot be captured.",
+        "requestedAt": "2026-11-06T12:00:30.000Z"
+      }
+    }
+  }
+}

@@ -80,7 +80,8 @@
           },
           "latestScreenshotId": null,
           "latestScreenshot": null,
-          "help": null
+          "help": null,
+          "confirm": null
         }
       }
     },
@@ -281,6 +282,7 @@
     "draft": null,
     "latestScreenshotId": null,
     "latestScreenshot": null,
-    "help": null
+    "help": null,
+    "confirm": null
   }
 }

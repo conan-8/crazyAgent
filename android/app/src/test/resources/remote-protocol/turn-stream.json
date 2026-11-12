@@ -52,7 +52,8 @@
           "draft": null,
           "latestScreenshotId": null,
           "latestScreenshot": null,
-          "help": null
+          "help": null,
+          "confirm": null
         }
       }
     },
@@ -456,6 +457,7 @@
       "bytes": 70,
       "source": "tool"
     },
-    "help": null
+    "help": null,
+    "confirm": null
   }
 }

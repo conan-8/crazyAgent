@@ -498,6 +498,56 @@ test('plan mode follows the current turn and synchronizes on provider connect', 
   assert.deepEqual(cleared, { v: 1, type: 'plan.mode', turnId: null, enabled: false })
 })
 
+test('confirm mode follows the current turn and synchronizes on provider connect', async t => {
+  const { bridge, url } = await setup(t)
+  bridge.setTurnId('turn-armed', { confirmMode: true })
+  const tools = await connect(url, 'tools')
+  t.after(() => tools.ws.close())
+  const initial = await tools.messages.next(message => message.type === 'confirm.mode')
+  assert.deepEqual(initial, { v: 1, type: 'confirm.mode', turnId: 'turn-armed', enabled: true })
+
+  bridge.setTurnId('turn-ordinary', { confirmMode: false })
+  const ordinary = await tools.messages.next(message => message.type === 'confirm.mode')
+  assert.deepEqual(ordinary, { v: 1, type: 'confirm.mode', turnId: 'turn-ordinary', enabled: false })
+
+  bridge.setTurnId('turn-resumed', { planMode: true, confirmMode: true })
+  await tools.messages.next(message => message.type === 'confirm.mode' && message.turnId === 'turn-resumed')
+  tools.ws.close()
+  await sleep(50)
+  const resumed = await connect(url, 'tools')
+  t.after(() => resumed.ws.close())
+  const replayed = await resumed.messages.next(message => message.type === 'confirm.mode')
+  assert.deepEqual(replayed, { v: 1, type: 'confirm.mode', turnId: 'turn-resumed', enabled: true })
+  const planReplayed = await resumed.messages.next(message => message.type === 'plan.mode')
+  assert.deepEqual(planReplayed, { v: 1, type: 'plan.mode', turnId: 'turn-resumed', enabled: true })
+
+  bridge.setTurnId(undefined)
+  const cleared = await resumed.messages.next(message => message.type === 'confirm.mode')
+  assert.deepEqual(cleared, { v: 1, type: 'confirm.mode', turnId: null, enabled: false })
+})
+
+test('settings.update control frames reach the control handler and chat.send keeps its confirm field', async t => {
+  const controls = []
+  const sends = []
+  const { url } = await setup(t, {
+    onControl: message => { controls.push(message) },
+    onChat: (text, ws, message) => { sends.push({ text, message }) },
+  })
+  const ui = await connect(url, 'ui')
+  t.after(() => ui.ws.close())
+
+  ui.ws.send(JSON.stringify({ v: 1, type: 'settings.update', confirmIrreversible: true }))
+  await sleep(50)
+  assert.equal(controls.length, 1)
+  assert.equal(controls[0].type, 'settings.update')
+  assert.equal(controls[0].confirmIrreversible, true)
+
+  ui.ws.send(JSON.stringify({ v: 1, type: 'chat.send', text: '', confirm: 'approve' }))
+  await sleep(50)
+  assert.equal(sends.length, 1)
+  assert.equal(sends[0].message.confirm, 'approve')
+})
+
 test('captured images are reported to the image observer for both auto views and tool results', async t => {
   const images = []
   const { bridge, url } = await setup(t, { onImage: info => images.push(info) })

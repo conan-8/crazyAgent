@@ -20,7 +20,7 @@ async function setup(t, options = {}) {
   let token = options.token ?? TOKEN
   let runner = options.runner === null ? undefined : (options.runner ?? new FakeRunner())
   const bridge = options.bridge ?? fakeBridge()
-  const health = { uiConnected: false, toolsConnected: false, dsh: 'ready', model: 'model-x' }
+  const health = { uiConnected: false, toolsConnected: false, dsh: 'ready', model: 'model-x', confirmIrreversible: options.confirmIrreversible === true }
   const hub = new RemoteHub({ instanceId: 'inst-test', serverVersion: 'test', getHealth: () => ({ ...health }), ...options.hub })
   const uiFrames = []
   const controller = new SessionController({
@@ -30,6 +30,7 @@ async function setup(t, options = {}) {
     autoCapture: options.autoCapture ?? false,
     provider: 'openrouter',
     getModelId: () => 'model-x',
+    getConfirmIrreversible: () => options.confirmIrreversible === true,
     publish: frame => {
       uiFrames.push(frame)
       bridge.sendToUi?.(frame)
@@ -970,4 +971,184 @@ test('without a push provider registration is refused but unregistering still an
   assert.equal(put.status, 503)
   assert.equal(put.body.error.code, 'PUSH_NOT_CONFIGURED')
   assert.equal((await ctx.call({ method: 'DELETE', path: '/remote/v1/push/devices/phone-1' })).status, 200)
+})
+
+/** The provider's `confirm-request` activity for the running turn, as the bridge forwards it. */
+function confirmSignal(ctx, request, turnId = ctx.controller.turnId) {
+  ctx.controller.noteActivity({ v: 1, type: 'chat.activity', kind: 'confirm-request', turnId, ...request })
+}
+
+test('a confirmation request waits with one capture; approve and deny are companion-written, idempotent, and scoped', async t => {
+  let hub
+  const bridge = snapshotBridge(() => hub)
+  const ctx = await setup(t, { bridge, confirmIrreversible: true })
+  hub = ctx.hub
+  const events = openEvents(ctx.port, { token: TOKEN })
+  t.after(() => events.close())
+  await events.next(frame => frame.type === 'remote.resync')
+
+  // The setting is read-only in /state health.
+  const initial = (await ctx.call({ path: '/remote/v1/state' })).body
+  assert.equal(initial.health.confirmIrreversible, true)
+  assert.equal(initial.confirm, null)
+
+  const sent = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0001', text: 'fill in the form and submit it' } })
+  await ctx.runner.started()
+  const sessionId = ctx.runner.sessionId
+  assert.match(ctx.runner.runs[0][0].text, /<confirm_mode>/)
+  confirmSignal(ctx, { action: 'Submit the assignment for grading', target: 'Submit for Grading button' })
+  assert.equal(bridge.requests.length, 0, 'nothing is captured while the model run is still in flight')
+  ctx.runner.current.resolve('BLOCKED — waiting for your approval.')
+
+  const confirm = await events.next(frame => frame.type === 'remote.confirm')
+  const turn = await events.next(frame => frame.type === 'chat.turn')
+  assert.ok(confirm.seq < turn.seq, 'the request is committed before the waiting state is announced')
+  assert.equal(confirm.turnId, sent.body.turnId)
+  assert.equal(confirm.body.action, 'Submit the assignment for grading')
+  assert.equal(confirm.body.target, 'Submit for Grading button')
+  assert.equal(confirm.body.captureError, null)
+  assert.equal(turn.body.status, 'waiting_for_user')
+  assert.deepEqual(bridge.requests.map(r => [r.op, r.source]), [['snapshot', 'confirm'], ['labels.clear', undefined]])
+  const shot = events.frames.find(frame => frame.type === 'remote.screenshot')
+  assert.equal(shot.body.source, 'confirm')
+  assert.equal(confirm.body.screenshotId, shot.body.screenshotId)
+  const done = events.frames.find(frame => frame.type === 'chat.done')
+  assert.deepEqual(done.body.confirm, { action: 'Submit the assignment for grading', target: 'Submit for Grading button' })
+
+  const state = (await ctx.call({ path: '/remote/v1/state' })).body
+  assert.equal(state.turn.status, 'waiting_for_user')
+  assert.equal(state.confirm.screenshotId, shot.body.screenshotId)
+  // Health changes must not knock the chat out of the waiting state.
+  ctx.health.uiConnected = true
+  ctx.hub.updateHealth()
+  assert.equal(ctx.hub.turn.status, 'waiting_for_user')
+
+  // Approve with no text: the companion writes the block; the same session continues.
+  const approve = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0002', text: '', confirm: 'approve' } })
+  assert.equal(approve.status, 202)
+  await ctx.runner.started()
+  assert.equal(ctx.runner.sessionId, sessionId)
+  assert.equal(ctx.runner.sessions, 1)
+  assert.ok(ctx.runner.runs[1][0].text.endsWith('<user_confirmation decision="approve" action="Submit the assignment for grading"/>'))
+  const running = (await ctx.call({ path: '/remote/v1/state' })).body
+  assert.equal(running.turn.status, 'running')
+  assert.equal(running.confirm, null)
+  // Idempotent replay of the same decision does not start a second turn.
+  const again = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0002', text: '', confirm: 'approve' } })
+  assert.equal(again.body.replayed, true)
+  assert.equal(ctx.runner.runs.length, 2)
+  // The same client ID with a different decision is a conflict, not a replay.
+  const conflict = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0002', text: '', confirm: 'deny' } })
+  assert.equal(conflict.status, 409)
+  assert.equal(conflict.body.error.code, 'IDEMPOTENCY_CONFLICT')
+  ctx.runner.current.resolve('DONE — submitted.')
+  await events.next(frame => frame.type === 'chat.turn' && frame.seq > turn.seq)
+  assert.equal(ctx.hub.turn.status, 'idle')
+
+  // Nothing is pending: another approve is 409 NO_CONFIRMATION_PENDING.
+  const late = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0003', text: '', confirm: 'approve' } })
+  assert.equal(late.status, 409)
+  assert.equal(late.body.error.code, 'NO_CONFIRMATION_PENDING')
+  assert.equal(ctx.runner.runs.length, 2)
+
+  // A deny answer carries the deny block plus the user's own text.
+  await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0004', text: 'send the email' } })
+  await ctx.runner.started()
+  confirmSignal(ctx, { action: 'Send the email', target: 'Send button' })
+  ctx.runner.current.resolve('Waiting for approval.')
+  await events.next(frame => frame.type === 'remote.confirm' && frame.seq > confirm.seq)
+  const deny = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0005', text: 'do not send it', confirm: 'deny' } })
+  assert.equal(deny.status, 202)
+  await ctx.runner.started()
+  assert.match(ctx.runner.runs[3][0].text, /<user_confirmation decision="deny" action="Send the email"\/>\n\ndo not send it$/u)
+  ctx.runner.current.resolve('Understood.')
+  await sleep(20)
+  assert.equal(ctx.hub.turn.status, 'idle')
+  assert.equal(ctx.hub.confirm, null)
+})
+
+test('confirm validation, missing capture evidence, ordinary-prompt abandonment, and new chat clearing', async t => {
+  let hub
+  const bridge = snapshotBridge(() => hub, { noImage: true })
+  const ctx = await setup(t, { bridge, confirmIrreversible: true })
+  hub = ctx.hub
+
+  // Invalid decision values never reach the controller.
+  for (const value of ['yes', true, 1, 'APPROVE']) {
+    const bad = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: `client-bad-${String(value)}`, text: 'go', confirm: value } })
+    assert.equal(bad.status, 422, JSON.stringify(value))
+    assert.equal(bad.body.error.code, 'INVALID_CONFIRMATION')
+  }
+  assert.equal(ctx.runner.runs.length, 0)
+
+  // A failed capture still waits and reports the missing evidence.
+  await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0001', text: 'go' } })
+  await ctx.runner.started()
+  confirmSignal(ctx, { action: 'Delete the file', target: 'Delete button' })
+  ctx.runner.current.resolve('Waiting.')
+  await sleep(30)
+  const state = (await ctx.call({ path: '/remote/v1/state' })).body
+  assert.equal(state.turn.status, 'waiting_for_user')
+  assert.equal(state.confirm.screenshotId, null)
+  assert.ok(state.confirm.captureError.length > 0)
+
+  // An ordinary prompt abandons the request: neither approve nor deny.
+  const ordinary = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0002', text: 'never mind' } })
+  assert.equal(ordinary.status, 202)
+  await ctx.runner.started()
+  assert.doesNotMatch(ctx.runner.runs[1][0].text, /<user_confirmation decision="[a-z]+" action=/u)
+  assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.confirm, null)
+  ctx.runner.current.resolve('ok')
+  await sleep(20)
+  const late = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0003', text: '', confirm: 'approve' } })
+  assert.equal(late.status, 409)
+  assert.equal(late.body.error.code, 'NO_CONFIRMATION_PENDING')
+
+  // A new chat while waiting clears the request.
+  await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0004', text: 'publish it' } })
+  await ctx.runner.started()
+  confirmSignal(ctx, { action: 'Publish the page', target: 'Publish button' })
+  ctx.runner.current.resolve('Waiting.')
+  await sleep(30)
+  assert.equal(ctx.hub.turn.status, 'waiting_for_user')
+  const fresh = await ctx.call({ method: 'POST', path: '/remote/v1/new', body: { clientCommandId: 'new-00001' } })
+  assert.equal(fresh.status, 200)
+  const cleared = (await ctx.call({ path: '/remote/v1/state' })).body
+  assert.equal(cleared.confirm, null)
+  assert.equal(cleared.turn.status, 'idle')
+})
+
+test('a confirmation wait sends no push until the phone card exists; malformed signals are ignored', async t => {
+  const sends = []
+  const push = new PushService({ registry: new PushRegistry(), provider: { name: 'fake', send: async (token, data, options) => { sends.push({ token, data, options }); return { ok: true } } } })
+  let hub
+  const bridge = snapshotBridge(() => hub)
+  const ctx = await setup(t, { bridge, push, confirmIrreversible: true })
+  hub = ctx.hub
+  assert.equal((await ctx.call({ method: 'PUT', path: '/remote/v1/push/devices/phone-1', body: { fcmToken: `fcm-token-A:${'a'.repeat(120)}`, platform: 'android' } })).status, 200)
+  ctx.controller.addObserver({
+    turnEnded: info => {
+      const type = pushTypeForTurn(info)
+      if (type !== null) void push.notify({ type, turnId: info.turnId, instanceId: ctx.hub.instanceId, sequence: ctx.hub.seq })
+    },
+  })
+  await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0001', text: 'go' } })
+  await ctx.runner.started()
+  // Malformed requests are ignored: the turn ends idle with no confirmation.
+  confirmSignal(ctx, { action: '   ', target: 'x' })
+  confirmSignal(ctx, { action: 'x' })
+  ctx.runner.current.resolve('ok')
+  await sleep(30)
+  assert.equal(ctx.hub.turn.status, 'idle')
+  assert.equal(ctx.hub.confirm, null)
+  assert.equal(sends.length, 1)
+  assert.equal(sends[0].data.type, 'done')
+
+  await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0002', text: 'submit it' } })
+  await ctx.runner.started()
+  confirmSignal(ctx, { action: 'Submit it', target: 'Submit button' })
+  ctx.runner.current.resolve('Waiting.')
+  await sleep(30)
+  assert.equal(ctx.hub.turn.status, 'waiting_for_user')
+  assert.equal(sends.length, 1, 'no push for a confirmation wait in B9a')
 })

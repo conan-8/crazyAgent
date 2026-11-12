@@ -145,8 +145,58 @@ class ReducerFixtureTest {
         assertEquals("idle", end.turn.status)
     }
 
+    @Test fun confirmRequestWaitsThenTheApproveOrANewChatClearsIt() {
+        assertMatchesProjection("confirm-request")
+        val f = fixture("confirm-request")
+        val all = frames(f)
+        val checkpoints = f["checkpoints"]!!.jsonObject
+        fun checkpoint(name: String) = ChatReducer.fromProjection(checkpoints[name]!!.jsonObject)!!
+        fun type(frame: JsonObject) = frame["type"].toString().trim('"')
+        fun turn(frame: JsonObject) = frame["turnId"]?.toString()?.trim('"')
+        fun upTo(predicate: (JsonObject) -> Boolean) = replay(all.take(all.indexOfFirst(predicate) + 1))
+
+        // The live stream reaches each of the hub's own projections.
+        val waiting = upTo { type(it) == "chat.turn" && turn(it) == "turn-8" }
+        assertEquals(checkpoint("waiting"), waiting)
+        assertTrue(waiting.turn.isWaiting)
+        assertEquals(
+            ConfirmRequest("turn-8", "Submit the assignment for grading", "Submit for Grading button", "shot-fixture-1", null, waiting.confirm!!.requestedAt),
+            waiting.confirm,
+        )
+        assertNull(waiting.help)
+        assertEquals("confirm", waiting.screenshot?.source)
+        assertEquals(true, waiting.health.confirmIrreversible)
+
+        // A manual capture while waiting replaces the live view, not the confirm evidence.
+        val captured = upTo { type(it) == "remote.screenshot" && it["body"]!!.jsonObject["source"].toString() == "\"manual\"" }
+        assertEquals(checkpoint("waitingAfterCapture"), captured)
+        assertEquals("shot-fixture-2", captured.screenshot?.id)
+        assertEquals("shot-fixture-1", captured.confirm?.screenshotId)
+        assertTrue(captured.turn.isWaiting)
+
+        // The companion-written approve block runs as an ordinary turn; the request is gone at once.
+        val approving = upTo { type(it) == "chat.user" && turn(it) == "turn-9" }
+        assertNull(approving.confirm)
+        assertEquals("running", approving.turn.status)
+        assertTrue((approving.items.last() as ChatItem.User).text.startsWith("<user_confirmation decision=\"approve\""))
+        val approved = upTo { type(it) == "chat.turn" && turn(it) == "turn-9" }
+        assertEquals(checkpoint("afterApprove"), approved)
+        assertEquals("idle", approved.turn.status)
+
+        // No capture: the request still waits and says the evidence is missing.
+        val blocked = upTo { type(it) == "chat.turn" && turn(it) == "turn-10" }
+        assertEquals(checkpoint("waitingNoCapture"), blocked)
+        assertNull(blocked.confirm!!.screenshotId)
+        assertTrue(blocked.confirm!!.captureError!!.contains("side panel"))
+
+        val end = replay(all)
+        assertEquals("session-2", end.sessionId)
+        assertNull(end.confirm)
+        assertEquals("idle", end.turn.status)
+    }
+
     @Test fun resyncFramesAreOnlyEverFirst() {
-        for (name in listOf("turn-stream", "mid-turn-resync", "lifecycle", "help-request")) {
+        for (name in listOf("turn-stream", "mid-turn-resync", "lifecycle", "help-request", "confirm-request")) {
             val all = (fixture(name)["frames"] as JsonArray).map { it.jsonObject["type"].toString() }
             assertEquals("\"remote.resync\"", all.first())
             assertTrue(all.drop(1).none { it == "\"remote.resync\"" })

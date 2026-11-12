@@ -244,8 +244,73 @@ function helpRequest() {
   return { ...fixture, checkpoints: { waiting, waitingAfterCapture, afterReply, waitingNoCapture } }
 }
 
+/**
+ * B9a: the agent asks to perform an irreversible action. One confirm capture,
+ * the waiting state, a manual capture while waiting, the companion-written
+ * approve block that continues the chat, then a second request (no capture
+ * this time) cleared by a new session.
+ */
+function confirmRequest() {
+  const s = scenario('companion-fixture-e')
+  s.connect()
+  s.setHealth({ confirmIrreversible: true })
+  startTurn(s, 'turn-8', 'Fill in the form and submit it')
+  s.hub.ingest({ type: 'chat.assistant', text: 'I need your approval to submit.' })
+  s.hub.addScreenshot({ data: PIXEL_PNG, mimeType: 'image/png', turnId: 'turn-8', callId: 'auto', source: 'confirm' })
+  const confirm = { action: 'Submit the assignment for grading', target: 'Submit for Grading button' }
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'BLOCKED — waiting for your approval to submit.',
+    label: 'blocked',
+    model: 'fixture/model',
+    usage: { inputTokens: 32, outputTokens: 7, totalTokens: 39 },
+    confirm,
+  })
+  s.hub.turnEnded({ turnId: 'turn-8', outcome: 'done', sessionId: 'session-1', label: 'blocked', usage: { inputTokens: 32, outputTokens: 7, totalTokens: 39 }, timings: { totalMs: 900, failedCalls: 0 }, confirm: { ...confirm, captureError: null } })
+  const waiting = s.hub.projection()
+  s.hub.addScreenshot({ data: PIXEL_PNG, mimeType: 'image/png', callId: 'auto', source: 'manual' })
+  const waitingAfterCapture = s.hub.projection()
+  startTurn(s, 'turn-9', '<user_confirmation decision="approve" action="Submit the assignment for grading"/>')
+  s.hub.ingest({ type: 'chat.assistant', text: 'Submitted.' })
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'DONE — the assignment was submitted.',
+    label: 'done',
+    model: 'fixture/model',
+    usage: { inputTokens: 26, outputTokens: 6, totalTokens: 32 },
+  })
+  s.hub.turnEnded({ turnId: 'turn-9', outcome: 'done', sessionId: 'session-1', label: 'done', usage: { inputTokens: 26, outputTokens: 6, totalTokens: 32 }, timings: { totalMs: 700, failedCalls: 0 } })
+  const afterApprove = s.hub.projection()
+  startTurn(s, 'turn-10', 'Now delete the draft')
+  const blocked = { action: 'Delete the draft', target: 'Delete button' }
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'BLOCKED — waiting for your approval to delete.',
+    label: 'blocked',
+    model: 'fixture/model',
+    usage: { inputTokens: 19, outputTokens: 5, totalTokens: 24 },
+    confirm: blocked,
+  })
+  s.hub.turnEnded({
+    turnId: 'turn-10',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: 'blocked',
+    usage: { inputTokens: 19, outputTokens: 5, totalTokens: 24 },
+    timings: { totalMs: 650, failedCalls: 0 },
+    confirm: { ...blocked, captureError: 'The browser side panel is not connected, so the screen cannot be captured.' },
+  })
+  const waitingNoCapture = s.hub.projection()
+  s.hub.setSession('session-2')
+  const fixture = s.done('confirm-request')
+  return { ...fixture, checkpoints: { waiting, waitingAfterCapture, afterApprove, waitingNoCapture } }
+}
+
 export function buildFixtures() {
-  return [turnStream(), midTurnResync(), lifecycle(), helpRequest()]
+  return [turnStream(), midTurnResync(), lifecycle(), helpRequest(), confirmRequest()]
 }
 
 export function fixtureFiles() {

@@ -82,6 +82,7 @@ object ChatReducer {
             screenshot = projection.obj("latestScreenshot")?.let(::screenshotOf),
         )
         val help = projection.obj("help")?.let(::helpOf)
+        val confirm = projection.obj("confirm")?.let(::confirmOf)
         for (element in projection.array("messages").orEmpty()) {
             val envelope = element as? JsonObject ?: continue
             val type = envelope.string("type") ?: continue
@@ -89,7 +90,7 @@ object ChatReducer {
         }
         // Re-apply the authoritative turn after committed messages (chat.user sets running).
         state = state.copy(turn = projection.obj("turn")?.let(::turnOf) ?: state.turn)
-        state = state.copy(draft = projection.obj("draft")?.let(::draftOf), help = help)
+        state = state.copy(draft = projection.obj("draft")?.let(::draftOf), help = help, confirm = confirm)
         return state
     }
 
@@ -116,6 +117,8 @@ object ChatReducer {
                     turn = TurnInfo(status = "running", turnId = turnId, origin = item.origin, clientMessageId = item.clientMessageId),
                     // Any prompt answers an open help request.
                     help = null,
+                    // Any prompt also answers (or abandons) an open confirmation.
+                    confirm = null,
                 )
             }
             "chat.assistant" -> {
@@ -167,9 +170,11 @@ object ChatReducer {
                 health = state.health.copy(contextTokens = null),
                 screenshot = null,
                 help = null,
+                confirm = null,
                 turn = if (state.turn.isWaiting) state.turn.copy(status = "idle") else state.turn,
             )
             "remote.help" -> state.copy(help = helpOf(body) ?: state.help)
+            "remote.confirm" -> state.copy(confirm = confirmOf(body) ?: state.confirm)
             "remote.screenshot" -> state.copy(screenshot = screenshotOf(body) ?: state.screenshot)
             "remote.health" -> state.copy(health = healthOf(body))
             "chat.draft" -> return applyDraft(state, turnId, body)
@@ -259,6 +264,7 @@ object ChatReducer {
         contextTokens = body.long("contextTokens"),
         pushConfigured = body.bool("pushConfigured"),
         executorHost = body.string("executorHost"),
+        confirmIrreversible = body.bool("confirmIrreversible"),
     )
 
     private fun screenshotOf(body: JsonObject): Screenshot? {
@@ -279,6 +285,19 @@ object ChatReducer {
             turnId = body.string("turnId"),
             category = body.string("category") ?: "other",
             reason = reason.take(500),
+            screenshotId = body.string("screenshotId")?.takeIf { SCREENSHOT_ID.matches(it) },
+            captureError = body.string("captureError")?.take(500),
+            requestedAt = body.string("requestedAt"),
+        )
+    }
+
+    private fun confirmOf(body: JsonObject): ConfirmRequest? {
+        val action = body.string("action")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val target = body.string("target")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return ConfirmRequest(
+            turnId = body.string("turnId"),
+            action = action.take(200),
+            target = target.take(200),
             screenshotId = body.string("screenshotId")?.takeIf { SCREENSHOT_ID.matches(it) },
             captureError = body.string("captureError")?.take(500),
             requestedAt = body.string("requestedAt"),

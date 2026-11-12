@@ -18,6 +18,17 @@ After real work, replace the COMPLETE list with the latest returned revision. Ke
 If genuinely blocked after real attempts, mark the affected item blocked with the reason. If user input is needed, call browser_plan with the unchanged complete list and user_input_needed:true, then ask the user. Finish only when every item is completed or blocked, or report remaining work honestly after the bounded harness nudges.
 </plan_mode>`
 
+/**
+ * B9a: sent only on turns where the companion's opt-in `confirmIrreversible`
+ * setting is on. It deliberately overrides the persona's "pick a default
+ * instead of asking" rule for irreversible actions. Not part of the standing
+ * guidance, so the 17,100-character ceiling is unaffected; it has its own size
+ * test (at most 600 characters).
+ */
+export const CONFIRM_MODE_GUIDANCE = `<confirm_mode>
+The user enabled "Ask before submitting, sending, paying, or deleting"; this overrides picking a default instead of asking. Before an action that submits for grading or review, sends a message, pays or places an order, deletes, or publishes: call agent_request_confirmation with action and target, then end your turn. Never perform it in the same turn. Drafts, navigation, and filling fields need none. An action still needs confirmation unless the latest turn carries <user_confirmation decision="approve"> for the same action; after deny, do not perform it.
+</confirm_mode>`
+
 export function normalizeImageAttachments(value) {
   if (value === undefined) return []
   if (!Array.isArray(value)) throw new Error('images must be an array')
@@ -98,7 +109,7 @@ function formatTimeContext(now) {
  * @param {string} text
  * @param {Date} now
  * @param {Array<{mimeType: string, data: string}>} images
- * @param {{planMode?: boolean}} [options]
+ * @param {{planMode?: boolean, confirmMode?: boolean}} [options]
  * @returns {Array<Record<string, unknown>>}
  */
 export function buildPromptBlocks(view, text, now = new Date(), images = [], options = {}) {
@@ -106,8 +117,9 @@ export function buildPromptBlocks(view, text, now = new Date(), images = [], opt
     ? `${formatViewText(view)}\n(No screenshot is attached for this turn. Use browser_screenshot if you need to see the page.)`
     : formatViewText(view)
   const planGuidance = options.planMode === true ? `\n\n${PLAN_MODE_GUIDANCE}` : ''
+  const confirmGuidance = options.confirmMode === true ? `\n\n${CONFIRM_MODE_GUIDANCE}` : ''
   /** @type {Array<Record<string, unknown>>} */
-  const blocks = [{ type: 'text', text: `${header}\n\n${formatTimeContext(now)}${planGuidance}\n\n${text}` }]
+  const blocks = [{ type: 'text', text: `${header}\n\n${formatTimeContext(now)}${planGuidance}${confirmGuidance}\n\n${text}` }]
   for (const image of images) blocks.push({ type: 'image', data: image.data, mimeType: image.mimeType })
   if (typeof view?.image?.data === 'string' && view.image.data.length > 0 && typeof view.image.mimeType === 'string') {
     blocks.push({ type: 'image', data: view.image.data, mimeType: view.image.mimeType })
