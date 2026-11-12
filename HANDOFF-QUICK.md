@@ -1,6 +1,6 @@
 # crazyAgent — quick handoff
 
-Current snapshot: **2026-11-10**. Read `HANDOFF.md` for architecture and invariants; use `e2e/checklist.md` for live acceptance.
+Current snapshot: **2026-11-12**. Read `HANDOFF.md` for architecture and invariants; use `e2e/checklist.md` for live acceptance.
 
 ## Resume
 
@@ -18,7 +18,7 @@ Restart the companion after companion/provider/config changes. After `extension/
 | Item | State |
 |---|---|
 | Release | **v2.2.0 released** (tag `v2.2.0` at `4c6a658`; GitHub release published 2026-11-12; manifest/package/companion `2.2.0`; signed Android `0.5.0 (4)` APK, SHA-256 `05090c08…fdac1`). Previous: [v2.1.0-beta GitHub prerelease](https://github.com/conan-8/crazyAgent/releases/tag/v2.1.0-beta) |
-| Tools | **34 standing model-facing:** 25 general + 8 guarded Docs tools + `agent_request_help`; conditional 35th `browser_plan` only during exact-`/plan` turns |
+| Tools | **34 standing model-facing:** 25 general + 8 guarded Docs tools + `agent_request_help`; conditional `browser_plan` only during exact-`/plan` turns and conditional `agent_request_confirmation` only while the companion's opt-in `confirmIrreversible` setting is on (both can coexist) |
 | Reasoning default | **Medium (recommended)** for new configurations; saved choices are preserved and Auto starts low when selected |
 | Last recorded tests | **992/992 Node** (2026-11-12; adds the B9a confirmation suite on top of the Track B suite); Android CI-green at HEAD (`testDebugUnitTest lintDebug`, 90 JVM tests, 0 lint findings) and `assembleRelease` rebuilt for 0.5.0 (4); prompt composition (**18,076 total / 17,082 guidance**). Clean `npm ci` and `npm run setup` pass, an isolated real DSH `0.2.2-rc.1` runtime reached `tools:true` without model calls, and `npm audit` reports **0 vulnerabilities** with compatible security overrides while DSH remains pinned to `0.2.2-rc.1`. Mock-bridge `ui-preview --scenario plan`, `--scenario remote`, and `--scenario slash` passed with sticky-position, expanded/collapsed-height, queue/race, accessibility, and narrow-layout assertions plus inspected screenshots. Direct executor gates rerun 2026-11-11 on isolated headless Edge: `edge-drag-e2e.mjs` (all cases including the mid-drag tab switch, twice), `edge-click-e2e.mjs`, `edge-expect-e2e.mjs` — full passes |
 | Latest live evidence | `scripts/edge-drag-e2e.mjs` used the real provider/executor bridge in a fresh isolated Edge profile to verify pointer before/after reorder, accepted/refused HTML5 drops, static-source clone effects, native/custom sliders, long-press success/early no-op, intentional no-op, detached-rerender unknown, and stale/ambiguous/off-screen/Docs guards. It independently checked DOM order, values, parents, drop receipts, and collateral application state; refused/no-op cases retained all semantic state. `scripts/edge-expect-e2e.mjs` and `scripts/edge-click-e2e.mjs` retained full regression passes. These are direct executor checks, not real-model acceptance. |
