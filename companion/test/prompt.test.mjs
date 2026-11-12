@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { PLAN_MODE_GUIDANCE, buildPromptBlocks, formatViewText, normalizeImageAttachments, promptStats } from '../prompt.mjs'
+import { CONFIRM_MODE_GUIDANCE, PLAN_MODE_GUIDANCE, buildPromptBlocks, formatViewText, normalizeImageAttachments, promptStats } from '../prompt.mjs'
 
 function view(overrides = {}) {
   return {
@@ -50,6 +50,27 @@ test('plan mode adds checklist instructions only when explicitly enabled', () =>
   assert.ok(planned.endsWith('Complete the long task'))
   assert.equal(plannedBlocks.length, 2)
   assert.equal(plannedBlocks[1].data, 'AAAA')
+})
+
+test('confirm mode adds the approval instructions only when the setting is on', () => {
+  const now = new Date('2026-11-11T12:00:00.000Z')
+  const ordinary = buildPromptBlocks(view(), 'Submit the form', now)[0].text
+  const armed = buildPromptBlocks(view(), 'Submit the form', now, [], { confirmMode: true })[0].text
+  assert.doesNotMatch(ordinary, /<confirm_mode>|agent_request_confirmation/)
+  assert.ok(armed.includes(CONFIRM_MODE_GUIDANCE))
+  assert.match(armed, /overrides picking a default instead of asking/)
+  assert.match(armed, /submits for grading or review/)
+  assert.match(armed, /Never perform it in the same turn/)
+  assert.match(armed, /<user_confirmation decision="approve">/)
+  assert.ok(armed.indexOf('<confirm_mode>') < armed.indexOf('Submit the form'))
+  assert.ok(armed.endsWith('Submit the form'))
+  // Conditional guidance stays outside the standing-guidance ceiling and small.
+  assert.ok(CONFIRM_MODE_GUIDANCE.length <= 600, `confirm guidance must stay under 600 chars, got ${CONFIRM_MODE_GUIDANCE.length}`)
+  // Both conditional blocks can ride one turn, each before the user text.
+  const both = buildPromptBlocks(view(), 'Plan and submit', now, [], { planMode: true, confirmMode: true })[0].text
+  assert.ok(both.includes(PLAN_MODE_GUIDANCE))
+  assert.ok(both.includes(CONFIRM_MODE_GUIDANCE))
+  assert.ok(both.endsWith('Plan and submit'))
 })
 
 test('buildPromptBlocks falls back to text when no image is available', () => {

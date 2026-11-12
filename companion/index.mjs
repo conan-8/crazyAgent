@@ -28,6 +28,7 @@ import { createRemoteTokenSource, resolveRemoteToken } from './remote-token.mjs'
 import { PushRegistry, PushService, createFcmProvider, pushTypeForTurn } from './remote-push.mjs'
 import { PROTOCOL_VERSION, errorMessage } from './protocol.mjs'
 import { clearKeyFile, resolveApiKey, writeKeyFile } from './credentials.mjs'
+import { readSettings, writeSettings } from './settings.mjs'
 import {
   DEFAULT_BASE_URL,
   baseEffortFor,
@@ -47,7 +48,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const VERSION = '2.2.0'
 const PROVIDER = 'openrouter'
 
-const BOOLEAN_FLAGS = new Set(['no-dsh', 'no-auto-capture', 'new-token', 'help', 'remote', 'pair-remote', 'new-remote-token'])
+const BOOLEAN_FLAGS = new Set(['no-dsh', 'no-auto-capture', 'new-token', 'help', 'remote', 'pair-remote', 'new-remote-token', 'confirm-irreversible'])
 
 /** @param {string[]} argv */
 function parseArgs(argv) {
@@ -97,6 +98,8 @@ if (cli.help === true) {
   --credentials <path>         fallback DSH credential file
   --no-dsh                      bridge-only test mode
   --no-auto-capture             do not attach a fresh DOM/text or screenshot view
+  --confirm-irreversible        ask before submitting, sending, paying, or deleting
+                                (opt-in; overrides the stored setting for this process)
   --remote                      also serve the phone remote API on 127.0.0.1
                                 (opt-in; publish only via tailnet-only Tailscale Serve)
   --remote-port <n>             remote API port (default ${DEFAULT_REMOTE_PORT})
@@ -257,6 +260,16 @@ let apiKeySource = keyState.source
 let llmConfig = readLlmConfig(llmConfigPath)
 let modelCatalog = { baseUrl: '', fetchedAt: 0, models: [] }
 
+// Behavior settings live with the companion so phone-started and panel-less
+// turns honor them. The stored value is the default; the CLI flag (or env)
+// forces the confirmation flow on for this process, which the harness uses.
+const settingsPath = join(browserDir, 'settings.json')
+let settings = readSettings(settingsPath)
+const confirmIrreversibleOverride = cli['confirm-irreversible'] === true || process.env.CRAZYAGENT_CONFIRM_IRREVERSIBLE === '1'
+function confirmIrreversiblePolicy() {
+  return confirmIrreversibleOverride || settings.confirmIrreversible === true
+}
+
 const runId = `run-${new Date().toISOString().replace(/[:.]/gu, '-')}-${randomBytes(3).toString('hex')}`
 logStore = new LogStore({
   root: join(browserDir, 'logs'),
@@ -346,6 +359,7 @@ function sendCompanionHello(_ui) {
     dsh: dshStatus,
     llm: llmInfo(),
     credentials: credentialsInfo(),
+    settings: { confirmIrreversible: confirmIrreversiblePolicy() },
     log: { runId, path: logStore.path },
   })
 }
@@ -384,6 +398,7 @@ function remoteHealth() {
     contextWindow: llmConfig?.model.contextWindow ?? null,
     autoCapture,
     pushConfigured: pushService?.configured === true,
+    confirmIrreversible: confirmIrreversiblePolicy(),
   }
 }
 
@@ -551,6 +566,7 @@ async function handleChat(text, _ui, message) {
     images: message?.images,
     autoCapture: message?.autoCapture,
     planMode: message?.planMode === true,
+    ...(message?.confirm !== undefined ? { confirm: message.confirm } : {}),
     origin: 'ui',
   })
   if (result.ok) {
@@ -629,6 +645,19 @@ async function handleControl(message) {
         remember: message.remember === true,
         reasoningEffort: typeof message.reasoningEffort === 'string' ? message.reasoningEffort : undefined,
       })
+      return
+    }
+    if (message.type === 'settings.update') {
+      if (message.confirmIrreversible !== undefined && typeof message.confirmIrreversible !== 'boolean') {
+        bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'settings.updated', ok: false, error: 'confirmIrreversible must be a boolean.' })
+        return
+      }
+      settings = writeSettings(settingsPath, {
+        confirmIrreversible: message.confirmIrreversible === undefined ? settings.confirmIrreversible : message.confirmIrreversible,
+      })
+      logStore.record('extension', 'settings.updated', { confirmIrreversible: settings.confirmIrreversible }, { severity: 'info' })
+      remoteHub?.updateHealth()
+      bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'settings.updated', ok: true, settings: { confirmIrreversible: confirmIrreversiblePolicy() } })
       return
     }
     if (message.type === 'log.stats') {
@@ -716,6 +745,7 @@ const controller = new SessionController({
   autoCapture,
   provider: PROVIDER,
   getModelId: () => llmConfig?.model.id,
+  getConfirmIrreversible: confirmIrreversiblePolicy,
   publish,
 })
 
@@ -793,6 +823,7 @@ crazyAgent companion ${VERSION}
   model:   ${llmConfig?.model.id ?? 'not selected — choose one in the side panel'}
   base:    ${llmConfig?.baseUrl ?? baseUrlOption}
   effort:  ${llmConfig?.model?.reasoning ? effortPolicy() : 'n/a (model has no reasoning)'}
+  confirm: ${confirmIrreversiblePolicy() ? 'on (ask before submitting, sending, paying, or deleting)' : 'off'}
   api key: ${credentialsInfo().configured ? `configured (${apiKeySource})` : 'not configured — enter it in the side panel'}
   dsh:     ${noDsh ? 'disabled (--no-dsh)' : !llmConfig ? 'waiting for model selection' : !apiKey ? 'waiting for API key' : 'warming...'}
   push:    ${pushService?.configured ? `FCM (${pushService.registry.size} device${pushService.registry.size === 1 ? '' : 's'})` : remoteEnabled ? 'off (no FCM service-account key)' : 'off'}

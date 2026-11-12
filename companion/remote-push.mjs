@@ -337,12 +337,18 @@ export async function createFcmProvider(options) {
 
 /**
  * What kind of push, if any, the end of a turn deserves. A stopped turn was
- * ended by the user and announces nothing.
- * @param {{outcome: string, help?: unknown}} info
+ * ended by the user and announces nothing. A confirmation wait sends no push
+ * until the B9b phone card exists; the waiting state still reaches every
+ * connected client through the event stream.
+ * @param {{outcome: string, help?: unknown, confirm?: unknown}} info
  * @returns {'help' | 'done' | 'error' | null}
  */
 export function pushTypeForTurn(info) {
-  if (info.outcome === 'done') return isRecord(info.help) ? 'help' : 'done'
+  if (info.outcome === 'done') {
+    if (isRecord(info.help)) return 'help'
+    if (isRecord(info.confirm)) return null
+    return 'done'
+  }
   if (info.outcome === 'error') return 'error'
   return null
 }

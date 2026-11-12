@@ -115,9 +115,11 @@ export function fakeBridge() {
     currentTurnId: undefined,
     requests: [],
     turnModes: [],
+    turnOptions: [],
     setTurnId(id, options = {}) {
       this.currentTurnId = id
       this.turnModes.push({ id, planMode: options.planMode === true })
+      this.turnOptions.push({ id, planMode: options.planMode === true, confirmMode: options.confirmMode === true })
     },
     async requestUi(command) {
       this.requests.push(command)

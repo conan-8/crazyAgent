@@ -23,14 +23,14 @@ export const NOT_READY_MESSAGE = 'OpenRouter is not ready. Open Settings, enter 
 /**
  * @typedef {{
  *   turnStarted?: (info: {turnId: string, origin: string, clientMessageId?: string | null, text: string, imageCount: number, planMode: boolean, sessionId?: string | null}) => void,
- *   turnEnded?: (info: {turnId: string, outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}, label?: 'done' | 'partial' | 'blocked' | null, usage?: Record<string, number>, timings?: Record<string, number | null>}) => void,
+ *   turnEnded?: (info: {turnId: string, outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}, confirm?: {action: string, target: string, captureError: string | null}, label?: 'done' | 'partial' | 'blocked' | null, usage?: Record<string, number>, timings?: Record<string, number | null>}) => void,
  * }} TurnObserver
  */
 
 export class SessionController {
   /**
    * @param {{
-   *   bridge: {requestUi: Function, setTurnId: (id: string | undefined, options?: {planMode?: boolean}) => void, currentTurnId?: string},
+   *   bridge: {requestUi: Function, setTurnId: (id: string | undefined, options?: {planMode?: boolean, confirmMode?: boolean}) => void, currentTurnId?: string},
    *   getRunner: () => any,
    *   isDisabled?: () => boolean,
    *   logStore: any,
@@ -38,6 +38,7 @@ export class SessionController {
    *   autoCapture: boolean,
    *   provider: string,
    *   getModelId: () => string | undefined,
+   *   getConfirmIrreversible?: () => boolean,
    *   publish: (frame: Record<string, any>) => void,
    *   observers?: TurnObserver[],
    * }} options
@@ -51,6 +52,7 @@ export class SessionController {
     this.autoCapture = options.autoCapture
     this.provider = options.provider
     this.getModelId = options.getModelId
+    this.getConfirmIrreversible = options.getConfirmIrreversible ?? (() => false)
     this.publish = options.publish
     /** @type {TurnObserver[]} */
     this.observers = options.observers ?? []
@@ -69,6 +71,20 @@ export class SessionController {
      * @type {{category: string, reason: string} | undefined}
      */
     this.helpTurnRequest = undefined
+    /**
+     * The model's structured confirmation request for the running turn
+     * (agent_request_confirmation), received as a `confirm-request` activity.
+     * @type {{action: string, target: string} | undefined}
+     */
+    this.confirmTurnRequest = undefined
+    /**
+     * The open confirmation the user has not answered yet. It survives the end
+     * of the turn that asked (the chat is waiting), and is cleared by the next
+     * prompt of any kind, a new chat, or a resume to another session. Only an
+     * answer submitted while this is set may carry confirm:"approve"|"deny".
+     * @type {{action: string, target: string, turnId: string, sessionId: string | undefined} | undefined}
+     */
+    this.pendingConfirmation = undefined
     /**
      * At most one message waiting to replace the running turn. It starts in
      * the same tick the stopped turn releases the slot, so nothing can slip in
@@ -165,6 +181,11 @@ export class SessionController {
       if (help !== undefined) this.helpTurnRequest = help
       return
     }
+    if (frame.kind === 'confirm-request') {
+      const confirm = normalizeConfirmRequest(frame)
+      if (confirm !== undefined) this.confirmTurnRequest = confirm
+      return
+    }
     if (frame.kind !== 'turn-outcome' || !Number.isSafeInteger(frame.turn)) return
     const sessionId = this.getRunner()?.sessionId
     if (typeof frame.sessionId === 'string' && typeof sessionId === 'string' && frame.sessionId !== sessionId) return
@@ -206,12 +227,21 @@ export class SessionController {
    * runtime interrupt as Stop) and this message starts the next turn in the
    * resumed session as soon as the slot is free. When idle it is an ordinary
    * send.
-   * @param {{text: unknown, images?: unknown, autoCapture?: unknown, planMode?: unknown, steer?: unknown, origin?: string, clientMessageId?: string | null}} input
+   * @param {{text: unknown, images?: unknown, autoCapture?: unknown, planMode?: unknown, steer?: unknown, confirm?: unknown, origin?: string, clientMessageId?: string | null}} input
    * @returns {{ok: true, turnId: string, done: Promise<void>, steered?: boolean} | {ok: false, code: string, message: string, retryable: boolean}}
    */
   submit(input) {
-    const prompt = typeof input.text === 'string' ? input.text.trim() : ''
-    if (prompt.length === 0) return { ok: false, code: 'EMPTY_PROMPT', message: 'The message is empty.', retryable: false }
+    const confirm = input.confirm
+    if (confirm !== undefined && confirm !== 'approve' && confirm !== 'deny') {
+      return { ok: false, code: 'INVALID_CONFIRMATION', message: 'confirm must be "approve" or "deny".', retryable: false }
+    }
+    if (confirm !== undefined && input.steer === true) {
+      return { ok: false, code: 'INVALID_CONFIRMATION', message: 'A confirmation answer cannot steer a running turn; answers are only valid while the chat waits.', retryable: false }
+    }
+    let prompt = typeof input.text === 'string' ? input.text.trim() : ''
+    // An approve/deny answer may carry no text of its own; the companion writes
+    // the confirmation block. An ordinary empty prompt is still refused.
+    if (prompt.length === 0 && confirm === undefined) return { ok: false, code: 'EMPTY_PROMPT', message: 'The message is empty.', retryable: false }
     let images
     try {
       images = normalizeImageAttachments(input.images)
@@ -242,6 +272,21 @@ export class SessionController {
     if (this.isDisabled() || runner === undefined) {
       return { ok: false, code: 'RUNTIME_NOT_READY', message: NOT_READY_MESSAGE, retryable: true }
     }
+    if (confirm !== undefined) {
+      const pending = this.pendingConfirmation
+      if (pending === undefined || (typeof runner.sessionId === 'string' && pending.sessionId !== runner.sessionId)) {
+        return { ok: false, code: 'NO_CONFIRMATION_PENDING', message: 'No confirmation is waiting for an answer in this chat. Send an ordinary prompt instead.', retryable: false }
+      }
+      // The companion, not the client, writes the decision block the model sees.
+      const block = confirmationPromptBlock(confirm, pending.action)
+      prompt = prompt.length > 0 ? `${block}\n\n${prompt}` : block
+      this.logStore.record('companion', 'confirm.answered', {
+        decision: confirm,
+        actionChars: pending.action.length,
+        requestedTurnId: pending.turnId,
+      }, { severity: 'info' })
+      this.pendingConfirmation = undefined
+    }
     return { ok: true, ...this.#begin({ turnId: newTurnId(), prompt, images, input, runner }) }
   }
 
@@ -256,9 +301,14 @@ export class SessionController {
     this.docsTurnVerification = undefined
     this.planTurnOutcome = undefined
     this.helpTurnRequest = undefined
+    this.confirmTurnRequest = undefined
+    // Any prompt answers an open confirmation; an approve/deny answer already
+    // consumed it in submit(). The same session continues either way.
+    this.pendingConfirmation = undefined
     this.turnId = turnId
     const origin = input.origin ?? 'ui'
     const planMode = input.planMode === true
+    const confirmMode = this.getConfirmIrreversible() === true
     this.#notify('turnStarted', {
       turnId,
       origin,
@@ -277,7 +327,7 @@ export class SessionController {
       // desktop input instead of colliding with it.
       this.publish({ v: PROTOCOL_VERSION, type: 'chat.user', turnId, origin, text: prompt, imageCount: images.length })
     }
-    const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode })
+    const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode })
     return { turnId, done }
   }
 
@@ -358,6 +408,7 @@ export class SessionController {
     try {
       const sessionId = await runner.newSession()
       this.logStore.sessionStart(sessionId)
+      this.pendingConfirmation = undefined
       this.publish({ v: PROTOCOL_VERSION, type: 'chat.session', sessionId })
       this.sendStatus('idle')
       return { ok: true, sessionId }
@@ -399,6 +450,7 @@ export class SessionController {
         return { ok: false, code: 'SESSION_NOT_RESUMABLE', message: 'This chat can no longer be continued. Its saved model session is gone.', retryable: false }
       }
       this.logStore.sessionStart(resumed)
+      this.pendingConfirmation = undefined
       this.publish({ v: PROTOCOL_VERSION, type: 'chat.session', sessionId: resumed, resumed: true })
       this.sendStatus('idle')
       return { ok: true, sessionId: resumed }
@@ -408,9 +460,9 @@ export class SessionController {
   }
 
   /**
-   * @param {{turnId: string, runner: any, prompt: string, images: any[], autoCaptureFlag: unknown, origin: string, planMode: boolean}} turn
+   * @param {{turnId: string, runner: any, prompt: string, images: any[], autoCaptureFlag: unknown, origin: string, planMode: boolean, confirmMode: boolean}} turn
    */
-  async #runTurn({ turnId, runner, prompt, images, autoCaptureFlag, planMode }) {
+  async #runTurn({ turnId, runner, prompt, images, autoCaptureFlag, planMode, confirmMode }) {
     const logStore = this.logStore
     const bridge = this.bridge
     const turnStart = performance.now()
@@ -427,10 +479,11 @@ export class SessionController {
     /** @type {{outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}}} */
     let ending = { outcome: 'error', error: 'turn ended unexpectedly' }
 
-    bridge.setTurnId(turnId, { planMode })
+    bridge.setTurnId(turnId, { planMode, confirmMode })
     logStore.turnStart(turnId, prompt, {
       autoCapture: wantAutoCapture,
       planMode,
+      confirmMode,
       provider: this.provider,
       model: this.getModelId(),
       sessionId: runner.sessionId,
@@ -472,7 +525,7 @@ export class SessionController {
         throw new Error('turn stopped by user before the model run')
       }
 
-      const blocks = buildPromptBlocks(view, prompt, new Date(), images, { planMode })
+      const blocks = buildPromptBlocks(view, prompt, new Date(), images, { planMode, confirmMode })
       const stats = promptStats(blocks)
       promptTextBytes = stats.textBytes
       imageBytes = stats.imageBytes
@@ -481,6 +534,7 @@ export class SessionController {
         imageBytes,
         images: stats.images,
         planMode,
+        confirmMode,
         text: blocks[0]?.text,
       }, { turnId, severity: 'debug' })
 
@@ -506,6 +560,26 @@ export class SessionController {
         }, { turnId, severity: 'info' })
         // Stop pressed during that capture: end as stopped, not as waiting.
         if (this.stopRequested) throw new Error('turn stopped by user during the help capture')
+      }
+
+      // The model asked to perform an irreversible action and wants approval.
+      // Same shape as help: one capture after the run, then the chat waits.
+      // A help request in the same turn wins (blocked is the stronger signal).
+      const confirmRequest = this.confirmTurnRequest
+      let confirm
+      if (confirmRequest !== undefined && helpRequest !== undefined) {
+        logStore.record('companion', 'confirm.superseded', { turnId }, { turnId, severity: 'info' })
+      } else if (confirmRequest !== undefined) {
+        const captured = await this.#capture('confirm')
+        confirm = { ...confirmRequest, captureError: captured.ok ? null : captured.message }
+        logStore.record('companion', 'confirm.request', {
+          actionChars: confirmRequest.action.length,
+          targetChars: confirmRequest.target.length,
+          captured: captured.ok,
+          ...(captured.ok ? {} : { captureCode: captured.code }),
+        }, { turnId, severity: 'info' })
+        // Stop pressed during that capture: end as stopped, not as waiting.
+        if (this.stopRequested) throw new Error('turn stopped by user during the confirmation capture')
       }
 
       const collectedUsage = collectUsage(result.events)
@@ -537,6 +611,7 @@ export class SessionController {
         label,
         planOutcome: plan?.outcome,
         planRevision: plan?.revision,
+        ...(confirm === undefined ? {} : { confirmRequested: true }),
         ...completionError ? { error: completionError } : {},
       })
       this.publish({
@@ -555,9 +630,15 @@ export class SessionController {
         planOutcome: plan?.outcome,
         planRevision: plan?.revision,
         ...(help === undefined ? {} : { help: { category: help.category, reason: help.reason } }),
+        ...(confirm === undefined ? {} : { confirm: { action: confirm.action, target: confirm.target } }),
       })
       this.sendStatus('idle')
-      ending = { outcome: 'done', sessionId: result.sessionId, label, usage, timings, ...(help === undefined ? {} : { help }) }
+      if (confirm !== undefined) {
+        // The chat now waits for the user's Approve/Deny. The next prompt of
+        // any kind clears this; only an answer while it is set may decide.
+        this.pendingConfirmation = { action: confirm.action, target: confirm.target, turnId, sessionId: result.sessionId }
+      }
+      ending = { outcome: 'done', sessionId: result.sessionId, label, usage, timings, ...(help === undefined ? {} : { help }), ...(confirm === undefined ? {} : { confirm }) }
     } catch (error) {
       const message = errorMessage(error)
       const timings = {
@@ -610,6 +691,7 @@ export class SessionController {
       this.docsTurnVerification = undefined
       this.planTurnOutcome = undefined
       this.helpTurnRequest = undefined
+      this.confirmTurnRequest = undefined
       this.turnId = undefined
       bridge.setTurnId(undefined)
       this.#startPendingSteer()
@@ -733,6 +815,37 @@ export function normalizeHelpRequest(value) {
   const reason = value.reason.trim().slice(0, HELP_REASON_MAX_CHARS)
   if (reason.length === 0 || !HELP_CATEGORIES.includes(value.category)) return undefined
   return { category: value.category, reason }
+}
+
+export const CONFIRM_ACTION_MAX_CHARS = 200
+export const CONFIRM_TARGET_MAX_CHARS = 200
+
+/**
+ * Accept only the exact structured shape the provider tool produces.
+ * @param {unknown} value
+ * @returns {{action: string, target: string} | undefined}
+ */
+export function normalizeConfirmRequest(value) {
+  if (!isRecord(value) || typeof value.action !== 'string' || typeof value.target !== 'string') return undefined
+  const action = value.action.trim().slice(0, CONFIRM_ACTION_MAX_CHARS)
+  const target = value.target.trim().slice(0, CONFIRM_TARGET_MAX_CHARS)
+  if (action.length === 0 || target.length === 0) return undefined
+  return { action, target }
+}
+
+/**
+ * The companion-written decision block the next turn's prompt carries. The
+ * model guidance keys off this exact shape; clients never write it themselves.
+ * @param {'approve' | 'deny'} decision
+ * @param {string} action
+ */
+export function confirmationPromptBlock(decision, action) {
+  const escaped = String(action)
+    .replace(/&/gu, '&amp;')
+    .replace(/</gu, '&lt;')
+    .replace(/>/gu, '&gt;')
+    .replace(/"/gu, '&quot;')
+  return `<user_confirmation decision="${decision}" action="${escaped}"/>`
 }
 
 function newTurnId() {

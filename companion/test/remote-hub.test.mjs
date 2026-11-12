@@ -165,6 +165,51 @@ test('chat.done preserves Docs and plan outcome metadata for remote clients', ()
   assert.equal(done.body.planRevision, 2)
 })
 
+test('a confirmation request publishes remote.confirm, waits, and is cleared by the next prompt or session', () => {
+  const h = hub()
+  startTurn(h)
+  h.addScreenshot({ data: PIXEL_PNG, mimeType: 'image/png', turnId: 'turn-1', source: 'confirm' })
+  h.ingest({ type: 'chat.done', text: 'Waiting for approval.', sessionId: 'session-1', confirm: { action: 'Submit the assignment', target: 'Submit button' } })
+  h.turnEnded({ turnId: 'turn-1', outcome: 'done', sessionId: 'session-1', confirm: { action: 'Submit the assignment', target: 'Submit button', captureError: null } })
+  const waiting = h.projection()
+  assert.equal(waiting.turn.status, 'waiting_for_user')
+  assert.equal(waiting.confirm.action, 'Submit the assignment')
+  assert.equal(waiting.confirm.target, 'Submit button')
+  assert.equal(waiting.confirm.captureError, null)
+  assert.equal(waiting.confirm.screenshotId, waiting.latestScreenshotId)
+  assert.equal(waiting.help, null)
+  const events = h.journal.map(entry => entry.type)
+  assert.ok(events.indexOf('remote.confirm') < events.lastIndexOf('chat.turn'))
+  const done = waiting.messages.find(message => message.type === 'chat.done')
+  assert.deepEqual(done.body.confirm, { action: 'Submit the assignment', target: 'Submit button' })
+
+  // A manual capture while waiting does not replace the confirmation evidence.
+  h.addScreenshot({ data: PIXEL_PNG, mimeType: 'image/png', source: 'manual' })
+  assert.equal(h.projection().confirm.screenshotId, waiting.confirm.screenshotId)
+
+  // The next prompt answers it at once.
+  startTurn(h, 'turn-2', 'approved, go ahead')
+  assert.equal(h.projection().confirm, null)
+  assert.equal(h.turn.status, 'running')
+  h.ingest({ type: 'chat.done', text: 'ok', sessionId: 'session-1' })
+  h.turnEnded({ turnId: 'turn-2', outcome: 'done' })
+
+  // A second request is cleared by a session change, and a stopped turn never waits.
+  startTurn(h, 'turn-3', 'submit again')
+  h.turnEnded({ turnId: 'turn-3', outcome: 'done', confirm: { action: 'Submit again', target: 'Submit button', captureError: 'no panel' } })
+  assert.equal(h.projection().turn.status, 'waiting_for_user')
+  assert.equal(h.projection().confirm.screenshotId, null)
+  assert.equal(h.projection().confirm.captureError, 'no panel')
+  h.ingest({ type: 'chat.session', sessionId: 'session-2' })
+  assert.equal(h.projection().confirm, null)
+  assert.equal(h.projection().turn.status, 'idle')
+
+  startTurn(h, 'turn-4', 'stop me')
+  h.turnEnded({ turnId: 'turn-4', outcome: 'stopped', confirm: { action: 'x', target: 'y' } })
+  assert.equal(h.projection().turn.status, 'idle')
+  assert.equal(h.projection().confirm, null)
+})
+
 test('chat.done carries per-turn usage and the model-reported label', () => {
   const h = hub()
   startTurn(h)

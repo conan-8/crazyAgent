@@ -213,4 +213,9 @@ test('only finished and failed turns are announced', () => {
   assert.equal(pushTypeForTurn({ outcome: 'error', error: 'x' }), 'error')
   assert.equal(pushTypeForTurn({ outcome: 'stopped' }), null)
   assert.equal(pushTypeForTurn({ outcome: 'stopped', help: { category: 'login', reason: 'x' } }), null)
+  // B9a: a confirmation wait is visible in the event stream but sends no push
+  // until the B9b phone card exists; help still wins when both are present.
+  assert.equal(pushTypeForTurn({ outcome: 'done', confirm: { action: 'Submit it', target: 'Submit button' } }), null)
+  assert.equal(pushTypeForTurn({ outcome: 'done', help: { category: 'login', reason: 'x' }, confirm: { action: 'Submit it', target: 'Submit button' } }), 'help')
+  assert.equal(pushTypeForTurn({ outcome: 'stopped', confirm: { action: 'Submit it', target: 'Submit button' } }), null)
 })

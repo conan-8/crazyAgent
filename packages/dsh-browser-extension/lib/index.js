@@ -21,6 +21,7 @@ import { classifyPrompt, effortFor, escalateEffort, shouldEscalate } from './rea
 import { createDownloadsFolder } from './downloads.js'
 import { createPlanRuntime } from './plan-runtime.js'
 import { AGENT_HELP_TOOL, createHelpRuntime } from './help.js'
+import { createConfirmRuntime } from './confirm.js'
 import {
   ACTION_EXPECT_BATCH_CHECKS,
   ACTION_EXPECT_DIRECT_CHECKS,
@@ -171,7 +172,7 @@ class BridgeClient {
   }
 
   /**
-   * @param {{url: string, token: string, timeoutMs: number, log: (message: string) => void, onDocsOutcome?: (command: Record<string, any>, callId: string | undefined, error: Error | undefined, result: Record<string, any> | undefined, sessionId: unknown) => void, onPlanMode?: (frame: Record<string, unknown>) => void}} options
+   * @param {{url: string, token: string, timeoutMs: number, log: (message: string) => void, onDocsOutcome?: (command: Record<string, any>, callId: string | undefined, error: Error | undefined, result: Record<string, any> | undefined, sessionId: unknown) => void, onPlanMode?: (frame: Record<string, unknown>) => void, onConfirmMode?: (frame: Record<string, unknown>) => void}} options
    */
   constructor(options) {
     this.url = options.url
@@ -180,6 +181,7 @@ class BridgeClient {
     this.log = options.log
     this.onDocsOutcome = options.onDocsOutcome
     this.onPlanMode = options.onPlanMode
+    this.onConfirmMode = options.onConfirmMode
   }
 
   start() {
@@ -459,6 +461,14 @@ class BridgeClient {
         this.onPlanMode?.(message)
       } catch (error) {
         this.logEvent('plan.mode.error', { message: error instanceof Error ? error.message : String(error) }, 'warn')
+      }
+      return
+    }
+    if (message.type === 'confirm.mode' && ws === this.#ws) {
+      try {
+        this.onConfirmMode?.(message)
+      } catch (error) {
+        this.logEvent('confirm.mode.error', { message: error instanceof Error ? error.message : String(error) }, 'warn')
       }
       return
     }
@@ -4505,6 +4515,7 @@ export function apply(ctx, config = {}) {
 
     const docsFinalCheck = createDocsFinalCheck()
     let planRuntime
+    let confirmRuntime
     const bridge = new BridgeClient({
       url: bridgeUrl ?? DEFAULT_BRIDGE_URL,
       token: bridgeToken ?? '',
@@ -4512,8 +4523,10 @@ export function apply(ctx, config = {}) {
       log,
       onDocsOutcome: docsFinalCheck.observeBridge,
       onPlanMode: frame => planRuntime?.setMode(frame),
+      onConfirmMode: frame => confirmRuntime?.setMode(frame),
     })
     planRuntime = createPlanRuntime({ ctx, bridge })
+    confirmRuntime = createConfirmRuntime({ ctx, bridge })
     // Repeat guard: fails an identical runaway call with a normal tool error
     // before it reaches the bridge, and resets whenever a new turn starts. There
     // is no per-turn call limit.
@@ -4555,6 +4568,7 @@ export function apply(ctx, config = {}) {
     ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
       try {
         planRuntime.claim(agent, turn)
+        confirmRuntime.claim(agent, turn)
         if (Number.isSafeInteger(turn)) {
           const messageId = isRecord(message) && typeof message.id === 'string' ? message.id : undefined
           guard.setTurn(messageId ? `message:${messageId}` : `turn:${turn}`)
@@ -4733,6 +4747,11 @@ export function apply(ctx, config = {}) {
               bridge.logEvent('turn.outcome.error', { part: 'plan', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
             }
             try {
+              confirmRuntime.endTurn(session, turn)
+            } catch (error) {
+              bridge.logEvent('turn.outcome.error', { part: 'confirm', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
+            }
+            try {
               docsFinalCheck.endTurn(session?.id, turn, outcome)
             } catch (error) {
               bridge.logEvent('turn.outcome.error', { part: 'docs', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
@@ -4827,6 +4846,7 @@ export function apply(ctx, config = {}) {
     // step of the turn. Only routes that declare reasoning efforts participate.
     ctx.on('agent/request', async ({ agent, turn }, next) => {
       planRuntime.claim(agent, turn)
+      confirmRuntime.claim(agent, turn)
       const config = await next()
       try {
         // Session identity prevents separate chats from sharing turn-1 fingerprints.
@@ -4890,6 +4910,7 @@ export function apply(ctx, config = {}) {
     })
     yield () => {
       planRuntime.dispose()
+      confirmRuntime.dispose()
       bridge.close()
     }
   }, 'browser-use-extension.runtime')

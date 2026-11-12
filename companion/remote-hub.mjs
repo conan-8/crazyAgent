@@ -53,7 +53,7 @@ const MAX_TOOL_ARGS_CHARS = 16_000
 const SCREENSHOT_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 /** Where a mirrored image came from: the agent, or a capture the companion made itself. */
-const SCREENSHOT_SOURCES = new Set(['auto', 'tool', 'manual', 'help'])
+const SCREENSHOT_SOURCES = new Set(['auto', 'tool', 'manual', 'help', 'confirm'])
 
 /**
  * @typedef {{
@@ -156,6 +156,14 @@ export class RemoteHub {
     this.help = null
     /** @type {null | {turnId: string | null, screenshotId: string}} the capture made for a help request */
     this.helpShot = null
+    /**
+     * The open irreversible-action confirmation, while the turn status is
+     * `waiting_for_user`. Cleared by the next prompt or a session change.
+     * @type {null | {turnId: string, action: string, target: string, screenshotId: string | null, captureError: string | null, requestedAt: string}}
+     */
+    this.confirm = null
+    /** @type {null | {turnId: string | null, screenshotId: string}} the capture made for a confirmation request */
+    this.confirmShot = null
   }
 
   get activeTurnId() {
@@ -260,6 +268,9 @@ export class RemoteHub {
           ...(isRecord(frame.help) && typeof frame.help.reason === 'string' && typeof frame.help.category === 'string'
             ? { help: { category: frame.help.category, reason: clip(frame.help.reason, 500) } }
             : {}),
+          ...(isRecord(frame.confirm) && typeof frame.confirm.action === 'string' && typeof frame.confirm.target === 'string'
+            ? { confirm: { action: clip(frame.confirm.action, 200), target: clip(frame.confirm.target, 200) } }
+            : {}),
           ...(replaces ? { replacesStreamId: replaces } : {}),
         })
         if (typeof frame.sessionId === 'string') this.sessionId = frame.sessionId
@@ -332,6 +343,8 @@ export class RemoteHub {
     this.latestScreenshot = null
     this.help = null
     this.helpShot = null
+    this.confirm = null
+    this.confirmShot = null
     // A help request belonged to the chat that was just left.
     if (this.turn.status === 'waiting_for_user') this.turn = { ...this.turn, status: 'idle' }
   }
@@ -374,6 +387,7 @@ export class RemoteHub {
     }
     this.latestScreenshot = meta
     if (meta.source === 'help') this.helpShot = { turnId: turnId ?? null, screenshotId: meta.screenshotId }
+    if (meta.source === 'confirm') this.confirmShot = { turnId: turnId ?? null, screenshotId: meta.screenshotId }
     this.publish('remote.screenshot', { ...meta }, { turnId: turnId ?? null })
     return meta
   }
@@ -415,6 +429,9 @@ export class RemoteHub {
     // Any prompt answers an open help request; the same session continues.
     this.help = null
     this.helpShot = null
+    // Any prompt also answers (or abandons) an open confirmation.
+    this.confirm = null
+    this.confirmShot = null
     this.publish('chat.user', {
       text: clip(info.text, MAX_TEXT_CHARS),
       origin: info.origin,
@@ -425,8 +442,9 @@ export class RemoteHub {
 
   /**
    * Record the end of the reserved turn from its actual lifecycle outcome.
-   * A finished turn that carries a help request ends in `waiting_for_user`.
-   * @param {{turnId: string, outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError?: string | null}}} info
+   * A finished turn that carries a help or confirmation request ends in
+   * `waiting_for_user`.
+   * @param {{turnId: string, outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError?: string | null}, confirm?: {action: string, target: string, captureError?: string | null}}} info
    */
   turnEnded(info) {
     if (this.turn.turnId !== info.turnId) return
@@ -451,10 +469,28 @@ export class RemoteHub {
       this.publish('remote.help', { ...this.help }, { turnId: info.turnId })
     }
     this.helpShot = null
+    const confirm = info.outcome === 'done' && help === null && isRecord(info.confirm) && typeof info.confirm.action === 'string' && typeof info.confirm.target === 'string'
+      ? info.confirm
+      : null
+    if (confirm !== null) {
+      const shot = this.confirmShot !== null && this.confirmShot.turnId === info.turnId && this.screenshots.has(this.confirmShot.screenshotId)
+        ? this.confirmShot.screenshotId
+        : null
+      this.confirm = {
+        turnId: info.turnId,
+        action: clip(confirm.action, 200),
+        target: clip(confirm.target, 200),
+        screenshotId: shot,
+        captureError: shot === null ? clip(confirm.captureError ?? 'No screenshot was captured.', 500) : null,
+        requestedAt: new Date(this.now()).toISOString(),
+      }
+      this.publish('remote.confirm', { ...this.confirm }, { turnId: info.turnId })
+    }
+    this.confirmShot = null
     const failedCalls = Number(info.timings?.failedCalls)
     this.turn = {
       ...this.turn,
-      status: info.outcome === 'error' ? 'error' : help !== null ? 'waiting_for_user' : 'idle',
+      status: info.outcome === 'error' ? 'error' : help !== null || confirm !== null ? 'waiting_for_user' : 'idle',
       endedAt: new Date(this.now()).toISOString(),
       outcome: info.outcome,
       error: info.outcome === 'error' ? clip(info.error, 4_000) : null,
@@ -530,6 +566,7 @@ export class RemoteHub {
       latestScreenshotId: this.latestScreenshot?.screenshotId ?? null,
       latestScreenshot: this.latestScreenshot === null ? null : { ...this.latestScreenshot },
       help: this.help === null ? null : { ...this.help },
+      confirm: this.confirm === null ? null : { ...this.confirm },
     }
   }
 

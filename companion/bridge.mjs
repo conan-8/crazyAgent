@@ -84,6 +84,7 @@ export class Bridge {
     this.port = options.port
     this.currentTurnId = undefined
     this.currentPlanMode = false
+    this.currentConfirmMode = false
     /** @type {Map<string, {ws: import('ws').WebSocket, turnId?: string, callId?: string, command?: Record<string, unknown>}>} */
     this.upstream = new Map()
     /** @type {Map<string, {resolve: (v: any) => void, reject: (e: Error) => void, timer: NodeJS.Timeout, turnId?: string, callId?: string, command?: Record<string, unknown>}>} */
@@ -197,11 +198,13 @@ export class Bridge {
     })
   }
 
-  /** @param {string | undefined} turnId @param {{planMode?: boolean}} [options] */
+  /** @param {string | undefined} turnId @param {{planMode?: boolean, confirmMode?: boolean}} [options] */
   setTurnId(turnId, options = {}) {
     this.currentTurnId = turnId
     this.currentPlanMode = turnId !== undefined && options.planMode === true
+    this.currentConfirmMode = turnId !== undefined && options.confirmMode === true
     this.#syncPlanMode()
+    this.#syncConfirmMode()
   }
 
   #syncPlanMode() {
@@ -210,6 +213,15 @@ export class Bridge {
       type: 'plan.mode',
       turnId: this.currentTurnId ?? null,
       enabled: this.currentPlanMode,
+    })
+  }
+
+  #syncConfirmMode() {
+    this.sendToTools({
+      v: PROTOCOL_VERSION,
+      type: 'confirm.mode',
+      turnId: this.currentTurnId ?? null,
+      enabled: this.currentConfirmMode === true,
     })
   }
 
@@ -313,7 +325,10 @@ export class Bridge {
       else this.#claimTools(ws, origin)
       this.#emit({ direction: 'in', role, frame: { ...message, token: '[redacted]' } })
       this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'hello.ok', version: PROTOCOL_VERSION })
-      if (role === 'tools') this.#syncPlanMode()
+      if (role === 'tools') {
+        this.#syncPlanMode()
+        this.#syncConfirmMode()
+      }
       ws.on('message', data2 => this.#onMessage(ws, role, data2))
       this.onConnectionChange?.()
     }
@@ -472,7 +487,7 @@ export class Bridge {
         this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'pong' })
         return
       }
-      if (typeof message.type === 'string' && (message.type.startsWith('log.') || message.type.startsWith('llm.')) && this.onControl !== undefined) {
+      if (typeof message.type === 'string' && (message.type.startsWith('log.') || message.type.startsWith('llm.') || message.type.startsWith('settings.')) && this.onControl !== undefined) {
         Promise.resolve(this.onControl(message, ws)).catch(error => {
           this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'log.error', message: errorMessage(error) })
         })

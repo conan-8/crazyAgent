@@ -52,7 +52,8 @@
           "draft": null,
           "latestScreenshotId": null,
           "latestScreenshot": null,
-          "help": null
+          "help": null,
+          "confirm": null
         }
       }
     },
@@ -457,7 +458,8 @@
     "draft": null,
     "latestScreenshotId": null,
     "latestScreenshot": null,
-    "help": null
+    "help": null,
+    "confirm": null
   },
   "checkpoints": {
     "waiting": {
@@ -579,7 +581,8 @@
         "screenshotId": "shot-fixture-1",
         "captureError": null,
         "requestedAt": "2026-11-06T12:00:12.000Z"
-      }
+      },
+      "confirm": null
     },
     "waitingAfterCapture": {
       "protocol": 1,
@@ -700,7 +703,8 @@
         "screenshotId": "shot-fixture-1",
         "captureError": null,
         "requestedAt": "2026-11-06T12:00:12.000Z"
-      }
+      },
+      "confirm": null
     },
     "afterReply": {
       "protocol": 1,
@@ -866,7 +870,8 @@
         "bytes": 70,
         "source": "manual"
       },
-      "help": null
+      "help": null,
+      "confirm": null
     },
     "waitingNoCapture": {
       "protocol": 1,
@@ -1083,7 +1088,8 @@
         "screenshotId": null,
         "captureError": "The browser side panel is not connected, so the screen cannot be captured.",
         "requestedAt": "2026-11-06T12:00:29.000Z"
-      }
+      },
+      "confirm": null
     }
   }
 }
