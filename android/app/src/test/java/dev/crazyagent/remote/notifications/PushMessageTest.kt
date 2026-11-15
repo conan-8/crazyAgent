@@ -14,6 +14,7 @@ class PushMessageTest {
         assertEquals(good, message.toMap())
         assertEquals(PushMessage.Type.DONE, PushMessage.parse(good + ("type" to "done"))!!.type)
         assertEquals(PushMessage.Type.ERROR, PushMessage.parse(good + ("type" to "error"))!!.type)
+        assertEquals(PushMessage.Type.CONFIRM, PushMessage.parse(good + ("type" to "confirm"))!!.type)
     }
 
     @Test fun anythingElseIsDropped() {
@@ -39,11 +40,14 @@ class PushMessageTest {
     @Test fun notificationTextIsGenericAndOneNotificationPerTurn() {
         val help = PushMessage.parse(good)!!
         val done = PushMessage.parse(good + ("type" to "done"))!!
+        val confirm = PushMessage.parse(good + ("type" to "confirm"))!!
         assertEquals("crazyAgent needs you", help.title)
         assertEquals("crazyAgent finished", done.title)
+        assertEquals("crazyAgent needs your approval", confirm.title)
         // A later push for the same turn replaces the earlier notification.
         assertEquals(help.notificationId, done.notificationId)
-        for (message in listOf(help, done, PushMessage.parse(good + ("type" to "error"))!!)) {
+        assertEquals(help.notificationId, confirm.notificationId)
+        for (message in listOf(help, done, confirm, PushMessage.parse(good + ("type" to "error"))!!)) {
             for (text in listOf(message.title, message.text)) {
                 assertFalse(text.contains(message.turnId))
                 assertFalse(text.contains(message.instanceId))

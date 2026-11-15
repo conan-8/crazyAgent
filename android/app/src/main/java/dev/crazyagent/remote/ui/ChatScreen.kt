@@ -125,6 +125,7 @@ class ChatActions(
     val onTogglePlanMode: () -> Unit,
     val onCaptureScreen: () -> Unit,
     val onEnableNotifications: () -> Unit,
+    val onConfirm: (String) -> Unit,
 )
 
 private enum class UtilityPanel { SETTINGS, DIAGNOSTICS, HISTORY }
@@ -237,6 +238,15 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
                 // Only offer the view when the capture made for this request is the one on screen.
                 canShowScreen = help.screenshotId != null && help.screenshotId == state.liveImage?.id,
                 onShowScreen = { viewerOpen = true },
+            )
+        }
+        SmoothPresence(state.chat.confirm?.takeIf { state.chat.turn.isWaiting }) { confirm ->
+            ConfirmCard(
+                confirm = confirm,
+                canAnswer = state.canConfirm,
+                canShowScreen = confirm.screenshotId != null && confirm.screenshotId == state.liveImage?.id,
+                onShowScreen = { viewerOpen = true },
+                onAnswer = actions.onConfirm,
             )
         }
         Composer(
@@ -518,6 +528,64 @@ private fun HelpCard(help: dev.crazyagent.remote.state.HelpRequest, canShowScree
                     modifier = Modifier.weight(1f),
                 )
                 if (canShowScreen) TextButton(onClick = onShowScreen) { Text("Show screen", color = AgentYellow, maxLines = 1) }
+            }
+        }
+    }
+}
+
+/**
+ * The opt-in irreversible-action confirmation (B9b). Approve/Deny sends the
+ * decision as the next message; the companion writes the decision block. An
+ * ordinary reply abandons the request instead, exactly as on the desktop.
+ */
+@Composable
+private fun ConfirmCard(
+    confirm: dev.crazyagent.remote.state.ConfirmRequest,
+    canAnswer: Boolean,
+    canShowScreen: Boolean,
+    onShowScreen: () -> Unit,
+    onAnswer: (String) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF242112),
+        border = BorderStroke(1.dp, AgentYellow.copy(alpha = 0.45f)),
+        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+    ) {
+        Column(
+            Modifier.padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text("Waiting for your approval", style = MaterialTheme.typography.labelLarge, color = AgentYellow, fontWeight = FontWeight.SemiBold)
+            SelectionContainer {
+                Text(confirm.action, style = MaterialTheme.typography.bodySmall, color = AgentTextSoft, modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()))
+            }
+            Text("Target: ${confirm.target}", style = MaterialTheme.typography.labelSmall, color = AgentMuted)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when {
+                        confirm.screenshotId == null -> "No screenshot was captured."
+                        canShowScreen -> "Approve only if this is what you want."
+                        else -> "Its screenshot is no longer shown."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AgentMuted,
+                    modifier = Modifier.weight(1f),
+                )
+                if (canShowScreen) TextButton(onClick = onShowScreen) { Text("Show screen", color = AgentYellow, maxLines = 1) }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { onAnswer("deny") }, enabled = canAnswer, modifier = Modifier.weight(1f)) {
+                    Text("Deny", maxLines = 1)
+                }
+                Button(
+                    onClick = { onAnswer("approve") },
+                    enabled = canAnswer,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = AgentYellow, contentColor = Color(0xFF1A1A1A)),
+                ) {
+                    Text("Approve", maxLines = 1)
+                }
             }
         }
     }

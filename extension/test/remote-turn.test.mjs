@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BUSY_REFUSAL_CODES, foreignPrompt, helpNotice, isBusyRefusal } from '../sidepanel/remote-turn.js'
+import { BUSY_REFUSAL_CODES, foreignPrompt, helpNotice, confirmNotice, isBusyRefusal } from '../sidepanel/remote-turn.js'
 
 test('a phone prompt becomes a labelled turn with name-only image placeholders', () => {
   assert.deepEqual(foreignPrompt({ type: 'chat.user', turnId: 'turn-1', origin: 'remote', text: 'check the cart', imageCount: 2 }), {
@@ -60,4 +60,22 @@ test('a help notice comes only from the structured help field of a finished turn
     { help: { category: 'login' } },
     { help: { reason: 'x' } },
   ]) assert.equal(helpNotice(frame), null)
+})
+
+test('a confirm notice comes only from the structured confirm field of a finished turn', () => {
+  assert.deepEqual(confirmNotice({ type: 'chat.done', text: 'x', confirm: { action: ' Submit the assignment. ', target: ' Submit button ' } }), {
+    action: 'Submit the assignment.', target: 'Submit button',
+  })
+  assert.equal(confirmNotice({ confirm: { action: 'x'.repeat(300), target: 'y' } }).action.length, 200)
+  assert.equal(confirmNotice({ confirm: { action: 'x', target: 'y'.repeat(300) } }).target.length, 200)
+  for (const frame of [
+    null,
+    { type: 'chat.done', text: 'I will submit it after you approve' },
+    { confirm: 'approve' },
+    { confirm: { action: '   ', target: 'x' } },
+    { confirm: { action: 'x', target: '' } },
+    { confirm: { action: 'x' } },
+    { confirm: { target: 'x' } },
+    { confirm: { action: 5, target: 'x' } },
+  ]) assert.equal(confirmNotice(frame), null)
 })

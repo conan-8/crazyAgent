@@ -73,3 +73,20 @@ export function helpNotice(frame) {
   const label = Object.hasOwn(HELP_LABELS, category) ? HELP_LABELS[category] : HELP_LABELS.other
   return { label, reason: reason.trim().slice(0, 500), category }
 }
+
+/**
+ * The agent's structured irreversible-action confirmation on a finished turn
+ * (B9b), as display text. Null unless the frame carries the exact shape the
+ * companion commits; the panel never infers a request from the answer text.
+ * @param {unknown} frame
+ * @returns {{action: string, target: string} | null}
+ */
+export function confirmNotice(frame) {
+  if (frame === null || typeof frame !== 'object') return null
+  const confirm = /** @type {Record<string, unknown>} */ (frame).confirm
+  if (confirm === null || typeof confirm !== 'object') return null
+  const { action, target } = /** @type {Record<string, unknown>} */ (confirm)
+  if (typeof action !== 'string' || action.trim().length === 0) return null
+  if (typeof target !== 'string' || target.trim().length === 0) return null
+  return { action: action.trim().slice(0, 200), target: target.trim().slice(0, 200) }
+}

@@ -70,6 +70,8 @@ data class PendingPrompt(
     val note: String? = null,
     val planMode: Boolean = false,
     val steer: Boolean = false,
+    /** "approve" or "deny" when this prompt answers an open confirmation (B9b). */
+    val confirm: String? = null,
 )
 
 data class ArchivedChat(
@@ -126,6 +128,9 @@ data class UiState(
         get() = link.status == LinkStatus.LIVE && chat.synced && pending == null && busy && runtimeReady && composer.isNotBlank()
     val canStop: Boolean get() = link.status == LinkStatus.LIVE && busy && chat.turn.status != "stopping" && !stopInFlight
     val canStartNew: Boolean get() = link.status == LinkStatus.LIVE && chat.synced && !busy && !newInFlight && !resumeInFlight && pending == null
+    /** An open confirmation can be answered only while the chat waits, with no send in flight. */
+    val canConfirm: Boolean
+        get() = link.status == LinkStatus.LIVE && chat.synced && pending == null && !busy && chat.confirm != null
 }
 
 /**
@@ -181,6 +186,7 @@ class RemoteController(
                 note = "Checking whether this message reached the companion…",
                 planMode = stored.planMode,
                 steer = stored.steer,
+                confirm = stored.confirm,
             ))
         }
         scheduleReconcile()
@@ -257,6 +263,36 @@ class RemoteController(
         val prompt = created ?: return
         scope.launch {
             pendingStore.save(StoredPending(prompt.clientMessageId, prompt.text, prompt.imageCount, prompt.instanceId, prompt.planMode, prompt.steer))
+            deliver(prompt)
+        }
+    }
+
+    /**
+     * Answer the open confirmation (B9b). The companion writes the decision
+     * block; the phone sends only the decision. Delivery uses the same
+     * idempotent pipeline as an ordinary prompt, so an uncertain answer is
+     * reconciled and retried with its original ID, never doubled.
+     */
+    fun sendConfirm(decision: String) {
+        if (decision != "approve" && decision != "deny") return
+        var created: PendingPrompt? = null
+        _state.update { current ->
+            if (!current.canConfirm) return@update current
+            val prompt = PendingPrompt(
+                clientMessageId = newId(),
+                text = "",
+                images = emptyList(),
+                imageCount = 0,
+                instanceId = current.chat.instanceId,
+                phase = PendingPhase.SENDING,
+                confirm = decision,
+            )
+            created = prompt
+            current.copy(pending = prompt, notice = null)
+        }
+        val prompt = created ?: return
+        scope.launch {
+            pendingStore.save(StoredPending(prompt.clientMessageId, prompt.text, prompt.imageCount, prompt.instanceId, prompt.planMode, prompt.steer, prompt.confirm))
             deliver(prompt)
         }
     }
@@ -599,7 +635,7 @@ class RemoteController(
     // ---- delivery -------------------------------------------------------
 
     private suspend fun deliver(prompt: PendingPrompt) = deliveryLock.withLock {
-        handleSendResult(prompt, api.sendMessage(prompt.clientMessageId, prompt.text, prompt.images, prompt.planMode, prompt.steer))
+        handleSendResult(prompt, api.sendMessage(prompt.clientMessageId, prompt.text, prompt.images, prompt.planMode, prompt.steer, prompt.confirm))
     }
 
     private suspend fun handleSendResult(prompt: PendingPrompt, result: ApiResult) {
@@ -665,7 +701,7 @@ class RemoteController(
                     deliveryLock.withLock {
                         val current = _state.value.pending
                         if (current?.clientMessageId == pending.clientMessageId && current.phase == PendingPhase.UNCERTAIN) {
-                            handleSendResult(current, api.sendMessage(current.clientMessageId, current.text, current.images, current.planMode, current.steer))
+                            handleSendResult(current, api.sendMessage(current.clientMessageId, current.text, current.images, current.planMode, current.steer, current.confirm))
                         }
                     }
                 }

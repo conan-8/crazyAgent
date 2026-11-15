@@ -868,6 +868,70 @@ textarea {
   text-decoration: underline;
 }
 
+.confirm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 4px 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 195, 0, 0.4);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.confirm-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.confirm-card-badge {
+  align-self: flex-start;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 195, 0, 0.35);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.confirm-card-title {
+  margin: 2px 0 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.confirm-card-action {
+  margin: 0;
+  color: var(--text, #e6e6e6);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.confirm-card-target {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.confirm-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.confirm-card-actions button {
+  min-width: 84px;
+}
+
 .composer {
   position: relative;
   flex: 0 0 auto;

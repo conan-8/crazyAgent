@@ -19,7 +19,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { dirname } from 'node:path'
 import { errorMessage, isRecord } from './protocol.mjs'
 
-export const PUSH_TYPES = Object.freeze(['help', 'done', 'error'])
+export const PUSH_TYPES = Object.freeze(['help', 'confirm', 'done', 'error'])
 export const MAX_PUSH_DEVICES = 8
 export const MAX_FCM_TOKEN_CHARS = 4_096
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/u
@@ -208,7 +208,7 @@ export class PushService {
       instanceId: String(event.instanceId),
       sequence: String(event.sequence),
     }
-    const priority = event.type === 'help' ? 'high' : 'normal'
+    const priority = event.type === 'help' || event.type === 'confirm' ? 'high' : 'normal'
     await Promise.all(devices.map(async device => {
       const result = await this.#deliver(device.fcmToken, data, priority)
       if (result.ok) {
@@ -337,16 +337,15 @@ export async function createFcmProvider(options) {
 
 /**
  * What kind of push, if any, the end of a turn deserves. A stopped turn was
- * ended by the user and announces nothing. A confirmation wait sends no push
- * until the B9b phone card exists; the waiting state still reaches every
- * connected client through the event stream.
+ * ended by the user and announces nothing. A confirmation wait (B9b) is
+ * announced like help: high priority, metadata only.
  * @param {{outcome: string, help?: unknown, confirm?: unknown}} info
- * @returns {'help' | 'done' | 'error' | null}
+ * @returns {'help' | 'confirm' | 'done' | 'error' | null}
  */
 export function pushTypeForTurn(info) {
   if (info.outcome === 'done') {
     if (isRecord(info.help)) return 'help'
-    if (isRecord(info.confirm)) return null
+    if (isRecord(info.confirm)) return 'confirm'
     return 'done'
   }
   if (info.outcome === 'error') return 'error'

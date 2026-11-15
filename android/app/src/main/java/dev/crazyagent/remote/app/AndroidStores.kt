@@ -120,6 +120,7 @@ class DataStorePendingStore(
             instanceId = json.string("instanceId"),
             planMode = json.bool("planMode") == true,
             steer = json.bool("steer") == true,
+            confirm = json.string("confirm")?.takeIf { it == "approve" || it == "deny" },
         )
     }
 
@@ -131,6 +132,7 @@ class DataStorePendingStore(
             "instanceId" to (pending.instanceId?.let(::JsonPrimitive) ?: JsonNull),
             "planMode" to JsonPrimitive(pending.planMode),
             "steer" to JsonPrimitive(pending.steer),
+            "confirm" to (pending.confirm?.let(::JsonPrimitive) ?: JsonNull),
         ))
         val sealed = cipher.encrypt(json.toString().toByteArray(Charsets.UTF_8))
         store.edit { it[PENDING] = sealed }

@@ -91,6 +91,18 @@
           <span class="plan-mode-copy">Next turn uses a live checklist</span>
           <button id="plan-mode-cancel" class="plan-mode-cancel" type="button" title="Cancel plan mode" aria-label="Cancel plan mode">×</button>
         </div>
+        <div id="confirm-card" class="confirm-card hidden" role="alertdialog" aria-labelledby="confirm-card-title" aria-describedby="confirm-card-action confirm-card-target">
+          <div class="confirm-card-copy">
+            <span class="confirm-card-badge">Approval</span>
+            <h2 id="confirm-card-title" class="confirm-card-title">Waiting for your approval</h2>
+            <p id="confirm-card-action" class="confirm-card-action"></p>
+            <p id="confirm-card-target" class="confirm-card-target"></p>
+          </div>
+          <div class="confirm-card-actions">
+            <button id="confirm-deny" class="secondary" type="button">Deny</button>
+            <button id="confirm-approve" class="primary" type="button">Approve</button>
+          </div>
+        </div>
         <div class="composer-field">
           <div id="image-chips" class="image-chips" aria-live="polite"></div>
           <div class="composer-input">
@@ -202,6 +214,15 @@
               <span>Pairing token</span>
               <input id="setting-token" type="password" spellcheck="false" placeholder="Printed by npm run dev" />
             </label>
+          </section>
+
+          <section class="settings-section" aria-labelledby="safety-label">
+            <h3 id="safety-label">Safety</h3>
+            <label class="check">
+              <span>Ask before submitting, sending, paying, or deleting</span>
+              <input id="setting-confirm-irreversible" type="checkbox" />
+            </label>
+            <p class="hint">The agent ends its turn and waits for your Approve or Deny before an irreversible action. Applies to every turn, including turns started from the phone.</p>
           </section>
 
           <section class="settings-section" aria-labelledby="capture-label">

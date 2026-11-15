@@ -22,6 +22,7 @@
  *   node scripts/ui-preview.mjs --scenario slash      # slash-command palette: filter, keys, execution
  *   node scripts/ui-preview.mjs --scenario plan       # /plan arm, live checklist, queue/race preservation
  *   node scripts/ui-preview.mjs --scenario remote     # phone-started turns: render, queue, lost-race requeue
+ *   node scripts/ui-preview.mjs --scenario confirm    # approval card: approve/deny, abandonment, settings toggle
  *   node scripts/ui-preview.mjs --scenario stopped    # stop, reload, restore, and continue a saved chat
  *
  * Options: --out DIR (default /tmp/crazyagent-ui-preview) and SHOT_FORMAT=jpeg.
@@ -624,6 +625,137 @@ async function playRemoteScenario(page, capture) {
   await sleep(150)
   assert.equal(await page.evaluate(`document.querySelectorAll('.activity-entry.error').length`), 1)
   assert.deepEqual(await queued(), [])
+}
+
+async function playConfirmScenario(page, capture) {
+  const { recv, batch } = makePage(page)
+  const sends = () => page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send')`)
+  const card = () => page.evaluate(`(() => {
+    const el = document.getElementById('confirm-card');
+    return {
+      hidden: el.classList.contains('hidden'),
+      role: el.getAttribute('role'),
+      action: document.getElementById('confirm-card-action').textContent,
+      target: document.getElementById('confirm-card-target').textContent,
+      phase: document.getElementById('activity-phase').textContent,
+      focused: document.activeElement?.id ?? null,
+    };
+  })()`)
+  const doneWithConfirm = (action, target) => recv({ v: 1, type: 'chat.done', sessionId: 'session-preview0001', text: 'BLOCKED — waiting for your approval.', timings: { totalMs: 1200 }, confirm: { action, target } })
+  await batch(HELLO_FRAMES)
+  await sleep(300)
+
+  // 1. A finished turn with a structured confirmation shows the approval card.
+  await sendPrompt(page, 'Fill in the form and submit it')
+  await doneWithConfirm('Submit the assignment for grading', 'Submit for Grading button')
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(200)
+  const shown = await card()
+  assert.equal(shown.hidden, false)
+  assert.equal(shown.role, 'alertdialog')
+  assert.equal(shown.action, 'Submit the assignment for grading')
+  assert.equal(shown.target, 'Target: Submit for Grading button')
+  assert.equal(shown.phase, 'Waiting for approval')
+  assert.equal(shown.focused, 'confirm-approve', 'the decision point receives focus')
+  await capture('card')
+
+  // 2. Approve sends confirm:"approve" with empty text and echoes the decision.
+  await page.evaluate(`document.getElementById('confirm-approve').click()`)
+  await sleep(250)
+  const approved = (await sends()).at(-1)
+  assert.equal(approved.confirm, 'approve')
+  assert.equal(approved.text, '')
+  assert.equal((await card()).hidden, true)
+  assert.equal(
+    await page.evaluate(`[...document.querySelectorAll('.activity-turn')].at(-1)?.querySelector('.turn-prompt')?.textContent`),
+    'Approved: Submit the assignment for grading',
+  )
+  await finishPrompt(page, 'session-preview0001', 'DONE — submitted.')
+
+  // 3. Deny sends confirm:"deny".
+  await sendPrompt(page, 'Now delete the draft')
+  await doneWithConfirm('Delete the draft', 'Delete button')
+  await sleep(200)
+  assert.equal((await card()).hidden, false)
+  await page.evaluate(`document.getElementById('confirm-deny').click()`)
+  await sleep(250)
+  assert.equal((await sends()).at(-1).confirm, 'deny')
+  assert.equal((await card()).hidden, true)
+  await finishPrompt(page, 'session-preview0001', 'Not deleted.')
+
+  // 4. An ordinary prompt abandons the request without deciding it.
+  await sendPrompt(page, 'Submit it')
+  await doneWithConfirm('Submit it', 'Submit button')
+  await sleep(200)
+  assert.equal((await card()).hidden, false)
+  await sendPrompt(page, 'never mind')
+  assert.equal((await card()).hidden, true, 'an ordinary prompt abandons the confirmation')
+  assert.equal((await sends()).at(-1).confirm, undefined)
+  await finishPrompt(page, 'session-preview0001', 'OK')
+
+  // 5. Another client answered first: the coded refusal retires the card.
+  await sendPrompt(page, 'Publish the page')
+  await doneWithConfirm('Publish the page', 'Publish button')
+  await sleep(200)
+  await recv({ v: 1, type: 'chat.error', code: 'NO_CONFIRMATION_PENDING', message: 'No confirmation is waiting for an answer in this chat.', recoverable: true })
+  await sleep(150)
+  assert.equal((await card()).hidden, true)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.activity-entry.error').length`), 0, 'a stale answer is not a turn error')
+
+  // 6. A phone prompt or a session change also clears the card.
+  await doneWithConfirm('Pay the invoice', 'Pay button')
+  await sleep(150)
+  assert.equal((await card()).hidden, false)
+  await recv({ v: 1, type: 'chat.user', turnId: 'turn-phone-1', origin: 'remote', text: 'approved from the phone', imageCount: 0 })
+  await sleep(150)
+  assert.equal((await card()).hidden, true)
+  await finishPrompt(page, 'session-preview0001', 'Paid.')
+  await doneWithConfirm('Send the email', 'Send button')
+  await sleep(150)
+  assert.equal((await card()).hidden, false)
+  await recv({ v: 1, type: 'chat.session', sessionId: 'session-preview0002' })
+  await sleep(150)
+  assert.equal((await card()).hidden, true)
+
+  // 7. The settings toggle mirrors the companion setting and saves via settings.update.
+  await page.evaluate(`document.getElementById('settings').click()`)
+  await sleep(200)
+  assert.equal(await page.evaluate(`document.getElementById('setting-confirm-irreversible').checked`), false)
+  await recv({ v: 1, type: 'chat.hello', dsh: { state: 'ready' }, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek: DeepSeek V4.1 Flash', reasoning: true, imageInput: true }, reasoningEffort: 'medium' }, credentials: { configured: true, source: 'stored' }, settings: { confirmIrreversible: true } })
+  await sleep(150)
+  assert.equal(await page.evaluate(`document.getElementById('setting-confirm-irreversible').checked`), true, 'chat.hello syncs an open settings modal')
+  await page.evaluate(`document.getElementById('setting-confirm-irreversible').click()`)
+  await page.evaluate(`document.getElementById('settings-save').click()`)
+  await sleep(200)
+  const update = await page.evaluate(`window.__frames.filter(frame => frame.type === 'settings.update').at(-1)`)
+  assert.equal(update.confirmIrreversible, false)
+  assert.equal(await page.evaluate(`document.activeElement.id`), 'input', 'saving settings returns focus to the composer')
+  await recv({ v: 1, type: 'settings.updated', ok: true, settings: { confirmIrreversible: false } })
+  await page.evaluate(`document.getElementById('settings').click()`)
+  await sleep(150)
+  assert.equal(await page.evaluate(`document.getElementById('setting-confirm-irreversible').checked`), false)
+  await page.evaluate(`document.getElementById('settings-close').click()`)
+  await sleep(150)
+
+  // 8. The card fits the narrowest panel without clipping its buttons.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 280, height: 940, deviceScaleFactor: 2, mobile: false })
+  await sleep(300)
+  await doneWithConfirm('Submit the assignment for grading', 'Submit for Grading button')
+  await sleep(250)
+  const narrow = await page.evaluate(`(() => {
+    const el = document.getElementById('confirm-card');
+    const approve = document.getElementById('confirm-approve').getBoundingClientRect();
+    const deny = document.getElementById('confirm-deny').getBoundingClientRect();
+    return {
+      hidden: el.classList.contains('hidden'),
+      overflow: el.scrollWidth > el.clientWidth + 1,
+      buttonsInside: approve.right <= window.innerWidth && deny.left >= 0 && approve.width > 40 && deny.width > 40,
+    };
+  })()`)
+  assert.deepEqual(narrow, { hidden: false, overflow: false, buttonsInside: true })
+  await capture('narrow')
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 940, deviceScaleFactor: 2, mobile: false })
+  await sleep(300)
 }
 
 async function playPlanScenario(page, capture) {
@@ -2065,6 +2197,8 @@ async function main() {
     await playPlanScenario(page, shot)
   } else if (SCENARIO === 'remote') {
     await playRemoteScenario(page, shot)
+  } else if (SCENARIO === 'confirm') {
+    await playConfirmScenario(page, shot)
   } else {
     await playTurn(page)
     await sleep(400)

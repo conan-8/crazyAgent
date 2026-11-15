@@ -6,7 +6,7 @@ package dev.crazyagent.remote.notifications
  * fetched over the authenticated remote API.
  */
 data class PushMessage(val type: Type, val turnId: String, val instanceId: String, val sequence: Long) {
-    enum class Type(val wire: String) { HELP("help"), DONE("done"), ERROR("error") }
+    enum class Type(val wire: String) { HELP("help"), CONFIRM("confirm"), DONE("done"), ERROR("error") }
 
     companion object {
         private val ID = Regex("^[A-Za-z0-9_.:-]{1,128}$")
@@ -33,6 +33,7 @@ data class PushMessage(val type: Type, val turnId: String, val instanceId: Strin
     val title: String
         get() = when (type) {
             Type.HELP -> "crazyAgent needs you"
+            Type.CONFIRM -> "crazyAgent needs your approval"
             Type.DONE -> "crazyAgent finished"
             Type.ERROR -> "crazyAgent stopped on an error"
         }
@@ -40,6 +41,7 @@ data class PushMessage(val type: Type, val turnId: String, val instanceId: Strin
     val text: String
         get() = when (type) {
             Type.HELP -> "Open to see what is blocking it and reply."
+            Type.CONFIRM -> "Open to approve or deny the action."
             Type.DONE -> "Open to read the result."
             Type.ERROR -> "Open to see what went wrong."
         }

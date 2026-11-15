@@ -47,6 +47,7 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
 
     private var pendingSteer: Pair<String, JsonObject>? = null
     private var help: JsonObject? = null
+    private var confirm: JsonObject? = null
     val snapshotPosts = CopyOnWriteArrayList<JsonObject>()
     /** Registered push devices: device ID to the body it sent. */
     val pushDevices = java.util.concurrent.ConcurrentHashMap<String, JsonObject>()
@@ -138,11 +139,14 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
                 }
             } else if (turnId != null || forceBusy) {
                 409 to JsonObject(error("TURN_BUSY", "A turn is already running.") + ("clientMessageId" to JsonPrimitive(id)))
+            } else if (body["confirm"] != null && confirm == null) {
+                409 to JsonObject(error("NO_CONFIRMATION_PENDING", "No confirmation is waiting for an answer in this chat.") + ("clientMessageId" to JsonPrimitive(id)))
             } else {
                 val turn = "turn-${++turnCounter}"
                 turnId = turn
                 turnStatus = "running"
                 help = null
+                confirm = null
                 publish("chat.user", buildJsonObject {
                     put("text", body.str("text"))
                     put("origin", "remote")
@@ -190,6 +194,7 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
             sessionId = "session-${newPosts.size + 1}"
             committed.clear()
             help = null
+            confirm = null
             turnStatus = "idle"
             latestScreenshot = null
             publish("chat.session", buildJsonObject { put("sessionId", sessionId) }, null)
@@ -275,6 +280,32 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
         }
         help = request
         publish("remote.help", request, turn)
+        turnId = null
+        turnStatus = "waiting_for_user"
+        publish("chat.turn", buildJsonObject { put("status", "waiting_for_user"); put("turnId", turn); put("outcome", "done") }, turn)
+    }
+
+    /**
+     * End the running turn as the companion does after
+     * agent_request_confirmation (B9b): an optional confirm capture, the
+     * committed answer, `remote.confirm`, then the waiting state.
+     */
+    fun finishTurnNeedingConfirmation(action: String, target: String, screenshotId: String? = "shot-confirm", text: String = "Waiting for your approval.") = synchronized(lock) {
+        val turn = turnId ?: return@synchronized
+        if (screenshotId != null) screenshot(screenshotId, byteArrayOf(4, 2), source = "confirm")
+        publish("chat.assistant", buildJsonObject { put("text", text) }, turn)
+        publish("chat.done", buildJsonObject {
+            put("text", text)
+            put("confirm", buildJsonObject { put("action", action); put("target", target) })
+        }, turn)
+        val request = buildJsonObject {
+            put("turnId", turn); put("action", action); put("target", target)
+            put("screenshotId", screenshotId)
+            put("captureError", if (screenshotId == null) "The browser side panel is not connected." else null)
+            put("requestedAt", "2026-11-06T12:00:00.000Z")
+        }
+        confirm = request
+        publish("remote.confirm", request, turn)
         turnId = null
         turnStatus = "waiting_for_user"
         publish("chat.turn", buildJsonObject { put("status", "waiting_for_user"); put("turnId", turn); put("outcome", "done") }, turn)
@@ -383,6 +414,7 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
             screenshots.clear()
             latestScreenshot = null
             help = null
+            confirm = null
         }
         closeStreams(1001, "shutdown")
     }
@@ -452,6 +484,7 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
         put("draft", JsonNull)
         put("latestScreenshot", latestScreenshot ?: JsonNull)
         put("help", help ?: JsonNull)
+        put("confirm", confirm ?: JsonNull)
     }
 
     private fun body(request: RecordedRequest): JsonObject =

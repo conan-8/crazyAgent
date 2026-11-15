@@ -161,6 +161,7 @@ class MainActivity : ComponentActivity() {
                 onResumeChat = controller::resumeChat,
                 onTogglePlanMode = controller::togglePlanMode,
                 onCaptureScreen = controller::captureScreen,
+                onConfirm = controller::sendConfirm,
                 onEnableNotifications = {
                     if (android.os.Build.VERSION.SDK_INT >= 33 && canAskForNotifications()) {
                         askedForNotifications = true
