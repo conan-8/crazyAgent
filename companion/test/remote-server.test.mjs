@@ -1118,7 +1118,7 @@ test('confirm validation, missing capture evidence, ordinary-prompt abandonment,
   assert.equal(cleared.turn.status, 'idle')
 })
 
-test('a confirmation wait sends no push until the phone card exists; malformed signals are ignored', async t => {
+test('a confirmation wait sends a high-priority metadata-only push; malformed signals are ignored', async t => {
   const sends = []
   const push = new PushService({ registry: new PushRegistry(), provider: { name: 'fake', send: async (token, data, options) => { sends.push({ token, data, options }); return { ok: true } } } })
   let hub
@@ -1150,5 +1150,9 @@ test('a confirmation wait sends no push until the phone card exists; malformed s
   ctx.runner.current.resolve('Waiting.')
   await sleep(30)
   assert.equal(ctx.hub.turn.status, 'waiting_for_user')
-  assert.equal(sends.length, 1, 'no push for a confirmation wait in B9a')
+  assert.equal(sends.length, 2, 'the confirmation wait is announced')
+  assert.equal(sends[1].data.type, 'confirm')
+  assert.equal(sends[1].options.priority, 'high')
+  assert.deepEqual(Object.keys(sends[1].data).sort(), ['instanceId', 'sequence', 'turnId', 'type'])
+  assert.ok(!JSON.stringify(sends[1]).includes('Submit it'), 'the action text never rides the push')
 })

@@ -52,16 +52,16 @@ object Notifier {
             for ((key, value) in message.toMap()) putExtra(EXTRA_PREFIX + key, value)
         }
         val pending = PendingIntent.getActivity(context, message.notificationId, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val help = message.type == PushMessage.Type.HELP
-        val notification = NotificationCompat.Builder(context, if (help) CHANNEL_HELP else CHANNEL_TURNS)
+        val urgent = message.type == PushMessage.Type.HELP || message.type == PushMessage.Type.CONFIRM
+        val notification = NotificationCompat.Builder(context, if (urgent) CHANNEL_HELP else CHANNEL_TURNS)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(message.title)
             .setContentText(message.text)
             .setContentIntent(pending)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
-            .setCategory(if (help) NotificationCompat.CATEGORY_MESSAGE else NotificationCompat.CATEGORY_STATUS)
-            .setPriority(if (help) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(if (urgent) NotificationCompat.CATEGORY_MESSAGE else NotificationCompat.CATEGORY_STATUS)
+            .setPriority(if (urgent) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build()
         return try {

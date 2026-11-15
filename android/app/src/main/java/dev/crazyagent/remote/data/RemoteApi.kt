@@ -92,13 +92,14 @@ class RemoteApi(private val client: OkHttpClient, private val config: ServerConf
     suspend fun resumeSession(sessionId: String, clientCommandId: String): ApiResult =
         post("sessions/$sessionId/resume", JsonObject(mapOf("clientCommandId" to JsonPrimitive(clientCommandId))))
 
-    /** [steer] stops a running turn and starts this message as the next one. */
-    suspend fun sendMessage(clientMessageId: String, text: String, images: List<PromptImage>, planMode: Boolean = false, steer: Boolean = false): ApiResult {
+    /** [steer] stops a running turn and starts this message as the next one. [confirm] answers an open confirmation. */
+    suspend fun sendMessage(clientMessageId: String, text: String, images: List<PromptImage>, planMode: Boolean = false, steer: Boolean = false, confirm: String? = null): ApiResult {
         val body = JsonObject(buildMap {
             put("clientMessageId", JsonPrimitive(clientMessageId))
             put("text", JsonPrimitive(text))
             if (planMode) put("planMode", JsonPrimitive(true))
             if (steer) put("steer", JsonPrimitive(true))
+            if (confirm != null) put("confirm", JsonPrimitive(confirm))
             if (images.isNotEmpty()) {
                 put("images", JsonArray(images.map { image ->
                     JsonObject(mapOf(

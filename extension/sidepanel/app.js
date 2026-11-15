@@ -7,7 +7,7 @@
  */
 
 import { DEFAULT_SETTINGS, execute, testCapture, imageDataUrl, beginDebuggerRun, endDebuggerRun, cleanImageFor, displayImageField } from './browser.js'
-import { foreignPrompt, helpNotice, isBusyRefusal } from './remote-turn.js'
+import { foreignPrompt, helpNotice, confirmNotice, isBusyRefusal } from './remote-turn.js'
 import { ClientLogger } from './logger.js'
 import { renderMarkdown } from './markdown.js'
 import { createPlanPanelModel, renderPlanPanel } from './plan-panel.js'
@@ -79,6 +79,10 @@ let copySummaryRequested = false
 let llmState = { provider: 'openrouter', baseUrl: DEFAULT_MODEL_BASE_URL, model: null }
 /** @type {{configured: boolean, source: string}} */
 let credentialState = { configured: false, source: 'none' }
+/** Companion-owned behavior settings, mirrored from chat.hello / settings.updated. */
+let companionSettings = { confirmIrreversible: false }
+/** The open approval request shown in the confirm card, if any. */
+let confirmRequest = null
 /** @type {{baseUrl: string, models: Array<Record<string, any>>, loading: boolean, error: string}} */
 let modelsState = { baseUrl: '', models: [], loading: false, error: '' }
 let latestContextTokens = 0
@@ -98,6 +102,8 @@ let turnNumber = 0
 let currentTurn = null
 let lastAgentTurn = null
 let planTerminalPhase = null
+/** A help/confirmation wait outlives the idle status frame that follows chat.done. */
+let waitingPhase = null
 /** @type {{index: number, block: HTMLElement, head: HTMLElement, titleEl: HTMLElement, metaEl: HTMLElement, durationEl: HTMLElement, bodyEl: HTMLElement, startedAt: number, modelStartedAt: number, modelMs?: number, liveMs: number, open: boolean, collapsed: boolean, finish?: string, totalMs?: number} | null} */
 let currentStep = null
 /** Completed step durations for the current turn (ms), rendered in the footer. */
@@ -157,6 +163,12 @@ const els = {
   settingWidth: $('setting-width'),
   settingQuality: $('setting-quality'),
   settingAutoCapture: $('setting-autocapture'),
+  settingConfirmIrreversible: $('setting-confirm-irreversible'),
+  confirmCard: $('confirm-card'),
+  confirmAction: $('confirm-card-action'),
+  confirmTarget: $('confirm-card-target'),
+  confirmApprove: $('confirm-approve'),
+  confirmDeny: $('confirm-deny'),
   settingsSave: $('settings-save'),
   testCapture: $('test-capture'),
   imageModal: $('image-modal'),
@@ -1109,6 +1121,7 @@ function openSettings() {
   els.settingBaseUrl.value = llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL
   els.settingModel.value = llmState.model?.id || settings.modelId || ''
   els.settingRememberKey.checked = true
+  els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
   setEffortSelection(llmState.reasoningEffort ?? 'medium')
   renderProviderStatus()
   els.settingsModal.classList.remove('hidden')
@@ -1216,6 +1229,53 @@ function showBanner(text, actionLabel = 'Reconnect', action = () => connect()) {
 
 function hideBanner() {
   els.banner.classList.add('hidden')
+}
+
+/**
+ * Show the B9b approval card for a structured confirmation request. The card
+ * stays until the user decides, another prompt abandons the request, or the
+ * companion reports it is no longer pending.
+ * @param {{action: string, target: string}} notice
+ */
+function showConfirmCard(notice) {
+  confirmRequest = notice
+  els.confirmAction.textContent = notice.action
+  els.confirmTarget.textContent = `Target: ${notice.target}`
+  els.confirmCard.classList.remove('hidden')
+  els.confirmApprove.focus({ preventScroll: true })
+}
+
+function hideConfirmCard() {
+  if (confirmRequest === null) return
+  confirmRequest = null
+  const hadFocus = els.confirmCard.contains(document.activeElement)
+  els.confirmCard.classList.add('hidden')
+  if (hadFocus) els.input.focus({ preventScroll: true })
+}
+
+/**
+ * Approve/Deny answer the open confirmation through the same chat.send path as
+ * an ordinary prompt; the companion writes the decision block. The local echo
+ * names the decision so the transcript shows what was answered.
+ * @param {'approve' | 'deny'} decision
+ */
+function sendConfirmation(decision) {
+  if (confirmRequest === null) return
+  if (busy || stopping) {
+    toast('Wait for the current turn to finish before answering')
+    return
+  }
+  const action = confirmRequest.action
+  const item = {
+    id: `confirm-${Date.now().toString(36)}`,
+    text: '',
+    confirm: decision,
+    confirmAction: action,
+    images: [],
+    planMode: false,
+  }
+  if (!dispatchMessage(item)) return
+  logger.log('confirm.answer', { decision, actionChars: action.length }, 'info')
 }
 
 function toast(text) {
@@ -2514,6 +2574,10 @@ function handleFrame(frame) {
       dshState = frame.dsh?.state ?? 'unknown'
       if (frame.llm && typeof frame.llm === 'object') llmState = { ...llmState, ...frame.llm }
       if (frame.credentials && typeof frame.credentials === 'object') credentialState = { ...credentialState, ...frame.credentials }
+      if (frame.settings && typeof frame.settings === 'object') {
+        companionSettings = { confirmIrreversible: frame.settings.confirmIrreversible === true }
+        if (!els.settingsModal.classList.contains('hidden')) els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
+      }
       if (llmState.model?.id) {
         settings.modelId = llmState.model.id
         els.sessionInfo.dataset.model = llmState.model.id
@@ -2594,6 +2658,7 @@ function handleFrame(frame) {
       handleForeignPrompt(frame)
       return
     case 'chat.session':
+      hideConfirmCard()
       if (typeof frame.sessionId === 'string') {
         sessionId = frame.sessionId
         updateFooter()
@@ -2607,6 +2672,15 @@ function handleFrame(frame) {
       return
     case 'llm.configured':
       handleLlmConfigured(frame)
+      return
+    case 'settings.updated':
+      if (frame.ok === true && frame.settings && typeof frame.settings === 'object') {
+        companionSettings = { confirmIrreversible: frame.settings.confirmIrreversible === true }
+        els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
+        logger.log('settings.updated', { confirmIrreversible: companionSettings.confirmIrreversible }, 'info')
+      } else {
+        toast(typeof frame.error === 'string' ? frame.error : 'The companion refused the settings change')
+      }
       return
     case 'log.stats.result':
       renderLogStats(frame.stats)
@@ -2644,7 +2718,7 @@ function handleStatus(frame) {
     if (dshState === 'unknown' || dshState === 'starting') dshState = 'ready'
     stopAllWaitCountdowns()
     setBusy(false)
-    setActivityPhase(planTerminalPhase?.label ?? 'Ready', planTerminalPhase?.kind ?? 'online')
+    setActivityPhase(planTerminalPhase?.label ?? waitingPhase?.label ?? 'Ready', planTerminalPhase?.kind ?? waitingPhase?.kind ?? 'online')
     finalizeStreamActivity()
     refreshStatus()
     scheduleQueuedMessage()
@@ -2907,6 +2981,7 @@ function beginUserTurn(text, attachments = [], options = {}) {
   answerAnchor = null
   conversationStopped = false
   planTerminalPhase = null
+  waitingPhase = null
   lastAssistantText = ''
   lastAnswerText = ''
   sawReasoningStream = false
@@ -2925,6 +3000,8 @@ function beginUserTurn(text, attachments = [], options = {}) {
 function handleForeignPrompt(frame) {
   const prompt = foreignPrompt(frame)
   if (prompt === null) return
+  // Any prompt from another client abandons an open confirmation.
+  hideConfirmCard()
   logger.log('chat.user.foreign', {
     origin: prompt.origin,
     turnId: prompt.turnId,
@@ -2986,6 +3063,7 @@ function cleanupAfterTurn() {
   lastDispatchedItem = null
   pendingForeignPrompt = null
   stopping = false
+  waitingPhase = null
   clearTimeout(stopTimer)
   stopTimer = null
   setBusy(false)
@@ -3009,11 +3087,15 @@ function handleDone(frame) {
   const planIncomplete = planOutcome === 'unfinished' || planOutcome === 'blocked'
   // A structured agent_request_help from this turn: the chat now waits for the user.
   const help = helpNotice(frame)
+  // A structured confirmation request (B9b): the chat waits for Approve/Deny.
+  const confirm = help === null ? confirmNotice(frame) : null
   const phase = unverified ? 'Verification incomplete'
     : planOutcome === 'unfinished' ? 'Plan unfinished'
       : planOutcome === 'blocked' ? 'Plan blocked'
-        : help !== null ? 'Waiting for you' : 'Ready'
+        : help !== null ? 'Waiting for you' : confirm !== null ? 'Waiting for approval' : 'Ready'
   planTerminalPhase = planIncomplete ? { label: phase, kind: 'error' } : null
+  waitingPhase = help !== null ? { label: 'Waiting for you', kind: 'online' }
+    : confirm !== null ? { label: 'Waiting for approval', kind: 'online' } : null
   setActivityPhase(phase, unverified || planIncomplete ? 'error' : 'online')
   logger.log('chat.done', {
     sessionId: frame.sessionId,
@@ -3036,12 +3118,21 @@ function handleDone(frame) {
   else if (planOutcome === 'unfinished') toast('Plan unfinished: open checklist items remain')
   else if (planOutcome === 'blocked') toast('Plan blocked: review the checklist for the reason')
   else if (help !== null) toast(`${help.label}: ${help.reason}`)
+  else if (confirm !== null) toast(`Approval needed: ${confirm.action}`)
+  if (confirm !== null) showConfirmCard(confirm)
+  else hideConfirmCard()
   archiveCurrentConversation()
   if (newChatDraft) newChat()
 }
 
 /** @param {Record<string, any>} frame */
 function handleChatError(frame) {
+  if (frame.code === 'NO_CONFIRMATION_PENDING' || frame.code === 'INVALID_CONFIRMATION') {
+    // Another client answered first, or the request was abandoned: retire the card.
+    hideConfirmCard()
+    toast('That confirmation is no longer waiting for an answer')
+    return
+  }
   if (frame.code === 'SESSION_NOT_RESUMABLE') {
     const message = typeof frame.message === 'string' ? frame.message : 'This saved chat can no longer be continued.'
     logger.log('chat.resume.error', { message }, 'warn')
@@ -3599,7 +3690,8 @@ function dispatchMessage(item) {
   stopTimer = null
   clearTimeout(queueDispatchTimer)
   queueDispatchTimer = null
-  const prompt = item.text || 'Review the attached image(s).'
+  const isConfirm = item.confirm === 'approve' || item.confirm === 'deny'
+  const prompt = isConfirm ? '' : (item.text || 'Review the attached image(s).')
   const images = item.images.map(image => ({ name: image.name, mimeType: image.mimeType, data: image.data }))
   const frame = {
     v: PROTOCOL_VERSION,
@@ -3607,6 +3699,7 @@ function dispatchMessage(item) {
     text: prompt,
     autoCapture: settings.autoCapture !== false,
     ...item.planMode === true ? { planMode: true } : {},
+    ...isConfirm ? { confirm: item.confirm } : {},
     ...images.length > 0 ? { images } : {},
   }
   void beginDebuggerRun().catch(() => {})
@@ -3618,11 +3711,17 @@ function dispatchMessage(item) {
     textLength: prompt.length,
     autoCapture: settings.autoCapture !== false,
     planMode: item.planMode === true,
+    ...(isConfirm ? { confirm: item.confirm } : {}),
     images: item.images.map(image => ({ name: image.name, size: image.size, mimeType: image.mimeType })),
     preview: truncate(item.text, 300),
   }, 'info')
-  lastDispatchedItem = { text: item.text, images: item.images, planMode: item.planMode === true }
-  beginUserTurn(item.text, item.images, { planMode: item.planMode === true })
+  lastDispatchedItem = { text: item.text, images: item.images, planMode: item.planMode === true, ...(isConfirm ? { confirm: item.confirm, confirmAction: item.confirmAction } : {}) }
+  const echoText = isConfirm
+    ? `${item.confirm === 'approve' ? 'Approved' : 'Denied'}: ${item.confirmAction ?? ''}`
+    : item.text
+  beginUserTurn(echoText, item.images, { planMode: item.planMode === true })
+  // Any prompt answers or abandons an open confirmation.
+  hideConfirmCard()
   setBusy(true)
   setStatus('busy', 'Sending…')
   return true
@@ -4112,6 +4211,15 @@ els.settingsSave.addEventListener('click', () => {
   void saveSettings()
   els.settingApiKey.value = ''
   closeSettings()
+  // The confirmation setting lives in the companion, not in local storage.
+  const confirmChanged = els.settingConfirmIrreversible.checked !== companionSettings.confirmIrreversible
+  if (confirmChanged) {
+    if (connected) {
+      sendFrame({ v: PROTOCOL_VERSION, type: 'settings.update', confirmIrreversible: els.settingConfirmIrreversible.checked })
+    } else {
+      toast('Connect to the companion to change the confirmation setting')
+    }
+  }
   if (reconnectNeeded || !connected) {
     pendingLlmConfig = llmUpdate
     connect()
@@ -4150,6 +4258,8 @@ function clearToast() {
 }
 
 els.settings.addEventListener('click', openSettings)
+els.confirmApprove.addEventListener('click', () => sendConfirmation('approve'))
+els.confirmDeny.addEventListener('click', () => sendConfirmation('deny'))
 els.settingsClose.addEventListener('click', closeSettings)
 els.debugLog.addEventListener('click', openLogModal)
 els.logClose.addEventListener('click', closeLogModal)

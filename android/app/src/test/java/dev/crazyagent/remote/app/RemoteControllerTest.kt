@@ -123,6 +123,94 @@ class RemoteControllerTest {
         assertEquals(false, running.planMode)
     }
 
+    @Test fun confirmAnswerSendsTheDecisionOnceAndOnlyWhileWaiting() {
+        val c = controller().start()
+        c.awaitLive()
+        // An answer with nothing pending sends nothing.
+        c.sendConfirm("approve")
+        assertEquals(0, fake.messagePosts.size)
+        c.type("fill in the form and submit it")
+        c.send()
+        c.await { it.chat.turn.isActive && it.pending == null }
+        fake.finishTurnNeedingConfirmation("Submit the assignment for grading", "Submit for Grading button")
+        val waiting = c.await { it.chat.turn.isWaiting && it.chat.confirm != null }
+        assertEquals("Submit the assignment for grading", waiting.chat.confirm!!.action)
+        assertEquals("Submit for Grading button", waiting.chat.confirm!!.target)
+        assertTrue(waiting.canConfirm)
+        c.sendConfirm("approve")
+        val running = c.await { it.chat.turn.isActive && it.pending == null }
+        val post = fake.messagePosts.last()
+        assertEquals("approve", post["confirm"]?.jsonPrimitive?.content)
+        assertEquals("", post["text"]?.jsonPrimitive?.content)
+        assertNull(running.chat.confirm)
+        assertNull(store.value)
+        fake.finishTurn("DONE — submitted.")
+        c.await { !it.chat.turn.isActive }
+        // The turn is over and nothing waits: another answer sends nothing.
+        c.sendConfirm("deny")
+        assertEquals(2, fake.messagePosts.size)
+    }
+
+    @Test fun denyIsSentAndAnOrdinaryPromptAbandonsTheRequest() {
+        val c = controller().start()
+        c.awaitLive()
+        c.type("delete the draft")
+        c.send()
+        c.await { it.chat.turn.isActive && it.pending == null }
+        fake.finishTurnNeedingConfirmation("Delete the draft", "Delete button")
+        c.await { it.chat.confirm != null }
+        c.sendConfirm("deny")
+        c.await { it.chat.turn.isActive && it.pending == null }
+        assertEquals("deny", fake.messagePosts.last()["confirm"]?.jsonPrimitive?.content)
+        fake.finishTurnNeedingConfirmation("Delete another draft", "Delete button")
+        c.await { it.chat.confirm != null }
+        // An ordinary prompt abandons the request instead of deciding it.
+        c.type("never mind")
+        c.send()
+        c.await { it.chat.turn.isActive && it.pending == null }
+        assertNull(fake.messagePosts.last()["confirm"])
+        assertEquals("never mind", fake.messagePosts.last()["text"]?.jsonPrimitive?.content)
+    }
+
+    @Test fun aLostConfirmAnswerIsRetriedOnlyWithTheSameId() {
+        val c = controller().start()
+        c.awaitLive()
+        c.type("submit it")
+        c.send()
+        c.await { it.chat.turn.isActive && it.pending == null }
+        fake.finishTurnNeedingConfirmation("Submit it", "Submit button")
+        c.await { it.chat.confirm != null }
+        fake.loseNextMessage = true
+        c.sendConfirm("approve")
+        c.await { it.pending == null && it.chat.turn.isActive }
+        assertEquals(3, fake.messagePosts.size)
+        val answerPosts = fake.messagePosts.filter { it["confirm"] != null }
+        assertEquals(2, answerPosts.size)
+        assertEquals(setOf("client-0002"), answerPosts.map { (it["clientMessageId"] as JsonPrimitive).content }.toSet())
+        assertEquals("the answer ran exactly once", 1, fake.userMessageCount() - 1)
+    }
+
+    @Test fun companionRestartLeavesAnUncertainConfirmAnswerForReview() {
+        val c = controller().start()
+        c.awaitLive()
+        c.type("pay the invoice")
+        c.send()
+        c.await { it.chat.turn.isActive && it.pending == null }
+        fake.finishTurnNeedingConfirmation("Pay the invoice", "Pay button")
+        c.await { it.chat.confirm != null }
+        fake.loseNextMessage = true
+        fake.muteLive = true
+        fake.refuseUpgrades = 100
+        c.sendConfirm("approve")
+        fake.restart("fake-2")
+        val review = c.await { it.pending?.phase == PendingPhase.NEEDS_REVIEW }
+        assertEquals("approve", review.pending!!.confirm)
+        assertEquals("approve", store.value?.confirm)
+        assertEquals("the uncertain answer never ran", 0, fake.userMessageCount())
+        c.discardPending()
+        c.await { it.pending == null }
+    }
+
     @Test fun busyRefusalPutsThePromptBackWithoutAnotherTurn() {
         fake.forceBusy = true
         val c = controller().start()

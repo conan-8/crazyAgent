@@ -14,6 +14,8 @@ data class StoredPending(
     val instanceId: String?,
     val planMode: Boolean = false,
     val steer: Boolean = false,
+    /** "approve" or "deny" when this pending message answers a confirmation (B9b). */
+    val confirm: String? = null,
 ) {
     override fun toString(): String = "StoredPending($clientMessageId, ${text.length} chars, $imageCount images, $instanceId)"
 }
