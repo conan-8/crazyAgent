@@ -1,0 +1,162 @@
+{
+  "startedAt": "2026-11-16T08:48:49.419Z",
+  "finishedAt": "2026-11-16T08:53:56.190Z",
+  "headless": true,
+  "fixturePort": 17872,
+  "cdpPort": 35719,
+  "results": [
+    {
+      "name": "find",
+      "class": "attach",
+      "result": "PASS",
+      "cases": 7,
+      "wallMs": 6725,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": "PASS reveal scrolls only, preserves user state, returns a fresh view, and rejects old coordinates | PASS canvas auto-view retains a full labelled screenshot | ALL FIND AND AUTO-VIEW CHECKS PASSED"
+    },
+    {
+      "name": "expect",
+      "class": "attach",
+      "result": "PASS",
+      "cases": 12,
+      "wallMs": 13360,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": "PASS off-screen pixels remain unknown with no dispatch | PASS precondition failure prevents dispatch and expectation verification | ALL EXPECT CHECKS PASSED"
+    },
+    {
+      "name": "table",
+      "class": "attach",
+      "result": "PASS",
+      "cases": 3,
+      "wallMs": 2404,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": "PASS read-only target rejects the complete write before input | PASS 14-cell trusted write — all values and formulas committed; all 7 names preserved | ALL TABLE CHECKS PASSED"
+    },
+    {
+      "name": "work",
+      "class": "attach",
+      "result": "PASS",
+      "cases": 28,
+      "wallMs": 50301,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": "PASS focus-fallback typing — method trusted-focus, 19 chars | PASS named punctuation keys — Period and Colon | ALL WORK CHECKS PASSED"
+    },
+    {
+      "name": "dialog",
+      "class": "attach",
+      "result": "PASS",
+      "cases": 6,
+      "wallMs": 16032,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": "PASS unintended beforeunload fails closed and dismissal stays on the page | PASS intended navigate auto-accepts beforeunload and completes | ALL DIALOG CHECKS PASSED"
+    },
+    {
+      "name": "files",
+      "class": "attach",
+      "result": "PASS",
+      "cases": 13,
+      "wallMs": 14856,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": "PASS exact-name upload reached an iframe input | PASS cross-origin frame 18 (http://localhost:45773/frame-files.html) fails closed with UPLOAD_FRAME_UNSUPPORTED; tab-level CDP DOM saw 0 marked nodes and the page assigned nothing | ALL FILE TRANSFER CHECKS PASSED"
+    },
+    {
+      "name": "canvas",
+      "class": "attach",
+      "result": "PASS",
+      "cases": 11,
+      "wallMs": 10011,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": "PASS canvas editor receives trusted focus | PASS canvas typing lands exactly once and stays explicitly UNVERIFIED | ALL CANVAS CHECKS PASSED"
+    },
+    {
+      "name": "advanced",
+      "class": "attach",
+      "result": "PASS",
+      "cases": 9,
+      "wallMs": 14288,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": "PASS hover menu | PASS click-open asynchronous ARIA menu path | ALL ADVANCED CHECKS PASSED"
+    },
+    {
+      "name": "clipboard",
+      "class": "attach",
+      "result": "PASS",
+      "cases": 11,
+      "wallMs": 4972,
+      "exitCode": 0,
+      "note": "system-clipboard paths need a real panel; suite SKIPs them when unavailable",
+      "stdoutTail": "PASS system rich paste — trusted Ctrl+V inserted \"BASE-SYSTEM-PASTE-MARKER\" | PASS system rich:false paste — typed \"TEXT-BASE-SYSTEM-TEXT-PASTE\" | ALL CLIPBOARD CHECKS PASSED"
+    },
+    {
+      "name": "background",
+      "class": "self",
+      "result": "PASS",
+      "cases": 12,
+      "wallMs": 69355,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": "ok - the panel executes alone while open | ok - closing the panel hands back to the worker in 0.4 s | 12 checks passed"
+    },
+    {
+      "name": "drag",
+      "class": "self",
+      "result": "PASS",
+      "cases": 0,
+      "wallMs": 75113,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": ""
+    },
+    {
+      "name": "cursor",
+      "class": "self",
+      "result": "PASS",
+      "cases": 11,
+      "wallMs": 28327,
+      "exitCode": 0,
+      "note": "",
+      "stdoutTail": "ok - the cursor leaves when the turn ends | ok - an orphaned cursor removes itself after 16 s | 11 checks passed"
+    }
+  ],
+  "cannotHeadless": [
+    {
+      "name": "click",
+      "reason": "stalls in its own setup without a visible window (2026-11-11 log); also hardcodes fixture port 17872"
+    },
+    {
+      "name": "capture",
+      "reason": "headed by design (minimizes a real OS window); on an idle/locked desktop the window never gains focus and its baseline assertion fails: image 2336x1282 != viewport 1168x688 x dpr 2 (debugger-infobar viewport accounting needs a painted, focused window). Bridge config is env-isolated (BRIDGE_URL/BRIDGE_TOKEN); rerun headed on an active desktop"
+    },
+    {
+      "name": "tabs",
+      "reason": "points the extension at the RUNNING service bridge (ws://127.0.0.1:17871) with the service token; cannot run isolated without touching the service"
+    },
+    {
+      "name": "log",
+      "reason": "same as tabs: drives the running service bridge with the service token"
+    },
+    {
+      "name": "docs-table",
+      "reason": "live Google Docs: needs the signed-in profile ~/.cache/crazyagent/docs-profile on port 9233 (docs-fixer owns both)"
+    },
+    {
+      "name": "find-live",
+      "reason": "live Google Docs: needs the signed-in profile and the service bridge port"
+    },
+    {
+      "name": "table-live",
+      "reason": "live Google Docs: needs the signed-in profile"
+    }
+  ],
+  "passed": 12,
+  "failed": 0,
+  "skipped": 7
+}
