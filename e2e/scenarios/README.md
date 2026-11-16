@@ -43,7 +43,10 @@ cannot look safe merely by rejecting everything.
 - Per-run metrics are read from the companion's own `events.jsonl`: wall time,
   model steps (`step/start`), tool calls and per-tool counts, failed calls and
   their codes (joined `tool.call`/`tool.result`, plus `bridge.command.error`),
-  token usage, final status, and the model's final text.
+  dead model steps and retries (Q4: provider `model.leaked_tool_call`,
+  companion `assistant.leaked_tool_call` and `turn.retry`, plus the
+  companion's dead-turn verdict on `turn.end`), token usage, final status,
+  and the model's final text.
 - Batch JSON is written after every run (also on failure) under
   `e2e/baselines/` unless `--json <path>` is given.
 
@@ -74,8 +77,17 @@ frame target over the harness's own CDP connection), `navigateFixture(path)`,
 bytes of each saved file), `cdp(method, params)` (raw page CDP for
 `solve()`/`tamper()` hooks only, never `check()`), `turn`
 (`status`, `waitingForUser`, `wallMs`, `steps`, `toolCalls`, `failedCalls`,
-`failed`, `toolCounts`, `inputTokens`, `outputTokens`, `finalText`, `confirm`),
-and `answer` (the confirmation answer phase, null for ordinary scenarios).
+`failed`, `toolCounts`, `inputTokens`, `outputTokens`, `finalText`, `confirm`,
+and the Q4 retry fields `deadSteps`, `deadRetried`, `deadGaveUp`,
+`deadRetryErrors`, `deadKinds`, `assistantLeaked`, `turnRetries`, `retries`,
+`deadTurn`, `deadTurnKind`, `recovered`), and `answer` (the confirmation
+answer phase, null for ordinary scenarios; carries the same retry fields).
+
+The per-run table's `retry` column shows the retry notices issued for the
+first turn (provider steer retries + companion reruns), flagged `DEAD` when
+the turn still ended having executed nothing, or `GAVEUP` when the retry cap
+was reached. The batch summary adds `dead`, `retries` (both including the
+answer turn) and `recovered` (first turn ended ok after a retry).
 
 `check()` must use independent ground truth: the fixture DOM read over the
 harness's own CDP connection, or the fixture server's request log. It never

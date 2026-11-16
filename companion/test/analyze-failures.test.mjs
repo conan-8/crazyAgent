@@ -1,19 +1,24 @@
 // Synthetic-log coverage for scripts/analyze-failures.mjs (plan-temporary.md §A2,
-// extended for A3: reported completion labels + stopped-turn cost/failure stats).
+// extended for A3: reported completion labels + stopped-turn cost/failure stats,
+// and Q4: dead model steps / retries / recovered turns). Also covers
+// scripts/model-eval.mjs readTurnMetrics on the same synthetic-log pattern.
 //
-// The log tree below is fabricated: it has known counts for every report section,
-// including A3's `turn.end.label` / `timings.failedCalls` / partial stopped-turn
-// usage. Real run logs contain the user's page content and are never used here.
+// The log trees below are fabricated: they have known counts for every report
+// section, including A3's `turn.end.label` / `timings.failedCalls` / partial
+// stopped-turn usage and Q4's model.leaked_tool_call / assistant.leaked_tool_call
+// / turn.retry events. Real run logs contain the user's page content and are
+// never used here.
 
 import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   analyzeLogs,
+  DEAD_TURN_ERRORS,
   formatReport,
   normalizeReportedLabel,
   percentile,
@@ -21,10 +26,13 @@ import {
   sanitizeFailureText,
   siteLabelForUrl,
 } from '../../scripts/analyze-failures.mjs'
+import { readTurnMetrics } from '../../scripts/model-eval.mjs'
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'analyze-failures.mjs')
+const CONTROLLER_SOURCE = join(dirname(fileURLToPath(import.meta.url)), '..', 'session-controller.mjs')
 
 let logsRoot
+let deadLogsRoot
 
 const call = (turnId, callId, name) => ({ type: 'tool.call', turnId, data: { callId, name } })
 const result = (turnId, callId, ok, extra = {}) => ({
@@ -45,6 +53,25 @@ const bridgeError = (turnId, callId, op, code) => ({
 })
 const turnEnd = (turnId, data) => ({ type: 'turn.end', turnId, data })
 const tab = (url) => ({ type: 'tab.active', data: { url } })
+// Q4 event shapes, copied from the provider/companion emitters:
+// model.leaked_tool_call carries outcome retried|gave-up|error; kind and
+// retries are absent on the error outcome (the steer itself threw).
+const leaked = (turnId, outcome, kind, retries) => ({
+  type: 'model.leaked_tool_call',
+  turnId,
+  data: {
+    sessionId: 'session-synthetic',
+    turn: 1,
+    step: 1,
+    outcome,
+    ...(kind === undefined ? {} : { kind }),
+    ...(retries === undefined ? {} : { retries }),
+    ...(outcome === 'error' ? { message: 'steer failed' } : {}),
+  },
+})
+const assistantLeaked = (turnId, chars) => ({ type: 'assistant.leaked_tool_call', turnId, data: { chars } })
+const turnRetry = (turnId, reason = 'malformed-response') => ({ type: 'turn.retry', turnId, data: { reason } })
+const stepStart = (turnId) => ({ type: 'notification', turnId, data: { params: { event: { type: 'step/start' } } } })
 
 function writeRun(root, name, lines) {
   const dir = join(root, name)
@@ -181,8 +208,89 @@ before(() => {
   mkdirSync(join(logsRoot, 'not-a-run'), { recursive: true })
 })
 
+// Q4 tree: every dead-step/retry path with known counts. The dead-turn error
+// strings are literals copied from companion/session-controller.mjs (a drift
+// guard below asserts they still match), NOT the script's own constants, so a
+// wording change on either side fails here instead of silently counting zero.
+before(() => {
+  deadLogsRoot = mkdtempSync(join(tmpdir(), 'crazyagent-analyze-dead-'))
+  writeRun(deadLogsRoot, 'run-2026-11-20T10-00-00-000Z-delta', [
+    // t10: markup dead step, retried once, then a real call -> recovered.
+    { type: 'turn.start', turnId: 't10', data: {} },
+    assistantLeaked('t10', 400),
+    leaked('t10', 'retried', 'markup', 1),
+    call('t10', 'c10', 'browser_click'),
+    result('t10', 'c10', true),
+    turnEnd('t10', { ok: true, label: 'done', timings: { totalMs: 4000, toolCalls: 1, failedCalls: 0 } }),
+    // t11: companion rerun of a MALFORMED_RESPONSE ending -> recovered.
+    { type: 'turn.start', turnId: 't11', data: {} },
+    turnRetry('t11'),
+    call('t11', 'c11', 'browser_navigate'),
+    result('t11', 'c11', true),
+    turnEnd('t11', { ok: true, label: 'done', timings: { totalMs: 2000, toolCalls: 1, failedCalls: 0 } }),
+    // t12: two retries, gave up, turn ended dead on markup.
+    { type: 'turn.start', turnId: 't12', data: {} },
+    assistantLeaked('t12', 400),
+    leaked('t12', 'retried', 'markup', 1),
+    assistantLeaked('t12', 16),
+    leaked('t12', 'retried', 'markup', 2),
+    assistantLeaked('t12', 76),
+    leaked('t12', 'gave-up', 'markup', 2),
+    turnEnd('t12', {
+      ok: false,
+      label: 'blocked',
+      error: 'Model wrote its tool call as text; nothing was executed',
+      finalText: 'BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again.',
+      timings: { totalMs: 3000, toolCalls: 0, failedCalls: 0 },
+    }),
+    // t13: dead on an empty reply with NO retry event (detection miss).
+    { type: 'turn.start', turnId: 't13', data: {} },
+    turnEnd('t13', {
+      ok: false,
+      label: 'blocked',
+      error: 'Model returned an empty reply; nothing was executed',
+      timings: { totalMs: 1000, toolCalls: 0, failedCalls: 0 },
+    }),
+    // t14: the steer itself threw; runtime-rejected reply, 0 calls.
+    { type: 'turn.start', turnId: 't14', data: {} },
+    leaked('t14', 'error'),
+    turnEnd('t14', {
+      ok: false,
+      error: "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again.",
+      timings: { totalMs: 1500, toolCalls: 0, failedCalls: 0 },
+    }),
+    // t15: retried empty step, then the user stopped the turn.
+    { type: 'turn.start', turnId: 't15', data: {} },
+    leaked('t15', 'retried', 'empty', 1),
+    { type: 'signal', turnId: 't15', data: { code: 'TURN_STOPPED' } },
+    turnEnd('t15', { ok: false, aborted: true, reason: 'user', timings: { totalMs: 2500, toolCalls: 0 } }),
+    // t16: retried step whose turn never ended in the log.
+    { type: 'turn.start', turnId: 't16', data: {} },
+    leaked('t16', 'retried', 'markup', 1),
+    // t17: retry led to a final answer with no tool call -> recovered, 0 calls.
+    { type: 'turn.start', turnId: 't17', data: {} },
+    leaked('t17', 'retried', 'empty', 1),
+    turnEnd('t17', { ok: true, label: 'done', timings: { totalMs: 1800, toolCalls: 0, failedCalls: 0 } }),
+    // t18: leaked markup alongside a REAL tool call: an observation only,
+    // not a dead step; the turn is not "affected".
+    { type: 'turn.start', turnId: 't18', data: {} },
+    assistantLeaked('t18', 50),
+    call('t18', 'c18', 'browser_click'),
+    result('t18', 'c18', true),
+    turnEnd('t18', { ok: true, label: 'done', timings: { totalMs: 1200, toolCalls: 1, failedCalls: 0 } }),
+  ])
+  // A clean month: no dead events at all.
+  writeRun(deadLogsRoot, 'run-2026-12-01T10-00-00-000Z-echo', [
+    { type: 'turn.start', turnId: 't20', data: {} },
+    call('t20', 'c20', 'browser_screenshot'),
+    result('t20', 'c20', true),
+    turnEnd('t20', { ok: true, label: 'done', timings: { totalMs: 900, toolCalls: 1, failedCalls: 0 } }),
+  ])
+})
+
 after(() => {
   if (logsRoot) rmSync(logsRoot, { recursive: true, force: true })
+  if (deadLogsRoot) rmSync(deadLogsRoot, { recursive: true, force: true })
 })
 
 test('sanitizeFailureText normalizes digits and redacts page content', () => {
@@ -524,4 +632,190 @@ test('CLI --json and human output run against --logs', async () => {
   assert.equal(sinceJson.totals.toolCalls, 3)
 
   assert.throws(() => execFileSync(process.execPath, [SCRIPT, '--bogus'], { stdio: 'pipe' }))
+})
+
+// ---------------------------------------------------------------------------
+// Q4: dead turns / retries / recovered
+// ---------------------------------------------------------------------------
+
+test('dead-turn error strings still match the companion emitter', () => {
+  // Drift guard: the report classifies dead turns by these exact strings.
+  const source = readFileSync(CONTROLLER_SOURCE, 'utf8')
+  assert.equal(DEAD_TURN_ERRORS.empty, 'Model returned an empty reply; nothing was executed')
+  assert.equal(DEAD_TURN_ERRORS.markup, 'Model wrote its tool call as text; nothing was executed')
+  assert.ok(source.includes(DEAD_TURN_ERRORS.empty), 'session-controller no longer emits the empty dead-turn string')
+  assert.ok(source.includes(DEAD_TURN_ERRORS.markup), 'session-controller no longer emits the markup dead-turn string')
+})
+
+test('dead steps, retries and recovery are counted from the Q4 events', async () => {
+  const report = await analyzeLogs({ logsDir: deadLogsRoot })
+  assert.equal(report.totals.turns, 9)
+  assert.deepEqual(report.totals.dead, {
+    steps: 8,
+    outcomes: { retried: 6, gaveUp: 1, error: 1 },
+    kinds: { markup: 5, empty: 2, unknown: 1 },
+    assistantLeaked: 5,
+    turnRetries: 1,
+    retryReasons: { 'malformed-response': 1 },
+    affectedTurns: 7,
+    recoveredTurns: 3,
+    recoveredWithCalls: 2,
+    recoveredRate: 0.4286,
+    notOkAffectedTurns: 2,
+    stoppedAffectedTurns: 1,
+    unendedAffectedTurns: 1,
+    deadTurns: 2,
+    deadTurnsEmpty: 1,
+    deadTurnsMarkup: 1,
+    deadTurnRate: 0.2222,
+    deadTurnsWithoutEvents: 1,
+    malformedNoCallTurns: 1,
+  })
+})
+
+test('dead metrics split by month and stay zero on logs without the events', async () => {
+  const report = await analyzeLogs({ logsDir: deadLogsRoot })
+  const november = report.months.find((month) => month.month === '2026-11')
+  const december = report.months.find((month) => month.month === '2026-12')
+  assert.equal(november.dead.steps, 8)
+  assert.equal(november.dead.deadTurns, 2)
+  assert.equal(november.dead.recoveredTurns, 3)
+  assert.equal(december.dead.steps, 0)
+  assert.equal(december.dead.deadTurns, 0)
+  assert.equal(december.dead.affectedTurns, 0)
+  assert.equal(december.dead.recoveredRate, 0)
+
+  // The original A2/A3 tree predates the retry events: everything stays 0.
+  const old = await analyzeLogs({ logsDir: logsRoot })
+  assert.equal(old.totals.dead.steps, 0)
+  assert.equal(old.totals.dead.turnRetries, 0)
+  assert.equal(old.totals.dead.assistantLeaked, 0)
+  assert.equal(old.totals.dead.affectedTurns, 0)
+  assert.equal(old.totals.dead.deadTurns, 0)
+  assert.equal(old.totals.dead.deadTurnsWithoutEvents, 0)
+  assert.equal(old.totals.dead.malformedNoCallTurns, 0)
+})
+
+test('the dead-turn section prints definitions, counts and monthly rows', async () => {
+  const report = await analyzeLogs({ logsDir: deadLogsRoot })
+  const text = formatReport(report)
+  assert.ok(text.includes('== Dead turns / retries / recovered =='))
+  assert.ok(text.includes('dead model steps: 8 (markup 5, empty 2, unknown 1)'))
+  assert.ok(text.includes('outcomes: retried 6 | gave-up 1 | error 1'))
+  assert.ok(text.includes('companion turn.retry: 1 (malformed-response 1)'))
+  assert.ok(text.includes('assistant.leaked_tool_call): 5'))
+  assert.ok(text.includes('affected turns: 7 of 9'))
+  assert.ok(text.includes('recovered (ok:true): 3 (42.9%) | with >=1 tool call: 2'))
+  assert.ok(text.includes('ended not ok: 2 | stopped: 1 | never ended: 1'))
+  assert.ok(text.includes('dead turns (did nothing): 2 of 9 (22.2%) — empty 1, markup 1'))
+  assert.ok(text.includes('without any retry event (detection miss): 1'))
+  assert.ok(text.includes('malformed-reply error endings with 0 calls: 1'))
+  // Monthly table rows.
+  assert.ok(text.includes('dead model steps'))
+  assert.ok(text.includes('dead turns (did nothing)'))
+  assert.ok(text.includes('recovered after retry'))
+  // No page content or synthetic session ids leak into the report.
+  assert.ok(!text.includes('session-synthetic'))
+})
+
+// ---------------------------------------------------------------------------
+// Q4: model-eval readTurnMetrics (per-run column source)
+// ---------------------------------------------------------------------------
+
+test('readTurnMetrics counts dead steps, retries and the dead-turn verdict per turn', () => {
+  const root = mkdtempSync(join(tmpdir(), 'crazyagent-model-eval-metrics-'))
+  try {
+    const eventsPath = join(root, 'events.jsonl')
+    const lines = [
+      // turn-A: markup dead step retried twice, gave up, turn ended dead.
+      stepStart('turn-A'),
+      assistantLeaked('turn-A', 400),
+      leaked('turn-A', 'retried', 'markup', 1),
+      stepStart('turn-A'),
+      assistantLeaked('turn-A', 16),
+      leaked('turn-A', 'retried', 'empty', 2),
+      stepStart('turn-A'),
+      leaked('turn-A', 'gave-up', 'markup', 2),
+      turnEnd('turn-A', {
+        ok: false,
+        label: 'blocked',
+        error: 'Model wrote its tool call as text; nothing was executed',
+        finalText: 'BLOCKED: synthetic',
+        timings: { totalMs: 5000, toolCalls: 0, failedCalls: 0 },
+        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+      }),
+      // turn-B: companion rerun + one retried empty step, then a real call.
+      turnRetry('turn-B'),
+      leaked('turn-B', 'retried', 'empty', 1),
+      stepStart('turn-B'),
+      call('turn-B', 'cB', 'browser_navigate'),
+      result('turn-B', 'cB', true),
+      stepStart('turn-B'),
+      turnEnd('turn-B', { ok: true, label: 'done', timings: { totalMs: 2000, toolCalls: 1, failedCalls: 0 } }),
+      // turn-C: clean turn, no dead events.
+      call('turn-C', 'cC', 'browser_click'),
+      result('turn-C', 'cC', true),
+      turnEnd('turn-C', { ok: true, label: 'done', timings: { totalMs: 800, toolCalls: 1, failedCalls: 0 } }),
+      // turn-D: the steer threw; runtime-rejected ending is not a dead-turn string.
+      leaked('turn-D', 'error'),
+      turnEnd('turn-D', {
+        ok: false,
+        error: "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again.",
+        timings: { totalMs: 900, toolCalls: 0, failedCalls: 0 },
+      }),
+    ]
+    writeFileSync(eventsPath, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`)
+
+    const a = readTurnMetrics(eventsPath, 'turn-A')
+    assert.equal(a.steps, 3)
+    assert.equal(a.toolCalls, 0)
+    assert.equal(a.deadSteps, 3)
+    assert.equal(a.deadRetried, 2)
+    assert.equal(a.deadGaveUp, 1)
+    assert.equal(a.deadRetryErrors, 0)
+    assert.deepEqual(a.deadKinds, { markup: 2, empty: 1, unknown: 0 })
+    assert.equal(a.assistantLeaked, 2)
+    assert.equal(a.turnRetries, 0)
+    assert.equal(a.deadTurn, true)
+    assert.equal(a.deadTurnKind, 'markup')
+    assert.equal(a.logOk, false)
+    assert.equal(a.reportedLabel, 'blocked')
+
+    const b = readTurnMetrics(eventsPath, 'turn-B')
+    assert.equal(b.steps, 2)
+    assert.equal(b.toolCalls, 1)
+    assert.equal(b.deadSteps, 1)
+    assert.equal(b.deadRetried, 1)
+    assert.equal(b.turnRetries, 1)
+    assert.equal(b.deadTurn, false)
+    assert.equal(b.deadTurnKind, null)
+    assert.equal(b.logOk, true)
+
+    const c = readTurnMetrics(eventsPath, 'turn-C')
+    assert.equal(c.deadSteps, 0)
+    assert.equal(c.deadRetried, 0)
+    assert.equal(c.deadGaveUp, 0)
+    assert.equal(c.deadRetryErrors, 0)
+    assert.deepEqual(c.deadKinds, { markup: 0, empty: 0, unknown: 0 })
+    assert.equal(c.assistantLeaked, 0)
+    assert.equal(c.turnRetries, 0)
+    assert.equal(c.deadTurn, false)
+
+    const d = readTurnMetrics(eventsPath, 'turn-D')
+    assert.equal(d.deadSteps, 1)
+    assert.equal(d.deadRetryErrors, 1)
+    assert.deepEqual(d.deadKinds, { markup: 0, empty: 0, unknown: 1 })
+    assert.equal(d.deadTurn, false)
+    assert.equal(d.logOk, false)
+
+    // Unknown turn and missing file return the zero defaults.
+    const missing = readTurnMetrics(eventsPath, 'turn-missing')
+    assert.equal(missing.deadSteps, 0)
+    assert.equal(missing.deadTurn, false)
+    const noFile = readTurnMetrics(join(root, 'absent.jsonl'), 'turn-A')
+    assert.equal(noFile.deadSteps, 0)
+    assert.equal(noFile.logOk, null)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
