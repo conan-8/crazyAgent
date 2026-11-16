@@ -5,7 +5,8 @@
  * One command runs a named scenario N times with a real model against an
  * isolated browser, an isolated companion and an isolated DSH home, then
  * reports pass/partial/fail from an independent check plus wall time, model
- * steps, tool calls, failed calls, token usage and the model's own final text.
+ * steps, tool calls, failed calls, dead-step retries (Q4), token usage and
+ * the model's own final text.
  *
  * Isolation rules (AGENTS.md):
  *   - a fresh Edge profile with the unpacked extension, loaded in this process;
@@ -65,6 +66,7 @@ import { tmpdir } from 'node:os'
 import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import WebSocket from 'ws'
+import { DEAD_TURN_ERRORS } from './analyze-failures.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const FIXTURES_DIR = join(ROOT, 'e2e', 'fixtures')
@@ -259,9 +261,17 @@ const truncate = (value, width) => (String(value).length > width ? `${String(val
 
 let tableHeaderPrinted = false
 
+/** Q4 retry column: retry notices issued, flagged when the turn still died. */
+function retryCell(turn) {
+  const retries = turn.retries ?? 0
+  if (turn.deadTurn === true) return `${retries} DEAD`
+  if ((turn.deadGaveUp ?? 0) > 0) return `${retries} GAVEUP`
+  return String(retries)
+}
+
 function printTable(rows) {
-  const header = ['scenario', 'run', 'check', 'turn', 'wall', 'steps', 'calls', 'failed', 'in/out', 'reasons']
-  const widths = [22, 4, 8, 6, 8, 6, 6, 7, 14, 60]
+  const header = ['scenario', 'run', 'check', 'turn', 'wall', 'steps', 'calls', 'failed', 'retry', 'in/out', 'reasons']
+  const widths = [22, 4, 8, 6, 8, 6, 6, 7, 9, 14, 60]
   const line = values => values.map((value, index) => pad(truncate(value ?? '', widths[index]), widths[index])).join(' ')
   if (!tableHeaderPrinted) {
     process.stdout.write(`${line(header)}\n${line(header.map(value => '-'.repeat(value.length)))}\n`)
@@ -279,9 +289,15 @@ function printSummary(results) {
     const median = walls.length === 0 ? null : walls[Math.floor(walls.length / 2)]
     const calls = runs.reduce((sum, run) => sum + run.turn.toolCalls, 0)
     const failed = runs.reduce((sum, run) => sum + run.turn.failedCalls, 0)
+    // Dead turns and retries cover every turn the harness ran, including the
+    // confirmation answer turn; recovery is reported for the first turn.
+    const allTurns = runs.flatMap(run => (run.answer?.responded === true ? [run.turn, run.answer] : [run.turn]))
+    const dead = allTurns.filter(turn => turn.deadTurn === true).length
+    const retries = allTurns.reduce((sum, turn) => sum + (turn.retries ?? 0), 0)
+    const recovered = runs.filter(run => run.turn.recovered === true).length
     process.stdout.write(
       `${pad(scenario.name, 22)} pass ${counts.pass}/${runs.length}  partial ${counts.partial}  fail ${counts.fail}  `
-      + `median ${fmtMs(median)}  calls ${calls}  failed ${failed}\n`,
+      + `median ${fmtMs(median)}  calls ${calls}  failed ${failed}  dead ${dead}  retries ${retries}  recovered ${recovered}\n`,
     )
   }
 }
@@ -822,11 +838,14 @@ async function waitForTurnEndInLog(eventsPath, turnId, timeoutMs = 10_000) {
 
 /**
  * Everything the report needs about one model turn, read from the companion's
- * own run log (not from tool results).
+ * own run log (not from tool results). Includes the Q4 dead-step/retry events:
+ * provider model.leaked_tool_call (outcome retried|gave-up|error, kind
+ * markup|empty), companion assistant.leaked_tool_call and turn.retry, plus the
+ * companion's dead-turn verdict on turn.end.
  * @param {string} eventsPath
  * @param {string} turnId
  */
-function readTurnMetrics(eventsPath, turnId) {
+export function readTurnMetrics(eventsPath, turnId) {
   const metrics = {
     steps: 0,
     toolCalls: 0,
@@ -839,6 +858,15 @@ function readTurnMetrics(eventsPath, turnId) {
     logWallMs: null,
     reportedLabel: null,
     loggedFailedCalls: null,
+    deadSteps: 0,
+    deadRetried: 0,
+    deadGaveUp: 0,
+    deadRetryErrors: 0,
+    deadKinds: { markup: 0, empty: 0, unknown: 0 },
+    assistantLeaked: 0,
+    turnRetries: 0,
+    deadTurn: false,
+    deadTurnKind: null,
   }
   if (!existsSync(eventsPath)) return metrics
   const names = new Map()
@@ -868,6 +896,19 @@ function readTurnMetrics(eventsPath, turnId) {
         code: event.data?.code ?? null,
         message: clip(event.data?.error ?? ''),
       })
+    } else if (event.type === 'model.leaked_tool_call') {
+      metrics.deadSteps += 1
+      const outcome = event.data?.outcome
+      if (outcome === 'retried') metrics.deadRetried += 1
+      else if (outcome === 'gave-up') metrics.deadGaveUp += 1
+      else if (outcome === 'error') metrics.deadRetryErrors += 1
+      const kind = event.data?.kind
+      if (kind === 'markup' || kind === 'empty') metrics.deadKinds[kind] += 1
+      else metrics.deadKinds.unknown += 1
+    } else if (event.type === 'assistant.leaked_tool_call') {
+      metrics.assistantLeaked += 1
+    } else if (event.type === 'turn.retry') {
+      metrics.turnRetries += 1
     } else if (event.type === 'notification' && event.data?.params?.event?.type === 'step/start') {
       metrics.steps += 1
     } else if (event.type === 'turn.end') {
@@ -879,6 +920,11 @@ function readTurnMetrics(eventsPath, turnId) {
       metrics.loggedFailedCalls = Number.isFinite(Number(event.data?.timings?.failedCalls))
         ? Number(event.data.timings.failedCalls)
         : null
+      const errorText = typeof event.data?.error === 'string' ? event.data.error : ''
+      metrics.deadTurnKind = errorText === DEAD_TURN_ERRORS.empty ? 'empty'
+        : errorText === DEAD_TURN_ERRORS.markup ? 'markup'
+          : null
+      metrics.deadTurn = metrics.deadTurnKind !== null
     }
   }
   if (metrics.failed.length > 20) metrics.failed.length = 20
@@ -956,6 +1002,17 @@ const EMPTY_TURN = Object.freeze({
   inputTokens: 0,
   outputTokens: 0,
   finalText: null,
+  deadSteps: 0,
+  deadRetried: 0,
+  deadGaveUp: 0,
+  deadRetryErrors: 0,
+  deadKinds: { markup: 0, empty: 0, unknown: 0 },
+  assistantLeaked: 0,
+  turnRetries: 0,
+  retries: 0,
+  deadTurn: false,
+  deadTurnKind: null,
+  recovered: false,
 })
 
 /**
@@ -1436,6 +1493,18 @@ async function runModelBatch(options, scenarios) {
         turn.logComplete = metrics.logOk !== null
         turn.reportedLabel = metrics.reportedLabel
         turn.loggedFailedCalls = metrics.loggedFailedCalls
+        // Q4: dead steps / retries / recovery, read from the same run log.
+        turn.deadSteps = metrics.deadSteps
+        turn.deadRetried = metrics.deadRetried
+        turn.deadGaveUp = metrics.deadGaveUp
+        turn.deadRetryErrors = metrics.deadRetryErrors
+        turn.deadKinds = metrics.deadKinds
+        turn.assistantLeaked = metrics.assistantLeaked
+        turn.turnRetries = metrics.turnRetries
+        turn.retries = metrics.deadRetried + metrics.turnRetries
+        turn.deadTurn = metrics.deadTurn
+        turn.deadTurnKind = metrics.deadTurnKind
+        turn.recovered = (metrics.deadSteps > 0 || metrics.turnRetries > 0) && metrics.logOk === true
         if (turn.wallMs === null || turn.wallMs === 0) turn.wallMs = metrics.logWallMs
         if (timedOut && turn.status !== 'timeout') turn.status = 'timeout'
         // The hub projection after the turn shows what panel/phone clients get
@@ -1488,6 +1557,13 @@ async function runModelBatch(options, scenarios) {
               totalTokens: answerTokens,
               finalText: answerMetrics.finalText,
               reportedLabel: answerMetrics.reportedLabel,
+              deadSteps: answerMetrics.deadSteps,
+              deadGaveUp: answerMetrics.deadGaveUp,
+              turnRetries: answerMetrics.turnRetries,
+              retries: answerMetrics.deadRetried + answerMetrics.turnRetries,
+              deadTurn: answerMetrics.deadTurn,
+              deadTurnKind: answerMetrics.deadTurnKind,
+              recovered: (answerMetrics.deadSteps > 0 || answerMetrics.turnRetries > 0) && answerMetrics.logOk === true,
             }
           } else {
             answer = { decision: scenario.answer, requested: false, responded: false, preAnswerCount }
@@ -1527,6 +1603,7 @@ async function runModelBatch(options, scenarios) {
           turn.steps,
           turn.toolCalls,
           turn.failedCalls,
+          retryCell(turn),
           `${turn.inputTokens}/${turn.outputTokens}`,
           check.reasons.length > 0 ? check.reasons.join('; ') : (turn.waitingForUser ? 'waiting_for_user' : ''),
         ]])
@@ -1590,10 +1667,14 @@ function finish(code) {
   guard.unref?.()
 }
 
-main()
-  .then(code => finish(code ?? 0))
-  .catch(error => {
-    process.stderr.write(`model-eval: ${error.message}\n`)
-    if (error.stack && process.env.MODEL_EVAL_DEBUG === '1') process.stderr.write(`${error.stack}\n`)
-    finish(1)
-  })
+// Run only as a CLI; importing the module (unit tests read readTurnMetrics)
+// must not start a batch. Same guard as scripts/analyze-failures.mjs.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
+    .then(code => finish(code ?? 0))
+    .catch(error => {
+      process.stderr.write(`model-eval: ${error.message}\n`)
+      if (error.stack && process.env.MODEL_EVAL_DEBUG === '1') process.stderr.write(`${error.stack}\n`)
+      finish(1)
+    })
+}

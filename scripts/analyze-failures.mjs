@@ -24,6 +24,16 @@
  *   - turn.end carries ok, timings{totalMs,toolCalls,...} and token usage.
  *     turns "completed" are turn.end with ok:true (plan percentiles use those).
  *   - signal TURN_STOPPED marks user stops.
+ *   - dead model steps (Q4): the provider logs `model.leaked_tool_call` when a
+ *     step's tool call arrived as literal DSML text (kind markup) or the step
+ *     was empty before any tool call (kind empty); outcome retried = an
+ *     agent.steer notice was sent, gave-up = the retry cap was reached,
+ *     error = the steer itself threw. The companion logs `turn.retry`
+ *     (reason malformed-response) when it reruns a MALFORMED_RESPONSE ending,
+ *     and `assistant.leaked_tool_call` for every assistant message whose text
+ *     is leaked markup (an observation; it can coexist with a real tool call).
+ *     A "dead turn" is a turn.end the companion marked with one of the two
+ *     DEAD_TURN_ERRORS strings: the turn ended having executed nothing.
  *   - frame.in lines are ~86% of a busy log and duplicate other events; they
  *     are skipped before JSON.parse for speed.
  *
@@ -113,6 +123,19 @@ export function sanitizeFailureText(text, maxLen = DEFAULT_MESSAGE_LIMIT) {
 
 /** The model-reported completion labels recorded by A3 on `turn.end`. */
 export const REPORTED_LABELS = Object.freeze(['done', 'partial', 'blocked'])
+
+/**
+ * The two `turn.end.error` strings the companion writes when a turn ended
+ * having executed nothing (companion/session-controller.mjs, dead-turn path).
+ * Kept in sync by companion/test/analyze-failures.test.mjs.
+ */
+export const DEAD_TURN_ERRORS = Object.freeze({
+  empty: 'Model returned an empty reply; nothing was executed',
+  markup: 'Model wrote its tool call as text; nothing was executed',
+})
+
+/** A runtime-rejected reply ("The model's reply could not be used (CODE)…"). */
+export const MALFORMED_REPLY_ERROR = /^The model's reply could not be used \(/u
 
 /**
  * Normalize a `turn.end` `label` field to one of done/partial/blocked/none.
@@ -223,6 +246,28 @@ function createBucket() {
       turnsWithRepeats: 0,
       patterns: new Map(), // `${tool}\u0000${message}` -> {tool,message,count,maxStreak}
     },
+    // Q4: dead model steps, retries, and turns that still did nothing.
+    dead: {
+      steps: 0, // model.leaked_tool_call events (one per dead model step)
+      retried: 0, // outcome retried: an agent.steer notice was sent
+      gaveUp: 0, // outcome gave-up: the retry cap was reached
+      retryErrors: 0, // outcome error: the steer itself threw
+      kinds: { markup: 0, empty: 0, unknown: 0 },
+      assistantLeaked: 0, // assistant.leaked_tool_call observations
+      turnRetries: 0, // companion turn.retry events (malformed-response reruns)
+      retryReasons: new Map(),
+      affectedTurns: 0, // turns with >=1 dead step or turn.retry event
+      recoveredTurns: 0, // of affected: turn.end ok:true
+      recoveredWithCalls: 0, // of recovered: timings.toolCalls > 0
+      notOkAffectedTurns: 0, // of affected: ended not ok (not a user stop)
+      stoppedAffectedTurns: 0, // of affected: user-stopped
+      unendedAffectedTurns: 0, // of affected: no turn.end in the log
+      deadTurns: 0, // turn.end carrying a DEAD_TURN_ERRORS string
+      deadTurnsEmpty: 0,
+      deadTurnsMarkup: 0,
+      deadTurnsWithoutEvents: 0, // dead turns with no retry event: detection miss
+      malformedNoCallTurns: 0, // runtime-rejected reply, 0 calls, not a dead-turn string
+    },
     malformedLines: 0,
     missingEventFiles: 0,
   }
@@ -233,6 +278,8 @@ function createRunAggregate() {
     ...createBucket(),
     turnFailures: new Map(),
     failedCallIds: new Set(),
+    deadEventTurns: new Set(), // turnIds with a model.leaked_tool_call/turn.retry
+    deadEndedTurns: 0,
   }
 }
 
@@ -306,6 +353,33 @@ async function scanRun(runDir, runName) {
         case 'tool.loop.detected':
           agg.classes.loopDetected++
           break
+        case 'model.leaked_tool_call': {
+          // One dead model step: the call arrived as DSML text (markup) or the
+          // step was empty before any tool call. The outcome says what the
+          // provider's in-turn retry did about it.
+          agg.dead.steps++
+          if (data.outcome === 'retried') agg.dead.retried++
+          else if (data.outcome === 'gave-up') agg.dead.gaveUp++
+          else if (data.outcome === 'error') agg.dead.retryErrors++
+          const kind = data.kind === 'markup' || data.kind === 'empty' ? data.kind : 'unknown'
+          agg.dead.kinds[kind]++
+          if (typeof event.turnId === 'string' && event.turnId) agg.deadEventTurns.add(event.turnId)
+          break
+        }
+        case 'assistant.leaked_tool_call':
+          // Companion observation of leaked markup in an assistant message.
+          // Counted on its own: it can coexist with a real tool call, so it
+          // does not by itself make a turn "affected".
+          agg.dead.assistantLeaked++
+          break
+        case 'turn.retry': {
+          // The companion reran a MALFORMED_RESPONSE ending in the same turn.
+          agg.dead.turnRetries++
+          const reason = typeof data.reason === 'string' && data.reason ? data.reason : '(unknown)'
+          addCount(agg.dead.retryReasons, reason, 'count')
+          if (typeof event.turnId === 'string' && event.turnId) agg.deadEventTurns.add(event.turnId)
+          break
+        }
         case 'tab.active': {
           const site = siteLabelForUrl(data.url)
           if (site === 'Unknown') agg.unknownTabActivations++
@@ -383,6 +457,32 @@ async function scanRun(runDir, runName) {
               agg.tokens.totalValues.push(total)
             }
           }
+          // Q4: dead-turn verdicts and retry recovery, joined on turnId.
+          const endTurnId = typeof event.turnId === 'string' ? event.turnId : ''
+          const errorText = typeof data.error === 'string' ? data.error : ''
+          const deadKind =
+            errorText === DEAD_TURN_ERRORS.empty ? 'empty'
+              : errorText === DEAD_TURN_ERRORS.markup ? 'markup'
+                : null
+          if (deadKind !== null) {
+            agg.dead.deadTurns++
+            if (deadKind === 'empty') agg.dead.deadTurnsEmpty++
+            else agg.dead.deadTurnsMarkup++
+            if (!agg.deadEventTurns.has(endTurnId)) agg.dead.deadTurnsWithoutEvents++
+          } else if (
+            data.aborted !== true && MALFORMED_REPLY_ERROR.test(errorText)
+            && Number(data.timings?.toolCalls) === 0
+          ) {
+            agg.dead.malformedNoCallTurns++
+          }
+          if (agg.deadEventTurns.has(endTurnId)) {
+            agg.deadEndedTurns++
+            if (data.aborted === true) agg.dead.stoppedAffectedTurns++
+            else if (ok) {
+              agg.dead.recoveredTurns++
+              if (Number(data.timings?.toolCalls) > 0) agg.dead.recoveredWithCalls++
+            } else agg.dead.notOkAffectedTurns++
+          }
           break
         }
         default:
@@ -427,6 +527,9 @@ async function scanRun(runDir, runName) {
     if (turnRepeats > 0) agg.repeats.turnsWithRepeats++
   }
 
+  // Affected turns include ones whose turn.end never reached the log.
+  agg.dead.affectedTurns = agg.deadEventTurns.size
+  agg.dead.unendedAffectedTurns = agg.deadEventTurns.size - agg.deadEndedTurns
   return agg
 }
 
@@ -493,6 +596,16 @@ function mergeRun(bucket, run) {
     target.count += pattern.count
     target.maxStreak = Math.max(target.maxStreak, pattern.maxStreak)
   }
+  for (const field of [
+    'steps', 'retried', 'gaveUp', 'retryErrors', 'assistantLeaked', 'turnRetries',
+    'affectedTurns', 'recoveredTurns', 'recoveredWithCalls', 'notOkAffectedTurns',
+    'stoppedAffectedTurns', 'unendedAffectedTurns', 'deadTurns', 'deadTurnsEmpty',
+    'deadTurnsMarkup', 'deadTurnsWithoutEvents', 'malformedNoCallTurns',
+  ]) {
+    bucket.dead[field] += run.dead[field]
+  }
+  for (const kind of ['markup', 'empty', 'unknown']) bucket.dead.kinds[kind] += run.dead.kinds[kind]
+  for (const [reason, entry] of run.dead.retryReasons) addCount(bucket.dead.retryReasons, reason, 'count', int(entry.count))
 }
 
 function rate(part, whole) {
@@ -553,6 +666,33 @@ function tokenSummary(values, bucket) {
   }
 }
 
+function deadSummary(bucket) {
+  const dead = bucket.dead
+  return {
+    steps: dead.steps,
+    outcomes: { retried: dead.retried, gaveUp: dead.gaveUp, error: dead.retryErrors },
+    kinds: { ...dead.kinds },
+    assistantLeaked: dead.assistantLeaked,
+    turnRetries: dead.turnRetries,
+    retryReasons: Object.fromEntries(
+      [...dead.retryReasons.entries()].map(([reason, entry]) => [reason, int(entry.count)])
+    ),
+    affectedTurns: dead.affectedTurns,
+    recoveredTurns: dead.recoveredTurns,
+    recoveredWithCalls: dead.recoveredWithCalls,
+    recoveredRate: round(rate(dead.recoveredTurns, dead.affectedTurns)),
+    notOkAffectedTurns: dead.notOkAffectedTurns,
+    stoppedAffectedTurns: dead.stoppedAffectedTurns,
+    unendedAffectedTurns: dead.unendedAffectedTurns,
+    deadTurns: dead.deadTurns,
+    deadTurnsEmpty: dead.deadTurnsEmpty,
+    deadTurnsMarkup: dead.deadTurnsMarkup,
+    deadTurnRate: round(rate(dead.deadTurns, bucket.turns)),
+    deadTurnsWithoutEvents: dead.deadTurnsWithoutEvents,
+    malformedNoCallTurns: dead.malformedNoCallTurns,
+  }
+}
+
 function bucketSummary(bucket) {
   return {
     runs: bucket.runs,
@@ -566,6 +706,7 @@ function bucketSummary(bucket) {
     failedToolCalls: bucket.failedToolCalls,
     failureRate: round(rate(bucket.failedToolCalls, bucket.toolCalls)),
     classes: { ...bucket.classes, sidePanelClosed: bucket.sidePanelCallKeys.size || bucket.classes.sidePanelClosed },
+    dead: deadSummary(bucket),
   }
 }
 
@@ -809,6 +950,9 @@ export function formatReport(report) {
     ['loop detected', (month) => fmtInt(month.classes.loopDetected)],
     ['side panel closed', (month) => fmtInt(month.classes.sidePanelClosed)],
     ['drag no-effect outcomes', (month) => fmtInt(month.classes.dragNoEffect)],
+    ['dead model steps', (month) => `${fmtInt(month.dead.steps)} (retried ${fmtInt(month.dead.outcomes.retried)}, gave up ${fmtInt(month.dead.outcomes.gaveUp)}, error ${fmtInt(month.dead.outcomes.error)})`],
+    ['dead turns (did nothing)', (month) => fmtInt(month.dead.deadTurns)],
+    ['recovered after retry', (month) => `${fmtInt(month.dead.recoveredTurns)} / ${fmtInt(month.dead.affectedTurns)}`],
   ]
   const monthTableRows = monthRows.map(([label, cell]) => [label, ...report.months.map((month) => cell(month))])
   lines.push(...table(['measure', ...report.months.map((month) => month.month)], monthTableRows))
@@ -868,6 +1012,43 @@ export function formatReport(report) {
     ]),
   ]
   lines.push(...table(['label', 'overall', ...report.months.map((month) => month.month)], labelRows))
+
+  // --- Dead turns / retries / recovered (Q4) -------------------------------
+  lines.push('')
+  lines.push('== Dead turns / retries / recovered ==')
+  lines.push(
+    'a dead model step = provider model.leaked_tool_call (tool call arrived as DSML text, or an empty step before any call); ' +
+      'retried = agent.steer notice sent, gave-up = retry cap reached, error = steer threw. ' +
+      'turn.retry = companion rerun of a MALFORMED_RESPONSE ending. ' +
+      'a dead turn = turn.end marked "nothing was executed". ' +
+      'recovered = an affected turn (>=1 dead step or turn.retry) that ended ok:true.'
+  )
+  const dead = totals.dead
+  lines.push(
+    `dead model steps: ${fmtInt(dead.steps)} (markup ${fmtInt(dead.kinds.markup)}, empty ${fmtInt(dead.kinds.empty)}, unknown ${fmtInt(dead.kinds.unknown)})`
+  )
+  lines.push(
+    `  outcomes: retried ${fmtInt(dead.outcomes.retried)} | gave-up ${fmtInt(dead.outcomes.gaveUp)} | error ${fmtInt(dead.outcomes.error)}`
+  )
+  const retryReasonText = Object.entries(dead.retryReasons)
+    .map(([reason, count]) => `${reason} ${fmtInt(count)}`)
+    .join(', ')
+  lines.push(`companion turn.retry: ${fmtInt(dead.turnRetries)}${retryReasonText ? ` (${retryReasonText})` : ''}`)
+  lines.push(`companion-observed leaked markup messages (assistant.leaked_tool_call): ${fmtInt(dead.assistantLeaked)}`)
+  lines.push(
+    `affected turns: ${fmtInt(dead.affectedTurns)} of ${fmtInt(totals.turns)} (${fmtPct(rate(dead.affectedTurns, totals.turns))})`
+  )
+  lines.push(
+    `  recovered (ok:true): ${fmtInt(dead.recoveredTurns)} (${fmtPct(dead.recoveredRate)}) | with >=1 tool call: ${fmtInt(dead.recoveredWithCalls)}`
+  )
+  lines.push(
+    `  ended not ok: ${fmtInt(dead.notOkAffectedTurns)} | stopped: ${fmtInt(dead.stoppedAffectedTurns)} | never ended: ${fmtInt(dead.unendedAffectedTurns)}`
+  )
+  lines.push(
+    `dead turns (did nothing): ${fmtInt(dead.deadTurns)} of ${fmtInt(totals.turns)} (${fmtPct(dead.deadTurnRate)}) — empty ${fmtInt(dead.deadTurnsEmpty)}, markup ${fmtInt(dead.deadTurnsMarkup)}`
+  )
+  lines.push(`  without any retry event (detection miss): ${fmtInt(dead.deadTurnsWithoutEvents)}`)
+  lines.push(`malformed-reply error endings with 0 calls: ${fmtInt(dead.malformedNoCallTurns)}`)
 
   // --- Stopped turns -------------------------------------------------------
   lines.push('')
