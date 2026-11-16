@@ -60,6 +60,7 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
     cellSectionOpen: false,
     colorSectionOpen: false,
     backgroundMenuOpen: false,
+    colorMenuProbes: 0,
     colorDialogOpen: false,
     hexFocused: false,
     hexValue: '',
@@ -251,6 +252,7 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
       }
       if (x === 62) {
         state.backgroundMenuOpen = true
+        state.colorMenuProbes = 0
         return
       }
       if (x === 63) {
@@ -366,11 +368,21 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
         backgroundPoint: state.cellPanelOpen && state.colorSectionOpen ? { x: 62, y: 20 } : undefined,
         closePoint: state.cellPanelOpen ? { x: 17, y: 20 } : undefined,
       }
-      if (command === 'colorMenu') return {
-        ok: true,
-        open: state.backgroundMenuOpen,
-        customPoint: state.backgroundMenuOpen && !options.backgroundPresetOnly ? { x: 12, y: 20 } : undefined,
-        presetPoint: state.backgroundMenuOpen && options.backgroundPresetOnly && args.value === '#d9d9d9' ? { x: 63, y: 20 } : undefined,
+      if (command === 'colorMenu') {
+        let presetPoint
+        if (state.backgroundMenuOpen && options.backgroundPresetOnly && args.value === '#d9d9d9') {
+          state.colorMenuProbes += 1
+          // Model the side-sheet grid reflow: the exact swatch point moves for
+          // the first probes (or forever), then settles at the clickable x=63.
+          const moving = options.paletteNeverStable || (options.paletteReflowProbes && state.colorMenuProbes <= options.paletteReflowProbes)
+          presetPoint = moving ? { x: 100 + state.colorMenuProbes, y: 20 } : { x: 63, y: 20 }
+        }
+        return {
+          ok: true,
+          open: state.backgroundMenuOpen,
+          customPoint: state.backgroundMenuOpen && !options.backgroundPresetOnly ? { x: 12, y: 20 } : undefined,
+          presetPoint,
+        }
       }
       if (command === 'colorDialog') return {
         ok: true,
@@ -573,6 +585,28 @@ test('Docs table applies an exact visible background preset without opening the 
   assert.equal(fake.state.clicks.filter(x => x === 63).length, 3)
   assert.equal(fake.state.clicks.includes(12), false)
   assert.equal(fake.state.clicks.includes(16), false)
+})
+
+test('Docs table waits for the reflowing palette to settle before clicking the exact preset', async () => {
+  // The side-sheet grid moves as it opens; the exact swatch point is unstable
+  // for the first probes. The flow must click only the settled point (x=63),
+  // never a moving one, and still apply the exact colour to every target cell.
+  const fake = fakeDocs([table([['H1', 'H2'], ['D1', 'D2']])], { backgroundPresetOnly: true, paletteReflowProbes: 3 })
+  const result = await docsTable({}, { action: 'format', edits: [{ row: 1, cell_background: '#D9D9D9' }] }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.deepEqual(selectDocsTable(fake.state.blocks).rows.map(row => row.map(item => item.background)), [['#d9d9d9', '#d9d9d9'], ['none', 'none']])
+  assert.equal(fake.state.clicks.filter(x => x === 63).length, 2)
+  assert.equal(fake.state.clicks.some(x => x >= 100), false)
+})
+
+test('Docs table fails closed when the palette never settles on a stable point', async () => {
+  const fake = fakeDocs([table([['H1', 'H2'], ['D1', 'D2']])], { backgroundPresetOnly: true, paletteNeverStable: true })
+  const result = await docsTable({}, { action: 'format', edits: [{ row: 1, column: 1, cell_background: '#D9D9D9' }] }, fake.io)
+  assert.equal(result.docs.status, 'failed')
+  assert.equal(result.docs.failure.code, 'DOCS_WAIT_TIMEOUT')
+  assert.equal(fake.state.clicks.some(x => x >= 100), false)
+  assert.equal(fake.state.clicks.includes(63), false)
+  assert.deepEqual(selectDocsTable(fake.state.blocks).rows.map(row => row.map(item => item.background)), [['none', 'none'], ['none', 'none']])
 })
 
 test('Docs table rejects an unavailable background instead of substituting a preset', async () => {
