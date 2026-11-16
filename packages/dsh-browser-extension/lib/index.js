@@ -3152,27 +3152,29 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
   ctx.tools.register(define({
     name: 'browser_drag',
     rawName: 'browser_drag',
-    description: 'Drag one labelled/ref source or coordinate point to a labelled/ref destination, coordinate point, or CSS dx/dy delta. Uses trusted pointer activation, hold, interpolated movement, and native HTML5 drag interception. Source and destination movement/value/selection/child/text evidence is reported separately; drop dispatch alone is not success. x/y and to_x/to_y default to current screenshot pixels with view_id/space guards; space:"css" uses viewport CSS pixels. dx/dy are always CSS pixels. to_position supports center/top/right/bottom/left for labelled destinations. hold_ms is bounded to 3000. Google Docs drag selection is rejected. Prefer browser_type with an exact value for native range inputs when a spatial drag is not required.',
+    description: 'Drag one labelled/ref source or coordinate point to a labelled/ref destination, coordinate point, or CSS dx/dy delta. Uses trusted pointer activation, hold, interpolated movement, and native HTML5 drag interception. Source and destination movement/value/selection/child/text evidence is reported separately; drop dispatch alone is not success. x/y and to_x/to_y default to current screenshot pixels with view_id/space guards; space:"css" uses viewport CSS pixels. dx/dy are always CSS pixels. from:{x,y}/to:{x,y} point aliases are accepted and normalized to x/y/to_x/to_y with a note. to_position supports center/top/right/bottom/left for labelled destinations. hold_ms is bounded to 3000. Google Docs drag selection is rejected. Prefer browser_type with an exact value for native range inputs when a spatial drag is not required.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       allOf: [
         {
           anyOf: [
-            { allOf: [{ required: ['label'] }, { not: { anyOf: [{ required: ['ref'] }, { required: ['x'] }, { required: ['y'] }] } }] },
-            { allOf: [{ required: ['ref'] }, { not: { anyOf: [{ required: ['label'] }, { required: ['x'] }, { required: ['y'] }] } }] },
-            { allOf: [{ required: ['x', 'y'] }, { not: { anyOf: [{ required: ['label'] }, { required: ['ref'] }] } }] },
+            { allOf: [{ required: ['label'] }, { not: { anyOf: [{ required: ['ref'] }, { required: ['x'] }, { required: ['y'] }, { required: ['from'] }] } }] },
+            { allOf: [{ required: ['ref'] }, { not: { anyOf: [{ required: ['label'] }, { required: ['x'] }, { required: ['y'] }, { required: ['from'] }] } }] },
+            { allOf: [{ required: ['x', 'y'] }, { not: { anyOf: [{ required: ['label'] }, { required: ['ref'] }, { required: ['from'] }] } }] },
+            { allOf: [{ required: ['from'] }, { not: { anyOf: [{ required: ['label'] }, { required: ['ref'] }, { required: ['x'] }, { required: ['y'] }] } }] },
           ],
         },
         {
           anyOf: [
-            { allOf: [{ required: ['to_label'] }, { not: { anyOf: [{ required: ['to_ref'] }, { required: ['to_x'] }, { required: ['to_y'] }, { required: ['dx'] }, { required: ['dy'] }] } }] },
-            { allOf: [{ required: ['to_ref'] }, { not: { anyOf: [{ required: ['to_label'] }, { required: ['to_x'] }, { required: ['to_y'] }, { required: ['dx'] }, { required: ['dy'] }] } }] },
-            { allOf: [{ required: ['to_x', 'to_y'] }, { not: { anyOf: [{ required: ['to_label'] }, { required: ['to_ref'] }, { required: ['dx'] }, { required: ['dy'] }] } }] },
+            { allOf: [{ required: ['to_label'] }, { not: { anyOf: [{ required: ['to_ref'] }, { required: ['to_x'] }, { required: ['to_y'] }, { required: ['dx'] }, { required: ['dy'] }, { required: ['to'] }] } }] },
+            { allOf: [{ required: ['to_ref'] }, { not: { anyOf: [{ required: ['to_label'] }, { required: ['to_x'] }, { required: ['to_y'] }, { required: ['dx'] }, { required: ['dy'] }, { required: ['to'] }] } }] },
+            { allOf: [{ required: ['to_x', 'to_y'] }, { not: { anyOf: [{ required: ['to_label'] }, { required: ['to_ref'] }, { required: ['dx'] }, { required: ['dy'] }, { required: ['to'] }] } }] },
+            { allOf: [{ required: ['to'] }, { not: { anyOf: [{ required: ['to_label'] }, { required: ['to_ref'] }, { required: ['to_x'] }, { required: ['to_y'] }, { required: ['dx'] }, { required: ['dy'] }] } }] },
             {
               allOf: [
                 { anyOf: [{ required: ['dx'] }, { required: ['dy'] }] },
-                { not: { anyOf: [{ required: ['to_label'] }, { required: ['to_ref'] }, { required: ['to_x'] }, { required: ['to_y'] }] } },
+                { not: { anyOf: [{ required: ['to_label'] }, { required: ['to_ref'] }, { required: ['to_x'] }, { required: ['to_y'] }, { required: ['to'] }] } },
               ],
             },
           ],
@@ -3195,11 +3197,52 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
         hold_ms: { type: 'integer', minimum: 0, maximum: 3000, description: 'Hold after press before activation. Default 60ms; use at least 300ms for long-press widgets.' },
         settle_ms: { type: 'integer', minimum: 0, maximum: 2000, description: 'Wait after release/drop before measurement. Default 150ms.' },
         view: { type: 'string', enum: ['auto', 'full', 'compact', 'none'], description: 'Result view. Default full for independent inspection; compact/none return text only.' },
+        from: { type: 'object', additionalProperties: false, required: ['x', 'y'], properties: { x: { type: 'number' }, y: { type: 'number' } }, description: 'Source point alias in the browser_select shape; normalized to x/y with a note. Prefer x/y directly.' },
+        to: { type: 'object', additionalProperties: false, required: ['x', 'y'], properties: { x: { type: 'number' }, y: { type: 'number' } }, description: 'Destination point alias in the browser_select shape; normalized to to_x/to_y with a note. Prefer to_x/to_y directly.' },
       },
     },
     async call(args, exec) {
       const allowed = ['label', 'ref', 'x', 'y', 'to_label', 'to_ref', 'to_x', 'to_y', 'dx', 'dy', 'to_position', 'space', 'view_id', 'hold_ms', 'settle_ms', 'view']
       if (!isRecord(args)) throw new Error('browser_drag arguments must be an object. Example: {"x":120,"y":300,"to_x":420,"to_y":300}')
+      // browser_select uses from/to points, and the model transfers that shape
+      // here (8 recovered shape errors across the Nov baselines). Accept the
+      // two point aliases, normalize to the canonical schema, and say so in
+      // the result; conflicts and malformed points still fail before input.
+      let aliasNote
+      if (args.from !== undefined || args.to !== undefined) {
+        const point = (value, name) => {
+          if (!isRecord(value) || Object.keys(value).some(key => key !== 'x' && key !== 'y')
+            || typeof value.x !== 'number' || !Number.isFinite(value.x)
+            || typeof value.y !== 'number' || !Number.isFinite(value.y)) {
+            throw new Error(`browser_drag ${name} must be exactly {x,y} with finite numbers. Example: {"x":120,"y":300,"to_x":420,"to_y":300}`)
+          }
+          return { x: value.x, y: value.y }
+        }
+        const normalized = { ...args }
+        const notes = []
+        if (args.from !== undefined) {
+          if (args.label !== undefined || args.ref !== undefined || args.x !== undefined || args.y !== undefined) {
+            throw new Error('browser_drag from:{x,y} is an alias for x/y; pass one source shape, not both. Example: {"x":120,"y":300,"to_x":420,"to_y":300}')
+          }
+          const source = point(args.from, 'from')
+          normalized.x = source.x
+          normalized.y = source.y
+          delete normalized.from
+          notes.push('from:{x,y} was normalized to x/y')
+        }
+        if (args.to !== undefined) {
+          if (args.to_label !== undefined || args.to_ref !== undefined || args.to_x !== undefined || args.to_y !== undefined || args.dx !== undefined || args.dy !== undefined) {
+            throw new Error('browser_drag to:{x,y} is an alias for to_x/to_y; pass one destination shape, not both. Example: {"x":120,"y":300,"to_x":420,"to_y":300}')
+          }
+          const destination = point(args.to, 'to')
+          normalized.to_x = destination.x
+          normalized.to_y = destination.y
+          delete normalized.to
+          notes.push('to:{x,y} was normalized to to_x/to_y')
+        }
+        args = normalized
+        aliasNote = `note: ${notes.join(' and ')} (browser_select point aliases); the canonical browser_drag schema is x/y and to_x/to_y.`
+      }
       rejectUnknownArguments('browser_drag', args, allowed)
       const sourcePoint = args.x !== undefined || args.y !== undefined
       const sourceLabel = args.label !== undefined || args.ref !== undefined
@@ -3250,7 +3293,13 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       const view = checkedView(args.view)
       if (view !== undefined) forward.view = view
       const result = await bridge.request({ op: 'drag', args: forward }, exec.callId, exec.signal, 30_000, exec.agent?.session?.id)
-      return dragContent(result)
+      const content = dragContent(result)
+      if (aliasNote !== undefined && Array.isArray(content?.content)) {
+        const textIndex = content.content.findLastIndex(block => block?.type === 'text' && typeof block.text === 'string')
+        if (textIndex < 0) content.content.push({ type: 'text', text: aliasNote })
+        else content.content[textIndex] = { ...content.content[textIndex], text: `${content.content[textIndex].text}\n${aliasNote}` }
+      }
+      return content
     },
   }))
 

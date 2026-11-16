@@ -3733,6 +3733,9 @@ test('browser_drag routes refs and formats scoped clone evidence without claimin
   assert.equal(validate({ label: 3, dx: 1, dy: 2 }), true, 'one delta branch permits dx and dy together')
   assert.equal(validate({ label: 3, dx: 1 }), true)
   assert.equal(validate({ label: 3, dy: 1 }), true)
+  assert.equal(validate({ from: { x: 1, y: 2 }, to: { x: 3, y: 4 } }), true, 'from/to point aliases are a valid source/destination shape')
+  assert.equal(validate({ from: { x: 1, y: 2 }, to_label: 4 }), true)
+  assert.equal(validate({ label: 3, to: { x: 3, y: 4 } }), true)
   assert.equal(validate({ to_label: 4 }), false)
   assert.equal(validate({ label: 3 }), false)
   for (const args of [
@@ -3745,6 +3748,14 @@ test('browser_drag routes refs and formats scoped clone evidence without claimin
     { label: 3, to_label: 4, dx: 1 },
     { label: 3, to_label: 4, dy: 1 },
     { label: 3, to_x: 5, to_y: 6, dx: 1, dy: 2 },
+    { from: { x: 1, y: 2 }, x: 3, y: 4, to_label: 4 },
+    { from: { x: 1, y: 2 }, label: 3, to_label: 4 },
+    { from: { x: 1, y: 2 }, ref: 'e3', to_label: 4 },
+    { label: 3, to: { x: 3, y: 4 }, to_x: 5, to_y: 6 },
+    { label: 3, to: { x: 3, y: 4 }, dx: 1 },
+    { label: 3, to: { x: 3, y: 4 }, to_label: 4 },
+    { from: { x: 1 }, to_label: 4 },
+    { from: { x: 1, y: 2, z: 3 }, to_label: 4 },
   ]) assert.equal(validate(args), false, JSON.stringify(args))
 })
 
@@ -4545,7 +4556,7 @@ test('every tool names an unknown argument and lists the accepted ones before th
   assert.equal(commands.length, 0, 'no unknown-argument call reached the bridge')
 })
 
-test('the invented from:{x,y} drag shape names the key, and a repeat says it was just rejected', async t => {
+test('a repeated malformed drag call says it was just rejected, with a literal example', async t => {
   const { server, url, commands } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -4556,13 +4567,13 @@ test('the invented from:{x,y} drag shape names the key, and a repeat says it was
   t.after(() => fake.dispose())
   fake.listeners.get('agent/inbox/claimed')({ message: { id: 'reject-1', content: [{ type: 'text', text: 'drag it' }] }, turn: 1 })
   const drag = (args, id) => fake.tools.get('browser_drag').execute(args, { callId: id, signal: new AbortController().signal })
-  const invented = { from: { x: 1, y: 2 }, to_x: 5, to_y: 6 }
-  await assert.rejects(() => drag(invented, 'r1'), error => {
-    assert.match(error.message, /browser_drag received unknown argument "from"\. Allowed: label, ref, x, y, to_label/u)
+  const malformed = { x: 1, to_x: 5, to_y: 6 }
+  await assert.rejects(() => drag(malformed, 'r1'), error => {
+    assert.match(error.message, /source requires both x and y.*Example: \{"x":120/u)
     assert.doesNotMatch(error.message, /just rejected/u)
     return true
   })
-  await assert.rejects(() => drag(invented, 'r2'), /received unknown argument "from".*This exact call was just rejected for the same reason/u)
+  await assert.rejects(() => drag(malformed, 'r2'), /source requires both x and y.*This exact call was just rejected for the same reason/u)
   // A different problem is reported plainly, with a literal example.
   await assert.rejects(() => drag({ to_x: 5, to_y: 6 }, 'r3'), error => {
     assert.match(error.message, /requires exactly one source.*Example: \{"x":120/u)
@@ -4570,13 +4581,64 @@ test('the invented from:{x,y} drag shape names the key, and a repeat says it was
     return true
   })
   // A new turn forgets the previous rejection.
-  await assert.rejects(() => drag(invented, 'r4'), /unknown argument "from"/u)
+  await assert.rejects(() => drag(malformed, 'r4'), /source requires both x and y/u)
   fake.listeners.get('agent/inbox/claimed')({ message: { id: 'reject-2', content: [{ type: 'text', text: 'again' }] }, turn: 2 })
-  await assert.rejects(() => drag(invented, 'r5'), error => {
+  await assert.rejects(() => drag(malformed, 'r5'), error => {
     assert.doesNotMatch(error.message, /just rejected/u)
     return true
   })
   assert.equal(commands.length, 0)
+})
+
+test('browser_drag accepts from/to point aliases, normalizes them, and says so', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+  const drag = (args, id) => fake.tools.get('browser_drag').execute(args, { callId: id, signal: new AbortController().signal })
+  const textOf = result => result.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+
+  // Both aliases (the browser_select point shape) normalize to canonical keys.
+  const both = await drag({ from: { x: 10, y: 20 }, to: { x: 40, y: 20 }, view_id: 3, hold_ms: 300 }, 'alias-both')
+  assert.deepEqual(commands.at(-1), { op: 'drag', args: { x: 10, y: 20, to_x: 40, to_y: 20, view_id: 3, hold_ms: 300 } })
+  assert.match(textOf(both), /from:\{x,y\} was normalized to x\/y and to:\{x,y\} was normalized to to_x\/to_y/u)
+  assert.match(textOf(both), /canonical browser_drag schema is x\/y and to_x\/to_y/u)
+
+  // One alias mixes with canonical keys on the other side.
+  await drag({ from: { x: 1, y: 2 }, to_label: 7, to_position: 'left' }, 'alias-mixed')
+  assert.deepEqual(commands.at(-1).args, { x: 1, y: 2, to_label: 7, to_position: 'left' })
+  await drag({ label: 4, to: { x: 9, y: 9 }, space: 'css' }, 'alias-dest-only')
+  assert.deepEqual(commands.at(-1).args, { label: 4, to_x: 9, to_y: 9, space: 'css' })
+
+  // Canonical calls are untouched: no note, no extra keys.
+  const canonical = await drag({ x: 10, y: 20, to_x: 40, to_y: 20 }, 'alias-canonical')
+  assert.doesNotMatch(textOf(canonical), /normalized/u)
+  assert.deepEqual(commands.at(-1).args, { x: 10, y: 20, to_x: 40, to_y: 20 })
+
+  // Conflicts and malformed points fail before any bridge traffic.
+  const sent = commands.length
+  const bad = [
+    [{ from: { x: 1, y: 2 }, x: 3, y: 4, to_x: 5, to_y: 6 }, /one source shape, not both/u],
+    [{ from: { x: 1, y: 2 }, label: 3, to_x: 5, to_y: 6 }, /one source shape, not both/u],
+    [{ x: 1, y: 2, to: { x: 3, y: 4 }, dx: 5 }, /one destination shape, not both/u],
+    [{ x: 1, y: 2, to: { x: 3, y: 4 }, to_label: 7 }, /one destination shape, not both/u],
+    [{ from: { x: 1 }, to_x: 5, to_y: 6 }, /from must be exactly \{x,y\} with finite numbers/u],
+    [{ from: { x: 1, y: '2' }, to_x: 5, to_y: 6 }, /from must be exactly \{x,y\} with finite numbers/u],
+    [{ from: { x: 1, y: 2, z: 3 }, to_x: 5, to_y: 6 }, /from must be exactly \{x,y\} with finite numbers/u],
+    [{ x: 1, y: 2, to: { x: Number.NaN, y: 4 } }, /to must be exactly \{x,y\} with finite numbers/u],
+    [{ x: 1, y: 2, to: 'right' }, /to must be exactly \{x,y\} with finite numbers/u],
+  ]
+  for (const [args, pattern] of bad) {
+    await assert.rejects(() => drag(args, `alias-bad-${sent}`), pattern, JSON.stringify(args))
+  }
+  assert.equal(commands.length, sent, 'no conflicted or malformed alias reached the bridge')
+  // A truly unknown key is still named with the allowed list (now incl. aliases).
+  await assert.rejects(() => drag({ x: 1, y: 2, to_x: 3, to_y: 4, bogus: 1 }, 'alias-stray'), /received unknown argument "bogus"\. Allowed: .*from, to/u)
 })
 
 test('a coordinate refusal that carries a fresh view reads as a refusal with its image and view id', async t => {

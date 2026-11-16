@@ -78,7 +78,19 @@ test('ambiguous or truncated reveal never scrolls or guesses a target', async ()
   const duplicates = fakeIo({
     runInAllFrames: async () => [{ frameId: 0, result: { matches: [match(0), match(1)] } }],
   })
-  await assert.rejects(executeFind({ query: 'match', reveal: true }, duplicates), error => error.code === 'FIND_AMBIGUOUS')
+  await assert.rejects(executeFind({ query: 'match', reveal: true }, duplicates), error => {
+    assert.equal(error.code, 'FIND_AMBIGUOUS')
+    // The result must teach the no-ordinal behavior, not just the occurrence
+    // syntax: duplicate-text partials came from models that reported the
+    // ambiguity and still revealed/hinted an occurrence (Q7, 2026-11-16).
+    assert.match(error.message, /Found 2 matches for "match"/u)
+    assert.match(error.message, /nothing was scrolled or changed/u)
+    assert.match(error.message, /user gave no ordinal: do not pick, reveal, or scroll to an occurrence/u)
+    assert.match(error.message, /do not claim you revealed the text/u)
+    assert.match(error.message, /Report the ambiguity \(2 matches\) and stop or ask which one/u)
+    assert.match(error.message, /only for an ordinal the user named/u)
+    return true
+  })
   assert.equal(duplicates.calls.length, 0)
   const truncated = fakeIo({
     runInAllFrames: async () => [{ frameId: 0, result: { matches: [match(0)], truncated: true } }],
