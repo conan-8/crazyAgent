@@ -1,0 +1,104 @@
+{
+  "startedAt": "2026-11-16T09:58:24.580Z",
+  "finishedAt": "2026-11-16T09:58:35.400Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "dshHome": "/tmp/crazyagent-c1/dsh-home",
+  "maxTotalTokens": 6000000,
+  "totalTokens": 83736,
+  "stopReason": null,
+  "checks": [
+    {
+      "name": "resume",
+      "status": "pass",
+      "reasons": [],
+      "evidence": {
+        "code": "CX-6209-EUEY",
+        "inProcess": {
+          "ok": true,
+          "status": 200,
+          "code": null,
+          "attempts": 1,
+          "resumedSessionId": "session-bcb4777efaf444abb1be16584553083e"
+        },
+        "restart": {
+          "performed": true,
+          "ok": true,
+          "status": 200,
+          "code": null,
+          "attempts": 1,
+          "resumedSessionId": "session-bcb4777efaf444abb1be16584553083e"
+        },
+        "expectedSessionId": "session-bcb4777efaf444abb1be16584553083e",
+        "stateSessionId": "session-bcb4777efaf444abb1be16584553083e",
+        "finalSessionId": "session-bcb4777efaf444abb1be16584553083e",
+        "restartStateSessionId": "session-bcb4777efaf444abb1be16584553083e",
+        "restartFinalSessionId": "session-bcb4777efaf444abb1be16584553083e",
+        "interveningAnswer": "4",
+        "answerText": "CX-6209-EUEY",
+        "restartAnswerText": "CX-6209-EUEY"
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj3c3mj-46aa",
+          "wallMs": 1110,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 20663,
+          "finalText": "OK",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj3c5bn-5a36",
+          "wallMs": 599,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 20658,
+          "finalText": "4",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj3c70s-60f9",
+          "wallMs": 1017,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 21026,
+          "finalText": "CX-6209-EUEY",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj3cam7-df2b",
+          "wallMs": 554,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 21389,
+          "finalText": "CX-6209-EUEY",
+          "reportedLabel": null,
+          "toolCounts": {}
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 9887,
+      "finishedAt": "2026-11-16T09:58:35.399Z"
+    }
+  ]
+}
