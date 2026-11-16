@@ -39,6 +39,7 @@ Nothing below is proven by unit, mock-bridge, JVM, or scripted-fixture checks. T
 - The confirmation gate is model-reported first; the backstop does not cover Enter-key submits or coordinate clicks, and a confirmation wait is not safety verification.
 - Remote browser execution needs an awake host, a running companion, and running Edge (the side panel need not be open). System-clipboard work needs a panel.
 - Never expose the privileged bridge (`17871`) or remote controller (`17873`) through Tailscale Funnel or an unauthenticated public listener.
+- **Known intermittent test issue (Android JVM):** `RemoteControllerTest.aLostConfirmAnswerIsRetriedOnlyWithTheSameId` very rarely hangs its bounded `await` in a full-suite run (observed once; not reproduced in 20 isolated runs, 10 class-under-load runs, or 6 subsequent full-suite runs). Suspected cross-test interference in the shared `Dispatchers.Default` pool / lingering MockWebServer resources, **not a proven production race**. The save/clear timing assertions were hardened test-only (`awaitStoreSaved`/`awaitStoreCleared` polls + a generous 15 s bounded `await`); CI is green. Revisit only if it recurs in CI.
 
 ## Environment notes
 
