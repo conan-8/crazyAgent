@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -56,7 +57,14 @@ class RemoteControllerTest {
 
     @After fun tearDown() {
         scope.cancel()
+        // Join the run loop so its WebSocket is fully closed before the server
+        // shuts down, and release the OkHttp threads. Without this, cancelled
+        // scopes and idle clients accumulate across the sequential tests and
+        // can stall later tests' event streams under load.
+        runBlocking { withTimeoutOrNull(5_000) { runJob?.join() } }
         server.close()
+        client.dispatcher.executorService.shutdown()
+        client.connectionPool.evictAll()
     }
 
     private fun controller(pendingStore: PendingStore = store) = RemoteController(
@@ -103,6 +111,22 @@ class RemoteControllerTest {
     private fun awaitStoreSaved(timeoutMs: Long = 5_000, predicate: (StoredPending?) -> Boolean) {
         runBlocking { withTimeout(timeoutMs) { while (!predicate(store.value)) delay(10) } }
         assertTrue("pending store must be saved as expected", predicate(store.value))
+    }
+
+    /**
+     * A lost answer is retried with its original ID by the reconcile loop, and
+     * that retry post lands asynchronously after UiState.pending clears. Wait
+     * for the full ground truth — the retry post recorded AND the answer run
+     * exactly once — before asserting counts, so the assertions do not race the
+     * retry. If the retry never lands this times out and the test fails
+     * correctly (it does not mask a real delivery regression).
+     */
+    private fun awaitAnswerRetriedOnce(timeoutMs: Long = 15_000) {
+        runBlocking {
+            withTimeout(timeoutMs) {
+                while (fake.messagePosts.size < 3 || fake.userMessageCount() < 2) delay(10)
+            }
+        }
     }
 
     @Test fun sendCarriesAuthAndJsonAndClearsOnceTheTurnStarts() {
@@ -206,6 +230,7 @@ class RemoteControllerTest {
         fake.loseNextMessage = true
         c.sendConfirm("approve")
         c.await { it.pending == null && it.chat.turn.isActive }
+        awaitAnswerRetriedOnce()
         assertEquals(3, fake.messagePosts.size)
         val answerPosts = fake.messagePosts.filter { it["confirm"] != null }
         assertEquals(2, answerPosts.size)
