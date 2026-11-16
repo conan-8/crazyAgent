@@ -96,25 +96,50 @@ async function trashOwnDocument() {
       await doc.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
       await doc.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
     }
-    const file = await evaluate(doc, `(() => {
+    // Route input to this run's document tab before driving its menus.
+    if (browser && docTarget) await browser.send('Target.activateTarget', { targetId: docTarget.id }).catch(() => {})
+    const filePoint = () => evaluate(doc, `(() => {
       const items = [...document.querySelectorAll('[role="menuitem"]')].filter(e => (e.getAttribute('aria-label') || e.textContent || '').trim() === 'File' && e.getBoundingClientRect().width > 0)
       if (items.length !== 1) return null
       const r = items[0].getBoundingClientRect()
       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
     })()`)
-    if (!file) return { attempted: true, docId, trashed: false, reason: 'File menu control not found' }
-    await click(file.x, file.y)
+    const trashPoint = () => evaluate(doc, `(() => {
+      const items = [...document.querySelectorAll('[role="menuitem"]')].filter(e => /^Move to trash/.test((e.getAttribute('aria-label') || e.textContent || '').trim()) && e.getBoundingClientRect().width > 0)
+      if (items.length !== 1) return null
+      const r = items[0].getBoundingClientRect()
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), disabled: items[0].getAttribute('aria-disabled') === 'true' }
+    })()`)
     let trash = null
-    for (let i = 0; i < 20 && !trash; i += 1) {
-      trash = await evaluate(doc, `(() => {
-        const items = [...document.querySelectorAll('[role="menuitem"]')].filter(e => /^Move to trash/.test((e.getAttribute('aria-label') || e.textContent || '').trim()) && e.getBoundingClientRect().width > 0)
-        if (items.length !== 1) return null
-        const r = items[0].getBoundingClientRect()
-        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
-      })()`)
-      if (!trash) await sleep(200)
+    let saveTriggered = false
+    for (let attempt = 0; attempt < 4 && !trash; attempt += 1) {
+      const file = await filePoint()
+      if (!file) return { attempted: true, docId, trashed: false, reason: 'File menu control not found' }
+      await click(file.x, file.y)
+      let candidate = null
+      for (let i = 0; i < 15 && !candidate; i += 1) {
+        candidate = await trashPoint()
+        if (!candidate) await sleep(200)
+      }
+      if (candidate && !candidate.disabled) { trash = candidate; break }
+      // Dismiss the menu before any retry or save trigger.
+      await doc.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...escape })
+      await doc.send('Input.dispatchKeyEvent', { type: 'keyUp', ...escape })
+      await sleep(400)
+      if (candidate?.disabled && !saveTriggered) {
+        // Docs disables "Move to trash" until the document's first save. A run
+        // that failed before any mutation leaves an unsaved Untitled document;
+        // type one space into the editor to trigger the autosave, then retry.
+        saveTriggered = true
+        await evaluate(doc, `(() => { for (const f of document.querySelectorAll('iframe')) { try { const box = f.contentDocument?.querySelector('[role="textbox"][aria-label="Document content"]'); if (box) { box.focus(); return true } } catch {} } return false })()`)
+        await doc.send('Input.insertText', { text: ' ' })
+        for (let i = 0; i < 40; i += 1) {
+          if (await evaluate(doc, `/Saved/.test(document.body.innerText || '')`)) break
+          await sleep(250)
+        }
+      }
     }
-    if (!trash) return { attempted: true, docId, trashed: false, reason: 'Move to trash menu item not found' }
+    if (!trash) return { attempted: true, docId, trashed: false, reason: 'Move to trash menu item not found or still disabled after retries' }
     await click(trash.x, trash.y)
     for (let i = 0; i < 25; i += 1) {
       if (await evaluate(doc, `/moved to trash/i.test(document.body.innerText || '')`)) {
@@ -145,15 +170,37 @@ try {
   await waitFor(doc, `location.pathname.includes('/document/d/') && [document, ...[...document.querySelectorAll('iframe')].map(frame => { try { return frame.contentDocument } catch { return null } }).filter(Boolean)].some(root => root.querySelector('[role="textbox"][aria-label="Document content"]') !== null)`, 60_000)
   docId = await evaluate(doc, `location.pathname.split('/document/d/')[1].split('/')[0]`)
 
-  let panelTarget = (await list()).find(target => target.type === 'page' && target.url.includes('/sidepanel/index.html'))
-  if (!panelTarget) {
+  // The panel page must actually expose the extension APIs: a page created
+  // before the extension registered (or surviving an extension reload) is a
+  // chrome-error shell whose target URL still looks right. Detect and replace.
+  const panelReady = `typeof chrome?.tabs?.query === 'function' && typeof chrome?.runtime?.id === 'string'`
+  const openPanel = async () => {
     const createdPanel = await browser.send('Target.createTarget', { url: `chrome-extension://${extensionId}/sidepanel/index.html`, background: true })
-    await sleep(900)
-    panelTarget = (await list()).find(target => target.id === createdPanel.targetId)
+    await sleep(1_200)
+    const target = (await list()).find(item => item.id === createdPanel.targetId)
+    assert.ok(target, 'side panel target not found')
+    const connection = await connect(target.webSocketDebuggerUrl)
+    await connection.send('Runtime.enable')
+    return { target, connection }
   }
-  assert.ok(panelTarget, 'side panel target not found')
-  panel = await connect(panelTarget.webSocketDebuggerUrl)
-  await panel.send('Runtime.enable')
+  let panelTarget = (await list()).find(target => target.type === 'page' && target.url.includes('/sidepanel/index.html'))
+  if (panelTarget) {
+    panel = await connect(panelTarget.webSocketDebuggerUrl)
+    await panel.send('Runtime.enable')
+    try {
+      await waitFor(panel, panelReady, 8_000)
+    } catch {
+      try { panel.close() } catch {}
+      await browser.send('Target.closeTarget', { targetId: panelTarget.id }).catch(() => {})
+      panelTarget = undefined
+    }
+  }
+  if (!panelTarget) {
+    const opened = await openPanel()
+    panelTarget = opened.target
+    panel = opened.connection
+    await waitFor(panel, panelReady, 20_000)
+  }
   // The panel page runs here as a background tab, and the clipboard-preserving table
   // paste refuses to read the system clipboard from an unfocused document. Emulate
   // focus for this harness page only; the product's own focus check is unchanged.

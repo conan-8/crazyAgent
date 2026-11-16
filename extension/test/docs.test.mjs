@@ -1710,6 +1710,8 @@ function fakeFormatManyDocs(options = {}) {
     findValue: '',
     current: 0,
     selection: undefined,
+    selectionVisibleAt: 0,
+    escapes: 0,
     styleMenuOpen: false,
     requestedStyle: undefined,
     fontSizeFocused: false,
@@ -1838,6 +1840,11 @@ function fakeFormatManyDocs(options = {}) {
       if (spec.key === 'Escape') {
         state.findOpen = false
         state.findFocused = false
+        state.escapes += 1
+        // Model the real async restore: the match becomes the document
+        // selection only some time after the bar closes (Q1 lag).
+        const lag = state.escapes === 1 ? options.selectionLagMs ?? 0 : options.selectionRetryLagMs ?? options.selectionLagMs ?? 0
+        state.selectionVisibleAt = options.selectionNeverRestores ? Infinity : now + lag
         return
       }
       if (spec.key === 'Enter' && state.findOpen) {
@@ -1910,6 +1917,12 @@ function fakeFormatManyDocs(options = {}) {
         return { ok: true, readback: true, value: state.findValue }
       }
       if (command === 'documentContent') return { ok: true, present: true, focused: true }
+      if (command === 'documentSelection') {
+        const block = state.blocks[state.selection?.blockIndex]
+        const visible = Boolean(state.selection) && now >= state.selectionVisibleAt
+        const text = visible && block ? block.text.slice(state.selection.start, state.selection.end) : ''
+        return { ok: true, present: true, collapsed: !visible, text }
+      }
       if (command === 'format') {
         const result = { ok: true }
         for (const attribute of args.attributes) {
@@ -2190,6 +2203,155 @@ test('Docs format_many compares native selection occurrence and count to the bas
   assert.equal(fake.events.some(event => event.startsWith('mutate:')), false)
   assert.equal(fake.exports.length, 1)
   assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs format_many proves the match is the selection before any toolbar read despite a late restore', async () => {
+  // Q1: the selection arrives 500ms after the find bar closes, later than the
+  // old fixed settling delay. Every edit must still format its own paragraph.
+  const fake = fakeFormatManyDocs({
+    selectionLagMs: 500,
+    blocks: [formatManyPara('alpha'), formatManyPara('beta'), formatManyPara('sentinel')],
+  })
+  const result = await runFormatManyDocs(fake, [
+    { text: 'alpha', bold: true, highlight: '#ffff00' },
+    { text: 'beta', bold: true, highlight: '#ffff00' },
+  ])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(result.docs.verifiedCount, 2)
+  assert.equal(result.docs.verifiedBy, 'export')
+  assert.deepEqual(fake.state.blocks[0].runs, [formatManyRun('alpha', { bold: true, highlight: '#ffff00' })])
+  assert.deepEqual(fake.state.blocks[1].runs, [formatManyRun('beta', { bold: true, highlight: '#ffff00' })])
+  assert.deepEqual(fake.state.blocks[2].runs, [formatManyRun('sentinel')])
+  // The positive selection proof precedes the first toolbar read of each edit.
+  for (const text of ['alpha', 'beta']) {
+    const query = fake.events.indexOf(`setFind:${text}`)
+    assert.ok(query >= 0, `missing find query for ${text}`)
+    const proof = fake.events.indexOf('probe:documentSelection', query)
+    const toolbar = fake.events.indexOf('probe:format', query)
+    assert.ok(proof >= 0 && proof < toolbar, `selection proof must precede the toolbar read for ${text}`)
+  }
+  assert.equal(fake.events.filter(event => event === 'key:b:2').length, 2)
+})
+
+test('Docs format_many fails closed before any toggle when the selection never becomes the match', async () => {
+  const fake = fakeFormatManyDocs({
+    selectionNeverRestores: true,
+    blocks: [formatManyPara('alpha'), formatManyPara('beta'), formatManyPara('sentinel')],
+  })
+  const result = await runFormatManyDocs(fake, [
+    { text: 'alpha', bold: true },
+    { text: 'beta', bold: true },
+  ])
+  assert.equal(result.docs.status, 'failed')
+  assert.equal(result.docs.failure.code, 'DOCS_SELECTION_NOT_RESTORED')
+  assert.equal(result.docs.failure.index, 0)
+  assert.equal(result.docs.failure.stage, 'selection-proof-retry')
+  assert.equal(result.docs.attemptedCount, 1)
+  assert.deepEqual(result.docs.results.map(edit => edit.status), ['failed', 'unattempted'])
+  // One scoped Find re-selection happened, then the failure became final.
+  assert.equal(fake.events.filter(event => event === 'setFind:alpha').length, 2)
+  assert.equal(fake.events.some(event => event.startsWith('mutate:')), false)
+  assert.equal(fake.events.some(event => event === 'key:b:2'), false)
+  assert.equal(fake.exports.length, 1)
+  assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs format_many recovers a lost selection restore with exactly one scoped re-selection', async () => {
+  // The first restore never lands within the proof window (a colour-dialog
+  // restore overwrote it); the single re-selection succeeds and the edit lands.
+  const fake = fakeFormatManyDocs({ selectionLagMs: 4_000, selectionRetryLagMs: 0 })
+  const result = await runFormatManyDocs(fake, [{ text: 'alpha', bold: true }])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(result.docs.verifiedBy, 'export')
+  assert.deepEqual(fake.state.blocks[0].runs, [formatManyRun('alpha', { bold: true })])
+  assert.equal(fake.events.filter(event => event === 'setFind:alpha').length, 2)
+  assert.equal(fake.events.filter(event => event === 'key:b:2').length, 1)
+  assert.equal(fake.events.filter(event => event.startsWith('mutate:')).length, 1)
+  assert.equal(fake.exports.length, 2)
+})
+
+test('Docs single-edit format keeps its existing path without the selection-proof probe', async () => {
+  // fakeFormatDocs throws on any probe it does not model, so a completed
+  // single-edit format proves documentSelection is format-many-only.
+  const fake = fakeFormatDocs()
+  const result = await runFormatDocs(fake)
+  assert.equal(result.docs.status, 'completed')
+  assert.equal(fake.events.includes('probe:documentSelection'), false)
+})
+
+test('Docs selection probe reads the editor mirror and fails closed on ambiguity', () => {
+  class FakeElement {
+    constructor(tagName, { label, roleName } = {}) {
+      this.tagName = tagName.toUpperCase()
+      this.attributes = { ...label === undefined ? {} : { 'aria-label': label }, ...roleName === undefined ? {} : { role: roleName } }
+      this.innerText = ''
+      this.textContent = ''
+      this.children = []
+      this.parentElement = undefined
+      this.isConnected = true
+      this.disabled = false
+    }
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const wanted = part.trim()
+        const roleMatch = /^\[role="([^"]+)"\]$/u.exec(wanted)
+        if (roleMatch) return this.attributes.role === roleMatch[1]
+        if (wanted === 'input' || wanted === 'textarea') return this.tagName === wanted.toUpperCase()
+        if (wanted === '[inert]') return 'inert' in this.attributes
+        if (wanted === '[aria-hidden="true"]') return this.attributes['aria-hidden'] === 'true'
+        return false
+      })
+    }
+    querySelectorAll(selector) {
+      return this.children.flatMap(child => [...child.matches(selector) ? [child] : [], ...child.querySelectorAll(selector)])
+    }
+    closest(selector) {
+      let current = this
+      while (current) {
+        if (current.matches(selector)) return current
+        current = current.parentElement
+      }
+      return null
+    }
+    getAttribute(name) { return this.attributes[name] ?? null }
+    getBoundingClientRect() { return { left: 0, top: 0, width: 10, height: 10 } }
+  }
+  const keys = ['Element', 'document', 'getComputedStyle', 'getSelection']
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  const install = (root, selection) => {
+    Object.assign(globalThis, {
+      Element: FakeElement,
+      document: { querySelectorAll: selector => root.querySelectorAll(selector), getElementById: () => undefined },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+      getSelection: () => selection,
+    })
+  }
+  try {
+    const editor = new FakeElement('div', { label: 'Document content', roleName: 'textbox' })
+    const root = new FakeElement('div')
+    root.children = [editor]
+    editor.parentElement = root
+    install(root, { isCollapsed: false, toString: () => 'Shenanigans' })
+    assert.deepEqual(docsPageProbe('documentSelection'), { ok: true, present: true, collapsed: false, text: 'Shenanigans' })
+    install(root, { isCollapsed: true, toString: () => '' })
+    assert.deepEqual(docsPageProbe('documentSelection'), { ok: true, present: true, collapsed: true, text: '' })
+    install(root, null)
+    assert.deepEqual(docsPageProbe('documentSelection'), { ok: true, present: true, collapsed: true, text: '' })
+    install(new FakeElement('div'), { isCollapsed: false, toString: () => 'x' })
+    assert.deepEqual(docsPageProbe('documentSelection'), { ok: true, present: false })
+    const second = new FakeElement('div', { label: 'Document content', roleName: 'textbox' })
+    second.parentElement = root
+    root.children = [editor, second]
+    install(root, { isCollapsed: false, toString: () => 'x' })
+    const ambiguous = docsPageProbe('documentSelection')
+    assert.equal(ambiguous.ok, false)
+    assert.equal(ambiguous.code, 'DOC_CONTENT_AMBIGUOUS')
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  }
 })
 
 test('Docs format_many formats an inline list target while preserving unrelated blocks', async () => {

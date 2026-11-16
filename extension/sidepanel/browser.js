@@ -7834,6 +7834,19 @@ export function docsPageProbe(command, args = {}) {
     boxes[0].focus({ preventScroll: true })
     return { ok: true, focused: document.activeElement === boxes[0] }
   }
+  // The editor's contenteditable mirror carries the real document selection.
+  // Find keeps the PREVIOUS match selected while its bar is open and moves the
+  // selection to the current match only when the bar closes, asynchronously.
+  // Reading this mirror is the positive proof that the match is selected; the
+  // toolbar's pressed state alone can still describe the previous selection.
+  const documentSelection = () => {
+    const boxes = exact('textbox', 'Document content', document, true)
+    if (boxes.length === 0) return { ok: true, present: false }
+    if (boxes.length !== 1) return failure('DOC_CONTENT_AMBIGUOUS', `Expected one Document content editor, found ${boxes.length}`)
+    const selection = typeof getSelection === 'function' ? getSelection() : null
+    const collapsed = !selection || selection.isCollapsed
+    return { ok: true, present: true, collapsed, text: collapsed ? '' : String(selection.toString()).slice(0, 2_000) }
+  }
 
   const menuSearchParts = () => {
     const controls = [...new Set([
@@ -7983,6 +7996,7 @@ export function docsPageProbe(command, args = {}) {
     case 'colorMenu': return colorMenuState(args.attribute, args.value)
     case 'colorDialog': return colorDialogState()
     case 'documentContent': return documentContent()
+    case 'documentSelection': return documentSelection()
     case 'focusDocument': return focusDocument()
     case 'setSearch': return setText('textbox', 'Search', args.value)
     case 'menuSearch': return menuSearchState()
@@ -8344,11 +8358,7 @@ function docsParagraphPlan(blocks, text, occurrence, nativeCount) {
   }
 }
 
-async function docsSelectFoundOccurrence(context, text, occurrence, found) {
-  if (occurrence === undefined && (found.match.total !== 1 || found.match.current !== 1)) {
-    throw docsFailure('find-match', 'DOCS_MATCH_NOT_UNIQUE', `Expected normalized 1 of 1, found ${found.match.text}`)
-  }
-  const target = docsResolveOccurrence(occurrence, found.match.total)
+async function docsNavigateFind(context, text, found, target) {
   const total = found.match.total
   if (!Number.isSafeInteger(found.match.current) || found.match.current < 1 || found.match.current > total) {
     throw docsFailure('find-match', 'DOCS_COUNTER_MISMATCH', `The initial Find counter is inconsistent: ${found.match.text}`)
@@ -8365,12 +8375,65 @@ async function docsSelectFoundOccurrence(context, text, occurrence, found) {
       docsFindReady(state, text) && state.match.current === current && state.match.total === total
     ))
   }
+  return found
+}
+
+/**
+ * Wait until the editor's selection mirror holds exactly the Find match.
+ * Closing Find restores the match selection asynchronously, and a colour
+ * dialog closing just before can restore the PREVIOUS cell's selection over
+ * it; a fixed settling delay cannot prove which selection won. The wait is
+ * bounded and fails closed — no toolbar read or toggle may run on an
+ * unproven selection.
+ */
+async function docsWaitDocumentSelection(context, stage, text, timeoutMs = 3_000) {
+  const frames = await listFrames(context.tab.id).catch(() => [{ frameId: 0 }])
+  let probe
+  for (const frame of frames) {
+    const candidate = frame.frameId === 0
+      ? command => docsProbe(context, stage, command)
+      : command => docsFrameProbe(context, frame.frameId, stage, command)
+    try {
+      const state = await candidate('documentSelection')
+      if (state.present) { probe = candidate; break }
+    } catch {}
+  }
+  if (!probe) throw docsFailure(stage, 'DOCS_FOCUS_FAILED', 'Document content editor was not found in any frame for the selection proof')
+  const end = Math.min(context.deadline, context.driver.now() + timeoutMs)
+  let latest
+  while (context.driver.now() < end) {
+    latest = await probe('documentSelection')
+    if (latest.present && latest.collapsed === false && latest.text === text) return latest
+    await context.driver.sleep(60)
+  }
+  throw docsFailure(stage, 'DOCS_SELECTION_NOT_RESTORED', `The document selection did not become the exact Find match ${JSON.stringify(text.slice(0, 80))}; observed ${JSON.stringify(latest?.text ?? null)} collapsed=${latest?.collapsed ?? 'unknown'}; no formatting was applied to an unproven selection`)
+}
+
+async function docsSelectFoundOccurrence(context, text, occurrence, found) {
+  if (occurrence === undefined && (found.match.total !== 1 || found.match.current !== 1)) {
+    throw docsFailure('find-match', 'DOCS_MATCH_NOT_UNIQUE', `Expected normalized 1 of 1, found ${found.match.text}`)
+  }
+  const target = docsResolveOccurrence(occurrence, found.match.total)
+  found = await docsNavigateFind(context, text, found, target)
   await docsCloseFind(context, 'close-find', true)
+  if (context.requireSelectionProof === true) {
+    try {
+      await docsWaitDocumentSelection(context, 'selection-proof', text)
+    } catch (error) {
+      if (error?.code !== 'DOCS_SELECTION_NOT_RESTORED') throw error
+      // One scoped re-selection: Find navigation mutates nothing, and no
+      // formatting ran on the unproven selection. A second failure is final.
+      const refound = await docsOpenFind(context, text)
+      found = await docsNavigateFind(context, text, refound, target)
+      await docsCloseFind(context, 'close-find-retry', true)
+      await docsWaitDocumentSelection(context, 'selection-proof-retry', text)
+    }
+  }
   return {
     text,
     occurrence: target,
     current: found.match.current,
-    matchCount: total,
+    matchCount: found.match.total,
     verifiedBy: 'find-counter',
     findFocused: found.focused === true,
   }
@@ -8816,6 +8879,11 @@ function docsFormatManyFailure(index, edit, error, attribute) {
 }
 
 async function docsFormatManyFlow(context, edits) {
+  // Multi-edit cadence only: each edit must prove the Find match became the
+  // document selection before any toolbar read, because the previous edit's
+  // colour dialog can restore the previous cell's selection over this edit's.
+  // Single-edit format/select flows keep their existing behaviour.
+  context.requireSelectionProof = true
   let plans = []
   let attemptedCount = 0
   let mutationPossible = false
@@ -9873,6 +9941,9 @@ async function docsTableVerifiedExport(context, stage, verify) {
 }
 
 async function docsTableWriteFlow(context, args) {
+  // Multi-edit cadence: the collapse/navigate keys after each selection must
+  // run on the proven cell, not on a selection still being restored.
+  context.requireSelectionProof = true
   let current = parseDocStructure(await docsExport(context, 'table-write-baseline', 'html'))
   let latest = current
   planDocsTableWrite(selectDocsTable(current, args.table), args.edits)
@@ -9990,6 +10061,9 @@ async function docsApplyCellBackground(context, edit) {
 }
 
 async function docsTableCellBackgroundFlow(context, args) {
+  // Multi-edit cadence: "Table options" only exists while the caret is inside
+  // a table cell, so the collapse key must run on the proven selection.
+  context.requireSelectionProof = true
   const baseline = parseDocStructure(await docsExport(context, 'table-cell-background-baseline', 'html'))
   const table = selectDocsTable(baseline, args.table)
   const { edits, targets } = docsTableCellBackgroundEdits(baseline, table, args.edits)
