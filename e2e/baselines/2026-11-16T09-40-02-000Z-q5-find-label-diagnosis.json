@@ -1,0 +1,60 @@
+{
+  "task": "task-17 / Q5 advisory: flaky-headless find label assertion",
+  "date": "2026-11-16",
+  "assertion": "edge-find-e2e.mjs: 'an already-labelled control keeps its click label' (exclusions.label.matches[0].label > 0)",
+  "classification": "suite environment-dependence (headless window size), NOT an executor race and NOT a timing flake; fixed test-only in edge-find-e2e.mjs",
+  "mechanism": {
+    "labelling": "extension/sidepanel/browser.js ~line 1443: viewport-scoped by design — a control with rect.top > innerHeight - 1 is not labelled",
+    "findLabelLookup": "extension/sidepanel/find.js ~317-319: match keeps its label only if globalThis.__crazyagent.idsByElement has the element and byId maps back to it; find itself scans the whole DOM, so an unlabelled below-fold control still matches by accessible-name with label undefined",
+    "fixtureGeometry": "e2e/fixtures/find.html #control-input sits at rect.top 520 (constant across sizes; layout is width-independent at these sizes)",
+    "headlessViewport": "a --window-size=800,600 headless Edge yields innerHeight 516 (chrome subtracts ~84px); 520 > 515 so the control is below the fold and unlabelled. 1280x900 yields innerHeight 816 -> labelled (id 4)."
+  },
+  "registryProbe": {
+    "window_800x600": {
+      "autoLabelCount": 3,
+      "innerHeight": 516,
+      "innerWidth": 792,
+      "inputTop": 520,
+      "inputBottom": 564,
+      "registryPresent": true,
+      "registrySize": 2,
+      "inputLabelId": null,
+      "labelledTexts": ["Focus field", "preserve this value"],
+      "findMatch": { "source": "accessible-name", "label": null, "tag": "input" }
+    },
+    "window_1280x900": {
+      "autoLabelCount": 7,
+      "innerHeight": 816,
+      "innerWidth": 1272,
+      "inputTop": 520,
+      "inputBottom": 564,
+      "registryPresent": true,
+      "registrySize": 6,
+      "inputLabelId": 4,
+      "labelledTexts": ["Focus field", "preserve this value", "Find control label", "CONTROL-VALUE-NEEDLE", "Password fixture", "PASSWORD-FIND-SECRET"],
+      "findMatch": { "source": "accessible-name", "label": 4, "tag": "input" }
+    }
+  },
+  "reproductionMatrix": {
+    "beforeFix": [
+      { "windowSize": "800,600", "exit": 1, "passLines": 2, "failure": "AssertionError: an already-labelled control keeps its click label" },
+      { "windowSize": "1280,900", "exit": 0, "passLines": 7 },
+      { "windowSize": "1280,720", "exit": 0, "passLines": 7 }
+    ],
+    "afterFix": [
+      { "windowSize": "800,600", "exit": 0, "passLines": 7 },
+      { "windowSize": "800,600", "exit": 0, "passLines": 7 },
+      { "windowSize": "1280,900", "exit": 0, "passLines": 7 },
+      { "windowSize": "1280,720", "exit": 0, "passLines": 7 }
+    ],
+    "gateRunnerAfterFix": { "suite": "find", "result": "PASS", "cases": 7, "wallSeconds": 7.1 },
+    "note": "fresh throwaway profile + free ports per run; headless=new; live extension tree. provider-fixer's 2 clean-HEAD failures are consistent with a launcher window <= ~520px viewport height (e.g. the headless default 800x600); harness-builder's earlier 5/5 green all used --window-size=1280,900."
+  },
+  "fix": {
+    "file": "scripts/edge-find-e2e.mjs",
+    "kind": "test-only",
+    "description": "Pin the fixture page viewport to 1280x900 via CDP Emulation.setDeviceMetricsOverride on the fixture tab target (connection kept open for the suite; survives the later canvas.html navigation). First attempt used chrome.windows.update(1280x900) but headless rejects out-of-screen bounds ('Bounds must be at least 50% within visible screen space') — recorded as a dead end.",
+    "executorChange": "none — viewport-scoped labelling is correct by design; browser.js untouched"
+  },
+  "priorClassificationCorrection": "the Q5 table's 'flaky-headless, environment/timing-dependent' advisory is superseded: deterministic window-size dependence, reproduced and fixed"
+}

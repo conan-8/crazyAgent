@@ -65,10 +65,24 @@ const fixture = await evaluate(`(async () => {
   let tab = tabs.find(item => item.url?.includes('/find.html'))
   if (!tab) tab = await chrome.tabs.create({ url: '${BASE}/find.html', active: true })
   else await chrome.tabs.update(tab.id, { active: true, url: '${BASE}/find.html' })
-  await new Promise(resolve => setTimeout(resolve, 900))
+  await new Promise(resolve => setTimeout(resolve, 1200))
   return { id: tab.id }
 })()`)
 assert.ok(fixture?.id, 'fixture tab id')
+// Labelling is viewport-scoped by design (controls below the fold are not
+// labelled), and the "already-labelled control" case sits ~520px down the
+// fixture. Headless Edge's default 800x600 window yields a ~516px viewport,
+// which leaves that control unlabelled and fails the assertion —
+// deterministic, not a race (reproduced 2026-11-16 with registry probes:
+// inputTop 520 > innerHeight 516, registrySize 2, find label null; at
+// 1280x900: innerHeight 816, label 4). chrome.windows.update cannot enlarge
+// past the headless screen ("Bounds must be at least 50% within visible
+// screen space"), so pin the page viewport through CDP instead. The override
+// lives on this connection and survives the later canvas.html navigation.
+const fixtureTarget = (await list()).find(target => target.type === 'page' && target.url.includes('/find.html'))
+assert.ok(fixtureTarget, 'fixture tab CDP target')
+const fixtureCdp = await connect(fixtureTarget.webSocketDebuggerUrl)
+await fixtureCdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false })
 const tabId = fixture.id
 const prefix = `const mod = await import('./browser.js')
   const tabId = ${tabId}
@@ -214,4 +228,5 @@ assert.equal(canvas.text, undefined, 'canvas fallback does not present unreliabl
 console.log('PASS canvas auto-view retains a full labelled screenshot')
 
 console.log('\nALL FIND AND AUTO-VIEW CHECKS PASSED')
+fixtureCdp.close()
 panel.close()
