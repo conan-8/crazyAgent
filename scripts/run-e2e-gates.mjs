@@ -76,19 +76,19 @@ const SUITES = [
   { name: 'canvas', script: 'edge-canvas-e2e.mjs', class: 'attach', timeoutS: 240, fixedFixturePort: 17872, needsTab: 'canvas.html' },
   { name: 'advanced', script: 'edge-advanced-e2e.mjs', class: 'attach', timeoutS: 180, fixedFixturePort: 17872, needsTab: 'advanced.html' },
   { name: 'clipboard', script: 'edge-clipboard-e2e.mjs', class: 'attach', timeoutS: 240, experimental: true, note: 'system-clipboard paths need a real panel; suite SKIPs them when unavailable' },
-  { name: 'background', script: 'edge-background-e2e.mjs', class: 'self', timeoutS: 180 },
-  { name: 'drag', script: 'edge-drag-e2e.mjs', class: 'self', timeoutS: 300, env: { HEADLESS: '1' } },
-  { name: 'cursor', script: 'edge-cursor-e2e.mjs', class: 'self', timeoutS: 180 },
+  { name: 'background', script: 'edge-background-e2e.mjs', class: 'self', mode: 'headless', timeoutS: 180 },
+  { name: 'drag', script: 'edge-drag-e2e.mjs', class: 'self', mode: 'headless', timeoutS: 300, env: { HEADLESS: '1' } },
+  { name: 'cursor', script: 'edge-cursor-e2e.mjs', class: 'self', mode: 'headless', timeoutS: 180 },
 ]
 
 const EXCLUDED = [
-  { name: 'click', reason: 'stalls in its own setup without a visible window (2026-11-11 log); also hardcodes fixture port 17872' },
-  { name: 'capture', reason: 'headed by design (minimizes a real OS window); on an idle/locked desktop the window never gains focus and its baseline assertion fails: image 2336x1282 != viewport 1168x688 x dpr 2 (debugger-infobar viewport accounting needs a painted, focused window). Bridge config is env-isolated (BRIDGE_URL/BRIDGE_TOKEN); rerun headed on an active desktop' },
-  { name: 'tabs', reason: 'points the extension at the RUNNING service bridge (ws://127.0.0.1:17871) with the service token; cannot run isolated without touching the service' },
-  { name: 'log', reason: 'same as tabs: drives the running service bridge with the service token' },
-  { name: 'docs-table', reason: 'live Google Docs: needs the signed-in profile ~/.cache/crazyagent/docs-profile on port 9233 (docs-fixer owns both)' },
-  { name: 'find-live', reason: 'live Google Docs: needs the signed-in profile and the service bridge port' },
-  { name: 'table-live', reason: 'live Google Docs: needs the signed-in profile' },
+  { name: 'click', mode: 'headed', reason: 'stalls in its own setup without a visible window (2026-11-11 log); also hardcodes fixture port 17872' },
+  { name: 'capture', mode: 'headed', reason: 'headed by design (minimizes a real OS window); on an idle/locked desktop the window never gains focus and its baseline assertion fails: image 2336x1282 != viewport 1168x688 x dpr 2 (debugger-infobar viewport accounting needs a painted, focused window). Bridge config is env-isolated (BRIDGE_URL/BRIDGE_TOKEN); rerun headed on an active desktop' },
+  { name: 'tabs', mode: 'n/a', reason: 'points the extension at the RUNNING service bridge (ws://127.0.0.1:17871) with the service token; cannot run isolated without touching the service' },
+  { name: 'log', mode: 'n/a', reason: 'same as tabs: drives the running service bridge with the service token' },
+  { name: 'docs-table', mode: 'n/a', reason: 'live Google Docs: needs the signed-in profile ~/.cache/crazyagent/docs-profile on port 9233 (docs-fixer owns both)' },
+  { name: 'find-live', mode: 'n/a', reason: 'live Google Docs: needs the signed-in profile and the service bridge port' },
+  { name: 'table-live', mode: 'n/a', reason: 'live Google Docs: needs the signed-in profile' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -403,7 +403,7 @@ async function main() {
     for (const spec of selected) {
       if (spec.fixedFixturePort && fixtureServer.port !== spec.fixedFixturePort) {
         const reason = `hardcodes fixture port ${spec.fixedFixturePort}, which is held by another server (runner used ${fixtureServer.port})`
-        results.push({ name: spec.name, class: spec.class, result: 'SKIP', cases: 0, wallMs: 0, note: reason })
+        results.push({ name: spec.name, class: spec.class, mode: spec.class === 'attach' ? (options.headed ? 'headed' : 'headless') : (spec.mode ?? 'headless'), result: 'SKIP', cases: 0, wallMs: 0, note: reason })
         cannotHeadless.push({ name: spec.name, reason })
         process.stdout.write(`SKIP ${pad(spec.name, 12)} ${reason}\n`)
         continue
@@ -422,12 +422,14 @@ async function main() {
         }
       }
       const timeoutS = options.timeoutS ?? spec.timeoutS
-      process.stdout.write(`RUN  ${pad(spec.name, 12)} (${spec.class}, timeout ${timeoutS}s)\n`)
+      const mode = spec.class === 'attach' ? (options.headed ? 'headed' : 'headless') : (spec.mode ?? 'headless')
+      process.stdout.write(`RUN  ${pad(spec.name, 12)} (${spec.class}, ${mode}, timeout ${timeoutS}s)\n`)
       const result = await runSuite(spec, { env, timeoutS, logDir: options.logs })
       if (spec.experimental && result.result !== 'PASS') {
         cannotHeadless.push({ name: spec.name, reason: `experimental headless trial ${result.result}: ${result.note || result.stdoutTail}` })
         result.note = `experimental: ${result.note}`
       }
+      result.mode = mode
       results.push(result)
       process.stdout.write(`${pad(result.result, 4)} ${pad(spec.name, 12)} cases ${pad(result.cases, 3)} ${(result.wallMs / 1000).toFixed(1)}s${result.note ? `  ${result.note}` : ''}\n`)
     }
@@ -444,16 +446,16 @@ async function main() {
   }
 
   // --- One table -----------------------------------------------------------
-  const widths = [12, 8, 8, 6, 8, 90]
+  const widths = [12, 8, 9, 8, 6, 8, 80]
   const line = cells => cells.map((cell, index) => pad(String(cell ?? '').slice(0, widths[index]), widths[index])).join(' ')
-  process.stdout.write(`\n${line(['suite', 'class', 'result', 'cases', 'wall', 'note'])}\n`)
+  process.stdout.write(`\n${line(['suite', 'class', 'mode', 'result', 'cases', 'wall', 'note'])}\n`)
   process.stdout.write(`${line(widths.map(width => '-'.repeat(width)))}\n`)
   for (const result of results) {
-    process.stdout.write(`${line([result.name, result.class, result.result, result.cases || '-', result.wallMs ? `${(result.wallMs / 1000).toFixed(1)}s` : '-', result.note])}\n`)
+    process.stdout.write(`${line([result.name, result.class, result.mode ?? '-', result.result, result.cases || '-', result.wallMs ? `${(result.wallMs / 1000).toFixed(1)}s` : '-', result.note])}\n`)
   }
   for (const suite of EXCLUDED) {
     if (!results.some(result => result.name === suite.name)) {
-      process.stdout.write(`${line([suite.name, 'excluded', 'SKIP', '-', '-', suite.reason])}\n`)
+      process.stdout.write(`${line([suite.name, 'excluded', suite.mode ?? 'n/a', 'SKIP', '-', '-', suite.reason])}\n`)
     }
   }
   const passed = results.filter(result => result.result === 'PASS').length
