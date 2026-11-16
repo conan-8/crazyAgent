@@ -16,6 +16,7 @@
     "test": "node --test \"companion/test/**/*.test.mjs\" \"extension/test/**/*.test.mjs\" \"packages/dsh-browser-extension/test/**/*.test.mjs\"",
     "bench": "node scripts/bench.mjs",
     "clean": "node scripts/clean.mjs",
+    "logs:prune": "node scripts/prune-logs.mjs",
     "system-prompt": "node scripts/print-system-prompt.mjs"
   },
   "dependencies": {
