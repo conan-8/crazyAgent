@@ -76,8 +76,8 @@ const EXTENSION_DIR = join(ROOT, 'extension')
 const COMPANION_ENTRY = join(ROOT, 'companion', 'index.mjs')
 const SETUP_ENTRY = join(ROOT, 'scripts', 'setup.mjs')
 const EDGE_BIN = process.env.EDGE_BIN ?? 'microsoft-edge'
-const DEFAULT_MODEL = 'deepseek/deepseek-v4.1-flash'
-const DEFAULT_EFFORT = 'medium'
+export const DEFAULT_MODEL = 'deepseek/deepseek-v4.1-flash'
+export const DEFAULT_EFFORT = 'medium'
 const DEFAULT_DSH_HOME = join(tmpdir(), 'crazyagent-model-eval', 'dsh-home')
 const EXTENSION_ID = (() => {
   const hex = createHash('sha256').update(EXTENSION_DIR).digest('hex').slice(0, 32)
@@ -88,8 +88,8 @@ const EXTENSION_ID = (() => {
 // Small utilities
 // ---------------------------------------------------------------------------
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
-const nowIso = () => new Date().toISOString()
+export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+export const nowIso = () => new Date().toISOString()
 const fmtMs = ms => (ms === null || ms === undefined ? '-' : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`)
 const clip = (value, max = 300) => {
   const text = typeof value === 'string' ? value : JSON.stringify(value)
@@ -115,7 +115,7 @@ class ApiError extends Error {
  * @param {number} [intervalMs]
  * @returns {Promise<T>}
  */
-async function until(what, predicate, timeoutMs = 15_000, intervalMs = 150) {
+export async function until(what, predicate, timeoutMs = 15_000, intervalMs = 150) {
   const started = Date.now()
   let lastError
   for (;;) {
@@ -134,7 +134,7 @@ async function until(what, predicate, timeoutMs = 15_000, intervalMs = 150) {
 }
 
 /** @returns {Promise<number>} */
-async function freePort() {
+export async function freePort() {
   const server = createNetServer()
   await new Promise((resolve, reject) => {
     server.once('error', reject)
@@ -324,7 +324,7 @@ const MIME = {
  * bodies and base64 otherwise; upload bodies are reported by length and name.
  * @returns {Promise<{baseUrl: string, port: number, requests: Array<Record<string, any>>, reset: () => void, close: () => Promise<void>}>}
  */
-async function startFixtureServer() {
+export async function startFixtureServer() {
   /** @type {Array<Record<string, any>>} */
   const requests = []
   const handle = (request, response) => {
@@ -552,7 +552,7 @@ export async function startEdge({ profileDir, cdpPort, initialUrl, headed, loadE
 /**
  * One page target, tracked across navigations and (rarely) recreation.
  */
-class PageController {
+export class PageController {
   constructor({ edge, fixtureBaseUrl }) {
     this.edge = edge
     this.fixtureBaseUrl = fixtureBaseUrl
@@ -641,7 +641,7 @@ class PageController {
 }
 
 /** Point the extension's background executor at the isolated companion. */
-async function injectExtensionSettings({ edge, bridgeUrl, token, verbose }) {
+export async function injectExtensionSettings({ edge, bridgeUrl, token, verbose }) {
   const worker = await until('the extension service worker target', async () => {
     const targets = await listTargets(edge.cdpHttp)
     return targets.find(target => target.type === 'service_worker' && target.url.includes(EXTENSION_ID))
@@ -679,7 +679,7 @@ async function injectExtensionSettings({ edge, bridgeUrl, token, verbose }) {
  * Start a second companion with its own harness home and the real model.
  * The API key is passed in the environment only.
  */
-async function startCompanion({ dshHome, bridgePort, remotePort, model, effort, apiKey, logPath, downloadsDir, confirmIrreversible }) {
+export async function startCompanion({ dshHome, bridgePort, remotePort, model, effort, apiKey, logPath, downloadsDir, confirmIrreversible }) {
   const stream = createWriteStream(logPath, { mode: 0o600 })
   const child = spawn(process.execPath, [
     COMPANION_ENTRY,
@@ -758,7 +758,7 @@ async function startCompanion({ dshHome, bridgePort, remotePort, model, effort, 
 }
 
 /** Prepare a cached isolated DSH harness home (profiles + symlinks). */
-async function prepareDshHome(dshHome, reset) {
+export async function prepareDshHome(dshHome, reset) {
   if (reset && existsSync(dshHome)) {
     const resolved = resolve(dshHome)
     const allowed = [resolve(tmpdir()), resolve(ROOT)]
@@ -782,7 +782,7 @@ async function prepareDshHome(dshHome, reset) {
 }
 
 /** Authenticated client for the isolated companion's remote API. */
-function makeRemote({ remoteUrl, token }) {
+export function makeRemote({ remoteUrl, token }) {
   const headers = { authorization: `Bearer ${token}` }
   const request = async (method, path, body) => {
     const response = await fetch(`${remoteUrl}${path}`, {
@@ -809,7 +809,7 @@ function makeRemote({ remoteUrl, token }) {
 // Turn metrics from the companion run log
 // ---------------------------------------------------------------------------
 
-function resolveRunEvents(logsRoot, runId) {
+export function resolveRunEvents(logsRoot, runId) {
   if (runId !== null) {
     const candidate = join(logsRoot, runId, 'events.jsonl')
     if (existsSync(candidate)) return candidate
@@ -824,7 +824,7 @@ function resolveRunEvents(logsRoot, runId) {
  * Wait (bounded) for that record before deriving metrics.
  * @param {string} eventsPath @param {string} turnId @param {number} [timeoutMs]
  */
-async function waitForTurnEndInLog(eventsPath, turnId, timeoutMs = 10_000) {
+export async function waitForTurnEndInLog(eventsPath, turnId, timeoutMs = 10_000) {
   try {
     await until(`the turn.end record for ${turnId} in the run log`, () => {
       if (!existsSync(eventsPath)) return false
@@ -990,7 +990,7 @@ function normalizeCheck(value) {
   }
 }
 
-const EMPTY_TURN = Object.freeze({
+export const EMPTY_TURN = Object.freeze({
   status: 'none',
   waitingForUser: false,
   wallMs: 0,
@@ -1086,7 +1086,7 @@ function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null, 
  * preference written before startEdge is what confines those to the harness
  * folder. Both are set so no download can reach the user's ~/Downloads.
  */
-async function routeDownloads(edge, downloadsDir) {
+export async function routeDownloads(edge, downloadsDir) {
   mkdirSync(downloadsDir, { recursive: true })
   await edge.browser.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloadsDir, eventsEnabled: false })
 }
@@ -1229,7 +1229,7 @@ function safeRemoveTemp(path) {
 // Real-model batch
 // ---------------------------------------------------------------------------
 
-async function waitForRemoteReady({ remote, bridgePort, companion, timeoutMs = 180_000 }) {
+export async function waitForRemoteReady({ remote, bridgePort, companion, timeoutMs = 180_000 }) {
   return until('the isolated companion runtime (dsh ready, tools + background executor connected)', async () => {
     if (companion.exited !== null) throw new Error(`companion exited: ${JSON.stringify(companion.exited)}`)
     const [state, health] = await Promise.all([
@@ -1245,7 +1245,7 @@ async function waitForRemoteReady({ remote, bridgePort, companion, timeoutMs = 1
   }, timeoutMs, 250)
 }
 
-async function waitForTurn({ remote, turnId, deadline }) {
+export async function waitForTurn({ remote, turnId, deadline }) {
   let transient = 0
   for (;;) {
     try {
@@ -1265,7 +1265,7 @@ async function waitForTurn({ remote, turnId, deadline }) {
   }
 }
 
-function turnFromState(state) {
+export function turnFromState(state) {
   const turn = state.turn ?? {}
   const waitingForUser = turn.status === 'waiting_for_user' || state.help != null || state.confirm != null
   let status = 'unknown'
