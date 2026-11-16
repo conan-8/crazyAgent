@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BUSY_MESSAGE, NOT_READY_MESSAGE, STOPPING_MESSAGE, SessionController, confirmationPromptBlock, normalizeConfirmRequest, parseReportedLabel, uiRejectionFrame } from '../session-controller.mjs'
+import { BUSY_MESSAGE, NOT_READY_MESSAGE, STOPPING_MESSAGE, SessionController, confirmationPromptBlock, isLeakedToolCallText, normalizeConfirmRequest, parseReportedLabel, uiRejectionFrame } from '../session-controller.mjs'
 import { FakeRunner, fakeBridge, fakeLogStore } from './remote-fixtures.mjs'
 
 function setup(options = {}) {
@@ -254,6 +254,7 @@ test('a confirmation request ends the turn waiting; approve writes the companion
   }
   const turn = controller.submit({ text: 'fill in the form and submit it', origin: 'remote' })
   assert.deepEqual(bridge.turnOptions[0], { id: turn.turnId, planMode: false, confirmMode: true })
+  assert.deepEqual(bridge.turnGuards[0], { id: turn.turnId, confirmGuard: true }, 'an unapproved turn runs with the executor backstop')
   assert.match(runner.runs[0][0].text, /<confirm_mode>/)
   assert.match(runner.runs[0][0].text, /agent_request_confirmation/)
 
@@ -278,6 +279,7 @@ test('a confirmation request ends the turn waiting; approve writes the companion
   assert.equal(answer.ok, true)
   assert.equal(controller.pendingConfirmation, undefined)
   assert.equal(runner.runs[1][0].text.endsWith('<user_confirmation decision="approve" action="Submit the assignment for grading"/>'), true)
+  assert.deepEqual(bridge.turnGuards.at(-1), { id: answer.turnId, confirmGuard: false }, 'only the approved turn runs without the backstop')
   // People (other clients, saved history) see the decision in plain words, never the model block.
   assert.equal(frames.filter(frame => frame.type === 'chat.user').at(-1).text, 'Approved: Submit the assignment for grading')
   runner.current.resolve('DONE — submitted.')
@@ -587,4 +589,119 @@ test('a stopped turn records elapsed time, failed calls, and partial usage witho
   assert.equal(logged.label, null)
   assert.deepEqual(logged.usage, usage)
   assert.equal(logged.timings.failedCalls, 1)
+})
+
+test('a tool call written as DSML text is never shown, and a turn ending on one is reported as blocked', async () => {
+  const leaked = '\n<｜DSML｜ calls>\n<｜DSML｜ invoke name="browser_batch">\n</｜DSML｜ invoke>'
+  assert.equal(isLeakedToolCallText(leaked), true)
+  assert.equal(isLeakedToolCallText('@@browser_batch {}\n</｜DSML｜ parameter>\n</｜DSML｜ invoke>'), true)
+  assert.equal(isLeakedToolCallText('DONE: the page mentions <|DSML| invoke markup'), false)
+  assert.equal(isLeakedToolCallText('DONE: all good'), false)
+  assert.equal(isLeakedToolCallText(undefined), false)
+
+  // Recovered: the provider retried and the turn finished normally.
+  const recovered = setup()
+  const first = recovered.controller.submit({ text: 'fill the form' })
+  recovered.runner.assistant(leaked)
+  recovered.runner.assistant('DONE: submitted')
+  recovered.runner.current.resolve('DONE: submitted')
+  await first.done
+  assert.deepEqual(recovered.frames.filter(frame => frame.type === 'chat.assistant').map(frame => frame.text), ['DONE: submitted'])
+  assert.equal(recovered.frames.find(frame => frame.type === 'chat.done').label, 'done')
+  assert.ok(recovered.logStore.calls.some(call => call[0] === 'record' && call[2] === 'assistant.leaked_tool_call'))
+
+  // Not recovered: the final response is still markup.
+  const dead = setup()
+  const second = dead.controller.submit({ text: 'fill the form' })
+  dead.runner.assistant(leaked)
+  dead.runner.current.resolve(leaked)
+  await second.done
+  assert.equal(dead.frames.some(frame => frame.type === 'chat.assistant'), false)
+  const done = dead.frames.find(frame => frame.type === 'chat.done')
+  assert.match(done.text, /^BLOCKED: the model sent an empty or malformed reply/)
+  assert.equal(done.label, 'blocked')
+  // A blank final answer with nothing done is reported the same way.
+  const blank = setup()
+  const third = blank.controller.submit({ text: 'fill the form' })
+  blank.runner.current.resolve('\n')
+  await third.done
+  assert.match(blank.frames.find(frame => frame.type === 'chat.done').text, /^BLOCKED: the model sent an empty/)
+  // ...but not when the turn did something.
+  const acted = setup()
+  const fourth = acted.controller.submit({ text: 'click it' })
+  acted.runner.toolCall('call-1')
+  acted.runner.toolResult({ callId: 'call-1' })
+  acted.runner.current.resolve('')
+  await fourth.done
+  assert.equal(acted.frames.find(frame => frame.type === 'chat.done').text, '')
+  const end = dead.logStore.calls.find(call => call[0] === 'turnEnd')
+  assert.equal(end[2].ok, false)
+  assert.doesNotMatch(end[2].finalText, /DSML/)
+})
+
+test('a turn the runtime ended on a malformed reply is retried once, then reported as an error', async () => {
+  const malformed = { turn: 1, reason: { kind: 'error', error: { code: 'MALFORMED_RESPONSE', message: 'Tool call "browser_batch": Expected , in JSON' } } }
+
+  // Recovered on the retry, with this turn's conditional modes re-armed.
+  const recovered = setup({ confirmIrreversible: true })
+  const first = recovered.controller.submit({ text: 'fill the form' })
+  await recovered.runner.started()
+  recovered.runner.event('turn/end', malformed)
+  recovered.runner.current.resolve('')
+  await new Promise(resolve => setImmediate(resolve))
+  await recovered.runner.started()
+  assert.equal(recovered.runner.runs.length, 2, 'one automatic retry')
+  assert.match(recovered.runner.runs[1][0].text, /Automatic notice, not a new request/)
+  recovered.runner.event('turn/end', { turn: 2, reason: { kind: 'completed' } })
+  recovered.runner.current.resolve('DONE: submitted')
+  await first.done
+  assert.equal(recovered.frames.find(frame => frame.type === 'chat.done').text, 'DONE: submitted')
+  assert.equal(recovered.frames.some(frame => frame.type === 'chat.error'), false)
+  assert.equal(recovered.frames.filter(frame => frame.type === 'chat.user').length <= 1, true, 'the notice is not shown as a user prompt')
+
+  // Malformed twice: an error, not an empty "done".
+  const dead = setup()
+  const second = dead.controller.submit({ text: 'fill the form' })
+  await dead.runner.started()
+  dead.runner.event('turn/end', malformed)
+  dead.runner.current.resolve('')
+  await new Promise(resolve => setImmediate(resolve))
+  await dead.runner.started()
+  dead.runner.event('turn/end', malformed)
+  dead.runner.current.resolve('')
+  await second.done
+  assert.equal(dead.runner.runs.length, 2, 'never more than one retry')
+  assert.equal(dead.frames.some(frame => frame.type === 'chat.done'), false)
+  assert.match(dead.frames.find(frame => frame.type === 'chat.error').message, /MALFORMED_RESPONSE.*nothing was done/)
+  assert.equal(dead.observed.at(-1)[1].outcome, 'error')
+
+  // After an action already ran, do not retry: report it.
+  const acted = setup()
+  const third = acted.controller.submit({ text: 'fill the form' })
+  await acted.runner.started()
+  acted.runner.toolCall('call-1')
+  acted.runner.toolResult({ callId: 'call-1' })
+  acted.runner.event('turn/end', malformed)
+  acted.runner.current.resolve('')
+  await third.done
+  assert.equal(acted.runner.runs.length, 1)
+  assert.match(acted.frames.find(frame => frame.type === 'chat.error').message, /after 1 action\. Check the page/)
+})
+
+test('the executor backstop is on for denied and ordinary turns of the setting, and never when it is off', async () => {
+  const on = setup({ confirmIrreversible: true })
+  const asked = on.controller.submit({ text: 'submit it' })
+  on.controller.noteActivity({ kind: 'confirm-request', turnId: asked.turnId, action: 'Submit', target: 'Submit button' })
+  on.runner.current.resolve('waiting')
+  await asked.done
+  const denied = on.controller.submit({ text: '', confirm: 'deny' })
+  assert.deepEqual(on.bridge.turnGuards.at(-1), { id: denied.turnId, confirmGuard: true })
+  on.runner.current.resolve('DONE: not submitted')
+  await denied.done
+
+  const off = setup()
+  const plain = off.controller.submit({ text: 'submit it' })
+  assert.deepEqual(off.bridge.turnGuards.at(-1), { id: plain.turnId, confirmGuard: false })
+  off.runner.current.resolve('done')
+  await plain.done
 })

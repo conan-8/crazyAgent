@@ -5184,6 +5184,83 @@ test('max-token responses queue internal follow-up turns without reviving aborte
   assert.deepEqual(logEvents.filter(event => event.type === 'model.max_tokens.continued').map(event => event.data.step), [5, 1])
 })
 
+test('a tool call leaked as DSML text is retried at most twice in a row', async t => {
+  const { server, url, logEvents } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const session = { id: 'leaked-call-session', surface: { nodes: [] } }
+  const followups = []
+  const agent = { session, steer: message => followups.push(message), followup: () => assert.fail('a retry must stay in the same turn') }
+  const sessionEvent = fake.listeners.get('session/event')
+  const turnStopping = fake.listeners.get('agent/turn-stopping')
+  const leakedText = '<｜DSML｜ calls>\n<｜DSML｜ invoke name="browser_batch">\n</｜DSML｜ invoke>'
+  const assistant = (turn, content) => sessionEvent(session, {
+    type: 'assistant/message',
+    data: { turn, step: 1, message: { role: 'assistant', content } },
+  })
+  const live = () => new AbortController().signal
+
+  assistant(1, [{ type: 'reasoning', text: 'plan' }, { type: 'text', text: leakedText }])
+  await turnStopping({ agent, turn: 1, signal: live() })
+  assert.equal(followups.length, 1)
+  assert.equal(followups[0].source.kind, 'runtime-context')
+  assert.match(followups[0].content[0].text, /nothing was executed/)
+
+  assistant(2, [{ type: 'text', text: leakedText }])
+  await turnStopping({ agent, turn: 2, signal: live() })
+  assert.equal(followups.length, 2)
+  assistant(3, [{ type: 'text', text: leakedText }])
+  await turnStopping({ agent, turn: 3, signal: live() })
+  assert.equal(followups.length, 2, 'a third consecutive leak is not retried')
+
+  assistant(4, [{ type: 'text', text: '@@browser_batch {}\n<result>{}\n</｜DSML｜ parameter>\n</｜DSML｜ invoke>' }])
+  await turnStopping({ agent, turn: 4, signal: live() })
+  assert.equal(followups.length, 2, 'closing tags alone are recognised (and the budget is spent)')
+
+  assistant(4, [{ type: 'text', text: 'DONE: finished' }])
+  await turnStopping({ agent, turn: 4, signal: live() })
+  assert.equal(followups.length, 2, 'ordinary text does not retry')
+  assistant(5, [{ type: 'text', text: 'The page shows <｜DSML｜ invoke' }, { type: 'tool-call', name: 'browser_click' }])
+  await turnStopping({ agent, turn: 5, signal: live() })
+  assert.equal(followups.length, 2, 'a step with a real tool call does not retry')
+
+  assistant(6, [{ type: 'text', text: leakedText }])
+  const aborted = new AbortController()
+  aborted.abort({ kind: 'user' })
+  await turnStopping({ agent, turn: 6, signal: aborted.signal })
+  assert.equal(followups.length, 2, 'a stopped turn is not retried')
+  sessionEvent(session, { type: 'turn/end', data: { turn: 6 } })
+  await turnStopping({ agent, turn: 6, signal: live() })
+  assert.equal(followups.length, 2)
+
+  assistant(7, [{ type: 'text', text: leakedText }])
+  await turnStopping({ agent, turn: 7, signal: live() })
+  assert.equal(followups.length, 3, 'the clean steps reset the retry budget')
+
+  assistant(8, [{ type: 'reasoning', text: 'thinking only' }, { type: 'text', text: '  ' }])
+  await turnStopping({ agent, turn: 8, signal: live() })
+  assert.equal(followups.length, 4, 'an empty step is retried too')
+  assert.match(followups[3].content[0].text, /previous step was empty/)
+
+  assistant(9, [{ type: 'text', text: 'ok' }])
+  sessionEvent(session, { type: 'tool/call', data: { turn: 10, name: 'agent_request_confirmation' } })
+  assistant(10, [{ type: 'reasoning', text: 'asked; stopping' }])
+  await turnStopping({ agent, turn: 10, signal: live() })
+  assert.equal(followups.length, 4, 'an empty reply after a tool call is a deliberate stop')
+  sessionEvent(session, { type: 'user/message', data: { content: [{ type: 'text', text: 'next request' }] } })
+  assistant(11, [])
+  await turnStopping({ agent, turn: 11, signal: live() })
+  assert.equal(followups.length, 5, 'a new user request re-arms the empty-step retry')
+  await waitFor(() => logEvents.filter(event => event.type === 'model.leaked_tool_call').length === 7)
+})
+
 test('direct expectation schemas normalize wire calls and format independent evidence', async t => {
   const dialogScope = { kind: 'native-dialog', target: 'not-applicable' }
   const { server, url, commands } = await startFakeBridge({

@@ -203,6 +203,9 @@ export class Bridge {
     this.currentTurnId = turnId
     this.currentPlanMode = turnId !== undefined && options.planMode === true
     this.currentConfirmMode = turnId !== undefined && options.confirmMode === true
+    // Backstop for the confirmation setting: on for a turn that has the
+    // setting on and did not start from the user's approval.
+    this.currentConfirmGuard = turnId !== undefined && options.confirmGuard === true
     this.#syncPlanMode()
     this.#syncConfirmMode()
   }
@@ -223,6 +226,17 @@ export class Bridge {
       turnId: this.currentTurnId ?? null,
       enabled: this.currentConfirmMode === true,
     })
+  }
+
+  /**
+   * Stamp click and type commands of a guarded turn so the executor refuses
+   * controls that submit, send, pay, or delete (and type's submit:true).
+   * Other commands pass through unchanged.
+   * @param {Record<string, any>} command
+   */
+  #guardedCommand(command) {
+    if (this.currentConfirmGuard !== true || !['click', 'click_role', 'batch', 'type'].includes(command?.op)) return command
+    return { ...command, args: { ...(isRecord(command.args) ? command.args : {}), confirm_guard: true } }
   }
 
   /** @param {Record<string, unknown>} frame */
@@ -559,7 +573,7 @@ export class Bridge {
       type: 'browser.command',
       id: message.id,
       callId: message.callId ?? null,
-      command: message.command,
+      command: this.#guardedCommand(message.command),
       turnId: enriched.turnId,
     })
     if (!sent) {

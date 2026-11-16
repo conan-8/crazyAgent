@@ -526,6 +526,35 @@ test('confirm mode follows the current turn and synchronizes on provider connect
   assert.deepEqual(cleared, { v: 1, type: 'confirm.mode', turnId: null, enabled: false })
 })
 
+test('a guarded turn stamps click commands for the executor backstop and nothing else', async t => {
+  const { bridge, url } = await setup(t)
+  const ui = await connect(url, 'ui')
+  const tools = await connect(url, 'tools')
+  t.after(() => { ui.ws.close(); tools.ws.close() })
+  const send = (id, command) => tools.ws.send(JSON.stringify({ v: 1, type: 'browser.command', id, callId: id, command }))
+  const forwarded = id => ui.messages.next(message => message.type === 'browser.command' && message.id === id)
+
+  bridge.setTurnId('turn-guarded', { confirmMode: true, confirmGuard: true })
+  send('g-click', { op: 'click', args: { label: 9 } })
+  assert.deepEqual((await forwarded('g-click')).command, { op: 'click', args: { label: 9, confirm_guard: true } })
+  send('g-batch', { op: 'batch', args: { actions: [] } })
+  assert.equal((await forwarded('g-batch')).command.args.confirm_guard, true)
+  send('g-role', { op: 'click_role', args: { path: [{ role: 'button', name: 'Send' }] } })
+  assert.equal((await forwarded('g-role')).command.args.confirm_guard, true)
+  send('g-type', { op: 'type', args: { label: 2, text: 'x' } })
+  assert.equal((await forwarded('g-type')).command.args.confirm_guard, true)
+  send('g-scroll', { op: 'scroll', args: { direction: 'down' } })
+  assert.deepEqual((await forwarded('g-scroll')).command, { op: 'scroll', args: { direction: 'down' } })
+
+  // An approved turn of the same setting, and a turn with the setting off.
+  bridge.setTurnId('turn-approved', { confirmMode: true, confirmGuard: false })
+  send('a-click', { op: 'click', args: { label: 9 } })
+  assert.deepEqual((await forwarded('a-click')).command, { op: 'click', args: { label: 9 } })
+  bridge.setTurnId('turn-off', {})
+  send('o-click', { op: 'click', args: { label: 9 } })
+  assert.deepEqual((await forwarded('o-click')).command, { op: 'click', args: { label: 9 } })
+})
+
 test('settings.update control frames reach the control handler and chat.send keeps its confirm field', async t => {
   const controls = []
   const sends = []

@@ -3456,9 +3456,10 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       rejectUnknownArguments('browser_find', args, ['query', 'occurrence', 'reveal'])
       const query = typeof args.query === 'string' ? args.query.replace(/\s+/gu, ' ').trim() : ''
       if (query.length < 1 || query.length > 200) throw new Error('browser_find query must contain 1 to 200 characters')
-      const occurrence = args.occurrence
-      if (occurrence !== undefined && occurrence !== 'first' && occurrence !== 'last' && (!isPositiveSafeInteger(occurrence))) {
-        throw new Error('browser_find occurrence must be first, last, or a positive one-based integer')
+      // A digit string is the same explicit ordinal as its number.
+      const occurrence = typeof args.occurrence === 'string' && /^[1-9]\d{0,5}$/u.test(args.occurrence.trim()) ? Number(args.occurrence.trim()) : args.occurrence
+      if (occurrence !== undefined && occurrence !== 'first' && occurrence !== 'last' && !(typeof occurrence === 'number' && Number.isSafeInteger(occurrence) && occurrence > 0)) {
+        throw new Error(`browser_find occurrence must be "first", "last", or a positive one-based integer such as 2 (got ${JSON.stringify(args.occurrence)?.slice(0, 40)}). Omit occurrence to list every match. Example: {"query":"Total","occurrence":2,"reveal":true}`)
       }
       if (args.reveal !== undefined && typeof args.reveal !== 'boolean') throw new Error('browser_find reveal must be true or false')
       const result = await bridge.request({
@@ -4472,6 +4473,22 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
   return names
 }
 
+/** @param {Record<string, any>} data */
+function reachedMaxTokensStep(data) {
+  return Array.isArray(data.stream) && data.stream.some(entry =>
+    entry?.type === 'chunk' && entry.chunk?.type === 'finish'
+    && (entry.chunk.reason === 'max-tokens' || entry.chunk.reason?.kind === 'max-tokens'))
+}
+
+const MAX_LEAKED_CALL_RETRIES = 2
+// DeepSeek's native tool-call markup, with fullwidth or ASCII bars.
+const LEAKED_TOOL_CALL = /<\/?[｜|]\s*DSML\s*[｜|]\s*(?:calls|invoke|function_calls|parameter)\b/
+const EMPTY_STEP_NOTICE = 'Your previous step was empty: no tool call and no reply, so nothing was done. Continue the task now with a real tool call, or give your final answer. This is an automatic notice, not a new user request.'
+// Deliberately not "repeat that call": the leaked call may have held a step
+// the rules forbid without confirmation (a retried turn once clicked Submit
+// first). The model must decide again under all of its instructions.
+const LEAKED_TOOL_CALL_NOTICE = 'Your previous step wrote a tool call as plain text, so nothing was executed and the browser is unchanged. Discard that text. Decide the next step again from the current page and all of your instructions, including any confirmation rule for irreversible actions, and send it as a real tool call with no markup in your reply. This is an automatic notice, not a new user request.'
+
 /**
  * @param {import('@deepseek-ai/cordis').Context} ctx
  * @param {Record<string, unknown>} [config]
@@ -4500,6 +4517,18 @@ export function apply(ctx, config = {}) {
   const effortByTurn = new Map()
   /** @type {Map<string, {turn: number, step: number, outputTokens?: number}>} */
   const maxTokenStepsBySession = new Map()
+  // A model step whose tool call arrived as literal DSML markup in the text
+  // (no structured tool call) executed nothing. Retry it, at most
+  // MAX_LEAKED_CALL_RETRIES times in a row per session.
+  /** @type {Map<string, {turn: number, step: number, kind: string}>} */
+  const leakedCallBySession = new Map()
+  /** @type {Map<string, number>} */
+  const leakedCallRetries = new Map()
+  // Sessions whose current user request has already made a tool call. An
+  // empty step is retried only before the first call: after one, an empty
+  // reply can be a deliberate stop (for example after asking for confirmation).
+  /** @type {Set<string>} */
+  const sessionsWithToolCalls = new Set()
   /** @type {{turn: number, text: string} | undefined} */
   let claimedPrompt
   const log = (message) => {
@@ -4684,6 +4713,7 @@ export function apply(ctx, config = {}) {
             .join('\n')
           if (text.trim().length === 0) return
           lastPromptBySession.set(String(session.id), text)
+          sessionsWithToolCalls.delete(String(session.id))
           if (lastPromptBySession.size > 50) {
             const oldest = lastPromptBySession.keys().next().value
             if (oldest !== undefined) lastPromptBySession.delete(oldest)
@@ -4695,9 +4725,20 @@ export function apply(ctx, config = {}) {
           const turn = data.turn
           if (!Number.isSafeInteger(turn)) return
           const sessionId = String(session.id)
-          const reachedMaxTokens = Array.isArray(data.stream) && data.stream.some(entry =>
-            entry?.type === 'chunk' && entry.chunk?.type === 'finish'
-            && (entry.chunk.reason === 'max-tokens' || entry.chunk.reason?.kind === 'max-tokens'))
+          const blocks = Array.isArray(data.message?.content) ? data.message.content : []
+          // A dead step: no structured tool call, and the text is either the
+          // call written as markup or nothing at all.
+          const texts = blocks.filter(block => isRecord(block) && block.type === 'text' && typeof block.text === 'string').map(block => block.text)
+          const noToolCall = isRecord(data.message) && !blocks.some(block => isRecord(block) && typeof block.type === 'string' && block.type.includes('tool'))
+          const leakedCall = noToolCall && (texts.some(text => LEAKED_TOOL_CALL.test(text))
+            ? 'markup' : texts.every(text => text.trim().length === 0) && !reachedMaxTokensStep(data) && !sessionsWithToolCalls.has(sessionId) ? 'empty' : undefined)
+          if (leakedCall) {
+            leakedCallBySession.set(sessionId, { turn, step: Number.isSafeInteger(data.step) ? data.step : 0, kind: leakedCall })
+          } else {
+            leakedCallBySession.delete(sessionId)
+            leakedCallRetries.delete(sessionId)
+          }
+          const reachedMaxTokens = reachedMaxTokensStep(data)
           if (reachedMaxTokens) {
             maxTokenStepsBySession.set(sessionId, {
               turn,
@@ -4710,6 +4751,10 @@ export function apply(ctx, config = {}) {
           return
         }
         if (type === 'tool/call') {
+          if (session?.id !== undefined) {
+            sessionsWithToolCalls.add(String(session.id))
+            if (sessionsWithToolCalls.size > 50) sessionsWithToolCalls.delete(sessionsWithToolCalls.values().next().value)
+          }
           planRuntime.observeToolCall(session, isRecord(event.data) ? event.data : {})
           return
         }
@@ -4734,6 +4779,7 @@ export function apply(ctx, config = {}) {
           imageDedupe.clear(session?.id)
           const turn = event.data?.turn
           if (maxTokenStepsBySession.get(String(session.id))?.turn === turn) maxTokenStepsBySession.delete(String(session.id))
+          if (leakedCallBySession.get(String(session.id))?.turn === turn) leakedCallBySession.delete(String(session.id))
           if (Number.isSafeInteger(turn)) {
             // DSH deep-freezes committed session events, so this turn's
             // outcome cannot be written onto `event.data` (the assignment
@@ -4793,6 +4839,37 @@ export function apply(ctx, config = {}) {
             sessionId: String(sessionId), turn, step: maxTokenStep.step,
             outputTokens: maxTokenStep.outputTokens, outcome: 'continued',
           }, 'info')
+          return
+        }
+        const leaked = leakedCallBySession.get(String(sessionId))
+        if (leaked?.turn === turn) {
+          if (signal?.aborted) return
+          leakedCallBySession.delete(String(sessionId))
+          const retries = leakedCallRetries.get(String(sessionId)) ?? 0
+          if (retries >= MAX_LEAKED_CALL_RETRIES) {
+            bridge.logEvent('model.leaked_tool_call', { sessionId: String(sessionId), turn, step: leaked.step, outcome: 'gave-up', kind: leaked.kind, retries }, 'warn')
+            return
+          }
+          const message = Object.freeze({
+            id: randomUUID(),
+            role: 'user',
+            source: Object.freeze({ kind: 'runtime-context', form: 'notice', summary: 'Tool call retry' }),
+            content: Object.freeze([Object.freeze({ type: 'text', text: leaked.kind === 'empty' ? EMPTY_STEP_NOTICE : LEAKED_TOOL_CALL_NOTICE })]),
+          })
+          try {
+            // Steer, not followup: a followup is a new turn, which would lose
+            // this turn's conditional tools (plan, confirmation) and state.
+            agent.steer(message)
+          } catch (error) {
+            bridge.logEvent('model.leaked_tool_call', {
+              sessionId: String(sessionId), turn, step: leaked.step,
+              outcome: 'error', message: error instanceof Error ? error.message : String(error),
+            }, 'warn')
+            return
+          }
+          leakedCallRetries.set(String(sessionId), retries + 1)
+          if (leakedCallRetries.size > 50) leakedCallRetries.delete(leakedCallRetries.keys().next().value)
+          bridge.logEvent('model.leaked_tool_call', { sessionId: String(sessionId), turn, step: leaked.step, outcome: 'retried', kind: leaked.kind, retries: retries + 1 }, 'info')
           return
         }
         if (planRuntime.stopping({ agent, turn, signal })) return
