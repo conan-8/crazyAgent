@@ -1,0 +1,79 @@
+{
+  "title": "crazyAgent Docs Table Acceptance 2026-11-16T11:02:02.807Z",
+  "documentUrl": "https://docs.google.com/document/d/1nAlYMVJnr-mGMCvbkS_Gyt164138QwRNjRoY6lhe87k/edit?tab=t.0",
+  "evidence": [
+    {
+      "action": "create",
+      "status": "completed",
+      "verifiedCount": 12
+    },
+    {
+      "action": "format",
+      "status": "completed",
+      "verifiedCount": 4
+    },
+    {
+      "action": "format",
+      "status": "completed",
+      "verifiedCount": 4
+    },
+    {
+      "action": "insert_rows",
+      "status": "completed",
+      "completedCount": 2
+    },
+    {
+      "action": "insert_columns",
+      "status": "completed",
+      "completedCount": 1
+    },
+    {
+      "action": "write",
+      "status": "completed",
+      "verifiedCount": 3
+    },
+    {
+      "action": "delete_rows",
+      "status": "completed",
+      "completedCount": 1
+    },
+    {
+      "action": "delete_columns",
+      "status": "completed",
+      "completedCount": 1
+    },
+    {
+      "action": "merge",
+      "status": "completed",
+      "completedCount": 1
+    },
+    {
+      "action": "unmerge",
+      "status": "completed",
+      "completedCount": 1
+    },
+    {
+      "action": "delete_table",
+      "status": "completed",
+      "completedCount": 1
+    }
+  ],
+  "independentExportVerified": true,
+  "reloadPersistenceVerified": true,
+  "compactCellsVerified": true,
+  "nativeCellBackgroundsVerified": true,
+  "finalShape": "4 rows × 4 columns before explicit delete_table",
+  "finalStateVerified": true,
+  "durationMs": 334052,
+  "metrics": {
+    "executorCalls": 13,
+    "failedCalls": 0,
+    "exportRequests": 8
+  },
+  "cleanup": {
+    "attempted": true,
+    "docId": "1nAlYMVJnr-mGMCvbkS_Gyt164138QwRNjRoY6lhe87k",
+    "trashed": true,
+    "verifiedBy": "File moved to trash toast"
+  }
+}

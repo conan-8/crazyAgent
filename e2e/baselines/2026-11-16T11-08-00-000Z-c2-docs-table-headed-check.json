@@ -1,0 +1,13 @@
+{
+  "kind": "headed-check",
+  "purpose": "Q1 step: check whether headless/unfocused matters for the Docs table selection-lag fix",
+  "date": "2026-11-16",
+  "display": "Wayland :0 (host display idle since ~03:30; headed Edge still painted)",
+  "editorReadiness": true,
+  "canvasPainted": {"canvasCount": 2, "sizes": ["1632x2112", "1x500"]},
+  "create": "completed",
+  "formatQ1Step": "completed (executor export-verified; the original Q1 failure step passes headed)",
+  "harnessIndependentReadback": "HTTP 429 (export budget exhausted after two full headless passes; the executor's own internal export verification passed)",
+  "cleanup": {"trashed": true, "verifiedBy": "File moved to trash toast", "docId": "1TYK54ZpsezgAiCI9fkoNQWLK0HFdhXETjlvrxQDPNRY"},
+  "conclusion": "Headed Docs paints and the Q1 format step passes headed exactly as headless; headless-vs-headed does not affect the selection-lag fix. headless=new remains the acceptance path (two full end-to-end passes)."
+}
