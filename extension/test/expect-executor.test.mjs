@@ -130,6 +130,7 @@ function fakeExpectBrowser(t, options = {}) {
         if (name === 'clickLabelled') {
           const label = args[0]
           state.mutations += 1
+          if (options.nullClickResult) return [{ result: null }]
           if (options.navigateAfter) {
             tab.url = 'https://example.test/other-document'
             state.timeOrigin += 1
@@ -244,6 +245,18 @@ test('pixel expectation forces full measurement and returns bounded semantic del
   assert.deepEqual(result.semanticDelta.changed.map(entry => [entry.id, entry.fields]), [[3, ['text']]])
   assert.deepEqual(result.semanticDelta.newText, ['Created'])
   assert.match(result.semanticDelta.text, /New on screen:[\s\S]*Changed:[\s\S]*New text:/u)
+})
+
+test('a null click script result fails closed instead of crashing on result.scroll', async t => {
+  // A frame destroyed mid-injection (drag-batch reflow) can return a null script
+  // result; runInFrame only rejects undefined. The click path must fail closed
+  // with a recoverable CLICK_FAILED, not a raw TypeError "reading 'scroll'".
+  const fake = fakeExpectBrowser(t, { nullClickResult: true })
+  const mod = await fake.initialize()
+  await assert.rejects(
+    mod.execute('click', { label: 3, view: 'none' }, {}),
+    error => error.code === 'CLICK_FAILED' && !/reading 'scroll'/.test(error.message),
+  )
 })
 
 test('off-screen coordinate bursts keep pixels unknown and report no dispatch or mutation risk', async t => {
