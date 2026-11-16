@@ -287,6 +287,142 @@ test('Docs replace probe scopes role buttons to the structural dialog', () => {
   }
 })
 
+test('Docs find probe reads the open find bar, its counter, and closed/hidden states', () => {
+  // Q8: a stray edit inside readFind once broke every live Docs find while all
+  // unit tests stayed green because nothing exercised probe('find') with the
+  // bar open. This covers the open-bar readback the selection flow waits on.
+  class FakeElement {
+    constructor(tagName, { label, roleName, text = '', x = 0 } = {}, children = []) {
+      this.tagName = tagName.toUpperCase()
+      this.attributes = { ...label === undefined ? {} : { 'aria-label': label }, ...roleName === undefined ? {} : { role: roleName } }
+      this.innerText = text
+      this.textContent = text
+      this.x = x
+      this.children = children
+      this.parentElement = undefined
+      this.isConnected = true
+      this.disabled = false
+      this.value = ''
+      for (const child of children) child.parentElement = this
+    }
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const wanted = part.trim()
+        const roleMatch = /^\[role="([^"]+)"\]$/u.exec(wanted)
+        if (roleMatch) return this.attributes.role === roleMatch[1]
+        if (wanted === 'input' || wanted === 'textarea' || wanted === 'button') return this.tagName === wanted.toUpperCase()
+        if (wanted === '[inert]') return 'inert' in this.attributes
+        if (wanted === '[aria-hidden="true"]') return this.attributes['aria-hidden'] === 'true'
+        if (wanted === ':disabled') return this.disabled
+        return false
+      })
+    }
+    querySelectorAll(selector) {
+      return this.children.flatMap(child => [
+        ...child.matches(selector) ? [child] : [],
+        ...child.querySelectorAll(selector),
+      ])
+    }
+    closest(selector) {
+      let current = this
+      while (current) {
+        if (current.matches(selector)) return current
+        current = current.parentElement
+      }
+      return null
+    }
+    getAttribute(name) { return this.attributes[name] ?? null }
+    getBoundingClientRect() { return { left: this.x, top: 0, width: 10, height: 10 } }
+    contains(other) {
+      let current = other
+      while (current) {
+        if (current === this) return true
+        current = current.parentElement
+      }
+      return false
+    }
+  }
+  const make = (tag, options, children) => new FakeElement(tag, options, children)
+  const keys = ['Element', 'document', 'getComputedStyle', 'innerWidth', 'innerHeight']
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  const install = (root, activeElement) => {
+    Object.assign(globalThis, {
+      Element: FakeElement,
+      innerWidth: 1790,
+      innerHeight: 925,
+      document: {
+        querySelectorAll: selector => root.querySelectorAll(selector),
+        getElementById: () => undefined,
+        elementFromPoint: () => root,
+        activeElement,
+      },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    })
+  }
+  try {
+    const box = make('input', { label: 'Find in document' })
+    box.value = 'needle'
+    const bar = make('div', { text: 'Find in document 1 of 3' }, [box])
+    const root = make('div', {}, [bar])
+    install(root, box)
+    assert.deepEqual(docsPageProbe('find'), {
+      ok: true,
+      open: true,
+      enabled: true,
+      focused: true,
+      value: 'needle',
+      counterText: 'Find in document 1 of 3',
+      match: { current: 1, total: 3, text: '1 of 3' },
+    })
+
+    // Focus and enabled are read independently of the open state.
+    install(root, root)
+    assert.equal(docsPageProbe('find').focused, false)
+    box.disabled = true
+    const disabled = docsPageProbe('find')
+    assert.equal(disabled.open, true)
+    assert.equal(disabled.enabled, false)
+    box.disabled = false
+
+    // No counter yet: open but no match, so the flow keeps waiting.
+    bar.textContent = 'Find in document'
+    const noCounter = docsPageProbe('find')
+    assert.equal(noCounter.open, true)
+    assert.equal(noCounter.counterText, '')
+    assert.equal(noCounter.match, undefined)
+
+    // Two counters in scope are ambiguous and must not resolve to a match.
+    bar.textContent = 'Find in document 1 of 3 and 2 of 3'
+    assert.equal(docsPageProbe('find').match, undefined)
+    bar.textContent = 'Find in document 2 of 3'
+    assert.deepEqual(docsPageProbe('find').match, { current: 2, total: 3, text: '2 of 3' })
+
+    // A CSS-hidden or aria-hidden bar is closed for the flow's purposes.
+    globalThis.getComputedStyle = () => ({ display: 'none', visibility: 'visible', opacity: '1' })
+    assert.deepEqual(docsPageProbe('find'), { ok: true, open: false })
+    globalThis.getComputedStyle = () => ({ display: 'block', visibility: 'visible', opacity: '1' })
+    bar.attributes['aria-hidden'] = 'true'
+    assert.deepEqual(docsPageProbe('find'), { ok: true, open: false })
+    delete bar.attributes['aria-hidden']
+
+    // No bar at all.
+    install(make('div', {}, []), root)
+    assert.deepEqual(docsPageProbe('find'), { ok: true, open: false })
+
+    // Two exact bars fail closed instead of picking one.
+    const box2 = make('input', { label: 'Find in document' })
+    install(make('div', {}, [make('div', { text: '1 of 1' }, [box]), make('div', { text: '1 of 1' }, [box2])]), box)
+    const ambiguous = docsPageProbe('find')
+    assert.equal(ambiguous.ok, false)
+    assert.equal(ambiguous.code, 'AMBIGUOUS_FIND')
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  }
+})
+
 test('Docs font menu filters unusable duplicates and rejects conflicting active menus', () => {
   class FakeElement {
     constructor(tagName, { label = '', roleName, x = 0, y = 0, covered = false, checked = false, isDisabled = false, hidden = false } = {}) {
