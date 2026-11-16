@@ -234,12 +234,22 @@ export function assertBatchExpectSequence(actions, options = {}) {
     const expectation = action?.args?.expect
     const sensitive = ['text_landed', 'export_contains', 'toolbar_style'].find(key => Object.hasOwn(expectation ?? {}, key))
     if (documentMayChange && sensitive !== undefined) {
-      const path = `${prefix}[${index}].expect.${sensitive}`
-      const error = new Error(`${path} cannot be verified after an earlier batch step that may navigate or replace the document; move it before those steps or use a separate call after a fresh view`)
-      error.name = 'ActionExpectError'
-      error.code = 'EXPECT_UNSUPPORTED'
-      error.path = path
-      throw error
+      // Page-scoped text_landed (a click) reports honest UNKNOWN on scope-mismatch
+      // when the document changed, so the scope itself preserves the safety the
+      // strict rule protects; it is allowed after a mutating step and dispatches.
+      // URL-sensitive Docs scopes (export_contains, toolbar_style) and field-scoped
+      // text_landed (type/press_key) keep the strict pre-dispatch rejection. This
+      // relaxes EVIDENCE validity only — each step's own stale-view/ambiguity/
+      // wrong-target mutation guards still apply unchanged.
+      const pageScopedText = sensitive === 'text_landed' && action?.op === 'click'
+      if (!pageScopedText) {
+        const path = `${prefix}[${index}].expect.${sensitive}`
+        const error = new Error(`${path} cannot be verified after an earlier batch step that may navigate or replace the document; move it before those steps or use a separate call after a fresh view`)
+        error.name = 'ActionExpectError'
+        error.code = 'EXPECT_UNSUPPORTED'
+        error.path = path
+        throw error
+      }
     }
     if (action?.op !== 'wait_for') documentMayChange = true
   }

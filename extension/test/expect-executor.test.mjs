@@ -578,6 +578,68 @@ test('URL-sensitive batch expectations fail before any earlier navigation side e
   }
 })
 
+test('batch sequence relaxes only page-scoped click text_landed; Docs scopes stay strict', () => {
+  // (a/relaxation) A click's page-scoped text_landed is allowed after a mutating
+  // step: the scope reports honest unknown on navigation, so no pre-dispatch refusal.
+  assert.doesNotThrow(() => assertBatchExpectSequence([
+    { op: 'type', args: { text: 'x' } },
+    { op: 'click', args: { label: 3, expect: { text_landed: 'later' } } },
+  ]))
+  assert.doesNotThrow(() => assertBatchExpectSequence([
+    { op: 'navigate', args: { url: 'https://example.test' } },
+    { op: 'click', args: { label: 3, expect: { text_landed: 'later' } } },
+  ]))
+  // (c) Field-scoped text_landed (type/press_key) keeps the strict rejection.
+  for (const op of ['type', 'press_key']) {
+    assert.throws(() => assertBatchExpectSequence([
+      { op: 'click', args: {} },
+      { op, args: { expect: { text_landed: 'later' } } },
+    ]), error => error.code === 'EXPECT_UNSUPPORTED', op)
+  }
+  // (c) URL-sensitive Docs scopes keep the strict pre-dispatch rejection.
+  for (const key of ['export_contains', 'toolbar_style']) {
+    const expect = key === 'export_contains' ? { export_contains: 'later' } : { toolbar_style: { bold: true } }
+    assert.throws(() => assertBatchExpectSequence([
+      { op: 'type', args: { text: 'x' } },
+      { op: 'click', args: { label: 3, expect } },
+    ]), error => error.code === 'EXPECT_UNSUPPORTED' && error.path === `actions[1].expect.${key}`, key)
+  }
+})
+
+test('batch click text_landed dispatches and verifies same-document absent-to-present', async t => {
+  const fake = fakeExpectBrowser(t, { pageText: '' })
+  const mod = await fake.initialize()
+  const result = await mod.execute('batch', { view: 'none', actions: [
+    { op: 'type', args: { label: 7, text: 'Ada' } },
+    { op: 'click', args: { label: 3, expect: { text_landed: 'result:' } } },
+  ] }, {})
+  const clickStep = result.actions[1]
+  assert.equal(clickStep.expectation.checks[0].status, 'verified', JSON.stringify(clickStep.expectation))
+  assert.equal(clickStep.expectation.checks[0].reason, 'appeared')
+  assert.equal(clickStep.expectation.checks[0].scope.before.kind, 'page')
+  assert.equal(clickStep.outcome.attempted, true)
+  assert.equal(fake.state.value, 'Ada')
+  assert.equal(fake.state.count, 1)
+})
+
+test('batch click text_landed reports unknown after navigation and never re-mutates', async t => {
+  // (a) document changed -> unknown; (d) no re-aiming/retry/re-mutation.
+  const fake = fakeExpectBrowser(t, { pageText: '', navigateAfter: true })
+  const mod = await fake.initialize()
+  const result = await mod.execute('batch', { view: 'none', actions: [
+    { op: 'type', args: { label: 7, text: 'Ada' } },
+    { op: 'click', args: { label: 3, expect: { text_landed: 'result:' } } },
+  ] }, {})
+  const clickStep = result.actions[1]
+  assert.equal(clickStep.expectation.checks[0].status, 'unverified')
+  assert.equal(clickStep.expectation.checks[0].observed, 'unknown')
+  assert.equal(clickStep.expectation.checks[0].reason, 'scope-mismatch')
+  assert.equal(clickStep.outcome.attempted, true)
+  // The click dispatched exactly once; the unknown expectation triggered no retry.
+  assert.equal(fake.state.scriptCalls.filter(call => call.name === 'clickLabelled').length, 1)
+  assert.equal(fake.state.count, 1)
+})
+
 test('explicit null outcome states are never inferred as true', () => {
   const result = finalizeActionEvidence({
     op: 'click', attempted: null, ok: null, mutationPossible: null,
