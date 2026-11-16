@@ -1,0 +1,466 @@
+{
+  "startedAt": "2026-11-16T09:15:44.286Z",
+  "finishedAt": "2026-11-16T09:17:21.719Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "dshHome": "/tmp/crazyagent-c1/dsh-home",
+  "maxTotalTokens": 6000000,
+  "totalTokens": 493554,
+  "stopReason": null,
+  "checks": [
+    {
+      "name": "plan",
+      "status": "pass",
+      "reasons": [],
+      "evidence": {
+        "page": {
+          "name": "Grace Hopper",
+          "notes": "Compiler pioneer",
+          "result": "result: name=Grace Hopper notes=Compiler pioneer pass=10chars",
+          "submitEvents": 1,
+          "editor": "",
+          "rich": "",
+          "comment": "",
+          "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+          "requested": {
+            "name": "Grace Hopper",
+            "notes": "Compiler pioneer",
+            "pass": "cobol-demo"
+          },
+          "expectedResult": "result: name=Grace Hopper notes=Compiler pioneer pass=10chars"
+        },
+        "chatDone": {
+          "planMode": true,
+          "planOutcome": "reported-complete",
+          "planRevision": 2,
+          "label": "done"
+        },
+        "turnEnd": {
+          "ok": true,
+          "aborted": false,
+          "planOutcome": "reported-complete",
+          "planRevision": 2
+        }
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj1t83h-6164",
+          "wallMs": 13609,
+          "steps": 12,
+          "toolCalls": 8,
+          "failedCalls": 0,
+          "retries": 3,
+          "deadSteps": 3,
+          "deadTurn": false,
+          "totalTokens": 281538,
+          "finalText": "DONE\n- Filled Name=\"Grace Hopper\", Notes=\"Compiler pioneer\", Password=\"cobol-demo\".\n- Submitted exactly once — page reports `submit=1` and `result: name=Grace Hopper notes=Compiler pioneer pass=10chars`.\n- Verified via fresh view: Rich text and canvas editor left empty; no other controls touched.",
+          "reportedLabel": "done",
+          "toolCounts": {
+            "browser_plan": 2,
+            "browser_type": 3,
+            "browser_click": 1,
+            "browser_read_text": 1,
+            "browser_screenshot": 1
+          }
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 13913,
+      "finishedAt": "2026-11-16T09:15:59.128Z"
+    },
+    {
+      "name": "resume",
+      "status": "fail",
+      "reasons": [
+        "POST /sessions/{id}/resume did not succeed"
+      ],
+      "evidence": {
+        "code": "CX-4769-SVUO",
+        "resumeOk": false,
+        "resumeStatus": 409,
+        "resumeAttempts": 1,
+        "resumeCode": "SESSION_NOT_RESUMABLE",
+        "expectedSessionId": "session-733164c301c042f7b3cff893a42b0b38",
+        "stateSessionId": "session-95f8ca8041b34a8ba6c0e2c13f98315a",
+        "finalSessionId": "session-95f8ca8041b34a8ba6c0e2c13f98315a",
+        "interveningAnswer": "4",
+        "answerText": "No verification code was provided in this conversation."
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj1titi-474b",
+          "wallMs": 9390,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 20500,
+          "finalText": "OK",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj1tq64-dba5",
+          "wallMs": 1378,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 20745,
+          "finalText": "4",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj1trv8-da31",
+          "wallMs": 1494,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 21168,
+          "finalText": "No verification code was provided in this conversation.",
+          "reportedLabel": null,
+          "toolCounts": {}
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 13464,
+      "finishedAt": "2026-11-16T09:16:12.592Z"
+    },
+    {
+      "name": "steer",
+      "status": "pass",
+      "reasons": [],
+      "evidence": {
+        "steered": true,
+        "firstTurnId": "turn-mwj1ttkd-7d68",
+        "secondTurnId": "turn-mwj1ty9e-51a9",
+        "turn1Aborted": true,
+        "turn1Ok": false,
+        "turn2Ok": true,
+        "countAtSteer": 4,
+        "finalCount": 4,
+        "target": 15,
+        "secondTurnClickCalls": 0,
+        "secondTurnBatchCalls": 0,
+        "secondAnswer": "Count: **4** (Increment count: 4). I've stopped clicking and will not click anything further.",
+        "secondStateOutcome": "done"
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj1ttkd-7d68",
+          "wallMs": 6104,
+          "steps": 1,
+          "toolCalls": 1,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 21319,
+          "finalText": null,
+          "reportedLabel": null,
+          "toolCounts": {
+            "browser_batch": 1
+          }
+        },
+        {
+          "turnId": "turn-mwj1ty9e-51a9",
+          "wallMs": 1202,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 21733,
+          "finalText": "Count: **4** (Increment count: 4). I've stopped clicking and will not click anything further.",
+          "reportedLabel": null,
+          "toolCounts": {}
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 8091,
+      "finishedAt": "2026-11-16T09:16:20.683Z"
+    },
+    {
+      "name": "cycles",
+      "status": "pass",
+      "reasons": [],
+      "evidence": {
+        "cycles": [
+          {
+            "index": 0,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 408,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 1,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 2,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 3,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 4,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 5,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 406,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 6,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 410,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 7,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 406,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 8,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 9,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 406,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 10,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 11,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 405,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 12,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 13,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 14,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 15,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 16,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 406,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 17,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 18,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 19,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 407,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          }
+        ],
+        "rotations": [
+          {
+            "afterCycle": 4,
+            "oldRevoked": true,
+            "newWorks": true,
+            "oneShotExit": 0,
+            "tokenChanged": true
+          },
+          {
+            "afterCycle": 9,
+            "oldRevoked": true,
+            "newWorks": true,
+            "oneShotExit": 0,
+            "tokenChanged": true
+          },
+          {
+            "afterCycle": 14,
+            "oldRevoked": true,
+            "newWorks": true,
+            "oneShotExit": 0,
+            "tokenChanged": true
+          },
+          {
+            "afterCycle": 19,
+            "oldRevoked": true,
+            "newWorks": true,
+            "oneShotExit": 0,
+            "tokenChanged": true
+          }
+        ],
+        "finalProbe": {
+          "accepted": true,
+          "outcome": "done"
+        },
+        "rateLimitRetries": 0
+      },
+      "metrics": [],
+      "attempts": 1,
+      "wallMs": 54677,
+      "finishedAt": "2026-11-16T09:17:15.361Z"
+    },
+    {
+      "name": "minimized",
+      "status": "pass",
+      "reasons": [],
+      "evidence": {
+        "minimizeOk": true,
+        "minimizeError": null,
+        "minimizeAt": "2026-11-16T09:17:18.191Z",
+        "turnDone": true,
+        "images": [
+          {
+            "name": "turn-mwj1v6kz-0fdc-3060-snapshot-5c5d762b.jpg",
+            "bytes": 97854,
+            "width": 2048,
+            "height": 1021,
+            "redPixels": 474,
+            "nonWhiteFraction": 0.06154782765058766,
+            "sampled": 2091008
+          }
+        ],
+        "setupState": "trusted 1 · synthetic 0 · offset 0",
+        "headed": true
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj1v6kz-0fdc",
+          "wallMs": 4805,
+          "steps": 2,
+          "toolCalls": 1,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 44361,
+          "finalText": "DONE — screenshot captured (view #2, 2048×1021, page `canvas.html`).\n\n**Page: \"Canvas fixture\"** (background white, most text dark gray/black)\n\n- **Title**: \"Canvas fixture\" in bold black text at top-left.\n- **Left panel — gridded canvas** (light gray border, white fill): a faint light-gray square grid covers the whole panel. Top-left has bold dark text \"trusted 1 · synthetic 0 · offset 0\" with a smaller line \"Canvas has no DOM targets: click by coordinate.\" Below the panel on the left edge the same status line repeats. The only colored shape inside is a **single solid crimson/red circle** (dot) sitting slightly left of center. Total seems to be: no other drawn shapes.\n- **Right panel — \"Canvas text editor\"**: a heading in bold black, then a bordered white rectangle containing gray text \"Ready:\" and a second line \"Text is painted on this canvas; the DOM textarea is only\" (cut off at the panel edge). Below the box, plain gray \"Ready:\" again. No shapes drawn here.\n- **Bottom-left**: a small **rectangular button, light gray with a border, labeled \"DOM button\"**, with a small **yellow tag/badge** just above its top-left corner.\n- **Overlay artifact**: a large **yellow-and-black arrow cursor with a soft yellow glow** near the right panel — that's the mouse pointer, not page content.\n\nColors overall: white background, light-gray grid lines/borders, black text, one red dot, gray button, yellow cursor highlight. Shapes: two rectangles (two canvases), one button rectangle, a grid of squares, and one circle.",
+          "reportedLabel": "done",
+          "toolCounts": {
+            "browser_screenshot": 1
+          }
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 5461,
+      "finishedAt": "2026-11-16T09:17:21.719Z"
+    }
+  ]
+}

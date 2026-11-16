@@ -1,0 +1,454 @@
+{
+  "startedAt": "2026-11-16T09:07:37.732Z",
+  "finishedAt": "2026-11-16T09:08:53.763Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "dshHome": "/tmp/crazyagent-c1/dsh-home",
+  "maxTotalTokens": 6000000,
+  "totalTokens": 603950,
+  "stopReason": null,
+  "checks": [
+    {
+      "name": "plan",
+      "status": "pass",
+      "reasons": [],
+      "evidence": {
+        "page": {
+          "name": "Grace Hopper",
+          "notes": "Compiler pioneer",
+          "result": "result: name=Grace Hopper notes=Compiler pioneer pass=10chars",
+          "submitEvents": 1,
+          "editor": "",
+          "rich": "",
+          "comment": "",
+          "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+          "requested": {
+            "name": "Grace Hopper",
+            "notes": "Compiler pioneer",
+            "pass": "cobol-demo"
+          },
+          "expectedResult": "result: name=Grace Hopper notes=Compiler pioneer pass=10chars"
+        },
+        "chatDone": {
+          "planMode": true,
+          "planOutcome": "reported-complete",
+          "planRevision": 2,
+          "label": "done"
+        },
+        "turnEnd": {
+          "ok": true,
+          "aborted": false,
+          "planOutcome": "reported-complete",
+          "planRevision": 2
+        }
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj1isow-5aa9",
+          "wallMs": 10097,
+          "steps": 6,
+          "toolCalls": 5,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 147976,
+          "finalText": "DONE\n\n- Filled Name=\"Grace Hopper\", Notes=\"Compiler pioneer\", Password=\"cobol-demo\"; left Rich text and the canvas editor untouched.\n- Submitted once; page evidence: `events input=3 keydown=0 submit=1`, `result: name=Grace Hopper notes=Compiler pioneer pass=10chars`.\n- Verified via page text read after the click.",
+          "reportedLabel": "done",
+          "toolCounts": {
+            "browser_plan": 2,
+            "browser_batch": 1,
+            "browser_click": 1,
+            "browser_read_text": 1
+          }
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 10341,
+      "finishedAt": "2026-11-16T09:07:49.025Z"
+    },
+    {
+      "name": "resume",
+      "status": "fail",
+      "reasons": [
+        "POST /sessions/{id}/resume did not succeed"
+      ],
+      "evidence": {
+        "code": "CX-3552-UNJS",
+        "resumeOk": false,
+        "resumeStatus": 409,
+        "expectedSessionId": "session-29e92f5727b24cbfb6033a4a85a393a9",
+        "stateSessionId": "session-2fe3ce46e9314ad0b1c79c95c769b743",
+        "finalSessionId": "session-2fe3ce46e9314ad0b1c79c95c769b743",
+        "interveningAnswer": "4",
+        "answerText": "No code was given to me — you haven't asked me to remember any verification code in this conversation."
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj1j0o1-4590",
+          "wallMs": 1107,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 21951,
+          "finalText": "OK",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj1j1m8-d6d2",
+          "wallMs": 1309,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 21891,
+          "finalText": "4",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj1j39r-34a1",
+          "wallMs": 1111,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 22326,
+          "finalText": "No code was given to me — you haven't asked me to remember any verification code in this conversation.",
+          "reportedLabel": null,
+          "toolCounts": {}
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 4743,
+      "finishedAt": "2026-11-16T09:07:53.768Z"
+    },
+    {
+      "name": "steer",
+      "status": "pass",
+      "reasons": [],
+      "evidence": {
+        "steered": true,
+        "firstTurnId": "turn-mwj1j4b8-b30b",
+        "secondTurnId": "turn-mwj1j73u-58df",
+        "turn1Aborted": true,
+        "turn1Ok": false,
+        "turn2Ok": true,
+        "countAtSteer": 3,
+        "finalCount": 3,
+        "target": 15,
+        "secondTurnClickCalls": 0,
+        "secondTurnBatchCalls": 0,
+        "secondAnswer": "Stopped — no further clicks made.\n\n- Current count shown: **Increment count: 3**\n- Only 3 of the 15 intended clicks landed (the batch was cancelled); the page now reads 3, not 15.\n- Verified from the current page view just now.",
+        "secondStateOutcome": "done"
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj1j4b8-b30b",
+          "wallMs": 3658,
+          "steps": 1,
+          "toolCalls": 1,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 22317,
+          "finalText": null,
+          "reportedLabel": null,
+          "toolCounts": {
+            "browser_batch": 1
+          }
+        },
+        {
+          "turnId": "turn-mwj1j73u-58df",
+          "wallMs": 1406,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 22772,
+          "finalText": "Stopped — no further clicks made.\n\n- Current count shown: **Increment count: 3**\n- Only 3 of the 15 intended clicks landed (the batch was cancelled); the page now reads 3, not 15.\n- Verified from the current page view just now.",
+          "reportedLabel": null,
+          "toolCounts": {}
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 5372,
+      "finishedAt": "2026-11-16T09:07:59.140Z"
+    },
+    {
+      "name": "cycles",
+      "status": "fail",
+      "reasons": [
+        "turn did not settle on 8 cycle(s): 13,14,15,16,17,18,19,20",
+        "next prompt not accepted (orphaned slot?) on cycle(s): 13,14,15,16,17,18,19,20"
+      ],
+      "evidence": {
+        "cycles": [
+          {
+            "index": 0,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 208,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 1,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 209,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 2,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 208,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 3,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 212,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 4,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 212,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 5,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 209,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 6,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 207,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 7,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 212,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 8,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 208,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 9,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 209,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 10,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 211,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 11,
+            "busy": false,
+            "settled": true,
+            "nextAccepted": true,
+            "settleMs": 206,
+            "stoppedStatus": "idle",
+            "stoppedOutcome": "stopped"
+          },
+          {
+            "index": 12,
+            "busy": false,
+            "settled": false,
+            "nextAccepted": false,
+            "settleMs": null,
+            "error": "429 Too many prompts. Wait a minute."
+          },
+          {
+            "index": 13,
+            "busy": false,
+            "settled": false,
+            "nextAccepted": false,
+            "settleMs": null,
+            "error": "429 Too many prompts. Wait a minute."
+          },
+          {
+            "index": 14,
+            "busy": false,
+            "settled": false,
+            "nextAccepted": false,
+            "settleMs": null,
+            "error": "429 Too many prompts. Wait a minute."
+          },
+          {
+            "index": 15,
+            "busy": false,
+            "settled": false,
+            "nextAccepted": false,
+            "settleMs": null,
+            "error": "429 Too many prompts. Wait a minute."
+          },
+          {
+            "index": 16,
+            "busy": false,
+            "settled": false,
+            "nextAccepted": false,
+            "settleMs": null,
+            "error": "429 Too many prompts. Wait a minute."
+          },
+          {
+            "index": 17,
+            "busy": false,
+            "settled": false,
+            "nextAccepted": false,
+            "settleMs": null,
+            "error": "429 Too many prompts. Wait a minute."
+          },
+          {
+            "index": 18,
+            "busy": false,
+            "settled": false,
+            "nextAccepted": false,
+            "settleMs": null,
+            "error": "429 Too many prompts. Wait a minute."
+          },
+          {
+            "index": 19,
+            "busy": false,
+            "settled": false,
+            "nextAccepted": false,
+            "settleMs": null,
+            "error": "429 Too many prompts. Wait a minute."
+          }
+        ],
+        "rotations": [
+          {
+            "afterCycle": 4,
+            "oldRevoked": true,
+            "newWorks": true,
+            "oneShotExit": 0,
+            "tokenChanged": true
+          },
+          {
+            "afterCycle": 9,
+            "oldRevoked": true,
+            "newWorks": true,
+            "oneShotExit": 0,
+            "tokenChanged": true
+          },
+          {
+            "afterCycle": 14,
+            "oldRevoked": true,
+            "newWorks": true,
+            "oneShotExit": 0,
+            "tokenChanged": true
+          },
+          {
+            "afterCycle": 19,
+            "oldRevoked": true,
+            "newWorks": true,
+            "oneShotExit": 0,
+            "tokenChanged": true
+          }
+        ]
+      },
+      "metrics": [],
+      "attempts": 1,
+      "wallMs": 40307,
+      "finishedAt": "2026-11-16T09:08:39.447Z"
+    },
+    {
+      "name": "minimized",
+      "status": "fail",
+      "reasons": [
+        "saved images are not real page content: [{\"width\":1280,\"height\":647,\"redPixels\":0,\"nonWhiteFraction\":0.065}]"
+      ],
+      "evidence": {
+        "minimizeOk": true,
+        "minimizeError": null,
+        "minimizeAt": "2026-11-16T09:08:42.131Z",
+        "turnDone": true,
+        "images": [
+          {
+            "name": "turn-mwj1k4dy-22f5-3010-click_at-31037622.jpg",
+            "bytes": 50620,
+            "width": 1280,
+            "height": 647,
+            "redPixels": 0,
+            "nonWhiteFraction": 0.06477009273570325,
+            "sampled": 828160
+          }
+        ],
+        "headed": true
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj1k4dy-22f5",
+          "wallMs": 12929,
+          "steps": 2,
+          "toolCalls": 1,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 45983,
+          "finalText": "DONE — clicked once at the center of the top drawing canvas and captured the screenshot above.\n\n- Verified: the click registered as trusted input (pixel change 22.9%), and the canvas counter updated from \"trusted 0 · synthetic 0 · offset 0\" to \"trusted 1 · synthetic 0 · offset 0\".\n- What I see: a light/white canvas with a faint gray grid of square cells; at the click point sits a small orange/amber arrow-shaped cursor marker with a yellow glow halo. Surrounding page: black \"Canvas fixture\" heading, monospace counter lines, a \"DOM button\" control below-left, and on the right a boxed \"Canvas text editor\" panel with the text \"Ready:\" and a note that text is painted on the canvas.",
+          "reportedLabel": "done",
+          "toolCounts": {
+            "browser_click_at": 1
+          }
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 13409,
+      "finishedAt": "2026-11-16T09:08:53.763Z"
+    }
+  ]
+}

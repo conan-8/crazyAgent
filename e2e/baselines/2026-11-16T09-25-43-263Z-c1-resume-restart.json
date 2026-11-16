@@ -1,0 +1,87 @@
+{
+  "startedAt": "2026-11-16T09:25:43.263Z",
+  "finishedAt": "2026-11-16T09:26:20.266Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "dshHome": "/tmp/crazyagent-c1/dsh-home",
+  "maxTotalTokens": 6000000,
+  "totalTokens": 80640,
+  "stopReason": null,
+  "checks": [
+    {
+      "name": "resume",
+      "status": "fail",
+      "reasons": [
+        "resume did not succeed on either path (in-process: SESSION_NOT_RESUMABLE; restart: 200)"
+      ],
+      "evidence": {
+        "code": "CX-1482-MAEM",
+        "inProcess": {
+          "ok": false,
+          "status": 409,
+          "code": "SESSION_NOT_RESUMABLE",
+          "attempts": 1
+        },
+        "restart": {
+          "performed": true,
+          "ok": false,
+          "status": 200,
+          "code": null,
+          "attempts": 1
+        },
+        "expectedSessionId": "session-ec92dba82d784a5bbef99e3a4e107a41",
+        "stateSessionId": "session-ec92dba82d784a5bbef99e3a4e107a41",
+        "finalSessionId": "session-ec92dba82d784a5bbef99e3a4e107a41",
+        "interveningAnswer": "4",
+        "answerText": "CX-1482-MAEM"
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj2629l-e3f3",
+          "wallMs": 15380,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 20663,
+          "finalText": "OK",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj26e86-b08c",
+          "wallMs": 823,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 38951,
+          "finalText": "4",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj26ho4-dd01",
+          "wallMs": 15919,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 21026,
+          "finalText": "CX-1482-MAEM",
+          "reportedLabel": null,
+          "toolCounts": {}
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 36065,
+      "finishedAt": "2026-11-16T09:26:20.266Z"
+    }
+  ]
+}
