@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { WebSocketServer } from 'ws'
 import Ajv from 'ajv'
 import { apply } from '../lib/index.js'
+import { CORE_GUIDANCE, DOCS_MODE_GUIDANCE } from '../lib/guidance.js'
 
 const IMAGE = { data: 'AAAA', mimeType: 'image/jpeg', width: 1, height: 1, bytes: 3 }
 const SCROLL = {
@@ -1030,10 +1031,22 @@ test('registers the provider, guidance, and the consolidated browser tools', asy
   }
   assert.equal(fake.sections.length, 1)
   const guidance = fake.sections[0].text
-  assert.ok(guidance.length >= 12_000 && guidance.length <= 17_100, `GUIDANCE must be 12-17.1K chars, got ${guidance.length}`)
-  // Every registered tool must be named by the guidance at least once
-  // (browser_scroll was the last one missing).
-  for (const name of toolNames) assert.match(guidance, new RegExp(`\\b${name}\\b`), `${name} must be mentioned in GUIDANCE`)
+  // D2: the standing section is the core block; the Docs block is conditional
+  // (<docs_mode> at turn start, or the first Docs tool result of a turn that
+  // lacked it). A Docs turn (core + docs) must still fit the old ceiling, and
+  // the core must leave real headroom for future tools.
+  assert.equal(guidance, CORE_GUIDANCE)
+  assert.ok(guidance.length >= 9_000 && guidance.length <= 17_100, `CORE_GUIDANCE must be 9-17.1K chars, got ${guidance.length}`)
+  const combined = `${CORE_GUIDANCE}\n\n${DOCS_MODE_GUIDANCE}`
+  assert.ok(combined.length <= 17_100, `core + Docs block must fit the 17.1K ceiling, got ${combined.length}`)
+  assert.ok(combined.length >= 12_000, `combined guidance lost too much content: ${combined.length}`)
+  assert.match(DOCS_MODE_GUIDANCE, /^<docs_mode>\n/u)
+  assert.match(DOCS_MODE_GUIDANCE, /\n<\/docs_mode>$/u)
+  assert.match(guidance, /Google Docs tools \(browser_docs_\*\): their rules arrive in a <docs_mode> block/)
+  // Every registered tool must be named by the guidance at least once; the
+  // non-Docs tools must be named in the standing core itself.
+  for (const name of toolNames) assert.match(combined, new RegExp(`\\b${name}\\b`), `${name} must be mentioned in guidance`)
+  for (const name of toolNames.filter(name => !name.startsWith('browser_docs_'))) assert.match(guidance, new RegExp(`\\b${name}\\b`), `${name} must be mentioned in CORE_GUIDANCE`)
   for (const pattern of [
     /browser_scroll scrolls the active tab and returns a fresh view/,
     /pages defaults to 0\.85 viewport/,
@@ -1059,22 +1072,21 @@ test('registers the provider, guidance, and the consolidated browser tools', asy
     /reporting check, not proof of success/,
     /dialog.status:"pending"/,
     /call browser_dialog once/,
-    /Never close tabs/,
+    /ctrl\/cmd\+W is rejected/,
     /select-all\/delete/,
     /One scoped Ctrl\+Z is allowed/,
     /never chain blind undos/,
     /CAPTCHA\/2FA/,
     /Never paste secrets or passwords/,
     /no per-turn call limit/,
+    /identical failure without new page evidence/,
     /one action \+ full fresh view/,
-    /No mutating batches or multi-point bursts/,
-    /executor will reject them/,
+    /Mutating batches\/bursts are rejected in code/,
     /never retry unverified input blindly/,
     /Never reuse earlier coordinates/,
     /prefer browser_click_role with path:\[\{role,name\}/,
     /ROLE_CLICK_UNSETTLED/,
-    /Docs' div comboboxes are not native selects/,
-    /Google Docs drag selection is rejected because it can move text/,
+    /Docs drag selection is rejected in code/,
     /Unlabelled browser_type inserts at the caret\/current selection, not a whole-document replace/,
     /composite form 'shift\+Tab'/,
     /never read the system clipboard without a user request/,
@@ -1100,42 +1112,42 @@ test('registers the provider, guidance, and the consolidated browser tools', asy
     /document tabs/,
   ]) assert.match(guidance, pattern)
 
-  assert.match(guidance, /make browser_docs_replace your FIRST tool call/)
-  assert.match(guidance, /edits:\[\{text,replacement\}, \.\.\.\] \(1-200\)/)
-  assert.match(guidance, /do not read page text first/i)
-  assert.match(guidance, /recheck uniqueness/)
-  assert.match(guidance, /zero-based failure index/)
-  assert.match(guidance, /do not choose another target/i)
-  assert.match(guidance, /Three consecutive failures trip DOCS_FAILURE_CIRCUIT/)
-  assert.match(guidance, /make browser_docs_format your FIRST tool call/)
-  assert.match(guidance, /paragraph_style, font_size, bold, italic, underline, font, color, or highlight/)
-  assert.match(guidance, /omitting occurrence always requires a unique match, never picks first/)
-  assert.match(guidance, /Booleans are desired states/)
-  assert.match(guidance, /remove_if_missing:true/)
-  assert.match(guidance, /matched text only, never its paragraph break/)
-  assert.match(guidance, /More fonts add → close → reopen → apply/)
-  assert.match(guidance, /Syne must not match Syne Mono/)
-  assert.match(guidance, /browser_docs_select_text with exact text/)
-  assert.match(guidance, /Omitted occurrence remains unique-only and never defaults to first/)
-  assert.match(guidance, /text-only result reports the verified selection/)
-  assert.match(guidance, /exactly one guarded primitive action/)
-  assert.match(guidance, /never batch selection\/formatting or chain Ctrl\+B repairs/)
-  assert.match(guidance, /identical failure without new page evidence/)
-  assert.match(guidance, /never repeat an identical table call without new page evidence/)
-  assert.match(guidance, /make browser_docs_write your FIRST content tool call/)
-  assert.match(guidance, /runs:\[\{text/)
-  assert.match(guidance, /list:"numbered"\|"bulleted"\|"checklist"/)
-  assert.match(guidance, /\{text,checked\}/)
-  assert.match(guidance, /\{page_break:true\}/)
-  assert.match(guidance, /Never send blank:false/)
-  assert.match(guidance, /always pair every items array with list and every list with items/)
-  assert.match(guidance, /formats every run ahead of the caret/)
-  assert.match(guidance, /exits lists with Enter twice/)
-  assert.match(guidance, /never retype content or drop requested attributes/)
-  assert.match(guidance, /browser_docs_page_setup/)
-  assert.match(guidance, /browser_docs_rename/)
-  assert.match(guidance, /Returned export results suffice/)
-  assert.match(guidance, /partial\/failed\/non-export mutations stay unverified/)
+  assert.match(DOCS_MODE_GUIDANCE, /make browser_docs_replace your FIRST tool call/)
+  assert.match(DOCS_MODE_GUIDANCE, /edits:\[\{text,replacement\}, \.\.\.\] \(1-200\)/)
+  assert.match(DOCS_MODE_GUIDANCE, /do not read page text first/i)
+  assert.match(DOCS_MODE_GUIDANCE, /recheck uniqueness/)
+  assert.match(DOCS_MODE_GUIDANCE, /zero-based failure index/)
+  assert.match(DOCS_MODE_GUIDANCE, /do not choose another target/i)
+  assert.match(DOCS_MODE_GUIDANCE, /Three consecutive failures trip DOCS_FAILURE_CIRCUIT/)
+  assert.match(DOCS_MODE_GUIDANCE, /make browser_docs_format your FIRST tool call/)
+  assert.match(DOCS_MODE_GUIDANCE, /paragraph_style, font_size, bold, italic, underline, font, color, or highlight/)
+  assert.match(DOCS_MODE_GUIDANCE, /omitting occurrence always requires a unique match, never picks first/)
+  assert.match(DOCS_MODE_GUIDANCE, /Booleans are desired states/)
+  assert.match(DOCS_MODE_GUIDANCE, /remove_if_missing:true/)
+  assert.match(DOCS_MODE_GUIDANCE, /matched text only, never its paragraph break/)
+  assert.match(DOCS_MODE_GUIDANCE, /More fonts add → close → reopen → apply/)
+  assert.match(DOCS_MODE_GUIDANCE, /Syne must not match Syne Mono/)
+  assert.match(DOCS_MODE_GUIDANCE, /browser_docs_select_text with exact text/)
+  assert.match(DOCS_MODE_GUIDANCE, /Omitted occurrence remains unique-only and never defaults to first/)
+  assert.match(DOCS_MODE_GUIDANCE, /text-only result reports the verified selection/)
+  assert.match(DOCS_MODE_GUIDANCE, /exactly one guarded primitive action/)
+  assert.match(DOCS_MODE_GUIDANCE, /batches are rejected in code; never chain Ctrl\+B repairs/)
+  assert.match(DOCS_MODE_GUIDANCE, /Docs' div comboboxes are not native selects/)
+  assert.match(DOCS_MODE_GUIDANCE, /never repeat an identical table call without new page evidence/)
+  assert.match(DOCS_MODE_GUIDANCE, /make browser_docs_write your FIRST content tool call/)
+  assert.match(DOCS_MODE_GUIDANCE, /runs:\[\{text/)
+  assert.match(DOCS_MODE_GUIDANCE, /list:"numbered"\|"bulleted"\|"checklist"/)
+  assert.match(DOCS_MODE_GUIDANCE, /\{text,checked\}/)
+  assert.match(DOCS_MODE_GUIDANCE, /\{page_break:true\}/)
+  assert.match(DOCS_MODE_GUIDANCE, /Never send blank:false/)
+  assert.match(DOCS_MODE_GUIDANCE, /always pair every items array with list and every list with items/)
+  assert.match(DOCS_MODE_GUIDANCE, /formats every run ahead of the caret/)
+  assert.match(DOCS_MODE_GUIDANCE, /exits lists with Enter twice/)
+  assert.match(DOCS_MODE_GUIDANCE, /never retype content or drop requested attributes/)
+  assert.match(DOCS_MODE_GUIDANCE, /browser_docs_page_setup/)
+  assert.match(DOCS_MODE_GUIDANCE, /browser_docs_rename/)
+  assert.match(DOCS_MODE_GUIDANCE, /Returned export results suffice/)
+  assert.match(DOCS_MODE_GUIDANCE, /partial\/failed\/non-export mutations stay unverified/)
   assert.match(guidance, /browser_wait_for waits for text, URL substring, idle:true, or fixed ms/)
   assert.match(guidance, /Optional view:"full"\|"compact"\|"none"\|"auto"/)
   assert.match(guidance, /browser_batch runs up to 20 known actions/)
@@ -1146,9 +1158,9 @@ test('registers the provider, guidance, and the consolidated browser tools', asy
   assert.match(guidance, /BATCH_POSTCONDITION_FAILED means dispatch occurred/)
   assert.match(guidance, /Any guard failure stops even with stop_on_error:false/)
   assert.match(guidance, /never assume success or rollback/)
-  assert.doesNotMatch(guidance, /browser_docs_(?:replace_text|replace_many|format_many)\b/)
-  assert.doesNotMatch(guidance, /browser_docs with action:/)
-  assert.doesNotMatch(guidance, /update_normal_style/)
+  assert.doesNotMatch(combined, /browser_docs_(?:replace_text|replace_many|format_many)\b/)
+  assert.doesNotMatch(combined, /browser_docs with action:/)
+  assert.doesNotMatch(combined, /update_normal_style/)
   for (const tool of ['browser_type', 'browser_press_key', 'browser_navigate', 'browser_wait_for', 'browser_batch', 'browser_select', 'browser_clipboard']) {
     assert.match(guidance, new RegExp(tool), tool)
   }
@@ -2549,6 +2561,94 @@ test('browser_docs_read forwards export options and returns document content wit
   await assert.rejects(tool.execute({ offset: -1 }, exec), /offset must be a non-negative safe integer/)
   await assert.rejects(tool.execute({ unexpected: true }, exec), /unknown argument/)
   assert.equal(commands.length, commandCount)
+})
+
+test('D2 fail-safe: a mid-turn switch to Docs gets the rules on the first Docs call, once per turn', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: (op, args) => op === 'docs' && args.action === 'read' ? {
+      op: 'docs',
+      docs: { action: 'read', status: 'completed', format: 'outline', chars: 10, returned: 10, offset: 0, nextOffset: null, truncated: false, content: '1. first', verifiedBy: 'export' },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const session = { id: 'docs-failsafe-session', surface: { nodes: [] } }
+  const agent = { session, steer: () => {} }
+  const claimed = fake.listeners.get('agent/inbox/claimed')
+  const exec = { callId: 'd2-0', agent, signal: new AbortController().signal }
+  const read = fake.tools.get('browser_docs_read')
+  const textOf = result => result.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
+
+  // The turn starts on a non-Docs page and navigates to Docs mid-turn.
+  claimed({ agent, message: { id: 'u1', content: [{ type: 'text', text: 'organize my files' }] }, turn: 1 })
+  await fake.tools.get('browser_navigate').execute({ url: 'https://docs.google.com/document/d/abc123/edit' }, { ...exec, callId: 'd2-nav' })
+  const first = await read.execute({}, { ...exec, callId: 'd2-read1' })
+  assert.ok(textOf(first).startsWith(DOCS_MODE_GUIDANCE), 'the first Docs result carries the full rules')
+  assert.match(textOf(first), /make browser_docs_replace your FIRST tool call/u)
+  assert.match(textOf(first), /docs.status=completed/u, 'the actual result follows the rules')
+
+  // Once per turn, across Docs tools: a second read and a failed replace get nothing.
+  const second = await read.execute({}, { ...exec, callId: 'd2-read2' })
+  assert.doesNotMatch(textOf(second), /<docs_mode>/u)
+  await assert.rejects(() => fake.tools.get('browser_docs_replace').execute({}, { ...exec, callId: 'd2-replace' }), error => {
+    assert.doesNotMatch(error.message, /<docs_mode>/u)
+    return true
+  })
+
+  // An internal continuation notice does not reset the delivery flag.
+  claimed({ agent, message: { id: 'n1', source: { kind: 'token-limit-continuation', form: 'notice', summary: 'Output-token continuation' }, content: [{ type: 'text', text: 'continue' }] }, turn: 1 })
+  const third = await read.execute({}, { ...exec, callId: 'd2-read3' })
+  assert.doesNotMatch(textOf(third), /<docs_mode>/u)
+
+  // A new user turn without the block re-arms delivery.
+  claimed({ agent, message: { id: 'u2', content: [{ type: 'text', text: 'another task' }] }, turn: 2 })
+  const fourth = await read.execute({}, { ...exec, callId: 'd2-read4' })
+  assert.ok(textOf(fourth).startsWith(DOCS_MODE_GUIDANCE))
+
+  // A turn whose prompt already carried <docs_mode> never injects.
+  claimed({ agent, message: { id: 'u3', content: [{ type: 'text', text: `edit the doc\n\n${DOCS_MODE_GUIDANCE}` }] }, turn: 3 })
+  const fifth = await read.execute({}, { ...exec, callId: 'd2-read5' })
+  assert.doesNotMatch(textOf(fifth), /<docs_mode>/u)
+
+  // Non-Docs tools never carry the block.
+  const shot = await fake.tools.get('browser_screenshot').execute({}, { ...exec, callId: 'd2-shot' })
+  assert.doesNotMatch(textOf(shot), /<docs_mode>/u)
+})
+
+test('D2 fail-safe: a malformed first Docs call teaches the rules with its error', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: (op, args) => op === 'docs' && args.action === 'read' ? {
+      op: 'docs',
+      docs: { action: 'read', status: 'completed', format: 'outline', chars: 10, returned: 10, offset: 0, nextOffset: null, truncated: false, content: '1. first', verifiedBy: 'export' },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+  const session = { id: 'docs-error-session', surface: { nodes: [] } }
+  const agent = { session, steer: () => {} }
+  fake.listeners.get('agent/inbox/claimed')({ agent, message: { id: 'u1', content: [{ type: 'text', text: 'fix the document' }] }, turn: 1 })
+  const exec = { callId: 'd2-err', agent, signal: new AbortController().signal }
+  const read = fake.tools.get('browser_docs_read')
+  await assert.rejects(() => read.execute({ offset: -1 }, exec), error => {
+    assert.match(error.message, /offset must be a non-negative safe integer/u)
+    assert.match(error.message, /<docs_mode>/u, 'the rules ride the first error too')
+    return true
+  })
+  const result = await read.execute({}, { ...exec, callId: 'd2-err-ok' })
+  assert.doesNotMatch(result.content.filter(block => block.type === 'text').map(block => block.text).join('\n'), /<docs_mode>/u, 'delivered once, even across error and success')
 })
 
 test('browser_docs_page_setup validates and forwards exact page settings', async t => {
