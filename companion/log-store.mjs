@@ -17,6 +17,21 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { zipSync, strToU8 } from 'fflate'
 
+/**
+ * D4 part 2: a busy run logged each browser result several times (ui capture,
+ * tools forward, …) with the full label list, and `frame.in` (mostly the
+ * provider's live activity stream) was ~86% of all lines. The metrics scripts
+ * (`analyze-failures.mjs`, `model-eval.mjs`) read `tool.call`/`tool.result`/
+ * `turn.end`/signals/`bridge.command.error`/the leaked-step events — never
+ * `frame.in`/`frame.out` or `browser.result` — so those copies can be deduped
+ * without losing any metric. Keep ONE full browser result per commandId and
+ * reference the rest; summarize `frame.in` into periodic count/byte summaries.
+ * Set `CRAZYAGENT_LOG_FULL_FRAMES=1` to restore full per-frame logging for
+ * debugging. Old logs are unaffected; the readers parse them unchanged.
+ */
+const FULL_FRAMES_ENV = 'CRAZYAGENT_LOG_FULL_FRAMES'
+const FRAME_IN_SUMMARY_EVERY = 200
+
 const SENSITIVE_KEY = /(?:^|_)(?:token|api[-_]?key|secret|password|passwd|authorization|cookie|credential|private[-_]?key|access[-_]?token|refresh[-_]?token)(?:$|_)/iu
 const SENSITIVE_QUERY = /([?&](?:token|key|api_key|apikey|secret|password|passwd|auth|authorization|code|session|sig|signature)=)[^&#\s]+/giu
 const API_KEY_SHAPE = /(sk-[A-Za-z0-9_-]{16,})/gu
@@ -173,6 +188,14 @@ export class LogStore {
     this.context = {}
     this.sessionId = undefined
     this.currentTurnId = undefined
+    /** Full per-frame logging escape hatch (default: dedup + summarize). */
+    this.fullFrames = /^(1|true|yes)$/iu.test(process.env[FULL_FRAMES_ENV] ?? '')
+    /** commandIds whose full browser result has already been logged this run. */
+    this.loggedResultCommands = new Set()
+    /** Pending `frame.in` counts/bytes by `role:type`, flushed as a summary. */
+    this.frameInStats = new Map()
+    this.frameInPending = 0
+    this.frameInBytes = 0
   }
 
   async init() {
@@ -342,29 +365,31 @@ export class LogStore {
           loggedResult = { ...result, image }
         }
       }
-      const data = {
-        ok: frame.ok !== false,
-        callId,
-        commandId: frame.id,
-        command: frame.command,
-        result: loggedResult,
-        error: frame.error,
-        turnId,
-      }
       const ok = frame.ok !== false
+      const commandId = typeof frame.id === 'string' ? frame.id : undefined
+      // Keep ONE full result per commandId (the ui capture, or the first copy
+      // seen for an error sent straight to the provider). Later copies — the
+      // tools forward of the same result — reference it by commandId instead of
+      // repeating the full label list. The wire frames are unchanged.
+      const firstCopy = commandId === undefined || !this.loggedResultCommands.has(commandId)
+      if (firstCopy && commandId !== undefined) this.loggedResultCommands.add(commandId)
+      const data = firstCopy
+        ? { ok, callId, commandId: frame.id, command: frame.command, result: loggedResult, error: frame.error, turnId }
+        : { ok, callId, commandId: frame.id, error: frame.error, turnId, resultRef: commandId }
       this.record('bridge', 'browser.result', data, {
         turnId,
         callId,
-        commandId: typeof frame.id === 'string' ? frame.id : undefined,
+        commandId,
         role: entry.role,
-        severity: ok ? 'debug' : 'warn',
-        signalCode: ok ? undefined : (frame.error?.code ?? 'BROWSER_ERROR'),
+        severity: firstCopy && !ok ? 'warn' : 'debug',
+        signalCode: firstCopy && !ok ? (frame.error?.code ?? 'BROWSER_ERROR') : undefined,
+        noSignal: !firstCopy,
       })
       if (isCapture) this.#addBrowserResult(turnId, frame, loggedResult, screenshot)
-      if (ok && Number(result?.captureMs) > 500) {
+      if (firstCopy && ok && Number(result?.captureMs) > 500) {
         this.signal('SLOW_CAPTURE', `screenshot capture took ${Math.round(result.captureMs)}ms`, 'info', { turnId, callId })
       }
-      if (ok && Number(result?.image?.bytes ?? screenshot?.bytes) > 500_000) {
+      if (firstCopy && ok && Number(result?.image?.bytes ?? screenshot?.bytes) > 500_000) {
         this.signal('LARGE_SCREENSHOT', `screenshot ${formatBytes(result.image?.bytes ?? screenshot?.bytes)}`, 'info', { turnId, callId })
       }
       return
@@ -387,6 +412,13 @@ export class LogStore {
       return
     }
 
+    // `frame.in` is mostly the provider's live activity stream (~86% of a busy
+    // log) and is not read by the metrics scripts. Summarize it into periodic
+    // count/byte summaries unless full per-frame logging is requested.
+    if (entry.direction === 'in' && !this.fullFrames) {
+      this.#accumulateFrameIn(entry)
+      return
+    }
     this.record('bridge', `frame.${entry.direction}`, {
       role: entry.role,
       frame,
@@ -395,6 +427,51 @@ export class LogStore {
       callId: frame.callId,
       severity: frame.type === 'chat.error' ? 'error' : 'debug',
     })
+  }
+
+  /**
+   * Accumulate one inbound frame into the pending summary instead of writing a
+   * full line. Flushes a summary every {@link FRAME_IN_SUMMARY_EVERY} frames.
+   * @param {{direction: string, role?: string, frame: Record<string, any>}} entry
+   */
+  #accumulateFrameIn(entry) {
+    const frame = entry.frame
+    const key = `${entry.role ?? '?'}:${typeof frame.type === 'string' ? frame.type : '?'}`
+    let bytes = 0
+    try {
+      bytes = Buffer.byteLength(JSON.stringify(frame))
+    } catch {
+      bytes = 0
+    }
+    const stat = this.frameInStats.get(key) ?? { count: 0, bytes: 0 }
+    stat.count += 1
+    stat.bytes += bytes
+    this.frameInStats.set(key, stat)
+    this.frameInPending += 1
+    this.frameInBytes += bytes
+    if (this.frameInPending >= FRAME_IN_SUMMARY_EVERY) this.#flushFrameInSummary()
+  }
+
+  /**
+   * Write the pending `frame.in` counts/bytes as one summary event and reset.
+   * Called periodically, at each turn end, and at close so nothing is lost.
+   */
+  #flushFrameInSummary() {
+    if (this.frameInPending === 0) return
+    const byType = [...this.frameInStats.entries()]
+      .map(([key, stat]) => {
+        const sep = key.indexOf(':')
+        return { role: key.slice(0, sep), type: key.slice(sep + 1), count: stat.count, bytes: stat.bytes }
+      })
+      .sort((a, b) => b.count - a.count)
+    this.record('bridge', 'frame.in.summary', {
+      frames: this.frameInPending,
+      bytes: this.frameInBytes,
+      byType,
+    }, { turnId: this.currentTurnId, severity: 'debug', noSignal: true })
+    this.frameInStats.clear()
+    this.frameInPending = 0
+    this.frameInBytes = 0
   }
 
   /** @param {Record<string, any>} context */
@@ -482,6 +559,7 @@ export class LogStore {
    * @param {{ok?: boolean, aborted?: boolean, reason?: string, finalText?: string, timings?: Record<string, unknown>, usage?: Record<string, unknown>, error?: string}} end
    */
   turnEnd(turnId, end = {}) {
+    this.#flushFrameInSummary()
     const turn = this.#ensureTurn(turnId)
     const aborted = end.aborted === true
     turn.endedAt = isoNow()
@@ -1010,6 +1088,7 @@ ${sessionNote}
 
   async close() {
     if (this.closed) return
+    this.#flushFrameInSummary()
     await this.flush()
     this.record('companion', 'run.stop', { at: isoNow() }, { severity: 'info' })
     await this.flush()

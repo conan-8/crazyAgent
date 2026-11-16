@@ -197,3 +197,144 @@ test('omits screenshots and the DSH session when asked', async t => {
   const summary = strFromU8(files['summary.md'])
   assert.match(summary, /PROTECTED_PAGE|no capture|TURN_FAILED/)
 })
+
+/* ---- D4 part 2: browser-result dedup + frame.in summarization ---- */
+
+async function readEvents(store) {
+  await store.flush()
+  const text = await readFile(store.eventsPath, 'utf8')
+  return text.split('\n').filter(Boolean).map(line => JSON.parse(line))
+}
+
+async function makeStoreFullFrames(t, full) {
+  const prev = process.env.CRAZYAGENT_LOG_FULL_FRAMES
+  if (full) process.env.CRAZYAGENT_LOG_FULL_FRAMES = '1'
+  else delete process.env.CRAZYAGENT_LOG_FULL_FRAMES
+  try {
+    return await makeStore(t)
+  } finally {
+    if (prev === undefined) delete process.env.CRAZYAGENT_LOG_FULL_FRAMES
+    else process.env.CRAZYAGENT_LOG_FULL_FRAMES = prev
+  }
+}
+
+const LABELS = Array.from({ length: 30 }, (_, k) => ({ id: k, role: 'button', name: `Control ${k}` }))
+
+/** The same synthetic busy turn fed to two stores (full vs dedup logging). */
+function feedBusyTurn(store, activityCount) {
+  store.turnStart('turn-busy', 'do many things', {})
+  for (let i = 0; i < activityCount; i += 1) {
+    store.recordBridge({
+      direction: 'in',
+      role: 'tools',
+      frame: { v: 1, type: 'activity', activity: { kind: i % 2 ? 'text' : 'reasoning', text: `chunk ${i} ${'x'.repeat(40)}` } },
+    })
+  }
+  for (let i = 0; i < 10; i += 1) {
+    const id = `cmd-${i}`
+    const callId = `call-${i}`
+    const command = { op: 'click', args: { label: i } }
+    const result = { op: 'click', labels: LABELS, changed: true, trusted: true }
+    store.recordBridge({ direction: 'in', role: 'tools', frame: { v: 1, type: 'browser.command', id, callId, turnId: 'turn-busy', command } })
+    store.recordBridge({ direction: 'out', role: 'ui', frame: { v: 1, type: 'browser.command', id, callId, turnId: 'turn-busy', command } })
+    store.recordBridge({ direction: 'in', role: 'ui', frame: { v: 1, type: 'browser.result', id, callId, turnId: 'turn-busy', ok: true, result } })
+    store.recordBridge({ direction: 'out', role: 'tools', frame: { v: 1, type: 'browser.result', id, callId, turnId: 'turn-busy', ok: true, result } })
+    store.toolCall('turn-busy', { callId, name: 'browser_click', args: { label: i } })
+    store.toolResult('turn-busy', { callId, ok: true, text: `clicked ${i}`, durationMs: 5 })
+  }
+  store.turnEnd('turn-busy', { ok: true, finalText: 'DONE', timings: { totalMs: 5000, toolCalls: 10 }, usage: { inputTokens: 1000, outputTokens: 200 } })
+}
+
+const METRIC_TYPES = new Set(['tool.call', 'tool.result', 'turn.end', 'bridge.command.error', 'signal'])
+
+test('a busy turn logs >=5x fewer lines while every metric event stays identical', async t => {
+  const full = await makeStoreFullFrames(t, true)
+  const dedup = await makeStoreFullFrames(t, false)
+  feedBusyTurn(full.store, 500)
+  feedBusyTurn(dedup.store, 500)
+  await full.store.close()
+  await dedup.store.close()
+  const fullEvents = await readEvents(full.store)
+  const dedupEvents = await readEvents(dedup.store)
+
+  assert.ok(fullEvents.length / dedupEvents.length >= 5,
+    `expected >=5x fewer lines: full=${fullEvents.length} dedup=${dedupEvents.length}`)
+
+  // The metrics source events are byte-identical between the two formats.
+  const fullMetrics = fullEvents.filter(e => METRIC_TYPES.has(e.type)).map(e => ({ type: e.type, callId: e.callId, data: e.data }))
+  const dedupMetrics = dedupEvents.filter(e => METRIC_TYPES.has(e.type)).map(e => ({ type: e.type, callId: e.callId, data: e.data }))
+  assert.deepEqual(dedupMetrics, fullMetrics)
+
+  // frame.in: full logs one line per frame; dedup logs only summaries totaling 500.
+  assert.equal(fullEvents.filter(e => e.type === 'frame.in').length, 500)
+  assert.equal(dedupEvents.filter(e => e.type === 'frame.in').length, 0)
+  const summaries = dedupEvents.filter(e => e.type === 'frame.in.summary')
+  assert.ok(summaries.length >= 1)
+  assert.equal(summaries.reduce((n, e) => n + e.data.frames, 0), 500)
+  assert.ok(summaries.every(e => Array.isArray(e.data.byType) && e.data.bytes > 0))
+
+  // browser.result: one full copy (with labels) per commandId, the rest references.
+  const fullResults = dedupEvents.filter(e => e.type === 'browser.result' && e.data.result)
+  const refResults = dedupEvents.filter(e => e.type === 'browser.result' && e.data.resultRef)
+  assert.equal(fullResults.length, 10)
+  assert.equal(refResults.length, 10)
+  assert.ok(fullResults.every(e => e.data.result.labels.length === 30))
+  assert.ok(refResults.every(e => e.data.result === undefined && typeof e.data.resultRef === 'string'))
+  assert.deepEqual(new Set(refResults.map(e => e.data.resultRef)), new Set(fullResults.map(e => e.data.commandId)))
+  // Result dedup is independent of the frame flag: both stores keep one full
+  // copy per commandId. The flag only restores full frame.in logging.
+  assert.equal(fullEvents.filter(e => e.type === 'browser.result' && e.data.result).length, 10)
+  assert.equal(fullEvents.filter(e => e.type === 'browser.result' && e.data.resultRef).length, 10)
+})
+
+test('CRAZYAGENT_LOG_FULL_FRAMES=1 restores full per-frame logging', async t => {
+  const { store } = await makeStoreFullFrames(t, true)
+  store.turnStart('turn-f', 'frames', {})
+  for (let i = 0; i < 5; i += 1) {
+    store.recordBridge({ direction: 'in', role: 'tools', frame: { v: 1, type: 'activity', activity: { kind: 'text', text: `t${i}` } } })
+  }
+  store.turnEnd('turn-f', { ok: true, timings: { totalMs: 10 } })
+  const events = await readEvents(store)
+  assert.equal(events.filter(e => e.type === 'frame.in').length, 5)
+  assert.equal(events.filter(e => e.type === 'frame.in.summary').length, 0)
+  await store.close()
+})
+
+test('default summarizes frame.in and flushes the remainder at turn end and close', async t => {
+  const { store } = await makeStoreFullFrames(t, false)
+  store.turnStart('turn-s', 'frames', {})
+  for (let i = 0; i < 5; i += 1) {
+    store.recordBridge({ direction: 'in', role: 'tools', frame: { v: 1, type: 'activity', activity: { kind: 'text', text: `t${i}` } } })
+  }
+  store.turnEnd('turn-s', { ok: true, timings: { totalMs: 10 } })
+  let events = await readEvents(store)
+  assert.equal(events.filter(e => e.type === 'frame.in').length, 0)
+  const turnSummaries = events.filter(e => e.type === 'frame.in.summary')
+  assert.equal(turnSummaries.length, 1)
+  assert.equal(turnSummaries[0].data.frames, 5)
+  assert.equal(turnSummaries[0].turnId, 'turn-s')
+  // Frames after the turn end are flushed at close, never dropped.
+  store.recordBridge({ direction: 'in', role: 'tools', frame: { v: 1, type: 'activity', activity: { kind: 'text', text: 'idle' } } })
+  await store.close()
+  events = await readEvents(store)
+  assert.equal(events.filter(e => e.type === 'frame.in.summary').reduce((n, e) => n + e.data.frames, 0), 6)
+})
+
+test('a duplicated browser result keeps one full copy and references the rest by commandId', async t => {
+  const { store } = await makeStore(t)
+  store.turnStart('turn-d', 'click', {})
+  const result = { op: 'click', labels: LABELS, changed: true }
+  store.recordBridge({ direction: 'in', role: 'ui', frame: { v: 1, type: 'browser.result', id: 'cmd-x', callId: 'call-x', turnId: 'turn-d', ok: true, result } })
+  store.recordBridge({ direction: 'out', role: 'tools', frame: { v: 1, type: 'browser.result', id: 'cmd-x', callId: 'call-x', turnId: 'turn-d', ok: true, result } })
+  store.recordBridge({ direction: 'out', role: 'tools', frame: { v: 1, type: 'browser.result', id: 'cmd-x', callId: 'call-x', turnId: 'turn-d', ok: true, result } })
+  store.turnEnd('turn-d', { ok: true, timings: { totalMs: 10 } })
+  const events = await readEvents(store)
+  const results = events.filter(e => e.type === 'browser.result')
+  assert.equal(results.length, 3)
+  assert.equal(results.filter(e => e.data.result).length, 1)
+  assert.equal(results.filter(e => e.data.resultRef === 'cmd-x').length, 2)
+  assert.equal(results[0].data.result.labels.length, 30)
+  // The turn evidence (summary/serializeTurns) still comes from the full capture.
+  assert.match(store.summary(), /browser_click|click/)
+  await store.close()
+})
