@@ -174,6 +174,11 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
       }
       if (key === 'arrowright' && mask === 8) {
         if (options.shiftExtend === false) return
+        if (options.mergeNeedsCollapse && state.selection) {
+          // Real Docs: Shift+Right on a text selection traverses characters,
+          // not cells; the cell span only grows after the selection is collapsed.
+          return
+        }
         if (state.selection?.entry.tableIndex !== undefined) {
           const entry = state.selection.entry
           state.currentCell = { tableIndex: entry.tableIndex, rowIndex: entry.rowIndex, columnIndex: entry.columnIndex }
@@ -759,6 +764,18 @@ test('Docs table merge requires the two-cell selection extension', async () => {
   assert.equal(result.docs.failure.code, 'DOCS_WAIT_TIMEOUT')
   assert.equal(fake.state.clicks.length, 0)
   assert.deepEqual(selectDocsTable(fake.state.blocks).rows.map(row => row.map(item => item.text)), [['A', 'B'], ['C', 'D']])
+})
+
+test('Docs table merge collapses the cell selection before extending across cells', async () => {
+  // Real Docs Shift+Right traverses characters on a text selection; only a
+  // collapsed selection extends by cells. Without the collapse step the span
+  // never reaches two cells and "Merge cells" stays disabled (DOCS_WAIT_TIMEOUT).
+  const fake = fakeDocs([table([['A', 'B'], ['C', 'D']])], { mergeNeedsCollapse: true })
+  const result = await docsTable({}, { action: 'merge', row: 1, column: 1 }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  const rows = selectDocsTable(fake.state.blocks).rows
+  assert.equal(rows[0][0].colspan, 2)
+  assert.equal(rows[0][0].text, 'A\nB')
 })
 
 test('Docs table merge refuses an empty left target before any native command', async () => {
