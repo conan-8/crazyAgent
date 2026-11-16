@@ -46,6 +46,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // -PappIdSuffix=.fake builds a second app that installs beside the paired one,
+            // for phone checks against scripts/fake-remote-companion.mjs (android/README.md).
+            (project.findProperty("appIdSuffix") as String?)?.takeIf { it.isNotBlank() }?.let { applicationIdSuffix = it }
+        }
         release {
             // Unsigned (and not installable) unless keystore.properties is present.
             signingConfig = signingConfigs.findByName("release")

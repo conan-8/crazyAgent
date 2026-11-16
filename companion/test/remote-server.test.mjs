@@ -1032,6 +1032,7 @@ test('a confirmation request waits with one capture; approve and deny are compan
   assert.ok(ctx.runner.runs[1][0].text.endsWith('<user_confirmation decision="approve" action="Submit the assignment for grading"/>'))
   const running = (await ctx.call({ path: '/remote/v1/state' })).body
   assert.equal(running.turn.status, 'running')
+  assert.equal(running.messages.filter(message => message.type === 'chat.user').at(-1).body.text, 'Approved: Submit the assignment for grading')
   assert.equal(running.confirm, null)
   // Idempotent replay of the same decision does not start a second turn.
   const again = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-0002', text: '', confirm: 'approve' } })
@@ -1061,6 +1062,7 @@ test('a confirmation request waits with one capture; approve and deny are compan
   assert.equal(deny.status, 202)
   await ctx.runner.started()
   assert.match(ctx.runner.runs[3][0].text, /<user_confirmation decision="deny" action="Send the email"\/>\n\ndo not send it$/u)
+  assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.messages.filter(message => message.type === 'chat.user').at(-1).body.text, 'Denied: Send the email\n\ndo not send it')
   ctx.runner.current.resolve('Understood.')
   await sleep(20)
   assert.equal(ctx.hub.turn.status, 'idle')

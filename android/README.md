@@ -2,7 +2,7 @@
 
 A native Kotlin + Jetpack Compose app for controlling the crazyAgent browser agent from an Android phone. It talks only to the companion's opt-in remote API (`npm run dev -- --remote`, `docs/REMOTE-ACCESS.md` §4.4–§4.5.1), and normally reaches it through tailnet-only Tailscale Serve.
 
-Status: the app implements Milestones 2–5 of `docs/REMOTE-ACCESS.md`: pairing, the shared chat, stop/new, reconnect with replay, the live screenshot view with on-demand capture, continue and steer, the help card for a waiting agent, and push registration with notifications. **Verified on a phone:** only the Milestone 2 scope (pairing, send/stream, stop, new, reconnect, a Wi-Fi → cellular switch). **Not verified on a phone:** the live view, capture, continue, steer, the help card, and notification settings; these have JVM coverage and a JVM run against the real Node remote API only. **Never run at all:** anything that needs Firebase, because no Firebase project exists.
+Status: the app implements Milestones 2–5 of `docs/REMOTE-ACCESS.md`: pairing, the shared chat, stop/new, reconnect with replay, the live screenshot view with on-demand capture, continue and steer, the help card for a waiting agent, and push registration with notifications. **Verified on a phone:** the Milestone 2 scope (pairing, send/stream, stop, new, reconnect, a Wi-Fi → cellular switch) against the real companion, and on 2026-11-15 the live view with capture and view-age labels, continue, steer, the help and approval cards, and notification settings against the fake companion (`scripts/fake-remote-companion.mjs`, side-by-side `.fake` build). **Not yet verified against the real companion:** those same screens. **Never run at all:** FCM delivery to a phone — a Firebase project exists since 2026-11-15 and this computer reports `pushConfigured: true` (a `validate_only` send returned 200), but the phone is paired with another computer and has never registered with a push-configured companion.
 
 The desktop side panel does not have to be open: with Edge running and the extension paired once, the extension's background worker runs the agent's browser actions. Diagnostics shows which one is connected.
 
@@ -107,9 +107,18 @@ Then, in the app:
 
 1. Pair with `http://127.0.0.1:17883` and the printed token.
 2. Every turn publishes synthetic screenshots for the live view; `tall` or `square` in the prompt changes their shape. A prompt containing `slow` runs for about 40 seconds, which is long enough for Stop and force-close/reopen. Wi-Fi/cellular switches only mean something through Tailscale Serve, because `adb reverse` traffic goes over USB. A prompt containing `fail` ends with an error.
-3. `node scripts/fake-remote-companion.mjs --rotate` revokes the token. Ctrl+C and a restart give the fake a new instance ID.
+3. A prompt containing `captcha`, `login`, or `stuck` ends waiting with the help card. A prompt containing `confirm` ends waiting with the approval card; Approve or Deny then runs an answer turn that says which decision arrived.
+4. `node scripts/fake-remote-companion.mjs --rotate` revokes the token. Ctrl+C and a restart give the fake a new instance ID.
 
 Through Tailscale Serve, run the fake with `--public-host <host>.ts.net` and pair with the HTTPS address.
+
+To keep the phone's real pairing untouched, build a second copy that installs beside the paired app and pair only that copy with the fake:
+
+```sh
+./gradlew assembleDebug -PappIdSuffix=.fake     # package dev.crazyagent.remote.fake
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb uninstall dev.crazyagent.remote.fake        # when done; then rebuild without the property
+```
 
 ## Pairing with the real companion
 

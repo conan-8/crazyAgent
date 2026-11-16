@@ -56,6 +56,33 @@ test('stop interrupts a slow scripted turn with the real lifecycle', async () =>
   })
 })
 
+test('a scripted confirmation waits for the answer, and approve/deny each produce their own answer turn', async () => {
+  await withFake(async fake => {
+    const port = fake.server.port
+    const events = openEvents(port, { token: fake.token })
+    await events.opened
+    for (const decision of ['approve', 'deny']) {
+      const seen = events.frames.length
+      await http(port, { method: 'POST', path: '/remote/v1/messages', token: fake.token, body: { clientMessageId: `client-confirm-ask-${decision}`, text: 'please confirm the order' } })
+      const waiting = await events.next(frame => frame.type === 'chat.turn' && frame.body.status === 'waiting_for_user' && events.frames.indexOf(frame) >= seen, 5_000)
+      const confirm = events.frames.slice(seen).find(frame => frame.type === 'remote.confirm')
+      assert.equal(confirm.body.turnId, waiting.body.turnId)
+      assert.equal(confirm.body.action, 'Place the fake order for 3 items')
+      assert.ok(confirm.body.screenshotId)
+      const answered = await http(port, { method: 'POST', path: '/remote/v1/messages', token: fake.token, body: { clientMessageId: `client-confirm-answer-${decision}`, text: '', confirm: decision } })
+      assert.equal(answered.status, 202)
+      const done = await events.next(frame => frame.type === 'chat.turn' && frame.body.turnId === answered.body.turnId && frame.body.status !== 'running', 5_000)
+      assert.notEqual(done.body.status, 'waiting_for_user')
+      const reply = events.frames.filter(frame => frame.type === 'chat.message' || frame.type === 'chat.assistant').map(frame => JSON.stringify(frame.body)).join('\n')
+      assert.match(reply, decision === 'approve' ? /approval received/u : /denied; nothing was placed/u)
+    }
+    const stray = await http(port, { method: 'POST', path: '/remote/v1/messages', token: fake.token, body: { clientMessageId: 'client-confirm-stray', text: '', confirm: 'approve' } })
+    assert.equal(stray.status, 409)
+    assert.equal(stray.body.code ?? stray.body.error?.code, 'NO_CONFIRMATION_PENDING')
+    await events.close()
+  })
+})
+
 test('a scripted blocker ends in waiting_for_user with a help capture, and a capture can be requested', async () => {
   await withFake(async fake => {
     const port = fake.server.port

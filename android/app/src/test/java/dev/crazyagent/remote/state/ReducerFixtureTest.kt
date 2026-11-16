@@ -174,11 +174,11 @@ class ReducerFixtureTest {
         assertEquals("shot-fixture-1", captured.confirm?.screenshotId)
         assertTrue(captured.turn.isWaiting)
 
-        // The companion-written approve block runs as an ordinary turn; the request is gone at once.
+        // The approve answer runs as an ordinary turn and shows the decision in plain words; the request is gone at once.
         val approving = upTo { type(it) == "chat.user" && turn(it) == "turn-9" }
         assertNull(approving.confirm)
         assertEquals("running", approving.turn.status)
-        assertTrue((approving.items.last() as ChatItem.User).text.startsWith("<user_confirmation decision=\"approve\""))
+        assertEquals("Approved: Submit the assignment for grading", (approving.items.last() as ChatItem.User).text)
         val approved = upTo { type(it) == "chat.turn" && turn(it) == "turn-9" }
         assertEquals(checkpoint("afterApprove"), approved)
         assertEquals("idle", approved.turn.status)
