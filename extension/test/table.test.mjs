@@ -77,6 +77,13 @@ test('table write planning resolves exact names and rejects duplicates, ambiguit
   assert.throws(() => planTableWrite(table, [validEdit(), { row: 1, column: 2, value: '2' }]), error => error.code === 'TABLE_DUPLICATE_TARGET')
   assert.throws(() => planTableWrite(table, [{ row: 1, column: 4, value: '0.5' }]), error => error.code === 'TABLE_READ_ONLY')
   assert.throws(() => planTableWrite(table, [{ row: 1, column: 'Missing', value: '2' }]), error => error.code === 'TABLE_TARGET_NOT_FOUND')
+  assert.throws(() => planTableWrite(table, [{ row: 1, column: 'Missing', value: '2' }]), error => /Column names: /u.test(error.message) && /No cells were changed/u.test(error.message))
+  // A first-column value is not a row name: the refusal says which row holds it.
+  const holder = table.rows[1].cells[0].value
+  if (holder && !table.rows.some(row => row.label === holder)) {
+    assert.throws(() => planTableWrite(table, [{ row: holder, column: 2, value: '2' }]), error => error.code === 'TABLE_TARGET_NOT_FOUND'
+      && error.message.includes(`${JSON.stringify(holder)} is a cell value in row 2, not a row name`))
+  }
   table.headers[1] = 'Dye'
   assert.throws(() => planTableWrite(table, [{ row: 1, column: 'Dye', value: '2' }]), error => error.code === 'TABLE_AMBIGUOUS')
 })

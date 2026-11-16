@@ -417,6 +417,23 @@ test('Docs font menu filters unusable duplicates and rejects conflicting active 
     assert.deepEqual(docsPageProbe('colorDialog'), {
       ok: true, open: true, enabled: true, focused: false, value: '#0000ff', point: { x: 50, y: 10 }, okPoint: { x: 70, y: 10 },
     })
+    // The picker's parsed colour comes from its R/G/B fields, not the hex box.
+    const channelInputs = [['R', '255'], ['G', '0'], ['B', '0']].map(([label, value], index) => {
+      const input = make('input', { label, x: 100 + index * 20 })
+      input.value = value
+      return input
+    })
+    root.children.push(...channelInputs)
+    rows.push(...channelInputs)
+    assert.equal(docsPageProbe('colorDialog').parsed, '#ff0000', 'typed #0000ff is not parsed yet')
+    channelInputs[0].value = '0'
+    channelInputs[2].value = '255'
+    assert.equal(docsPageProbe('colorDialog').parsed, '#0000ff')
+    channelInputs[1].value = ''
+    assert.equal(docsPageProbe('colorDialog').parsed, undefined)
+    root.children = [staleHex, activeHex, colorOk]
+    rows.length = 0
+    rows.push(activeHex, colorOk)
     const secondVisibleHex = make('input', { label: 'Hex color', y: 30 })
     root.children.push(secondVisibleHex)
     rows.push(secondVisibleHex)
