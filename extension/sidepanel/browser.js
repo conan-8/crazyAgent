@@ -10186,6 +10186,12 @@ function docsTableCommand(request) {
 }
 
 async function docsTableStructureFlow(context, args) {
+  // Structural commands are positional: "Insert row below"/"Delete row"/merge
+  // act on the caret's row/column. The anchor selection must be proven before
+  // the collapse/extend keys and the menu command, or a still-restoring
+  // selection from the previous step edits the wrong row (measured: an
+  // insert-after-row-3 landed below row 1 and shifted the body).
+  context.requireSelectionProof = true
   let current = parseDocStructure(await docsExport(context, 'table-structure-baseline', 'html'))
   let latest = current
   const initialTable = selectDocsTable(current, args.table)
