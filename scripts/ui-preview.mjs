@@ -376,7 +376,7 @@ async function playToolScenario(page) {
   assert.equal(modelMeta.maxWidth, 'none')
   assert.ok(modelMeta.width > 200, `model selector uses available width (${modelMeta.width}px)`)
   assert.equal(modelMeta.modelName, 'DeepSeek V4.1 Flash 1017')
-  assert.equal(modelMeta.effortText, '· medium')
+  assert.equal(modelMeta.effortText, '· med')
   assert.equal(modelMeta.effortTitle, 'Reasoning effort: Medium')
   assert.equal(modelMeta.effortColor, 'rgb(255, 195, 0)')
   assert.match(modelMeta.buttonTitle, /deepseek\/deepseek-v4\.1-flash-1017\s/)

@@ -315,7 +315,9 @@ function renderComposerModel() {
   const model = modelsState.models.find(item => item.id === llmState.model?.id) ?? llmState.model
   const policy = llmState.reasoningEffort ?? settings.reasoningEffort ?? 'medium'
   const context = contextWindowBadge(model)
-  const effortText = model?.reasoning === false ? 'no CoT' : policy === 'auto' ? 'low' : policy
+  // `med` keeps the footer compact so more of the model name fits; the tooltip
+  // still spells out the full effort label.
+  const effortText = model?.reasoning === false ? 'no CoT' : policy === 'auto' ? 'low' : policy === 'medium' ? 'med' : policy
   const effortTitle = model?.reasoning === false
     ? 'This model does not support reasoning'
     : `Reasoning effort: ${policy === 'auto' ? 'Auto (low from the first step)' : effortLabel(policy)}`
