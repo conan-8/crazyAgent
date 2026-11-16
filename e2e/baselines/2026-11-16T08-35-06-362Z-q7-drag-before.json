@@ -1,0 +1,1818 @@
+{
+  "startedAt": "2026-11-16T08:35:06.362Z",
+  "finishedAt": "2026-11-16T08:40:19.000Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval-q7/dsh-home",
+  "repeat": 10,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": 6000000,
+  "totalTokens": 3963031,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "drag-reorder",
+      "fixture": "drag.html",
+      "prompt": "In the Pointer sortable list on this page, drag Alpha so the order becomes Beta, Gamma, Alpha.",
+      "file": "drag-reorder.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwj0cza1-4e56",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 54487,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 17,
+            "toolCalls": 16,
+            "failedCalls": 9,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag requires exactly one source: label, ref, or x/y. Example: {\"x\":120,\"y\":300,\"to_x\":420,\"to_y\":300} or {\"label\":4,\"dx\":80}"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag requires exactly one source: label, ref, or x/y. Example: {\"x\":120,\"y\":300,\"to_x\":420,\"to_y\":300} or {\"label\":4,\"dx\":80}"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag requires exactly one source: label, ref, or x/y. Example: {\"x\":120,\"y\":300,\"to_x\":420,\"to_y\":300} or {\"label\":4,\"dx\":80} This exact call was just rejected for the same reason: change the arguments instead of sending it again."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag requires exactly one source: label, ref, or x/y. Example: {\"x\":120,\"y\":300,\"to_x\":420,\"to_y\":300} or {\"label\":4,\"dx\":80} This exact call was just rejected for the same reason: change the arguments instead of sending it again."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag requires exactly one source: label, ref, or x/y. Example: {\"x\":120,\"y\":300,\"to_x\":420,\"to_y\":300} or {\"label\":4,\"dx\":80}"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag requires exactly one source: label, ref, or x/y. Example: {\"x\":120,\"y\":300,\"to_x\":420,\"to_y\":300} or {\"label\":4,\"dx\":80}"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag requires exactly one source: label, ref, or x/y. Example: {\"x\":120,\"y\":300,\"to_x\":420,\"to_y\":300} or {\"label\":4,\"dx\":80} This exact call was just rejected for the same reason: change the arguments instead of sending it again."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag requires exactly one destination: to_label, to_ref, to_x/to_y, or dx/dy. Example: {\"label\":4,\"to_label\":7} or {\"x\":120,\"y\":300,\"dx\":80}"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag requires exactly one source: label, ref, or x/y. Example: {\"x\":120,\"y\":300,\"to_x\":420,\"to_y\":300} or {\"label\":4,\"dx\":80}"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 15
+            },
+            "inputTokens": 11160,
+            "outputTokens": 5934,
+            "cacheReadTokens": 799616,
+            "totalTokens": 816710,
+            "usage": {
+              "inputTokens": 11160,
+              "outputTokens": 5934,
+              "totalTokens": 816710,
+              "cacheReadTokens": 799616
+            },
+            "finalText": "DONE — Pointer sortable order is now **Beta, Gamma, Alpha**.\n\n- Verified in the live snapshot: order reads `Beta,Gamma,Alpha` with the three items reordered accordingly (Alpha last).\n- Method: trusted pointer drags (Alpha right one slot, then Gamma onto Alpha); event counters incremented 6/54/6.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 9,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0cza1-4e56",
+              "origin": "remote",
+              "clientMessageId": "15506673-d200-4b9f-bfce-8a51dde355e8",
+              "startedAt": "2026-11-16T08:35:07.802Z",
+              "endedAt": "2026-11-16T08:36:02.289Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 11160,
+                "outputTokens": 5934,
+                "totalTokens": 816710,
+                "cacheReadTokens": 799616
+              },
+              "failedCalls": 9
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwj0e5wi-043c",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 15094,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 3
+            },
+            "inputTokens": 8159,
+            "outputTokens": 1365,
+            "cacheReadTokens": 116224,
+            "totalTokens": 125748,
+            "usage": {
+              "inputTokens": 8159,
+              "outputTokens": 1365,
+              "totalTokens": 125748,
+              "cacheReadTokens": 116224
+            },
+            "finalText": "DONE — Dragged Alpha to the end of the Pointer sortable list.\n\n- Order is now **Beta, Gamma, Alpha** (shown in the fixture's \"order:\" line and label order).\n- Verified from the fresh post-drag view; page committed the pointer reorder (event counters advanced).\n- Note: the first drop landed Alpha mid-list, so a second drag from Alpha onto Gamma was needed to reach the requested final order.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0e5wi-043c",
+              "origin": "remote",
+              "clientMessageId": "c6877eec-e02f-4df0-a27a-bba16f6b07e2",
+              "startedAt": "2026-11-16T08:36:03.042Z",
+              "endedAt": "2026-11-16T08:36:18.136Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 8159,
+                "outputTokens": 1365,
+                "totalTokens": 125748,
+                "cacheReadTokens": 116224
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwj0ei2w-6b3e",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 18972,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 2
+            },
+            "inputTokens": 4643,
+            "outputTokens": 1035,
+            "cacheReadTokens": 92288,
+            "totalTokens": 97966,
+            "usage": {
+              "inputTokens": 4643,
+              "outputTokens": 1035,
+              "totalTokens": 97966,
+              "cacheReadTokens": 92288
+            },
+            "finalText": "DONE — dragged \"Alpha\" from its original first position to the right of \"Gamma\" in the Pointer sortable list.\n\n- Verified: list order label now reads `order: Beta,Gamma,Alpha`, and the item order is Beta, Gamma, Alpha (Alpha now carries label [1] at the end).\n- Dispatch was a real pointer drag (source signals: index-changed, bounds-changed); an earlier center-drop attempt had no effect, a drop on Gamma's right edge committed the reorder.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0ei2w-6b3e",
+              "origin": "remote",
+              "clientMessageId": "974b9b59-4e4b-4de1-822c-3c15e4e80271",
+              "startedAt": "2026-11-16T08:36:18.824Z",
+              "endedAt": "2026-11-16T08:36:37.796Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 4643,
+                "outputTokens": 1035,
+                "totalTokens": 97966,
+                "cacheReadTokens": 92288
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwj0ex77-ea73",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6869,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 3576,
+            "outputTokens": 260,
+            "cacheReadTokens": 65280,
+            "totalTokens": 69116,
+            "usage": {
+              "inputTokens": 3576,
+              "outputTokens": 260,
+              "totalTokens": 69116,
+              "cacheReadTokens": 65280
+            },
+            "finalText": "DONE — Pointer sortable now reads **Beta, Gamma, Alpha** (snapshot `pointerOrder` updated, events 1/9/1), confirmed by fresh view.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0ex77-ea73",
+              "origin": "remote",
+              "clientMessageId": "9ba0bd00-98c4-413f-8e3e-a54561722274",
+              "startedAt": "2026-11-16T08:36:38.419Z",
+              "endedAt": "2026-11-16T08:36:45.288Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3576,
+                "outputTokens": 260,
+                "totalTokens": 69116,
+                "cacheReadTokens": 65280
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwj0f31f-640b",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3480,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_drag": 1
+            },
+            "inputTokens": 7270,
+            "outputTokens": 183,
+            "cacheReadTokens": 38400,
+            "totalTokens": 45853,
+            "usage": {
+              "inputTokens": 7270,
+              "outputTokens": 183,
+              "totalTokens": 45853,
+              "cacheReadTokens": 38400
+            },
+            "finalText": "DONE\n- Dragged Alpha to the end of the Pointer sortable via trusted pointer drag.\n- Verified in the fixture's own state: `order: Beta,Gamma,Alpha` and `\"pointerOrder\": [\"Beta\",\"Gamma\",\"Alpha\"]`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0f31f-640b",
+              "origin": "remote",
+              "clientMessageId": "9e388732-5d31-4327-8c0d-6b2cb91bc0ae",
+              "startedAt": "2026-11-16T08:36:45.987Z",
+              "endedAt": "2026-11-16T08:36:49.467Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 7270,
+                "outputTokens": 183,
+                "totalTokens": 45853,
+                "cacheReadTokens": 38400
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 5,
+          "turnId": "turn-mwj0f6af-4b1b",
+          "status": "fail",
+          "reasons": [
+            "order stayed Alpha,Beta,Gamma"
+          ],
+          "evidence": {
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "timeout",
+            "waitingForUser": false,
+            "wallMs": 120039,
+            "error": null,
+            "outcome": "stopped",
+            "confirm": null,
+            "steps": 20,
+            "toolCalls": 19,
+            "failedCalls": 2,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "refused AMBIGUOUS_VIEW: These drag coordinates fit more than one image scale. Take a fresh view and pass its view_id; no drag was dispatched.\nno input was dispatched (attempted=false, mutationPossible=false). Fresh view #20 is attached to this result: measure the coordinates again on it and pass vi…"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_navigate",
+                "message": "Error: browser_navigate supports only http and https URLs"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 2,
+              "browser_drag": 7,
+              "browser_navigate": 5,
+              "browser_switch_tab": 3,
+              "browser_scroll": 2
+            },
+            "inputTokens": 48406,
+            "outputTokens": 23202,
+            "cacheReadTokens": 988928,
+            "totalTokens": 1060536,
+            "usage": {
+              "inputTokens": 48406,
+              "outputTokens": 23202,
+              "totalTokens": 1060536,
+              "cacheReadTokens": 988928
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0f6af-4b1b",
+              "origin": "remote",
+              "clientMessageId": "7c5475b6-da91-4ebe-9de9-4e929d7a59d3",
+              "startedAt": "2026-11-16T08:36:50.199Z",
+              "endedAt": "2026-11-16T08:38:50.238Z",
+              "outcome": "stopped",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 48406,
+                "outputTokens": 23202,
+                "totalTokens": 1060536,
+                "cacheReadTokens": 988928
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 6,
+          "turnId": "turn-mwj0hrrj-9e72",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5646,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 2,
+              "browser_drag": 1
+            },
+            "inputTokens": 3089,
+            "outputTokens": 425,
+            "cacheReadTokens": 164352,
+            "totalTokens": 167866,
+            "usage": {
+              "inputTokens": 3089,
+              "outputTokens": 425,
+              "totalTokens": 167866,
+              "cacheReadTokens": 164352
+            },
+            "finalText": "DONE — dragged Alpha to the end.\n- Verified: pointer sortable order now reads \"order: Beta,Gamma,Alpha\" (`pointerOrder` = Beta, Gamma, Alpha), events down/move/up = 1/1/1.\n- Beta and Gamma retained their original order; only Alpha was moved.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0hrrj-9e72",
+              "origin": "remote",
+              "clientMessageId": "b4311e6a-4f05-4c6a-aebd-ac399b050b50",
+              "startedAt": "2026-11-16T08:38:51.343Z",
+              "endedAt": "2026-11-16T08:38:56.989Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3089,
+                "outputTokens": 425,
+                "totalTokens": 167866,
+                "cacheReadTokens": 164352
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 7,
+          "turnId": "turn-mwj0hwnf-d5c7",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6389,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "refused AMBIGUOUS_VIEW: These drag coordinates fit more than one image scale. Take a fresh view and pass its view_id; no drag was dispatched.\nno input was dispatched (attempted=false, mutationPossible=false). Fresh view #38 is attached to this result: measure the coordinates again on it and pass vi…"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 2
+            },
+            "inputTokens": 3634,
+            "outputTokens": 608,
+            "cacheReadTokens": 164992,
+            "totalTokens": 169234,
+            "usage": {
+              "inputTokens": 3634,
+              "outputTokens": 608,
+              "totalTokens": 169234,
+              "cacheReadTokens": 164992
+            },
+            "finalText": "DONE\n- Dragged Alpha past Beta and Gamma in the Pointer sortable list; the DOM order is now `Beta, Gamma, Alpha`.\n- Verified in the fixture's own readout: \"order: Beta,Gamma,Alpha\" and the element/index order Beta→Gamma→Alpha.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0hwnf-d5c7",
+              "origin": "remote",
+              "clientMessageId": "a659d42a-0713-4bed-b1ea-55e072c5977d",
+              "startedAt": "2026-11-16T08:38:57.675Z",
+              "endedAt": "2026-11-16T08:39:04.064Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3634,
+                "outputTokens": 608,
+                "totalTokens": 169234,
+                "cacheReadTokens": 164992
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 8,
+          "turnId": "turn-mwj0i23d-8db6",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 18114,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 7,
+            "toolCalls": 6,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 5
+            },
+            "inputTokens": 8179,
+            "outputTokens": 1684,
+            "cacheReadTokens": 304768,
+            "totalTokens": 314631,
+            "usage": {
+              "inputTokens": 8179,
+              "outputTokens": 1684,
+              "totalTokens": 314631,
+              "cacheReadTokens": 304768
+            },
+            "finalText": "DONE — the Pointer sortable order is now **Beta, Gamma, Alpha** (page shows `order: Beta,Gamma,Alpha`, with items reordered in the DOM; drag committed, snapshot counters advanced 0→1 commit).\n\n- Verified: labels re-listed as Pointer Beta, Pointer Gamma, Pointer Alpha, and the snapshot line changed to `order: Beta,Gamma,Alpha`.\n- Note: my first drag moved Alpha past Beta, then a second drag moved it past Gamma to reach the requested order.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0i23d-8db6",
+              "origin": "remote",
+              "clientMessageId": "b22cb9c9-4bd6-494d-8015-0c7a178ebb40",
+              "startedAt": "2026-11-16T08:39:04.729Z",
+              "endedAt": "2026-11-16T08:39:22.843Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 8179,
+                "outputTokens": 1684,
+                "totalTokens": 314631,
+                "cacheReadTokens": 304768
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 9,
+          "turnId": "turn-mwj0igmi-8d6b",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6339,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 3517,
+            "outputTokens": 419,
+            "cacheReadTokens": 66816,
+            "totalTokens": 70752,
+            "usage": {
+              "inputTokens": 3517,
+              "outputTokens": 419,
+              "totalTokens": 70752,
+              "cacheReadTokens": 66816
+            },
+            "finalText": "DONE\n\n- Dragged \"Pointer Alpha\" past Beta and Gamma; the list now reads Beta, Gamma, Alpha.\n- Verified in the page's own snapshot: `\"pointerOrder\": [\"Beta\",\"Gamma\",\"Alpha\"]`, order text \"order: Beta,Gamma,Alpha\" (pointerEvents 1/9/1, commit recorded).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0igmi-8d6b",
+              "origin": "remote",
+              "clientMessageId": "e2b6d910-9eda-4b00-b07d-7cc189200125",
+              "startedAt": "2026-11-16T08:39:23.562Z",
+              "endedAt": "2026-11-16T08:39:29.901Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3517,
+                "outputTokens": 419,
+                "totalTokens": 70752,
+                "cacheReadTokens": 66816
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "slider-value",
+      "fixture": "drag.html",
+      "prompt": "Set the Native range slider on this page to exactly 75.",
+      "file": "slider-value.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwj0im3b-482e",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5045,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 2001,
+            "outputTokens": 263,
+            "cacheReadTokens": 65280,
+            "totalTokens": 67544,
+            "usage": {
+              "inputTokens": 2001,
+              "outputTokens": 263,
+              "totalTokens": 67544,
+              "cacheReadTokens": 65280
+            },
+            "finalText": "DONE\n- Native range set to 75 via exact native value; page snapshot confirms `rangeValue: \"75\"` and field shows \"Native range 75\" (input/change fired 1/1).\n- Other widgets untouched (custom slider still 20).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0im3b-482e",
+              "origin": "remote",
+              "clientMessageId": "af085262-32d5-4c0c-9433-02f9541f17fb",
+              "startedAt": "2026-11-16T08:39:30.647Z",
+              "endedAt": "2026-11-16T08:39:35.692Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2001,
+                "outputTokens": 263,
+                "totalTokens": 67544,
+                "cacheReadTokens": 65280
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwj0iqjh-362b",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3375,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1551,
+            "outputTokens": 503,
+            "cacheReadTokens": 121856,
+            "totalTokens": 123910,
+            "usage": {
+              "inputTokens": 1551,
+              "outputTokens": 503,
+              "totalTokens": 123910,
+              "cacheReadTokens": 121856
+            },
+            "finalText": "DONE — Native range set to exactly 75; page now reads \"value 75; native value: 75; input/change: 1/1\" (verified in the rendered snapshot).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0iqjh-362b",
+              "origin": "remote",
+              "clientMessageId": "4768084e-e438-4f68-8a37-69240abb68e0",
+              "startedAt": "2026-11-16T08:39:36.413Z",
+              "endedAt": "2026-11-16T08:39:39.788Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1551,
+                "outputTokens": 503,
+                "totalTokens": 123910,
+                "cacheReadTokens": 121856
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwj0itng-9af6",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5691,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1,
+              "browser_find": 1
+            },
+            "inputTokens": 1230,
+            "outputTokens": 331,
+            "cacheReadTokens": 65536,
+            "totalTokens": 67097,
+            "usage": {
+              "inputTokens": 1230,
+              "outputTokens": 331,
+              "totalTokens": 67097,
+              "cacheReadTokens": 65536
+            },
+            "finalText": "DONE — Native range slider set to exactly 75.\n- Done: typed 75 into the \"Native range\" slider (native value now \"75\").\n- Verified: fixture snapshot reads `native value: 75; input/change: 1/1`, confirming the value committed and the widget received its input/change events.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0itng-9af6",
+              "origin": "remote",
+              "clientMessageId": "aedece2c-9021-47b6-8060-9430ff80257c",
+              "startedAt": "2026-11-16T08:39:40.444Z",
+              "endedAt": "2026-11-16T08:39:46.135Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1230,
+                "outputTokens": 331,
+                "totalTokens": 67097,
+                "cacheReadTokens": 65536
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwj0iymm-a1fb",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3846,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_type",
+                "message": "Error: browser_type.expect.toolbar_style is not available for this action (available here: text_landed, dialog, pixel_changed, export_contains); nothing was dispatched, so resend the call without it"
+              }
+            ],
+            "toolCounts": {
+              "browser_type": 2
+            },
+            "inputTokens": 2404,
+            "outputTokens": 345,
+            "cacheReadTokens": 65280,
+            "totalTokens": 68029,
+            "usage": {
+              "inputTokens": 2404,
+              "outputTokens": 345,
+              "totalTokens": 68029,
+              "cacheReadTokens": 65280
+            },
+            "finalText": "DONE\n\n- Set the Native range control to exactly 75 via direct typing into the field; label now reads \"Native range 75\" and the page reports native value: 75.\n- Verified in a fresh full view (input/change counters updated 1/1).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0iymm-a1fb",
+              "origin": "remote",
+              "clientMessageId": "2e875598-e25a-442b-ba31-906df8813cbe",
+              "startedAt": "2026-11-16T08:39:46.894Z",
+              "endedAt": "2026-11-16T08:39:50.740Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2404,
+                "outputTokens": 345,
+                "totalTokens": 68029,
+                "cacheReadTokens": 65280
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwj0j255-183c",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3075,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1834,
+            "outputTokens": 421,
+            "cacheReadTokens": 121728,
+            "totalTokens": 123983,
+            "usage": {
+              "inputTokens": 1834,
+              "outputTokens": 421,
+              "totalTokens": 123983,
+              "cacheReadTokens": 121728
+            },
+            "finalText": "DONE\n- Native range slider set to exactly 75.\n- Verified: page snapshot shows `native value: 75`, `rangeValue: \"75\"`, with input/change events fired 1/1.\n- Custom ARIA slider untouched (still 20).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0j255-183c",
+              "origin": "remote",
+              "clientMessageId": "db863712-5fb7-421b-930a-d5e1817bf99a",
+              "startedAt": "2026-11-16T08:39:51.449Z",
+              "endedAt": "2026-11-16T08:39:54.524Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1834,
+                "outputTokens": 421,
+                "totalTokens": 123983,
+                "cacheReadTokens": 121728
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 5,
+          "turnId": "turn-mwj0j532-5709",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3490,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1587,
+            "outputTokens": 281,
+            "cacheReadTokens": 65920,
+            "totalTokens": 67788,
+            "usage": {
+              "inputTokens": 1587,
+              "outputTokens": 281,
+              "totalTokens": 67788,
+              "cacheReadTokens": 65920
+            },
+            "finalText": "DONE\n- Native range slider set to exactly 75; fixture state now reads `native value: 75; input/change: 1/1`.\n- Verified via rendered snapshot (`value now \"75\"` plus read-back of the page state).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0j532-5709",
+              "origin": "remote",
+              "clientMessageId": "d5f276d1-8f92-49c4-a0a8-6f31c5109de9",
+              "startedAt": "2026-11-16T08:39:55.262Z",
+              "endedAt": "2026-11-16T08:39:58.752Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1587,
+                "outputTokens": 281,
+                "totalTokens": 67788,
+                "cacheReadTokens": 65920
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 6,
+          "turnId": "turn-mwj0j8c1-8535",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3322,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_screenshot",
+                "message": "Error: browser_screenshot region, space, and view_id are valid only with scope:\"region\""
+              }
+            ],
+            "toolCounts": {
+              "browser_type": 1,
+              "browser_screenshot": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1679,
+            "outputTokens": 441,
+            "cacheReadTokens": 162688,
+            "totalTokens": 164808,
+            "usage": {
+              "inputTokens": 1679,
+              "outputTokens": 441,
+              "totalTokens": 164808,
+              "cacheReadTokens": 162688
+            },
+            "finalText": "DONE\n- Native range set to exactly 75; the page confirms \"native value: 75\" and the snapshot shows `\"rangeValue\": \"75\"` with 1 input/1 change event.\n- Verified via the fixture's own rendered state and machine-readable snapshot.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0j8c1-8535",
+              "origin": "remote",
+              "clientMessageId": "59fe83ba-d894-4700-a188-1d259e9161c1",
+              "startedAt": "2026-11-16T08:39:59.473Z",
+              "endedAt": "2026-11-16T08:40:02.795Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1679,
+                "outputTokens": 441,
+                "totalTokens": 164808,
+                "cacheReadTokens": 162688
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 7,
+          "turnId": "turn-mwj0jbfg-0e57",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 7266,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_type": 1,
+              "browser_read_text": 2
+            },
+            "inputTokens": 2840,
+            "outputTokens": 1072,
+            "cacheReadTokens": 207616,
+            "totalTokens": 211528,
+            "usage": {
+              "inputTokens": 2840,
+              "outputTokens": 1072,
+              "totalTokens": 211528,
+              "cacheReadTokens": 207616
+            },
+            "finalText": "DONE\n- Native range slider set to exactly **75** (input value \"75\"; snapshot `rangeValue: \"75\"`, `rangeEvents: [1,1]`).\n- Verified via the page's machine-readable snapshot; other widgets untouched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0jbfg-0e57",
+              "origin": "remote",
+              "clientMessageId": "86a3932c-3bd1-4c5b-8141-06bd8424f3fc",
+              "startedAt": "2026-11-16T08:40:03.484Z",
+              "endedAt": "2026-11-16T08:40:10.750Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2840,
+                "outputTokens": 1072,
+                "totalTokens": 211528,
+                "cacheReadTokens": 207616
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 8,
+          "turnId": "turn-mwj0jhli-a1e3",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 2702,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1
+            },
+            "inputTokens": 2480,
+            "outputTokens": 285,
+            "cacheReadTokens": 43392,
+            "totalTokens": 46157,
+            "usage": {
+              "inputTokens": 2480,
+              "outputTokens": 285,
+              "totalTokens": 46157,
+              "cacheReadTokens": 43392
+            },
+            "finalText": "DONE\n- Set the \"Native range\" slider to exactly 75 via the labelled field (mode replace).\n- Verified on the fresh view: label reads \"Native range 75\", slider handle at max, and the machine-readable snapshot shows `native value: 75; input/change: 1/1`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0jhli-a1e3",
+              "origin": "remote",
+              "clientMessageId": "9cdede66-637e-4591-aba7-fe16203b8dd0",
+              "startedAt": "2026-11-16T08:40:11.478Z",
+              "endedAt": "2026-11-16T08:40:14.180Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2480,
+                "outputTokens": 285,
+                "totalTokens": 46157,
+                "cacheReadTokens": 43392
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 9,
+          "turnId": "turn-mwj0jk8a-1384",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3886,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1
+            },
+            "inputTokens": 2018,
+            "outputTokens": 733,
+            "cacheReadTokens": 81024,
+            "totalTokens": 83775,
+            "usage": {
+              "inputTokens": 2018,
+              "outputTokens": 733,
+              "totalTokens": 83775,
+              "cacheReadTokens": 81024
+            },
+            "finalText": "DONE\n- Native range slider now reads `native value: 75` (label shows \"Native range 75\"), fired input/change as 1/1.\n- Verified in the page's own machine-readable snapshot text plus the rendered label; custom ARIA slider was left untouched at 20.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0jk8a-1384",
+              "origin": "remote",
+              "clientMessageId": "dbd56ba9-82b8-4e93-8c6c-778edf06a42f",
+              "startedAt": "2026-11-16T08:40:14.890Z",
+              "endedAt": "2026-11-16T08:40:18.776Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2018,
+                "outputTokens": 733,
+                "totalTokens": 83775,
+                "cacheReadTokens": 81024
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}
