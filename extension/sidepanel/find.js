@@ -23,7 +23,7 @@ export function parseFindArgs(args = {}) {
   }
   const occurrence = args.occurrence
   if (occurrence !== undefined && occurrence !== 'first' && occurrence !== 'last' && (!Number.isSafeInteger(occurrence) || occurrence < 1)) {
-    throw findFailure('BAD_FIND', 'find occurrence must be first, last, or a positive one-based integer')
+    throw findFailure('BAD_FIND', `find occurrence must be "first", "last", or a positive one-based integer such as 2 (got ${String(JSON.stringify(occurrence)).slice(0, 40)})`)
   }
   if (args.reveal !== undefined && typeof args.reveal !== 'boolean') throw findFailure('BAD_FIND', 'find reveal must be true or false')
   return { query, occurrence, reveal: args.reveal === true }

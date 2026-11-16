@@ -7889,12 +7889,23 @@ export function docsPageProbe(command, args = {}) {
     const dialog = box.closest('[role="dialog"]') ?? document
     const confirmations = exact('button', 'OK', dialog).filter(hitVisible)
     if (confirmations.length !== 1) return failure('AMBIGUOUS_DIALOG', `Expected one visible custom-color OK button, found ${confirmations.length}`)
+    // The picker's own parsed colour, from its R/G/B fields. The hex box can
+    // hold typed text the picker has not parsed yet, and OK commits this.
+    const channels = ['R', 'G', 'B'].map(label => {
+      const inputs = Array.from(dialog.querySelectorAll('input')).filter(input => input.getAttribute('aria-label') === label)
+      const text = inputs.length === 1 ? String(inputs[0].value ?? '').trim() : ''
+      return /^\d{1,3}$/u.test(text) && Number(text) <= 255 ? Number(text) : undefined
+    })
+    const parsed = channels.every(channel => channel !== undefined)
+      ? `#${channels.map(channel => channel.toString(16).padStart(2, '0')).join('')}`
+      : undefined
     return {
       ok: true,
       open: true,
       enabled: !disabled(box),
       focused: document.activeElement === box,
       value: String(box.value ?? ''),
+      ...(parsed === undefined ? {} : { parsed }),
       point: disabled(box) ? undefined : point(box),
       okPoint: disabled(confirmations[0]) ? undefined : point(confirmations[0]),
     }
@@ -9243,6 +9254,21 @@ function docsWriteValidateBlocks(blocks) {
   return normalized
 }
 
+/**
+ * Type a hex colour into the focused, selected Hex box of the custom-colour
+ * dialog and wait until the picker has taken it. The picker parses the box on
+ * key events, not on inserted text: without a real key it keeps its previous
+ * colour (red by default) while the box shows the typed value, and OK would
+ * commit that old colour. A caret key makes it parse; the R/G/B fields prove it.
+ */
+async function docsEnterCustomColor(context, prefix, value) {
+  await docsInsertText(context, `${prefix}-input`, value)
+  await docsWait(context, `${prefix}-input`, 'colorDialog', {}, state => state.focused && state.value === value)
+  await docsKey(context, `${prefix}-parse`, { ...KEY_SPECS.End })
+  return docsWait(context, `${prefix}-parse`, 'colorDialog', {}, state =>
+    state.focused && state.value === value && (state.parsed === undefined || state.parsed === value.toLowerCase()))
+}
+
 async function docsApplyWriteColor(context, attribute, value, options = {}) {
   const prefix = options.prefix ?? 'write'
   const cache = options.cache !== false
@@ -9259,8 +9285,7 @@ async function docsApplyWriteColor(context, attribute, value, options = {}) {
     await docsClick(context, `${prefix}-${attribute}-focus`, dialog.point)
     await docsWait(context, `${prefix}-${attribute}-focus`, 'colorDialog', {}, state => state.focused)
     await docsKey(context, `${prefix}-${attribute}-select`, { key: 'a', code: 'KeyA', keyCode: 65 }, MODIFIER_BITS.ctrl)
-    await docsInsertText(context, `${prefix}-${attribute}-input`, value)
-    const committed = await docsWait(context, `${prefix}-${attribute}-input`, 'colorDialog', {}, state => state.focused && state.value === value)
+    const committed = await docsEnterCustomColor(context, `${prefix}-${attribute}`, value)
     await docsClick(context, `${prefix}-${attribute}-commit`, committed.okPoint)
     await docsWait(context, `${prefix}-${attribute}-close`, 'colorDialog', {}, state => !state.open)
   }
@@ -9928,8 +9953,7 @@ async function docsApplyCellBackground(context, edit) {
     await docsClick(context, 'table-cell-background-focus', dialog.point)
     await docsWait(context, 'table-cell-background-focus', 'colorDialog', {}, current => current.focused)
     await docsKey(context, 'table-cell-background-select', { key: 'a', code: 'KeyA', keyCode: 65 }, MODIFIER_BITS.ctrl)
-    await docsInsertText(context, 'table-cell-background-input', edit.value)
-    const committed = await docsWait(context, 'table-cell-background-input', 'colorDialog', {}, current => current.focused && current.value === edit.value)
+    const committed = await docsEnterCustomColor(context, 'table-cell-background', edit.value)
     context.menuMutationPossible = true
     await docsClick(context, 'table-cell-background-commit', committed.okPoint)
     await docsWait(context, 'table-cell-background-close-dialog', 'colorDialog', {}, current => !current.open)

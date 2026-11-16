@@ -184,7 +184,7 @@ export function validateActionExpect(value, options = {}) {
       continue
     }
     if (supported !== undefined && !supported.has(key)) {
-      validationIssue(errors, `${path}.${key}`, 'is incompatible with this action\'s available evidence; reject it before dispatch', 'EXPECT_UNSUPPORTED')
+      validationIssue(errors, `${path}.${key}`, `is not available for this action (available here: ${[...supported].join(', ') || 'none'}); nothing was dispatched, so resend the call without it`, 'EXPECT_UNSUPPORTED')
       continue
     }
     const itemPath = `${path}.${key}`

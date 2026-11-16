@@ -83,7 +83,24 @@ function selectTable(tables, selector) {
   return tables[0]
 }
 
-function resolveIndex(reference, names, kind) {
+/**
+ * Text that helps the next call succeed after a name was not found: the real
+ * names, and, for a row, where that exact text sits as a cell value. It never
+ * substitutes a target; the call still fails.
+ */
+function notFoundHint(reference, names, kind, rows) {
+  const shown = names.slice(0, 12).map(name => JSON.stringify(name)).join(', ')
+  const list = `${kind} names: ${shown}${names.length > 12 ? `, … (${names.length} total)` : ''}`
+  if (kind !== 'Row' || !Array.isArray(rows)) return list
+  const holders = []
+  rows.forEach((row, rowIndex) => {
+    if (row.cells.some(cell => cell.value === reference)) holders.push(rowIndex + 1)
+  })
+  if (holders.length === 0) return list
+  return `${list}. ${JSON.stringify(reference)} is a cell value in row ${holders.slice(0, 5).join(', ')}${holders.length > 5 ? ', …' : ''}, not a row name; pass that one-based row index`
+}
+
+function resolveIndex(reference, names, kind, rows) {
   if (validIndex(reference)) {
     const index = reference - 1
     if (index >= names.length) throw tableFailure('TABLE_TARGET_NOT_FOUND', `${kind} ${reference} is outside the table's ${names.length} ${kind.toLowerCase()}s`)
@@ -93,7 +110,7 @@ function resolveIndex(reference, names, kind) {
   for (let index = 0; index < names.length; index += 1) {
     if (names[index] === reference) matches.push(index)
   }
-  if (matches.length === 0) throw tableFailure('TABLE_TARGET_NOT_FOUND', `${kind} ${JSON.stringify(reference)} was not found; use an exact name from browser_table action:"read"`)
+  if (matches.length === 0) throw tableFailure('TABLE_TARGET_NOT_FOUND', `${kind} ${JSON.stringify(reference)} was not found. ${notFoundHint(reference, names, kind, rows)}. No cells were changed`)
   if (matches.length > 1) throw tableFailure('TABLE_AMBIGUOUS', `${kind} ${JSON.stringify(reference)} occurs ${matches.length} times; use its one-based numeric index`)
   return matches[0]
 }
@@ -101,7 +118,7 @@ function resolveIndex(reference, names, kind) {
 export function planTableWrite(table, edits) {
   const targets = new Set()
   return edits.map((edit, index) => {
-    const rowIndex = resolveIndex(edit.row, table.rows.map(row => row.label), 'Row')
+    const rowIndex = resolveIndex(edit.row, table.rows.map(row => row.label), 'Row', table.rows)
     const columnIndex = resolveIndex(edit.column, table.headers, 'Column')
     const cell = table.rows[rowIndex]?.cells[columnIndex]
     if (!cell) throw tableFailure('TABLE_TARGET_NOT_FOUND', `edits[${index}] targets a cell that does not exist`)

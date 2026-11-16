@@ -1485,10 +1485,16 @@ test('find validates arguments, returns bounded matches, and reveals with one fr
   assert.match(revealed.content[0].text, /no focus, selection, click, or edit/)
   assert.deepEqual(commands.at(-1), { op: 'find', args: { query: 'silver key', occurrence: 2, reveal: true } })
 
+  // A digit string is forwarded as the number the executor requires.
+  await tool.execute({ query: 'silver key', occurrence: '2', reveal: true }, { ...exec, callId: 'find-reveal-string' })
+  assert.deepEqual(commands.at(-1), { op: 'find', args: { query: 'silver key', occurrence: 2, reveal: true } })
+  await assert.rejects(() => tool.execute({ query: 'key', occurrence: 'all' }, exec), /got "all"\)\. Omit occurrence to list every match/)
+
   const before = commands.length
   const invalid = [
     {}, { query: ' ' }, { query: 'x'.repeat(201) }, { query: 'key', occurrence: 0 },
-    { query: 'key', occurrence: 'all' }, { query: 'key', reveal: 'yes' }, { query: 'key', surprise: true },
+    { query: 'key', occurrence: 'all' }, { query: 'key', occurrence: '2.0' }, { query: 'key', occurrence: [2] },
+    { query: 'key', reveal: 'yes' }, { query: 'key', surprise: true },
   ]
   for (const args of invalid) await assert.rejects(() => tool.execute(args, exec), /browser_find/)
   assert.equal(commands.length, before)

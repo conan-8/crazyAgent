@@ -71,6 +71,9 @@ function fakeWrite(options = {}) {
     colorDialogOpen: false,
     hexFocused: false,
     hexValue: '',
+    // Like the real picker: the colour OK commits. It follows the hex box only
+    // on a key event, never on inserted text, and starts at the default red.
+    pickerValue: '#ff0000',
     numbered: false,
     bulleted: false,
     checklist: false,
@@ -135,6 +138,10 @@ function fakeWrite(options = {}) {
       events.push(`key:${spec.key}:${mask}`)
       if (options.mutatePrefix && spec.key === 'End') state.blocks[0].text = 'Changed sentinel'
       if (spec.key === 'End' && mask === 2) return
+      if (spec.key === 'End' && state.hexFocused) {
+        if (options.pickerNeverParses !== true) state.pickerValue = state.hexValue
+        return
+      }
       if (state.hexFocused && spec.key.toLowerCase() === 'a' && mask === 2) return
       if (spec.key === 'Enter' && state.hexFocused) {
         state[state.colorTarget] = state.hexValue
@@ -257,7 +264,7 @@ function fakeWrite(options = {}) {
         state.highlightMenuOpen = false
       } else if (x === 14) state.hexFocused = true
       else if (x === 16) {
-        state[state.colorTarget] = state.hexValue
+        state[state.colorTarget] = state.pickerValue
         state.hexFocused = false
         state.colorDialogOpen = false
       } else if (x === 15) state.controlsRevealed = true
@@ -336,6 +343,7 @@ function fakeWrite(options = {}) {
           enabled: true,
           focused: state.hexFocused,
           value: state.hexValue,
+          parsed: state.pickerValue,
           point: { x: 14, y: 20 },
           okPoint: state.colorDialogOpen ? { x: 16, y: 20 } : undefined,
         }
@@ -452,6 +460,23 @@ test('Docs write resets non-default baseline colors only when needed', async () 
   assert.ok(fake.events.indexOf('click:13') < fake.events.indexOf('insert:After'))
   assert.equal(fake.state.blocks[1].format.color, '#000000')
   assert.equal(fake.state.blocks[1].format.highlight, 'none')
+})
+
+test('Docs write commits a custom colour only after the picker has parsed the typed hex', async () => {
+  // The fake picker commits its own parsed colour, so this passes only when
+  // the flow sends the key that makes the picker read the hex box.
+  const applied = fakeWrite()
+  const result = await runWrite(applied, [{ text: 'Marked', highlight: '#ffff00' }])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.ok(applied.events.includes('key:End:0'), 'a caret key follows the typed hex')
+  assert.equal(applied.state.highlight, '#ffff00')
+
+  // A picker that never parses: stop before OK instead of committing red.
+  const stuck = fakeWrite({ pickerNeverParses: true })
+  const refused = await runWrite(stuck, [{ text: 'Marked', highlight: '#ffff00' }]).then(value => value, error => error)
+  assert.notEqual(refused?.docs?.status, 'completed')
+  assert.equal(stuck.state.colorDialogOpen, true, 'OK was never clicked')
+  assert.notEqual(stuck.state.highlight, '#ff0000')
 })
 
 test('Docs write styles mixed inline runs before insertion and verifies exact run boundaries', async () => {
