@@ -5444,6 +5444,13 @@ async function click(settings, args) {
   // separately for the stale-coordinate warning.
   const layoutBaseline = await runInTab(tab.id, pageMetrics, []).catch(() => undefined)
   const result = await clickOnce(target)
+  // A frame destroyed mid-injection (for example a drag batch reflowing the DOM
+  // around the target) can yield a null script result rather than a thrown
+  // error; runInFrame only rejects undefined. Fail closed with a recoverable
+  // click error instead of dereferencing null below (reading 'scroll').
+  if (!result || typeof result !== 'object') {
+    throw await decorateStaleLabelError(tab, new BrowserError('CLICK_FAILED', 'The click produced no result; the target frame may have changed mid-click. Take a fresh view before trying again.'))
+  }
   if (result?.ok === false) {
     const code = typeof result.code === 'string' ? result.code : 'CLICK_FAILED'
     const error = new BrowserError(code, typeof result.message === 'string' ? result.message : 'Click failed')

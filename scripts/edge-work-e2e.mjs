@@ -768,5 +768,38 @@ assert.equal(namedKeys.colon.trusted, true, 'named Colon uses trusted input')
 assert.equal(namedKeys.value, '.:', 'named punctuation keys type their characters')
 console.log('PASS named punctuation keys — Period and Colon')
 
+// A click whose target frame is destroyed mid-injection (the drag-batch reflow
+// shape behind the null-'scroll' crash) must fail closed or report navigation,
+// never crash with a raw TypeError. The button removes its own iframe on click.
+const destroyedFrame = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tabId, { url: '${BASE}/form.html' })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  await chrome.scripting.executeScript({ target: { tabId }, func: () => {
+    const old = document.getElementById('qa-destruct-frame'); if (old) old.remove()
+    const frame = document.createElement('iframe')
+    frame.id = 'qa-destruct-frame'
+    frame.style.cssText = 'position:fixed;top:10px;left:10px;width:240px;height:80px;z-index:99999;border:2px solid red'
+    frame.srcdoc = '<button id="boom" style="width:200px;height:40px">Destroy frame</button><script>document.getElementById("boom").addEventListener("click",()=>{const f=window.frameElement;if(f)f.remove();});<\\/script>'
+    document.body.appendChild(frame)
+  } })
+  await new Promise(resolve => setTimeout(resolve, 600))
+  const snap = await mod.execute('snapshot', {}, settings)
+  const boom = snap.labels.find(item => item.text === 'Destroy frame')
+  if (!boom) return { labelFound: false }
+  let outcome
+  try {
+    const result = await mod.execute('click', { label: boom.id, view: 'none' }, settings)
+    outcome = { crashed: false, kind: 'result', navigated: result.navigated === true, changed: result.changed === true }
+  } catch (error) {
+    outcome = { crashed: /reading 'scroll'/.test(String(error.message ?? '')), kind: 'error', code: error.code ?? '', message: String(error.message ?? '').slice(0, 120) }
+  }
+  const frameGone = (await chrome.scripting.executeScript({ target: { tabId }, func: () => !document.getElementById('qa-destruct-frame') }))[0].result
+  return { labelFound: true, frameId: boom.frame ?? 0, outcome, frameGone }
+})()`)
+assert.equal(destroyedFrame.labelFound, true, 'destroy-frame button is labelled in its iframe')
+assert.equal(destroyedFrame.frameGone, true, 'the clicked button removed its own frame')
+assert.equal(destroyedFrame.outcome.crashed, false, `destroyed-frame click must not crash with a null scroll deref (${destroyedFrame.outcome.kind} ${destroyedFrame.outcome.code ?? ''})`)
+console.log(`PASS destroyed-frame click — ${destroyedFrame.outcome.kind} ${destroyedFrame.outcome.code ?? '(clean result)'}, no null-scroll crash`)
+
 console.log('\nALL WORK CHECKS PASSED')
 panel.close()
