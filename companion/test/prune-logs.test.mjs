@@ -1,4 +1,4 @@
-// Coverage for scripts/prune-logs.mjs (plan-temporary.md §D4) on synthetic folders.
+// Coverage for scripts/prune-logs.mjs (retired work plan §D4, archived in docs/HISTORY.md) on synthetic folders.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'

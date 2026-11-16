@@ -1,4 +1,4 @@
-// Synthetic-log coverage for scripts/analyze-failures.mjs (plan-temporary.md §A2,
+// Synthetic-log coverage for scripts/analyze-failures.mjs (retired work plan §A2,
 // extended for A3: reported completion labels + stopped-turn cost/failure stats,
 // and Q4: dead model steps / retries / recovered turns). Also covers
 // scripts/model-eval.mjs readTurnMetrics on the same synthetic-log pattern.

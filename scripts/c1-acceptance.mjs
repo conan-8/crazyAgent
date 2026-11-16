@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * C1 acceptance through the real runtime (plan-temporary.md Q6 / Track C1).
+ * C1 acceptance through the real runtime (retired work plan Q6 / Track C1, archived in docs/HISTORY.md).
  * No accounts: every check runs against the local fixtures with a real model
  * on an isolated companion, isolated DSH home, and isolated Edge — the same
  * pattern as scripts/model-eval.mjs, whose helpers this script reuses.

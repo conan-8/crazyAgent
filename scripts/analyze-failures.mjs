@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Reproducible failure report for crazyAgent run logs (plan-temporary.md §A2).
+ * Reproducible failure report for crazyAgent run logs (retired work plan §A2, archived in docs/HISTORY.md).
  *
  * Reads the `events.jsonl` file inside every `run-<id>` folder under the logs
  * directory, streaming one JSON object per line, and prints the aggregate
@@ -928,7 +928,7 @@ export function formatReport(report) {
 
   // --- Monthly measures (plan section 0 reproduction) -----------------------
   lines.push('')
-  lines.push('== Monthly measures (reproduces plan-temporary.md section 0) ==')
+  lines.push('== Monthly measures (reproduces the retired work plan, section 0) ==')
   const monthRows = [
     ['runs', (month) => fmtInt(month.runs)],
     ['turns', (month) => fmtInt(month.turns)],

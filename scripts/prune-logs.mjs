@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Retention for companion run logs (plan-temporary.md §D4).
+ * Retention for companion run logs (retired work plan §D4, archived in docs/HISTORY.md).
  *
  * Each companion run writes a `run-<ISO time>-<id>` folder under
  * `.dsh-home/browser-agent/logs/`; nothing ever removed them. This script
