@@ -2354,6 +2354,130 @@ test('Docs selection probe reads the editor mirror and fails closed on ambiguity
   }
 })
 
+test('Docs menu-item probe scrolls a unique below-fold command into view without guessing', () => {
+  // Q1 follow-up: Format > Table is a scrollable submenu; on a short viewport
+  // "Table options" sits below the fold and the hit test cannot see it. The
+  // probe must scroll the unique exact match into view, and must not pick
+  // between duplicates or return an uncovered point.
+  class FakeElement {
+    constructor(tagName, { label, roleName, top = 0, disabled = false } = {}) {
+      this.tagName = tagName.toUpperCase()
+      this.attributes = { 'aria-label': label, ...(roleName ? { role: roleName } : {}), ...(disabled ? { 'aria-disabled': 'true' } : {}) }
+      this.innerText = label
+      this.textContent = label
+      this.top = top
+      this.children = []
+      this.parentElement = undefined
+      this.isConnected = true
+      this.disabled = disabled
+      this.scrolls = 0
+    }
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const wanted = part.trim()
+        const roleMatch = /^\[role="([^"]+)"\]$/u.exec(wanted)
+        if (roleMatch) return this.attributes.role === roleMatch[1]
+        if (wanted === '[inert]') return 'inert' in this.attributes
+        if (wanted === '[aria-hidden="true"]') return this.attributes['aria-hidden'] === 'true'
+        return false
+      })
+    }
+    querySelectorAll(selector) {
+      return this.children.flatMap(child => [...child.matches(selector) ? [child] : [], ...child.querySelectorAll(selector)])
+    }
+    closest(selector) {
+      let current = this
+      while (current) {
+        if (current.matches(selector)) return current
+        current = current.parentElement
+      }
+      return null
+    }
+    getAttribute(name) { return this.attributes[name] ?? null }
+    getBoundingClientRect() { return { left: 100, top: this.top, width: 200, height: 32 } }
+    contains(other) { return other === this }
+    scrollIntoView() { this.scrolls += 1; this.top = 700 }
+  }
+  const keys = ['Element', 'document', 'getComputedStyle', 'innerWidth', 'innerHeight']
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  const install = items => {
+    const root = new FakeElement('div')
+    root.children = items
+    for (const item of items) item.parentElement = root
+    Object.assign(globalThis, {
+      Element: FakeElement,
+      innerWidth: 1280,
+      innerHeight: 769,
+      document: {
+        querySelectorAll: selector => root.querySelectorAll(selector),
+        getElementById: () => undefined,
+        elementFromPoint: (x, y) => {
+          if (x < 0 || y < 0 || x >= 1280 || y >= 769) return null
+          return items.find(item => y >= item.top && y < item.top + 32 && x >= 100 && x < 300) ?? null
+        },
+      },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    })
+  }
+  try {
+    // Below the fold: the probe scrolls the unique exact item and returns its new point.
+    const below = new FakeElement('div', { label: 'Table options', roleName: 'menuitem', top: 799 })
+    install([below])
+    const scrolled = docsPageProbe('tableMenuItem', { name: 'Table options' })
+    assert.equal(scrolled.ok, true)
+    assert.equal(scrolled.present, true)
+    assert.equal(scrolled.disabled, false)
+    assert.deepEqual(scrolled.point, { x: 200, y: 716 })
+    assert.equal(below.scrolls, 1)
+    // A second probe is stable (already visible, no further scroll).
+    const again = docsPageProbe('tableMenuItem', { name: 'Table options' })
+    assert.deepEqual(again.point, { x: 200, y: 716 })
+    assert.equal(below.scrolls, 1)
+
+    // A visible exact item wins without scrolling; hidden duplicates do not ambiguity-fail.
+    const visible = new FakeElement('div', { label: 'Merge cells', roleName: 'menuitem', top: 300 })
+    const hiddenDup = new FakeElement('div', { label: 'Merge cells', roleName: 'menuitem', top: 900 })
+    install([visible, hiddenDup])
+    const merge = docsPageProbe('tableMenuItem', { name: 'Merge cells' })
+    assert.equal(merge.present, true)
+    assert.deepEqual(merge.point, { x: 200, y: 316 })
+    assert.equal(visible.scrolls, 0)
+    assert.equal(hiddenDup.scrolls, 0)
+
+    // Two hidden exact matches: no guessing, no scroll, still not present.
+    const hiddenA = new FakeElement('div', { label: 'Delete table', roleName: 'menuitem', top: 900 })
+    const hiddenB = new FakeElement('div', { label: 'Delete table', roleName: 'menuitem', top: 950 })
+    install([hiddenA, hiddenB])
+    const duplicate = docsPageProbe('tableMenuItem', { name: 'Delete table' })
+    assert.deepEqual(duplicate, { ok: true, present: false })
+    assert.equal(hiddenA.scrolls, 0)
+    assert.equal(hiddenB.scrolls, 0)
+
+    // Two visible exact matches fail closed as ambiguous.
+    install([new FakeElement('div', { label: 'Split cell', roleName: 'menuitem', top: 100 }), new FakeElement('div', { label: 'Split cell', roleName: 'menuitem', top: 200 })])
+    const ambiguous = docsPageProbe('tableMenuItem', { name: 'Split cell' })
+    assert.equal(ambiguous.ok, false)
+    assert.equal(ambiguous.code, 'AMBIGUOUS_CONTROL')
+
+    // Disabled below-fold item: scrolled into view but reported disabled without a point.
+    const disabledItem = new FakeElement('div', { label: 'Table options', roleName: 'menuitem', top: 799, disabled: true })
+    install([disabledItem])
+    const disabledResult = docsPageProbe('tableMenuItem', { name: 'Table options' })
+    assert.equal(disabledResult.present, true)
+    assert.equal(disabledResult.disabled, true)
+    assert.equal(disabledResult.point, undefined)
+
+    // Absent command stays absent.
+    install([])
+    assert.deepEqual(docsPageProbe('tableMenuItem', { name: 'Table options' }), { ok: true, present: false })
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  }
+})
+
 test('Docs format_many formats an inline list target while preserving unrelated blocks', async () => {
   const list = { ...formatManyPara('List target', 'LI'), listLevel: 0, ordered: false }
   const fake = fakeFormatManyDocs({
