@@ -299,6 +299,54 @@ assert.equal(preGuard.action.expectation.status, 'unverified')
 assert.equal(preGuard.state.value, 'AfterGuard')
 console.log('PASS precondition failure prevents dispatch and expectation verification')
 
+// Q2: page-scoped text_landed on a click — appears / pre-existing / navigated away.
+const clickTextSetup = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tab.id, { url: '${BASE}/expect.html' })
+  await new Promise(resolve => setTimeout(resolve, 900))
+  const view = await mod.execute('snapshot', {}, settings)
+  const byText = text => view.labels.find(label => label.text === text)
+  return { create: byText('Create')?.id, noop: byText('Does nothing')?.id }
+})()`)
+assert.ok(clickTextSetup.create && clickTextSetup.noop, 'click text controls are labelled')
+
+const clickAppears = await evaluate(`(async () => { ${prefix}
+  const result = await mod.execute('click', { label: ${clickTextSetup.create}, view: 'none', expect: { text_landed: 'Created' } }, settings)
+  const s = await state()
+  return { expectation: result.expectation, observed: result.observed, evidence: result.expectEvidence, status: s.status }
+})()`)
+assert.equal(clickAppears.expectation.status, 'verified', JSON.stringify(clickAppears))
+assert.equal(clickAppears.expectation.checks[0].reason, 'appeared')
+assert.equal(clickAppears.expectation.checks[0].scope.before.kind, 'page')
+assert.equal(clickAppears.evidence.text_landed.before.contains, false)
+assert.equal(clickAppears.evidence.text_landed.after.contains, true)
+assert.equal('text' in clickAppears.evidence.text_landed.after, false)
+assert.equal(clickAppears.status, 'Created')
+console.log('PASS click text_landed appears with independent page readback')
+
+const clickPreexisting = await evaluate(`(async () => { ${prefix}
+  const result = await mod.execute('click', { label: ${clickTextSetup.create}, view: 'none', expect: { text_landed: 'Created' } }, settings)
+  const s = await state()
+  return { expectation: result.expectation, status: s.status }
+})()`)
+assert.equal(clickPreexisting.expectation.status, 'unverified')
+assert.equal(clickPreexisting.expectation.checks[0].reason, 'preexisting-text')
+assert.equal(clickPreexisting.status, 'Created')
+console.log('PASS click text_landed pre-existing stays unverified')
+
+const clickNavigated = await evaluate(`(async () => { ${prefix}
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: base => {
+    document.getElementById('noop').addEventListener('click', () => { location.href = base + '/second.html' })
+  }, args: ['${BASE}'] })
+  const result = await mod.execute('click', { label: ${clickTextSetup.noop}, view: 'none', expect: { text_landed: 'SECOND-MARKER' } }, settings)
+  const allTabs = await chrome.tabs.query({})
+  return { expectation: result.expectation, url: allTabs.find(t => t.id === tab.id)?.url ?? '' }
+})()`)
+assert.equal(clickNavigated.expectation.status, 'unverified')
+assert.equal(clickNavigated.expectation.checks[0].observed, 'unknown')
+assert.equal(clickNavigated.expectation.checks[0].reason, 'scope-mismatch')
+assert.match(clickNavigated.url, /second\.html/)
+console.log('PASS click text_landed unknown after navigating away (independent URL read)')
+
 const debuggerRunEnd = await evaluate(`(async () => {
   const mod = await import('./browser.js')
   await mod.endDebuggerRun()

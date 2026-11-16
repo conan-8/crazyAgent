@@ -59,10 +59,12 @@ import {
   expectDialogProbe,
   expectFocusedTextProbe,
   expectLabelledTextProbe,
+  expectPageTextProbe,
   finalizeActionEvidence,
   finalizeBatchEvidence,
   focusedTextSnapshot,
   labelledTextSnapshot,
+  pageTextSnapshot,
   parseOperationExpect,
   supportsActionEvidence,
   unknownToolbarBaseline,
@@ -5132,6 +5134,13 @@ async function finishActionExpect(session, tab, result, options = {}) {
   if (expectation.toolbar_style !== undefined) {
     context.expectEvidence.toolbar_style.after = await readActionToolbarSnapshot(tab, expectation.toolbar_style)
   }
+  // A click's page-scoped text_landed captures its baseline in the click path
+  // (before the press); read the matching after-scope here. Field-scoped
+  // text_landed (type/press_key) captures its own after inline, so only the
+  // page scope is handled generically.
+  if (expectation.text_landed !== undefined && context.expectEvidence.text_landed?.before?.scope?.kind === 'page') {
+    context.expectEvidence.text_landed.after = await readActionPageText(tab, expectation.text_landed, context.pageTextFrameId ?? 0)
+  }
   if (expectation.pixel_changed === true) {
     const before = context.pixelBefore
     const after = options.pixelAfter ?? result
@@ -5176,6 +5185,15 @@ async function readActionFocusedText(tab, expected) {
     return focusedTextSnapshot(frames)
   } catch {
     return { scope: { kind: 'field', target: 'unknown' }, complete: null, limits: ['focused-target-unavailable'] }
+  }
+}
+
+async function readActionPageText(tab, expected, frameId = 0) {
+  try {
+    const probe = await runInFrame(tab.id, frameId, expectPageTextProbe, [expected], 2_000)
+    return pageTextSnapshot(probe, frameId)
+  } catch {
+    return pageTextSnapshot(undefined, frameId)
   }
 }
 
@@ -5418,6 +5436,12 @@ async function click(settings, args) {
   if (!target) throw await decorateStaleLabelError(tab, missingLabelError(tab, label))
   const expectSession = await startActionExpect('click', args, tab, settings)
   if (expectSession.expectation?.pixel_changed === true) viewMode = 'full'
+  if (expectSession.expectation?.text_landed !== undefined) {
+    // Page-scoped absent-to-present baseline, read BEFORE the press in the
+    // clicked frame; finishActionExpect reads the matching after-scope post-settle.
+    expectSession.context.pageTextFrameId = target.frameId
+    expectSession.context.expectEvidence.text_landed = { before: await readActionPageText(tab, expectSession.expectation.text_landed, target.frameId) }
+  }
   const clickOnce = async labelTarget => {
     await glideToLabel(tab, labelTarget, { press: true })
     try {

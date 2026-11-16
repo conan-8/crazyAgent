@@ -36,6 +36,7 @@ function fakeExpectBrowser(t, options = {}) {
     dialogOpen: false,
     bold: false,
     exportBody: 'old text',
+    pageText: options.pageText ?? '',
     mutations: 0,
     probeCalls: 0,
     guardResults: [...(options.guardResults ?? [])],
@@ -115,6 +116,7 @@ function fakeExpectBrowser(t, options = {}) {
         if (name === 'waitForPaint' || name === 'waitInPage') return [{ result: {} }]
         if (name === 'expectLabelledTextProbe') return [{ result: fieldProbe(args[1]) }]
         if (name === 'expectFocusedTextProbe') return [{ result: { ...fieldProbe(args[0]), identity: 'input#name', hasFocus: true } }]
+        if (name === 'expectPageTextProbe') return [{ result: { readable: true, target: 'unique', documentUrl: tab.url, timeOrigin: state.timeOrigin, contains: state.pageText.includes(args[0]), complete: true, chars: state.pageText.length } }]
         if (name === 'expectDialogProbe') return [{ result: { visible: state.dialogOpen ? 1 : 0 } }]
         if (name === 'typeLabelled') {
           state.mutations += 1
@@ -139,6 +141,7 @@ function fakeExpectBrowser(t, options = {}) {
             state.count += 1
             state.exportBody = 'old text new marker'
             state.bold = true
+            state.pageText = `${state.pageText} result: ${state.count}`.trim()
             return [{ result: { ok: true, clicked: { label, tag: 'button', role: 'button', text: 'Increment' }, changed: true, signals: ['dom-mutations:1'], mutations: 1, newText: ['Created'] } }]
           }
           if (label === 4) {
@@ -257,6 +260,37 @@ test('a null click script result fails closed instead of crashing on result.scro
     mod.execute('click', { label: 3, view: 'none' }, {}),
     error => error.code === 'CLICK_FAILED' && !/reading 'scroll'/.test(error.message),
   )
+})
+
+test('click text_landed verifies a page-scoped absent-to-present transition', async t => {
+  const fake = fakeExpectBrowser(t, { pageText: '' })
+  const mod = await fake.initialize()
+  const result = await mod.execute('click', { label: 3, view: 'none', expect: { text_landed: 'result:' } }, {})
+  assert.equal(result.expectation.status, 'verified', JSON.stringify(result.expectation))
+  assert.equal(result.expectation.checks[0].reason, 'appeared')
+  assert.equal(result.expectation.checks[0].scope.before.kind, 'page')
+  assert.equal(result.expectation.checks[0].actual.before.contains, false)
+  assert.equal(result.expectation.checks[0].actual.after.contains, true)
+  assert.equal(result.observed, 'changed')
+  assert.equal(result.outcome.attempted, true)
+})
+
+test('click text_landed cannot verify pre-existing page text', async t => {
+  const fake = fakeExpectBrowser(t, { pageText: 'result: already here' })
+  const mod = await fake.initialize()
+  const result = await mod.execute('click', { label: 3, view: 'none', expect: { text_landed: 'result:' } }, {})
+  assert.equal(result.expectation.status, 'unverified')
+  assert.equal(result.expectation.checks[0].reason, 'preexisting-text')
+  assert.equal(result.expectation.checks[0].actual.before.contains, true)
+})
+
+test('click text_landed is unknown when the document navigates away', async t => {
+  const fake = fakeExpectBrowser(t, { pageText: '', navigateAfter: true })
+  const mod = await fake.initialize()
+  const result = await mod.execute('click', { label: 3, view: 'none', expect: { text_landed: 'result:' } }, {})
+  assert.equal(result.expectation.status, 'unverified')
+  assert.notEqual(result.expectation.checks[0].scope.before.id, result.expectation.checks[0].scope.after.id)
+  assert.equal(result.expectation.checks[0].observed, 'unknown')
 })
 
 test('off-screen coordinate bursts keep pixels unknown and report no dispatch or mutation risk', async t => {
