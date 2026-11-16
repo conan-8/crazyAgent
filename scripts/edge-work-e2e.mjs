@@ -179,6 +179,32 @@ assert.match(covered.error.message, /covered by an unlabelled <div> role=dialog 
 assert.equal(covered.clicks, 0, 'the overlay independently saw no click')
 console.log('PASS a covered label names what covers it and dispatches nothing')
 
+// Confirmation backstop: with the companion's guard stamp, a Submit control is
+// refused before input (directly and inside a batch); other controls still work.
+const submitLabel = setup.labels.find(item => item.tag === 'button' && item.text === 'Submit')
+assert.ok(submitLabel, 'the fixture Submit button is labelled')
+const guarded = await evaluate(`(async () => { ${prefix}
+  const submits = async () => Number(/submit=(\\d+)/.exec(await read('events'))?.[1] ?? -1)
+  const before = await submits()
+  let direct
+  try { await mod.execute('click', { label: ${submitLabel.id}, view: 'none', confirm_guard: true }, settings) } catch (caught) { direct = { code: caught.code, message: caught.message } }
+  const batch = await mod.execute('batch', { actions: [{ op: 'click', args: { label: ${submitLabel.id} } }], view: 'none', confirm_guard: true }, settings).then(
+    result => ({ steps: (result.actions ?? result.results ?? []).map(step => ({ ok: step.ok, code: step.error?.code ?? step.code })) , raw: JSON.stringify(result).slice(0, 600) }),
+    caught => ({ thrown: { code: caught.code, message: caught.message } }))
+  const afterRefusals = await submits()
+  const other = await mod.execute('click', { label: ${nameLabel}, view: 'none', confirm_guard: true }, settings).then(() => 'clicked', caught => caught.code)
+  const typedSubmit = await mod.execute('type', { label: ${nameLabel}, text: 'Ada Lovelace', submit: true, view: 'none', confirm_guard: true }, settings).then(() => 'typed', caught => caught.code)
+  return { before, direct, batch, afterRefusals, other, typedSubmit, afterOther: await submits() }
+})()`)
+assert.equal(guarded.direct?.code, 'CONFIRMATION_REQUIRED', JSON.stringify(guarded))
+assert.match(guarded.direct.message, /No click was dispatched\. Call agent_request_confirmation/u)
+assert.ok(guarded.batch.thrown?.code === 'CONFIRMATION_REQUIRED' || /CONFIRMATION_REQUIRED/u.test(guarded.batch.raw ?? ''), `a guarded batch click is refused too: ${JSON.stringify(guarded.batch)}`)
+assert.equal(guarded.afterRefusals, guarded.before, 'the page independently saw no submit')
+assert.equal(guarded.other, 'clicked', 'a guarded turn can still click ordinary controls')
+assert.equal(guarded.typedSubmit, 'CONFIRMATION_REQUIRED', 'type with submit:true is refused in a guarded turn')
+assert.equal(guarded.afterOther, guarded.before)
+console.log('PASS confirmation backstop refuses Submit directly and in a batch with zero submits; ordinary clicks still work')
+
 const append = await evaluate(`(async () => { ${prefix}
   const before = Number(/input=(\\d+)/.exec(await read('events'))?.[1] ?? -1)
   const result = await mod.execute('type', { label: ${nameLabel}, text: '!', mode: 'append' }, settings)

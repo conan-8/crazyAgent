@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { computeScrollPixels, isProtectedUrl, scaleDimensions } from '../sidepanel/browser.js'
+import { computeScrollPixels, confirmGuardMatches, isProtectedUrl, scaleDimensions } from '../sidepanel/browser.js'
 
 test('scaleDimensions preserves aspect ratio and never upscales', () => {
   assert.deepEqual(scaleDimensions(2560, 1440, 1280), { width: 1280, height: 720 })
@@ -27,4 +27,12 @@ test('isProtectedUrl identifies browser-owned and blocked surfaces', () => {
   assert.equal(isProtectedUrl('https://example.com/article'), false)
   assert.equal(isProtectedUrl('http://127.0.0.1:8080/'), false)
   assert.equal(isProtectedUrl(undefined), true)
+})
+test('the confirmation backstop matches reviewed irreversible verbs as whole words only', () => {
+  for (const name of ['Submit', 'Submit for Grading', 'SEND', 'Send message', 'Pay now', 'Place your order', 'Buy', 'Delete account', 'Publish', 'Post', 'Turn in', 'Check out', 'Hand in assignment']) {
+    assert.equal(confirmGuardMatches(name), true, name)
+  }
+  for (const name of ['Increment', 'Next', 'Save draft', 'Search', 'Cancel', 'Postpone', 'Sender details', 'Payment history', 'Buyer guide', 'Resubmitted items', 'Deleted files', 'Open', '']) {
+    assert.equal(confirmGuardMatches(name), false, name)
+  }
 })

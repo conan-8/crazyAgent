@@ -291,7 +291,7 @@ export class SessionController {
       }, { severity: 'info' })
       this.pendingConfirmation = undefined
     }
-    return { ok: true, ...this.#begin({ turnId: newTurnId(), prompt, displayText, images, input, runner }) }
+    return { ok: true, ...this.#begin({ turnId: newTurnId(), prompt, displayText, images, input, runner, confirmApproved: confirm === 'approve' }) }
   }
 
   /**
@@ -302,7 +302,7 @@ export class SessionController {
    * @param {{turnId: string, prompt: string, displayText?: string, images: any[], input: Record<string, any>, runner: any}} start
    * @returns {{turnId: string, done: Promise<void>}}
    */
-  #begin({ turnId, prompt, displayText, images, input, runner }) {
+  #begin({ turnId, prompt, displayText, images, input, runner, confirmApproved = false }) {
     const shownText = displayText ?? prompt
     this.running = true
     this.docsTurnVerification = undefined
@@ -316,6 +316,8 @@ export class SessionController {
     const origin = input.origin ?? 'ui'
     const planMode = input.planMode === true
     const confirmMode = this.getConfirmIrreversible() === true
+    // Executor backstop: on unless this turn starts from the user's approval.
+    const confirmGuard = confirmMode && confirmApproved !== true
     this.#notify('turnStarted', {
       turnId,
       origin,
@@ -334,7 +336,7 @@ export class SessionController {
       // desktop input instead of colliding with it.
       this.publish({ v: PROTOCOL_VERSION, type: 'chat.user', turnId, origin, text: shownText, imageCount: images.length })
     }
-    const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode })
+    const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode, confirmGuard })
     return { turnId, done }
   }
 
@@ -469,7 +471,7 @@ export class SessionController {
   /**
    * @param {{turnId: string, runner: any, prompt: string, images: any[], autoCaptureFlag: unknown, origin: string, planMode: boolean, confirmMode: boolean}} turn
    */
-  async #runTurn({ turnId, runner, prompt, images, autoCaptureFlag, planMode, confirmMode }) {
+  async #runTurn({ turnId, runner, prompt, images, autoCaptureFlag, planMode, confirmMode, confirmGuard = false }) {
     const logStore = this.logStore
     const bridge = this.bridge
     const turnStart = performance.now()
@@ -486,7 +488,7 @@ export class SessionController {
     /** @type {{outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}}} */
     let ending = { outcome: 'error', error: 'turn ended unexpectedly' }
 
-    bridge.setTurnId(turnId, { planMode, confirmMode })
+    bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard })
     logStore.turnStart(turnId, prompt, {
       autoCapture: wantAutoCapture,
       planMode,
@@ -546,11 +548,30 @@ export class SessionController {
       }, { turnId, severity: 'debug' })
 
       this.sendStatus('thinking')
-      const result = await runner.run(blocks, notification => {
+      const run = runBlocks => runner.run(runBlocks, notification => {
         if (firstEventMs === null) firstEventMs = Math.round(performance.now() - turnStart)
         logStore.recordDshNotification(notification, turnId)
         this.forwardNotification(notification, turnId, toolCalls, toolStarts, turnStats)
       })
+      let result = await run(blocks)
+      // The model's reply could not be parsed (typically a tool call with
+      // broken JSON arguments) and the runtime ended the turn with nothing
+      // done. Run once more in the same companion turn, re-arming this turn's
+      // conditional tools, instead of ending on an empty answer.
+      if (turnStats.endError?.code === 'MALFORMED_RESPONSE' && toolCalls.size === 0 && !this.stopRequested) {
+        logStore.record('companion', 'turn.retry', { reason: 'malformed-response' }, { turnId, severity: 'warn' })
+        turnStats.endError = undefined
+        bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard })
+        result = await run(buildPromptBlocks(null, MALFORMED_RETRY_NOTICE, new Date(), [], { planMode, confirmMode }))
+      }
+      // A run that still ended in a runtime error is a failed turn, never an
+      // empty successful one.
+      if (turnStats.endError !== undefined && !this.stopRequested) {
+        const code = turnStats.endError.code ?? 'runtime error'
+        throw new Error(toolCalls.size === 0
+          ? `The model's reply could not be used (${code}), so nothing was done. Send the request again.`
+          : `The model's reply could not be used (${code}) after ${toolCalls.size} action${toolCalls.size === 1 ? '' : 's'}. Check the page before sending the request again.`)
+      }
 
       // The model asked for the user. Its run has finished, so one capture of
       // what it is stuck on cannot overlap any browser work of its own.
@@ -591,7 +612,13 @@ export class SessionController {
 
       const collectedUsage = collectUsage(result.events)
       const usage = hasUsageTotals(collectedUsage) ? collectedUsage : { ...turnStats.usage }
-      const label = parseReportedLabel(result.finalResponse)
+      // A turn that still ends on a tool call written as text did nothing.
+      // So did a turn with no tool call, no request to the user, and no words.
+      const blankTurn = toolCalls.size === 0 && help === undefined && confirm === undefined
+        && String(result.finalResponse ?? '').trim().length === 0
+      const deadTurn = blankTurn || isLeakedToolCallText(result.finalResponse)
+      const finalText = deadTurn ? DEAD_TURN_TEXT : result.finalResponse
+      const label = parseReportedLabel(finalText)
       const timings = {
         totalMs: Math.round(performance.now() - turnStart),
         autoCaptureMs: Math.round(autoCaptureMs),
@@ -607,12 +634,14 @@ export class SessionController {
       const unverified = verification?.status === 'unverified'
       const plan = this.planTurnOutcome
       const planIncomplete = plan?.outcome === 'unfinished' || plan?.outcome === 'blocked'
-      const completionError = unverified
+      const completionError = deadTurn
+        ? (blankTurn ? 'Model returned an empty reply; nothing was executed' : 'Model wrote its tool call as text; nothing was executed')
+        : unverified
         ? `Docs verification incomplete (${verification.reason ?? 'one-nudge-only'})`
         : planIncomplete ? `Plan ${plan.outcome} (revision ${plan.revision ?? 0})` : undefined
       logStore.turnEnd(turnId, {
-        ok: !unverified && !planIncomplete,
-        finalText: result.finalResponse,
+        ok: !deadTurn && !unverified && !planIncomplete,
+        finalText,
         timings,
         usage,
         label,
@@ -625,7 +654,7 @@ export class SessionController {
         v: PROTOCOL_VERSION,
         type: 'chat.done',
         sessionId: result.sessionId,
-        text: result.finalResponse,
+        text: finalText,
         timings,
         usage,
         label,
@@ -729,6 +758,13 @@ export class SessionController {
 
     if (event.type === 'turn/end') {
       this.noteOutcome(data)
+      // Remember a runtime-error ending (for example MALFORMED_RESPONSE); a
+      // later turn of the same run that ends normally clears it.
+      const reason = isRecord(data.reason) ? data.reason : {}
+      const error = isRecord(reason.error) ? reason.error : {}
+      turnStats.endError = reason.kind === 'error'
+        ? { code: typeof error.code === 'string' ? error.code.slice(0, 60) : undefined }
+        : undefined
       return
     }
     if (event.type === 'assistant/message') {
@@ -739,7 +775,11 @@ export class SessionController {
       const usage = isRecord(data.usage) ? data.usage : undefined
       if (usage !== undefined) addUsageTotals(turnStats.usage, usage)
       const text = extractAssistantText(data)
-      if (text.length > 0) {
+      if (isLeakedToolCallText(text)) {
+        // The model wrote a tool call as markup: nothing ran and the provider
+        // retries the step. Log it, but do not show the markup to people.
+        this.logStore.record('dsh', 'assistant.leaked_tool_call', { chars: text.length }, { turnId, severity: 'warn' })
+      } else if (text.length > 0) {
         this.logStore.assistant(turnId, text)
         this.publish({ v: PROTOCOL_VERSION, type: 'chat.assistant', text })
       }
@@ -934,6 +974,22 @@ function extractReasoningText(data) {
     if (isRecord(block) && block.type === 'reasoning' && typeof block.text === 'string') parts.push(block.text)
   }
   return parts.join('')
+}
+
+const MALFORMED_RETRY_NOTICE = 'Automatic notice, not a new request: your previous reply could not be parsed (a tool call with malformed JSON arguments), so nothing was executed and the browser is unchanged. Continue the request above now, and send every tool call with valid JSON arguments.'
+
+const DEAD_TURN_TEXT = 'BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again.'
+
+/**
+ * True when the text is a tool call written as DeepSeek DSML markup instead
+ * of a structured call (the provider retries such steps).
+ * @param {unknown} text
+ */
+export function isLeakedToolCallText(text) {
+  // Fullwidth-bar DSML tags never occur in ordinary prose; the ASCII form
+  // counts only at the very start of the reply.
+  return typeof text === 'string'
+    && (/<\/?｜\s*DSML\s*｜\s*(?:calls|invoke|function_calls|parameter)\b/.test(text) || /^\s*<\/?\|\s*DSML\s*\|/.test(text))
 }
 
 /** @param {Record<string, any>} data */

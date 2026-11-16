@@ -1893,7 +1893,7 @@ async function decorateStaleLabelError(tab, error, preferText, freshLabels) {
  * click produces, then report whether the page changed.
  * @param {number} label persistent label id
  */
-async function clickLabelled(label) {
+async function clickLabelled(label, confirmGuardPattern) {
   const __t0 = performance.now()
   const state = globalThis.__crazyagent
   const el = state?.byId?.get(label)
@@ -1913,6 +1913,29 @@ async function clickLabelled(label) {
   }
   if ((tag === 'input' && el.type === 'file') || (tag === 'label' && el.control?.type === 'file')) {
     return { ok: false, code: 'FILE_INPUT', message: `Label ${label} selects a file input. Use browser_upload instead of opening a native file picker.`, clicked: { label, tag, role, text } }
+  }
+  // Confirmation backstop (only when the user's opt-in setting is on and this
+  // turn was not approved): refuse a control that submits, sends, pays, or
+  // deletes before any input. The model-reported confirmation tool stays the
+  // primary mechanism; this catches a turn that skipped it.
+  if (typeof confirmGuardPattern === 'string') {
+    const control = el.closest('button,input,a,[role="button"],[role="menuitem"],[role="link"]') ?? el
+    const kind = control.tagName.toLowerCase()
+    const inputType = kind === 'input' ? String(control.type ?? '').toLowerCase() : ''
+    const buttonLike = kind === 'button' || kind === 'a' || ['submit', 'button', 'image'].includes(inputType)
+      || ['button', 'menuitem', 'link'].includes(control.getAttribute('role') ?? '')
+    const controlName = String(control.getAttribute('aria-label') || (kind === 'input' ? control.value : '') || control.innerText || control.textContent || control.getAttribute('title') || text)
+      .replace(/\s+/gu, ' ').trim().slice(0, 120)
+    const nativeSubmit = (inputType === 'submit' || inputType === 'image' || (kind === 'button' && String(control.type).toLowerCase() === 'submit'))
+      && String(control.form?.getAttribute('method') ?? '').toLowerCase() === 'post'
+    if (buttonLike && (nativeSubmit || new RegExp(confirmGuardPattern, 'iu').test(controlName))) {
+      return {
+        ok: false,
+        code: 'CONFIRMATION_REQUIRED',
+        message: `Label ${label} (${kind} ${JSON.stringify(controlName)}) looks like an irreversible action, and the user's "ask before submitting, sending, paying, or deleting" setting is on. No click was dispatched. Call agent_request_confirmation for this action and end your turn; it can be clicked only in a turn that starts with the user's approval.`,
+        clicked: { label, tag, role, text },
+      }
+    }
   }
 
   // Scroll only when the target is not already fully inside the viewport: a
@@ -5398,7 +5421,7 @@ async function click(settings, args) {
   const clickOnce = async labelTarget => {
     await glideToLabel(tab, labelTarget, { press: true })
     try {
-      return await runInFrame(tab.id, labelTarget.frameId, clickLabelled, [labelTarget.localId], 1_200)
+      return await runInFrame(tab.id, labelTarget.frameId, clickLabelled, [labelTarget.localId, ...(confirmGuardActive ? [CONFIRM_GUARD_PATTERN] : [])], 1_200)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
@@ -5642,6 +5665,9 @@ function parseTypeArgs(args) {
       throw new BrowserError('BAD_LABEL', 'label must be a positive integer from the current view')
     }
     label = value
+  }
+  if (args.submit === true && confirmGuardActive) {
+    throw new BrowserError('CONFIRMATION_REQUIRED', 'submit:true would submit the form, and the user\'s "ask before submitting, sending, paying, or deleting" setting is on. Nothing was typed. Type without submit, then call agent_request_confirmation and end your turn.')
   }
   return { text: args.text, mode, label, submit: args.submit === true }
 }
@@ -11049,6 +11075,10 @@ async function executeOperationUnchecked(op, args, normalized, io = {}) {
     return click(normalized, args)
   }
   if (op === 'click_role') {
+    const finalName = Array.isArray(args?.path) ? args.path.at(-1)?.name : undefined
+    if (confirmGuardActive && typeof finalName === 'string' && confirmGuardMatches(finalName)) {
+      throw new BrowserError('CONFIRMATION_REQUIRED', `${JSON.stringify(finalName.slice(0, 120))} looks like an irreversible action, and the user's "ask before submitting, sending, paying, or deleting" setting is on. No click was dispatched. Call agent_request_confirmation for this action and end your turn; it can be clicked only in a turn that starts with the user's approval.`)
+    }
     return clickRole(normalized, args, { driver: roleClickDriver() })
   }
   if (op === 'click_at') {
@@ -11229,7 +11259,33 @@ async function coordinateRefusalWithView(op, args, error, settings) {
   }
 }
 
+/**
+ * Accessible names the confirmation backstop refuses to click in an unapproved
+ * turn. Kept short and reviewed: verbs that submit, send, pay, or delete.
+ */
+export const CONFIRM_GUARD_PATTERN = '(?:^|[^\\p{L}])(?:submit|send|pay|buy|purchase|checkout|check out|place (?:your |my )?order|order now|delete|erase|publish|post|turn in|hand in|unsubscribe|transfer|donate)(?:$|[^\\p{L}])'
+
+/** @param {string} name */
+export function confirmGuardMatches(name) {
+  return new RegExp(CONFIRM_GUARD_PATTERN, 'iu').test(String(name))
+}
+
+// True only while one command from a guarded turn runs. Mutating commands run
+// one at a time in model order, so a module flag cannot leak across commands.
+let confirmGuardActive = false
+
 export async function execute(op, args = {}, settings) {
+  // The companion stamps commands of a turn that has the confirmation setting
+  // on and no approval. It is transport metadata, never a tool argument.
+  if (args && typeof args === 'object' && Object.hasOwn(args, 'confirm_guard')) {
+    const { confirm_guard: guard, ...rest } = args
+    confirmGuardActive = guard === true
+    try {
+      return await execute(op, rest, settings)
+    } finally {
+      confirmGuardActive = false
+    }
+  }
   const normalized = normalizeSettings(settings)
   if (normalized.paused) throw new BrowserError('PAUSED', 'Browser access is paused in the side panel.')
   await prepareDebuggerCommand().catch(() => {})
