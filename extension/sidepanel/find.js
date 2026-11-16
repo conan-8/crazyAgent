@@ -108,7 +108,7 @@ export async function executeFind(args, io) {
     throw findFailure('FIND_REFINE_QUERY', 'The search was truncated, so uniqueness is unknown; refine the query or pass an explicit occurrence. Nothing was scrolled.')
   }
   if (request.reveal && request.occurrence === undefined && collected.matches.length !== 1) {
-    throw findFailure('FIND_AMBIGUOUS', `Found ${collected.matches.length} matches for ${JSON.stringify(request.query)}; pass occurrence:"first", "last", or a one-based integer. Nothing was scrolled.`)
+    throw findFailure('FIND_AMBIGUOUS', `Found ${collected.matches.length} matches for ${JSON.stringify(request.query)}; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (${collected.matches.length} matches) and stop or ask which one. occurrence:"first", "last", or a one-based integer is only for an ordinal the user named.`)
   }
   const target = request.reveal ? collected.matches[request.occurrence === undefined ? 0 : selectedIndex] : undefined
   const selected = target ?? (selectedIndex === undefined ? undefined : collected.matches[selectedIndex])
