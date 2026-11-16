@@ -9996,8 +9996,15 @@ async function docsTableWriteFlow(context, args) {
       }
       result.attempted = true
       result.mutationPossible = true
-      if (!edit.value) await docsKey(context, 'table-cell-clear', KEY_SPECS.Delete)
-      else await docsInsertText(context, 'table-cell-write', edit.value)
+      if (planned.before) {
+        // The proven selection covers the cell's existing text. Input.insertText
+        // inserts at the caret WITHOUT replacing the document selection
+        // (measured live: 'X' into a proven 'alpha' selection gave 'Xalpha'),
+        // so delete the proven selection first, then insert into the empty cell.
+        // Delete is a document-selection operation, like the format toggles.
+        await docsKey(context, 'table-cell-clear', KEY_SPECS.Delete)
+      }
+      if (edit.value) await docsInsertText(context, 'table-cell-write', edit.value)
       const { blocks: actual, verification } = await docsTableVerifiedExport(context, 'table-cell-verify', candidate => verifyDocsTableWrite(current, candidate, table.index, edit))
       latest = actual
       if (!verification.ok) {
