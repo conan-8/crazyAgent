@@ -7887,8 +7887,22 @@ export function docsPageProbe(command, args = {}) {
     return { ok: true, value: String(parts.input.value ?? ''), readback: String(parts.input.value ?? '') === value }
   }
   const tableMenuItem = wantedName => {
-    const items = nodes('menuitem').filter(hitVisible).filter(element => name(element) === wantedName)
-    if (items.length === 0) return { ok: true, present: false }
+    const all = nodes('menuitem').filter(element => name(element) === wantedName)
+    const items = all.filter(hitVisible)
+    if (items.length === 0) {
+      // A long submenu (Format > Table) scrolls on a short viewport, and the
+      // exact command can sit below the fold. Scroll one unique exact match
+      // into view and re-measure; never choose between duplicates, and never
+      // return a point the hit test cannot see.
+      if (all.length === 1 && typeof all[0].scrollIntoView === 'function') {
+        all[0].scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        const scrolled = all.filter(hitVisible)
+        if (scrolled.length === 1) {
+          return { ok: true, present: true, disabled: disabled(scrolled[0]), point: disabled(scrolled[0]) ? undefined : point(scrolled[0]) }
+        }
+      }
+      return { ok: true, present: false }
+    }
     if (items.length !== 1) return failure('AMBIGUOUS_CONTROL', `Expected one ${wantedName} menu item, found ${items.length}`)
     return { ok: true, present: true, disabled: disabled(items[0]), point: disabled(items[0]) ? undefined : point(items[0]) }
   }
