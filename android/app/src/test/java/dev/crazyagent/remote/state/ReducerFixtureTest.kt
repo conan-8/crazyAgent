@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -195,8 +196,87 @@ class ReducerFixtureTest {
         assertEquals("idle", end.turn.status)
     }
 
+    /**
+     * Q10: both malformed-reply endings render on the phone, and the leaked
+     * markup the companion streams rides only the transient draft — each ending
+     * drops it, so no committed item (and nothing in saved history) carries it.
+     */
+    @Test fun deadTurnEndingsRenderErrorAndBlockedWithoutMarkup() {
+        assertMatchesProjection("dead-turn")
+        val f = fixture("dead-turn")
+        val all = frames(f)
+        val checkpoints = f["checkpoints"]!!.jsonObject
+        fun checkpoint(name: String) = ChatReducer.fromProjection(checkpoints[name]!!.jsonObject)!!
+        fun type(frame: JsonObject) = frame["type"].toString().trim('"')
+        // turnEnded publishes a chat.turn after the ending; the checkpoint includes it.
+        fun chatTurnAfter(index: Int): Int {
+            for (i in (index + 1) until all.size) if (type(all[i]) == "chat.turn") return i
+            return all.size - 1
+        }
+        val markup = Regex("｜\\s*DSML\\s*｜|\\|\\s*DSML\\s*\\|")
+        fun committedMarkup(items: List<ChatItem>): Boolean = items.any { item ->
+            when (item) {
+                is ChatItem.User -> markup.containsMatchIn(item.text)
+                is ChatItem.Assistant -> markup.containsMatchIn(item.text)
+                is ChatItem.Done -> markup.containsMatchIn(item.text)
+                is ChatItem.Error -> markup.containsMatchIn(item.message)
+                is ChatItem.Stopped -> markup.containsMatchIn(item.message.orEmpty())
+                is ChatItem.ToolCall -> markup.containsMatchIn(item.args) || markup.containsMatchIn(item.result?.text.orEmpty())
+            }
+        }
+        val errorText = "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again."
+        val blockedText = "BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again."
+
+        // The live stream really does carry the markup as a draft before the ending.
+        val errorIndex = all.indexOfFirst { type(it) == "chat.error" }
+        val beforeError = replay(all.take(errorIndex))
+        assertTrue(markup.containsMatchIn(beforeError.draft?.text.orEmpty()))
+        assertTrue(beforeError.turn.isActive)
+
+        // Ending 1: chat.error -> an ERROR note, turn error, draft dropped, no committed markup.
+        val afterError = checkpoint("afterError")
+        assertEquals(afterError, replay(all.take(chatTurnAfter(errorIndex) + 1)))
+        assertEquals("error", afterError.turn.status)
+        assertEquals("error", afterError.turn.outcome)
+        assertEquals(errorText, afterError.turn.error)
+        assertNull(afterError.draft)
+        assertEquals(errorText, (afterError.items.last() as ChatItem.Error).message)
+        assertFalse(committedMarkup(afterError.items))
+        val errorRows = displayRows(afterError.items)
+        val errorNote = errorRows.last() as DisplayRow.Note
+        assertEquals(NoteKind.ERROR, errorNote.kind)
+        assertEquals(errorText, errorNote.text)
+
+        // Ending 2: chat.done BLOCKED -> the answer renders, a DONE note, draft dropped, no markup.
+        val doneIndex = all.indexOfFirst { type(it) == "chat.done" }
+        val beforeDone = replay(all.take(doneIndex))
+        assertTrue(markup.containsMatchIn(beforeDone.draft?.text.orEmpty()))
+        val afterBlocked = checkpoint("afterBlocked")
+        assertEquals(afterBlocked, replay(all.take(chatTurnAfter(doneIndex) + 1)))
+        assertEquals("idle", afterBlocked.turn.status)
+        assertEquals("done", afterBlocked.turn.outcome)
+        assertNull(afterBlocked.draft)
+        val blocked = afterBlocked.items.filterIsInstance<ChatItem.Done>().first()
+        assertEquals(blockedText, blocked.text)
+        assertEquals(22373L, blocked.usage?.totalTokens)
+        assertFalse(committedMarkup(afterBlocked.items))
+        val blockedRows = displayRows(afterBlocked.items)
+        assertTrue(blockedRows.any { it is DisplayRow.Assistant && it.text == blockedText })
+        assertTrue(blockedRows.any { it is DisplayRow.Note && it.kind == NoteKind.DONE })
+        // The earlier error note is still in the committed history, clean.
+        assertTrue(blockedRows.any { it is DisplayRow.Note && it.kind == NoteKind.ERROR && it.text == errorText })
+
+        // Recovery: an ordinary turn finishes after both dead endings.
+        val afterRecovery = checkpoint("afterRecovery")
+        assertEquals(afterRecovery, replay(all))
+        assertEquals("idle", afterRecovery.turn.status)
+        assertNull(afterRecovery.draft)
+        assertFalse(committedMarkup(afterRecovery.items))
+        assertTrue(displayRows(afterRecovery.items).any { it is DisplayRow.Assistant && it.text == "DONE: all set." })
+    }
+
     @Test fun resyncFramesAreOnlyEverFirst() {
-        for (name in listOf("turn-stream", "mid-turn-resync", "lifecycle", "help-request", "confirm-request")) {
+        for (name in listOf("turn-stream", "mid-turn-resync", "lifecycle", "help-request", "confirm-request", "dead-turn")) {
             val all = (fixture(name)["frames"] as JsonArray).map { it.jsonObject["type"].toString() }
             assertEquals("\"remote.resync\"", all.first())
             assertTrue(all.drop(1).none { it == "\"remote.resync\"" })

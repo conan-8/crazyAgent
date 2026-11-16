@@ -309,8 +309,99 @@ function confirmRequest() {
   return { ...fixture, checkpoints: { waiting, waitingAfterCapture, afterApprove, waitingNoCapture } }
 }
 
+/**
+ * Q10: both malformed-reply endings, recorded from the real hub exactly as the
+ * companion emits them. A MALFORMED_RESPONSE turn streams a broken-JSON tool
+ * delta plus the call's DSML tail as text, is retried once, then ends as
+ * `chat.error`; a turn whose final reply is leaked markup dead-steps through two
+ * steers and ends as `chat.done` with the BLOCKED text and label `blocked`. The
+ * markup rides only the transient draft, which each ending drops — no committed
+ * item ever carries it. A clean follow-up turn shows the slot recovering.
+ */
+function deadTurn() {
+  const s = scenario('companion-fixture-f')
+  s.connect()
+  const ERROR_TEXT = "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again."
+  const BLOCKED_TEXT = 'BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again.'
+  const BROKEN_ARGS = '{"actions":[{"op":"click","label":7},{"op":"type","label":9,"text":"hello","mode":"replace"}]'
+  const DSML_TAIL = '\n<｜DSML｜ parameter name="view":"full</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>'
+  const LEAKED_CALL = '\n<｜DSML｜ calls>\n<｜DSML｜ invoke name="browser_batch">\n<｜DSML｜ parameter name="actions">[{"op":"click","label":7}]</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>'
+
+  // Ending 1: malformed twice -> chat.error (the retry is a new model run).
+  startTurn(s, 'turn-11', 'Fill in the form and submit it')
+  s.modelStart()
+  s.reasoning('Looking at the form.')
+  s.toolDelta('call-a', 'browser_batch', BROKEN_ARGS)
+  s.text(DSML_TAIL)
+  s.modelStart()
+  s.text(DSML_TAIL)
+  s.hub.ingest({ type: 'chat.error', message: ERROR_TEXT, recoverable: true })
+  s.hub.turnEnded({
+    turnId: 'turn-11',
+    outcome: 'error',
+    error: ERROR_TEXT,
+    sessionId: 'session-1',
+    label: null,
+    usage: { inputTokens: 21963, outputTokens: 205, totalTokens: 22168 },
+    timings: { totalMs: 1100, toolCalls: 0, failedCalls: 0 },
+  })
+  const afterError = s.hub.projection()
+
+  // Ending 2: leaked markup final -> chat.done BLOCKED, label blocked.
+  startTurn(s, 'turn-12', 'Try again after the error.')
+  s.modelStart()
+  s.reasoning('Trying the form again.')
+  s.text(LEAKED_CALL)
+  s.modelStart()
+  s.text('\n<｜DSM')
+  s.text('L｜ calls>\n<｜DSML｜ invoke name="browser_batch">\n</｜DSML｜ invoke>\n</｜DSML｜ calls>')
+  s.modelStart()
+  s.text(LEAKED_CALL)
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: BLOCKED_TEXT,
+    label: 'blocked',
+    model: 'fixture/model',
+    timings: { totalMs: 12300, toolCalls: 0, failedCalls: 0 },
+    usage: { inputTokens: 22168, outputTokens: 205, totalTokens: 22373, cacheReadTokens: 12000 },
+  })
+  s.hub.turnEnded({
+    turnId: 'turn-12',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: 'blocked',
+    usage: { inputTokens: 22168, outputTokens: 205, totalTokens: 22373, cacheReadTokens: 12000 },
+    timings: { totalMs: 12300, toolCalls: 0, failedCalls: 0 },
+  })
+  const afterBlocked = s.hub.projection()
+
+  // Recovery: an ordinary turn runs and finishes after both dead endings.
+  startTurn(s, 'turn-13', 'One more try.')
+  s.hub.ingest({ type: 'chat.assistant', text: 'DONE: all set.' })
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'DONE: all set.',
+    label: 'done',
+    model: 'fixture/model',
+    usage: { inputTokens: 22373, outputTokens: 12, totalTokens: 22385 },
+  })
+  s.hub.turnEnded({
+    turnId: 'turn-13',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: 'done',
+    usage: { inputTokens: 22373, outputTokens: 12, totalTokens: 22385 },
+    timings: { totalMs: 700, toolCalls: 0, failedCalls: 0 },
+  })
+  const afterRecovery = s.hub.projection()
+  const fixture = s.done('dead-turn')
+  return { ...fixture, checkpoints: { afterError, afterBlocked, afterRecovery } }
+}
+
 export function buildFixtures() {
-  return [turnStream(), midTurnResync(), lifecycle(), helpRequest(), confirmRequest()]
+  return [turnStream(), midTurnResync(), lifecycle(), helpRequest(), confirmRequest(), deadTurn()]
 }
 
 export function fixtureFiles() {
