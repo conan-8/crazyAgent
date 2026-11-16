@@ -27,8 +27,17 @@ function deferred() {
  * can be made to fail. No subprocess, timers, or disk access.
  */
 class FakeHarness {
-  constructor(name = 'fake') {
+  /**
+   * @param {string} name
+   * @param {Set<string>} [store] shared persisted-session store; when given,
+   *   resumeSession enforces the SDK contract: a target this runtime still
+   *   owns rejects with 'already open or opening', and a target absent from
+   *   the store rejects as missing. A fresh harness (new process) owns nothing.
+   */
+  constructor(name = 'fake', store = undefined) {
     this.name = name
+    this.store = store
+    this.openIds = new Set()
     this.started = false
     this.closed = false
     this.sessions = []
@@ -51,6 +60,8 @@ class FakeHarness {
       },
     }
     this.sessions.push(session)
+    this.openIds.add(id)
+    this.store?.add(id)
     return session
   }
 
@@ -64,7 +75,12 @@ class FakeHarness {
 
   async resumeSession(sessionId) {
     this.resumed.push(sessionId)
-    if (this.failResume !== undefined) throw new Error(this.failResume)
+    const failure = this.failResume instanceof Set
+      ? (this.failResume.has(sessionId) ? 'session history is missing' : undefined)
+      : this.failResume
+    if (failure !== undefined) throw new Error(failure)
+    if (this.openIds.has(sessionId)) throw new Error(`SDK session is already open or opening: ${sessionId}`)
+    if (this.store !== undefined && !this.store.has(sessionId)) throw new Error(`session is missing or unreadable: ${sessionId}`)
     return this.#createSession(sessionId)
   }
 
@@ -188,6 +204,92 @@ test('interrupt when idle is a no-op and keeps the current runtime', async () =>
   assert.equal(harness.closed, false)
   assert.equal(runner.sessionId, sessionId)
   assert.equal(runner.resumeSessionId, undefined)
+})
+
+test('in-process resume of an earlier chat restarts the runtime and restores it (phone Continue)', async () => {
+  const store = new Set()
+  const harnessA = new FakeHarness('a', store)
+  let current = harnessA
+  const runner = createRunner(() => current)
+  await runner.ensureStarted()
+  const firstChat = runner.sessionId
+  // New chat leaves the earlier SDK session open — the SDK has no per-session
+  // close RPC, so the earlier chat stays 'already owned' in this process.
+  const secondChat = await runner.newSession()
+  assert.notEqual(secondChat, firstChat)
+  assert.ok(harnessA.openIds.has(firstChat))
+
+  const harnessB = new FakeHarness('b', store)
+  current = harnessB
+  const resumed = await runner.resume(firstChat)
+  assert.equal(resumed, firstChat, 'resume returns the session ID string')
+  assert.equal(runner.sessionId, firstChat)
+  assert.equal(runner.session.id, firstChat, 'the restored session is the runner current session')
+  assert.equal(harnessA.closed, true, 'the owning runtime was torn down')
+  assert.ok(harnessB.resumed.includes(firstChat), 'the fresh runtime restored it from disk')
+  assert.equal(runner.resumeSessionId, undefined)
+
+  // The restored session runs prompts.
+  const next = runner.run([{ type: 'text', text: 'continue the old chat' }])
+  const guarded = next.catch(error => error)
+  await waitFor(() => harnessB.runs.length > 0)
+  harnessB.runs[0].resolve({ sessionId: firstChat, finalResponse: 'ok', events: [] })
+  assert.equal((await guarded).sessionId, firstChat)
+})
+
+test('in-process resume of an unowned persisted session needs no restart', async () => {
+  const store = new Set(['saved-chat'])
+  const harness = new FakeHarness('a', store)
+  const runner = createRunner(() => harness)
+  await runner.ensureStarted()
+  const current = runner.sessionId
+  const resumed = await runner.resume('saved-chat')
+  assert.equal(resumed, 'saved-chat')
+  assert.equal(runner.sessionId, 'saved-chat')
+  assert.equal(harness.closed, false, 'an unowned target resumes in place')
+  assert.equal(harness.closeCount, 0)
+  assert.notEqual(runner.sessionId, current)
+})
+
+test('a failed in-process restore keeps the current chat and rethrows', async () => {
+  const store = new Set()
+  const harnessA = new FakeHarness('a', store)
+  let current = harnessA
+  const runner = createRunner(() => current)
+  await runner.ensureStarted()
+  const firstChat = runner.sessionId
+  const currentChat = await runner.newSession()
+
+  const harnessB = new FakeHarness('b', store)
+  harnessB.failResume = new Set([firstChat])
+  current = harnessB
+  await assert.rejects(() => runner.resume(firstChat), /session history is missing/)
+  assert.equal(harnessA.closed, true)
+  // The current chat is persisted, so it is restored on the fresh runtime.
+  assert.equal(runner.sessionId, currentChat, 'the current chat survives the failed restore')
+  assert.ok(harnessB.resumed.includes(currentChat))
+})
+
+test('the post-restart resume path still works and clears a pending interrupt intent', async () => {
+  const store = new Set()
+  const harnessA = new FakeHarness('a', store)
+  let current = harnessA
+  const runner = createRunner(() => current)
+  await runner.ensureStarted()
+  const saved = runner.sessionId
+  const first = await startFakeRun(runner, harnessA)
+  await runner.interrupt()
+  await first.guarded
+  assert.equal(runner.resumeSessionId, saved)
+
+  // A fresh process (harness undefined) resumes the persisted chat directly.
+  const harnessB = new FakeHarness('b', store)
+  current = harnessB
+  const resumed = await runner.resume(saved)
+  assert.equal(resumed, saved)
+  assert.equal(runner.sessionId, saved)
+  assert.equal(runner.resumeSessionId, undefined, 'the explicit resume superseded the interrupt intent')
+  assert.deepEqual(harnessB.resumed, [saved], 'no extra fresh-session resume attempt')
 })
 
 test('reset and close clear the saved resume state', async () => {

@@ -227,15 +227,53 @@ export class DshRunner {
   }
 
   /**
-   * Best-effort restoration of a persisted session after a companion restart.
+   * Restore a persisted session and make it the runner's current session.
+   * Works after a companion restart AND in-process (phone Continue on any
+   * saved chat). The SDK rejects a resume target it still owns ("already open
+   * or opening") and has no per-session close RPC, so an owned target is
+   * restored through the supported post-restart path: tear the runtime down,
+   * start a fresh one, and resume from disk. A failed restore keeps the
+   * current chat (restored on the fresh runtime when possible) and rethrows,
+   * so the controller can answer SESSION_NOT_RESUMABLE.
    * @param {string} sessionId
+   * @returns {Promise<string>} the restored session id
    */
   async resume(sessionId) {
     if (this.harness === undefined) await this.ensureStarted()
     if (this.harness === undefined) throw new Error('DSH runtime is not available')
-    this.session = await this.harness.resumeSession(sessionId)
+    // An explicit resume supersedes any pending interrupt-resume intent.
     this.resumeSessionId = undefined
-    return this.session.id
+    // ensureStarted may already have restored exactly this session (the
+    // post-restart interrupt-resume path); it is then the current session.
+    if (this.session?.id === sessionId) return this.session.id
+    try {
+      this.session = await this.harness.resumeSession(sessionId)
+      return this.session.id
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/already open or opening/iu.test(message)) throw error
+      const previousSessionId = this.session?.id
+      this.log(`dsh: session ${sessionId} is owned by this runtime; restarting to restore it`)
+      await this.#teardownHarness()
+      await this.ensureStarted()
+      if (this.harness === undefined) throw new Error('DSH runtime is not available')
+      try {
+        this.session = await this.harness.resumeSession(sessionId)
+        return this.session.id
+      } catch (restoreError) {
+        // Keep the current chat: it is persisted, so restore it on the fresh
+        // runtime. If even that fails, the fresh session from ensureStarted
+        // stands and the caller reports the original restore failure.
+        if (previousSessionId !== undefined && previousSessionId !== sessionId) {
+          try {
+            this.session = await this.harness.resumeSession(previousSessionId)
+          } catch {
+            // Best effort; the original restore error is what the caller sees.
+          }
+        }
+        throw restoreError
+      }
+    }
   }
 
   async reset() {
