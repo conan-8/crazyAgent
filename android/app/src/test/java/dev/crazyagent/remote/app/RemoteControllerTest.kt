@@ -74,7 +74,9 @@ class RemoteControllerTest {
         return this
     }
 
-    private fun RemoteController.await(timeoutMs: Long = 5_000, predicate: (UiState) -> Boolean): UiState = runBlocking {
+    // Generous bounded timeout: the connection/reconcile loops can lose a 5 s
+    // race on a slow or loaded CI runner (companion restart, lost acceptance).
+    private fun RemoteController.await(timeoutMs: Long = 15_000, predicate: (UiState) -> Boolean): UiState = runBlocking {
         withTimeout(timeoutMs) { state.first(predicate) }
     }
 
@@ -91,6 +93,16 @@ class RemoteControllerTest {
     private fun awaitStoreCleared(timeoutMs: Long = 5_000) {
         runBlocking { withTimeout(timeoutMs) { while (store.value != null) delay(10) } }
         assertNull("pending store must clear", store.value)
+    }
+
+    /**
+     * The pending store is saved in a launched coroutine (RemoteController.send /
+     * sendConfirm), so an immediate read of `store.value` races that async save
+     * under concurrent load. Wait until the saved pending satisfies [predicate].
+     */
+    private fun awaitStoreSaved(timeoutMs: Long = 5_000, predicate: (StoredPending?) -> Boolean) {
+        runBlocking { withTimeout(timeoutMs) { while (!predicate(store.value)) delay(10) } }
+        assertTrue("pending store must be saved as expected", predicate(store.value))
     }
 
     @Test fun sendCarriesAuthAndJsonAndClearsOnceTheTurnStarts() {
@@ -216,6 +228,7 @@ class RemoteControllerTest {
         fake.restart("fake-2")
         val review = c.await { it.pending?.phase == PendingPhase.NEEDS_REVIEW }
         assertEquals("approve", review.pending!!.confirm)
+        awaitStoreSaved { it?.confirm == "approve" }
         assertEquals("approve", store.value?.confirm)
         assertEquals("the uncertain answer never ran", 0, fake.userMessageCount())
         c.discardPending()
@@ -288,6 +301,7 @@ class RemoteControllerTest {
         assertEquals(true, review.pending!!.planMode)
         assertEquals(1, fake.messagePosts.size)
         assertEquals(0, fake.userMessageCount())
+        awaitStoreSaved { it?.planMode == true }
         assertNotNull(store.value)
         assertEquals(true, store.value?.planMode)
 
@@ -526,6 +540,7 @@ class RemoteControllerTest {
         c.await { it.chat.turn.status == "stopping" }
         val post = fake.messagePosts.last()
         assertEquals("true", post["steer"]?.jsonPrimitive?.content)
+        awaitStoreSaved { it?.steer == true }
         assertEquals(true, store.value?.steer)
         // Only one message may wait to steer.
         c.type("another")
