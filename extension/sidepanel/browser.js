@@ -8205,7 +8205,31 @@ function docsFindReady(state, text) {
 
 async function docsFindQuery(context, stage, text) {
   await docsNativeText(context, stage, 'setFind', text)
-  return docsWait(context, stage, 'find', {}, state => docsFindReady(state, text))
+  // The find bar opens retaining the PREVIOUS query, and after a mutation that
+  // deleted that query its counter can briefly read "0 of 0" while the value
+  // field already shows the new text. Accepting the first match-defined reading
+  // then resolves an occurrence against a stale total (measured: a navigation
+  // anchor failed "occurrence 1 unavailable in 0 matches" right after a cell
+  // write deleted the previous query). Wait until the counter is stable across
+  // two consecutive reads before trusting it; a genuine zero-match query still
+  // settles at 0 of 0 and fails closed in occurrence resolution.
+  const end = Math.min(context.deadline, context.driver.now() + 3_000)
+  let latest
+  let lastSignature
+  let stableSince = 0
+  while (context.driver.now() < end) {
+    latest = await docsProbe(context, stage, 'find', {})
+    const signature = JSON.stringify(latest.match ?? null)
+    const now = context.driver.now()
+    if (docsFindReady(latest, text) && signature === lastSignature) {
+      if (now - stableSince >= 80) return latest
+    } else {
+      lastSignature = signature
+      stableSince = now
+    }
+    await context.driver.sleep(60)
+  }
+  throw docsFailure(stage, 'DOCS_WAIT_TIMEOUT', `Find did not settle on a stable counter for ${JSON.stringify(text.slice(0, 80))} (last ${latest?.match?.text ?? 'unknown'})`)
 }
 
 async function docsOpenFind(context, text) {

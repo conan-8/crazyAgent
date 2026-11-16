@@ -1712,6 +1712,7 @@ function fakeFormatManyDocs(options = {}) {
     selection: undefined,
     selectionVisibleAt: 0,
     escapes: 0,
+    staleFindPending: false,
     styleMenuOpen: false,
     requestedStyle: undefined,
     fontSizeFocused: false,
@@ -1755,6 +1756,12 @@ function fakeFormatManyDocs(options = {}) {
     state.selection = currentMatches[state.current - 1]
   }
   const find = () => {
+    // Model the transient stale counter: the first probe after a query change
+    // can still show the previous query's "0 of 0" while value shows the new text.
+    if (state.staleFindPending) {
+      state.staleFindPending = false
+      return { ok: true, open: state.findOpen, enabled: true, focused: state.findOpen && state.findFocused, value: state.findValue, match: { current: 0, total: 0, text: '0 of 0' } }
+    }
     const total = nativeTotal()
     return {
       ok: true,
@@ -1909,6 +1916,7 @@ function fakeFormatManyDocs(options = {}) {
       events.push(`probe:${command}`)
       if (command === 'find') return find()
       if (command === 'setFind') {
+        if (options.staleFirstFindProbe) state.staleFindPending = true
         state.findValue = args.value
         const count = nativeTotal()
         state.current = count ? Math.min(options.initialCurrent ?? 1, count) : 0
@@ -2277,6 +2285,26 @@ test('Docs single-edit format keeps its existing path without the selection-proo
   const result = await runFormatDocs(fake)
   assert.equal(result.docs.status, 'completed')
   assert.equal(fake.events.includes('probe:documentSelection'), false)
+})
+
+test('Docs format_many waits for a stable find counter instead of a stale zero after a query change', async () => {
+  // The first find probe after setting a query can still show a stale "0 of 0"
+  // (the bar retains the previous query's count while the value updates).
+  // Accepting it would resolve occurrence 1 against total 0
+  // (DOCS_MATCH_OUT_OF_RANGE); the stability wait settles on the real counter.
+  const fake = fakeFormatManyDocs({
+    staleFirstFindProbe: true,
+    blocks: [formatManyPara('alpha'), formatManyPara('beta'), formatManyPara('sentinel')],
+  })
+  const result = await runFormatManyDocs(fake, [
+    { text: 'alpha', bold: true },
+    { text: 'beta', bold: true },
+  ])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(result.docs.verifiedCount, 2)
+  assert.deepEqual(fake.state.blocks[0].runs, [formatManyRun('alpha', { bold: true })])
+  assert.deepEqual(fake.state.blocks[1].runs, [formatManyRun('beta', { bold: true })])
+  assert.deepEqual(fake.state.blocks[2].runs, [formatManyRun('sentinel')])
 })
 
 test('Docs selection probe reads the editor mirror and fails closed on ambiguity', () => {
