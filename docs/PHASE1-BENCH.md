@@ -1,5 +1,7 @@
 # Phase 1 measurements (historical)
 
+> **Current measurements live elsewhere (D5, 2026-11-16).** For up-to-date real-model acceptance use `scripts/model-eval.mjs` (11 scripted scenarios + 3 confirmation gates, independent checkers, `--self-test` mutation gate) and the saved batches under `e2e/baselines/`; for the real-runtime C1 acceptance use `scripts/c1-acceptance.mjs`; for direct-executor gates use `scripts/run-e2e-gates.mjs`. The latest verified numbers are in `docs/STATUS.md`. The phase-1 figures below are kept only as historical local reference points (34-tool build, earlier route/effort).
+
 These are measurements from the original vertical slice, not a controlled benchmark or a description of the current 28-tool prompt. They are useful only as local reference points. Model timings came from the earlier direct Alibaba route with reasoning off; the current OpenRouter/Auto configuration differs. Bridge, capture, executor, and logging overhead is less provider-dependent.
 
 ## Environment

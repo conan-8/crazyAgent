@@ -1,4 +1,4 @@
-# Real-model evaluation scenarios (plan-temporary.md Track A / A1)
+# Real-model evaluation scenarios (Track A / A1)
 
 `scripts/model-eval.mjs` runs these scenarios N times with a real model against
 an isolated browser, an isolated companion, and an isolated DSH home, then
