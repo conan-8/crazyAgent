@@ -82,6 +82,17 @@ class RemoteControllerTest {
 
     private fun RemoteController.type(text: String) = updateComposer(text)
 
+    /**
+     * The pending store is cleared in a launched coroutine right after
+     * UiState.pending flips to null (RemoteController.accepted / editPending),
+     * so an immediate `assertNull(store.value)` races that async clear under
+     * concurrent load. Wait for the store to actually clear, then assert it.
+     */
+    private fun awaitStoreCleared(timeoutMs: Long = 5_000) {
+        runBlocking { withTimeout(timeoutMs) { while (store.value != null) delay(10) } }
+        assertNull("pending store must clear", store.value)
+    }
+
     @Test fun sendCarriesAuthAndJsonAndClearsOnceTheTurnStarts() {
         val c = controller().start()
         c.awaitLive()
@@ -101,7 +112,7 @@ class RemoteControllerTest {
         val user = running.chat.items.single() as ChatItem.User
         assertEquals("client-0001", user.clientMessageId)
         assertEquals(1, user.imageCount)
-        assertNull(store.value)
+        awaitStoreCleared()
 
         fake.draft("turn-1:s1", 0, "Two ")
         fake.draft("turn-1:s1", 4, "items.")
@@ -143,7 +154,7 @@ class RemoteControllerTest {
         assertEquals("approve", post["confirm"]?.jsonPrimitive?.content)
         assertEquals("", post["text"]?.jsonPrimitive?.content)
         assertNull(running.chat.confirm)
-        assertNull(store.value)
+        awaitStoreCleared()
         fake.finishTurn("DONE — submitted.")
         c.await { !it.chat.turn.isActive }
         // The turn is over and nothing waits: another answer sends nothing.
@@ -221,7 +232,7 @@ class RemoteControllerTest {
         assertEquals("buy it", refused.composer)
         assertEquals("A turn is already running.", refused.notice)
         assertEquals(0, fake.userMessageCount())
-        assertNull(store.value)
+        awaitStoreCleared()
     }
 
     @Test fun lostAcceptanceIsReconciledFromEventsWithoutResending() {
@@ -246,7 +257,7 @@ class RemoteControllerTest {
         c.await { it.pending == null }
         assertEquals(1, fake.messagePosts.size)
         assertEquals(1, fake.userMessageCount())
-        assertNull(store.value)
+        awaitStoreCleared()
     }
 
     @Test fun lostRequestIsRetriedOnlyWithTheSameId() {
@@ -283,7 +294,7 @@ class RemoteControllerTest {
         c.editPending()
         val restored = c.await { it.pending == null && it.planMode }
         assertEquals("pay the invoice", restored.composer)
-        runBlocking { withTimeout(2_000) { while (store.value != null) delay(10) } }
+        awaitStoreCleared(2_000)
     }
 
     @Test fun reconnectDuringATurnResumesFromTheLastSequence() {
@@ -529,7 +540,7 @@ class RemoteControllerTest {
         assertTrue(running.chat.items.any { it is ChatItem.Stopped })
         assertEquals(2, fake.messagePosts.size)
         assertTrue(fake.stopPosts.isEmpty())
-        assertNull(store.value)
+        awaitStoreCleared()
     }
 
     @Test fun aSteerThatNeverStartsGoesToReviewAfterTheNextResync() {
