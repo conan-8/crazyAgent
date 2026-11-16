@@ -397,7 +397,7 @@ None of this is new code. It is proof that shipped code works. Record every run 
 
 Install the current debug APK, then check in order: live view pane and its age/expired states, capture button, help card (Reply, Show screen), Continue on a saved transcript, steer button, notification settings screen. Use `scripts/fake-remote-companion.mjs` first, then the real companion. An agent can drive this over `adb` while the user watches.
 
-### C4. Push (computer side configured; delivery untested)
+### C4. Push (designated sender: conan-evo-x3; delivery untested)
 
 The user creates a Firebase project, puts the service-account key at `.dsh-home/browser-agent/fcm-service-account.json`, and fills `android/firebase.properties`. Then: registration returns 200 and `health.pushConfigured` is true; one help, one done, one error notification arrive; tap opens and resyncs; token refresh re-registers; delivery with the screen off; an unregistered token is pruned. Until this happens, all push code is unproven.
 
@@ -571,3 +571,64 @@ Not touched by this work: the running service, the user's normal Edge profile, a
 - **C4 Firebase — computer side works; delivery untested.** `android/firebase.properties` (from the user's `google-services.json`, package `dev.crazyagent.remote`) and `.dsh-home/browser-agent/fcm-service-account.json` (`0600`) are in place, both git-ignored. The debug APK was rebuilt and installed; its Settings row moved from "Not set up in this app build" to a computer-side status. After a service restart `/state` health reports `pushConfigured: true`, and a `validate_only` FCM send with the key returned 200. **No notification has been delivered:** the phone is paired with a different computer (`conan-evo-x3`), not this one (`conan-expertbook`), so it never registered here (`push-devices.json` does not exist) and its "Not set up on the computer" row describes the other machine. Next: pair the phone with this computer, or put the same key on the other one.
 - **C2 Docs table suite — ran signed in; fails at the first format step.** Profile `~/.cache/crazyagent/docs-profile`, the user's own account. Two harness fixes in `scripts/edge-docs-table-e2e.mjs`: readiness now waits for the editor textbox (`role=textbox`, "Document content", in a same-origin iframe) instead of page text that this Docs build does not render, and the panel page gets CDP focus emulation because it runs as a background tab and the clipboard-preserving table paste refuses an unfocused document. With those, rename and `create` (3×4, values, compact cell paragraphs by independent export) pass. Then `format {row:1, bold:true, highlight:"#ffff00"}` returned `partial` with `DOCS_FORMAT_VERIFY_FAILED`: the export shows highlight `#ff0000` in all four cells. The colour dialog's hex field read back `#ffff00` before OK, so the typed value did not reach the picker and OK committed the dialog's default red. The export check caught it; nothing after that step ran (cell background, row/column structure, merge, deletion, reload persistence). Not yet known: whether this is a Docs change or an effect of the window not having OS focus. The three runs left three documents in that account (one "Untitled document", two "crazyAgent Docs Table Acceptance …").
 
+## Progress log (2026-11-16)
+
+- **Push sender decided: `conan-evo-x3`.** The phone keeps its existing pairing; that computer becomes the FCM sender, and this computer's key is the source, not the delivery path. Plan: copy `.dsh-home/browser-agent/fcm-service-account.json` there (`0600`, contents never printed), restart its companion, verify `pushConfigured: true` there, then the app registers on open / after notification permission is granted (`push-devices.json` appears there), then the screen-off delivery checks — `done` first (a no-browser "reply OK" turn completes without an executor), then `help`, then `confirm` only if that repo has B9b (`9f3ed87`) and `confirmIrreversible` is on there. SSH from here to that machine needs a Tailscale browser approval only the user can give, so a self-contained brief went to the user's own agent on `conan-evo-x3` instead. Do not re-pair the phone to this computer. Recorded the same day in `AGENTS.md`, `docs/STATUS.md`, `docs/REMOTE-ACCESS.md` (status header, §4.9, §13.7), `HANDOFF-QUICK.md`, and `android/README.md`.
+
+
+---
+
+## Delegation queue (written 2026-11-16 by the reliability session)
+
+Self-contained items for other agents. Same rules as "Rules for every agent" above. Each names its evidence, files, and proof. Items marked **(live Docs)** need the signed-in profile at `~/.cache/crazyagent/docs-profile` (start it headless with `--remote-debugging-port=9233 --load-extension=<repo>/extension --headless=new`); Google rate-limited the document export (HTTP 429) after about six suite runs in 40 minutes on 2026-11-16, so space runs out and stop on the first 429. Context for all of them is the "Progress log (2026-11-16, reliability session)" entry below.
+
+### Q1. Docs table format skips the last cell of a row (live Docs) — highest value
+**Evidence.** `scripts/edge-docs-table-e2e.mjs`, step `format {row:1, bold:true, highlight:"#ffff00"}` on a fresh 3×4 table, twice in a row after the colour fix: cells 1–3 end bold + yellow by export, cell 4 ("Shenanigans") gets neither, and the result says `bold: applied (toolbar-pressed)`, `highlight: applied (color-dialog)` for it. Edit 1 reported `bold: already_applied (toolbar)` although cell 2 was not bold before. Reading: the Find-driven selection lags by one edit — the toolbar is read (and bold toggled) while the previous cell is still selected, the selection arrives during the colour dialog, and for the last edit it never arrives. The export check catches it (`DOCS_FORMAT_VERIFY_FAILED`, `partial`), so nothing is misreported, but the suite cannot get past this step.
+**Files.** `extension/sidepanel/browser.js`: `docsSelectOccurrence`, `docsOpenFind`, `docsFindReady`, `docsFormatManyFlow`, the 80 ms toolbar-settling interval.
+**Steps.** Reproduce with a single-cell call first (`{row:1,column:4,…}` alone, then `{row:1,column:1}` after it) to separate "last column" from "lag by one". Find a positive signal that the match is the document selection before any toolbar read (not a timer). Check whether headless/unfocused matters by running once headed.
+**Prove it.** The suite passes end to end twice (it has never passed signed in), reload persistence included; `npm test`.
+
+### Q2. `text_landed` on a click — the most common recovered failure
+**Evidence.** Across every saved batch in `e2e/baselines/`, 33 failed calls are the model asking `browser_click`/batch click for `expect.text_landed` ("click Submit, expect `result:` to appear"). Clicks support only `dialog`, `pixel_changed`, `export_contains`, `toolbar_style`. The error now lists what is available (2026-11-16), which removes the guesswork but not the wasted call.
+**Idea.** Add a page-scoped absent-to-present text check for clicks: read bounded rendered text for the needle before the press and after settle, same document identity rules as the existing field scope, `unknown` when the document changed. Keep provider/executor `action-expect.js` byte-identical.
+**Prove it.** `edge-expect-e2e.mjs` cases (appears / pre-existing / navigated away); model-eval `form-submit` ×10 failed-call count before and after.
+
+### Q3. The max-token continuation starts a new turn and loses conditional tools
+**Evidence.** `packages/dsh-browser-extension/lib/index.js`, `agent/turn-stopping`: the output-token continuation uses `agent.followup`, which is a new DSH turn. `agent_request_confirmation` and `browser_plan` are registered per armed turn and retired at `turn/end`, so the continuation runs without them. This was measured by accident on 2026-11-16: a first version of the dead-turn retry used `followup`, and in 3 of 3 retried confirmation turns the tool was gone — one run said "the confirmation gate tool isn't in my toolset", one asked through `agent_request_help`, and **one submitted the form without asking** (`e2e/baselines/2026-11-16T06-47-10-154Z-deadturn-retry-gates.json`, `submit-gate` run 5). The retry now uses `agent.steer` (same turn). The max-token path still uses `followup`.
+**Steps.** Either switch that path to `steer` (check it works when the stop reason is max-tokens) or let `planRuntime`/`confirmRuntime` carry an armed turn across an internal continuation. Add a provider test with both conditionals armed.
+**Also decide (user):** with the setting on, a turn that finds itself without the confirmation tool should fail safe. This is the first measured gate bypass, and it argues for the B9c executor backstop.
+
+### Q4. Report dead turns and retries in the measurement tools
+`scripts/analyze-failures.mjs` and `scripts/model-eval.mjs` do not count the new log events: provider `model.leaked_tool_call` (`outcome: retried|gave-up`, `kind: markup|empty`), companion `assistant.leaked_tool_call`, and companion `turn.retry` (`reason: malformed-response`). Add a "dead turns / retries / recovered" line to both and a per-run column in model-eval, with a synthetic-log unit test. Then run `form-submit` ×30 to get a real rate.
+
+### Q5. One command for the real-extension gates
+Today each `scripts/edge-*-e2e.mjs` needs a hand-started fixture server on 17872 and a hand-started Edge. On 2026-11-16 `find`, `expect`, `table`, and `work` all passed against `microsoft-edge --headless=new --load-extension=… --remote-debugging-port=9228` on a throwaway profile. Write `scripts/run-e2e-gates.mjs` that starts both (own PIDs only, free ports via `FIXTURE_URL`/`CDP_URL`), runs the suites that work headless, prints one table, and cleans up. List which suites cannot run headless and why. Optional: a CI job if Edge installs on the runner.
+
+### Q6. C1 acceptance through the harness (no accounts needed)
+Still unrun from Track C1. Each needs a small addition to `scripts/model-eval.mjs` or a sibling script on the same isolated companion: (a) a `/plan` scenario (`planMode:true`, multi-step fixture task; evidence `chat.done.planOutcome` + page state); (b) resume an older chat (`POST /sessions/{id}/resume`, follow-up that depends on earlier context); (c) a steered turn (`steer:true` mid-turn; the fixture log shows no duplicate action); (d) 20 cycles of Stop/New/token rotation with no stuck `TURN_BUSY`; (e) minimise the window mid-turn through CDP and check the saved images are real page content.
+
+### Q7. Smaller recovered-failure classes (from the baselines tally)
+- `browser_drag` shape errors (8): the model sends `from:{x,y}`/`to:{x,y}`. Decide between accepting those two aliases and keeping the refusal; measure with `drag-reorder` + `slider-value` ×10.
+- `browser_batch` argument names like `"expect:"` and `text_landed` after a navigating step (Q2 may remove most).
+- `duplicate-text` partials: after reporting ambiguity the model still names an occurrence. Guidance or result wording; the page is never touched.
+- `browser_screenshot` stray `view` argument (3).
+
+### Q8. Docs suite hygiene (live Docs, small)
+- `edge-docs-table-e2e.mjs` leaves its document behind on every failed run; several "crazyAgent Docs Table Acceptance …" documents are in the test account now. Trash the run's own document in `finally` (by its ID only) and say so in the output.
+- Add bounded backoff on export 429 in the harness's own `readExport`.
+- Unit-test gap: nothing covers `docsPageProbe('find')` with the find bar open. A stray edit inside `readFind` on 2026-11-16 broke every Docs find and all 1000 unit tests still passed; only the live suite caught it. Add that probe case to `extension/test/docs.test.mjs`.
+
+### Q9. Structure and docs (Track D, unchanged but still open)
+- **D2** conditional Docs guidance (guidance is 17,082 of 17,100 characters; any new sentence needs it).
+- **D1** file splits after B work settles.
+- **D3** `docs/STATUS.md` has become the changelog `AGENTS.md` used to be (45 long paragraphs, header still dated 2026-11-12). Cut it to current behaviour + latest numbers + still-unrun, move history to `RELEASE-NOTES.md`.
+- **D4 part 2:** `frame.in` duplication in `events.jsonl` (each browser result is logged about four times).
+- Two sessions edited the same doc files on 2026-11-16. Agents should append their own dated section rather than rewrite shared paragraphs.
+
+### Q10. Check the new failure wording on the clients
+A turn that dies on a malformed reply now ends as `chat.error` ("The model's reply could not be used (MALFORMED_RESPONSE)…") or as `chat.done` with `BLOCKED: the model sent a malformed tool call…`, instead of a blank answer or raw markup. Add a `scripts/ui-preview.mjs` scenario for both, and a reducer/JVM check that the phone renders them (and that the `error` push type fires for the first).
+
+### Waiting on the user
+- Run `npm run logs:prune -- --apply` (dry run on 2026-11-16: 43 of 83 runs, 1.30 GiB would go; the rule keeps the newest 40 and anything under 14 days).
+- Restart `crazyagent.service` and reload the unpacked extension to activate the 2026-11-16 changes.
+- The Q3 backstop decision.
