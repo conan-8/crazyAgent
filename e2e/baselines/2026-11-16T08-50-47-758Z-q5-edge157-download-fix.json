@@ -1,0 +1,142 @@
+{
+  "startedAt": "2026-11-16T08:50:47.758Z",
+  "finishedAt": "2026-11-16T08:50:56.696Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval-q4/dsh-home",
+  "repeat": 1,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": 6000000,
+  "totalTokens": 114723,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "download-upload",
+      "fixture": "files.html",
+      "prompt": "Download the payload file linked on this page, then attach that downloaded file to the Visible attachment input and click Send attachment.",
+      "file": "download-upload.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwj0x5nw-0e71",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 7294,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_click",
+                "message": "Error: browser_click.expect.text_landed is not available for this action (available here: dialog, pixel_changed, export_contains, toolbar_style); nothing was dispatched, so resend the call without it"
+              }
+            ],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 2
+            },
+            "inputTokens": 9793,
+            "outputTokens": 482,
+            "cacheReadTokens": 104448,
+            "totalTokens": 114723,
+            "usage": {
+              "inputTokens": 9793,
+              "outputTokens": 482,
+              "totalTokens": 114723,
+              "cacheReadTokens": 104448
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link.\n- Attached it to the \"Visible attachment\" input (verified: `payload.txt` shown in that field) and clicked \"Send attachment\".\n- Page confirmed submission: status changed to `uploaded:payload.txt:281`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0x5nw-0e71",
+              "origin": "remote",
+              "clientMessageId": "3c55fc2a-c9cf-4955-8cbc-39b1d979fc54",
+              "startedAt": "2026-11-16T08:50:49.197Z",
+              "endedAt": "2026-11-16T08:50:56.491Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 9793,
+                "outputTokens": 482,
+                "totalTokens": 114723,
+                "cacheReadTokens": 104448
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}

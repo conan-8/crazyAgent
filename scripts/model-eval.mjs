@@ -412,7 +412,7 @@ async function startFixtureServer() {
 /** @param {string} wsUrl */
 const CDP_SEND_TIMEOUT_MS = 20_000
 
-async function connectCdp(wsUrl) {
+export async function connectCdp(wsUrl) {
   const websocket = new WebSocket(wsUrl, { maxPayload: 64 * 1024 * 1024 })
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -481,7 +481,7 @@ async function connectCdp(wsUrl) {
   }
 }
 
-async function listTargets(cdpHttp) {
+export async function listTargets(cdpHttp) {
   return fetchJson(`${cdpHttp}/json`)
 }
 
@@ -489,7 +489,7 @@ async function listTargets(cdpHttp) {
  * Start an isolated Edge with the unpacked extension. The browser-level CDP
  * connection is used only for target bookkeeping; page work uses per-target ws.
  */
-async function startEdge({ profileDir, cdpPort, initialUrl, headed, loadExtension, verbose }) {
+export async function startEdge({ profileDir, cdpPort, initialUrl, headed, loadExtension, verbose }) {
   const cdpHttp = `http://127.0.0.1:${cdpPort}`
   const args = [
     `--user-data-dir=${profileDir}`,
@@ -1080,7 +1080,12 @@ function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null, 
   }
 }
 
-/** Send browser downloads to the harness folder instead of the profile default (~/Downloads). */
+/**
+ * CDP download override for navigational downloads. On Edge 157 this does NOT
+ * redirect chrome.downloads API downloads (the executor's path); the profile
+ * preference written before startEdge is what confines those to the harness
+ * folder. Both are set so no download can reach the user's ~/Downloads.
+ */
 async function routeDownloads(edge, downloadsDir) {
   mkdirSync(downloadsDir, { recursive: true })
   await edge.browser.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloadsDir, eventsEnabled: false })
@@ -1294,6 +1299,18 @@ async function runModelBatch(options, scenarios) {
   const downloadsDir = join(runRoot, 'Downloads')
   mkdirSync(edgeProfile, { recursive: true })
   mkdirSync(downloadsDir, { recursive: true })
+  // Edge 157 does not let the CDP Browser.setDownloadBehavior override
+  // redirect downloads started through the chrome.downloads API (the
+  // executor's browser_download path): they land in the profile default
+  // ~/Downloads unless the profile itself says otherwise (measured via the
+  // files gate suite, 2026-11-16). Set the profile preference BEFORE Edge
+  // starts so the harness Downloads folder is the real download directory;
+  // routeDownloads keeps the CDP override for navigational downloads.
+  mkdirSync(join(edgeProfile, 'Default'), { recursive: true })
+  writeFileSync(join(edgeProfile, 'Default', 'Preferences'), JSON.stringify({
+    download: { default_directory: downloadsDir, prompt_for_download: false, directory_upgrade: true },
+    savefile: { default_directory: downloadsDir },
+  }))
   const logsRoot = join(dshHome, 'browser-agent', 'logs')
   const startedAt = nowIso()
   const results = []
