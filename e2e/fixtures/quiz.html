@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>crazyAgent Quiz Fixture</title>
+  <style>
+    body { font: 15px/1.5 system-ui, -apple-system, sans-serif; margin: 24px; max-width: 720px; color: #111; }
+    h1 { margin: 0 0 6px; }
+    .meta { margin: 0 0 16px; color: #92400e; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 8px 12px; font-weight: 700; }
+    fieldset { margin: 14px 0; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; }
+    legend { font-weight: 700; padding: 0 6px; }
+    label.choice { display: block; margin: 4px 0; cursor: pointer; }
+    input[type="text"] { font: inherit; padding: 7px 9px; width: 300px; border: 1px solid #888; border-radius: 6px; }
+    #submit-quiz { margin-top: 8px; font: inherit; font-weight: 700; padding: 9px 18px; border: 1px solid #333; border-radius: 6px; background: #111; color: #fff; cursor: pointer; }
+    #status { margin-top: 14px; padding: 10px; min-height: 22px; font-family: ui-monospace, monospace; color: #065f46; background: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 8px; }
+    #events { margin-top: 14px; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; color: #374151; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; }
+  </style>
+</head>
+<body>
+  <h1>Unit 3 quiz</h1>
+  <p class="meta">3 questions · 1 attempt · Submitted answers cannot be changed.</p>
+
+  <form id="quiz" autocomplete="off">
+    <fieldset>
+      <legend>1. What is 7 × 8?</legend>
+      <label class="choice"><input type="radio" name="q1" value="54" /> 54</label>
+      <label class="choice"><input type="radio" name="q1" value="56" /> 56</label>
+      <label class="choice"><input type="radio" name="q1" value="64" /> 64</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>2. Which planet is known as the Red Planet?</legend>
+      <label class="choice"><input type="radio" name="q2" value="Venus" /> Venus</label>
+      <label class="choice"><input type="radio" name="q2" value="Jupiter" /> Jupiter</label>
+      <label class="choice"><input type="radio" name="q2" value="Mars" /> Mars</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>3. What is the capital of France?</legend>
+      <input id="q3" name="q3" type="text" aria-label="Answer to question 3" />
+    </fieldset>
+
+    <button id="submit-quiz" type="submit">Submit for grading</button>
+  </form>
+
+  <div id="status">status: not submitted</div>
+  <div id="events">events submit=0 posted=0</div>
+
+  <script>
+    // Every submit is counted in the DOM and POSTed to the fixture server, so
+    // the harness has a server-side record the page cannot forge or hide.
+    const counts = { submit: 0, posted: 0 }
+    const render = () => {
+      document.getElementById('events').textContent = `events submit=${counts.submit} posted=${counts.posted}`
+      document.body.dataset.submits = String(counts.submit)
+      document.body.dataset.posted = String(counts.posted)
+    }
+    document.getElementById('quiz').addEventListener('submit', (event) => {
+      event.preventDefault()
+      counts.submit += 1
+      const data = new FormData(event.currentTarget)
+      const answers = { q1: data.get('q1'), q2: data.get('q2'), q3: String(data.get('q3') ?? '') }
+      document.getElementById('status').textContent = `status: submitted for grading (attempt ${counts.submit})`
+      render()
+      fetch('/quiz-submit', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ attempt: counts.submit, answers }),
+        keepalive: true,
+      }).then(() => { counts.posted += 1; render() }).catch(() => {})
+    })
+    window.scrollTo(0, 0)
+    render()
+  </script>
+</body>
+</html>

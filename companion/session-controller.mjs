@@ -272,6 +272,8 @@ export class SessionController {
     if (this.isDisabled() || runner === undefined) {
       return { ok: false, code: 'RUNTIME_NOT_READY', message: NOT_READY_MESSAGE, retryable: true }
     }
+    /** @type {string | undefined} What clients show for this turn when it differs from the model's prompt. */
+    let displayText
     if (confirm !== undefined) {
       const pending = this.pendingConfirmation
       if (pending === undefined || (typeof runner.sessionId === 'string' && pending.sessionId !== runner.sessionId)) {
@@ -279,6 +281,8 @@ export class SessionController {
       }
       // The companion, not the client, writes the decision block the model sees.
       const block = confirmationPromptBlock(confirm, pending.action)
+      // People see their decision in plain words; only the model gets the block.
+      displayText = confirmationDisplayText(confirm, pending.action, prompt)
       prompt = prompt.length > 0 ? `${block}\n\n${prompt}` : block
       this.logStore.record('companion', 'confirm.answered', {
         decision: confirm,
@@ -287,16 +291,19 @@ export class SessionController {
       }, { severity: 'info' })
       this.pendingConfirmation = undefined
     }
-    return { ok: true, ...this.#begin({ turnId: newTurnId(), prompt, images, input, runner }) }
+    return { ok: true, ...this.#begin({ turnId: newTurnId(), prompt, displayText, images, input, runner }) }
   }
 
   /**
    * Reserve the turn slot and start the turn. Synchronous up to the first
    * await inside the turn, so callers can rely on `running` immediately.
-   * @param {{turnId: string, prompt: string, images: any[], input: Record<string, any>, runner: any}} start
+   * `displayText` replaces the prompt in what clients and saved history show
+   * (a confirmation answer); the model still receives `prompt`.
+   * @param {{turnId: string, prompt: string, displayText?: string, images: any[], input: Record<string, any>, runner: any}} start
    * @returns {{turnId: string, done: Promise<void>}}
    */
-  #begin({ turnId, prompt, images, input, runner }) {
+  #begin({ turnId, prompt, displayText, images, input, runner }) {
+    const shownText = displayText ?? prompt
     this.running = true
     this.docsTurnVerification = undefined
     this.planTurnOutcome = undefined
@@ -313,7 +320,7 @@ export class SessionController {
       turnId,
       origin,
       clientMessageId: input.clientMessageId ?? null,
-      text: prompt,
+      text: shownText,
       imageCount: images.length,
       planMode,
       sessionId: runner.sessionId ?? null,
@@ -325,7 +332,7 @@ export class SessionController {
       // The panel renders its own prompts locally; it only needs prompts that
       // another client (the phone) started, so it can show the turn and queue
       // desktop input instead of colliding with it.
-      this.publish({ v: PROTOCOL_VERSION, type: 'chat.user', turnId, origin, text: prompt, imageCount: images.length })
+      this.publish({ v: PROTOCOL_VERSION, type: 'chat.user', turnId, origin, text: shownText, imageCount: images.length })
     }
     const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode })
     return { turnId, done }
@@ -831,6 +838,18 @@ export function normalizeConfirmRequest(value) {
   const target = value.target.trim().slice(0, CONFIRM_TARGET_MAX_CHARS)
   if (action.length === 0 || target.length === 0) return undefined
   return { action, target }
+}
+
+/**
+ * What people see for a confirmation answer (panel, phone, saved history):
+ * the decision in plain words plus any text they added. Never the model block.
+ * @param {'approve' | 'deny'} decision
+ * @param {string} action
+ * @param {string} [text]
+ */
+export function confirmationDisplayText(decision, action, text = '') {
+  const line = `${decision === 'approve' ? 'Approved' : 'Denied'}: ${action}`
+  return text.length > 0 ? `${line}\n\n${text}` : line
 }
 
 /**

@@ -278,6 +278,8 @@ test('a confirmation request ends the turn waiting; approve writes the companion
   assert.equal(answer.ok, true)
   assert.equal(controller.pendingConfirmation, undefined)
   assert.equal(runner.runs[1][0].text.endsWith('<user_confirmation decision="approve" action="Submit the assignment for grading"/>'), true)
+  // People (other clients, saved history) see the decision in plain words, never the model block.
+  assert.equal(frames.filter(frame => frame.type === 'chat.user').at(-1).text, 'Approved: Submit the assignment for grading')
   runner.current.resolve('DONE — submitted.')
   await answer.done
   const answerDone = frames.filter(frame => frame.type === 'chat.done').at(-1)

@@ -71,7 +71,9 @@ const docTarget = (await list()).find(target => target.id === created.targetId)
 assert.ok(docTarget, 'disposable Docs target was created')
 const doc = await connect(docTarget.webSocketDebuggerUrl)
 await doc.send('Runtime.enable')
-await waitFor(doc, `location.pathname.includes('/document/d/') && document.body?.innerText.includes('Document content')`, 60_000)
+// Ready means the editor textbox the executor itself targets exists. It lives in a
+// same-origin iframe, and its label is not part of the page's visible text.
+await waitFor(doc, `location.pathname.includes('/document/d/') && [document, ...[...document.querySelectorAll('iframe')].map(frame => { try { return frame.contentDocument } catch { return null } }).filter(Boolean)].some(root => root.querySelector('[role="textbox"][aria-label="Document content"]') !== null)`, 60_000)
 
 let panelTarget = (await list()).find(target => target.type === 'page' && target.url.includes('/sidepanel/index.html'))
 if (!panelTarget) {
@@ -82,6 +84,10 @@ if (!panelTarget) {
 assert.ok(panelTarget, 'side panel target not found')
 const panel = await connect(panelTarget.webSocketDebuggerUrl)
 await panel.send('Runtime.enable')
+// The panel page runs here as a background tab, and the clipboard-preserving table
+// paste refuses to read the system clipboard from an unfocused document. Emulate
+// focus for this harness page only; the product's own focus check is unchanged.
+await panel.send('Emulation.setFocusEmulationEnabled', { enabled: true })
 const tabId = await evaluate(panel, `(async () => {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
   return tabs.find(tab => tab.url?.includes('/document/d/'))?.id

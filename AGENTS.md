@@ -38,7 +38,7 @@ Priorities: (1) exact deletion/replacement preserving formatting and neighbors; 
 - **Remote API** (`--remote`, `127.0.0.1:17873`, tailnet-only Serve, its own `0600` token) can never claim `ui`/`tools`, send browser commands, configure the LLM, or read arbitrary files. Port `17872` is the e2e fixture server.
 - **One executor at a time:** the side panel or the background service worker, handed over explicitly. System-clipboard work needs the panel.
 - **What people see:** no hitboxes on the page (they are drawn only into the model's copy of a capture; people get the clean `displayImage`), and one yellow agent cursor that fades out for every capture.
-- **Android:** the reducer must match frames recorded from the real `RemoteHub` (`npm test` fails when stale). Toolchain under `~/Android`. No Firebase project exists, so push has never been sent.
+- **Android:** the reducer must match frames recorded from the real `RemoteHub` (`npm test` fails when stale). Toolchain under `~/Android`. Firebase is configured on this computer (`pushConfigured: true`, a `validate_only` send returned 200), but no push has been delivered: the phone is paired with another computer and has never registered here.
 - **Prompt budget:** model guidance stays under the test-enforced 17,100-character ceiling.
 
 ## Status and evidence

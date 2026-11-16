@@ -236,7 +236,7 @@
       "turnId": "turn-9",
       "occurredAt": "2026-11-06T12:00:20.000Z",
       "body": {
-        "text": "<user_confirmation decision=\"approve\" action=\"Submit the assignment for grading\"/>",
+        "text": "Approved: Submit the assignment for grading",
         "origin": "remote",
         "clientMessageId": "client-turn-9",
         "imageCount": 0
@@ -838,7 +838,7 @@
           "turnId": "turn-9",
           "occurredAt": "2026-11-06T12:00:20.000Z",
           "body": {
-            "text": "<user_confirmation decision=\"approve\" action=\"Submit the assignment for grading\"/>",
+            "text": "Approved: Submit the assignment for grading",
             "origin": "remote",
             "clientMessageId": "client-turn-9",
             "imageCount": 0
@@ -1006,7 +1006,7 @@
           "turnId": "turn-9",
           "occurredAt": "2026-11-06T12:00:20.000Z",
           "body": {
-            "text": "<user_confirmation decision=\"approve\" action=\"Submit the assignment for grading\"/>",
+            "text": "Approved: Submit the assignment for grading",
             "origin": "remote",
             "clientMessageId": "client-turn-9",
             "imageCount": 0

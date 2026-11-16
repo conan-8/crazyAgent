@@ -271,7 +271,7 @@ function confirmRequest() {
   const waiting = s.hub.projection()
   s.hub.addScreenshot({ data: PIXEL_PNG, mimeType: 'image/png', callId: 'auto', source: 'manual' })
   const waitingAfterCapture = s.hub.projection()
-  startTurn(s, 'turn-9', '<user_confirmation decision="approve" action="Submit the assignment for grading"/>')
+  startTurn(s, 'turn-9', 'Approved: Submit the assignment for grading')
   s.hub.ingest({ type: 'chat.assistant', text: 'Submitted.' })
   s.hub.ingest({
     type: 'chat.done',

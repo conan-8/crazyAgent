@@ -13,7 +13,9 @@
  * Tailscale Serve with `--public-host <name>.ts.net`.
  *
  * Prompt keywords: "slow" makes a ~40 s turn (for force-close/network tests),
- * "fail" ends the turn with an error. Everything else takes ~8 s. Every turn
+ * "fail" ends the turn with an error. "captcha"/"login"/"stuck" end waiting
+ * for help, and "confirm" ends waiting for an Approve/Deny (the answer turn
+ * then says which decision arrived). Everything else takes ~8 s. Every turn
  * also publishes synthetic 1280x800 screenshots for the phone's live view;
  * "tall" (720x2400) and "square" (900x900) change their shape.
  *
@@ -102,6 +104,8 @@ export class ScriptedRunner {
     this.addScreenshot = options.addScreenshot ?? (() => {})
     /** Stands in for the provider's help-request activity. */
     this.requestHelp = options.requestHelp ?? (() => {})
+    /** Stands in for the provider's confirm-request activity (agent_request_confirmation). */
+    this.requestConfirm = options.requestConfirm ?? (() => {})
     this.shots = 0
     this.stepMs = options.stepMs ?? 300
     this.sessionId = 'fake-session-1'
@@ -169,6 +173,27 @@ export class ScriptedRunner {
         onNotification?.({ method: 'session.status', params: { status: 'idle' } })
         return { sessionId: this.sessionId, finalResponse: final, events: [] }
       }
+      // "confirm" in the prompt: ask for approval as agent_request_confirmation does.
+      // The companion-written answer block never re-triggers it.
+      const decision = /<user_confirmation decision="(approve|deny)"/u.exec(promptText(blocks))?.[1]
+      if (decision === undefined && /\bconfirm\b/iu.test(prompt)) {
+        event('tool/result', { message: { source: { callId }, content: [{ type: 'text', text: 'Fake page text: an order form with a Place order button.' }] } })
+        const final = 'Fake companion: the next step is irreversible, so I am asking first.'
+        event('assistant/message', { message: { content: [{ type: 'text', text: final }] } })
+        this.requestConfirm({ action: 'Place the fake order for 3 items', target: 'Place order button on the fake checkout page' })
+        onNotification?.({ method: 'session.status', params: { status: 'idle' } })
+        return { sessionId: this.sessionId, finalResponse: final, events: [] }
+      }
+      if (decision !== undefined) {
+        event('tool/result', { message: { source: { callId }, content: [{ type: 'text', text: 'Fake page text: an order form with a Place order button.' }] } })
+        const final = decision === 'approve'
+          ? 'Fake companion: approval received; the fake order was placed once.'
+          : 'Fake companion: denied; nothing was placed.'
+        this.ingestActivity({ type: 'chat.activity', kind: 'text', text: final })
+        event('assistant/message', { message: { content: [{ type: 'text', text: final }] } })
+        onNotification?.({ method: 'session.status', params: { status: 'idle' } })
+        return { sessionId: this.sessionId, finalResponse: final, events: [] }
+      }
       shoot(callId)
       event('tool/result', { message: { source: { callId }, content: [{ type: 'text', text: 'Fake page text: three products, one cart.' }] } })
       this.ingestActivity({ type: 'chat.activity', kind: 'model-start' })
@@ -233,6 +258,7 @@ export async function startFakeCompanion(options = {}) {
     ingestActivity: frame => hub.ingest(frame),
     addScreenshot: input => hub.addScreenshot(input),
     requestHelp: request => controller.noteActivity({ type: 'chat.activity', kind: 'help-request', turnId: controller.turnId, ...request }),
+    requestConfirm: request => controller.noteActivity({ type: 'chat.activity', kind: 'confirm-request', turnId: controller.turnId, ...request }),
     stepMs: options.stepMs,
   })
   controller = new SessionController({
@@ -334,7 +360,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     `  phone via USB:  adb reverse tcp:${fake.server.port} tcp:${fake.server.port}  →  address http://127.0.0.1:${fake.server.port} (debug APK)`,
     args.publicHost ? `  phone via Serve: https://${args.publicHost}` : '  phone via Serve: rerun with --public-host <name>.ts.net',
     `  token (fake server only): ${fake.token}`,
-    '  prompts containing "slow" run ~40 s; "fail" ends with an error. Ctrl+C stops (a restart gets a new instance).',
+    '  prompts containing "slow" run ~40 s; "fail" ends with an error; "captcha" asks for help; "confirm" asks for Approve/Deny.',
+    '  Ctrl+C stops (a restart gets a new instance).',
     '',
   ].join('\n'))
   const shutdown = async () => {
