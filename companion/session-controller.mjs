@@ -12,7 +12,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { buildPromptBlocks, normalizeImageAttachments, promptStats } from './prompt.mjs'
+import { buildPromptBlocks, isDocsDocumentUrl, normalizeImageAttachments, promptStats } from './prompt.mjs'
 import { PROTOCOL_VERSION, errorMessage, isRecord } from './protocol.mjs'
 
 export const BUSY_MESSAGE = 'A turn is already running. Wait for it to finish.'
@@ -534,7 +534,11 @@ export class SessionController {
         throw new Error('turn stopped by user before the model run')
       }
 
-      const blocks = buildPromptBlocks(view, prompt, new Date(), images, { planMode, confirmMode })
+      // D2: a Docs tab in the turn-start view arms the conditional Docs
+      // guidance block; a mid-turn switch is covered by the provider's
+      // first-Docs-call fail-safe.
+      const docsMode = isDocsDocumentUrl(view?.tab?.url)
+      const blocks = buildPromptBlocks(view, prompt, new Date(), images, { planMode, confirmMode, docsMode })
       const stats = promptStats(blocks)
       promptTextBytes = stats.textBytes
       imageBytes = stats.imageBytes
@@ -562,7 +566,7 @@ export class SessionController {
         logStore.record('companion', 'turn.retry', { reason: 'malformed-response' }, { turnId, severity: 'warn' })
         turnStats.endError = undefined
         bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard })
-        result = await run(buildPromptBlocks(null, MALFORMED_RETRY_NOTICE, new Date(), [], { planMode, confirmMode }))
+        result = await run(buildPromptBlocks(null, MALFORMED_RETRY_NOTICE, new Date(), [], { planMode, confirmMode, docsMode }))
       }
       // A run that still ended in a runtime error is a failed turn, never an
       // empty successful one.

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CONFIRM_MODE_GUIDANCE, PLAN_MODE_GUIDANCE, buildPromptBlocks, formatViewText, normalizeImageAttachments, promptStats } from '../prompt.mjs'
+import { CONFIRM_MODE_GUIDANCE, PLAN_MODE_GUIDANCE, buildPromptBlocks, formatViewText, isDocsDocumentUrl, normalizeImageAttachments, promptStats } from '../prompt.mjs'
+import { CORE_GUIDANCE, DOCS_MODE_GUIDANCE } from '../../packages/dsh-browser-extension/lib/guidance.js'
 
 function view(overrides = {}) {
   return {
@@ -71,6 +72,45 @@ test('confirm mode adds the approval instructions only when the setting is on', 
   assert.ok(both.includes(PLAN_MODE_GUIDANCE))
   assert.ok(both.includes(CONFIRM_MODE_GUIDANCE))
   assert.ok(both.endsWith('Plan and submit'))
+})
+
+test('isDocsDocumentUrl accepts only Google Docs document URLs', () => {
+  for (const url of [
+    'https://docs.google.com/document/d/abc123/edit',
+    'https://docs.google.com/document/d/abc123/edit?tab=t.0',
+    'https://docs.google.com/document/u/0/d/abc123/edit',
+    'https://docs.google.com/document/u/2/d/abc123/pub',
+  ]) assert.equal(isDocsDocumentUrl(url), true, url)
+  for (const url of [
+    'https://docs.google.com/spreadsheets/d/abc/edit',
+    'https://docs.google.com/presentation/d/abc/edit',
+    'https://docs.google.com/document/',
+    'https://example.com/document/d/abc/edit',
+    'http://docs.google.com/document/d/abc/edit',
+    'https://docs.google.com.evil.test/document/d/abc/edit',
+    'chrome://extensions',
+    '', null, undefined, 42,
+  ]) assert.equal(isDocsDocumentUrl(url), false, String(url))
+})
+
+test('docs mode appends the conditional Docs block only when armed, alongside plan and confirm', () => {
+  const now = new Date('2026-11-16T12:00:00.000Z')
+  const ordinary = buildPromptBlocks(view(), 'Edit the page', now)[0].text
+  assert.doesNotMatch(ordinary, /<docs_mode>/u)
+  const armed = buildPromptBlocks(view(), 'Edit the document', now, [], { docsMode: true })[0].text
+  assert.ok(armed.includes(DOCS_MODE_GUIDANCE))
+  assert.ok(armed.indexOf('<docs_mode>') < armed.indexOf('Edit the document'))
+  assert.ok(armed.endsWith('Edit the document'))
+  // All three conditionals can ride one turn, each before the user text.
+  const all = buildPromptBlocks(view(), 'Plan, confirm, edit', now, [], { planMode: true, confirmMode: true, docsMode: true })[0].text
+  assert.ok(all.includes(PLAN_MODE_GUIDANCE))
+  assert.ok(all.includes(CONFIRM_MODE_GUIDANCE))
+  assert.ok(all.includes(DOCS_MODE_GUIDANCE))
+  assert.ok(all.endsWith('Plan, confirm, edit'))
+  // The split keeps a Docs turn within the old standing ceiling, and the
+  // standing core is materially smaller than the pre-D2 guidance.
+  assert.ok(CORE_GUIDANCE.length + DOCS_MODE_GUIDANCE.length <= 17_100)
+  assert.ok(CORE_GUIDANCE.length < 12_000, `core guidance should leave headroom, got ${CORE_GUIDANCE.length}`)
 })
 
 test('buildPromptBlocks falls back to text when no image is available', () => {

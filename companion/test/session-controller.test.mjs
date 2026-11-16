@@ -115,6 +115,43 @@ test('stop during auto-capture ends the turn without starting the model', async 
   assert.equal(runner.runs.length, 0)
 })
 
+test('a Docs tab in the turn-start view arms the Docs guidance block; other pages do not', async () => {
+  const { controller, runner, bridge } = setup({ autoCapture: true })
+  let url = 'https://docs.google.com/document/d/abc123/edit'
+  bridge.requestUi = async () => ({ tab: { id: 7, title: 'Doc', url }, viewport: { width: 1280, height: 720 }, scroll: { y: 0, maxY: 0 } })
+  const docsTurn = controller.submit({ text: 'edit the document' })
+  await runner.started()
+  assert.ok(runner.runs[0][0].text.includes('<docs_mode>'), 'the Docs turn carries the conditional block')
+  assert.match(runner.runs[0][0].text, /make browser_docs_replace your FIRST tool call/u)
+  runner.current.resolve('done')
+  await docsTurn.done
+
+  url = 'https://example.com/page'
+  const plainTurn = controller.submit({ text: 'read the page' })
+  await runner.started()
+  assert.doesNotMatch(runner.runs[1][0].text, /<docs_mode>/u, 'a non-Docs turn stays on the core guidance')
+  runner.current.resolve('done')
+  await plainTurn.done
+})
+
+test('the malformed-reply retry keeps the Docs block armed for the same turn', async () => {
+  const { controller, runner, bridge } = setup({ autoCapture: true })
+  bridge.requestUi = async () => ({ tab: { id: 7, title: 'Doc', url: 'https://docs.google.com/document/u/0/d/abc/edit' }, viewport: { width: 1280, height: 720 }, scroll: { y: 0, maxY: 0 } })
+  const turn = controller.submit({ text: 'edit the document' })
+  await runner.started()
+  assert.ok(runner.runs[0][0].text.includes('<docs_mode>'))
+  runner.event('turn/end', { turn: 1, reason: { kind: 'error', error: { code: 'MALFORMED_RESPONSE', message: 'bad JSON' } } })
+  runner.current.resolve('')
+  await new Promise(resolve => setImmediate(resolve))
+  await runner.started()
+  assert.equal(runner.runs.length, 2)
+  assert.match(runner.runs[1][0].text, /Automatic notice, not a new request/u)
+  assert.ok(runner.runs[1][0].text.includes('<docs_mode>'), 'the retry re-sends the turn Docs block')
+  runner.event('turn/end', { turn: 2, reason: { kind: 'completed' } })
+  runner.current.resolve('DONE: edited')
+  await turn.done
+})
+
 test('new chat refuses while running and blocks submissions while switching', async () => {
   const { controller, runner, frames } = setup()
   const turn = controller.submit({ text: 'work' })

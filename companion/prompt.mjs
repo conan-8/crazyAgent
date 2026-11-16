@@ -6,6 +6,8 @@
  * DSH admits it to durable attachment storage before the prompt is accepted.
  */
 
+import { DOCS_MODE_GUIDANCE } from '../packages/dsh-browser-extension/lib/guidance.js'
+
 const MAX_PROMPT_IMAGES = 4
 const MAX_PROMPT_IMAGE_BYTES = 5_000_000
 const MAX_PROMPT_TOTAL_IMAGE_BYTES = 12_000_000
@@ -28,6 +30,26 @@ If genuinely blocked after real attempts, mark the affected item blocked with th
 export const CONFIRM_MODE_GUIDANCE = `<confirm_mode>
 The user enabled "Ask before submitting, sending, paying, or deleting"; this overrides picking a default instead of asking. Before an action that submits for grading or review, sends a message, pays or places an order, deletes, or publishes: call agent_request_confirmation with action and target, then end your turn. Never perform it in the same turn. Drafts, navigation, and filling fields need none. An action still needs confirmation unless the latest turn carries <user_confirmation decision="approve"> for the same action; after deny, do not perform it.
 </confirm_mode>`
+
+/**
+ * D2: the Docs guidance block is conditional. A turn whose turn-start view is
+ * a Google Docs document gets it appended to the first prompt; other turns
+ * stay on the smaller core guidance. A mid-turn switch to Docs is covered by
+ * the provider's fail-safe (the first Docs tool result carries the rules).
+ * Sheets/Slides are not Docs documents; their generic canvas rules stay in
+ * the core block.
+ * @param {unknown} url
+ */
+export function isDocsDocumentUrl(url) {
+  if (typeof url !== 'string') return false
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' && parsed.hostname === 'docs.google.com'
+      && /^\/document\/(?:u\/\d+\/)?d\//u.test(parsed.pathname)
+  } catch {
+    return false
+  }
+}
 
 export function normalizeImageAttachments(value) {
   if (value === undefined) return []
@@ -109,7 +131,7 @@ function formatTimeContext(now) {
  * @param {string} text
  * @param {Date} now
  * @param {Array<{mimeType: string, data: string}>} images
- * @param {{planMode?: boolean, confirmMode?: boolean}} [options]
+ * @param {{planMode?: boolean, confirmMode?: boolean, docsMode?: boolean}} [options]
  * @returns {Array<Record<string, unknown>>}
  */
 export function buildPromptBlocks(view, text, now = new Date(), images = [], options = {}) {
@@ -118,8 +140,9 @@ export function buildPromptBlocks(view, text, now = new Date(), images = [], opt
     : formatViewText(view)
   const planGuidance = options.planMode === true ? `\n\n${PLAN_MODE_GUIDANCE}` : ''
   const confirmGuidance = options.confirmMode === true ? `\n\n${CONFIRM_MODE_GUIDANCE}` : ''
+  const docsGuidance = options.docsMode === true ? `\n\n${DOCS_MODE_GUIDANCE}` : ''
   /** @type {Array<Record<string, unknown>>} */
-  const blocks = [{ type: 'text', text: `${header}\n\n${formatTimeContext(now)}${planGuidance}${confirmGuidance}\n\n${text}` }]
+  const blocks = [{ type: 'text', text: `${header}\n\n${formatTimeContext(now)}${planGuidance}${confirmGuidance}${docsGuidance}\n\n${text}` }]
   for (const image of images) blocks.push({ type: 'image', data: image.data, mimeType: image.mimeType })
   if (typeof view?.image?.data === 'string' && view.image.data.length > 0 && typeof view.image.mimeType === 'string') {
     blocks.push({ type: 'image', data: view.image.data, mimeType: view.image.mimeType })
