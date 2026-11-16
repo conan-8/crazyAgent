@@ -5808,6 +5808,7 @@ test('Ajv enforces top-level and nested args.expect capabilities in the public b
     { actions: [{ op: 'navigate', args: { url: 'https://example.test' } }] },
     { actions: [{ op: 'press_key', key: 'Enter', args: { expect: { dialog: 'closed' } } }] },
     { actions: [{ op: 'click', label: 3, expect: { dialog: 'open' } }] },
+    { actions: [{ op: 'click', label: 3, expect: { text_landed: 'marker' } }] },
   ]
   for (const input of valid) assert.equal(validate(input), true, JSON.stringify(validate.errors))
   const invalid = [
@@ -5817,7 +5818,7 @@ test('Ajv enforces top-level and nested args.expect capabilities in the public b
     { actions: [{ op: 'wait_for', args: { ms: 0, expect: { dialog: 'open' } } }] },
     { actions: [{ op: 'type', args: { label: 7, text: 'x', expect: { pixel_changed: false } } }] },
     { actions: [{ op: 'type', args: { label: 7, text: 'x', expect: { toolbar_style: { color: '#aabbcc' } } } }] },
-    { actions: [{ op: 'click', args: { label: 3, expect: { text_landed: 'marker' } } }] },
+    { actions: [{ op: 'click', args: { label: 3, expect: { export_contains: 'marker' } } }] },
     { actions: [{ op: 'navigate', url: 'https://example.test', expect: { dialog: 'open' } }] },
   ]
   for (const input of invalid) assert.equal(validate(input), false, JSON.stringify(input))

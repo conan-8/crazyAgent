@@ -6,13 +6,13 @@ const MAX_EXPECT_TEXT = 20_000
 const NON_WHITESPACE = '\\S'
 
 export const ACTION_EXPECT_DIRECT_CHECKS = Object.freeze({
-  click: Object.freeze(['dialog', 'pixel_changed', 'export_contains', 'toolbar_style']),
+  click: Object.freeze(['dialog', 'pixel_changed', 'export_contains', 'toolbar_style', 'text_landed']),
   click_at: Object.freeze(['dialog', 'pixel_changed']),
   type: Object.freeze(['text_landed', 'dialog', 'pixel_changed', 'export_contains']),
   press_key: Object.freeze(['text_landed', 'dialog', 'pixel_changed', 'export_contains', 'toolbar_style']),
 })
 export const ACTION_EXPECT_BATCH_CHECKS = Object.freeze({
-  click: Object.freeze(['dialog']),
+  click: Object.freeze(['dialog', 'text_landed']),
   click_at: Object.freeze(['dialog']),
   type: Object.freeze(['text_landed', 'dialog']),
   press_key: Object.freeze(['text_landed', 'dialog']),

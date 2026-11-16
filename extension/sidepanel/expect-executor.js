@@ -236,9 +236,50 @@ export function expectFocusedTextProbe(expected) {
   }
 }
 
+/** Page probe: bounded rendered text of one frame, for a click's page-scoped
+ * absent-to-present check. It returns presence, never the page text itself. */
+export function expectPageTextProbe(expected) {
+  const LIMIT = 100_000
+  const body = document.body
+  if (!body) return { readable: false, target: 'unknown' }
+  const text = String(body.innerText ?? '')
+  const bounded = text.length > LIMIT ? text.slice(0, LIMIT) : text
+  return {
+    readable: true,
+    target: 'unique',
+    documentUrl: location.href,
+    timeOrigin: performance.timeOrigin,
+    contains: bounded.includes(expected),
+    complete: text.length <= LIMIT,
+    chars: text.length,
+  }
+}
+
 function hasDocumentIdentity(value) {
   return typeof value?.documentUrl === 'string' && value.documentUrl.length > 0
     && Number.isFinite(value?.timeOrigin) && value.timeOrigin > 0
+}
+
+/** Page-scoped text snapshot for a click. Identity is frame + navigation
+ * generation (timeOrigin) + URL, so a navigation makes the scope mismatch and
+ * the transition unknown rather than a false present/absent. */
+export function pageTextSnapshot(probe, frameId) {
+  const identified = probe?.readable !== true || hasDocumentIdentity(probe)
+  const target = identified && probe?.readable === true ? 'unique' : 'unknown'
+  const scope = {
+    kind: 'page',
+    target,
+    ...target === 'unique' ? {
+      id: `${frameId}:${probe.timeOrigin}:${probe.documentUrl}`,
+      detail: probe.documentUrl,
+    } : {},
+  }
+  const limits = [...(Array.isArray(probe?.limits) ? probe.limits : []), ...identified ? [] : ['document-identity-unavailable']]
+  return {
+    scope,
+    ...probe?.readable === true && identified ? { contains: probe.contains, complete: probe.complete === true, chars: probe.chars } : { complete: null },
+    ...(limits.length > 0 ? { limits } : {}),
+  }
 }
 
 export function focusedTextSnapshot(frames) {
