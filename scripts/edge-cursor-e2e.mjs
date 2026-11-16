@@ -12,6 +12,7 @@
  */
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -27,13 +28,28 @@ const CDP = `http://127.0.0.1:${CDP_PORT}`
 const TOKEN = 'cursor-e2e-token'
 const USER_DIR = mkdtempSync(join(tmpdir(), 'ca-edge-cursor-'))
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+// Match the worker by extension id, not by the file name "background.js":
+// Edge ships built-in extensions whose workers are also named background.js
+// and have no chrome.storage/alarms (measured on Edge 157, 2026-11-16).
+const extensionId = (() => {
+  const hex = createHash('sha256').update(join(ROOT, 'extension')).digest('hex').slice(0, 32)
+  return [...hex].map(char => String.fromCharCode(97 + parseInt(char, 16))).join('')
+})()
 
 async function until(what, predicate, timeoutMs = 10_000) {
   const started = Date.now()
+  let lastError
   for (;;) {
-    const value = await predicate()
-    if (value) return value
-    assert.ok(Date.now() - started < timeoutMs, `timed out waiting for ${what}`)
+    try {
+      const value = await predicate()
+      if (value) return value
+    } catch (error) {
+      // A probe can throw while its target is still starting (the service
+      // worker appears in /json before `chrome` is defined in it). Treat that
+      // as not-ready and keep polling instead of dying on the first race.
+      lastError = error
+    }
+    assert.ok(Date.now() - started < timeoutMs, `timed out waiting for ${what}${lastError ? ` (last error: ${lastError.message})` : ''}`)
     await sleep(100)
   }
 }
@@ -122,7 +138,7 @@ async function run() {
 
   const version = await until('Edge CDP', async () => { try { return await (await fetch(`${CDP}/json/version`)).json() } catch { return false } }, 20_000)
   browser = await cdp(version.webSocketDebuggerUrl)
-  const worker = await until('the extension service worker', async () => (await targets()).find(target => target.type === 'service_worker' && target.url.includes('background.js')), 20_000)
+  const worker = await until('the extension service worker', async () => (await targets()).find(target => target.type === 'service_worker' && target.url.includes(extensionId)), 20_000)
   const workerCdp = await cdp(worker.webSocketDebuggerUrl)
   const pageTarget = await until('the fixture page', async () => (await targets()).find(target => target.type === 'page' && target.url.startsWith(pageUrl)))
   page = await cdp(pageTarget.webSocketDebuggerUrl)
