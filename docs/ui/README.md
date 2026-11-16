@@ -2,7 +2,8 @@
 
 Screenshots of the crazyAgent side panel captured from the mocked-bridge preview
 harness (`scripts/ui-preview.mjs`). All frames were refreshed on 2026-11-06 with
-camel-case crazyAgent branding, the normal DeepSeek V4.1 Flash model, and the
+camel-case crazyAgent branding, the then-default DeepSeek V4.1 Flash model (the
+frames predate the 2026-11-16 pin to `deepseek/deepseek-v4.1-flash-1017`), and the
 recommended Medium reasoning default. No companion, extension permissions, or
 model tokens are involved: the harness opens the real
 `extension/sidepanel/index.html` page in an isolated Edge instance, replaces the
@@ -43,7 +44,7 @@ it to the page body.
 
 | Frame | State |
 |---|---|
-| `sidebar-activity-dark.jpeg` | Finished v2 turn: user request, compact action summary, formatted final answer, and the current DeepSeek V4.1 Flash composer |
+| `sidebar-activity-dark.jpeg` | Finished v2 turn: user request, compact action summary, formatted final answer, and the DeepSeek V4.1 Flash composer (pre-pin frame; the default is now V4.1 Flash 1017) |
 | `sidebar-activity-light.jpeg` | Same turn with light-theme emulation requested; the current UI uses a fixed dark color scheme |
 | `sidebar-live-dark.jpeg` | Mid-turn: finished step collapsed, running step expanded with live clock, `step 2 · 2.7s` header pill, live footer step |
 | `sidebar-step-expanded.jpeg` | A finished step expanded by clicking its header |

@@ -1,0 +1,126 @@
+{
+  "startedAt": "2026-11-16T23:41:31.294Z",
+  "finishedAt": "2026-11-16T23:41:39.484Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 1,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": 1000000,
+  "totalTokens": 65629,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "form-submit",
+      "fixture": "form.html",
+      "prompt": "Fill out the form on this page: name \"Ada Lovelace\", notes \"First computer programmer\", password \"hunter2-demo\". Submit it exactly once and leave the rest of the page alone.",
+      "file": "form-submit.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwjwqn5b-3d99",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:34041/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6381,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 22343,
+            "outputTokens": 406,
+            "cacheReadTokens": 42880,
+            "totalTokens": 65629,
+            "usage": {
+              "inputTokens": 22343,
+              "outputTokens": 406,
+              "totalTokens": 65629,
+              "cacheReadTokens": 42880
+            },
+            "finalText": "DONE\n\n- Filled Name = \"Ada Lovelace\", Notes = \"First computer programmer\", Password = \"hunter2-demo\", then clicked Submit once.\n- Verified via page text: `submit=1`, `result: name=Ada Lovelace notes=First computer programmer pass=12chars` — one submission with correct values.\n- Left all other elements (Rich text, canvas editor, comment card) untouched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwjwqn5b-3d99",
+              "origin": "remote",
+              "clientMessageId": "2e6ea0e5-55db-43eb-b889-c246428f1bb1",
+              "startedAt": "2026-11-16T23:41:32.976Z",
+              "endedAt": "2026-11-16T23:41:39.357Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 22343,
+                "outputTokens": 406,
+                "totalTokens": 65629,
+                "cacheReadTokens": 42880
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}

@@ -21,7 +21,7 @@ const DISCLAIMER_KEY = 'crazyagent.disclaimerPending'
 const RECONNECT_MS = 2_500
 const STOP_CONFIRM_TIMEOUT_MS = 15_000
 const DEFAULT_MODEL_BASE_URL = 'https://openrouter.ai/api/v1'
-const RECOMMENDED_MODEL_ID = 'deepseek/deepseek-v4.1-flash'
+const RECOMMENDED_MODEL_ID = 'deepseek/deepseek-v4.1-flash-1017'
 const HISTORY_KEY = 'crazyagent.history'
 const MAX_HISTORY = 12
 const MAX_RECENT_SESSIONS = 3
@@ -2911,6 +2911,7 @@ function toolKind(name) {
   if (/navigate|switch_tab/.test(name)) return 'open'
   if (/read|tabs/.test(name)) return 'read'
   if (/screenshot/.test(name)) return 'shot'
+  if (/wait/.test(name)) return 'wait'
   return 'tool'
 }
 
@@ -3813,7 +3814,13 @@ function sendMessage() {
   const text = els.input.value.trim()
   const images = attachedImages
   const planMode = planModeArmed
-  if (text.length === 0 && images.length === 0) return
+  if (text.length === 0 && images.length === 0) {
+    // Enter (or Send) on a blank composer sends the first queued message:
+    // immediately when idle, or as a steer while a turn is running — the same
+    // action as the first queue row's arrow button. An empty queue stays a no-op.
+    if (queuedMessages.length > 0) steerQueuedMessage(queuedMessages[0].id)
+    return
+  }
   if (newChatDraft) {
     toast('Wait for the running session to finish')
     return

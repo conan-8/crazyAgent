@@ -1,3 +1,12 @@
+# Unreleased (post-v2.3.0)
+
+## 2026-11-16 — model pin and composer polish
+
+- **Default model pinned to `deepseek/deepseek-v4.1-flash-1017`** (OpenRouter "DeepSeek V4.1 Flash 1017"). Every live default now references the pinned snapshot: the panel's recommended model, the companion's `RECOMMENDED_MODEL_ID`, the saved `llm.json`, `config/browser.patch.yml`'s compaction `modelPolicies`, `config/crazyagent.service` (and the installed unit), the `model-eval`/`reload-midturn-accept` defaults, the UI-preview mock, and the README install instructions. Dated run records (baselines and history sections) keep the un-pinned alias they actually requested. The running service was restarted onto the pinned ID and independently verified (`/health`, startup log, regenerated `llm.patch.yml`). Real-model smoke on the pinned ID: `form-submit` ×1 **PASS** (6.4 s, 2 calls, 0 failed, exactly one correct submission; `e2e/baselines/2026-11-16T23-41-31-295Z-model-1017-smoke.json`). Full reliability batches on 1017 are still unrun.
+- **Enter on a blank composer sends the first queued message** — immediately when idle, or as a steer (stop the running turn, then send) while busy, the same action as the queue row's arrow button. An empty queue stays a no-op. Gated by the mock-bridge `queue` preview scenario; the new assertion failed on the pre-change build first.
+- **Wait steps wear a stopwatch icon** (`icon-step-wait`) instead of the generic tool wrench. Gated by the `wait` preview scenario (icon href asserted, baseline failed first).
+- `npm test` **1055/1055** after the changes; `ui-preview` `queue`, `wait`, and `tools` (1017 model display) scenarios pass.
+
 # crazyAgent v2.3.0
 
 Changes since **v2.2.0**. This release adds an opt-in confirmation step before irreversible actions, makes dead model steps recover inside the same turn instead of ending it, and records the first end-to-end pass of the signed-in Google Docs table suite. It also adds click `text_landed` postconditions, cuts the non-Docs prompt by 31%, fixes phone Continue for chats the running companion still owns, and ships a one-command gate runner.

@@ -169,7 +169,7 @@ const settings = {
   autoCapture: true,
   paused: false,
   reasoningEffort: 'medium',
-  modelId: 'deepseek/deepseek-v4.1-flash',
+  modelId: 'deepseek/deepseek-v4.1-flash-1017',
 }
 
 const HELLO_FRAMES = [
@@ -179,13 +179,13 @@ const HELLO_FRAMES = [
     type: 'chat.hello',
     companion: { version: 'preview', pid: 1, startedAt: Date.now() },
     provider: 'openrouter',
-    model: 'deepseek/deepseek-v4.1-flash',
+    model: 'deepseek/deepseek-v4.1-flash-1017',
     autoCapture: true,
     dsh: { state: 'ready' },
     llm: {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
-      model: { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek: DeepSeek V4.1 Flash', reasoning: true, imageInput: true },
+      model: { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, imageInput: true },
       reasoningEffort: 'medium',
     },
     credentials: { configured: true, source: 'stored' },
@@ -199,7 +199,7 @@ const HELLO_FRAMES = [
     ok: true,
     baseUrl: 'https://openrouter.ai/api/v1',
     models: [
-      { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek: DeepSeek V4.1 Flash', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
+      { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
       { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
       { id: 'openai/gpt-5', name: 'GPT-5', reasoning: true, imageInput: true, tools: true, contextWindow: 400000 },
       { id: 'acme/text-only', name: 'Text Only Model', reasoning: true, imageInput: false, tools: true, contextWindow: 128000 },
@@ -337,7 +337,7 @@ async function playTurn(page, options = {}) {
     timings: { totalMs: 28400, autoCaptureMs: 412, firstEventMs: 910, toolCalls: 3, failedCalls: 0, promptTextBytes: 18422, imageBytes: 182000, images: 1 },
     usage: { inputTokens: 21000, outputTokens: 480, totalTokens: 65509, cacheReadTokens: 44029 },
     label: 'done',
-    model: 'deepseek/deepseek-v4.1-flash',
+    model: 'deepseek/deepseek-v4.1-flash-1017',
     provider: 'openrouter',
   })
   await recv({ v: 1, type: 'chat.status', status: 'idle' })
@@ -375,11 +375,11 @@ async function playToolScenario(page) {
   assert.equal(modelMeta.flexGrow, '1')
   assert.equal(modelMeta.maxWidth, 'none')
   assert.ok(modelMeta.width > 200, `model selector uses available width (${modelMeta.width}px)`)
-  assert.equal(modelMeta.modelName, 'DeepSeek V4.1 Flash')
+  assert.equal(modelMeta.modelName, 'DeepSeek V4.1 Flash 1017')
   assert.equal(modelMeta.effortText, '· medium')
   assert.equal(modelMeta.effortTitle, 'Reasoning effort: Medium')
   assert.equal(modelMeta.effortColor, 'rgb(255, 195, 0)')
-  assert.match(modelMeta.buttonTitle, /deepseek\/deepseek-v4\.1-flash\s/)
+  assert.match(modelMeta.buttonTitle, /deepseek\/deepseek-v4\.1-flash-1017\s/)
   await recv({ v: 1, type: 'chat.activity', kind: 'usage', usage: { totalTokens: 250000, inputTokens: 250000 } })
   const contextMeta = await page.evaluate(`(() => {
     const progress = document.getElementById('composer-context-progress')
@@ -446,7 +446,7 @@ async function playToolScenario(page) {
     sessionId: 'session-preview0001',
     text: 'I can see the fixture page in the tab list. The tab list card above shows every open tab.',
     timings: { totalMs: 6200, autoCaptureMs: 0, firstEventMs: 620, toolCalls: 1 },
-    model: 'deepseek/deepseek-v4.1-flash',
+    model: 'deepseek/deepseek-v4.1-flash-1017',
     provider: 'openrouter',
   })
   await recv({ v: 1, type: 'chat.status', status: 'idle' })
@@ -534,6 +534,46 @@ async function playQueueScenario(page, capture) {
   assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1).text`), 'FIFO two')
   assert.equal(await page.evaluate(`document.querySelectorAll('.queued-message').length`), 0)
   assert.equal(await page.evaluate(`document.getElementById('message-queue').classList.contains('hidden')`), true)
+
+  // Enter on a blank composer sends the first queued message: while a turn is
+  // running it steers (stop, then send on idle), exactly like the row's arrow.
+  await finishPrompt(page, 'session-preview0001', '')
+  await sendPrompt(page, 'Enter-steer target')
+  await sendPrompt(page, 'Enter queue one')
+  await sendPrompt(page, 'Enter queue two')
+  assert.equal(await page.evaluate(`document.querySelectorAll('.queued-message').length`), 2)
+  assert.equal(await page.evaluate(`document.getElementById('input').value`), '')
+  const sendsBeforeEnter = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').length`)
+  const stopsBeforeEnter = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.stop').length`)
+  const pressEnter = () => page.evaluate(`(() => {
+    const input = document.getElementById('input');
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  })()`)
+  await pressEnter()
+  await sleep(250)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.stop').length`), stopsBeforeEnter + 1, 'blank Enter steers the first queued message')
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').length`), sendsBeforeEnter, 'the steer waits for the stop before sending')
+  await recv({ v: 1, type: 'chat.stopping', turnId: 'turn-preview-1' })
+  await recv({ v: 1, type: 'chat.stopped', turnId: 'turn-preview-1', reason: 'user', sessionId: 'session-preview0001' })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(250)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1).text`), 'Enter queue one')
+  assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.queued-message-preview')].map(node => node.textContent)`), ['Enter queue two'])
+  assert.equal(await page.evaluate(`document.getElementById('input').value`), '')
+  await recv({ v: 1, type: 'chat.done', sessionId: 'session-preview0001', text: '', timings: { totalMs: 1 } })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(250)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1).text`), 'Enter queue two')
+  assert.equal(await page.evaluate(`document.querySelectorAll('.queued-message').length`), 0)
+
+  // A blank composer with an empty queue stays a no-op: no empty prompt goes out.
+  const sendsBeforeBlank = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').length`)
+  const stopsBeforeBlank = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.stop').length`)
+  await pressEnter()
+  await sleep(250)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').length`), sendsBeforeBlank)
+  assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.stop').length`), stopsBeforeBlank)
 }
 
 async function playRemoteScenario(page, capture) {
@@ -722,7 +762,7 @@ async function playConfirmScenario(page, capture) {
   await page.evaluate(`document.getElementById('settings').click()`)
   await sleep(200)
   assert.equal(await page.evaluate(`document.getElementById('setting-confirm-irreversible').checked`), false)
-  await recv({ v: 1, type: 'chat.hello', dsh: { state: 'ready' }, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'deepseek/deepseek-v4.1-flash', name: 'DeepSeek: DeepSeek V4.1 Flash', reasoning: true, imageInput: true }, reasoningEffort: 'medium' }, credentials: { configured: true, source: 'stored' }, settings: { confirmIrreversible: true } })
+  await recv({ v: 1, type: 'chat.hello', dsh: { state: 'ready' }, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, imageInput: true }, reasoningEffort: 'medium' }, credentials: { configured: true, source: 'stored' }, settings: { confirmIrreversible: true } })
   await sleep(150)
   assert.equal(await page.evaluate(`document.getElementById('setting-confirm-irreversible').checked`), true, 'chat.hello syncs an open settings modal')
   await page.evaluate(`document.getElementById('setting-confirm-irreversible').click()`)
@@ -1623,7 +1663,7 @@ async function playDeadTurnScenario(page, capture) {
     timings: { totalMs: 12300, autoCaptureMs: 380, firstEventMs: 850, toolCalls: 0, failedCalls: 0, promptTextBytes: 18100, imageBytes: 176000, images: 1 },
     usage: { inputTokens: 22168, outputTokens: 205, totalTokens: 22373, cacheReadTokens: 12000 },
     label: 'blocked',
-    model: 'deepseek/deepseek-v4.1-flash',
+    model: 'deepseek/deepseek-v4.1-flash-1017',
     provider: 'openrouter',
   })
   await recv({ v: 1, type: 'chat.status', status: 'idle' })
@@ -2008,6 +2048,7 @@ async function main() {
     await recv({ v: 1, type: 'chat.tool_call', callId: 'wait-ms', name: 'browser_wait_for', args: '{"ms":3000}' })
     const start = await read()
     assert.deepEqual({ title: start.title, phase: start.phase }, { title: 'Wait 3s', phase: 'Wait 3s…' })
+    assert.equal(await page.evaluate(`document.querySelector('.activity-step:last-child .step-icon use').getAttribute('href')`), '#icon-step-wait', 'a wait step wears the stopwatch icon')
     const rowShown = () => page.evaluate(`document.querySelector('.activity-step:last-child .activity-entry.tool')?.getClientRects().length > 0`)
     assert.equal(await rowShown(), false, 'no subtext while waiting')
     await sleep(MOTION_SETTLE_MS)

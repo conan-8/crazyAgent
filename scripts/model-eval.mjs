@@ -76,7 +76,7 @@ const EXTENSION_DIR = join(ROOT, 'extension')
 const COMPANION_ENTRY = join(ROOT, 'companion', 'index.mjs')
 const SETUP_ENTRY = join(ROOT, 'scripts', 'setup.mjs')
 const EDGE_BIN = process.env.EDGE_BIN ?? 'microsoft-edge'
-export const DEFAULT_MODEL = 'deepseek/deepseek-v4.1-flash'
+export const DEFAULT_MODEL = 'deepseek/deepseek-v4.1-flash-1017'
 export const DEFAULT_EFFORT = 'medium'
 const DEFAULT_DSH_HOME = join(tmpdir(), 'crazyagent-model-eval', 'dsh-home')
 const EXTENSION_ID = (() => {
