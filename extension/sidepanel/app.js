@@ -2516,6 +2516,9 @@ function handleActivity(frame) {
           lastStreamEntry.entry.remove()
           lastStreamEntry = null
         }
+        // A fully suppressed step would otherwise keep its "gathering thoughts"
+        // placeholder, which the first rendered row normally retires.
+        removeRow(activityContainer().querySelector(':scope > .thinking-wait:not(.leaving)'))
         return
       }
       sawTextStream = true

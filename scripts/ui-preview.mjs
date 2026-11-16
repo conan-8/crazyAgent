@@ -24,6 +24,7 @@
  *   node scripts/ui-preview.mjs --scenario remote     # phone-started turns: render, queue, lost-race requeue
  *   node scripts/ui-preview.mjs --scenario confirm    # approval card: approve/deny, abandonment, settings toggle
  *   node scripts/ui-preview.mjs --scenario stopped    # stop, reload, restore, and continue a saved chat
+ *   node scripts/ui-preview.mjs --scenario deadturn   # malformed-reply error + BLOCKED dead-turn endings
  *
  * Options: --out DIR (default /tmp/crazyagent-ui-preview) and SHOT_FORMAT=jpeg.
  * Needs Node >= 22 (global WebSocket) and microsoft-edge or (set EDGE_BIN) on PATH.
@@ -1481,6 +1482,238 @@ async function playSlashScenario(page, capture) {
   assert.deepEqual(reconnectedState, { draft: false, sendLabel: 'Send', phase: 'Ready' })
 }
 
+/**
+ * Q10: both dead-turn endings in the real panel on the mock bridge.
+ *
+ * The frame sequences mirror what the companion actually emits (verified
+ * against companion/test/session-controller.test.mjs and recorded harness
+ * runs): a MALFORMED_RESPONSE step streams a tool-call delta with broken JSON
+ * plus the DSML tail as text, the companion retries once (a new model run, no
+ * user prompt), and a second rejection ends as chat.error; a turn whose final
+ * reply is leaked markup gets up to two in-turn steers and then ends as
+ * chat.done with the BLOCKED text and label 'blocked'. The streamed markup
+ * must never render — not live, not in a collapsed step, not in saved history.
+ */
+async function playDeadTurnScenario(page, capture) {
+  const { recv, batch } = makePage(page)
+  await batch(HELLO_FRAMES)
+  await sleep(300)
+  // Headless Edge stops producing frames when idle, which freezes enter/exit
+  // animations at their first frame; a surface screenshot would then catch
+  // rows mid-fade. Finish every started animation so captures show the settled
+  // state. (Infinite decorative loops cannot finish; they are skipped.)
+  const shot = async name => {
+    await page.evaluate(`(() => { for (const a of document.getAnimations()) { try { a.finish() } catch {} } })()`)
+    await sleep(120)
+    await capture(name)
+  }
+
+  const ERROR_TEXT = "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again."
+  const BLOCKED_TEXT = 'BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again.'
+  // Synthetic payloads with the exact shapes seen in real dead turns.
+  const BROKEN_ARGS = '{"actions":[{"op":"click","label":7},{"op":"type","label":9,"text":"hello","mode":"replace"}]'
+  const DSML_TAIL = '\n<｜DSML｜ parameter name="view":"full</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>'
+  const LEAKED_CALL = '\n<｜DSML｜ calls>\n<｜DSML｜ invoke name="browser_batch">\n<｜DSML｜ parameter name="actions">[{"op":"click","label":7}]</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>'
+  const markupIn = text => /｜\s*DSML\s*｜|\|\s*DSML\s*\|/.test(String(text ?? ''))
+  const assertNoMarkup = async label => {
+    const state = await page.evaluate(`(() => ({
+      feed: document.getElementById('activity-log').textContent,
+      latest: document.getElementById('activity-latest').textContent,
+      latestTitle: document.getElementById('activity-latest').title,
+    }))()`)
+    assert.equal(markupIn(state.feed), false, `${label}: no DSML markup anywhere in the feed (live or collapsed)`)
+    assert.equal(markupIn(state.latest), false, `${label}: no DSML markup in the latest-activity line`)
+    assert.equal(markupIn(state.latestTitle), false, `${label}: no DSML markup in the latest-activity tooltip`)
+  }
+  const malformedStep = async (turn, step, attemptId) => {
+    await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn, step, attemptId })
+    await sleep(180)
+    await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text: 'Looking at the form. ' })
+    await recv({ v: 1, type: 'chat.activity', kind: 'tool-call-delta', id: `call-${attemptId}`, name: 'browser_batch', argumentsDelta: BROKEN_ARGS })
+    await sleep(120)
+    // The runtime streams the rejected call's tail as ordinary text.
+    await recv({ v: 1, type: 'chat.activity', kind: 'text', text: DSML_TAIL })
+    await recv({ v: 1, type: 'chat.activity', kind: 'usage', usage: { inputTokens: 21963, outputTokens: 205, totalTokens: 22168 } })
+    await recv({ v: 1, type: 'chat.activity', kind: 'finish', reason: { kind: 'error', failure: { code: 'MALFORMED_RESPONSE', message: 'Tool call "browser_batch": Expected , or } in JSON' } } })
+    await recv({ v: 1, type: 'chat.activity', kind: 'model-end', outcome: { kind: 'committed', eventType: 'assistant/attempt' } })
+  }
+
+  // ---- Ending 1: malformed twice -> chat.error, never a blank success. ----
+  await sendPrompt(page, 'Fill in the form and submit it.')
+  await recv({ v: 1, type: 'chat.status', status: 'thinking' })
+  await malformedStep(1, 1, 'd1')
+  await sleep(220)
+  // The companion's one automatic retry: a new model run, no user prompt.
+  await malformedStep(2, 1, 'd2')
+  await recv({ v: 1, type: 'chat.error', message: ERROR_TEXT, recoverable: true })
+  await recv({ v: 1, type: 'chat.status', status: 'error' })
+  await sleep(320)
+
+  const errorState = await page.evaluate(`(() => ({
+    errorRows: [...document.querySelectorAll('.activity-entry.error .activity-text')].map(node => node.textContent),
+    phase: document.getElementById('activity-phase').textContent,
+    status: document.getElementById('status-text').textContent,
+    summary: document.querySelector('.agent-turn-summary').textContent,
+    running: document.querySelectorAll('.activity-step.running, .agent-turn.running').length,
+    sendLabel: document.getElementById('send').getAttribute('aria-label'),
+    userPrompts: window.__frames.filter(frame => frame.type === 'chat.send').length,
+  }))()`)
+  assert.deepEqual(errorState.errorRows, [ERROR_TEXT])
+  assert.equal(errorState.phase, 'Error')
+  assert.equal(errorState.status, 'Error')
+  assert.match(errorState.summary, /^\d+ (actions?|steps?) · /)
+  assert.equal(errorState.running, 0)
+  assert.equal(errorState.sendLabel, 'Send')
+  // The retry notice is runtime metadata, never a second user prompt.
+  assert.equal(errorState.userPrompts, 1)
+  await assertNoMarkup('chat.error ending')
+  log('error turn summary:', errorState.summary)
+  await shot('error')
+  // Expand the collapsed turn and its steps: the bodies must hold no markup row.
+  await page.evaluate(`(() => {
+    document.querySelector('.agent-turn .agent-turn-summary').click()
+    for (const head of document.querySelectorAll('.agent-turn .step-head')) head.click()
+  })()`)
+  await sleep(400)
+  await assertNoMarkup('chat.error ending, steps expanded')
+  await shot('error-steps-open')
+  await page.evaluate(`(() => {
+    for (const head of document.querySelectorAll('.agent-turn .step-head')) head.click()
+    document.querySelector('.agent-turn .agent-turn-summary').click()
+  })()`)
+  await sleep(250)
+
+  // ---- Composer usable: the next prompt runs and ends as the BLOCKED answer. ----
+  await sendPrompt(page, 'Try again after the error.')
+  const resent = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1)`)
+  assert.equal(resent?.text, 'Try again after the error.')
+  await recv({ v: 1, type: 'chat.status', status: 'thinking' })
+
+  // ---- Ending 2: leaked markup final -> chat.done BLOCKED, label blocked. ----
+  // Dead step 1: the whole call arrives as one text delta.
+  await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 1, attemptId: 'b1' })
+  await sleep(180)
+  await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text: 'Trying the form again. ' })
+  await recv({ v: 1, type: 'chat.activity', kind: 'text', text: LEAKED_CALL })
+  await recv({ v: 1, type: 'chat.activity', kind: 'usage', usage: { inputTokens: 22168, outputTokens: 96, totalTokens: 22264 } })
+  await recv({ v: 1, type: 'chat.activity', kind: 'finish', reason: { kind: 'stop' } })
+  await recv({ v: 1, type: 'chat.activity', kind: 'model-end', outcome: { kind: 'committed', eventType: 'assistant/message' } })
+  await sleep(180)
+  // Dead step 2 (first steer): the tag is split across deltas, then more text.
+  await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 2, attemptId: 'b2' })
+  await sleep(180)
+  await recv({ v: 1, type: 'chat.activity', kind: 'text', text: '\n<｜DSM' })
+  await recv({ v: 1, type: 'chat.activity', kind: 'text', text: 'L｜ calls>\n<｜DSML｜ invoke name="browser_batch">\n</｜DSML｜ invoke>\n</｜DSML｜ calls>' })
+  await recv({ v: 1, type: 'chat.activity', kind: 'text', text: ' trailing words that must also vanish' })
+  await recv({ v: 1, type: 'chat.activity', kind: 'finish', reason: { kind: 'stop' } })
+  await recv({ v: 1, type: 'chat.activity', kind: 'model-end', outcome: { kind: 'committed', eventType: 'assistant/message' } })
+  await sleep(180)
+  // Dead step 3 (second steer): gave-up; the companion ends the turn.
+  await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 3, attemptId: 'b3' })
+  await sleep(180)
+  await recv({ v: 1, type: 'chat.activity', kind: 'text', text: LEAKED_CALL })
+  await recv({ v: 1, type: 'chat.activity', kind: 'finish', reason: { kind: 'stop' } })
+  await recv({ v: 1, type: 'chat.activity', kind: 'model-end', outcome: { kind: 'committed', eventType: 'assistant/message' } })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await recv({
+    v: 1,
+    type: 'chat.done',
+    sessionId: 'session-preview0001',
+    text: BLOCKED_TEXT,
+    timings: { totalMs: 12300, autoCaptureMs: 380, firstEventMs: 850, toolCalls: 0, failedCalls: 0, promptTextBytes: 18100, imageBytes: 176000, images: 1 },
+    usage: { inputTokens: 22168, outputTokens: 205, totalTokens: 22373, cacheReadTokens: 12000 },
+    label: 'blocked',
+    model: 'deepseek/deepseek-v4.1-flash',
+    provider: 'openrouter',
+  })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await sleep(320)
+
+  const blockedState = await page.evaluate(`(() => {
+    const turn = document.querySelector('.agent-turn:last-of-type');
+    const answer = turn?.querySelector('.answer-text');
+    const rect = answer?.getBoundingClientRect();
+    const style = answer ? getComputedStyle(answer) : null;
+    return {
+      answer: answer?.textContent ?? null,
+      answers: document.querySelectorAll('.answer-text').length,
+      summary: turn?.querySelector('.agent-turn-summary').textContent,
+      phase: document.getElementById('activity-phase').textContent,
+      running: document.querySelectorAll('.activity-step.running, .agent-turn.running').length,
+      sendLabel: document.getElementById('send').getAttribute('aria-label'),
+      errorRows: document.querySelectorAll('.activity-entry.error').length,
+      turnClass: turn?.className,
+      answerBox: rect ? { top: Math.round(rect.top), height: Math.round(rect.height) } : null,
+      answerStyle: style ? { opacity: style.opacity, display: style.display, visibility: style.visibility } : null,
+    };
+  })()`)
+  log('blocked turn state:', JSON.stringify({ turnClass: blockedState.turnClass, answerBox: blockedState.answerBox, answerStyle: blockedState.answerStyle }))
+  assert.equal(blockedState.answer, BLOCKED_TEXT)
+  assert.equal(blockedState.answers, 1, 'the BLOCKED text is the only answer; the error turn had none')
+  assert.equal(blockedState.summary, '3 steps · 22,373 tok · 12.3s')
+  assert.equal(blockedState.phase, 'Ready')
+  assert.equal(blockedState.running, 0)
+  assert.equal(blockedState.sendLabel, 'Send')
+  assert.equal(blockedState.errorRows, 1, 'only the first turn ended as an error')
+  await assertNoMarkup('BLOCKED ending')
+  // The answer must be visibly rendered, not merely present in the DOM.
+  await page.evaluate(`(() => { for (const a of document.getAnimations()) { try { a.finish() } catch {} } })()`)
+  let answerVisible = false
+  for (let i = 0; i < 40; i += 1) {
+    answerVisible = await page.evaluate(`(() => {
+      const el = document.querySelector('.agent-turn:last-of-type .answer-text')
+      if (!el) return false
+      const rect = el.getBoundingClientRect()
+      return rect.height > 0 && getComputedStyle(el).opacity === '1'
+    })()`)
+    if (answerVisible) break
+    await sleep(100)
+  }
+  assert.equal(answerVisible, true, 'the BLOCKED answer is visible')
+  await shot('blocked')
+  // Expand the dead turn: its step bodies hold reasoning only, no markup rows.
+  await page.evaluate(`(() => {
+    document.querySelector('.agent-turn:last-of-type .agent-turn-summary').click()
+    for (const head of document.querySelectorAll('.agent-turn:last-of-type .step-head')) head.click()
+  })()`)
+  await sleep(400)
+  await assertNoMarkup('BLOCKED ending, steps expanded')
+  await shot('blocked-steps-open')
+  await page.evaluate(`(() => {
+    for (const head of document.querySelectorAll('.agent-turn:last-of-type .step-head')) head.click()
+    document.querySelector('.agent-turn:last-of-type .agent-turn-summary').click()
+  })()`)
+  await sleep(250)
+
+  // Saved history carries both turns and no markup (archive runs on chat.done).
+  let saved
+  for (let i = 0; i < 40; i += 1) {
+    saved = await page.evaluate(`(async () => (await chrome.storage.local.get('crazyagent.history'))['crazyagent.history']?.[0])()`)
+    if (saved?.html?.includes('Try again after the error.')) break
+    await sleep(50)
+  }
+  assert.equal(saved?.title, 'Fill in the form and submit it.')
+  assert.equal(saved?.stopped, false)
+  assert.equal(saved?.sessionId, 'session-preview0001')
+  assert.match(saved?.html ?? '', /Try again after the error\./)
+  assert.ok((saved?.html ?? '').includes(BLOCKED_TEXT), 'history keeps the BLOCKED answer')
+  assert.ok((saved?.html ?? '').includes(ERROR_TEXT), 'history keeps the error row')
+  assert.equal(markupIn(saved?.html), false, 'no DSML markup in saved history HTML')
+
+  // Reopening the saved chat renders clean and the composer still works.
+  await page.evaluate(`document.getElementById('history').click()`)
+  await sleep(200)
+  await page.evaluate(`document.querySelector('.history-open').click()`)
+  await sleep(300)
+  await assertNoMarkup('restored history')
+  await sendPrompt(page, 'One more try.')
+  const third = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1)`)
+  assert.equal(third?.text, 'One more try.')
+  await finishPrompt(page, 'session-preview0001', 'DONE: all set.')
+  await assertNoMarkup('after a clean follow-up turn')
+  await shot('continued')
+}
+
 async function main() {
   if (!existsSync(join(ROOT, 'extension', 'manifest.json'))) throw new Error(`extension/ not found under ${ROOT}`)
   if (SCENARIO === 'tools') {
@@ -1576,6 +1809,10 @@ async function main() {
     await assertVisibleReasoning(page, '.activity-step.running .activity-entry.reasoning.streaming', 'The first streamed thought.')
     // It leaves by fading and shrinking, then is removed.
     assert.equal(await page.evaluate(`document.querySelectorAll('.thinking-wait:not(.leaving)').length`), 0)
+    // A stalled headless compositor freezes the fade at its first frame, so the
+    // .finished -> remove() path never runs; finish the animation to test that
+    // removal deterministically (the fade itself is sampled by the glide probe).
+    await page.evaluate(`(() => { for (const a of document.getAnimations()) { try { a.finish() } catch {} } })()`)
     await sleep(MOTION_SETTLE_MS)
     assert.equal(await page.evaluate(`document.querySelector('.thinking-wait') === null`), true)
 
@@ -2199,6 +2436,8 @@ async function main() {
     await playRemoteScenario(page, shot)
   } else if (SCENARIO === 'confirm') {
     await playConfirmScenario(page, shot)
+  } else if (SCENARIO === 'deadturn') {
+    await playDeadTurnScenario(page, shot)
   } else {
     await playTurn(page)
     await sleep(400)
