@@ -41,13 +41,18 @@ class PushMessageTest {
         val help = PushMessage.parse(good)!!
         val done = PushMessage.parse(good + ("type" to "done"))!!
         val confirm = PushMessage.parse(good + ("type" to "confirm"))!!
+        val error = PushMessage.parse(good + ("type" to "error"))!!
         assertEquals("crazyAgent needs you", help.title)
         assertEquals("crazyAgent finished", done.title)
         assertEquals("crazyAgent needs your approval", confirm.title)
+        // Q10: a malformed-reply turn ends as chat.error and pushes the error type.
+        assertEquals("crazyAgent stopped on an error", error.title)
+        assertEquals("Open to see what went wrong.", error.text)
         // A later push for the same turn replaces the earlier notification.
         assertEquals(help.notificationId, done.notificationId)
         assertEquals(help.notificationId, confirm.notificationId)
-        for (message in listOf(help, done, confirm, PushMessage.parse(good + ("type" to "error"))!!)) {
+        assertEquals(help.notificationId, error.notificationId)
+        for (message in listOf(help, done, confirm, error)) {
             for (text in listOf(message.title, message.text)) {
                 assertFalse(text.contains(message.turnId))
                 assertFalse(text.contains(message.instanceId))

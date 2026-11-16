@@ -1,0 +1,1007 @@
+{
+  "name": "dead-turn",
+  "frames": [
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 3,
+      "type": "remote.resync",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:04.000Z",
+      "body": {
+        "reason": "no-instance",
+        "state": {
+          "protocol": 1,
+          "server": {
+            "name": "crazyagent-companion",
+            "version": "fixture"
+          },
+          "instanceId": "companion-fixture-f",
+          "sessionId": "session-1",
+          "latestSequence": 3,
+          "oldestSequence": 1,
+          "turn": {
+            "status": "idle",
+            "turnId": null,
+            "origin": null,
+            "clientMessageId": null,
+            "startedAt": null,
+            "endedAt": null,
+            "outcome": null,
+            "error": null,
+            "label": null,
+            "usage": null,
+            "failedCalls": null
+          },
+          "phase": {
+            "status": null,
+            "tool": null
+          },
+          "health": {
+            "uiConnected": true,
+            "toolsConnected": true,
+            "dsh": "ready",
+            "dshMessage": null,
+            "provider": "openrouter",
+            "model": "fixture/model",
+            "autoCapture": true,
+            "contextWindow": null,
+            "contextTokens": null
+          },
+          "messages": [],
+          "draft": null,
+          "latestScreenshotId": null,
+          "latestScreenshot": null,
+          "help": null,
+          "confirm": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 4,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-11",
+      "occurredAt": "2026-11-06T12:00:06.000Z",
+      "body": {
+        "text": "Fill in the form and submit it",
+        "origin": "remote",
+        "clientMessageId": "client-turn-11",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 5,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-11",
+      "occurredAt": "2026-11-06T12:00:07.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 6,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-11",
+      "occurredAt": "2026-11-06T12:00:08.000Z",
+      "body": {
+        "streamId": "turn-11:s1",
+        "channel": "reasoning",
+        "offset": 0,
+        "delta": "Looking at the form."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 7,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-11",
+      "occurredAt": "2026-11-06T12:00:09.000Z",
+      "body": {
+        "streamId": "turn-11:s1",
+        "channel": "tool",
+        "toolCallId": "call-a",
+        "name": "browser_batch",
+        "offset": 0,
+        "delta": "{\"actions\":[{\"op\":\"click\",\"label\":7},{\"op\":\"type\",\"label\":9,\"text\":\"hello\",\"mode\":\"replace\"}]"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 8,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-11",
+      "occurredAt": "2026-11-06T12:00:10.000Z",
+      "body": {
+        "streamId": "turn-11:s1",
+        "channel": "text",
+        "offset": 0,
+        "delta": "\n<｜DSML｜ parameter name=\"view\":\"full</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 9,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-11",
+      "occurredAt": "2026-11-06T12:00:11.000Z",
+      "body": {
+        "streamId": "turn-11:s3",
+        "channel": "text",
+        "offset": 0,
+        "delta": "\n<｜DSML｜ parameter name=\"view\":\"full</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 10,
+      "type": "chat.error",
+      "sessionId": "session-1",
+      "turnId": "turn-11",
+      "occurredAt": "2026-11-06T12:00:12.000Z",
+      "body": {
+        "message": "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again.",
+        "recoverable": true,
+        "replacesStreamId": "turn-11:s3"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 11,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-11",
+      "occurredAt": "2026-11-06T12:00:14.000Z",
+      "body": {
+        "status": "error",
+        "turnId": "turn-11",
+        "origin": "remote",
+        "clientMessageId": "client-turn-11",
+        "startedAt": "2026-11-06T12:00:05.000Z",
+        "endedAt": "2026-11-06T12:00:13.000Z",
+        "outcome": "error",
+        "error": "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again.",
+        "label": null,
+        "usage": {
+          "inputTokens": 21963,
+          "outputTokens": 205,
+          "totalTokens": 22168
+        },
+        "failedCalls": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 12,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-12",
+      "occurredAt": "2026-11-06T12:00:16.000Z",
+      "body": {
+        "text": "Try again after the error.",
+        "origin": "remote",
+        "clientMessageId": "client-turn-12",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 13,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-12",
+      "occurredAt": "2026-11-06T12:00:17.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 14,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-12",
+      "occurredAt": "2026-11-06T12:00:18.000Z",
+      "body": {
+        "streamId": "turn-12:s5",
+        "channel": "reasoning",
+        "offset": 0,
+        "delta": "Trying the form again."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 15,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-12",
+      "occurredAt": "2026-11-06T12:00:19.000Z",
+      "body": {
+        "streamId": "turn-12:s5",
+        "channel": "text",
+        "offset": 0,
+        "delta": "\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"browser_batch\">\n<｜DSML｜ parameter name=\"actions\">[{\"op\":\"click\",\"label\":7}]</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 16,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-12",
+      "occurredAt": "2026-11-06T12:00:20.000Z",
+      "body": {
+        "streamId": "turn-12:s7",
+        "channel": "text",
+        "offset": 0,
+        "delta": "\n<｜DSM"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 17,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-12",
+      "occurredAt": "2026-11-06T12:00:21.000Z",
+      "body": {
+        "streamId": "turn-12:s7",
+        "channel": "text",
+        "offset": 6,
+        "delta": "L｜ calls>\n<｜DSML｜ invoke name=\"browser_batch\">\n</｜DSML｜ invoke>\n</｜DSML｜ calls>"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 18,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-12",
+      "occurredAt": "2026-11-06T12:00:22.000Z",
+      "body": {
+        "streamId": "turn-12:s9",
+        "channel": "text",
+        "offset": 0,
+        "delta": "\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"browser_batch\">\n<｜DSML｜ parameter name=\"actions\">[{\"op\":\"click\",\"label\":7}]</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 19,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-12",
+      "occurredAt": "2026-11-06T12:00:23.000Z",
+      "body": {
+        "text": "BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again.",
+        "timings": {
+          "totalMs": 12300,
+          "toolCalls": 0,
+          "failedCalls": 0
+        },
+        "usage": {
+          "inputTokens": 22168,
+          "outputTokens": 205,
+          "totalTokens": 22373,
+          "cacheReadTokens": 12000
+        },
+        "label": "blocked",
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": false,
+        "planOutcome": null,
+        "planRevision": null,
+        "replacesStreamId": "turn-12:s9"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 20,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-12",
+      "occurredAt": "2026-11-06T12:00:25.000Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-12",
+        "origin": "remote",
+        "clientMessageId": "client-turn-12",
+        "startedAt": "2026-11-06T12:00:15.000Z",
+        "endedAt": "2026-11-06T12:00:24.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "blocked",
+        "usage": {
+          "inputTokens": 22168,
+          "outputTokens": 205,
+          "totalTokens": 22373,
+          "cacheReadTokens": 12000
+        },
+        "failedCalls": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 21,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-13",
+      "occurredAt": "2026-11-06T12:00:27.000Z",
+      "body": {
+        "text": "One more try.",
+        "origin": "remote",
+        "clientMessageId": "client-turn-13",
+        "imageCount": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 22,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-13",
+      "occurredAt": "2026-11-06T12:00:28.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 23,
+      "type": "chat.assistant",
+      "sessionId": "session-1",
+      "turnId": "turn-13",
+      "occurredAt": "2026-11-06T12:00:29.000Z",
+      "body": {
+        "text": "DONE: all set."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 24,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-13",
+      "occurredAt": "2026-11-06T12:00:30.000Z",
+      "body": {
+        "text": "DONE: all set.",
+        "timings": null,
+        "usage": {
+          "inputTokens": 22373,
+          "outputTokens": 12,
+          "totalTokens": 22385
+        },
+        "label": "done",
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": false,
+        "planOutcome": null,
+        "planRevision": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-f",
+      "seq": 25,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-13",
+      "occurredAt": "2026-11-06T12:00:32.000Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-13",
+        "origin": "remote",
+        "clientMessageId": "client-turn-13",
+        "startedAt": "2026-11-06T12:00:26.000Z",
+        "endedAt": "2026-11-06T12:00:31.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "done",
+        "usage": {
+          "inputTokens": 22373,
+          "outputTokens": 12,
+          "totalTokens": 22385
+        },
+        "failedCalls": 0
+      }
+    }
+  ],
+  "final": {
+    "protocol": 1,
+    "server": {
+      "name": "crazyagent-companion",
+      "version": "fixture"
+    },
+    "instanceId": "companion-fixture-f",
+    "sessionId": "session-1",
+    "latestSequence": 25,
+    "oldestSequence": 1,
+    "turn": {
+      "status": "idle",
+      "turnId": "turn-13",
+      "origin": "remote",
+      "clientMessageId": "client-turn-13",
+      "startedAt": "2026-11-06T12:00:26.000Z",
+      "endedAt": "2026-11-06T12:00:31.000Z",
+      "outcome": "done",
+      "error": null,
+      "label": "done",
+      "usage": {
+        "inputTokens": 22373,
+        "outputTokens": 12,
+        "totalTokens": 22385
+      },
+      "failedCalls": 0
+    },
+    "phase": {
+      "status": null,
+      "tool": null
+    },
+    "health": {
+      "uiConnected": true,
+      "toolsConnected": true,
+      "dsh": "ready",
+      "dshMessage": null,
+      "provider": "openrouter",
+      "model": "fixture/model",
+      "autoCapture": true,
+      "contextWindow": null,
+      "contextTokens": null
+    },
+    "messages": [
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-f",
+        "seq": 4,
+        "type": "chat.user",
+        "sessionId": "session-1",
+        "turnId": "turn-11",
+        "occurredAt": "2026-11-06T12:00:06.000Z",
+        "body": {
+          "text": "Fill in the form and submit it",
+          "origin": "remote",
+          "clientMessageId": "client-turn-11",
+          "imageCount": 0
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-f",
+        "seq": 10,
+        "type": "chat.error",
+        "sessionId": "session-1",
+        "turnId": "turn-11",
+        "occurredAt": "2026-11-06T12:00:12.000Z",
+        "body": {
+          "message": "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again.",
+          "recoverable": true,
+          "replacesStreamId": "turn-11:s3"
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-f",
+        "seq": 12,
+        "type": "chat.user",
+        "sessionId": "session-1",
+        "turnId": "turn-12",
+        "occurredAt": "2026-11-06T12:00:16.000Z",
+        "body": {
+          "text": "Try again after the error.",
+          "origin": "remote",
+          "clientMessageId": "client-turn-12",
+          "imageCount": 0
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-f",
+        "seq": 19,
+        "type": "chat.done",
+        "sessionId": "session-1",
+        "turnId": "turn-12",
+        "occurredAt": "2026-11-06T12:00:23.000Z",
+        "body": {
+          "text": "BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again.",
+          "timings": {
+            "totalMs": 12300,
+            "toolCalls": 0,
+            "failedCalls": 0
+          },
+          "usage": {
+            "inputTokens": 22168,
+            "outputTokens": 205,
+            "totalTokens": 22373,
+            "cacheReadTokens": 12000
+          },
+          "label": "blocked",
+          "model": "fixture/model",
+          "docsVerification": null,
+          "docsVerificationReason": null,
+          "planMode": false,
+          "planOutcome": null,
+          "planRevision": null,
+          "replacesStreamId": "turn-12:s9"
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-f",
+        "seq": 21,
+        "type": "chat.user",
+        "sessionId": "session-1",
+        "turnId": "turn-13",
+        "occurredAt": "2026-11-06T12:00:27.000Z",
+        "body": {
+          "text": "One more try.",
+          "origin": "remote",
+          "clientMessageId": "client-turn-13",
+          "imageCount": 0
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-f",
+        "seq": 23,
+        "type": "chat.assistant",
+        "sessionId": "session-1",
+        "turnId": "turn-13",
+        "occurredAt": "2026-11-06T12:00:29.000Z",
+        "body": {
+          "text": "DONE: all set."
+        }
+      },
+      {
+        "v": 1,
+        "instanceId": "companion-fixture-f",
+        "seq": 24,
+        "type": "chat.done",
+        "sessionId": "session-1",
+        "turnId": "turn-13",
+        "occurredAt": "2026-11-06T12:00:30.000Z",
+        "body": {
+          "text": "DONE: all set.",
+          "timings": null,
+          "usage": {
+            "inputTokens": 22373,
+            "outputTokens": 12,
+            "totalTokens": 22385
+          },
+          "label": "done",
+          "model": "fixture/model",
+          "docsVerification": null,
+          "docsVerificationReason": null,
+          "planMode": false,
+          "planOutcome": null,
+          "planRevision": null
+        }
+      }
+    ],
+    "draft": null,
+    "latestScreenshotId": null,
+    "latestScreenshot": null,
+    "help": null,
+    "confirm": null
+  },
+  "checkpoints": {
+    "afterError": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-f",
+      "sessionId": "session-1",
+      "latestSequence": 11,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "error",
+        "turnId": "turn-11",
+        "origin": "remote",
+        "clientMessageId": "client-turn-11",
+        "startedAt": "2026-11-06T12:00:05.000Z",
+        "endedAt": "2026-11-06T12:00:13.000Z",
+        "outcome": "error",
+        "error": "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again.",
+        "label": null,
+        "usage": {
+          "inputTokens": 21963,
+          "outputTokens": 205,
+          "totalTokens": 22168
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 4,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-11",
+          "occurredAt": "2026-11-06T12:00:06.000Z",
+          "body": {
+            "text": "Fill in the form and submit it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-11",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 10,
+          "type": "chat.error",
+          "sessionId": "session-1",
+          "turnId": "turn-11",
+          "occurredAt": "2026-11-06T12:00:12.000Z",
+          "body": {
+            "message": "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again.",
+            "recoverable": true,
+            "replacesStreamId": "turn-11:s3"
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null
+    },
+    "afterBlocked": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-f",
+      "sessionId": "session-1",
+      "latestSequence": 20,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-12",
+        "origin": "remote",
+        "clientMessageId": "client-turn-12",
+        "startedAt": "2026-11-06T12:00:15.000Z",
+        "endedAt": "2026-11-06T12:00:24.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "blocked",
+        "usage": {
+          "inputTokens": 22168,
+          "outputTokens": 205,
+          "totalTokens": 22373,
+          "cacheReadTokens": 12000
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 4,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-11",
+          "occurredAt": "2026-11-06T12:00:06.000Z",
+          "body": {
+            "text": "Fill in the form and submit it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-11",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 10,
+          "type": "chat.error",
+          "sessionId": "session-1",
+          "turnId": "turn-11",
+          "occurredAt": "2026-11-06T12:00:12.000Z",
+          "body": {
+            "message": "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again.",
+            "recoverable": true,
+            "replacesStreamId": "turn-11:s3"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 12,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-12",
+          "occurredAt": "2026-11-06T12:00:16.000Z",
+          "body": {
+            "text": "Try again after the error.",
+            "origin": "remote",
+            "clientMessageId": "client-turn-12",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 19,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-12",
+          "occurredAt": "2026-11-06T12:00:23.000Z",
+          "body": {
+            "text": "BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again.",
+            "timings": {
+              "totalMs": 12300,
+              "toolCalls": 0,
+              "failedCalls": 0
+            },
+            "usage": {
+              "inputTokens": 22168,
+              "outputTokens": 205,
+              "totalTokens": 22373,
+              "cacheReadTokens": 12000
+            },
+            "label": "blocked",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "replacesStreamId": "turn-12:s9"
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null
+    },
+    "afterRecovery": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-f",
+      "sessionId": "session-1",
+      "latestSequence": 25,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-13",
+        "origin": "remote",
+        "clientMessageId": "client-turn-13",
+        "startedAt": "2026-11-06T12:00:26.000Z",
+        "endedAt": "2026-11-06T12:00:31.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "done",
+        "usage": {
+          "inputTokens": 22373,
+          "outputTokens": 12,
+          "totalTokens": 22385
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 4,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-11",
+          "occurredAt": "2026-11-06T12:00:06.000Z",
+          "body": {
+            "text": "Fill in the form and submit it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-11",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 10,
+          "type": "chat.error",
+          "sessionId": "session-1",
+          "turnId": "turn-11",
+          "occurredAt": "2026-11-06T12:00:12.000Z",
+          "body": {
+            "message": "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again.",
+            "recoverable": true,
+            "replacesStreamId": "turn-11:s3"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 12,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-12",
+          "occurredAt": "2026-11-06T12:00:16.000Z",
+          "body": {
+            "text": "Try again after the error.",
+            "origin": "remote",
+            "clientMessageId": "client-turn-12",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 19,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-12",
+          "occurredAt": "2026-11-06T12:00:23.000Z",
+          "body": {
+            "text": "BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again.",
+            "timings": {
+              "totalMs": 12300,
+              "toolCalls": 0,
+              "failedCalls": 0
+            },
+            "usage": {
+              "inputTokens": 22168,
+              "outputTokens": 205,
+              "totalTokens": 22373,
+              "cacheReadTokens": 12000
+            },
+            "label": "blocked",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "replacesStreamId": "turn-12:s9"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 21,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-13",
+          "occurredAt": "2026-11-06T12:00:27.000Z",
+          "body": {
+            "text": "One more try.",
+            "origin": "remote",
+            "clientMessageId": "client-turn-13",
+            "imageCount": 0
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 23,
+          "type": "chat.assistant",
+          "sessionId": "session-1",
+          "turnId": "turn-13",
+          "occurredAt": "2026-11-06T12:00:29.000Z",
+          "body": {
+            "text": "DONE: all set."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-f",
+          "seq": 24,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-13",
+          "occurredAt": "2026-11-06T12:00:30.000Z",
+          "body": {
+            "text": "DONE: all set.",
+            "timings": null,
+            "usage": {
+              "inputTokens": 22373,
+              "outputTokens": 12,
+              "totalTokens": 22385
+            },
+            "label": "done",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": false,
+            "planOutcome": null,
+            "planRevision": null
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null
+    }
+  }
+}
