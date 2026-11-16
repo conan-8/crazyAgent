@@ -253,7 +253,10 @@ test('dirty Docs mutation steers one final read and reconciliation', async t => 
   assert.equal(fixture.steered.length, 1)
   const message = fixture.steered[0]
   assert.equal(message.role, 'user')
-  assert.equal(message.source.kind, 'runtime-context')
+  // 'agent-notice', never 'runtime-context': the DSH loop replaces a claimed
+  // runtime-context message with its context snapshot, so the nudge text
+  // would never reach the model.
+  assert.equal(message.source.kind, 'agent-notice')
   const text = message.content[0].text
   assert.match(text, /browser_docs_read exactly once/)
   assert.match(text, /format:"html"/)

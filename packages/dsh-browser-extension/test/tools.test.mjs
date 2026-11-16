@@ -5130,7 +5130,7 @@ test('midturn image pruning uses hysteresis and turn/end still prunes', async t 
   })
 })
 
-test('max-token responses queue internal follow-up turns without reviving aborted turns', async t => {
+test('max-token responses steer a continuation in the same turn without reviving aborted turns', async t => {
   const { server, url, logEvents } = await startFakeBridge()
   t.after(() => {
     for (const client of server.clients) client.terminate()
@@ -5142,8 +5142,8 @@ test('max-token responses queue internal follow-up turns without reviving aborte
   await waitFor(() => server.clients.size > 0)
 
   const session = { id: 'token-limit-session', surface: { nodes: [] } }
-  const followups = []
-  const agent = { session, followup: message => followups.push(message) }
+  const steered = []
+  const agent = { session, steer: message => steered.push(message), followup: () => assert.fail('a max-token continuation must stay in the same turn') }
   const sessionEvent = fake.listeners.get('session/event')
   const turnStopping = fake.listeners.get('agent/turn-stopping')
   const assistant = (turn, step, reason) => sessionEvent(session, {
@@ -5158,27 +5158,29 @@ test('max-token responses queue internal follow-up turns without reviving aborte
 
   assistant(1, 5, 'max-tokens')
   await turnStopping({ agent, turn: 1, signal: new AbortController().signal })
-  assert.equal(followups.length, 1)
-  assert.match(followups[0].content[0].text, /Continue the same task in this new step/)
-  assert.equal(followups[0].source.kind, 'token-limit-continuation')
+  assert.equal(steered.length, 1)
+  assert.match(steered[0].content[0].text, /Continue the same task in this new step/)
+  // A 'runtime-context' kind would be replaced by the loop's context snapshot
+  // and never reach the model; the continuation kind is appended verbatim.
+  assert.equal(steered[0].source.kind, 'token-limit-continuation')
 
   assistant(2, 1, 'max-tokens')
   await turnStopping({ agent, turn: 2, signal: new AbortController().signal })
-  assert.equal(followups.length, 2, 'every token-limited turn gets one continuation')
-  assert.notEqual(followups[0].id, followups[1].id)
+  assert.equal(steered.length, 2, 'every token-limited turn gets one continuation')
+  assert.notEqual(steered[0].id, steered[1].id)
 
   assistant(3, 1, 'completed')
   await turnStopping({ agent, turn: 3, signal: new AbortController().signal })
-  assert.equal(followups.length, 2, 'ordinary completion does not continue')
+  assert.equal(steered.length, 2, 'ordinary completion does not continue')
 
   assistant(4, 1, 'max-tokens')
   const aborted = new AbortController()
   aborted.abort({ kind: 'user' })
   await turnStopping({ agent, turn: 4, signal: aborted.signal })
-  assert.equal(followups.length, 2, 'manual cancellation wins over continuation')
+  assert.equal(steered.length, 2, 'manual cancellation wins over continuation')
   sessionEvent(session, { type: 'turn/end', data: { turn: 4, reason: { kind: 'aborted' } } })
   await turnStopping({ agent, turn: 4, signal: new AbortController().signal })
-  assert.equal(followups.length, 2, 'turn cleanup prevents a stale continuation')
+  assert.equal(steered.length, 2, 'turn cleanup prevents a stale continuation')
 
   await waitFor(() => logEvents.filter(event => event.type === 'model.max_tokens.continued').length === 2)
   assert.deepEqual(logEvents.filter(event => event.type === 'model.max_tokens.continued').map(event => event.data.step), [5, 1])
@@ -5210,7 +5212,9 @@ test('a tool call leaked as DSML text is retried at most twice in a row', async 
   assistant(1, [{ type: 'reasoning', text: 'plan' }, { type: 'text', text: leakedText }])
   await turnStopping({ agent, turn: 1, signal: live() })
   assert.equal(followups.length, 1)
-  assert.equal(followups[0].source.kind, 'runtime-context')
+  // 'runtime-context' notices are swallowed by the DSH loop's snapshot
+  // admission; the retry notice must use a kind the loop appends verbatim.
+  assert.equal(followups[0].source.kind, 'agent-notice')
   assert.match(followups[0].content[0].text, /nothing was executed/)
 
   assistant(2, [{ type: 'text', text: leakedText }])
@@ -5259,6 +5263,193 @@ test('a tool call leaked as DSML text is retried at most twice in a row', async 
   await turnStopping({ agent, turn: 11, signal: live() })
   assert.equal(followups.length, 5, 'a new user request re-arms the empty-step retry')
   await waitFor(() => logEvents.filter(event => event.type === 'model.leaked_tool_call').length === 7)
+})
+
+// DSH 0.2.2-rc.1 ReactLoopAgent.step admission rule (node_modules/@deepseek-ai/
+// dsh-agent-loop/lib/index.js): a claimed message whose source.kind is
+// 'runtime-context' is NOT appended to the surface — the loop appends its
+// dynamic context snapshot instead, and nothing at all when the snapshot is
+// unchanged. Every other kind is appended verbatim and reaches the model's
+// request. Measured 2026-11-16: retry notices sent as 'runtime-context'
+// appeared only in agent/inbox/spliced events, never in a request, so the
+// model never read them. Replay that rule over the real notice objects the
+// provider steers: an inbox-only notice must fail this test.
+function admittedSurfaceTexts(claimedMessages) {
+  const texts = []
+  for (const message of claimedMessages) {
+    if (message.source?.kind === 'runtime-context') continue
+    for (const block of message.content ?? []) {
+      if (block.type === 'text') texts.push(block.text)
+    }
+  }
+  return texts
+}
+
+test('every internal steer notice is admitted to the model surface, not just the inbox', async t => {
+  const { server, url } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const session = { id: 'notice-admission-session', surface: { nodes: [] } }
+  const steered = []
+  const agent = { session, steer: message => steered.push(message), followup: () => assert.fail('internal notices must steer, never followup') }
+  const sessionEvent = fake.listeners.get('session/event')
+  const turnStopping = fake.listeners.get('agent/turn-stopping')
+  const live = () => new AbortController().signal
+
+  // Markup leak, empty step, and max-token continuation each steer a notice.
+  sessionEvent(session, { type: 'assistant/message', data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '<｜DSML｜ invoke name="browser_click">' }] } } })
+  await turnStopping({ agent, turn: 1, signal: live() })
+  sessionEvent(session, { type: 'assistant/message', data: { turn: 2, step: 1, message: { role: 'assistant', content: [{ type: 'reasoning', text: 'only thinking' }] } } })
+  await turnStopping({ agent, turn: 2, signal: live() })
+  sessionEvent(session, { type: 'assistant/message', data: { turn: 3, step: 1, usage: { outputTokens: 8_192 }, stream: [{ type: 'chunk', chunk: { type: 'finish', reason: { kind: 'max-tokens' } } }] } })
+  await turnStopping({ agent, turn: 3, signal: live() })
+
+  assert.equal(steered.length, 3)
+  const admitted = admittedSurfaceTexts(steered)
+  assert.equal(admitted.length, 3, 'a runtime-context notice would be replaced by the context snapshot and never reach the request')
+  assert.ok(admitted.some(text => /nothing was executed/u.test(text)))
+  assert.ok(admitted.some(text => /previous step was empty/u.test(text)))
+  assert.ok(admitted.some(text => /Continue the same task in this new step/u.test(text)))
+  for (const message of steered) {
+    assert.notEqual(message.source.kind, 'runtime-context')
+    assert.equal(message.source.form, 'notice')
+    assert.ok(typeof message.source.summary === 'string' && message.source.summary.length > 0)
+  }
+})
+
+test('a max-token continuation keeps the turn repeat guard instead of refreshing it', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const session = { id: 'guard-cont-session', surface: { nodes: [] } }
+  const steered = []
+  const agent = { session, steer: message => steered.push(message), followup: () => assert.fail('a continuation must stay in the same turn') }
+  const claimed = fake.listeners.get('agent/inbox/claimed')
+  const request = fake.listeners.get('agent/request')
+  const click = fake.tools.get('browser_click')
+  const exec = { callId: 'c-guard-cont', signal: new AbortController().signal }
+
+  claimed({ agent, message: { id: 'u1', content: [{ type: 'text', text: 'click it' }] }, turn: 1 })
+  await request({ agent, turn: 1 }, async () => ({}))
+  await click.execute({ label: 3 }, exec)
+  await click.execute({ label: 3 }, exec)
+  await click.execute({ label: 3 }, exec)
+  await assert.rejects(() => click.execute({ label: 3 }, exec), /LOOP_DETECTED/)
+
+  // The step hits the output limit; the continuation is claimed in the same
+  // turn and must not give the loop a fresh repeat budget.
+  fake.listeners.get('session/event')(session, { type: 'assistant/message', data: { turn: 1, step: 5, usage: { outputTokens: 8_192 }, stream: [{ type: 'chunk', chunk: { type: 'finish', reason: { kind: 'max-tokens' } } }] } })
+  await fake.listeners.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal })
+  assert.equal(steered.length, 1)
+  claimed({ agent, message: steered[0], turn: 1 })
+  await request({ agent, turn: 1 }, async () => ({}))
+  await assert.rejects(() => click.execute({ label: 3 }, exec), /LOOP_DETECTED/)
+  assert.equal(commands.filter(command => command.op === 'click').length, 3, 'the continuation did not reset the fingerprint count')
+
+  // A real new user request still resets the guard.
+  claimed({ agent, message: { id: 'u2', content: [{ type: 'text', text: 'click it again' }] }, turn: 2 })
+  await request({ agent, turn: 2 }, async () => ({}))
+  assert.ok((await click.execute({ label: 3 }, exec)).content.length >= 1)
+  assert.equal(commands.filter(command => command.op === 'click').length, 4)
+})
+
+test('a continuation claim leaves the closed-panel circuit open until a new turn', async t => {
+  const closed = { code: 'SIDE_PANEL_CLOSED', message: 'the crazyAgent side panel is disconnected or reloading. Retry this call once; if it fails again, stop and report BLOCKED so the user can reopen the side panel' }
+  const { server, url, commands } = await startFakeBridge({ failures: { click: closed } })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const session = { id: 'circuit-cont-session', surface: { nodes: [] } }
+  const steered = []
+  const agent = { session, steer: message => steered.push(message), followup: () => assert.fail('a continuation must stay in the same turn') }
+  const claimed = fake.listeners.get('agent/inbox/claimed')
+  const click = label => fake.tools.get('browser_click').execute({ label }, { callId: `circuit-cont-${label}`, signal: new AbortController().signal })
+
+  claimed({ agent, message: { id: 'u1', content: [{ type: 'text', text: 'go' }] }, turn: 1 })
+  await assert.rejects(() => click(1), /Retry this call once/u)
+  await assert.rejects(() => click(2), /browser executor unavailable/u)
+  assert.equal(commands.length, 2)
+
+  // A max-token continuation inside the same turn must not reopen the circuit.
+  fake.listeners.get('session/event')(session, { type: 'assistant/message', data: { turn: 1, step: 3, usage: { outputTokens: 8_192 }, stream: [{ type: 'chunk', chunk: { type: 'finish', reason: { kind: 'max-tokens' } } }] } })
+  await fake.listeners.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal })
+  assert.equal(steered.length, 1)
+  claimed({ agent, message: steered[0], turn: 1 })
+  await assert.rejects(() => click(3), error => error.circuitOpen === true)
+  assert.equal(commands.length, 2, 'the continuation claim sent nothing new to the bridge')
+
+  // A real new turn still starts clean.
+  claimed({ agent, message: { id: 'u2', content: [{ type: 'text', text: 'go again' }] }, turn: 2 })
+  await assert.rejects(() => click(4), /Retry this call once/u)
+  assert.equal(commands.length, 3)
+})
+
+test('a continuation notice does not re-arm the empty-step retry or rewrite the session prompt', async t => {
+  const { server, url, logEvents } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const session = { id: 'tracking-cont-session', surface: { nodes: [] } }
+  const steered = []
+  const agent = { session, steer: message => steered.push(message), followup: () => assert.fail('a continuation must stay in the same turn') }
+  const claimed = fake.listeners.get('agent/inbox/claimed')
+  const sessionEvent = fake.listeners.get('session/event')
+  const request = fake.listeners.get('agent/request')
+  const turnStopping = fake.listeners.get('agent/turn-stopping')
+
+  const userPrompt = 'click the button'
+  claimed({ agent, message: { id: 'u1', content: [{ type: 'text', text: userPrompt }] }, turn: 1 })
+  sessionEvent(session, { type: 'user/message', data: { content: [{ type: 'text', text: userPrompt }] } })
+  await request({ agent, turn: 1 }, async () => ({ reasoningEffort: 'low' }))
+  sessionEvent(session, { type: 'tool/call', data: { turn: 1, name: 'browser_click', callId: 'tc-1' } })
+
+  // Max-token continuation: the notice claim and its surface user/message must
+  // not re-arm the empty-step retry (the turn already made a tool call) and
+  // must not become the session prompt. The same skip also preserves the
+  // no-progress count, which shares this code path.
+  sessionEvent(session, { type: 'assistant/message', data: { turn: 1, step: 4, usage: { outputTokens: 8_192 }, stream: [{ type: 'chunk', chunk: { type: 'finish', reason: { kind: 'max-tokens' } } }] } })
+  await turnStopping({ agent, turn: 1, signal: new AbortController().signal })
+  assert.equal(steered.length, 1)
+  claimed({ agent, message: steered[0], turn: 1 })
+  sessionEvent(session, { type: 'user/message', data: steered[0] })
+
+  // An empty step after the continuation is a deliberate stop, not a retry.
+  sessionEvent(session, { type: 'assistant/message', data: { turn: 1, step: 5, message: { role: 'assistant', content: [{ type: 'text', text: '   ' }] } } })
+  await turnStopping({ agent, turn: 1, signal: new AbortController().signal })
+  assert.equal(steered.length, 1, 'the continuation notice did not re-arm the empty-step retry')
+
+  // The next turn's reasoning classification still uses the real user prompt.
+  claimed({ agent, message: { id: 'u2', content: [{ type: 'text', text: userPrompt }] }, turn: 2 })
+  await request({ agent, turn: 2 }, async () => ({ reasoningEffort: 'low' }))
+  await waitFor(() => logEvents.filter(event => event.type === 'reasoning.policy').length === 2)
+  const policies = logEvents.filter(event => event.type === 'reasoning.policy')
+  assert.equal(policies[1].data.promptChars, userPrompt.length, 'the notice text never became the session prompt')
 })
 
 test('direct expectation schemas normalize wire calls and format independent evidence', async t => {

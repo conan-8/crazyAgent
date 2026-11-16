@@ -163,7 +163,10 @@ test('non-plan results trigger bounded stale reminders while plan results do not
   await flushSteering()
   assert.equal(fake.steered.length, 1)
   assert.match(fake.steered[0].content[0].text, /Stale-plan reminder 1 of 2/)
-  assert.equal(fake.steered[0].source.kind, 'runtime-context')
+  // 'agent-notice', never 'runtime-context': the DSH loop replaces a claimed
+  // runtime-context message with its context snapshot, so the nudge text
+  // would never reach the model.
+  assert.equal(fake.steered[0].source.kind, 'agent-notice')
 
   for (let index = 6; index < 11; index += 1) nonPlanResult(fake, index)
   await flushSteering()
