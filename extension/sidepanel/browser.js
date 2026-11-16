@@ -46,6 +46,8 @@ import {
   verifyDocsTableWrite,
 } from './docs-table.js'
 import { DialogManager } from './dialogs.js'
+import { docsFindReady, docsLiteralPositions, docsSameDocumentUrl, docsUrl } from './docs-ops.js'
+export { docsFontName, docsSameDocumentUrl, docsToolbarFont } from './docs-ops.js'
 import { executeFind, findProbe } from './find.js'
 import { createAgentCursor } from './agent-cursor.js'
 import { executeDrag as executeTrustedDrag, docsDragError, parseDragArgs } from './drag.js'
@@ -7049,18 +7051,6 @@ export function parseDocsMatchCounter(value) {
   return { current, total, text: `${current} of ${total}` }
 }
 
-/** Strip only the accessible-name suffix used to advertise a submenu. */
-export function docsFontName(value) {
-  return String(value ?? '').replace(/\s+/gu, ' ').trim().replace(/\s+(?:▸|›|»|▶|►)$/u, '')
-}
-
-/** @param {unknown} value */
-export function docsToolbarFont(value) {
-  const text = String(value ?? '').replace(/\s+/gu, ' ').trim()
-  const match = /^Font list\.\s+(.+?)\s+selected\.$/u.exec(text)
-  if (match) return docsFontName(match[1])
-  return text && !text.startsWith('Font list.') ? docsFontName(text) : undefined
-}
 
 function docsFailure(stage, code, message) {
   const error = new BrowserError(code.startsWith('DOCS_') ? code : `DOCS_${code}`, `[${stage}] ${message}`)
@@ -7068,24 +7058,6 @@ function docsFailure(stage, code, message) {
   return error
 }
 
-function docsUrl(value) {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && url.hostname === 'docs.google.com' && /^\/document(?:\/|$)/u.test(url.pathname)
-  } catch {
-    return false
-  }
-}
-
-export function docsSameDocumentUrl(before, after) {
-  try {
-    const left = new URL(before)
-    const right = new URL(after)
-    return left.origin === right.origin && left.pathname === right.pathname && left.search === right.search && docsUrl(right.href)
-  } catch {
-    return false
-  }
-}
 
 /**
  * Self-contained Docs probes. All targets are resolved by role and accessible
@@ -7854,9 +7826,6 @@ async function docsCloseFind(context, stage, awaitDocumentFocus = false) {
   }
 }
 
-function docsFindReady(state, text) {
-  return state.open && state.enabled && state.focused === true && state.value === text && state.match !== undefined
-}
 
 async function docsFindQuery(context, stage, text) {
   await docsNativeText(context, stage, 'setFind', text)
@@ -7996,16 +7965,6 @@ function docsResolveOccurrence(occurrence, total, stage = 'find-match') {
   return resolved
 }
 
-function docsLiteralPositions(haystack, needle) {
-  const source = String(haystack).toLowerCase()
-  const wanted = String(needle).toLowerCase()
-  if (!wanted) return []
-  const positions = []
-  for (let index = source.indexOf(wanted); index >= 0; index = source.indexOf(wanted, index + wanted.length)) {
-    positions.push(index)
-  }
-  return positions
-}
 
 function docsParagraphPlan(blocks, text, occurrence, nativeCount) {
   for (const block of blocks) {
