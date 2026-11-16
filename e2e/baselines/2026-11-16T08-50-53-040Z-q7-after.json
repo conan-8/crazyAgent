@@ -1,0 +1,2881 @@
+{
+  "startedAt": "2026-11-16T08:50:53.040Z",
+  "finishedAt": "2026-11-16T09:03:01.888Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval-q7a/dsh-home",
+  "repeat": 10,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": 6000000,
+  "totalTokens": 4225873,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "drag-reorder",
+      "fixture": "drag.html",
+      "prompt": "In the Pointer sortable list on this page, drag Alpha so the order becomes Beta, Gamma, Alpha.",
+      "file": "drag-reorder.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwj0x9qr-61df",
+          "status": "partial",
+          "reasons": [
+            "order is Beta,Alpha,Gamma, not Beta,Gamma,Alpha"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Alpha",
+              "Gamma"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "timeout",
+            "waitingForUser": false,
+            "wallMs": 120048,
+            "error": null,
+            "outcome": "stopped",
+            "confirm": null,
+            "steps": 11,
+            "toolCalls": 10,
+            "failedCalls": 2,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_navigate",
+                "message": "Error: browser_navigate supports only http and https URLs"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "refused NO_VIEW: View 3 is not a recent view of this page, so its image scale is unknown. Take a fresh view and use coordinates measured on that screenshot.\nno input was dispatched (attempted=false, mutationPossible=false). Fresh view #6 is attached to this result: measure the coordinates again on …"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 4,
+              "browser_navigate": 3,
+              "browser_switch_tab": 1,
+              "browser_select": 1
+            },
+            "inputTokens": 23938,
+            "outputTokens": 9534,
+            "cacheReadTokens": 267008,
+            "totalTokens": 300480,
+            "usage": {
+              "inputTokens": 23938,
+              "outputTokens": 9534,
+              "totalTokens": 300480,
+              "cacheReadTokens": 267008
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0x9qr-61df",
+              "origin": "remote",
+              "clientMessageId": "e466a252-6c87-4254-a436-42894bc1a015",
+              "startedAt": "2026-11-16T08:50:54.483Z",
+              "endedAt": "2026-11-16T08:52:54.531Z",
+              "outcome": "stopped",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 23938,
+                "outputTokens": 9534,
+                "totalTokens": 300480,
+                "cacheReadTokens": 267008
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwj0zv1w-1cac",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 99870,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 8,
+            "toolCalls": 7,
+            "failedCalls": 3,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "refused STALE_VIEW: The page controls or layout changed since the browser_drag view was captured. Take a full fresh view and measure the coordinates again.\nno input was dispatched (attempted=false, mutationPossible=false). Fresh view #12 is attached to this result: measure the coordinates again on …"
+              },
+              {
+                "kind": "command",
+                "tool": "drag",
+                "code": "DRAG_STALE_TARGET",
+                "message": "The source element moved or became covered before input completed."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: The source element moved or became covered before input completed."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "refused STALE_VIEW: The page controls or layout changed since the browser_drag view was captured. Take a full fresh view and measure the coordinates again.\nno input was dispatched (attempted=false, mutationPossible=false). Fresh view #13 is attached to this result: measure the coordinates again on …"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 2,
+              "browser_drag": 5
+            },
+            "inputTokens": 81385,
+            "outputTokens": 13842,
+            "cacheReadTokens": 125440,
+            "totalTokens": 220667,
+            "usage": {
+              "inputTokens": 81385,
+              "outputTokens": 13842,
+              "totalTokens": 220667,
+              "cacheReadTokens": 125440
+            },
+            "finalText": "DONE — Pointer sortable now shows **Beta, Gamma, Alpha**, with Alpha moved to the end.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj0zv1w-1cac",
+              "origin": "remote",
+              "clientMessageId": "5f2ba992-0a39-455d-b67c-7b5877815e95",
+              "startedAt": "2026-11-16T08:52:55.412Z",
+              "endedAt": "2026-11-16T08:54:35.282Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 81385,
+                "outputTokens": 13842,
+                "totalTokens": 220667,
+                "cacheReadTokens": 125440
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwj120mt-7da1",
+          "status": "fail",
+          "reasons": [
+            "order stayed Alpha,Beta,Gamma"
+          ],
+          "evidence": {
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "timeout",
+            "waitingForUser": false,
+            "wallMs": 120035,
+            "error": null,
+            "outcome": "stopped",
+            "confirm": null,
+            "steps": 17,
+            "toolCalls": 16,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "click",
+                "code": "BROWSER_ERROR",
+                "message": "Cannot read properties of null (reading 'scroll')"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_click",
+                "message": "Error: Cannot read properties of null (reading 'scroll')"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 2,
+              "browser_drag": 10,
+              "browser_click": 1,
+              "browser_navigate": 1,
+              "browser_switch_tab": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 79933,
+            "outputTokens": 14303,
+            "cacheReadTokens": 464608,
+            "totalTokens": 558844,
+            "usage": {
+              "inputTokens": 79933,
+              "outputTokens": 14303,
+              "totalTokens": 558844,
+              "cacheReadTokens": 464608
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj120mt-7da1",
+              "origin": "remote",
+              "clientMessageId": "b58062a0-fbfc-4a7e-b19c-5e40505d844b",
+              "startedAt": "2026-11-16T08:54:35.957Z",
+              "endedAt": "2026-11-16T08:56:35.992Z",
+              "outcome": "stopped",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 79933,
+                "outputTokens": 14303,
+                "totalTokens": 558844,
+                "cacheReadTokens": 464608
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwj14m3d-04a9",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 36748,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 8,
+            "toolCalls": 7,
+            "failedCalls": 2,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: browser_drag to:{x,y} is an alias for to_x/to_y; pass one destination shape, not both. Example: {\"x\":120,\"y\":300,\"to_x\":420,\"to_y\":300}"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "refused AMBIGUOUS_VIEW: These drag coordinates fit more than one image scale. Take a fresh view and pass its view_id; no drag was dispatched.\nno input was dispatched (attempted=false, mutationPossible=false). Fresh view #31 is attached to this result: measure the coordinates again on it and pass vi…"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 6
+            },
+            "inputTokens": 47023,
+            "outputTokens": 3206,
+            "cacheReadTokens": 309632,
+            "totalTokens": 359861,
+            "usage": {
+              "inputTokens": 47023,
+              "outputTokens": 3206,
+              "totalTokens": 359861,
+              "cacheReadTokens": 309632
+            },
+            "finalText": "DONE\n\n- Pointer sortable order is now `Beta,Gamma,Alpha` — the page's live `order:` readout and the JSON snapshot (`\"pointerOrder\": [\"Beta\",\"Gamma\",\"Alpha\"]`) both confirm it.\n- Achieved in two pointer drags: Alpha onto Beta (→ Beta,Alpha,Gamma) then Alpha onto Gamma (→ Beta,Gamma,Alpha); the fixture inserts the dragged item after the hovered sibling.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj14m3d-04a9",
+              "origin": "remote",
+              "clientMessageId": "a8e2c23d-b943-406a-848a-7fcde9e52de0",
+              "startedAt": "2026-11-16T08:56:37.081Z",
+              "endedAt": "2026-11-16T08:57:13.829Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 47023,
+                "outputTokens": 3206,
+                "totalTokens": 359861,
+                "cacheReadTokens": 309632
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwj15f22-11a9",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 30066,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 10,
+            "toolCalls": 9,
+            "failedCalls": 3,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "refused STALE_VIEW: The page controls or layout changed since the browser_drag view was captured. Take a full fresh view and measure the coordinates again.\nno input was dispatched (attempted=false, mutationPossible=false). Fresh view #38 is attached to this result: measure the coordinates again on …"
+              },
+              {
+                "kind": "command",
+                "tool": "drag",
+                "code": "DRAG_STALE_TARGET",
+                "message": "The destination element moved or became covered before input completed."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: The destination element moved or became covered before input completed."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "refused STALE_VIEW: The page controls or layout changed since the browser_drag view was captured. Take a full fresh view and measure the coordinates again.\nno input was dispatched (attempted=false, mutationPossible=false). Fresh view #39 is attached to this result: measure the coordinates again on …"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 2,
+              "browser_drag": 6,
+              "browser_find": 1
+            },
+            "inputTokens": 48880,
+            "outputTokens": 2377,
+            "cacheReadTokens": 227328,
+            "totalTokens": 278585,
+            "usage": {
+              "inputTokens": 48880,
+              "outputTokens": 2377,
+              "totalTokens": 278585,
+              "cacheReadTokens": 227328
+            },
+            "finalText": "DONE\n- Dragged the \"Alpha\" item in the Pointer sortable to the end; the list now reads Beta, Gamma, Alpha (visible in both the button order and the \"order: Beta,Gamma,Alpha\" readout, with down/move/up 4/47/4).\n- Verified in a fresh full view after the drop; no other widgets touched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj15f22-11a9",
+              "origin": "remote",
+              "clientMessageId": "bc8c773f-9956-47a8-83a7-9bcaddd8cd74",
+              "startedAt": "2026-11-16T08:57:14.618Z",
+              "endedAt": "2026-11-16T08:57:44.684Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 48880,
+                "outputTokens": 2377,
+                "totalTokens": 278585,
+                "cacheReadTokens": 227328
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 5,
+          "turnId": "turn-mwj162v9-917e",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5625,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 10540,
+            "outputTokens": 375,
+            "cacheReadTokens": 60800,
+            "totalTokens": 71715,
+            "usage": {
+              "inputTokens": 10540,
+              "outputTokens": 375,
+              "totalTokens": 71715,
+              "cacheReadTokens": 60800
+            },
+            "finalText": "DONE\n- Dragged Alpha to after Gamma in the Pointer sortable list.\n- Verified: page now shows `order: Beta,Gamma,Alpha` and the JSON snapshot lists `pointerOrder: [\"Beta\",\"Gamma\",\"Alpha\"]` with the source's index changed.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj162v9-917e",
+              "origin": "remote",
+              "clientMessageId": "609b7c1c-93f2-4343-98ca-888a7d813ea1",
+              "startedAt": "2026-11-16T08:57:45.477Z",
+              "endedAt": "2026-11-16T08:57:51.102Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 10540,
+                "outputTokens": 375,
+                "totalTokens": 71715,
+                "cacheReadTokens": 60800
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 6,
+          "turnId": "turn-mwj167ph-f81c",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6493,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1
+            },
+            "inputTokens": 25657,
+            "outputTokens": 352,
+            "cacheReadTokens": 45188,
+            "totalTokens": 71197,
+            "usage": {
+              "inputTokens": 25657,
+              "outputTokens": 352,
+              "totalTokens": 71197,
+              "cacheReadTokens": 45188
+            },
+            "finalText": "DONE\n- Dragged Alpha to the end of the Pointer sortable list; the fixture now reads `order: Beta,Gamma,Alpha` with a committed drop (up: 1, pointerCommits 1).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj167ph-f81c",
+              "origin": "remote",
+              "clientMessageId": "37e200b1-de1c-4d0d-abe8-437cab674aa5",
+              "startedAt": "2026-11-16T08:57:51.749Z",
+              "endedAt": "2026-11-16T08:57:58.242Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 25657,
+                "outputTokens": 352,
+                "totalTokens": 71197,
+                "cacheReadTokens": 45188
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 7,
+          "turnId": "turn-mwj16db1-083a",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 25979,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 1,
+              "browser_find": 1
+            },
+            "inputTokens": 25312,
+            "outputTokens": 3817,
+            "cacheReadTokens": 69632,
+            "totalTokens": 98761,
+            "usage": {
+              "inputTokens": 25312,
+              "outputTokens": 3817,
+              "totalTokens": 98761,
+              "cacheReadTokens": 69632
+            },
+            "finalText": "DONE — dragged Alpha to the end; the Pointer sortable order is now Beta, Gamma, Alpha. Verified in the page state.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj16db1-083a",
+              "origin": "remote",
+              "clientMessageId": "83765f45-00ab-493a-ab0e-fb38deb0423d",
+              "startedAt": "2026-11-16T08:57:59.005Z",
+              "endedAt": "2026-11-16T08:58:24.984Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 25312,
+                "outputTokens": 3817,
+                "totalTokens": 98761,
+                "cacheReadTokens": 69632
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 8,
+          "turnId": "turn-mwj16xz1-7752",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 33909,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 10,
+            "toolCalls": 9,
+            "failedCalls": 5,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "refused AMBIGUOUS_VIEW: These drag coordinates fit more than one image scale. Take a fresh view and pass its view_id; no drag was dispatched.\nno input was dispatched (attempted=false, mutationPossible=false). Fresh view #50 is attached to this result: measure the coordinates again on it and pass vi…"
+              },
+              {
+                "kind": "command",
+                "tool": "drag",
+                "code": "AMBIGUOUS_VIEW",
+                "message": "These are the same coordinates that were just refused (AMBIGUOUS_VIEW); they were measured on an older view. Measure the target again on view #50 and pass view_id:50; no input was dispatched."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: These are the same coordinates that were just refused (AMBIGUOUS_VIEW); they were measured on an older view. Measure the target again on view #50 and pass view_id:50; no input was dispatched."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "refused AMBIGUOUS_VIEW: These drag coordinates fit more than one image scale. Take a fresh view and pass its view_id; no drag was dispatched.\nno input was dispatched (attempted=false, mutationPossible=false). Fresh view #52 is attached to this result: measure the coordinates again on it and pass vi…"
+              },
+              {
+                "kind": "command",
+                "tool": "drag",
+                "code": "AMBIGUOUS_VIEW",
+                "message": "These are the same coordinates that were just refused (AMBIGUOUS_VIEW); they were measured on an older view. Measure the target again on view #52 and pass view_id:52; no input was dispatched."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: These are the same coordinates that were just refused (AMBIGUOUS_VIEW); they were measured on an older view. Measure the target again on view #52 and pass view_id:52; no input was dispatched."
+              },
+              {
+                "kind": "command",
+                "tool": "drag",
+                "code": "AMBIGUOUS_VIEW",
+                "message": "These are the same coordinates that were just refused (AMBIGUOUS_VIEW); they were measured on an older view. Measure the target again on view #52 and pass view_id:52; no input was dispatched."
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_drag",
+                "message": "Error: These are the same coordinates that were just refused (AMBIGUOUS_VIEW); they were measured on an older view. Measure the target again on view #52 and pass view_id:52; no input was dispatched."
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_drag": 8
+            },
+            "inputTokens": 7006,
+            "outputTokens": 3275,
+            "cacheReadTokens": 445568,
+            "totalTokens": 455849,
+            "usage": {
+              "inputTokens": 7006,
+              "outputTokens": 3275,
+              "totalTokens": 455849,
+              "cacheReadTokens": 445568
+            },
+            "finalText": "DONE — Pointer sortable now reads `order: Beta,Gamma,Alpha`.\n\n- Drag performed with trusted pointer input: Alpha (source) dropped onto Gamma's position, verified by the list's own DOM state (`Beta, Gamma, Alpha`) and the reordered labels in the fresh view.\n- Snapshot fields confirm the move: pointerOrder is Beta, Gamma, Alpha.\n\nNote: the first attempt that targeted the empty area after Gamma had no effect; dropping on Gamma's trailing edge produced the swap.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 3,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj16xz1-7752",
+              "origin": "remote",
+              "clientMessageId": "da29687e-7ed8-4e01-aba1-a8bc3bdd72b3",
+              "startedAt": "2026-11-16T08:58:25.789Z",
+              "endedAt": "2026-11-16T08:58:59.698Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 7006,
+                "outputTokens": 3275,
+                "totalTokens": 455849,
+                "cacheReadTokens": 445568
+              },
+              "failedCalls": 3
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 9,
+          "turnId": "turn-mwj17oqx-81b9",
+          "status": "pass",
+          "reasons": [
+            "pointer order is Beta, Gamma, Alpha with no other widget change"
+          ],
+          "evidence": {
+            "order": [
+              "Beta",
+              "Gamma",
+              "Alpha"
+            ],
+            "rangeValue": "20",
+            "customValue": "20",
+            "html5Parent": "html5-origin",
+            "selection": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 119854,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 16,
+            "toolCalls": 15,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_screenshot",
+                "message": "Error: browser_screenshot received unknown argument \"view\". Allowed: detail, delay_ms, scope, region, space, view_id, to_clipboard"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 2,
+              "browser_drag": 10,
+              "browser_navigate": 2,
+              "browser_switch_tab": 1
+            },
+            "inputTokens": 35776,
+            "outputTokens": 13990,
+            "cacheReadTokens": 519040,
+            "totalTokens": 568806,
+            "usage": {
+              "inputTokens": 35776,
+              "outputTokens": 13990,
+              "totalTokens": 568806,
+              "cacheReadTokens": 519040
+            },
+            "finalText": "DONE — Pointer sortable order is now **Beta, Gamma, Alpha**.\n\n- Done: Dragged Alpha to the end via successive adjacent swaps (the fixture commits one position swap per completed drag, and rightward drags past an item didn't register, so I used left-swaps to reach the same permutation).\n- Verified: The fixture's live readout shows `order: Beta,Gamma,Alpha`, and the label order is Beta, Gamma, Alpha.\n- Note: I used an extra browser tab briefly to probe the server; the drag page tab itself was untouched otherwise.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj17oqx-81b9",
+              "origin": "remote",
+              "clientMessageId": "491aaeb3-cc13-48f6-ab38-e28bdffa7ca6",
+              "startedAt": "2026-11-16T08:59:00.489Z",
+              "endedAt": "2026-11-16T09:01:00.343Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 35776,
+                "outputTokens": 13990,
+                "totalTokens": 568806,
+                "cacheReadTokens": 519040
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "duplicate-text",
+      "fixture": "find.html",
+      "prompt": "Scroll to the paragraph that starts with \"Duplicate needle\" on this page and tell me what it says.",
+      "file": "duplicate-text.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwj1a9ts-a863",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33339/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "DONE\n- \"Duplicate needle\" appears twice on the page, in the same box, right below \"The silver key is under the third stone.\":\n  - **Duplicate needle first**\n  - **Duplicate needle second**\n- Verified: both paragraphs are in the current viewport (scrolled/revealed by find); the second is directly below the first. No third \"Duplicate needle\" paragraph exists.",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4178,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 2
+            },
+            "inputTokens": 2622,
+            "outputTokens": 537,
+            "cacheReadTokens": 64896,
+            "totalTokens": 68055,
+            "usage": {
+              "inputTokens": 2622,
+              "outputTokens": 537,
+              "totalTokens": 68055,
+              "cacheReadTokens": 64896
+            },
+            "finalText": "DONE\n- \"Duplicate needle\" appears twice on the page, in the same box, right below \"The silver key is under the third stone.\":\n  - **Duplicate needle first**\n  - **Duplicate needle second**\n- Verified: both paragraphs are in the current viewport (scrolled/revealed by find); the second is directly below the first. No third \"Duplicate needle\" paragraph exists.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1a9ts-a863",
+              "origin": "remote",
+              "clientMessageId": "b5d78d23-4f5e-417f-b763-9c27006b3975",
+              "startedAt": "2026-11-16T09:01:01.120Z",
+              "endedAt": "2026-11-16T09:01:05.298Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2622,
+                "outputTokens": 537,
+                "totalTokens": 68055,
+                "cacheReadTokens": 64896
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwj1adlh-eee5",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33339/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "There are two paragraphs starting with \"Duplicate needle\", so both are reported:\n\n- **\"Duplicate needle first\"**\n- **\"Duplicate needle second\"**\n\ndone: scrolled/located the \"Duplicate needle\" paragraphs on the fixture page.\nverified: browser_find returned exactly 2 matches, both in the viewport; page text confirms them.\nassumed: your request named a single paragraph but two start with \"Duplicate n",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5357,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 695,
+            "outputTokens": 627,
+            "cacheReadTokens": 80256,
+            "totalTokens": 81578,
+            "usage": {
+              "inputTokens": 695,
+              "outputTokens": 627,
+              "totalTokens": 81578,
+              "cacheReadTokens": 80256
+            },
+            "finalText": "There are two paragraphs starting with \"Duplicate needle\", so both are reported:\n\n- **\"Duplicate needle first\"**\n- **\"Duplicate needle second\"**\n\ndone: scrolled/located the \"Duplicate needle\" paragraphs on the fixture page.\nverified: browser_find returned exactly 2 matches, both in the viewport; page text confirms them.\nassumed: your request named a single paragraph but two start with \"Duplicate needle\" — I listed both rather than guess; tell me which one if you need just one.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1adlh-eee5",
+              "origin": "remote",
+              "clientMessageId": "2c9b6e21-2d8a-4b02-99e9-32b80a12f6fe",
+              "startedAt": "2026-11-16T09:01:06.005Z",
+              "endedAt": "2026-11-16T09:01:11.362Z",
+              "outcome": "done",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 695,
+                "outputTokens": 627,
+                "totalTokens": 81578,
+                "cacheReadTokens": 80256
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwj1aiah-3a2c",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33339/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "DONE — the page has two paragraphs starting with \"Duplicate needle\":\n\n- **Duplicate needle first**\n- **Duplicate needle second**\n\nBoth are already in the current view (no scrolling was actually needed). If you meant only one of them, tell me which.",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3725,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 16177,
+            "outputTokens": 304,
+            "cacheReadTokens": 28800,
+            "totalTokens": 45281,
+            "usage": {
+              "inputTokens": 16177,
+              "outputTokens": 304,
+              "totalTokens": 45281,
+              "cacheReadTokens": 28800
+            },
+            "finalText": "DONE — the page has two paragraphs starting with \"Duplicate needle\":\n\n- **Duplicate needle first**\n- **Duplicate needle second**\n\nBoth are already in the current view (no scrolling was actually needed). If you meant only one of them, tell me which.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1aiah-3a2c",
+              "origin": "remote",
+              "clientMessageId": "b838460a-4c37-4c73-94bc-23749cd29dc2",
+              "startedAt": "2026-11-16T09:01:12.089Z",
+              "endedAt": "2026-11-16T09:01:15.814Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 16177,
+                "outputTokens": 304,
+                "totalTokens": 45281,
+                "cacheReadTokens": 28800
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwj1alqj-f6c9",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33339/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "DONE\n\nBoth paragraphs starting with \"Duplicate needle\" are now on screen (already within the viewport; the page didn't need to scroll):\n\n- **Duplicate needle first**\n- **Duplicate needle second**\n\nVerified from the rendered page text and the fresh view. Note there are two matching paragraphs, so I reported both.",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4282,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 1407,
+            "outputTokens": 432,
+            "cacheReadTokens": 80256,
+            "totalTokens": 82095,
+            "usage": {
+              "inputTokens": 1407,
+              "outputTokens": 432,
+              "totalTokens": 82095,
+              "cacheReadTokens": 80256
+            },
+            "finalText": "DONE\n\nBoth paragraphs starting with \"Duplicate needle\" are now on screen (already within the viewport; the page didn't need to scroll):\n\n- **Duplicate needle first**\n- **Duplicate needle second**\n\nVerified from the rendered page text and the fresh view. Note there are two matching paragraphs, so I reported both.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1alqj-f6c9",
+              "origin": "remote",
+              "clientMessageId": "a973ac08-ceba-484d-b484-5050e9e5c8d8",
+              "startedAt": "2026-11-16T09:01:16.555Z",
+              "endedAt": "2026-11-16T09:01:20.837Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1407,
+                "outputTokens": 432,
+                "totalTokens": 82095,
+                "cacheReadTokens": 80256
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwj1apnq-e304",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33339/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": true,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "There are two paragraphs starting with \"Duplicate needle\" on this page, so I can't tell which one you mean and didn't scroll to either:\n\n- **\"Duplicate needle first\"**\n- **\"Duplicate needle second\"**\n\nWhich one should I scroll to — the first or the second?",
+            "failed": "FIND_AMBIGUOUS find Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based integer … | browser_find Error: Found 2 matches for \"Duplicate needle\"; nothing was scrol"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 8130,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "find",
+                "code": "FIND_AMBIGUOUS",
+                "message": "Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based integer …"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_find",
+                "message": "Error: Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based i…"
+              }
+            ],
+            "toolCounts": {
+              "browser_find": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 22859,
+            "outputTokens": 845,
+            "cacheReadTokens": 43776,
+            "totalTokens": 67480,
+            "usage": {
+              "inputTokens": 22859,
+              "outputTokens": 845,
+              "totalTokens": 67480,
+              "cacheReadTokens": 43776
+            },
+            "finalText": "There are two paragraphs starting with \"Duplicate needle\" on this page, so I can't tell which one you mean and didn't scroll to either:\n\n- **\"Duplicate needle first\"**\n- **\"Duplicate needle second\"**\n\nWhich one should I scroll to — the first or the second?",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1apnq-e304",
+              "origin": "remote",
+              "clientMessageId": "38918188-8bb8-4d22-bc99-9698b3f19365",
+              "startedAt": "2026-11-16T09:01:21.639Z",
+              "endedAt": "2026-11-16T09:01:29.769Z",
+              "outcome": "done",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 22859,
+                "outputTokens": 845,
+                "totalTokens": 67480,
+                "cacheReadTokens": 43776
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 5,
+          "turnId": "turn-mwj1awje-cdd9",
+          "status": "fail",
+          "reasons": [
+            "no ambiguity was reported and no correct reveal happened"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33339/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": false,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "DONE\n\nThe paragraph starting with \"Duplicate needle\" reads: **\"Duplicate needle first\"** (it sits right below \"The silver key is under the third stone.\").\n\nNote: there's a second, near-identical paragraph just below it reading \"Duplicate needle second\". If you meant that one, tell me and I'll confirm it specifically.",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3756,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 9131,
+            "outputTokens": 301,
+            "cacheReadTokens": 35840,
+            "totalTokens": 45272,
+            "usage": {
+              "inputTokens": 9131,
+              "outputTokens": 301,
+              "totalTokens": 45272,
+              "cacheReadTokens": 35840
+            },
+            "finalText": "DONE\n\nThe paragraph starting with \"Duplicate needle\" reads: **\"Duplicate needle first\"** (it sits right below \"The silver key is under the third stone.\").\n\nNote: there's a second, near-identical paragraph just below it reading \"Duplicate needle second\". If you meant that one, tell me and I'll confirm it specifically.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1awje-cdd9",
+              "origin": "remote",
+              "clientMessageId": "541a3942-2060-4900-b79e-2081b22228ec",
+              "startedAt": "2026-11-16T09:01:30.554Z",
+              "endedAt": "2026-11-16T09:01:34.310Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 9131,
+                "outputTokens": 301,
+                "totalTokens": 45272,
+                "cacheReadTokens": 35840
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 6,
+          "turnId": "turn-mwj1azzb-83c4",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33339/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": true,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "PARTIAL — \"Duplicate needle\" isn't unique on the page, so I didn't scroll to either one.\n\n- The page contains **two** paragraphs starting with \"Duplicate needle\": one reads **\"Duplicate needle first\"** and the other reads **\"Duplicate needle second\"**.\n- Since you didn't specify which, I left both unscrolled. Tell me which one (e.g., the first or the second), and I'll scroll to it.",
+            "failed": "FIND_AMBIGUOUS find Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based integer … | browser_find Error: Found 2 matches for \"Duplicate needle\"; nothing was scrol"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 2608,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "find",
+                "code": "FIND_AMBIGUOUS",
+                "message": "Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based integer …"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_find",
+                "message": "Error: Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based i…"
+              }
+            ],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 21995,
+            "outputTokens": 291,
+            "cacheReadTokens": 22016,
+            "totalTokens": 44302,
+            "usage": {
+              "inputTokens": 21995,
+              "outputTokens": 291,
+              "totalTokens": 44302,
+              "cacheReadTokens": 22016
+            },
+            "finalText": "PARTIAL — \"Duplicate needle\" isn't unique on the page, so I didn't scroll to either one.\n\n- The page contains **two** paragraphs starting with \"Duplicate needle\": one reads **\"Duplicate needle first\"** and the other reads **\"Duplicate needle second\"**.\n- Since you didn't specify which, I left both unscrolled. Tell me which one (e.g., the first or the second), and I'll scroll to it.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "partial",
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1azzb-83c4",
+              "origin": "remote",
+              "clientMessageId": "6ba85d8f-aea6-4b8b-8b5b-6893989d3197",
+              "startedAt": "2026-11-16T09:01:35.015Z",
+              "endedAt": "2026-11-16T09:01:37.623Z",
+              "outcome": "done",
+              "error": null,
+              "label": "partial",
+              "usage": {
+                "inputTokens": 21995,
+                "outputTokens": 291,
+                "totalTokens": 44302,
+                "cacheReadTokens": 22016
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 7,
+          "turnId": "turn-mwj1b2i1-82ab",
+          "status": "fail",
+          "reasons": [
+            "no ambiguity was reported and no correct reveal happened"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33339/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": false,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "The paragraph starting with \"Duplicate needle\" reads: **\"Duplicate needle first\"** — and note there are two such paragraphs on the page: \"Duplicate needle first\" and \"Duplicate needle second\". Both are now visible in the viewport (the page was already scrolled such that no movement was needed).",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3393,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 1456,
+            "outputTokens": 378,
+            "cacheReadTokens": 80128,
+            "totalTokens": 81962,
+            "usage": {
+              "inputTokens": 1456,
+              "outputTokens": 378,
+              "totalTokens": 81962,
+              "cacheReadTokens": 80128
+            },
+            "finalText": "The paragraph starting with \"Duplicate needle\" reads: **\"Duplicate needle first\"** — and note there are two such paragraphs on the page: \"Duplicate needle first\" and \"Duplicate needle second\". Both are now visible in the viewport (the page was already scrolled such that no movement was needed).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1b2i1-82ab",
+              "origin": "remote",
+              "clientMessageId": "2243a07e-866b-4a66-a241-71867ffb4083",
+              "startedAt": "2026-11-16T09:01:38.281Z",
+              "endedAt": "2026-11-16T09:01:41.674Z",
+              "outcome": "done",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 1456,
+                "outputTokens": 378,
+                "totalTokens": 81962,
+                "cacheReadTokens": 80128
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 8,
+          "turnId": "turn-mwj1b5mt-ea76",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33339/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": true,
+            "finalText": "DONE\n- Scrolled to the paragraph; it reads: **\"Duplicate needle first\"**.\n- Note: there are two paragraphs starting with \"Duplicate needle\" on the page — the first is \"Duplicate needle first\" (shown), and the second, immediately below it, is \"Duplicate needle second\". Let me know if you want the second one instead.",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3201,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 1742,
+            "outputTokens": 323,
+            "cacheReadTokens": 43264,
+            "totalTokens": 45329,
+            "usage": {
+              "inputTokens": 1742,
+              "outputTokens": 323,
+              "totalTokens": 45329,
+              "cacheReadTokens": 43264
+            },
+            "finalText": "DONE\n- Scrolled to the paragraph; it reads: **\"Duplicate needle first\"**.\n- Note: there are two paragraphs starting with \"Duplicate needle\" on the page — the first is \"Duplicate needle first\" (shown), and the second, immediately below it, is \"Duplicate needle second\". Let me know if you want the second one instead.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1b5mt-ea76",
+              "origin": "remote",
+              "clientMessageId": "1feb83ea-4bd2-4eba-9e8d-6679ab2b7c69",
+              "startedAt": "2026-11-16T09:01:42.341Z",
+              "endedAt": "2026-11-16T09:01:45.542Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1742,
+                "outputTokens": 323,
+                "totalTokens": 45329,
+                "cacheReadTokens": 43264
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 9,
+          "turnId": "turn-mwj1b8qa-d273",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33339/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": true,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "There are two paragraphs starting with \"Duplicate needle\" on this page: \"Duplicate needle first\" and \"Duplicate needle second\". Which one should I scroll to?",
+            "failed": "FIND_AMBIGUOUS find Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based integer … | browser_find Error: Found 2 matches for \"Duplicate needle\"; nothing was scrol"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 24323,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "find",
+                "code": "FIND_AMBIGUOUS",
+                "message": "Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based integer …"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_find",
+                "message": "Error: Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based i…"
+              }
+            ],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 44792,
+            "outputTokens": 3300,
+            "cacheReadTokens": 0,
+            "totalTokens": 48092,
+            "usage": {
+              "inputTokens": 44792,
+              "outputTokens": 3300,
+              "totalTokens": 48092,
+              "cacheReadTokens": 0
+            },
+            "finalText": "There are two paragraphs starting with \"Duplicate needle\" on this page: \"Duplicate needle first\" and \"Duplicate needle second\". Which one should I scroll to?",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1b8qa-d273",
+              "origin": "remote",
+              "clientMessageId": "59b79598-4a23-4d99-b1c8-a1b97c671d5f",
+              "startedAt": "2026-11-16T09:01:46.354Z",
+              "endedAt": "2026-11-16T09:02:10.677Z",
+              "outcome": "done",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 44792,
+                "outputTokens": 3300,
+                "totalTokens": 48092,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "slider-value",
+      "fixture": "drag.html",
+      "prompt": "Set the Native range slider on this page to exactly 75.",
+      "file": "slider-value.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwj1bs3w-6cb1",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5860,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_screenshot": 1,
+              "browser_type": 1
+            },
+            "inputTokens": 11271,
+            "outputTokens": 501,
+            "cacheReadTokens": 60160,
+            "totalTokens": 71932,
+            "usage": {
+              "inputTokens": 11271,
+              "outputTokens": 501,
+              "totalTokens": 71932,
+              "cacheReadTokens": 60160
+            },
+            "finalText": "DONE — Native range set to exactly 75.\n- Typed 75 into the \"Native range\" input; DOM value now \"75\", label reads \"Native range 75\", snapshot shows native value: 75 (input/change fired 1/1) and the thumb moved to ~75%.\n- Assumption: the \"Native range\" slider [10] is the target (the \"Custom slider\" ARIA widget was left at 20).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1bs3w-6cb1",
+              "origin": "remote",
+              "clientMessageId": "5246190c-290b-49ca-95f7-1f6fc69bf4a0",
+              "startedAt": "2026-11-16T09:02:11.468Z",
+              "endedAt": "2026-11-16T09:02:17.328Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 11271,
+                "outputTokens": 501,
+                "totalTokens": 71932,
+                "cacheReadTokens": 60160
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwj1bx4q-9f77",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4846,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1,
+              "browser_find": 1
+            },
+            "inputTokens": 8435,
+            "outputTokens": 290,
+            "cacheReadTokens": 59776,
+            "totalTokens": 68501,
+            "usage": {
+              "inputTokens": 8435,
+              "outputTokens": 290,
+              "totalTokens": 68501,
+              "cacheReadTokens": 59776
+            },
+            "finalText": "DONE\n- Set the Native range slider (label \"Native range\") to exactly 75.\n- Verified: DOM now reports `native value: 75; input/change: 1/1` (and the snapshot's rangeValue field), with the expected input/change events fired.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1bx4q-9f77",
+              "origin": "remote",
+              "clientMessageId": "3303a785-26d9-4582-8c2f-7ef4f4d9651b",
+              "startedAt": "2026-11-16T09:02:17.978Z",
+              "endedAt": "2026-11-16T09:02:22.824Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 8435,
+                "outputTokens": 290,
+                "totalTokens": 68501,
+                "cacheReadTokens": 59776
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwj1c1d9-35d6",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3502,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1
+            },
+            "inputTokens": 2170,
+            "outputTokens": 210,
+            "cacheReadTokens": 80768,
+            "totalTokens": 83148,
+            "usage": {
+              "inputTokens": 2170,
+              "outputTokens": 210,
+              "totalTokens": 83148,
+              "cacheReadTokens": 80768
+            },
+            "finalText": "DONE\n- Set the \"Native range\" slider to 75 via the labelled range field; the page snapshot now reports `native value: 75` (input/change: 1/1) and the label reads \"Native range 75\".\n- Verified in a fresh full view of the fixture.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1c1d9-35d6",
+              "origin": "remote",
+              "clientMessageId": "05d01c92-d076-4e86-9159-7efc0958fa8d",
+              "startedAt": "2026-11-16T09:02:23.469Z",
+              "endedAt": "2026-11-16T09:02:26.971Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2170,
+                "outputTokens": 210,
+                "totalTokens": 83148,
+                "cacheReadTokens": 80768
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwj1c4nq-be97",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3801,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1
+            },
+            "inputTokens": 23694,
+            "outputTokens": 182,
+            "cacheReadTokens": 22656,
+            "totalTokens": 46532,
+            "usage": {
+              "inputTokens": 23694,
+              "outputTokens": 182,
+              "totalTokens": 46532,
+              "cacheReadTokens": 22656
+            },
+            "finalText": "DONE\n- Typed 75 into the \"Native range\" slider ([10]); page now reads \"Native range 75\" and \"native value: 75\" (input/change: 1/1), verified in the fresh view.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1c4nq-be97",
+              "origin": "remote",
+              "clientMessageId": "2f1f70fc-d869-4392-851a-f8999481bafe",
+              "startedAt": "2026-11-16T09:02:27.734Z",
+              "endedAt": "2026-11-16T09:02:31.535Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 23694,
+                "outputTokens": 182,
+                "totalTokens": 46532,
+                "cacheReadTokens": 22656
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwj1c84e-cc43",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5218,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1
+            },
+            "inputTokens": 2630,
+            "outputTokens": 663,
+            "cacheReadTokens": 43776,
+            "totalTokens": 47069,
+            "usage": {
+              "inputTokens": 2630,
+              "outputTokens": 663,
+              "totalTokens": 47069,
+              "cacheReadTokens": 43776
+            },
+            "finalText": "DONE — Native range set to exactly 75.\n\n- Typed 75 into the \"Native range\" input ([10]); field value reads \"75\" and the slider thumb moved to the right.\n- Page's own snapshot shows \"native value: 75; input/change: 1/1\", confirming it registered natively.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1c84e-cc43",
+              "origin": "remote",
+              "clientMessageId": "213fa29c-0cd6-47c0-8ac0-058024960a21",
+              "startedAt": "2026-11-16T09:02:32.222Z",
+              "endedAt": "2026-11-16T09:02:37.440Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2630,
+                "outputTokens": 663,
+                "totalTokens": 47069,
+                "cacheReadTokens": 43776
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 5,
+          "turnId": "turn-mwj1ccnp-bb8a",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4168,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1
+            },
+            "inputTokens": 2304,
+            "outputTokens": 348,
+            "cacheReadTokens": 44288,
+            "totalTokens": 46940,
+            "usage": {
+              "inputTokens": 2304,
+              "outputTokens": 348,
+              "totalTokens": 46940,
+              "cacheReadTokens": 44288
+            },
+            "finalText": "DONE\n- Set the native range slider to 75 via `browser_type` (label 10, \"Native range\").\n- Verified on screen: label now reads \"Native range 75\", snapshot shows `native value: 75` and range events `input/change: 1/1`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1ccnp-bb8a",
+              "origin": "remote",
+              "clientMessageId": "9bc135ef-a733-4bdd-b38c-39dc03b857d8",
+              "startedAt": "2026-11-16T09:02:38.101Z",
+              "endedAt": "2026-11-16T09:02:42.269Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2304,
+                "outputTokens": 348,
+                "totalTokens": 46940,
+                "cacheReadTokens": 44288
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 6,
+          "turnId": "turn-mwj1cgez-4f37",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4326,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1,
+              "browser_find": 1
+            },
+            "inputTokens": 1600,
+            "outputTokens": 328,
+            "cacheReadTokens": 66816,
+            "totalTokens": 68744,
+            "usage": {
+              "inputTokens": 1600,
+              "outputTokens": 328,
+              "totalTokens": 68744,
+              "cacheReadTokens": 66816
+            },
+            "finalText": "DONE — Native range slider set to exactly 75.\n\n- Verified: page snapshot now shows `\"rangeValue\": \"75\"` and `rangeEvents: [1,1]` (input + change fired); the native range readback printed value \"75\".",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1cgez-4f37",
+              "origin": "remote",
+              "clientMessageId": "4f6ce165-98c9-47fb-a06a-194527ea60bf",
+              "startedAt": "2026-11-16T09:02:42.971Z",
+              "endedAt": "2026-11-16T09:02:47.297Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1600,
+                "outputTokens": 328,
+                "totalTokens": 68744,
+                "cacheReadTokens": 66816
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 7,
+          "turnId": "turn-mwj1ckc2-ac39",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3640,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 11008,
+            "outputTokens": 323,
+            "cacheReadTokens": 57472,
+            "totalTokens": 68803,
+            "usage": {
+              "inputTokens": 11008,
+              "outputTokens": 323,
+              "totalTokens": 68803,
+              "cacheReadTokens": 57472
+            },
+            "finalText": "DONE — Native range slider set to exactly 75.\n\n- Done: typed 75 into the \"Native range\" input (labeled [10]).\n- Verified: page state now reads `native value: 75; input/change: 1/1` (events fired and DOM value committed).\n- Left: custom ARIA slider untouched (not requested).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1ckc2-ac39",
+              "origin": "remote",
+              "clientMessageId": "e6ee0801-bae3-4622-b4f4-b3618dbc9420",
+              "startedAt": "2026-11-16T09:02:48.051Z",
+              "endedAt": "2026-11-16T09:02:51.691Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 11008,
+                "outputTokens": 323,
+                "totalTokens": 68803,
+                "cacheReadTokens": 57472
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 8,
+          "turnId": "turn-mwj1cnqo-dd8d",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4680,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1
+            },
+            "inputTokens": 2455,
+            "outputTokens": 338,
+            "cacheReadTokens": 44032,
+            "totalTokens": 46825,
+            "usage": {
+              "inputTokens": 2455,
+              "outputTokens": 338,
+              "totalTokens": 46825,
+              "cacheReadTokens": 44032
+            },
+            "finalText": "DONE\n- Native range slider set to exactly 75 via the labelled \"Native range\" field; page snapshot now reads `native value: 75; input/change: 1/1`, and the control label shows \"Native range 75\".\n- Verified in the fresh full view/snapshot after the edit.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1cnqo-dd8d",
+              "origin": "remote",
+              "clientMessageId": "44338d62-0b45-4c0b-922e-9a28589200f1",
+              "startedAt": "2026-11-16T09:02:52.464Z",
+              "endedAt": "2026-11-16T09:02:57.144Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2455,
+                "outputTokens": 338,
+                "totalTokens": 46825,
+                "cacheReadTokens": 44032
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 9,
+          "turnId": "turn-mwj1cryy-1ff2",
+          "status": "pass",
+          "reasons": [
+            "native range is exactly 75 and nothing else changed"
+          ],
+          "evidence": {
+            "value": "75",
+            "output": "75",
+            "custom": "20",
+            "order": [
+              "Alpha",
+              "Beta",
+              "Gamma"
+            ]
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3658,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 1
+            },
+            "inputTokens": 41996,
+            "outputTokens": 212,
+            "cacheReadTokens": 40960,
+            "totalTokens": 83168,
+            "usage": {
+              "inputTokens": 41996,
+              "outputTokens": 212,
+              "totalTokens": 83168,
+              "cacheReadTokens": 40960
+            },
+            "finalText": "DONE — Native range slider set to exactly 75 (label reads \"Native range 75\"; snapshot shows native value: 75, input/change: 1/1).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj1cryy-1ff2",
+              "origin": "remote",
+              "clientMessageId": "d534616b-fd04-478e-97f0-301dd556464c",
+              "startedAt": "2026-11-16T09:02:57.946Z",
+              "endedAt": "2026-11-16T09:03:01.604Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 41996,
+                "outputTokens": 212,
+                "totalTokens": 83168,
+                "cacheReadTokens": 40960
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}
