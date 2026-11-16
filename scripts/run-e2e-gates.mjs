@@ -67,7 +67,7 @@ const nowIso = () => new Date().toISOString()
  *   to the cannot-run-headless list with the observed reason.
  */
 const SUITES = [
-  { name: 'find', script: 'edge-find-e2e.mjs', class: 'attach', timeoutS: 180, note: 'flaky-headless report 2026-11-16: label assertion (edge-find-e2e.mjs:147) failed 2x on a clean-HEAD worktree elsewhere; 5/5 headless green on this host (3 live-tree + 2 pristine-HEAD)' },
+  { name: 'find', script: 'edge-find-e2e.mjs', class: 'attach', timeoutS: 180, note: 'RESOLVED 2026-11-16: window-size dependent, not a race — headless default 800x600 gives a 516px viewport and the labelled control sits at top 520 (below the fold; viewport-scoped labelling skips it by design). Suite now pins a 1280x900 page viewport via CDP Emulation; green at 800x600/1280x720/1280x900. Evidence: e2e/baselines/2026-11-16T09-40-02-000Z-q5-find-label-diagnosis.json' },
   { name: 'expect', script: 'edge-expect-e2e.mjs', class: 'attach', timeoutS: 180 },
   { name: 'table', script: 'edge-table-e2e.mjs', class: 'attach', timeoutS: 180 },
   { name: 'work', script: 'edge-work-e2e.mjs', class: 'attach', timeoutS: 240 },
