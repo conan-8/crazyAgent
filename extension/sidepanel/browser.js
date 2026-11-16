@@ -10259,6 +10259,12 @@ async function docsTableStructureFlow(context, args) {
         : docsTableAnchor(current, table, kind, targetIndex)
       await docsTableSelectPlan(context, plan)
       if (operation.action === 'merge') {
+        // Collapse the proven cell-text selection to the cell end FIRST, then
+        // extend across the boundary. Shift+Right on a text selection traverses
+        // characters, not cells (measured live: two presses left "Merge cells"
+        // disabled; collapse + two presses selects exactly two cells and enables
+        // it). The collapse makes the extension independent of the cell text length.
+        await docsKey(context, 'table-merge-collapse', KEY_SPECS.ArrowRight)
         await docsKey(context, 'table-merge-extend', KEY_SPECS.ArrowRight, MODIFIER_BITS.shift)
         await docsKey(context, 'table-merge-extend', KEY_SPECS.ArrowRight, MODIFIER_BITS.shift)
       } else {
