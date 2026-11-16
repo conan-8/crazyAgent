@@ -16,10 +16,12 @@
  *   resume     an older chat resumed through POST /sessions/{id}/resume after
  *              an intervening different chat; the follow-up answer must use a
  *              harness-generated code that exists only in the earlier turn.
- *              Both runtime paths are exercised: in-process resume and the
- *              documented post-restart restore (the SDK refuses to re-open a
- *              session it still owns; in-process refusal is a product finding
- *              routed to task-16, and restart-only restore verdicts partial).
+ *              BOTH paths are exercised unconditionally (task-16 proof gate):
+ *              in-process resume (since 6276261 an owned target is restored
+ *              via an internal runtime restart) and the post-restart restore.
+ *              Pass requires both; one path alone is partial. A failed
+ *              in-process follow-up doubles as the negative control: the code
+ *              must NOT appear without a successful restore.
  *   steer      steer:true mid-turn; first turn stopped, second ran once, the
  *              fixture counter shows no duplicate action (ground truth is the
  *              counter, not tool results).
@@ -108,32 +110,36 @@ export function checkPlanEvidence({ page, chatDone, turnEnd }) {
 
 /**
  * C1(b): the answer must carry the restored-context code; session must match.
- * Two runtime paths: in-process resume, and the documented post-restart
- * restore. The SDK rejects resume of a session it still owns ("already open
- * or opening"), and newSession() never closes the previous one, so in-process
- * resume of an earlier chat of the same companion process is refused
- * (SESSION_NOT_RESUMABLE) — a product finding, recorded here. Restore through
- * the supported post-restart path alone is a partial, not a pass.
+ * BOTH runtime paths are exercised unconditionally (task-16 proof gate):
+ * in-process resume of an earlier chat of the same companion process, and
+ * the post-restart restore. Pass requires both; one path alone is partial.
+ * When in-process resume fails, its follow-up answer is a NEGATIVE CONTROL:
+ * it must NOT contain the code (context cannot leak without a restore).
  */
-export function checkResumeEvidence({ inProcess, restart, stateSessionId, expectedSessionId, answerText, code, interveningAnswer }) {
+export function checkResumeEvidence({ inProcess, restart, stateSessionId, restartStateSessionId, expectedSessionId, answerText, restartAnswerText, code, interveningAnswer }) {
   const reasons = []
   const inProcessOk = inProcess?.ok === true
   const restartOk = restart?.performed === true && restart?.ok === true
   if (!inProcessOk && !restartOk) {
     return { status: 'fail', reasons: [`resume did not succeed on either path (in-process: ${inProcess?.code ?? inProcess?.status ?? 'not attempted'}; restart: ${restart?.performed ? (restart.code ?? restart.status) : 'not performed'})`] }
   }
+  const hasCode = text => Boolean(code) && String(text ?? '').toLowerCase().includes(String(code).toLowerCase())
   if (stateSessionId !== expectedSessionId) reasons.push(`/state.sessionId=${stateSessionId} != resumed ${expectedSessionId}`)
-  const answer = String(answerText ?? '')
-  if (!code || !answer.toLowerCase().includes(String(code).toLowerCase())) {
-    reasons.push(`answer does not contain the restored code ${code}: ${JSON.stringify(answer.slice(0, 120))}`)
+  if (inProcessOk) {
+    if (!hasCode(answerText)) reasons.push(`in-process follow-up does not contain the restored code ${code}: ${JSON.stringify(String(answerText ?? '').slice(0, 120))}`)
+  } else if (hasCode(answerText)) {
+    reasons.push(`negative control violated: code appeared without a successful in-process resume: ${JSON.stringify(String(answerText).slice(0, 120))}`)
+  }
+  if (restart?.performed === true) {
+    if (restartStateSessionId !== expectedSessionId) reasons.push(`post-restart /state.sessionId=${restartStateSessionId} != resumed ${expectedSessionId}`)
+    if (restartOk && !hasCode(restartAnswerText)) reasons.push(`post-restart follow-up does not contain the restored code ${code}: ${JSON.stringify(String(restartAnswerText ?? '').slice(0, 120))}`)
   }
   if (interveningAnswer !== null && !String(interveningAnswer).includes('4')) {
     reasons.push(`intervening chat answer unexpected: ${JSON.stringify(String(interveningAnswer).slice(0, 80))}`)
   }
   if (reasons.length > 0) return { status: 'fail', reasons }
-  if (!inProcessOk) {
-    return { status: 'partial', reasons: [`restore verified via the post-restart path only; in-process resume refused (${inProcess?.code ?? 'unknown'}) — phone Continue on a same-process chat fails (product finding)`] }
-  }
+  if (!inProcessOk) return { status: 'partial', reasons: [`post-restart restore verified only; in-process resume refused (${inProcess?.code ?? 'unknown'})`] }
+  if (!restartOk) return { status: 'partial', reasons: [`in-process resume verified only; post-restart path ${restart?.performed ? `refused (${restart.code ?? restart.status})` : 'not exercised'}`] }
   return { status: 'pass', reasons: [] }
 }
 
@@ -226,13 +232,21 @@ function selfTest() {
   expect('plan not armed', checkPlanEvidence({ page: goodPage, chatDone: { ...goodDone, planMode: false }, turnEnd: { ok: true } }), 'partial')
 
   const code = 'CX-4511-QZTR'
-  const goodResume = { inProcess: { ok: true }, restart: { performed: false }, stateSessionId: 'session-a', expectedSessionId: 'session-a', answerText: `The code is ${code}.`, code, interveningAnswer: '4' }
-  expect('resume good', checkResumeEvidence(goodResume), 'pass')
-  expect('resume restart-only', checkResumeEvidence({ ...goodResume, inProcess: { ok: false, code: 'SESSION_NOT_RESUMABLE' }, restart: { performed: true, ok: true } }), 'partial')
+  const goodResume = {
+    inProcess: { ok: true }, restart: { performed: true, ok: true },
+    stateSessionId: 'session-a', restartStateSessionId: 'session-a', expectedSessionId: 'session-a',
+    answerText: `The code is ${code}.`, restartAnswerText: code, code, interveningAnswer: '4',
+  }
+  expect('resume both paths', checkResumeEvidence(goodResume), 'pass')
+  expect('resume in-process only', checkResumeEvidence({ ...goodResume, restart: { performed: false } }), 'partial')
+  expect('resume restart-only', checkResumeEvidence({ ...goodResume, inProcess: { ok: false, code: 'SESSION_NOT_RESUMABLE' }, answerText: 'No code was given.' }), 'partial')
   expect('resume no code', checkResumeEvidence({ ...goodResume, answerText: 'I do not remember any code.' }), 'fail')
+  expect('resume restart answer no code', checkResumeEvidence({ ...goodResume, restartAnswerText: 'I do not remember.' }), 'fail')
   expect('resume wrong session', checkResumeEvidence({ ...goodResume, stateSessionId: 'session-b' }), 'fail')
-  expect('resume both refused', checkResumeEvidence({ ...goodResume, inProcess: { ok: false, code: 'SESSION_NOT_RESUMABLE' }, restart: { performed: true, ok: false, code: 'SESSION_NOT_RESUMABLE' } }), 'fail')
-  expect('resume restart failed', checkResumeEvidence({ ...goodResume, inProcess: { ok: false, code: 'SESSION_NOT_RESUMABLE' }, restart: { performed: false } }), 'fail')
+  expect('resume restart wrong session', checkResumeEvidence({ ...goodResume, restartStateSessionId: 'session-b' }), 'fail')
+  expect('resume both refused', checkResumeEvidence({ ...goodResume, inProcess: { ok: false, code: 'SESSION_NOT_RESUMABLE' }, answerText: 'No code.', restart: { performed: true, ok: false, code: 'SESSION_NOT_RESUMABLE' } }), 'fail')
+  expect('resume negative control leak', checkResumeEvidence({ ...goodResume, inProcess: { ok: false, code: 'SESSION_NOT_RESUMABLE' }, answerText: `The code is ${code}.` }), 'fail')
+  expect('resume intervening wrong', checkResumeEvidence({ ...goodResume, interveningAnswer: '5' }), 'fail')
 
   const goodSteer = { steered: true, turn1Aborted: true, turn2Ok: true, countAtSteer: 4, finalCount: 4, target: 15 }
   expect('steer good', checkSteerEvidence(goodSteer), 'pass')
@@ -420,8 +434,9 @@ async function runResumeCheck(runtime) {
   // Path 1: in-process resume through the same endpoint a phone uses. The hub
   // projection can settle a moment before the controller's running/
   // sessionChanging flags clear, so a retryable 409 is waited out like a real
-  // client does. SESSION_NOT_RESUMABLE is the SDK's refusal to re-open a
-  // session it still owns (product finding, task-16) — not retryable.
+  // client does. Since task-16 (6276261) an owned target is restored via an
+  // internal runtime restart (~1-3 s warm boot) inside the resume call; the
+  // 30 s request timeout tolerates it.
   const attemptResume = async () => {
     let response = null
     let attempts = 0
@@ -438,38 +453,45 @@ async function runResumeCheck(runtime) {
     }
     return { ok: response.ok && response.json?.sessionId === sessionIdA, status: response.status, code: response.json?.error?.code ?? null, attempts, resumedSessionId: response.json?.sessionId ?? null }
   }
-  const inProcess = await attemptResume()
-  // Path 2: the documented post-restart restore. Restart ONLY the isolated
-  // companion (same home, same ports); the SDK then loads chat A from
-  // persistence instead of owning it live.
-  const restart = { performed: false }
-  if (!inProcess.ok && inProcess.code === 'SESSION_NOT_RESUMABLE') {
-    await runtime.restartCompanion()
-    restart.performed = true
-    const second = await attemptResume()
-    restart.ok = second.ok
-    restart.status = second.status
-    restart.code = second.code
-    restart.attempts = second.attempts
+  const followUp = async () => {
+    await sleep(700)
+    const stateResumed = await runtime.remote.state()
+    const turn = await runtime.sendPaced('What verification code did I ask you to remember? Reply with the code only.')
+    const stateDone = await waitForTurn({ remote: runtime.remote, turnId: turn.turnId, deadline: Date.now() + 90_000 })
+    await waitForTurnEndInLog(runtime.eventsPath, turn.turnId)
+    return {
+      stateSessionId: stateResumed.sessionId,
+      finalSessionId: stateDone.sessionId,
+      answerText: lastChatDone(stateDone, turn.turnId)?.text ?? null,
+      metrics: metricsOf(runtime.eventsPath, turn.turnId),
+    }
   }
-  await sleep(700)
-  const stateResumed = await runtime.remote.state()
-  const c = await runtime.sendPaced('What verification code did I ask you to remember? Reply with the code only.')
-  const stateC = await waitForTurn({ remote: runtime.remote, turnId: c.turnId, deadline: Date.now() + 90_000 })
-  await waitForTurnEndInLog(runtime.eventsPath, c.turnId)
-  const answerText = lastChatDone(stateC, c.turnId)?.text ?? null
+  const inProcess = await attemptResume()
+  // If in-process resume failed, this follow-up runs in the WRONG chat and is
+  // the negative control: the code must not appear without a restore.
+  const first = await followUp()
+  // Path 2: the post-restart restore, exercised UNCONDITIONALLY (task-16
+  // proof gate: both paths must pass). Restart ONLY the isolated companion
+  // (same home, same ports); the SDK loads chat A from persistence.
+  await runtime.restartCompanion()
+  const second = await attemptResume()
+  const restart = { performed: true, ok: second.ok, status: second.status, code: second.code, attempts: second.attempts, resumedSessionId: second.resumedSessionId }
+  const afterRestart = await followUp()
   const evidence = {
     code,
     inProcess,
     restart,
     expectedSessionId: sessionIdA,
-    stateSessionId: stateResumed.sessionId,
-    finalSessionId: stateC.sessionId,
+    stateSessionId: first.stateSessionId,
+    finalSessionId: first.finalSessionId,
+    restartStateSessionId: afterRestart.stateSessionId,
+    restartFinalSessionId: afterRestart.finalSessionId,
     interveningAnswer,
-    answerText,
+    answerText: first.answerText,
+    restartAnswerText: afterRestart.answerText,
   }
   const verdict = checkResumeEvidence(evidence)
-  const metrics = [metricsA, metricsB, metricsOf(runtime.eventsPath, c.turnId)]
+  const metrics = [metricsA, metricsB, first.metrics, afterRestart.metrics]
   budget.spend(metrics)
   return { verdict, evidence, metrics, attempts: 1 }
 }
