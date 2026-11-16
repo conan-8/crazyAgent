@@ -1,0 +1,536 @@
+{
+  "startedAt": "2026-11-16T08:32:21.821Z",
+  "finishedAt": "2026-11-16T08:32:51.710Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval-q3/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": 6000000,
+  "totalTokens": 437812,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "form-submit",
+      "fixture": "form.html",
+      "prompt": "Fill out the form on this page: name \"Ada Lovelace\", notes \"First computer programmer\", password \"hunter2-demo\". Submit it exactly once and leave the rest of the page alone.",
+      "file": "form-submit.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwj09g2p-5347",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:39451/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6695,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_scroll": 1
+            },
+            "inputTokens": 2697,
+            "outputTokens": 471,
+            "cacheReadTokens": 65280,
+            "totalTokens": 68448,
+            "usage": {
+              "inputTokens": 2697,
+              "outputTokens": 471,
+              "totalTokens": 68448,
+              "cacheReadTokens": 65280
+            },
+            "finalText": "DONE\n- Filled Name=\"Ada Lovelace\", Notes=\"First computer programmer\", Password=\"hunter2-demo\"; submitted once.\n- Verified on page: `result: name=Ada Lovelace notes=First computer programmer pass=12chars`, `events input=3 keydown=0 submit=1`.\n- Rest of page untouched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj09g2p-5347",
+              "origin": "remote",
+              "clientMessageId": "17b5c7e1-e0f9-4947-8587-1f15cd539e43",
+              "startedAt": "2026-11-16T08:32:22.945Z",
+              "endedAt": "2026-11-16T08:32:29.640Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2697,
+                "outputTokens": 471,
+                "totalTokens": 68448,
+                "cacheReadTokens": 65280
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwj09lj9-62fa",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:39451/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4752,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1895,
+            "outputTokens": 467,
+            "cacheReadTokens": 65792,
+            "totalTokens": 68154,
+            "usage": {
+              "inputTokens": 1895,
+              "outputTokens": 467,
+              "totalTokens": 68154,
+              "cacheReadTokens": 65792
+            },
+            "finalText": "DONE\n\n- Filled Name = \"Ada Lovelace\", Notes = \"First computer programmer\", Password = \"hunter2-demo\", and clicked Submit once.\n- Verified via page text: `result: name=Ada Lovelace notes=First computer programmer pass=12chars` and `events input=3 keydown=0 submit=1` (exactly one submit).\n- Left Rich text, the canvas editor, and all other page elements untouched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj09lj9-62fa",
+              "origin": "remote",
+              "clientMessageId": "8115453c-8cdf-4689-b6b8-7642ac2abbce",
+              "startedAt": "2026-11-16T08:32:30.021Z",
+              "endedAt": "2026-11-16T08:32:34.773Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1895,
+                "outputTokens": 467,
+                "totalTokens": 68154,
+                "cacheReadTokens": 65792
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwj09pht-550a",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:39451/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6330,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 7317,
+            "outputTokens": 652,
+            "cacheReadTokens": 82688,
+            "totalTokens": 90657,
+            "usage": {
+              "inputTokens": 7317,
+              "outputTokens": 652,
+              "totalTokens": 90657,
+              "cacheReadTokens": 82688
+            },
+            "finalText": "DONE\n\n- Filled Name=\"Ada Lovelace\", Notes=\"First computer programmer\", Password=\"hunter2-demo\" (field shows hidden dots).\n- Submitted exactly once; page confirms `submit=1` with `result: name=Ada Lovelace notes=First computer programmer pass=12chars`. No other fields touched.\n- Note: the click reported \"no visible change,\" but a read confirmed the single submission registered.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj09pht-550a",
+              "origin": "remote",
+              "clientMessageId": "bb6d5243-0852-4cf5-b839-fee74c90e6de",
+              "startedAt": "2026-11-16T08:32:35.153Z",
+              "endedAt": "2026-11-16T08:32:41.483Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 7317,
+                "outputTokens": 652,
+                "totalTokens": 90657,
+                "cacheReadTokens": 82688
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwj09upg-71eb",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:39451/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5364,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1623,
+            "outputTokens": 316,
+            "cacheReadTokens": 85248,
+            "totalTokens": 87187,
+            "usage": {
+              "inputTokens": 1623,
+              "outputTokens": 316,
+              "totalTokens": 87187,
+              "cacheReadTokens": 85248
+            },
+            "finalText": "DONE\n- Filled Name \"Ada Lovelace\", Notes \"First computer programmer\", Password \"hunter2-demo\".\n- Submitted exactly once (page shows `submit=1`, result `name=Ada Lovelace notes=First computer programmer pass=12chars`).\n- Left all other fields, the canvas editor, and the rest of the page untouched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj09upg-71eb",
+              "origin": "remote",
+              "clientMessageId": "d9901139-cef4-46e2-ad6e-9ccea5788698",
+              "startedAt": "2026-11-16T08:32:41.908Z",
+              "endedAt": "2026-11-16T08:32:47.272Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1623,
+                "outputTokens": 316,
+                "totalTokens": 87187,
+                "cacheReadTokens": 85248
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwj09z4h-081c",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:39451/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3900,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1806,
+            "outputTokens": 472,
+            "cacheReadTokens": 121088,
+            "totalTokens": 123366,
+            "usage": {
+              "inputTokens": 1806,
+              "outputTokens": 472,
+              "totalTokens": 123366,
+              "cacheReadTokens": 121088
+            },
+            "finalText": "DONE\n- Filled Name \"Ada Lovelace\", Notes \"First computer programmer\", Password \"hunter2-demo\" (12 chars); submitted once.\n- Verified via page state: `result: name=Ada Lovelace notes=First computer programmer pass=12chars`, `events input=3 keydown=0 submit=1`, and `submit name=Ada Lovelace`.\n- Rich text and canvas editor left untouched; no other parts changed.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwj09z4h-081c",
+              "origin": "remote",
+              "clientMessageId": "5012d820-1bfd-4200-a485-6142904a7cd7",
+              "startedAt": "2026-11-16T08:32:47.633Z",
+              "endedAt": "2026-11-16T08:32:51.533Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1806,
+                "outputTokens": 472,
+                "totalTokens": 123366,
+                "cacheReadTokens": 121088
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}
