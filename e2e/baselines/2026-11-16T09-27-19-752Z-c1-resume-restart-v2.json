@@ -1,0 +1,88 @@
+{
+  "startedAt": "2026-11-16T09:27:19.752Z",
+  "finishedAt": "2026-11-16T09:27:28.048Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "dshHome": "/tmp/crazyagent-c1/dsh-home",
+  "maxTotalTokens": 6000000,
+  "totalTokens": 117288,
+  "stopReason": null,
+  "checks": [
+    {
+      "name": "resume",
+      "status": "partial",
+      "reasons": [
+        "restore verified via the post-restart path only; in-process resume refused (SESSION_NOT_RESUMABLE) — phone Continue on a same-process chat fails (product finding)"
+      ],
+      "evidence": {
+        "code": "CX-8772-IHTY",
+        "inProcess": {
+          "ok": false,
+          "status": 409,
+          "code": "SESSION_NOT_RESUMABLE",
+          "attempts": 1,
+          "resumedSessionId": null
+        },
+        "restart": {
+          "performed": true,
+          "ok": true,
+          "status": 200,
+          "code": null,
+          "attempts": 1
+        },
+        "expectedSessionId": "session-a7cd047ecdbc4e79b99cc78fe09471a0",
+        "stateSessionId": "session-a7cd047ecdbc4e79b99cc78fe09471a0",
+        "finalSessionId": "session-a7cd047ecdbc4e79b99cc78fe09471a0",
+        "interveningAnswer": "4",
+        "answerText": "CX-8772-IHTY"
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwj284p3-f114",
+          "wallMs": 765,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 38986,
+          "finalText": "OK",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj286e8-d4b2",
+          "wallMs": 740,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 38952,
+          "finalText": "4",
+          "reportedLabel": null,
+          "toolCounts": {}
+        },
+        {
+          "turnId": "turn-mwj289oh-f69e",
+          "wallMs": 754,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 39350,
+          "finalText": "CX-8772-IHTY",
+          "reportedLabel": null,
+          "toolCounts": {}
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 7381,
+      "finishedAt": "2026-11-16T09:27:28.048Z"
+    }
+  ]
+}

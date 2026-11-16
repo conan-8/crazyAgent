@@ -144,3 +144,17 @@ pass, and a pass with failed calls still means the model recovered from a real
 failure. Keep model and reasoning effort fixed when comparing batches; the
 harness records both. Baseline wall times are from this host and are not a
 latency claim.
+
+## Sibling harness: C1 acceptance
+
+`scripts/c1-acceptance.mjs` reuses this harness's isolation helpers for the
+Track C1 real-runtime rows that are not page-state scenarios: a `/plan` turn
+(`planMode:true`, `chat.done.planOutcome` + independent page state), resuming
+an older chat through `POST /sessions/{id}/resume` with a context-dependent
+follow-up, a steered turn (counter-freeze ground truth), 20 Stop/New cycles
+with live remote-token rotations, and a minimized-window turn whose saved
+screenshots are pixel-checked. Its checkers are pure evidence functions,
+mutation-checked by `node scripts/c1-acceptance.mjs --self-test` (no model, no
+browser). It defaults to its own isolated home (`/tmp/crazyagent-c1/dsh-home`)
+because concurrent companions must never share one (token files and run-dir
+resolution race). Batch JSON lands in `e2e/baselines/` like model-eval's.

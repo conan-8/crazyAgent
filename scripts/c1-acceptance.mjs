@@ -16,6 +16,10 @@
  *   resume     an older chat resumed through POST /sessions/{id}/resume after
  *              an intervening different chat; the follow-up answer must use a
  *              harness-generated code that exists only in the earlier turn.
+ *              Both runtime paths are exercised: in-process resume and the
+ *              documented post-restart restore (the SDK refuses to re-open a
+ *              session it still owns; in-process refusal is a product finding
+ *              routed to task-16, and restart-only restore verdicts partial).
  *   steer      steer:true mid-turn; first turn stopped, second ran once, the
  *              fixture counter shows no duplicate action (ground truth is the
  *              counter, not tool results).
@@ -102,10 +106,22 @@ export function checkPlanEvidence({ page, chatDone, turnEnd }) {
   return { status: 'pass', reasons: [] }
 }
 
-/** C1(b): the answer must carry the restored-context code; session must match. */
-export function checkResumeEvidence({ resumeOk, stateSessionId, expectedSessionId, answerText, code, interveningAnswer }) {
+/**
+ * C1(b): the answer must carry the restored-context code; session must match.
+ * Two runtime paths: in-process resume, and the documented post-restart
+ * restore. The SDK rejects resume of a session it still owns ("already open
+ * or opening"), and newSession() never closes the previous one, so in-process
+ * resume of an earlier chat of the same companion process is refused
+ * (SESSION_NOT_RESUMABLE) — a product finding, recorded here. Restore through
+ * the supported post-restart path alone is a partial, not a pass.
+ */
+export function checkResumeEvidence({ inProcess, restart, stateSessionId, expectedSessionId, answerText, code, interveningAnswer }) {
   const reasons = []
-  if (resumeOk !== true) return { status: 'fail', reasons: ['POST /sessions/{id}/resume did not succeed'] }
+  const inProcessOk = inProcess?.ok === true
+  const restartOk = restart?.performed === true && restart?.ok === true
+  if (!inProcessOk && !restartOk) {
+    return { status: 'fail', reasons: [`resume did not succeed on either path (in-process: ${inProcess?.code ?? inProcess?.status ?? 'not attempted'}; restart: ${restart?.performed ? (restart.code ?? restart.status) : 'not performed'})`] }
+  }
   if (stateSessionId !== expectedSessionId) reasons.push(`/state.sessionId=${stateSessionId} != resumed ${expectedSessionId}`)
   const answer = String(answerText ?? '')
   if (!code || !answer.toLowerCase().includes(String(code).toLowerCase())) {
@@ -115,6 +131,9 @@ export function checkResumeEvidence({ resumeOk, stateSessionId, expectedSessionI
     reasons.push(`intervening chat answer unexpected: ${JSON.stringify(String(interveningAnswer).slice(0, 80))}`)
   }
   if (reasons.length > 0) return { status: 'fail', reasons }
+  if (!inProcessOk) {
+    return { status: 'partial', reasons: [`restore verified via the post-restart path only; in-process resume refused (${inProcess?.code ?? 'unknown'}) — phone Continue on a same-process chat fails (product finding)`] }
+  }
   return { status: 'pass', reasons: [] }
 }
 
@@ -140,7 +159,7 @@ export function checkSteerEvidence({ steered, turn1Aborted, turn2Ok, countAtStee
 }
 
 /** C1(d): every cycle settled, no TURN_BUSY, every rotation revoked the old token. */
-export function checkCyclesEvidence({ cycles, rotations }) {
+export function checkCyclesEvidence({ cycles, rotations, finalProbe }) {
   const reasons = []
   if (!Array.isArray(cycles) || cycles.length !== 20) return { status: 'fail', reasons: [`expected 20 cycles, got ${cycles?.length}`] }
   const busy = cycles.filter(cycle => cycle.busy === true)
@@ -154,6 +173,7 @@ export function checkCyclesEvidence({ cycles, rotations }) {
     const bad = rotations.filter(rotation => rotation.oldRevoked !== true || rotation.newWorks !== true)
     if (bad.length > 0) reasons.push(`rotation failed at cycle(s): ${bad.map(r => r.afterCycle + 1).join(',')} (oldRevoked/newWorks)`)
   }
+  if (finalProbe?.accepted !== true) reasons.push(`final post-stop probe not accepted: ${finalProbe?.error ?? 'missing'}`)
   if (reasons.length > 0) return { status: 'fail', reasons }
   return { status: 'pass', reasons: [] }
 }
@@ -206,11 +226,13 @@ function selfTest() {
   expect('plan not armed', checkPlanEvidence({ page: goodPage, chatDone: { ...goodDone, planMode: false }, turnEnd: { ok: true } }), 'partial')
 
   const code = 'CX-4511-QZTR'
-  const goodResume = { resumeOk: true, stateSessionId: 'session-a', expectedSessionId: 'session-a', answerText: `The code is ${code}.`, code, interveningAnswer: '4' }
+  const goodResume = { inProcess: { ok: true }, restart: { performed: false }, stateSessionId: 'session-a', expectedSessionId: 'session-a', answerText: `The code is ${code}.`, code, interveningAnswer: '4' }
   expect('resume good', checkResumeEvidence(goodResume), 'pass')
+  expect('resume restart-only', checkResumeEvidence({ ...goodResume, inProcess: { ok: false, code: 'SESSION_NOT_RESUMABLE' }, restart: { performed: true, ok: true } }), 'partial')
   expect('resume no code', checkResumeEvidence({ ...goodResume, answerText: 'I do not remember any code.' }), 'fail')
   expect('resume wrong session', checkResumeEvidence({ ...goodResume, stateSessionId: 'session-b' }), 'fail')
-  expect('resume refused', checkResumeEvidence({ ...goodResume, resumeOk: false }), 'fail')
+  expect('resume both refused', checkResumeEvidence({ ...goodResume, inProcess: { ok: false, code: 'SESSION_NOT_RESUMABLE' }, restart: { performed: true, ok: false, code: 'SESSION_NOT_RESUMABLE' } }), 'fail')
+  expect('resume restart failed', checkResumeEvidence({ ...goodResume, inProcess: { ok: false, code: 'SESSION_NOT_RESUMABLE' }, restart: { performed: false } }), 'fail')
 
   const goodSteer = { steered: true, turn1Aborted: true, turn2Ok: true, countAtSteer: 4, finalCount: 4, target: 15 }
   expect('steer good', checkSteerEvidence(goodSteer), 'pass')
@@ -223,12 +245,14 @@ function selfTest() {
   const goodCycles = {
     cycles: Array.from({ length: 20 }, (_, index) => ({ index, busy: false, settled: true, nextAccepted: true })),
     rotations: [4, 9, 14, 19].map(afterCycle => ({ afterCycle, oldRevoked: true, newWorks: true })),
+    finalProbe: { accepted: true },
   }
   expect('cycles good', checkCyclesEvidence(goodCycles), 'pass')
   expect('cycles busy', checkCyclesEvidence({ ...goodCycles, cycles: goodCycles.cycles.map((c, i) => i === 7 ? { ...c, busy: true } : c) }), 'fail')
   expect('cycles stuck', checkCyclesEvidence({ ...goodCycles, cycles: goodCycles.cycles.map((c, i) => i === 3 ? { ...c, settled: false } : c) }), 'fail')
   expect('cycles orphaned', checkCyclesEvidence({ ...goodCycles, cycles: goodCycles.cycles.map((c, i) => i === 11 ? { ...c, nextAccepted: false } : c) }), 'fail')
   expect('cycles rotation leak', checkCyclesEvidence({ ...goodCycles, rotations: goodCycles.rotations.map((r, i) => i === 2 ? { ...r, oldRevoked: false } : r) }), 'fail')
+  expect('cycles final orphan', checkCyclesEvidence({ ...goodCycles, finalProbe: { accepted: false, error: 'TURN_BUSY' } }), 'fail')
 
   const goodImage = { name: 'x.jpg', width: 1280, height: 720, redPixels: 4200, nonWhiteFraction: 0.08 }
   const goodMin = { minimizeOk: true, turnDone: true, images: [goodImage] }
@@ -313,7 +337,7 @@ async function waitSettled(remote, deadlineMs = 30_000) {
     const state = await remote.state()
     const status = String(state.turn?.status ?? '')
     return ['running', 'stopping', 'starting'].includes(status) ? null : state
-  }, deadlineMs, 200)
+  }, deadlineMs, 400)
 }
 
 async function newChatSettled(remote) {
@@ -358,7 +382,7 @@ async function runPlanCheck(runtime) {
   await newChatSettled(remote)
   await page.reset('form.html')
   const prompt = 'Plan this task first, then carry it out: fill the form on this page — name "Grace Hopper", notes "Compiler pioneer", password "cobol-demo" — and submit it exactly once. Leave every other field and control on the page alone.'
-  const accepted = await remote.send(prompt, { planMode: true })
+  const accepted = await runtime.sendPaced(prompt, { planMode: true })
   const state = await waitForTurn({ remote, turnId: accepted.turnId, deadline: Date.now() + 150_000 })
   await waitForTurnEndInLog(eventsPath, accepted.turnId)
   const chatDone = lastChatDone(state, accepted.turnId)
@@ -376,33 +400,68 @@ async function runPlanCheck(runtime) {
 }
 
 async function runResumeCheck(runtime) {
-  const { remote, page, eventsPath, budget, remoteUrl } = runtime
+  const { page, budget, remoteUrl } = runtime
   const code = `CX-${Math.floor(1000 + Math.random() * 9000)}-${Array.from({ length: 4 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('')}`
-  await newChatSettled(remote)
+  await newChatSettled(runtime.remote)
   await page.reset('click.html')
   // Chat A: store the code in conversation context only (never on the page).
-  const a = await remote.send(`Remember this verification code: ${code}. Reply with OK only.`)
-  const stateA = await waitForTurn({ remote, turnId: a.turnId, deadline: Date.now() + 90_000 })
-  await waitForTurnEndInLog(eventsPath, a.turnId)
+  const a = await runtime.sendPaced(`Remember this verification code: ${code}. Reply with OK only.`)
+  const stateA = await waitForTurn({ remote: runtime.remote, turnId: a.turnId, deadline: Date.now() + 90_000 })
+  await waitForTurnEndInLog(runtime.eventsPath, a.turnId)
   const sessionIdA = stateA.sessionId
+  const metricsA = metricsOf(runtime.eventsPath, a.turnId)
   // Chat B: an unrelated turn proves the next answer is not just the live chat.
-  await newChatSettled(remote)
-  const b = await remote.send('What is 2+2? Reply with the number only.')
-  const stateB = await waitForTurn({ remote, turnId: b.turnId, deadline: Date.now() + 90_000 })
-  await waitForTurnEndInLog(eventsPath, b.turnId)
+  await newChatSettled(runtime.remote)
+  const b = await runtime.sendPaced('What is 2+2? Reply with the number only.')
+  const stateB = await waitForTurn({ remote: runtime.remote, turnId: b.turnId, deadline: Date.now() + 90_000 })
+  await waitForTurnEndInLog(runtime.eventsPath, b.turnId)
   const interveningAnswer = lastChatDone(stateB, b.turnId)?.text ?? null
-  // Resume chat A through the same endpoint a phone uses.
-  const resume = await rawApi(remoteUrl, runtime.token(), 'POST', `/sessions/${sessionIdA}/resume`, { clientCommandId: randomUUID() })
+  const metricsB = metricsOf(runtime.eventsPath, b.turnId)
+  // Path 1: in-process resume through the same endpoint a phone uses. The hub
+  // projection can settle a moment before the controller's running/
+  // sessionChanging flags clear, so a retryable 409 is waited out like a real
+  // client does. SESSION_NOT_RESUMABLE is the SDK's refusal to re-open a
+  // session it still owns (product finding, task-16) — not retryable.
+  const attemptResume = async () => {
+    let response = null
+    let attempts = 0
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await waitSettled(runtime.remote, 30_000)
+      attempts += 1
+      response = await rawApi(remoteUrl, runtime.token(), 'POST', `/sessions/${sessionIdA}/resume`, { clientCommandId: randomUUID() })
+      // Success body is {clientCommandId, sessionId, instanceId} — verify the
+      // resumed session id, not an ok flag the endpoint does not send.
+      if (response.ok && response.json?.sessionId === sessionIdA) break
+      const code409 = response.json?.error?.code ?? ''
+      if (response.status !== 409 || !['TURN_BUSY', 'TURN_STOPPING', 'SESSION_CHANGING', 'RUNTIME_NOT_READY'].includes(code409)) break
+      await sleep(600)
+    }
+    return { ok: response.ok && response.json?.sessionId === sessionIdA, status: response.status, code: response.json?.error?.code ?? null, attempts, resumedSessionId: response.json?.sessionId ?? null }
+  }
+  const inProcess = await attemptResume()
+  // Path 2: the documented post-restart restore. Restart ONLY the isolated
+  // companion (same home, same ports); the SDK then loads chat A from
+  // persistence instead of owning it live.
+  const restart = { performed: false }
+  if (!inProcess.ok && inProcess.code === 'SESSION_NOT_RESUMABLE') {
+    await runtime.restartCompanion()
+    restart.performed = true
+    const second = await attemptResume()
+    restart.ok = second.ok
+    restart.status = second.status
+    restart.code = second.code
+    restart.attempts = second.attempts
+  }
   await sleep(700)
-  const stateResumed = await remote.state()
-  const c = await remote.send('What verification code did I ask you to remember? Reply with the code only.')
-  const stateC = await waitForTurn({ remote, turnId: c.turnId, deadline: Date.now() + 90_000 })
-  await waitForTurnEndInLog(eventsPath, c.turnId)
+  const stateResumed = await runtime.remote.state()
+  const c = await runtime.sendPaced('What verification code did I ask you to remember? Reply with the code only.')
+  const stateC = await waitForTurn({ remote: runtime.remote, turnId: c.turnId, deadline: Date.now() + 90_000 })
+  await waitForTurnEndInLog(runtime.eventsPath, c.turnId)
   const answerText = lastChatDone(stateC, c.turnId)?.text ?? null
   const evidence = {
     code,
-    resumeOk: resume.ok && resume.json?.ok === true,
-    resumeStatus: resume.status,
+    inProcess,
+    restart,
     expectedSessionId: sessionIdA,
     stateSessionId: stateResumed.sessionId,
     finalSessionId: stateC.sessionId,
@@ -410,7 +469,7 @@ async function runResumeCheck(runtime) {
     answerText,
   }
   const verdict = checkResumeEvidence(evidence)
-  const metrics = [metricsOf(eventsPath, a.turnId), metricsOf(eventsPath, b.turnId), metricsOf(eventsPath, c.turnId)]
+  const metrics = [metricsA, metricsB, metricsOf(runtime.eventsPath, c.turnId)]
   budget.spend(metrics)
   return { verdict, evidence, metrics, attempts: 1 }
 }
@@ -423,7 +482,7 @@ async function runSteerCheck(runtime) {
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     await newChatSettled(remote)
     await page.reset('click.html')
-    const first = await remote.send(`Click the Increment button on this page ${STEER_TARGET} times, one click per step, then tell me the final count.`)
+    const first = await runtime.sendPaced(`Click the Increment button on this page ${STEER_TARGET} times, one click per step, then tell me the final count.`)
     // Steer once the turn is visibly acting (counter >= 3) but still running.
     let countAtSteer = null
     let steerResponse = null
@@ -435,14 +494,14 @@ async function runSteerCheck(runtime) {
       const count = await readCount().catch(() => NaN)
       if (active && Number.isFinite(count) && count >= 3) {
         countAtSteer = count
-        steerResponse = await remote.send('Stop clicking now. Do not click anything else. Tell me the current count shown on the page.', { steer: true })
+        steerResponse = await runtime.sendPaced('Stop clicking now. Do not click anything else. Tell me the current count shown on the page.', { steer: true })
         break
       }
       if (!active && state.turn?.turnId === first.turnId && !['running', 'stopping', 'starting'].includes(String(state.turn?.status))) {
         tooLate = true
         break
       }
-      await sleep(250)
+      await sleep(400)
     }
     if (tooLate || steerResponse === null) {
       // The turn finished before a steer could land (e.g. batched clicks).
@@ -499,11 +558,15 @@ async function runCyclesCheck(runtime) {
   const readToken = () => readFileSync(join(dshHome, 'browser-agent', 'remote-token'), 'utf8').trim()
   for (let index = 0; index < 20; index += 1) {
     await page.reset('click.html').catch(() => {})
+    // One prompt per cycle: this cycle's clean newChat+send IS the proof that
+    // the previous cycle's stop left no orphaned slot. Sends are paced under
+    // the remote API's 30-prompts/minute WindowLimiter (sendPaced).
     const cycle = { index, busy: false, settled: false, nextAccepted: false, settleMs: null }
     try {
       await waitSettled(remote, 30_000)
       await remote.newChat()
-      const accepted = await remote.send('Click the Increment button on this page 10 times, one click per step, then tell me the count.')
+      const accepted = await runtime.sendPaced('Click the Increment button on this page 10 times, one click per step, then tell me the count.')
+      cycle.nextAccepted = true
       await sleep(1_200)
       const stopAt = Date.now()
       await remote.stop()
@@ -514,25 +577,13 @@ async function runCyclesCheck(runtime) {
       cycle.stoppedOutcome = settledState.turn?.outcome ?? null
       await waitForTurnEndInLog(eventsPath, accepted.turnId).catch(() => {})
       budget.spend([metricsOf(eventsPath, accepted.turnId)])
-      // The next prompt must be accepted cleanly: an orphaned slot shows up
-      // here as TURN_BUSY/TURN_STOPPING on a settled companion.
-      try {
-        await remote.newChat()
-        const next = await remote.send('Reply with OK only.')
-        cycle.nextAccepted = true
-        await waitForTurn({ remote, turnId: next.turnId, deadline: Date.now() + 60_000 })
-        await waitForTurnEndInLog(eventsPath, next.turnId).catch(() => {})
-        budget.spend([metricsOf(eventsPath, next.turnId)])
-      } catch (error) {
-        cycle.busy = String(error.body?.error?.code ?? error.message).includes('TURN_BUSY') || String(error.body?.error?.code ?? '').includes('TURN_STOPPING')
-        cycle.nextError = String(error.body?.error?.code ?? error.message)
-      }
     } catch (error) {
-      cycle.error = String(error.message).slice(0, 200)
-      cycle.busy = String(error.body?.error?.code ?? '').includes('TURN_BUSY')
+      const code = String(error.body?.error?.code ?? '')
+      cycle.error = `${code || error.message}`.slice(0, 200)
+      cycle.busy = code.includes('TURN_BUSY') || code.includes('TURN_STOPPING')
     }
     cycles.push(cycle)
-    process.stdout.write(`  cycle ${index + 1}/20: settled=${cycle.settled} next=${cycle.nextAccepted}${cycle.busy ? ' BUSY' : ''}${cycle.error ? ` error=${cycle.error}` : ''}\n`)
+    process.stdout.write(`  cycle ${index + 1}/20: accepted=${cycle.nextAccepted} settled=${cycle.settled}${cycle.busy ? ' BUSY' : ''}${cycle.error ? ` error=${cycle.error}` : ''}\n`)
     // Live token rotation after every 5th cycle: the one-shot CLI writes a new
     // credential; the running companion re-reads the file within ~2 s.
     if ((index + 1) % 5 === 0) {
@@ -563,8 +614,24 @@ async function runCyclesCheck(runtime) {
       process.stdout.write(`  rotation after cycle ${index + 1}: oldRevoked=${rotation.oldRevoked} newWorks=${rotation.newWorks}\n`)
     }
   }
-  const verdict = checkCyclesEvidence({ cycles, rotations })
-  return { verdict, evidence: { cycles, rotations }, metrics: [], attempts: 1 }
+  // Final orphan probe: after the last stop (and rotation), a fresh chat and
+  // prompt must still be accepted and run — no slot left behind by 20 cycles.
+  const finalProbe = { accepted: false }
+  try {
+    await waitSettled(remote, 30_000)
+    await remote.newChat()
+    const probe = await runtime.sendPaced('Reply with OK only.')
+    finalProbe.accepted = true
+    const probeState = await waitForTurn({ remote, turnId: probe.turnId, deadline: Date.now() + 60_000 })
+    finalProbe.outcome = probeState.turn?.outcome ?? null
+    await waitForTurnEndInLog(eventsPath, probe.turnId).catch(() => {})
+    budget.spend([metricsOf(eventsPath, probe.turnId)])
+  } catch (error) {
+    finalProbe.error = String(error.body?.error?.code ?? error.message).slice(0, 200)
+  }
+  process.stdout.write(`  final probe: accepted=${finalProbe.accepted}${finalProbe.error ? ` error=${finalProbe.error}` : ''}\n`)
+  const verdict = checkCyclesEvidence({ cycles, rotations, finalProbe })
+  return { verdict, evidence: { cycles, rotations, finalProbe, rateLimitRetries: runtime.rateLimitRetries() }, metrics: [], attempts: 1 }
 }
 
 /** Decode a saved image through the harness's own page (independent pixels). */
@@ -594,10 +661,26 @@ async function runMinimizedCheck(runtime) {
   // This check needs the HEADED Edge the runtime swapped in before calling it.
   await newChatSettled(runtime.remote)
   await page.reset('canvas.html')
-  // The canvas draws red #e11d48 dots only after a trusted click, so the turn
-  // acts first and then captures: the post-minimize saved images must show the
-  // dot the click created — real page content, not a blank frame.
-  const accepted = await runtime.remote.send('Click once in the middle of the drawing canvas at the top of this page, then take a screenshot and describe the colors and shapes you see in it.')
+  // Create the ground-truth signature with the harness's OWN trusted CDP
+  // click (the canvas draws red #e11d48 dots only after a trusted click).
+  // The model then only has to capture: any saved post-minimize image must
+  // show this dot — real page content, independent of what the model does.
+  const connection = await page.ensure()
+  const center = await page.evaluate(`(() => {
+    const rect = document.getElementById('board').getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  })()`)
+  await connection.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: center.x, y: center.y, button: 'left', clickCount: 1 })
+  await connection.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: center.x, y: center.y, button: 'left', clickCount: 1 })
+  await sleep(300)
+  const setupState = await page.evaluate(`document.getElementById('state')?.textContent ?? ''`)
+  if (!String(setupState).includes('trusted 1')) {
+    return {
+      verdict: { status: 'blocked', reasons: [`harness setup click did not register on the canvas: ${JSON.stringify(setupState)}`] },
+      evidence: { setupState, headed: true }, metrics: [], attempts: 1,
+    }
+  }
+  const accepted = await runtime.sendPaced('Take a screenshot of this page and describe the colors and shapes you see in it.')
   await sleep(1_500)
   let minimizeOk = false
   let minimizeError = null
@@ -646,7 +729,7 @@ async function runMinimizedCheck(runtime) {
       }
     }
   }
-  const evidence = { minimizeOk, minimizeError, minimizeAt: new Date(minimizeAt).toISOString(), turnDone, images, headed: true }
+  const evidence = { minimizeOk, minimizeError, minimizeAt: new Date(minimizeAt).toISOString(), turnDone, images, setupState, headed: true }
   const verdict = checkMinimizedEvidence(evidence)
   const metrics = [metricsOf(eventsPath, accepted.turnId)]
   budget.spend(metrics)
@@ -797,6 +880,32 @@ async function main() {
     }
   }
 
+  // The remote API limits prompts to 30 per fixed 60 s window
+  // (WindowLimiter). Pace every send >= 2.2 s apart and back off on 429 so
+  // the acceptance measures turn-slot integrity, not the rate limiter.
+  let lastSendAt = 0
+  let rateLimitRetries = 0
+  async function sendPaced(text, extra = {}) {
+    const wait = lastSendAt + 2_200 - Date.now()
+    if (wait > 0) await sleep(wait)
+    for (let attempt = 0; ; attempt += 1) {
+      lastSendAt = Date.now()
+      try {
+        return await remote.send(text, extra)
+      } catch (error) {
+        if (error.status === 429 && attempt < 3) {
+          rateLimitRetries += 1
+          process.stdout.write(`  rate-limited (429); waiting 20s before retry ${attempt + 1}\n`)
+          await sleep(20_000)
+          continue
+        }
+        throw error
+      }
+    }
+  }
+  runtime.sendPaced = sendPaced
+  runtime.rateLimitRetries = () => rateLimitRetries
+
   const startIsolatedEdge = async headed => {
     const profileDir = join(runRoot, headed ? 'edge-profile-headed' : 'edge-profile')
     mkdirSync(join(profileDir, 'Default'), { recursive: true })
@@ -843,6 +952,28 @@ async function main() {
     runtime.eventsPath = eventsPath
     page = new PageController({ edge, fixtureBaseUrl: fixtureServer.baseUrl })
     await page.ensure()
+    // The resume check's second path: restart ONLY this isolated companion on
+    // the same ports/home so the SDK loads the saved session from persistence
+    // instead of owning it live. The Edge worker reconnects to the unchanged
+    // bridge URL/token; the new companion writes a new run dir, so eventsPath
+    // is re-resolved for post-restart telemetry.
+    runtime.restartCompanion = async () => {
+      await companion.stop()
+      companion = await startCompanion({
+        dshHome, bridgePort, remotePort,
+        model: DEFAULT_MODEL, effort: DEFAULT_EFFORT, apiKey,
+        logPath: join(runRoot, 'companion-restart.log'),
+        downloadsDir,
+        confirmIrreversible: false,
+      })
+      currentToken = companion.token
+      runtime.remoteUrl = companion.remoteUrl
+      remote = makeRemoteLocal(companion.remoteUrl, currentToken)
+      await waitForRemoteReady({ remote, bridgePort, companion })
+      eventsPath = resolveRunEvents(logsRoot, null)
+      runtime.eventsPath = eventsPath
+      process.stdout.write('  isolated companion restarted for the post-restart resume path\n')
+    }
     process.stdout.write(`c1-acceptance: ${DEFAULT_MODEL} @ ${DEFAULT_EFFORT} · checks: ${options.checks.join(', ')}\nisolated home: ${dshHome}\nscratch: ${runRoot}\n\n`)
 
     for (const name of options.checks) {
