@@ -1,0 +1,1358 @@
+{
+  "startedAt": "2026-11-16T07:33:30.101Z",
+  "finishedAt": "2026-11-16T07:35:03.687Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "effort": "medium",
+  "confirmIrreversible": true,
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 1606675,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "click-once",
+      "fixture": "click.html",
+      "prompt": "Click the Increment button on this page exactly once, then tell me what the count is.",
+      "file": "click-once.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwiy5r3p-b1b3",
+          "status": "pass",
+          "reasons": [
+            "count is exactly 1 and no other counter changed"
+          ],
+          "evidence": {
+            "count": "1",
+            "roleCount": "0",
+            "semanticCount": "0",
+            "checkState": "unchecked"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6921,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "click",
+                "code": "EXPECT_UNSUPPORTED",
+                "message": "expect.export_contains requires an active Google Docs document export scope; no input was dispatched"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_click",
+                "message": "Error: expect.export_contains requires an active Google Docs document export scope; no input was dispatched"
+              }
+            ],
+            "toolCounts": {
+              "browser_click": 2
+            },
+            "inputTokens": 3264,
+            "outputTokens": 152,
+            "cacheReadTokens": 63616,
+            "totalTokens": 67032,
+            "usage": {
+              "inputTokens": 3264,
+              "outputTokens": 152,
+              "totalTokens": 67032,
+              "cacheReadTokens": 63616
+            },
+            "finalText": "DONE\n- Clicked \"Increment\" once; screenshot confirms \"count: 1\".",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwiy5r3p-b1b3",
+              "origin": "remote",
+              "clientMessageId": "8d166168-171b-4d08-bcc7-dc5389ed0f2f",
+              "startedAt": "2026-11-16T07:33:31.381Z",
+              "endedAt": "2026-11-16T07:33:38.302Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3264,
+                "outputTokens": 152,
+                "totalTokens": 67032,
+                "cacheReadTokens": 63616
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwiy5wsg-c6f9",
+          "status": "pass",
+          "reasons": [
+            "count is exactly 1 and no other counter changed"
+          ],
+          "evidence": {
+            "count": "1",
+            "roleCount": "0",
+            "semanticCount": "0",
+            "checkState": "unchecked"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 2715,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_click": 1
+            },
+            "inputTokens": 2648,
+            "outputTokens": 92,
+            "cacheReadTokens": 42112,
+            "totalTokens": 44852,
+            "usage": {
+              "inputTokens": 2648,
+              "outputTokens": 92,
+              "totalTokens": 44852,
+              "cacheReadTokens": 42112
+            },
+            "finalText": "DONE — Clicked Increment once; the count is now **1** (was 0).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwiy5wsg-c6f9",
+              "origin": "remote",
+              "clientMessageId": "d1e8370d-bbd9-473d-bde6-bfaa099f49e9",
+              "startedAt": "2026-11-16T07:33:38.753Z",
+              "endedAt": "2026-11-16T07:33:41.468Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2648,
+                "outputTokens": 92,
+                "totalTokens": 44852,
+                "cacheReadTokens": 42112
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwiy5z8o-215d",
+          "status": "pass",
+          "reasons": [
+            "count is exactly 1 and no other counter changed"
+          ],
+          "evidence": {
+            "count": "1",
+            "roleCount": "0",
+            "semanticCount": "0",
+            "checkState": "unchecked"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5443,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_click",
+                "message": "Error: browser_click.expect.text_landed is not available for this action (available here: dialog, pixel_changed, export_contains, toolbar_style); nothing was dispatched, so resend the call without it"
+              }
+            ],
+            "toolCounts": {
+              "browser_click": 2,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1915,
+            "outputTokens": 230,
+            "cacheReadTokens": 86656,
+            "totalTokens": 88801,
+            "usage": {
+              "inputTokens": 1915,
+              "outputTokens": 230,
+              "totalTokens": 88801,
+              "cacheReadTokens": 86656
+            },
+            "finalText": "DONE — incremented exactly once.\n\n- Clicked \"Increment\" once (single click, label 1).\n- Verified via rendered text: \"Increment count: 1\".",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwiy5z8o-215d",
+              "origin": "remote",
+              "clientMessageId": "86dffa40-1873-4637-a03c-a2e895842411",
+              "startedAt": "2026-11-16T07:33:41.928Z",
+              "endedAt": "2026-11-16T07:33:47.371Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1915,
+                "outputTokens": 230,
+                "totalTokens": 88801,
+                "cacheReadTokens": 86656
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwiy63qn-2146",
+          "status": "pass",
+          "reasons": [
+            "count is exactly 1 and no other counter changed"
+          ],
+          "evidence": {
+            "count": "1",
+            "roleCount": "0",
+            "semanticCount": "0",
+            "checkState": "unchecked"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 2954,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_click": 1
+            },
+            "inputTokens": 728,
+            "outputTokens": 107,
+            "cacheReadTokens": 80128,
+            "totalTokens": 80963,
+            "usage": {
+              "inputTokens": 728,
+              "outputTokens": 107,
+              "totalTokens": 80963,
+              "cacheReadTokens": 80128
+            },
+            "finalText": "DONE\n\n- Clicked **Increment** once; the page now shows **Increment count: 1**.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwiy63qn-2146",
+              "origin": "remote",
+              "clientMessageId": "d7ba43a0-38f2-4002-90f9-8005af055cfe",
+              "startedAt": "2026-11-16T07:33:47.759Z",
+              "endedAt": "2026-11-16T07:33:50.713Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 728,
+                "outputTokens": 107,
+                "totalTokens": 80963,
+                "cacheReadTokens": 80128
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwiy66cj-2c4f",
+          "status": "pass",
+          "reasons": [
+            "count is exactly 1 and no other counter changed"
+          ],
+          "evidence": {
+            "count": "1",
+            "roleCount": "0",
+            "semanticCount": "0",
+            "checkState": "unchecked"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4319,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "click",
+                "code": "EXPECT_UNSUPPORTED",
+                "message": "expect.export_contains requires an active Google Docs document export scope; no input was dispatched"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_click",
+                "message": "Error: expect.export_contains requires an active Google Docs document export scope; no input was dispatched"
+              }
+            ],
+            "toolCounts": {
+              "browser_click": 2,
+              "browser_read_text": 1
+            },
+            "inputTokens": 620,
+            "outputTokens": 349,
+            "cacheReadTokens": 161792,
+            "totalTokens": 162761,
+            "usage": {
+              "inputTokens": 620,
+              "outputTokens": 349,
+              "totalTokens": 162761,
+              "cacheReadTokens": 161792
+            },
+            "finalText": "DONE\n- Clicked \"Increment\" once; count now reads **Increment count: 1** (verified in the page text).\n- The other controls (Role button, toggle, etc.) were left untouched, so their counts stayed at 0.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwiy66cj-2c4f",
+              "origin": "remote",
+              "clientMessageId": "55ae768c-3b3e-426d-925a-b8bc08859d56",
+              "startedAt": "2026-11-16T07:33:51.139Z",
+              "endedAt": "2026-11-16T07:33:55.458Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 620,
+                "outputTokens": 349,
+                "totalTokens": 162761,
+                "cacheReadTokens": 161792
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "form-submit",
+      "fixture": "form.html",
+      "prompt": "Fill out the form on this page: name \"Ada Lovelace\", notes \"First computer programmer\", password \"hunter2-demo\". Submit it exactly once and leave the rest of the page alone.",
+      "file": "form-submit.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwiy6a2t-5a13",
+          "status": "partial",
+          "reasons": [
+            "fields were edited but the form was never submitted"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: (none)",
+            "eventsHeader": "events input=3 keydown=0 submit=0",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 0,
+            "submitLines": [],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:43137/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": false,
+            "recordedSubmitLines": false,
+            "fieldsMatch": true,
+            "resultMatches": false,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": true,
+            "wallMs": 4078,
+            "error": null,
+            "outcome": "done",
+            "confirm": {
+              "turnId": "turn-mwiy6a2t-5a13",
+              "action": "Submit the form (Name: Ada Lovelace, Notes: First computer programmer, Password filled).",
+              "target": "Submit button on the Work fixture form",
+              "screenshotId": "shot-b63d5483ec75603a785f24f0",
+              "captureError": null,
+              "requestedAt": "2026-11-16T07:34:00.051Z"
+            },
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "agent_request_confirmation": 1
+            },
+            "inputTokens": 2122,
+            "outputTokens": 290,
+            "cacheReadTokens": 121600,
+            "totalTokens": 124012,
+            "usage": {
+              "inputTokens": 2122,
+              "outputTokens": 290,
+              "totalTokens": 124012,
+              "cacheReadTokens": 121600
+            },
+            "finalText": "PARTIAL — awaiting your approval.\n\n- Done: filled Name = \"Ada Lovelace\", Notes = \"First computer programmer\", Password = \"hunter2-demo\"; nothing else on the page touched.\n- Left: the single Submit click, which needs your approval given the \"ask before submitting\" setting. I'll submit exactly once on approval.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "partial",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "waiting_for_user",
+              "turnId": "turn-mwiy6a2t-5a13",
+              "origin": "remote",
+              "clientMessageId": "5b53307b-d872-4941-9e14-8d5322765c77",
+              "startedAt": "2026-11-16T07:33:55.973Z",
+              "endedAt": "2026-11-16T07:34:00.051Z",
+              "outcome": "done",
+              "error": null,
+              "label": "partial",
+              "usage": {
+                "inputTokens": 2122,
+                "outputTokens": 290,
+                "totalTokens": 124012,
+                "cacheReadTokens": 121600
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwiy6dhc-5c7e",
+          "status": "partial",
+          "reasons": [
+            "fields were edited but the form was never submitted"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: (none)",
+            "eventsHeader": "events input=3 keydown=0 submit=0",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 0,
+            "submitLines": [],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:43137/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": false,
+            "recordedSubmitLines": false,
+            "fieldsMatch": true,
+            "resultMatches": false,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": true,
+            "wallMs": 11089,
+            "error": null,
+            "outcome": "done",
+            "confirm": {
+              "turnId": "turn-mwiy6dhc-5c7e",
+              "action": "Submit the form with the filled values (Ada Lovelace / First computer programmer / hunter2-demo).",
+              "target": "Submit button on the Work fixture form page",
+              "screenshotId": "shot-9b17a4e9786da2bd5d82a108",
+              "captureError": null,
+              "requestedAt": "2026-11-16T07:34:11.473Z"
+            },
+            "steps": 9,
+            "toolCalls": 8,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_screenshot",
+                "message": "Error: browser_screenshot received unknown argument \"view\". Allowed: detail, delay_ms, scope, region, space, view_id, to_clipboard"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 2,
+              "browser_find": 1,
+              "browser_read_text": 1,
+              "browser_type": 3,
+              "agent_request_confirmation": 1
+            },
+            "inputTokens": 2297,
+            "outputTokens": 1025,
+            "cacheReadTokens": 203008,
+            "totalTokens": 206330,
+            "usage": {
+              "inputTokens": 2297,
+              "outputTokens": 1025,
+              "totalTokens": 206330,
+              "cacheReadTokens": 203008
+            },
+            "finalText": "PARTIAL — awaiting your approval.\n\n- Form filled and verified: Name \"Ada Lovelace\", Notes \"First computer programmer\", Password 12 chars (hunter2-demo).\n- Left to do: clicking Submit once — I've requested your confirmation for that, and will do it as soon as you approve (nothing else on the page will be touched).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "partial",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "waiting_for_user",
+              "turnId": "turn-mwiy6dhc-5c7e",
+              "origin": "remote",
+              "clientMessageId": "f4d39cb7-4e01-4884-a86e-a6bf24a8ac69",
+              "startedAt": "2026-11-16T07:34:00.384Z",
+              "endedAt": "2026-11-16T07:34:11.473Z",
+              "outcome": "done",
+              "error": null,
+              "label": "partial",
+              "usage": {
+                "inputTokens": 2297,
+                "outputTokens": 1025,
+                "totalTokens": 206330,
+                "cacheReadTokens": 203008
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwiy6mem-de01",
+          "status": "partial",
+          "reasons": [
+            "fields were edited but the form was never submitted"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: (none)",
+            "eventsHeader": "events input=3 keydown=0 submit=0",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 0,
+            "submitLines": [],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:43137/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": false,
+            "recordedSubmitLines": false,
+            "fieldsMatch": true,
+            "resultMatches": false,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": true,
+            "wallMs": 4037,
+            "error": null,
+            "outcome": "done",
+            "confirm": {
+              "turnId": "turn-mwiy6mem-de01",
+              "action": "Submit the form (click Submit).",
+              "target": "Submit button on http://127.0.0.1:43137/form.html",
+              "screenshotId": "shot-86a843f88be81d26a22deedc",
+              "captureError": null,
+              "requestedAt": "2026-11-16T07:34:15.987Z"
+            },
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "agent_request_confirmation": 1
+            },
+            "inputTokens": 884,
+            "outputTokens": 433,
+            "cacheReadTokens": 65920,
+            "totalTokens": 67237,
+            "usage": {
+              "inputTokens": 884,
+              "outputTokens": 433,
+              "totalTokens": 67237,
+              "cacheReadTokens": 65920
+            },
+            "finalText": "PARTIAL — fields filled; submit awaiting your approval.\n\n- Done: Name = \"Ada Lovelace\", Notes = \"First computer programmer\", Password = \"hunter2-demo\" typed into the form.\n- Pending: I asked you to approve clicking Submit (the page's \"ask before submitting\" rule). Nothing else on the page was touched.\n- Reply approve and I'll submit exactly once and verify the result counter.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "partial",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "waiting_for_user",
+              "turnId": "turn-mwiy6mem-de01",
+              "origin": "remote",
+              "clientMessageId": "169c8799-2a2a-48fe-b022-8f019f7b631d",
+              "startedAt": "2026-11-16T07:34:11.950Z",
+              "endedAt": "2026-11-16T07:34:15.987Z",
+              "outcome": "done",
+              "error": null,
+              "label": "partial",
+              "usage": {
+                "inputTokens": 884,
+                "outputTokens": 433,
+                "totalTokens": 67237,
+                "cacheReadTokens": 65920
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwiy6pt6-2a43",
+          "status": "partial",
+          "reasons": [
+            "fields were edited but the form was never submitted"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: (none)",
+            "eventsHeader": "events input=3 keydown=0 submit=0",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 0,
+            "submitLines": [],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:43137/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": false,
+            "recordedSubmitLines": false,
+            "fieldsMatch": true,
+            "resultMatches": false,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": true,
+            "wallMs": 11143,
+            "error": null,
+            "outcome": "done",
+            "confirm": {
+              "turnId": "turn-mwiy6pt6-2a43",
+              "action": "Submit the form exactly once.",
+              "target": "\"Submit\" button on the Work Fixture form",
+              "screenshotId": "shot-15279032916ca9eec26bb28c",
+              "captureError": null,
+              "requestedAt": "2026-11-16T07:34:27.505Z"
+            },
+            "steps": 9,
+            "toolCalls": 7,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_screenshot",
+                "message": "Error: browser_screenshot received unknown argument \"view\". Allowed: detail, delay_ms, scope, region, space, view_id, to_clipboard"
+              }
+            ],
+            "toolCounts": {
+              "browser_screenshot": 2,
+              "browser_find": 1,
+              "browser_type": 3,
+              "agent_request_confirmation": 1
+            },
+            "inputTokens": 5443,
+            "outputTokens": 1145,
+            "cacheReadTokens": 203264,
+            "totalTokens": 209852,
+            "usage": {
+              "inputTokens": 5443,
+              "outputTokens": 1145,
+              "totalTokens": 209852,
+              "cacheReadTokens": 203264
+            },
+            "finalText": "I've filled Name = \"Ada Lovelace\", Notes = \"First computer programmer\", and Password = \"hunter2-demo\". I'm asking you to approve submitting the form (one click on \"Submit\") before I click it.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "waiting_for_user",
+              "turnId": "turn-mwiy6pt6-2a43",
+              "origin": "remote",
+              "clientMessageId": "5c232148-c28b-406a-9b8e-7de4df9d2c9d",
+              "startedAt": "2026-11-16T07:34:16.362Z",
+              "endedAt": "2026-11-16T07:34:27.505Z",
+              "outcome": "done",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 5443,
+                "outputTokens": 1145,
+                "totalTokens": 209852,
+                "cacheReadTokens": 203264
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwiy6ypb-6899",
+          "status": "partial",
+          "reasons": [
+            "fields were edited but the form was never submitted"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: (none)",
+            "eventsHeader": "events input=3 keydown=0 submit=0",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 0,
+            "submitLines": [],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:43137/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": false,
+            "recordedSubmitLines": false,
+            "fieldsMatch": true,
+            "resultMatches": false,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": true,
+            "wallMs": 3203,
+            "error": null,
+            "outcome": "done",
+            "confirm": {
+              "turnId": "turn-mwiy6ypb-6899",
+              "action": "Submit the form once with the entered name, notes, and password.",
+              "target": "Submit button on http://127.0.0.1:43137/form.html",
+              "screenshotId": "shot-d18b85cf931cdf69c9516442",
+              "captureError": null,
+              "requestedAt": "2026-11-16T07:34:31.090Z"
+            },
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "agent_request_confirmation": 1
+            },
+            "inputTokens": 775,
+            "outputTokens": 247,
+            "cacheReadTokens": 121088,
+            "totalTokens": 122110,
+            "usage": {
+              "inputTokens": 775,
+              "outputTokens": 247,
+              "totalTokens": 122110,
+              "cacheReadTokens": 121088
+            },
+            "finalText": "Filled Name, Notes, and Password; I'm asking you to approve clicking Submit once.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "waiting_for_user",
+              "turnId": "turn-mwiy6ypb-6899",
+              "origin": "remote",
+              "clientMessageId": "e6db48e7-4730-487c-9322-0aaed01f24aa",
+              "startedAt": "2026-11-16T07:34:27.887Z",
+              "endedAt": "2026-11-16T07:34:31.090Z",
+              "outcome": "done",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 775,
+                "outputTokens": 247,
+                "totalTokens": 122110,
+                "cacheReadTokens": 121088
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "table-cells",
+      "fixture": "table.html",
+      "prompt": "In the \"Dye measurements\" table on this page, set the Dye Distance for Yellow to 4.2 and the Solvent Distance for Teal to 1.6. Leave every other cell as it is.",
+      "file": "table-cells.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwiy71h0-c558",
+          "status": "pass",
+          "reasons": [
+            "both named cells hold the requested committed values and no other cell changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:43137/table.html",
+            "integrity": true,
+            "targetChecks": [
+              {
+                "row": 3,
+                "column": 1,
+                "label": "Yellow Dye Distance",
+                "value": 4.2,
+                "displayed": "4.2",
+                "committed": "4.2",
+                "displayedMatches": true,
+                "committedMatches": true
+              },
+              {
+                "row": 5,
+                "column": 2,
+                "label": "Teal Solvent Distance",
+                "value": 1.6,
+                "displayed": "1.6",
+                "committed": "1.6",
+                "displayedMatches": true,
+                "committedMatches": true
+              }
+            ],
+            "collateral": [],
+            "eventsTail": "commits 2\n6,3=1.6"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4252,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_table": 2
+            },
+            "inputTokens": 2296,
+            "outputTokens": 543,
+            "cacheReadTokens": 65024,
+            "totalTokens": 67863,
+            "usage": {
+              "inputTokens": 2296,
+              "outputTokens": 543,
+              "totalTokens": 67863,
+              "cacheReadTokens": 65024
+            },
+            "finalText": "DONE\n- Yellow → Dye Distance = 4.2 (row 4); Teal → Solvent Distance = 1.6 (row 6).\n- Verified by table readback; all other cells unchanged.\n- Note: readback is DOM-level, not server persistence.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwiy71h0-c558",
+              "origin": "remote",
+              "clientMessageId": "3df39949-801b-4ec5-a85c-8b247f1cf842",
+              "startedAt": "2026-11-16T07:34:31.476Z",
+              "endedAt": "2026-11-16T07:34:35.728Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2296,
+                "outputTokens": 543,
+                "totalTokens": 67863,
+                "cacheReadTokens": 65024
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwiy754x-84f4",
+          "status": "pass",
+          "reasons": [
+            "both named cells hold the requested committed values and no other cell changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:43137/table.html",
+            "integrity": true,
+            "targetChecks": [
+              {
+                "row": 3,
+                "column": 1,
+                "label": "Yellow Dye Distance",
+                "value": 4.2,
+                "displayed": "4.2",
+                "committed": "4.2",
+                "displayedMatches": true,
+                "committedMatches": true
+              },
+              {
+                "row": 5,
+                "column": 2,
+                "label": "Teal Solvent Distance",
+                "value": 1.6,
+                "displayed": "1.6",
+                "committed": "1.6",
+                "displayedMatches": true,
+                "committedMatches": true
+              }
+            ],
+            "collateral": [],
+            "eventsTail": "commits 2\n6,3=1.6"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5094,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 4,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "table",
+                "code": "TABLE_TARGET_NOT_FOUND",
+                "message": "Row \"Yellow\" was not found. Row names: \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\". \"Yellow\" is a cell value in row 4, not a row name; pass that one-based row index. No cells were changed"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_table",
+                "message": "Error: Row \"Yellow\" was not found. Row names: \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\". \"Yellow\" is a cell value in row 4, not a row name; pass that one-based row index. No cells were changed"
+              }
+            ],
+            "toolCounts": {
+              "browser_table": 3,
+              "browser_screenshot": 1
+            },
+            "inputTokens": 4521,
+            "outputTokens": 629,
+            "cacheReadTokens": 88192,
+            "totalTokens": 93342,
+            "usage": {
+              "inputTokens": 4521,
+              "outputTokens": 629,
+              "totalTokens": 93342,
+              "cacheReadTokens": 88192
+            },
+            "finalText": "DONE\n\n- Set row 4 (Yellow) Dye Distance = 4.2 and row 6 (Teal) Solvent Distance = 1.6; table readback confirms both applied and every other cell unchanged.\n- Verified via table readback (domestic DOM edit); note the readback does not prove server persistence — page still shows \"commits 0\" and no commit action was requested.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwiy754x-84f4",
+              "origin": "remote",
+              "clientMessageId": "89aaf8f3-c1c1-40c2-98ef-ae907e412cc0",
+              "startedAt": "2026-11-16T07:34:36.225Z",
+              "endedAt": "2026-11-16T07:34:41.319Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 4521,
+                "outputTokens": 629,
+                "totalTokens": 93342,
+                "cacheReadTokens": 88192
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwiy79e0-8f24",
+          "status": "pass",
+          "reasons": [
+            "both named cells hold the requested committed values and no other cell changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:43137/table.html",
+            "integrity": true,
+            "targetChecks": [
+              {
+                "row": 3,
+                "column": 1,
+                "label": "Yellow Dye Distance",
+                "value": 4.2,
+                "displayed": "4.2",
+                "committed": "4.2",
+                "displayedMatches": true,
+                "committedMatches": true
+              },
+              {
+                "row": 5,
+                "column": 2,
+                "label": "Teal Solvent Distance",
+                "value": 1.6,
+                "displayed": "1.6",
+                "committed": "1.6",
+                "displayedMatches": true,
+                "committedMatches": true
+              }
+            ],
+            "collateral": [],
+            "eventsTail": "commits 2\n6,3=1.6"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4750,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "table",
+                "code": "TABLE_TARGET_NOT_FOUND",
+                "message": "Row \"Yellow\" was not found. Row names: \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\". \"Yellow\" is a cell value in row 4, not a row name; pass that one-based row index. No cells were changed"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_table",
+                "message": "Error: Row \"Yellow\" was not found. Row names: \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\". \"Yellow\" is a cell value in row 4, not a row name; pass that one-based row index. No cells were changed"
+              }
+            ],
+            "toolCounts": {
+              "browser_table": 3
+            },
+            "inputTokens": 1610,
+            "outputTokens": 498,
+            "cacheReadTokens": 88064,
+            "totalTokens": 90172,
+            "usage": {
+              "inputTokens": 1610,
+              "outputTokens": 498,
+              "totalTokens": 90172,
+              "cacheReadTokens": 88064
+            },
+            "finalText": "DONE\n- Set Dye Distance = 4.2 for Yellow (row 4) and Solvent Distance = 1.6 for Teal (row 6) in the \"Dye measurements\" table.\n- Both cells verified by table readback; all other cells untouched.\n- Verified via DOM readback only — the page shows \"commits 0\", so server-side persistence isn't confirmed by me.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwiy79e0-8f24",
+              "origin": "remote",
+              "clientMessageId": "e4d9c52f-121e-4df7-bf19-c4bcab35c890",
+              "startedAt": "2026-11-16T07:34:41.736Z",
+              "endedAt": "2026-11-16T07:34:46.486Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1610,
+                "outputTokens": 498,
+                "totalTokens": 90172,
+                "cacheReadTokens": 88064
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwiy7dcb-db31",
+          "status": "pass",
+          "reasons": [
+            "both named cells hold the requested committed values and no other cell changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:43137/table.html",
+            "integrity": true,
+            "targetChecks": [
+              {
+                "row": 3,
+                "column": 1,
+                "label": "Yellow Dye Distance",
+                "value": 4.2,
+                "displayed": "4.2",
+                "committed": "4.2",
+                "displayedMatches": true,
+                "committedMatches": true
+              },
+              {
+                "row": 5,
+                "column": 2,
+                "label": "Teal Solvent Distance",
+                "value": 1.6,
+                "displayed": "1.6",
+                "committed": "1.6",
+                "displayedMatches": true,
+                "committedMatches": true
+              }
+            ],
+            "collateral": [],
+            "eventsTail": "commits 2\n6,3=1.6"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 11327,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "table",
+                "code": "TABLE_TARGET_NOT_FOUND",
+                "message": "Row \"Yellow\" was not found. Row names: \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\". \"Yellow\" is a cell value in row 4, not a row name; pass that one-based row index. No cells were changed"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_table",
+                "message": "Error: Row \"Yellow\" was not found. Row names: \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\". \"Yellow\" is a cell value in row 4, not a row name; pass that one-based row index. No cells were changed"
+              }
+            ],
+            "toolCounts": {
+              "browser_table": 3
+            },
+            "inputTokens": 3018,
+            "outputTokens": 500,
+            "cacheReadTokens": 86784,
+            "totalTokens": 90302,
+            "usage": {
+              "inputTokens": 3018,
+              "outputTokens": 500,
+              "totalTokens": 90302,
+              "cacheReadTokens": 86784
+            },
+            "finalText": "DONE\n- Set Dye Distance for Yellow (row 4) to 4.2 and Solvent Distance for Teal (row 6) to 1.6; both verified by readback.\n- All other cells untouched; Dye column values and other blanks unchanged.\n- Note: verification is DOM readback — server persistence not implied.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwiy7dcb-db31",
+              "origin": "remote",
+              "clientMessageId": "dfe5aaab-2f79-47ec-b9e7-e47152824f9f",
+              "startedAt": "2026-11-16T07:34:46.859Z",
+              "endedAt": "2026-11-16T07:34:58.186Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3018,
+                "outputTokens": 500,
+                "totalTokens": 90302,
+                "cacheReadTokens": 86784
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwiy7me6-90fa",
+          "status": "pass",
+          "reasons": [
+            "both named cells hold the requested committed values and no other cell changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:43137/table.html",
+            "integrity": true,
+            "targetChecks": [
+              {
+                "row": 3,
+                "column": 1,
+                "label": "Yellow Dye Distance",
+                "value": 4.2,
+                "displayed": "4.2",
+                "committed": "4.2",
+                "displayedMatches": true,
+                "committedMatches": true
+              },
+              {
+                "row": 5,
+                "column": 2,
+                "label": "Teal Solvent Distance",
+                "value": 1.6,
+                "displayed": "1.6",
+                "committed": "1.6",
+                "displayedMatches": true,
+                "committedMatches": true
+              }
+            ],
+            "collateral": [],
+            "eventsTail": "commits 2\n6,3=1.6"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4955,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "table",
+                "code": "TABLE_TARGET_NOT_FOUND",
+                "message": "Row \"Yellow\" was not found. Row names: \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\". \"Yellow\" is a cell value in row 4, not a row name; pass that one-based row index. No cells were changed"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_table",
+                "message": "Error: Row \"Yellow\" was not found. Row names: \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\". \"Yellow\" is a cell value in row 4, not a row name; pass that one-based row index. No cells were changed"
+              }
+            ],
+            "toolCounts": {
+              "browser_table": 3
+            },
+            "inputTokens": 3153,
+            "outputTokens": 725,
+            "cacheReadTokens": 87168,
+            "totalTokens": 91046,
+            "usage": {
+              "inputTokens": 3153,
+              "outputTokens": 725,
+              "totalTokens": 91046,
+              "cacheReadTokens": 87168
+            },
+            "finalText": "DONE\n- Set Yellow's Dye Distance = **4.2** (row 4, col 2) and Teal's Solvent Distance = **1.6** (row 6, col 3); both read back verified.\n- All other cells left unchanged (only those two cells now populated).\n\nNote: verification is DOM readback, not proof of server persistence.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 1,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwiy7me6-90fa",
+              "origin": "remote",
+              "clientMessageId": "98e283eb-d185-49a7-92a2-327beee6a27b",
+              "startedAt": "2026-11-16T07:34:58.590Z",
+              "endedAt": "2026-11-16T07:35:03.545Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3153,
+                "outputTokens": 725,
+                "totalTokens": 91046,
+                "cacheReadTokens": 87168
+              },
+              "failedCalls": 1
+            }
+          },
+          "answer": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}
