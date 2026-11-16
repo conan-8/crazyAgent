@@ -10035,6 +10035,35 @@ async function docsTableWriteFlow(context, args) {
   }, tables)
 }
 
+/**
+ * Wait until the cell-background palette is open with a usable exact preset or
+ * custom-color control AND its geometry has stopped moving. The side-sheet
+ * grid reflows as it opens, so a point probed the instant the menu reports
+ * open can land on a neighbouring swatch once the grid settles (measured: a
+ * #d9d9d9 request committed #d0e0e3). Two consecutive identical probes prove
+ * the point is stable; a palette that never settles fails closed.
+ */
+async function docsWaitPaletteStable(context, stage, attribute, value, timeoutMs = 3_000) {
+  const end = Math.min(context.deadline, context.driver.now() + timeoutMs)
+  let latest
+  let lastSignature
+  let stableSince = 0
+  while (context.driver.now() < end) {
+    latest = await docsProbe(context, stage, 'colorMenu', { attribute, value })
+    const usable = latest.open
+    const signature = JSON.stringify([latest.presetPoint ?? null, latest.customPoint ?? null, latest.nonePoint ?? null])
+    const now = context.driver.now()
+    if (usable && signature === lastSignature) {
+      if (now - stableSince >= 100) return latest
+    } else {
+      lastSignature = signature
+      stableSince = now
+    }
+    await context.driver.sleep(60)
+  }
+  throw docsFailure(stage, 'DOCS_WAIT_TIMEOUT', `The cell-background palette did not settle on a stable exact ${value} preset or custom-color control`)
+}
+
 async function docsApplyCellBackground(context, edit) {
   await docsTableSelectPlan(context, edit.plan)
   await docsKey(context, 'table-cell-background-collapse', KEY_SPECS.ArrowRight)
@@ -10051,7 +10080,7 @@ async function docsApplyCellBackground(context, edit) {
     }
   }
   await docsClick(context, 'table-cell-background-open', state.backgroundPoint)
-  const menu = await docsWait(context, 'table-cell-background-menu', 'colorMenu', { attribute: 'color', value: edit.value }, current => current.open)
+  const menu = await docsWaitPaletteStable(context, 'table-cell-background-menu', 'color', edit.value)
   if (menu.presetPoint) {
     context.menuMutationPossible = true
     await docsClick(context, 'table-cell-background-preset', menu.presetPoint)
