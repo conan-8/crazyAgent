@@ -339,6 +339,11 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
         return { ok: true, readback: true }
       }
       if (command === 'documentContent') return { ok: true, present: true, focused: true }
+      if (command === 'documentSelection') {
+        const block = state.selection?.entry.block
+        const text = block ? block.text.slice(state.selection.start, state.selection.end) : ''
+        return { ok: true, present: true, collapsed: !state.selection, text }
+      }
       if (command === 'focusDocument') return { ok: true, focused: true }
       if (command === 'menuSearch') return { ok: true, present: state.menuOpen, enabled: true, focused: state.menuOpen, value: state.menuQuery }
       if (command === 'setMenuSearch') {
