@@ -135,9 +135,13 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
       }
       if (state.selection) {
         const block = selectedParagraph()
-        block.text = text
-        block.marked = text
-        block.runs = text ? [{ text, bold: false, italic: false, underline: false, strike: false, color: '#000000', highlight: 'none' }] : []
+        // Real Docs Input.insertText inserts at the caret WITHOUT replacing the
+        // document selection (measured: 'X' into selected 'alpha' gave 'Xalpha').
+        // This option models that so the Delete-before-insert fix is mutation-checked.
+        const next = options.insertTextAppends ? text + block.text : text
+        block.text = next
+        block.marked = next
+        block.runs = next ? [{ text: next, bold: false, italic: false, underline: false, strike: false, color: '#000000', highlight: 'none' }] : []
         state.selection = undefined
         return
       }
@@ -521,6 +525,16 @@ test('Docs table write replaces duplicate and empty cells with per-cell export v
   assert.deepEqual(result.tables[0].cells.map(row => row.map(item => item.value)), [['first', 'first', 'third'], ['', 'b', 'c']])
   assert.equal(fake.state.blocks[0].text, 'same')
   assert.equal(fake.state.inserts, 3)
+})
+
+test('Docs table write deletes the proven selection before inserting (insertText does not replace)', async () => {
+  // Models real Docs: Input.insertText keeps the old text. Without the
+  // Delete-before-insert step the cell would read 'KerfuffleBumbershoot' and
+  // the export verification would fail; with it the exact value lands.
+  const fake = fakeDocs([table([['Bumbershoot', 'keep'], ['x', 'y']])], { insertTextAppends: true })
+  const result = await docsTable({}, { action: 'write', edits: [{ row: 1, column: 1, value: 'Kerfuffle' }] }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.deepEqual(selectDocsTable(fake.state.blocks).rows.map(row => row.map(item => item.text)), [['Kerfuffle', 'keep'], ['x', 'y']])
 })
 
 test('Docs table write validates all targets before input and fails closed on an unanchored empty table', async () => {
