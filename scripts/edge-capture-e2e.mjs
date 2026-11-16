@@ -32,6 +32,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const EDGE_BIN = process.env.EDGE_BIN ?? 'microsoft-edge'
 const CDP_PORT = Number(process.env.CDP_PORT ?? (10_000 + process.pid % 20_000))
 const CDP = `http://127.0.0.1:${CDP_PORT}`
+// The panel's bridge config is env-configurable so an isolated runner can
+// point it at a dead port instead of the running service. Defaults are
+// byte-identical to the previous hard-coded values.
+const BRIDGE_URL = process.env.BRIDGE_URL ?? 'ws://127.0.0.1:17871/bridge'
+const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN ?? ''
 const USER_DIR = mkdtempSync(join(tmpdir(), 'crazyagent-capture-e2e-'))
 const FIXTURES = join(ROOT, 'e2e', 'fixtures')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -161,8 +166,8 @@ try {
     return result.result?.value
   }
   await evaluate(`chrome.storage.local.set({ 'crazyagent.settings': ${JSON.stringify({
-    bridgeUrl: 'ws://127.0.0.1:17871/bridge',
-    token: '',
+    bridgeUrl: BRIDGE_URL,
+    token: BRIDGE_TOKEN,
     captureWidth: 1280,
     quality: 72,
     autoCapture: true,
