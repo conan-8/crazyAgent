@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Real-model scenario harness (plan-temporary.md, Track A / A1).
+ * Real-model scenario harness (retired work plan, Track A / A1, archived in docs/HISTORY.md).
  *
  * One command runs a named scenario N times with a real model against an
  * isolated browser, an isolated companion and an isolated DSH home, then

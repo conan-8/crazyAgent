@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * One command for the real-extension regression gates (plan-temporary.md Q5).
+ * One command for the real-extension regression gates (retired work plan Q5, archived in docs/HISTORY.md).
  *
  * Starts a fixture server (e2e/fixtures, with a request log) and ONE isolated
  * headless Edge with the unpacked extension, then runs every edge-*-e2e suite
