@@ -4488,6 +4488,18 @@ const EMPTY_STEP_NOTICE = 'Your previous step was empty: no tool call and no rep
 // the rules forbid without confirmation (a retried turn once clicked Submit
 // first). The model must decide again under all of its instructions.
 const LEAKED_TOOL_CALL_NOTICE = 'Your previous step wrote a tool call as plain text, so nothing was executed and the browser is unchanged. Discard that text. Decide the next step again from the current page and all of your instructions, including any confirmation rule for irreversible actions, and send it as a real tool call with no markup in your reply. This is an automatic notice, not a new user request.'
+// DSH admits a claimed `runtime-context` message by replacing it with the
+// loop's dynamic context snapshot, so a notice sent with that kind never
+// reaches the model as text (measured 2026-11-16: retry notices appeared only
+// in inbox events, never in a request). Internal steer notices therefore use
+// their own source kinds, which the loop appends verbatim. They are not new
+// user requests: prompt tracking and the per-turn resets below skip them, so
+// a continuation keeps the turn's repeat guard, executor circuit, and
+// no-progress accounting instead of refreshing them mid-turn.
+const INTERNAL_NOTICE_KINDS = new Set(['runtime-context', 'agent-notice', 'token-limit-continuation'])
+function isInternalNotice(source) {
+  return isRecord(source) && INTERNAL_NOTICE_KINDS.has(source.kind)
+}
 
 /**
  * @param {import('@deepseek-ai/cordis').Context} ctx
@@ -4598,15 +4610,18 @@ export function apply(ctx, config = {}) {
       try {
         planRuntime.claim(agent, turn)
         confirmRuntime.claim(agent, turn)
+        if (!isRecord(message)) return
+        // An internal continuation or retry notice stays inside the current
+        // turn: it must not reset the repeat guard, the executor circuit, or
+        // the no-progress count, and it is not the turn's user prompt.
+        if (isInternalNotice(message.source)) return
         if (Number.isSafeInteger(turn)) {
-          const messageId = isRecord(message) && typeof message.id === 'string' ? message.id : undefined
+          const messageId = typeof message.id === 'string' ? message.id : undefined
           guard.setTurn(messageId ? `message:${messageId}` : `turn:${turn}`)
           bridge.resetExecutorCircuit()
           bridge.lastRejection = undefined
           noProgressByTurn.delete(turn)
         }
-        if (!isRecord(message)) return
-        if (message.source?.kind === 'runtime-context') return
         const blocks = Array.isArray(message.content) ? message.content : []
         const text = blocks
           .filter(block => isRecord(block) && block.type === 'text' && typeof block.text === 'string')
@@ -4703,9 +4718,10 @@ export function apply(ctx, config = {}) {
         const type = event?.type
         if (type === 'user/message') {
           // Track the latest real user prompt per session. Runtime-context
-          // messages are harness metadata, not the user's task.
+          // snapshots and internal steer notices are harness metadata, not
+          // the user's task, and must not re-arm the empty-step retry.
           const data = event.data ?? {}
-          if (data.source?.kind === 'runtime-context') return
+          if (isInternalNotice(data.source)) return
           const blocks = Array.isArray(data.content) ? data.content : []
           const text = blocks
             .filter(block => isRecord(block) && block.type === 'text' && typeof block.text === 'string')
@@ -4826,7 +4842,11 @@ export function apply(ctx, config = {}) {
             content: Object.freeze([Object.freeze({ type: 'text', text })]),
           })
           try {
-            agent.followup(message)
+            // Steer, not followup: a followup is a new turn, which would lose
+            // this turn's conditional tools (plan, confirmation). The loop
+            // dispatches turn-stopping for a max-tokens stop too, and a
+            // steered notice keeps the same turn running.
+            agent.steer(message)
           } catch (error) {
             bridge.logEvent('model.max_tokens.continued', {
               sessionId: String(sessionId), turn, step: maxTokenStep.step,
@@ -4853,7 +4873,7 @@ export function apply(ctx, config = {}) {
           const message = Object.freeze({
             id: randomUUID(),
             role: 'user',
-            source: Object.freeze({ kind: 'runtime-context', form: 'notice', summary: 'Tool call retry' }),
+            source: Object.freeze({ kind: 'agent-notice', form: 'notice', summary: 'Tool call retry' }),
             content: Object.freeze([Object.freeze({ type: 'text', text: leaked.kind === 'empty' ? EMPTY_STEP_NOTICE : LEAKED_TOOL_CALL_NOTICE })]),
           })
           try {
@@ -4890,7 +4910,7 @@ export function apply(ctx, config = {}) {
           const message = Object.freeze({
             id: randomUUID(),
             role: 'user',
-            source: Object.freeze({ kind: 'runtime-context', form: 'notice', summary: 'Docs final evidence check' }),
+            source: Object.freeze({ kind: 'agent-notice', form: 'notice', summary: 'Docs final evidence check' }),
             content: Object.freeze([Object.freeze({ type: 'text', text })]),
           })
           try {

@@ -159,6 +159,83 @@ test('a real confirm.mode frame activates agent_request_confirmation only for th
   assert.equal(fake.tools.size, standingCount)
 })
 
+test('a max-token continuation steers in the same turn and keeps both conditional tools armed', async t => {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+  await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject) })
+  const activities = []
+  const logEvents = []
+  let toolsSocket
+  server.on('connection', ws => {
+    toolsSocket = ws
+    ws.on('message', data => {
+      const message = JSON.parse(data.toString())
+      if (message.type === 'hello') ws.send(JSON.stringify({ v: 1, type: 'hello.ok', version: 1 }))
+      else if (message.type === 'activity') activities.push(message.activity)
+      else if (message.type === 'log.event') logEvents.push(message.event)
+    })
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: `ws://127.0.0.1:${server.address().port}/bridge`, bridgeToken: 'test', requestTimeoutMs: 500 })
+  t.after(async () => {
+    fake.dispose()
+    for (const client of server.clients) client.terminate()
+    await new Promise(resolve => server.close(resolve))
+  })
+  await waitFor(() => toolsSocket?.readyState === 1)
+  const standingCount = fake.tools.size
+  toolsSocket.send(JSON.stringify({ v: 1, type: 'plan.mode', turnId: 'turn-cont', enabled: true }))
+  toolsSocket.send(JSON.stringify({ v: 1, type: 'confirm.mode', turnId: 'turn-cont', enabled: true }))
+  await new Promise(resolve => setTimeout(resolve, 30))
+
+  const session = { id: 'session-cont', surface: { nodes: [] }, append: () => {} }
+  const steered = []
+  const agent = { session, steer: message => steered.push(message), followup: () => assert.fail('a max-token continuation must not start a new turn') }
+  const claimed = fake.listeners.get('agent/inbox/claimed')
+  const sessionEvent = fake.listeners.get('session/event')
+  claimed({ agent, message: { id: 'user-1', content: [{ type: 'text', text: 'fill the form and submit it' }] }, turn: 1 })
+  await fake.listeners.get('agent/request')({ agent, turn: 1 }, async () => ({}))
+  assert.equal(fake.tools.has('browser_plan'), true)
+  assert.equal(fake.tools.has('agent_request_confirmation'), true)
+  assert.equal(fake.tools.size, standingCount + 2)
+
+  // Step 1 reaches the output-token limit; the turn tries to stop.
+  sessionEvent(session, {
+    type: 'assistant/message',
+    data: { turn: 1, step: 1, usage: { outputTokens: 8_192 }, stream: [{ type: 'chunk', chunk: { type: 'finish', reason: { kind: 'max-tokens' } } }] },
+  })
+  await fake.listeners.get('agent/turn-stopping')({ agent, turn: 1, signal: new AbortController().signal })
+  assert.equal(steered.length, 1, 'the continuation is a steer, not a followup')
+  assert.equal(steered[0].source.kind, 'token-limit-continuation')
+  assert.match(steered[0].content[0].text, /Continue the same task in this new step/)
+
+  // The loop claims the steered notice inside the SAME turn and assembles the
+  // next step: both conditional tools must still be registered and usable.
+  claimed({ agent, message: steered[0], turn: 1 })
+  let visibleAtAssembly = false
+  await fake.listeners.get('agent/request')({ agent, turn: 1 }, async () => {
+    visibleAtAssembly = fake.tools.has('browser_plan') && fake.tools.has('agent_request_confirmation')
+    return {}
+  })
+  assert.equal(visibleAtAssembly, true, 'the continuation step sees both conditional tools')
+  assert.equal(fake.tools.size, standingCount + 2)
+  await waitFor(() => logEvents.some(event => event.type === 'plan.mode.started'))
+  assert.equal(logEvents.filter(event => event.type === 'plan.mode.started').length, 1, 'the claim is idempotent: no re-arm')
+  assert.equal(logEvents.filter(event => event.type === 'confirm.mode.started').length, 1)
+
+  const exec = { callId: 'cont-call', agent, signal: new AbortController().signal }
+  const planResult = await fake.tools.get('browser_plan').execute({ items: [{ content: 'Fill the form', status: 'in_progress' }, { content: 'Ask to submit', status: 'pending' }], expected_revision: 0 }, { ...exec, callId: 'cont-plan' })
+  assert.equal(planResult.structuredContent.revision, 1)
+  const confirmResult = await fake.tools.get('agent_request_confirmation').execute({ action: 'Submit the form', target: 'Submit button' }, { ...exec, callId: 'cont-confirm' })
+  assert.equal(confirmResult.structuredContent.recorded, true)
+  await waitFor(() => activities.some(activity => activity.kind === 'confirm-request'))
+
+  // Only the real turn end retires the tools, even though DSH keeps the
+  // turn/end reason sticky at max-tokens after a continuation.
+  const frozen = Object.freeze({ type: 'turn/end', data: Object.freeze({ turn: 1, reason: Object.freeze({ kind: 'max-tokens' }) }) })
+  assert.doesNotThrow(() => sessionEvent(session, frozen))
+  assert.equal(fake.tools.size, standingCount)
+})
+
 test('plan and confirmation modes coexist on one armed turn without touching the standing count', async t => {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
   await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject) })

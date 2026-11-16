@@ -42,7 +42,11 @@ function runtimeMessage(text, summary) {
   return Object.freeze({
     id: randomUUID(),
     role: 'user',
-    source: Object.freeze({ kind: 'runtime-context', form: 'notice', summary }),
+    // Not 'runtime-context': the DSH loop replaces a claimed runtime-context
+    // message with its context snapshot, so the nudge text would never reach
+    // the model. 'agent-notice' is appended verbatim and skipped by the
+    // provider's prompt tracking.
+    source: Object.freeze({ kind: 'agent-notice', form: 'notice', summary }),
     content: Object.freeze([Object.freeze({ type: 'text', text })]),
   })
 }
