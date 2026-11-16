@@ -8,6 +8,7 @@
 
 import { DEFAULT_SETTINGS, execute, testCapture, imageDataUrl, beginDebuggerRun, endDebuggerRun, cleanImageFor, displayImageField } from './browser.js'
 import { foreignPrompt, helpNotice, confirmNotice, isBusyRefusal } from './remote-turn.js'
+import { textStreamDeltaAction, hasLeakedReplyRow, removeLeakedReplyRows } from './leaked-markup.js'
 import { ClientLogger } from './logger.js'
 import { renderMarkdown } from './markdown.js'
 import { createPlanPanelModel, renderPlanPanel } from './plan-panel.js'
@@ -96,6 +97,8 @@ let lastStreamEntry = null
 let lastReasoningStreamText = ''
 let sawReasoningStream = false
 let sawTextStream = false
+/** The current reply stream leaked tool-call markup; drop its remaining deltas. */
+let textStreamSuppressed = false
 let liveClockTimer = null
 let turnNumber = 0
 /** @type {{number: number, startedAt: number, root: HTMLElement, divider: HTMLElement, durationEl: HTMLElement, stepCount: number, totalMs: number | null, done: boolean} | null} */
@@ -647,7 +650,10 @@ function conversationDate(item) {
 
 /** Serialize one feed child without elements that exist only for a running animation. */
 function archivableHtml(child) {
-  if (!child.querySelector('.motion-ghost, .leaving, .gliding')) return child.outerHTML
+  // Leaked-markup reply rows never belong in saved history, even if one ever
+  // reached the feed (the stream guard removes them; this is the backstop).
+  const leaked = hasLeakedReplyRow(child)
+  if (!leaked && !child.querySelector('.motion-ghost, .leaving, .gliding')) return child.outerHTML
   const copy = child.cloneNode(true)
   copy.querySelectorAll('.motion-ghost, .leaving').forEach(node => node.remove())
   // A row still gliding open is saved at its full height.
@@ -657,6 +663,7 @@ function archivableHtml(child) {
     node.style.removeProperty('overflow')
     if (node.getAttribute('style') === '') node.removeAttribute('style')
   })
+  if (leaked) removeLeakedReplyRows(copy)
   return copy.outerHTML
 }
 
@@ -794,6 +801,8 @@ function restoreConversation(id) {
   clearChat()
   if (!newChatDraft) els.activityEmpty?.classList.add('hidden')
   els.activityLog.insertAdjacentHTML('beforeend', item.html)
+  // History saved before the stream guard existed may carry leaked reply rows.
+  removeLeakedReplyRows(els.activityLog)
   if (!reducedMotion.matches) els.activityLog.animate({ opacity: [0, 1] }, { duration: MOTION.base, easing: MOTION.ease })
   for (const head of els.activityLog.querySelectorAll('.step-head')) {
     head.addEventListener('click', () => {
@@ -2392,6 +2401,8 @@ function finalizeStreamActivity() {
     if (textEl?.querySelector('.stream-chunk')) textEl.textContent = textEl.textContent
   }
   lastStreamEntry = null
+  // The reply stream ended; a later stream starts with a clean guard.
+  textStreamSuppressed = false
 }
 
 function clearActivity() {
@@ -2489,11 +2500,29 @@ function handleActivity(frame) {
       setActivityPhase('Thinking…', 'busy')
       appendStreamActivity('reasoning', frame.text)
       return
-    case 'text':
+    case 'text': {
+      // A dead step can stream its tool call as literal DSML markup. Match on
+      // the accumulated reply so split tags are caught too, and never let the
+      // markup render: drop the row at once (no fade-out that shows it) and
+      // discard the rest of this stream. The ending still arrives as a
+      // BLOCKED answer or a chat.error, never as the markup itself.
+      const priorText = lastStreamEntry !== null && lastStreamEntry.kind === 'text' ? lastStreamEntry.textEl.textContent : ''
+      const action = textStreamDeltaAction(priorText, frame.text, textStreamSuppressed)
+      if (action === 'drop') return
+      if (action === 'suppress') {
+        textStreamSuppressed = true
+        if (lastStreamEntry !== null && lastStreamEntry.kind === 'text') {
+          endStreamGlide(lastStreamEntry.entry)
+          lastStreamEntry.entry.remove()
+          lastStreamEntry = null
+        }
+        return
+      }
       sawTextStream = true
       setActivityPhase('Responding…', 'busy')
       appendStreamActivity('text', frame.text)
       return
+    }
     case 'tool-call-delta': {
       const label = toolLabel(frame.name)
       setActivityPhase(`Using ${label}…`, 'busy')
