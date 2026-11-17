@@ -19,6 +19,7 @@ Plan reference: `MARATHON-PLAN.md` §4 (invariants), §5 M6 (docs + version 2.4.
 | fix chain C3 | `9b856df` | (combined tree 1201) | c1 steer-plan real aborted-shape evidence fix |
 | **M3 acceptance pin** | `2abb065` | **1201/1201** (independently verified at clean checkout + c1 --self-test PASS) | android push (watch type + dedupe) on top of C3; deterministic-only (no index.mjs judge wiring yet) |
 | M4 live wiring | `6a20c39` | **1201/1201** (judge-reported; re-verify at clean checkout at M6 go) | judge live wiring (injected getters) + log hardening (dropped raw error.message → errorName only, per core review) |
+| M4 final (FALLBACK A) | `cd77337` (code) / `e7503a6` (report) | **1214/1214** (core-verified working tree; +13 watch-revisit) | neutral prompt + bounded aggregates + REVISIT_HINT + watcher-eval replay; gate 6/9 windows FALLBACK A |
 | M5 full / release head | **PENDING** | **PENDING** | android M5 full + final release head; re-run npm test + gradle at M6 go |
 
 **M6 rule:** quote the count that belongs to each pin; never quote a working-tree count as a pin count. The final release-head count is **PENDING** until M4/M5 land and is re-verified at a clean checkout.
@@ -119,9 +120,25 @@ Already updated incrementally for M1–M3; M6 verifies completeness and adds M4/
 6. Tag `v2.4.0`; `gh release` **condition:** only after the final gates are green and the extension/companion are verified active (follow the v2.3.0 published-release pattern). Do NOT tag/release while M4/M5 acceptance is pending.
 7. Update HANDOFF-QUICK "Current build" Release row with the tag/release URL + APK SHA-256.
 
+## 6. M4 carry-forward for STATUS.md (judge-confirmed, lead ruling — verbatim source)
+
+M4 landed: code `cd77337` (neutral prompt + bounded aggregates + REVISIT_HINT + scripts/watcher-eval.mjs + 13 watch-revisit tests + m4-evidence + M4-report), report framing `e7503a6`. `watcher.mjs` unchanged from `cbe50ee` (core's `lastEndedIncomplete` intact). npm test **1214/1214** at this head. STATUS.md must carry:
+
+- **Label correction (lead ruling):** `m0Stall-r4` is **STUCK, a true positive** — 140 s inert looping + PLAN_STALLED + judge stuck@140 s precedes its honest BLOCKED@153 s by 13 s; plan-consistent (§0 "looping without having said so", §5 M4 expects stall-loop alerts, §2.3 recovery-collapse). Lead's earlier "zero alerts on honest runs" framing was **over-strict** (lead acknowledges); the hard requirement is **zero false alerts on HEALTHY/PROGRESSING runs**. An alert that precedes an honest BLOCKED end on a genuinely looping run is desired, not a false alarm.
+- **Gate metric (lead ruling):** the gate is stuck **WINDOWS** flagged within two checks = **6/9 = 67% → FALLBACK A**. The distinct-run figure **6/7 = 86%** is nuance, NOT the gate. No relabeling to hit targets; labels fixed by lead.
+- **Corrected scores + caveat:** fine **0/53 healthy false alerts** (hard requirement met); stuck **6/9 windows (67%)** / **6/7 distinct (86%, nuance)**; **3/53 ≈ 0.057** false-alert rate caveat (small sample, correlated late slices noted).
+- **Judge non-determinism finding:** the temp-0 judge still varies run-to-run; the earlier "0 fine false alerts" was partly luck. Record this honestly (it bounds confidence in the zero-false-alert claim; the 3/N caveat applies).
+- **FALLBACK A ruling (lead, explicit):** commit the best 0-false-alert configuration (neutral prompt + aggregates + REVISIT_HINT), document the intermittent-wander gap as a **known v1 limitation**, proceed to the live phase. No further iteration.
+- **Intermittent-varied-wander limitation (v1):** the low-effort (plan decision #3), text-only cadence judge (plan decision #4) reliably catches sustained obvious stalls + all hard signals, but returns unknown/progressing on intermittent varied-activity wander at sampled moments. Completing-wander-with-redos is a **correctness** failure caught by independent server-side checkers (the redo IS detected there), not a watcher "stuck" (inability-to-progress) failure.
+- **TOP v2 follow-up — continuation-plan-snapshot product gap (core M2/M3 area):** the provider emits **no plan activity for the M2 seed**, so the live ledger has no plan snapshot until the first `browser_plan` call → open-flat (REVISIT_HINT) cannot fire on continuation wander. Fix = surface the seed plan to the ledger at turn start (provider/controller change). **Out of M4 scope; v2.** (Core's M3 `noteActivity`→ledger feed is correct for emitted activities; the gap is the seed not emitting an activity.)
+- **Watcher-deviation ruling (lead):** lead adds the explicit ruling to STATUS.md via the M6 pass (the watcher's two-strike stays the plan's literal rule — signal-corroborated first alert allowed; tightening options A/B rejected because they would suppress desired stall-loop alerts).
+
 ## Open items to resolve at M6 go
-- Final release-head npm test + gradle counts (re-verify clean checkout) — **PENDING**.
-- M3 zero-alert (task-11), M4 replay+live (task-5), M5 gradle/lint/fake-companion (task-6) acceptance results — **PENDING**.
+- Final release-head npm test + gradle counts (re-verify clean checkout) — **PENDING** (M4 head `e7503a6` = 1214/1214; final head after M5 full + any live-phase fixes re-verified).
+- M3 zero-alert (task-11) — **RESOLVED GREEN** (`0e67869`, marathon-long ×5 zero alerts on pin `2abb065`).
+- M4 replay+unit (task-5) — **RESOLVED FALLBACK A** (`cd77337`/`e7503a6`, 0/53 healthy fine, 6/9 windows); M4 **live phase** (stall-loop/sign-in-wall/marathon-long ×5 with judge wired) — **PENDING** (eval running on `e7503a6`).
+- M5 gradle/lint/fake-companion (task-6) — **RESOLVED** (android M5 committed `8f1f757`; on-device + push delivery still unrun, carried to STATUS.md).
 - Android versionName/versionCode target — **RESOLVED:** lead approved 0.7.0 / versionCode 6 (product version 2.4.0).
 - M2-report tuning section count correction (1152→1105) — do in M6 final pass.
 - Whether judge's `error.message` log hardening (optional note from review) landed in `6a20c39` — **RESOLVED:** judge dropped raw error.message (errorName only) for zero key-leak risk; reflect the key-never-logged guarantee in REMOTE-ACCESS/STATUS.
+- M4 STATUS.md carry-forward (§6) — content judge-confirmed; fold into STATUS.md in the M6 final pass incl. lead's watcher-deviation ruling.
