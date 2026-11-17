@@ -133,6 +133,8 @@ class ChatActions(
     val onWatchSteer: () -> Unit,
     /** Watch card: It's fine dismisses the alert and snoozes its kind. */
     val onWatchAck: () -> Unit,
+    /** V7: Settings — send a test notification and show the route's answer. */
+    val onSendTestPush: () -> Unit,
 )
 
 private enum class UtilityPanel { SETTINGS, DIAGNOSTICS, HISTORY }
@@ -404,6 +406,7 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
                 confirmForget = true
             },
             onEnableNotifications = actions.onEnableNotifications,
+            onSendTestPush = actions.onSendTestPush,
         )
     }
     SmoothFullScreenDialog(state.historyOpen, onDismiss = actions.onCloseHistory) { archived ->
@@ -1220,6 +1223,7 @@ private fun UtilityDialog(
     onEditPairing: () -> Unit,
     onForget: () -> Unit,
     onEnableNotifications: () -> Unit,
+    onSendTestPush: () -> Unit,
 ) {
     Surface(Modifier.fillMaxSize(), color = AgentBackground) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -1249,7 +1253,7 @@ private fun UtilityDialog(
                     verticalArrangement = Arrangement.spacedBy(26.dp),
                 ) {
                     if (panel == UtilityPanel.SETTINGS) {
-                        SettingsContent(state, onEditPairing, onForget, onEnableNotifications)
+                        SettingsContent(state, onEditPairing, onForget, onEnableNotifications, onSendTestPush)
                     } else {
                         DiagnosticsContent(state, onReconnect)
                     }
@@ -1260,7 +1264,7 @@ private fun UtilityDialog(
 }
 
 @Composable
-private fun SettingsContent(state: UiState, onEditPairing: () -> Unit, onForget: () -> Unit, onEnableNotifications: () -> Unit) {
+private fun SettingsContent(state: UiState, onEditPairing: () -> Unit, onForget: () -> Unit, onEnableNotifications: () -> Unit, onSendTestPush: () -> Unit) {
     Section("Model") {
         InfoCard {
             KeyValue("Current model", state.chat.health.model?.substringAfterLast('/') ?: "Unavailable")
@@ -1289,6 +1293,16 @@ private fun SettingsContent(state: UiState, onEditPairing: () -> Unit, onForget:
         if (status == PushState.Status.NEEDS_PERMISSION) {
             AgentButton("Allow notifications", onEnableNotifications, wide = true)
         }
+        // V7: the one-tap delivery check. The route's answer appears in the
+        // notice banner — including an explicit "no Firebase key" / "no
+        // registered phones" — so the button works in every push state.
+        AgentButton(
+            "Send test notification",
+            onSendTestPush,
+            wide = true,
+            enabled = state.link.status == LinkStatus.LIVE && state.chat.synced && !state.testPushInFlight,
+            loading = state.testPushInFlight,
+        )
         Text(
             "A notification only says that the agent needs you, may be stuck, finished, or failed. It never contains your prompt, the answer, or a screenshot. \"On\" means the computer has this phone's address, not that a notification is guaranteed to arrive.",
             style = AgentType.Hint,

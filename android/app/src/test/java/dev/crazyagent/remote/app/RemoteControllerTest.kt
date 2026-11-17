@@ -21,6 +21,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
 import org.junit.After
@@ -359,6 +360,66 @@ class RemoteControllerTest {
         assertNull(running.chat.marathon.watch.open)
         assertNull(running.chat.watchNotice)
         assertEquals("Watching this turn", dev.crazyagent.remote.state.marathonChipCopy(running.chat.marathon, busy = true, nowMs = 0))
+    }
+
+    // V7 (task-21): the Settings "Send test notification" button.
+
+    @Test fun theTestNotificationShowsTheRoutesAnswer() {
+        val c = controller().start()
+        c.awaitLive()
+        // A registered device: the answer reports the send (not a delivery claim).
+        fake.pushDevices["phone-1"] = kotlinx.serialization.json.buildJsonObject { put("fcmToken", "fcm-token-A:" + "a".repeat(120)) }
+        c.sendTestNotification()
+        val sent = c.await { it.notice?.startsWith("Test notification sent to 1 device.") == true && !it.testPushInFlight }
+        assertEquals(1, fake.testPushPosts.size)
+        assertNotNull(fake.testPushPosts.single()["clientCommandId"])
+        assertTrue(sent.notice!!.contains("Delivery is not guaranteed"))
+
+        // Zero devices: an explicit answer, not an error.
+        fake.pushDevices.clear()
+        fake.resetTestPushWindow()
+        c.dismissNotice()
+        c.sendTestNotification()
+        c.await { it.notice == "No phones are registered for push on this computer." }
+        assertEquals(2, fake.testPushPosts.size)
+
+        // No Firebase key on the computer: also explicit.
+        fake.pushConfigured = false
+        fake.resetTestPushWindow()
+        c.dismissNotice()
+        c.sendTestNotification()
+        c.await { it.notice == "The computer has no Firebase key, so it cannot send notifications." }
+        assertEquals(3, fake.testPushPosts.size)
+        assertEquals(LinkStatus.LIVE, c.state.value.link.status)
+    }
+
+    @Test fun aRateLimitedTestNotificationShowsTheRefusal() {
+        val c = controller().start()
+        c.awaitLive()
+        fake.refuseNextTestPush = true
+        c.sendTestNotification()
+        val refused = c.await { it.notice?.contains("Too many test notifications") == true && !it.testPushInFlight }
+        assertEquals(LinkStatus.LIVE, refused.link.status)
+        assertEquals(1, fake.testPushPosts.size)
+    }
+
+    @Test fun anUncertainTestNotificationKeepsItsIdForTheNextTap() {
+        val c = controller().start()
+        c.awaitLive()
+        fake.pushDevices["phone-1"] = kotlinx.serialization.json.buildJsonObject { put("fcmToken", "fcm-token-A:" + "a".repeat(120)) }
+        fake.loseNextTestPush = true
+        c.sendTestNotification()
+        c.await { it.notice?.contains("The test notification was not confirmed") == true }
+        assertEquals(1, fake.testPushPosts.size)
+        c.dismissNotice()
+        fake.resetTestPushWindow()
+        c.sendTestNotification()
+        c.await { it.notice?.startsWith("Test notification sent") == true }
+        assertEquals(2, fake.testPushPosts.size)
+        assertEquals(
+            fake.testPushPosts[0]["clientCommandId"]?.jsonPrimitive?.content,
+            fake.testPushPosts[1]["clientCommandId"]?.jsonPrimitive?.content,
+        )
     }
 
     @Test fun oldStoredPlanModePendingArmsMarathonThenSendsPlainly() {

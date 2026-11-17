@@ -10,6 +10,7 @@ import dev.crazyagent.remote.data.StreamSignal
 import dev.crazyagent.remote.data.array
 import dev.crazyagent.remote.data.bool
 import dev.crazyagent.remote.data.eventStream
+import dev.crazyagent.remote.data.int
 import dev.crazyagent.remote.data.obj
 import dev.crazyagent.remote.data.string
 import dev.crazyagent.remote.notifications.PushMessage
@@ -111,6 +112,7 @@ data class UiState(
     val legacyPlanMode: Boolean = false,
     val marathonInFlight: Boolean = false,
     val watchAckInFlight: Boolean = false,
+    val testPushInFlight: Boolean = false,
     val notice: String? = null,
     /** Last screenshot that finished downloading; kept while a newer one loads. */
     val liveImage: LiveImage? = null,
@@ -187,6 +189,8 @@ class RemoteController(
     private var marathonCommand: Pair<Boolean, String>? = null
     /** The watch ack in flight: alert ID to its idempotent command ID. */
     private var watchAckCommand: Pair<String, String>? = null
+    /** The test notification in flight: its idempotent command ID. */
+    private var testPushCommandId: String? = null
     /** A tapped notification waiting for the next full resync to be checked against. */
     private var openedFrom: PushMessage? = null
     private var imageJob: Job? = null
@@ -274,6 +278,52 @@ class RemoteController(
     /** The watch card's Steer… action: the composer takes it from here. */
     fun steerFromWatch() {
         notice(if (_state.value.busy) "Type a steer message and send — it replaces the running turn" else "Type a message and send")
+    }
+
+    /**
+     * V7: the Settings "Send test notification" button. The route's answer is
+     * shown verbatim in the notice banner — an explicit not-configured /
+     * no-devices answer is the point, not an error. Idempotent command ID kept
+     * on an uncertain answer so tapping again repeats the same command.
+     */
+    fun sendTestNotification() {
+        val current = _state.value
+        if (current.link.status != LinkStatus.LIVE || !current.chat.synced || current.testPushInFlight) return
+        val id = testPushCommandId ?: newId().also { testPushCommandId = it }
+        _state.update { it.copy(testPushInFlight = true) }
+        scope.launch {
+            val result = api.sendTestPush(id)
+            _state.update { it.copy(testPushInFlight = false) }
+            when (result) {
+                is ApiResult.Ok -> {
+                    testPushCommandId = null
+                    notice(testPushAnswer(result.body))
+                }
+                is ApiResult.Rejected -> {
+                    testPushCommandId = null
+                    onRejected(result)
+                }
+                // Keep the ID so tapping again repeats the same command.
+                is ApiResult.Unreachable -> notice("The test notification was not confirmed. ${result.reason}")
+            }
+        }
+    }
+
+    /** Plain-language summary of the route's {sent, failed, pruned, skipped} answer. */
+    private fun testPushAnswer(body: JsonObject): String {
+        val sent = body.int("sent") ?: 0
+        val failed = body.int("failed") ?: 0
+        val pruned = body.int("pruned") ?: 0
+        return when (body.string("skipped")) {
+            "not-configured" -> "The computer has no Firebase key, so it cannot send notifications."
+            "no-devices" -> "No phones are registered for push on this computer."
+            else -> buildString {
+                append(if (sent == 1) "Test notification sent to 1 device." else "Test notification sent to $sent devices.")
+                if (failed > 0) append(" $failed failed.")
+                if (pruned > 0) append(" $pruned dead registration(s) removed.")
+                append(" Delivery is not guaranteed until it appears on the phone.")
+            }
+        }
     }
 
     fun addImages(images: List<PromptImage>) = _state.update { it.copy(attachments = (it.attachments + images).take(MAX_IMAGES)) }

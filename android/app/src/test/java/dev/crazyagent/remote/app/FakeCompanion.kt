@@ -61,6 +61,13 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
     /** Registered push devices: device ID to the body it sent. */
     val pushDevices = java.util.concurrent.ConcurrentHashMap<String, JsonObject>()
     val pushDeletes = CopyOnWriteArrayList<String>()
+    /** V7: every POST /push/test body, in order. */
+    val testPushPosts = CopyOnWriteArrayList<JsonObject>()
+    private var lastTestPushMs = 0L
+    /** V7: force the next test push to answer 429 (rate limit). */
+    @Volatile var refuseNextTestPush = false
+    /** V7: drop the next test push response without processing it. */
+    @Volatile var loseNextTestPush = false
     /** Whether the computer has an FCM key. */
     @Volatile var pushConfigured = true
     /** Report the side panel as disconnected. */
@@ -111,6 +118,7 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
             path == "/remote/v1/new" && request.method == "POST" -> postNew(body(request))
             path == "/remote/v1/marathon" && request.method == "POST" -> postMarathon(body(request))
             path == "/remote/v1/marathon/watch/ack" && request.method == "POST" -> postWatchAck(body(request))
+            path == "/remote/v1/push/test" && request.method == "POST" -> postPushTest(body(request))
             path == "/remote/v1/snapshots" && request.method == "POST" -> postSnapshot(body(request))
             path.startsWith("/remote/v1/push/devices/") && request.method == "PUT" -> {
                 val device = path.substringAfterLast('/')
@@ -269,6 +277,44 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
         outcomes[id] = outcome
         json(outcome.first, outcome.second)
     }
+
+    /**
+     * V7: the test-notification route, mirroring the real one — idempotent per
+     * command id, 1/minute, explicit not-configured / no-devices answers.
+     */
+    private fun postPushTest(body: JsonObject): MockResponse = synchronized(lock) {
+        testPushPosts += body
+        if (loseNextTestPush) {
+            loseNextTestPush = false
+            return MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build()
+        }
+        val id = body.str("clientCommandId")
+        outcomes[id]?.let { return json(it.first, it.second) }
+        val now = System.currentTimeMillis()
+        val outcome = if (refuseNextTestPush || (lastTestPushMs != 0L && now - lastTestPushMs < 60_000)) {
+            refuseNextTestPush = false
+            429 to JsonObject(error("RATE_LIMITED", "Too many test notifications. Wait a minute.") + ("clientCommandId" to JsonPrimitive(id)))
+        } else {
+            lastTestPushMs = now
+            val summary = when {
+                !pushConfigured -> mapOf("skipped" to JsonPrimitive("not-configured"))
+                pushDevices.isEmpty() -> mapOf("skipped" to JsonPrimitive("no-devices"))
+                else -> emptyMap()
+            }
+            200 to buildJsonObject {
+                put("clientCommandId", id)
+                put("sent", if (summary.isEmpty()) pushDevices.size else 0)
+                put("failed", 0)
+                put("pruned", 0)
+                for ((key, value) in summary) put(key, value)
+            }
+        }
+        outcomes[id] = outcome
+        json(outcome.first, outcome.second)
+    }
+
+    /** V7 test control: forget the rate-limit window so another send is allowed. */
+    fun resetTestPushWindow() = synchronized(lock) { lastTestPushMs = 0L }
 
     private fun marathonBody(): JsonObject = buildJsonObject {
         put("enabled", marathonEnabled)
