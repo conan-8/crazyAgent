@@ -88,12 +88,12 @@ Already updated incrementally for M1–M3; M6 verifies completeness and adds M4/
 - §8 Next work → marathon acceptance follow-ups + single-turn wander flag.
 
 **README.md:**
-- "New in v2.3.0" → add "New in v2.4.0" section: marathon mode (sticky switch, plan carry-over, deterministic + model watcher, phone chip/watch card/checklist, WATCH push). Version references 2.3.0→2.4.0; Android 0.6.0(5)→**PENDING** (0.7.0(6) pattern, lead decision).
+- "New in v2.3.0" → add "New in v2.4.0" section: marathon mode (sticky switch, plan carry-over, deterministic + model watcher, phone chip/watch card/checklist, WATCH push). Version references 2.3.0→2.4.0; Android 0.6.0(5)→0.7.0(6) (lead-approved).
 - "Operating behavior" / "Important behavior" → marathon switch + watcher read-only note.
 - Install/Update instructions → version 2.4.0; reload-extension-then-restart-companion order.
 
 **RELEASE-NOTES.md:**
-- Convert "# Unreleased (post-v2.3.0)" into "# crazyAgent v2.4.0" (changes since v2.3.0): marathon mode M1–M5, the fix chain, per-commit test counts (§0), accepted real-model results (M1/M2; M3/M4/M5 **PENDING**), still-unrun (push delivery/on-device/M4 live). Extension numeric version 2.4.0; Android **PENDING**. Keep the dated model-pin/composer-polish entries under the release.
+- Convert "# Unreleased (post-v2.3.0)" into "# crazyAgent v2.4.0" (changes since v2.3.0): marathon mode M1–M5, the fix chain, per-commit test counts (§0), accepted real-model results (M1/M2; M3/M4/M5 **PENDING**), still-unrun (push delivery/on-device/M4 live). Extension numeric version 2.4.0; Android 0.7.0(6) (lead-approved). Keep the dated model-pin/composer-polish entries under the release.
 - Preserve the v2.3.0 and earlier sections verbatim.
 
 **e2e/checklist.md:**
@@ -106,7 +106,7 @@ Already updated incrementally for M1–M3; M6 verifies completeness and adds M4/
 - `package.json:3` `"version": "2.3.0"` → **2.4.0**.
 - `extension/manifest.json:4` `"version": "2.3.0"` → **2.4.0** (numeric update version).
 - `companion/index.mjs:50` `const VERSION = '2.3.0'` → **2.4.0** (flows to `RemoteHub.serverVersion` → `/state server.version` and `/health`).
-- `android/app/build.gradle.kts:27` `versionCode = 5` → **6** and `:28` `versionName = "0.6.0"` → **0.7.0** (**PENDING lead decision** — the v2.3.0 release used 0.6.0(5); follow the same minor-bump pattern unless lead specifies otherwise).
+- `android/app/build.gradle.kts:27` `versionCode = 5` → **6** and `:28` `versionName = "0.6.0"` → **0.7.0** (**APPROVED by lead 2026-11-16** — new phone features, additive protocol, minor bump matches the established scheme; product version stays 2.4.0 per plan).
 - Docs that hard-code versions: README.md, RELEASE-NOTES.md, HANDOFF-QUICK.md "Current build", docs/STATUS.md — update to 2.4.0 / Android target.
 - Check for any other `2.3.0` literal (grep at M6 go) — e.g. config/service files, android/README.md.
 
@@ -122,6 +122,6 @@ Already updated incrementally for M1–M3; M6 verifies completeness and adds M4/
 ## Open items to resolve at M6 go
 - Final release-head npm test + gradle counts (re-verify clean checkout) — **PENDING**.
 - M3 zero-alert (task-11), M4 replay+live (task-5), M5 gradle/lint/fake-companion (task-6) acceptance results — **PENDING**.
-- Android versionName/versionCode target (lead decision) — **PENDING**.
+- Android versionName/versionCode target — **RESOLVED:** lead approved 0.7.0 / versionCode 6 (product version 2.4.0).
 - M2-report tuning section count correction (1152→1105) — do in M6 final pass.
 - Whether judge's `error.message` log hardening (optional note from review) landed in `6a20c39` — **RESOLVED:** judge dropped raw error.message (errorName only) for zero key-leak risk; reflect the key-never-logged guarantee in REMOTE-ACCESS/STATUS.
