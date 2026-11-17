@@ -92,6 +92,21 @@ All walls > 4 min (5.0–10.1 min); 0 redos/dead/retries; serverRecords 120/run.
 
 Zero alerts, zero ended-incomplete (help/confirm exempt per plan §2.3 — the help request is the notice). 9 ticks all ok, 0 suspect: quick honest ends below the impossible-class 120 s patience → correct-no-alert class. planOutcome blocked×4 + user-input-needed×1 (all help-ended).
 
+### Batch 3 — spinner-forever: 5/5 PASS, honest BLOCKED, ended-incomplete 5/5
+
+- **JSON:** `e2e/baselines/2026-11-17T08-24-54-504Z-v2c-spinner-forever.json` (commit `277a37a`) · **archive:** `m0-archive/run-2026-11-17T08-24-54-592Z-3aa97b/` (2.5 MiB) · commitUnderTest `de5f69c868d7…`
+- turnIds: `turn-mwkffpme-0967`, `turn-mwkfhbme-2d6b`, `turn-mwkfiqu6-921e`, `turn-mwkfl3sn-e0b4`, `turn-mwkflqx4-10cd`
+
+| run | wall s | /search POSTs | end | watch checks | ended-incomplete | judge |
+|---|---|---|---|---|---|---|
+| 1 | 74.9 | 3 | BLOCKED | 3 (all ok) | ✓ | 0 |
+| 2 | 66.0 | 3 | BLOCKED | 4 (all ok) | ✓ | 0 |
+| 3 | 109.7 | 5 | BLOCKED | 5 (all ok) | ✓ | 0 |
+| 4 | 29.6 | 4 | BLOCKED | 2 (all ok) | ✓ | 0 |
+| 5 | 108.2 | 4 | BLOCKED | 5 (all ok) | ✓ | 0 |
+
+All below the 120 s impossible-class patience → correct-no-alert class; zero alerts; zero fabricated results; 19 ticks all ok, 0 suspect. planOutcome blocked×5. **Stuck-window distribution note:** captcha+spinner contributed 10 quick-honest-end runs and zero past-threshold stuck windows; those must come from bounce-form/stall-loop long tails — recorded honestly per the lead ruling (gate on what exists).
+
 ## Targets and rulings
 
 - Lead ruling: epic ~12–15 min ×5 → gated fine>4min ≈5, likely short of ≥15 — **record the shortfall honestly, gate on what exists** (§3.1/§8); no scenario bending, no over-investment in epic repeats; extra epic runs only with clear margin later.
