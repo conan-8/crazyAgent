@@ -31,6 +31,7 @@ import { PushRegistry, PushService, createFcmProvider, pushTypeForTurn } from '.
 import { PROTOCOL_VERSION, errorMessage } from './protocol.mjs'
 import { clearKeyFile, resolveApiKey, writeKeyFile } from './credentials.mjs'
 import { readSettings, writeSettings } from './settings.mjs'
+import { Updater } from './updater.mjs'
 import {
   DEFAULT_BASE_URL,
   baseEffortFor,
@@ -50,7 +51,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const VERSION = '2.3.0'
 const PROVIDER = 'openrouter'
 
-const BOOLEAN_FLAGS = new Set(['no-dsh', 'no-auto-capture', 'new-token', 'help', 'remote', 'pair-remote', 'new-remote-token', 'confirm-irreversible'])
+const BOOLEAN_FLAGS = new Set(['no-dsh', 'no-auto-capture', 'new-token', 'help', 'remote', 'pair-remote', 'new-remote-token', 'confirm-irreversible', 'no-auto-update'])
 
 /** @param {string[]} argv */
 function parseArgs(argv) {
@@ -110,6 +111,8 @@ if (cli.help === true) {
   --fcm-credentials <path>      Firebase service-account key for phone push
                                 (default .dsh-home/browser-agent/fcm-service-account.json
                                 when present; without one, push is off)
+  --no-auto-update              never install newer releases automatically
+                                (also CRAZYAGENT_AUTO_UPDATE=0)
   --pair-remote                 print the remote token and pairing details, then exit
   --new-remote-token            rotate the remote token (revokes paired phones; a
                                 running companion picks it up), then exit
@@ -312,6 +315,8 @@ let remoteHub
 let remoteServer
 /** @type {PushService | undefined} */
 let pushService
+/** @type {Updater | undefined} */
+let updater
 
 /** @param {string} baseUrl @param {boolean} [force] */
 async function getModels(baseUrl, force = false) {
@@ -822,7 +827,36 @@ if (remoteEnabled) {
   })
 }
 
+// Automatic updates: only a clean checkout of a release tag is ever touched,
+// and only while no turn runs and marathon is off (see updater.mjs).
+const autoUpdateOff = cli['no-auto-update'] === true || process.env.CRAZYAGENT_AUTO_UPDATE === '0'
+updater = new Updater({
+  root: ROOT,
+  version: VERSION,
+  stateFile: join(browserDir, 'update-state.json'),
+  enabled: !autoUpdateOff && !noDsh,
+  disabledReason: autoUpdateOff ? 'switched off (--no-auto-update / CRAZYAGENT_AUTO_UPDATE=0)' : 'bridge-only test mode',
+  supervised: process.env.CRAZYAGENT_SUPERVISED === '1',
+  isIdle: () => controller.running !== true && controller.marathonState().enabled !== true,
+  beforeInstall: () => stopServices('update'),
+  exit: code => process.exit(code),
+  log,
+  record: (event, data) => {
+    try {
+      logStore.record('companion', event, data, { severity: 'info', noSignal: true })
+    } catch {
+      // Logging must never break the updater.
+    }
+  },
+})
+controller.addObserver({
+  turnStarted: () => updater?.noteActivity(),
+  turnEnded: () => updater?.noteActivity(),
+})
+bridge.healthExtra = () => ({ version: VERSION, update: updater?.status() ?? null })
+
 await bridge.start()
+updater.start()
 
 if (remoteHub !== undefined) {
   // Ensure a credential exists without printing it.
@@ -865,6 +899,7 @@ crazyAgent companion ${VERSION}
   api key: ${credentialsInfo().configured ? `configured (${apiKeySource})` : 'not configured — enter it in the side panel'}
   dsh:     ${noDsh ? 'disabled (--no-dsh)' : !llmConfig ? 'waiting for model selection' : !apiKey ? 'waiting for API key' : 'warming...'}
   push:    ${pushService?.configured ? `FCM (${pushService.registry.size} device${pushService.registry.size === 1 ? '' : 's'})` : remoteEnabled ? 'off (no FCM service-account key)' : 'off'}
+  update:  ${updater.status().state === 'disabled' ? `off (${updater.status().reason})` : process.env.CRAZYAGENT_SUPERVISED === '1' ? 'automatic (newest release, installed while idle)' : 'notify only (start with "npm run dev" for automatic installs)'}
   remote:  ${remoteServer ? `${remoteServer.address} (instance ${remoteHub?.instanceId}; token via --pair-remote)` : remoteEnabled ? 'failed to start' : 'off (enable with --remote)'}
   logs:    ${logStore.path}
   run:     ${runId}
@@ -917,16 +952,28 @@ if (!noDsh) {
   logStore.record('dsh', 'disabled', { reason: '--no-dsh' }, { severity: 'info' })
 }
 
-/** @param {string} signal */
-async function shutdown(signal) {
+/** Stop every server and close the log; the process is still alive afterwards. @param {string} signal */
+async function stopServices(signal) {
   log(`shutting down (${signal})`)
   logStore.record('companion', 'shutdown', { signal }, { severity: 'info' })
+  updater?.stop()
   await remoteServer?.stop().catch(() => {})
   remoteHub?.close()
   controller.dispose()
   await bridge.stop().catch(() => {})
   await runner?.close().catch(() => {})
   await logStore.close().catch(() => {})
+}
+
+/** @param {string} signal */
+async function shutdown(signal) {
+  // An install is already past the point of stopping the servers; let it
+  // finish (it restores the old version itself on failure) and exit on its own.
+  if (updater?.status().state === 'installing') {
+    log(`${signal} received during an update; exiting when the install finishes`)
+    return
+  }
+  await stopServices(signal)
   process.exit(0)
 }
 process.on('SIGINT', () => { void shutdown('SIGINT') })

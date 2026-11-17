@@ -21,6 +21,10 @@ The configured OpenRouter-compatible provider and the selected model’s upstrea
 
 Provider retention and training policies apply. Do not use the agent on content you are not willing to send to those providers.
 
+## Update checks
+
+About every six hours the companion requests `https://api.github.com/repos/conan-8/crazyAgent/releases/latest` and, when a newer release exists, fetches that tag from GitHub with Git and runs `npm ci` (which downloads dependencies from the npm registry). These requests carry no token, key, prompt, page content, or identifier beyond what any HTTPS request reveals (your IP address) and a fixed client name, `crazyagent-updater`. Start the companion with `--no-auto-update` or `CRAZYAGENT_AUTO_UPDATE=0` to make none of them. The extension's part is local: it reads its own `manifest.json` from disk and contacts nothing.
+
 ## Capture behavior
 
 With auto-view enabled, ordinary pages attach bounded rendered text and labels without a screenshot. Known canvas editors attach a viewport screenshot. Explicit screenshot tools can capture the viewport, a bounded full page, or an in-viewport region; full-page capture temporarily changes viewport metrics and then restores them.

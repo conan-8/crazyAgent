@@ -9,6 +9,8 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=%h/Documents/GitHub/crazyAgent
 Environment=CRAZYAGENT_MODEL=deepseek/deepseek-v4.1-flash-1017
+# Restart=always restarts the companion after an automatic update (exit code 75).
+Environment=CRAZYAGENT_SUPERVISED=1
 Environment=CRAZYAGENT_REMOTE_PUBLIC_HOST=conan-expertbook.tail11f47e.ts.net
 ExecStart=%h/.hermes/node/bin/node %h/Documents/GitHub/crazyAgent/companion/index.mjs --remote
 Restart=always

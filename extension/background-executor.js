@@ -66,6 +66,8 @@ export class BackgroundExecutor {
     this.socket = null
     this.ready = false
     this.inFlight = 0
+    /** A turn this worker executes is between its first frame and its end. */
+    this.running = false
     this.ticking = false
     this.authFailedToken = null
     /** @type {Set<{postMessage: (message: any) => void}>} */
@@ -165,6 +167,7 @@ export class BackgroundExecutor {
       case 'chat.user':
         // Only turns the panel did not start reach this frame; they hold one
         // debugger lease for the whole turn, as the panel does.
+        this.running = true
         void Promise.resolve().then(() => this.deps.beginRun()).catch(() => {})
         return
       case 'chat.done':
@@ -177,6 +180,7 @@ export class BackgroundExecutor {
   }
 
   #finishRun() {
+    this.running = false
     void Promise.resolve().then(() => this.deps.endRun()).catch(() => {})
     void Promise.resolve()
       .then(() => this.deps.execute('labels.clear', {}, this.settings))

@@ -63,6 +63,19 @@ Update my existing crazyAgent installation to v2.3.0 from https://github.com/con
 6. Finish with the previous and resulting versions or commits, install path, test result, verified health and side-panel status, and the exact restart command. Never ask me to paste credentials into chat, and never print, log, commit, or transmit them yourself. Keep the updated companion running and do not run website tasks or model-spending tests until I confirm the update is complete.
 ```
 
+## Automatic updates
+
+From the release after v2.3.0 on, an installation keeps itself current. About every six hours the companion asks GitHub for the latest published release. When a newer one exists it fetches that tag, waits until no turn has run for about ten minutes (and marathon is off), then stops its servers, checks the tag out, runs `npm ci` and the setup script, and restarts on the new version. About a minute later the extension notices that its files on disk are newer and reloads itself; reopen the side panel afterwards (a reload closes it, and the background executor keeps a phone connected meanwhile). Configuration, the API key, tokens, and sessions in `.dsh-home` are not touched.
+
+It only ever updates a standard installation and otherwise leaves everything alone:
+
+- The checkout must be the official repository, sit exactly on the release tag of the running version, and have no modified tracked files. A development checkout on a branch, a fork, or an installation with local edits is never updated; `/health` reports why under `update.reason`.
+- The companion must have been started by something that restarts it: `npm run dev` (which now restarts the companion after an update) or a service with `CRAZYAGENT_SUPERVISED=1` such as `config/crazyagent.service`. Started directly with `node companion/index.mjs`, it only logs that an update is available.
+- Pre-releases are ignored. A failed install restores the previous version and is not retried for a day; the reason is in `.dsh-home/browser-agent/update-state.json`.
+- Turn it off with `--no-auto-update` or `CRAZYAGENT_AUTO_UPDATE=0`.
+
+v2.3.0 and older do not contain the updater: move those to a newer release once with the prompt above. The Android app is not updated automatically; install new APKs as described below.
+
 ## What it can do
 
 - **Generally everything a human can do on a browser, including filling forms, doing work, planning, and research.**

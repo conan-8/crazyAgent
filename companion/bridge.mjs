@@ -81,6 +81,8 @@ export class Bridge {
     this.onImage = options.onImage
     /** Reconnect grace window before browser commands fail with SIDE_PANEL_CLOSED. */
     this.uiGraceMs = resolveUiGraceMs(options.uiGraceMs)
+    /** @type {(() => Record<string, unknown>) | undefined} */
+    this.healthExtra = undefined
     /** @type {import('ws').WebSocket | undefined} */
     this.ui = undefined
     /** @type {import('ws').WebSocket | undefined} */
@@ -103,12 +105,22 @@ export class Bridge {
     this.stopped = false
   }
 
+  /** Extra read-only /health fields (version, update status). Never secrets. */
+  #healthExtra() {
+    try {
+      const extra = this.healthExtra?.()
+      return extra !== null && typeof extra === 'object' ? extra : {}
+    } catch {
+      return {}
+    }
+  }
+
   async start() {
     this.stopped = false
     const http = createServer((req, res) => {
       if (req.url === '/health') {
         res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ ok: true, ui: this.hasUi(), tools: this.tools !== undefined, port: this.port }))
+        res.end(JSON.stringify({ ok: true, ui: this.hasUi(), tools: this.tools !== undefined, port: this.port, ...this.#healthExtra() }))
         return
       }
       res.writeHead(404, { 'content-type': 'text/plain' })
