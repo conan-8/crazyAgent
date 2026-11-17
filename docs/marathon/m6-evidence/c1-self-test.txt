@@ -1,0 +1,52 @@
+ok   plan good: pass
+ok   plan wrong page: fail
+ok   plan collateral edit: fail
+ok   plan unfinished: partial
+ok   plan no chat.done: fail
+ok   plan not armed: partial
+ok   resume both paths: pass
+ok   resume in-process only: partial
+ok   resume restart-only: partial
+ok   resume no code: fail
+ok   resume restart answer no code: fail
+ok   resume wrong session: fail
+ok   resume restart wrong session: fail
+ok   resume both refused: fail
+ok   resume negative control leak: fail
+ok   resume intervening wrong: fail
+ok   steer good: pass
+ok   steer in-flight click: pass
+ok   steer duplicate actions: fail
+ok   steer first not stopped: fail
+ok   steer second failed: fail
+ok   steer not accepted: fail
+ok   steer-plan good: pass
+ok   steer-plan continued by turn2: pass
+ok   steer-plan in-flight click: pass
+ok   steer-plan annotated turn.end still authoritative: pass
+ok   steer-plan aborted, only carried revision proves the plan: pass
+ok   steer-plan not accepted: fail
+ok   steer-plan first not stopped: fail
+ok   steer-plan second failed: fail
+ok   steer-plan no plan before steer: fail
+ok   steer-plan non-aborted null turn.end cannot fall back: fail
+ok   steer-plan turn2 not armed: fail
+ok   steer-plan wrong carried revision: fail
+ok   steer-plan wrong carried, no atSteer log: fail
+ok   steer-plan no carry in prompt: fail
+ok   steer-plan plan lost: fail
+ok   steer-plan duplicate clicks: fail
+ok   cycles good: pass
+ok   cycles busy: fail
+ok   cycles stuck: fail
+ok   cycles orphaned: fail
+ok   cycles rotation leak: fail
+ok   cycles final orphan: fail
+ok   minimized good: pass
+ok   minimized blank: fail
+ok   minimized white frame: fail
+ok   minimized no images: fail
+ok   minimized turn failed: fail
+ok   minimized blocked: blocked
+
+self-test passed: every checker accepts its good evidence and rejects every mutation.

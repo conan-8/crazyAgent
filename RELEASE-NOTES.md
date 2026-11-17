@@ -1,4 +1,23 @@
-# Unreleased (post-v2.3.0)
+# crazyAgent v2.4.0
+
+Changes since **v2.3.0**. This release adds **marathon mode** — a sticky, companion-owned planning switch with plan carry-over and a read-only watcher (deterministic alerts plus an optional model judge) — and the maintainer's **automatic updates** feature. Marathon M1–M5 real-model acceptance is green on the isolated harness; the acceptance evidence below is **marathon-scoped**. The automatic-updater feature was landed and verified by the maintainer (its own tests + a real scratch-clone update), **not** independently accepted by the marathon team.
+
+The extension uses numeric update version `2.4.0`. The Android app is version `0.7.0` with version code `6`; **the signed v2.4.0 release APK is pending maintainer publication** (the marathon phone features ship in it once available).
+
+## Marathon mode (M1–M5)
+
+- **Sticky switch (`/marathon`, unlisted legacy alias `/plan`):** one companion-owned state shared by the side panel and the phone API; clients render it and never optimistically flip it; off on `/new`, a chat switch, or companion restart. A legacy one-shot `planMode:true` message still arms a single turn. A mid-turn toggle never re-arms the running turn. (M1; `docs/marathon/M1-report.md`, independent check `scripts/marathon-independent-check.mjs`.)
+- **Plan carry-over + refill limits:** a turn ending with open checklist items carries the list into the next turn (fail-closed seed validation); stop a long task and "continue" resumes from the first open item without redoing completed work; an unrelated question after a stopped marathon is answered without plan nudges. Completion nudges/stale reminders refill per accepted revision under a per-turn lifetime cap. (M2 + task-10 continuation-fidelity tuning; `docs/marathon/M2-report.md`. Real-model: stop-then-continue ×5 **5/5** zero redos, unrelated ×5 **5/5**, marathon-long ×5 within M0 noise, steer-plan PASS — pin `2abb065`.)
+- **Deterministic watcher:** a pure per-turn ledger alerts on hard stalls — silence (300 s), a hung tool (240 s), a lost executor (120 s) — without the model; one open alert, kind-change/15-min re-alert, ≤3 alerts+pushes per turn, recovery collapse, "It's fine" snooze, and an `ended-incomplete` notice on unfinished/blocked/dead/error endings. The panel shows a watch row (Stop / Steer… / It's fine) + amber chip; the phone gets a watch card. The watcher **only reports** — it never steers, stops, or changes the turn. (M3; `docs/marathon/M3-report.md`, real-extension fixtures `scripts/watch-fixtures-e2e.mjs`. Real-model marathon-long ×5 **ZERO alerts** on healthy runs.)
+- **Model judge (M4, FALLBACK A):** one stateless tool-less chat-completions check per cadence window (key never logged), two-strike alert rule, budget 40 calls / 150k input tokens per turn, strict schema validation → `unknown` on any deviation, bounded per-turn aggregates + a `REVISIT_HINT` soft signal. A verdict is a diagnostic, not verification; hard signals alert without it and it can never veto them. **Recorded deviation:** stuck-window detection 6/9 (67%) against the ≥80% target (distinct-run 6/7 = 86% is nuance, not the gate); **zero false alerts on healthy runs is met** (0/53 replay fine windows; live 15/15 zero healthy false alerts with 5 true-positive alerts on genuine looping). The v1 judge is low-effort/text-only/cadence-sampled and intermittent varied-activity wander can read as progressing; the top v2 follow-up is the continuation-plan-snapshot gap. See `docs/STATUS.md` Known limitations + `docs/marathon/M4-report.md` (offline replay `scripts/watcher-eval.mjs`).
+- **Phone (M5):** marathon chip (visible+tappable while busy), watch card, collapsible plan checklist, and a `WATCH` push type (dedupe `turnId:type:ordinal`). Code + JVM + fake-companion verified; **on-device phone marathon screens + WATCH push delivery are still unrun** (see `docs/STATUS.md`). `docs/marathon/M5-report.md`.
+- **Watcher cost is reported separately** from agent usage (`watch {checks, alerts, usage}` per turn; judge tokens logged apart).
+
+Marathon per-commit test counts: 1055 pre-M1 / 1085 M1 / 1105 M2+tuning / 1152 M3 / 1214 M4 / 1237 release head (with the maintainer's updater tests). Evidence: `docs/marathon/M0-baseline.md` … `M6-report.md` + `e2e/baselines/`.
+
+## Automatic updates (maintainer feature, `cdcd9d1`)
+
+*Landed and verified by the maintainer — not independently accepted by the marathon team. The marathon acceptance evidence above is marathon-scoped. Preserved verbatim from the maintainer's release note:*
 
 ## 2026-11-16 — automatic updates
 

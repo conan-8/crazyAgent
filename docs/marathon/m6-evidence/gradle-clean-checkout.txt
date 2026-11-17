@@ -1,0 +1,62 @@
+Calculating task graph as no cached configuration is available for tasks: testDebugUnitTest lintDebug
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:extractProguardFiles
+> Task :app:javaPreCompileDebug FROM-CACHE
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:javaPreCompileDebugUnitTest FROM-CACHE
+> Task :app:extractDeepLinksDebug FROM-CACHE
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugBuildConfig
+> Task :app:generateDebugResources FROM-CACHE
+> Task :app:processDebugNavigationResources FROM-CACHE
+> Task :app:checkDebugAarMetadata
+> Task :app:compileDebugNavigationResources FROM-CACHE
+> Task :app:processDebugMainManifest FROM-CACHE
+> Task :app:packageDebugResources FROM-CACHE
+> Task :app:processDebugManifest FROM-CACHE
+> Task :app:processDebugManifestForPackage FROM-CACHE
+> Task :app:mergeDebugResources FROM-CACHE
+> Task :app:parseDebugLocalResources FROM-CACHE
+> Task :app:generateDebugRFile FROM-CACHE
+> Task :app:processDebugResources FROM-CACHE
+> Task :app:compileDebugKotlin
+> Task :app:compressDebugJavaRes FROM-CACHE
+> Task :app:compileDebugJavaWithJavac
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:generateDebugLintReportModel
+> Task :app:generateDebugAndroidTestLintModel
+> Task :app:generateDebugUnitTestLintModel
+> Task :app:lintAnalyzeDebugAndroidTest
+
+> Task :app:compileDebugUnitTestKotlin
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/app/LiveFakeCompanionTest.kt:71:50 Unnecessary non-null assertion (!!) on a non-null receiver of type 'LiveImage'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/app/LiveFakeCompanionTest.kt:79:49 Unnecessary non-null assertion (!!) on a non-null receiver of type 'HelpRequest'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/app/RemoteControllerTest.kt:275:54 Unnecessary non-null assertion (!!) on a non-null receiver of type 'WatchNotice'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/app/RemoteControllerTest.kt:276:83 Unnecessary non-null assertion (!!) on a non-null receiver of type 'WatchNotice'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/app/RemoteControllerTest.kt:293:87 Unnecessary non-null assertion (!!) on a non-null receiver of type 'WatchNotice'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/app/RemoteControllerTest.kt:346:71 Unnecessary non-null assertion (!!) on a non-null receiver of type 'ConfirmRequest'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/app/RemoteControllerTest.kt:664:43 Unnecessary non-null assertion (!!) on a non-null receiver of type 'LiveImage'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/app/RemoteControllerTest.kt:871:94 Unnecessary non-null assertion (!!) on a non-null receiver of type 'HelpRequest'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/app/RemoteControllerTest.kt:872:52 Unnecessary non-null assertion (!!) on a non-null receiver of type 'HelpRequest'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/app/RemoteControllerTest.kt:899:40 Unnecessary non-null assertion (!!) on a non-null receiver of type 'HelpRequest'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/state/ReducerFixtureTest.kt:141:32 Unnecessary non-null assertion (!!) on a non-null receiver of type 'HelpRequest'.
+w: file:///tmp/m6-release-verify-f730021/android/app/src/test/java/dev/crazyagent/remote/state/ReducerFixtureTest.kt:191:35 Unnecessary non-null assertion (!!) on a non-null receiver of type 'ConfirmRequest'.
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:compressDebugUnitTestJavaRes FROM-CACHE
+> Task :app:extractDebugUnitTestJavaRes
+> Task :app:lintAnalyzeDebugUnitTest
+> Task :app:testDebugUnitTest
+> Task :app:lintAnalyzeDebug
+> Task :app:lintReportDebug
+> Task :app:lintDebug
+
+[Incubating] Problems report is available at: file:///tmp/m6-release-verify-f730021/android/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 14s
+36 actionable tasks: 20 executed, 16 from cache
+Configuration cache entry stored.

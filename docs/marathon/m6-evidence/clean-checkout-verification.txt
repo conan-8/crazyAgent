@@ -1,0 +1,12 @@
+M6 clean-checkout gate verification (release commit f730021, tag v2.4.0)
+Worktree: /tmp/m6-release-verify-f730021 (detached HEAD f730021, node_modules symlinked)
+Versions at pin: package.json 2.4.0; extension/manifest.json version+version_name 2.4.0;
+  companion/index.mjs const VERSION 2.4.0; android versionCode 6 / versionName 0.7.0.
+Maintainer updater code present (committed cdcd9d1): companion/updater.mjs, extension/self-update.js.
+
+Gates (run IN the clean worktree, not the dirty main tree):
+- npm test: 1237/1237 pass, exit 0.
+- c1-acceptance --self-test: PASS (every checker accepts good evidence, rejects every mutation).
+- prompt ceiling: non-Docs 12402 / Docs turn 18092 (core+docs 17096 <= 17100).
+- gradle testDebugUnitTest lintDebug: BUILD SUCCESSFUL (ANDROID_HOME=/home/conan/Android/Sdk;
+  local.properties is gitignored so ANDROID_HOME was set explicitly). 125 JVM tests / 0 fail / 2 skip.
