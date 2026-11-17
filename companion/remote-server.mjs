@@ -99,7 +99,7 @@ export class RemoteServer {
    *   log?: (message: string) => void,
    *   audit?: (event: string, data: Record<string, unknown>) => void,
    *   now?: () => number,
-   *   limits?: {authFailuresPerMinute?: number, messagesPerMinute?: number, requestsPerMinute?: number, snapshotsPerMinute?: number, pushRegistrationsPerMinute?: number},
+   *   limits?: {authFailuresPerMinute?: number, messagesPerMinute?: number, requestsPerMinute?: number, snapshotsPerMinute?: number, pushRegistrationsPerMinute?: number, pushTestsPerMinute?: number},
    *   push?: import('./remote-push.mjs').PushService,
    *   heartbeatMs?: number,
    * }} options
@@ -124,6 +124,8 @@ export class RemoteServer {
     this.requestLimiter = new WindowLimiter(limits.requestsPerMinute ?? 600, 60_000, this.now)
     this.snapshotLimiter = new WindowLimiter(limits.snapshotsPerMinute ?? 20, 60_000, this.now)
     this.pushLimiter = new WindowLimiter(limits.pushRegistrationsPerMinute ?? 30, 60_000, this.now)
+    // V7: one test notification per minute; an idempotent replay never consumes it.
+    this.testPushLimiter = new WindowLimiter(limits.pushTestsPerMinute ?? 1, 60_000, this.now)
     /** @type {import('./remote-push.mjs').PushService | undefined} */
     this.push = options.push
     this.heartbeatMs = options.heartbeatMs ?? WS_HEARTBEAT_MS
@@ -336,6 +338,10 @@ export class RemoteServer {
       if (image === undefined) throw new HttpError(404, 'SCREENSHOT_NOT_FOUND', 'Unknown or expired screenshot.')
       return { status: 200, binary: image }
     }
+    if (path === '/push/test') {
+      allow(method, ['POST'])
+      return this.#postPushTest(await readJson(req, MAX_COMMAND_BODY_BYTES))
+    }
     const device = /^\/push\/devices\/([^/]+)$/u.exec(path)
     if (device !== null) {
       allow(method, ['PUT', 'DELETE'])
@@ -543,6 +549,32 @@ export class RemoteServer {
     const removed = this.push?.registry.delete(deviceId) === true
     this.audit('push.unregistered', { deviceId, removed })
     return { status: 200, body: { deviceId, registered: false, removed, instanceId: this.hub.instanceId } }
+  }
+
+  /**
+   * V7: the one-tap delivery check from the phone's Settings. Sends a `test`
+   * push (metadata only, fresh `test-…` turnId) to every registered device and
+   * reports exactly what happened — a missing FCM key or zero devices is an
+   * explicit answer, not an error. Authenticated like every route; idempotent
+   * per clientCommandId (a replay returns the cached answer without resending
+   * or consuming the rate limit); at most one test per minute.
+   * This does not prove delivery: a provider success means FCM accepted the
+   * message, not that Android displayed it.
+   * @param {Record<string, any>} body
+   */
+  async #postPushTest(body) {
+    const clientCommandId = requireClientId(body.clientCommandId, 'clientCommandId')
+    const cached = this.#cached('push-test', clientCommandId, '')
+    if (cached !== undefined) return cached
+    if (!this.testPushLimiter.take()) throw new HttpError(429, 'RATE_LIMITED', 'Too many test notifications. Wait a minute.', true, { 'retry-after': '60' })
+    const push = this.push
+    const summary = push === undefined || !push.configured
+      ? { sent: 0, failed: 0, pruned: 0, skipped: 'not-configured' }
+      : await push.notify({ type: 'test', turnId: `test-${randomUUID()}`, instanceId: this.hub.instanceId, sequence: this.hub.seq })
+    const outcome = { status: 200, body: { clientCommandId, ...summary } }
+    this.audit('push.test', { sent: summary.sent, failed: summary.failed, pruned: summary.pruned, skipped: summary.skipped ?? null })
+    this.hub.rememberCommand('push-test', clientCommandId, '', outcome)
+    return outcome
   }
 
   /**

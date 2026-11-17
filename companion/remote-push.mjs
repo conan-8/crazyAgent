@@ -21,9 +21,10 @@ import { errorMessage, isRecord } from './protocol.mjs'
 import { decideEndedIncomplete } from './watcher.mjs'
 
 // M5: `watch` announces a marathon watch alert (mid-turn) or an ended-incomplete
-// turn end. An old APK drops the unknown type by design; the payload stays
-// exactly {type, turnId, instanceId, sequence}.
-export const PUSH_TYPES = Object.freeze(['help', 'confirm', 'done', 'error', 'watch'])
+// turn end. V7: `test` is the one-tap delivery check from the phone's Settings.
+// An old APK drops unknown types by design; the payload stays exactly
+// {type, turnId, instanceId, sequence}.
+export const PUSH_TYPES = Object.freeze(['help', 'confirm', 'done', 'error', 'watch', 'test'])
 export const MAX_PUSH_DEVICES = 8
 export const MAX_FCM_TOKEN_CHARS = 4_096
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/u
