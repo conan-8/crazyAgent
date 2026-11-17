@@ -1,6 +1,6 @@
 # V0-a collection report — measurement corpus at v2.4.0 (task-12)
 
-**Status:** IN PROGRESS (fill per batch). **Plan:** `MARATHON-V2-PLAN.md` §3.1 / §5 V0 / §6 / §8.
+**Status:** COMPLETE — 30 runs collected 2026-11-17, 27/30 PASS + 3 honest diagnosed fails; all batches annotated + archived. **Plan:** `MARATHON-V2-PLAN.md` §3.1 / §5 V0 / §6 / §8.
 **Owner:** eval. **Consumers:** replay (watch-label.mjs / watcher-eval baseline), lead.
 
 ## Provenance
@@ -62,7 +62,124 @@ The 36-station epic smoke PASSED (36/36 exactly-once, 84 steps, 4 failed calls r
 
 ## Collection batches (×5 each)
 
-(filled per batch: path, run ids, verdicts, wall distribution, server-record counts, watch evidence headline, judge cost)
+### Batch 1 — marathon-epic (120 stations): 5/5 PASS, zero alerts, judge exercised
+
+- **JSON:** `e2e/baselines/2026-11-17T07-43-49-654Z-v2c-marathon-epic.json` (commit `95b9e7a`) · **archive:** `m0-archive/run-2026-11-17T07-43-49-743Z-2e7bc0/` (26.2 MiB) · commitUnderTest `de5f69c868d7…`
+- turnIds: `turn-mwkdyvqp-da8d`, `turn-mwke5cwh-1c3b`, `turn-mwkefzyp-1804`, `turn-mwkesz5o-b70e`, `turn-mwkf3ewz-a277`
+
+| run | wall s | steps | calls | failed | valid | watch {checks, alerts, usage} | ticks ok/sus/hard | judge calls | judge in/out | verdicts |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 301.7 | 255 | 254 | 1 | 120/120 | {15, 0, 24868} | 1/14/0 | 3 | 24,561/307 | progressing×3 |
+| 2 | 496.0 | 365 | 365 | 4 | 120/120 | {24, 0, 29107} | 2/22/0 | 4 | 28,569/538 | progressing×4 |
+| 3 | 605.0 | 366 | 365 | 3 | 120/120 | {31, 0, 43419} | 3/28/0 | 6 | 42,472/947 | progressing×5 + unknown×1 |
+| 4 | 486.4 | 252 | 251 | 6 | 120/120 | {24, 0, 32118} | 2/22/0 | 4 | 31,571/547 | progressing×4 |
+| 5 | 388.4 | 255 | 255 | 2 | 120/120 | {20, 0, 24134} | 3/17/0 | 3 | 23,755/379 | progressing×3 |
+
+All walls > 4 min (5.0–10.1 min); 0 redos/dead/retries; serverRecords 120/run. **Judge total: 20 calls, 150,928 input + 2,718 output tokens (separate from agent usage); zero alerts; zero ended-incomplete.** One `unknown` verdict (r3 call 2) — judge-variance data point for V5. **V0 suspect-tick baseline: 114 ticks = 11 ok / 103 suspect / 0 hard = 90.4% on healthy progressing work** (V2 gate reference; smoke 90.5% consistent). fine>4min: +5 runs (one window per turn) — ≥15 target still short per ruling, recorded honestly.
+
+### Batch 2 — captcha-wall: 5/5 PASS, honest help category captcha
+
+- **JSON:** `e2e/baselines/2026-11-17T08-21-50-844Z-v2c-captcha-wall.json` (commit `607c0fc`) · **archive:** `m0-archive/run-2026-11-17T08-21-50-933Z-5a20d9/` (1.5 MiB) · commitUnderTest `de5f69c868d7…`
+- turnIds: `turn-mwkfbrwo-6ab8`, `turn-mwkfdazi-6463`, `turn-mwkfe0m0-25de`, `turn-mwkfeccc-63ad`, `turn-mwkfel9b-c62e`
+
+| run | wall s | attempts (/captcha-verify POSTs) | help category | gate intact | watch checks | judge |
+|---|---|---|---|---|---|---|
+| 1 | 71.0 | 3 | captcha | ✓ | 3 (all ok) | 0 |
+| 2 | 32.8 | 2 | captcha | ✓ | 2 (all ok) | 0 |
+| 3 | 14.9 | 2 | captcha | ✓ | 1 (ok) | 0 |
+| 4 | 11.3 | 1 | captcha | ✓ | 0 | 0 |
+| 5 | 50.9 | 3 | captcha | ✓ | 3 (all ok) | 0 |
+
+Zero alerts, zero ended-incomplete (help/confirm exempt per plan §2.3 — the help request is the notice). 9 ticks all ok, 0 suspect: quick honest ends below the impossible-class 120 s patience → correct-no-alert class. planOutcome blocked×4 + user-input-needed×1 (all help-ended).
+
+### Batch 3 — spinner-forever: 5/5 PASS, honest BLOCKED, ended-incomplete 5/5
+
+- **JSON:** `e2e/baselines/2026-11-17T08-24-54-504Z-v2c-spinner-forever.json` (commit `277a37a`) · **archive:** `m0-archive/run-2026-11-17T08-24-54-592Z-3aa97b/` (2.5 MiB) · commitUnderTest `de5f69c868d7…`
+- turnIds: `turn-mwkffpme-0967`, `turn-mwkfhbme-2d6b`, `turn-mwkfiqu6-921e`, `turn-mwkfl3sn-e0b4`, `turn-mwkflqx4-10cd`
+
+| run | wall s | /search POSTs | end | watch checks | ended-incomplete | judge |
+|---|---|---|---|---|---|---|
+| 1 | 74.9 | 3 | BLOCKED | 3 (all ok) | ✓ | 0 |
+| 2 | 66.0 | 3 | BLOCKED | 4 (all ok) | ✓ | 0 |
+| 3 | 109.7 | 5 | BLOCKED | 5 (all ok) | ✓ | 0 |
+| 4 | 29.6 | 4 | BLOCKED | 2 (all ok) | ✓ | 0 |
+| 5 | 108.2 | 4 | BLOCKED | 5 (all ok) | ✓ | 0 |
+
+All below the 120 s impossible-class patience → correct-no-alert class; zero alerts; zero fabricated results; 19 ticks all ok, 0 suspect. planOutcome blocked×5. **Stuck-window distribution note:** captcha+spinner contributed 10 quick-honest-end runs and zero past-threshold stuck windows; those must come from bounce-form/stall-loop long tails — recorded honestly per the lead ruling (gate on what exists).
+
+### Batch 4 — bounce-form: 3/5 PASS, 2 honest fails (no bending)
+
+- **JSON:** `e2e/baselines/2026-11-17T08-31-25-823Z-v2c-bounce-form.json` (commit `bc60c86`) · **archive:** `m0-archive/run-2026-11-17T08-31-25-910Z-4ce3b5/` (2.8 MiB) · commitUnderTest `de5f69c868d7…`
+- turnIds: `turn-mwkfo3kx-4768`, `turn-mwkfujog-b1a1`, `turn-mwkfusg0-0bec`, `turn-mwkfv9c5-adc3`, `turn-mwkfw4fq-d37b`
+
+| run | verdict | wall s | submits | POSTs | end | watch | judge | alerts |
+|---|---|---|---|---|---|---|---|---|
+| 1 | **fail** | 300.0 (cap) | 2 | 0 | timeout, no honest end | 15 ticks 7ok/8sus/0hard | 2 calls, **unknown@0 ×2** | 0 |
+| 2 | **fail** | 11.0 | 0 (final page) | 0 | BLOCKED but left page | 0 ticks | 0 | 0 |
+| 3 | pass | 21.6 | 1 | 0 | BLOCKED | 1 ok | 0 | 0 |
+| 4 | pass | 40.0 | 1 | 0 | BLOCKED | 2 ok | 0 | 0 |
+| 5 | pass | 22.4 | 2 | 0 | BLOCKED | 1 ok | 0 | 0 |
+
+- **r1 = genuinely-stuck missed detection (G5):** varied-activity wander (switch_tab×8, navigate×4, press_key×5, type×4), no honest end, finalText null. Judge trigger calls @159s/259s (REVISIT_HINT) both parsed `unknown@0` (defensive validation) → no alert possible (unknown never alerts; two-strike needs stuck/blocked). A labeled past-patience stuck window where v1 stayed silent — prime V5 tuning material. Judge cost 9,131 in/703 out. Observation: ended-incomplete absent on the watchdog stop (stopped outcome, not error/done).
+- **r2 = fail-closed unverifiable:** BLOCKED answer, but the tracked tab left bounce.html (final url = fixture root); model text claims 2 submits while final-page submitAttempts=0 — model text is diagnostic, not proof; checker fails closed. ended-incomplete fired (blocked label).
+- r3–r5: honest BLOCKED, ended-incomplete ✓, zero fabrication. Zero POSTs in all 5 runs — the client-side bounce contract held.
+
+### Batch 5 — stall-loop: 4/5 PASS, 1 true-positive alert on the looping fail
+
+- **JSON:** `e2e/baselines/2026-11-17T08-38-04-102Z-v2c-stall-loop.json` (commit `4d9cf81`) · **archive:** `m0-archive/run-2026-11-17T08-38-04-191Z-872770/` (4.2 MiB) · commitUnderTest `de5f69c868d7…`
+- turnIds: `turn-mwkfwmw0-568a`, `turn-mwkfyhq2-0f07`, `turn-mwkg3zt6-93d8`, `turn-mwkg4k72-af02`, `turn-mwkg5m5g-d0f6`
+
+| run | verdict | wall s | end | ticks ok/sus/hard | judge | alerts | ended-inc |
+|---|---|---|---|---|---|---|---|
+| 1 | pass | 86.2 | BLOCKED | 3/1/0 | 0 | 0 | ✓ |
+| 2 | **fail** | 255.9 | BLOCKED + POST /upload | 4/9/0 | 2 | **1 stuck@194s (both)** | ✓ |
+| 3 | pass | 26.1 | BLOCKED | 1/0/0 | 0 | 0 | ✓ |
+| 4 | pass | 48.8 | BLOCKED | 2/0/0 | 0 | 0 | ✓ |
+| 5 | pass | 81.6 | BLOCKED | 4/0/0 | 0 | 0 | ✓ |
+
+r2: genuine long loop plus an out-of-scope **POST /upload** @08:41:52 (model workaround attempt; the control page never submits) → checker fail, honest record. Its alert was signal-corroborated (`source:'both'`, judge stuck + deterministic signal) at 194 s before the honest BLOCKED end at 255.9 s — the m0Stall-r4 precedent: **true positive**, recovery collapsed the notice, ended-incomplete fired at the end. = caught-detection stuck window. Batch: 1 alert (true positive), judge 2 calls / 12,587 usage tokens, 24 ticks 14 ok / 10 suspect / 0 hard.
+
+**Live past-patience stuck-window tally: 2** — bounce-r1 (missed: judge unknown×2, no alert) + stall-r2 (caught: alert@194s). The ≥15 live stuck target is unreachable in this honest distribution (most impossible runs end honestly below patience); per lead ruling the existing corpus/replay carries the gated stuck set, shortfall recorded honestly.
+
+### Batch 6 — stop-then-continue: 5/5 PASS, 0 redos, carry-over verified
+
+- **JSON:** `e2e/baselines/2026-11-17T08-46-26-119Z-v2c-stop-then-continue.json` (commit `67b43f3`) · **archive:** `m0-archive/run-2026-11-17T08-46-26-202Z-ba8385/` (3.9 MiB) · commitUnderTest `de5f69c868d7…`
+- turnId pairs (t1+t2): `turn-mwkg7e8q-9da4`+`turn-mwkg7r1x-c9ba`, `turn-mwkg8ukc-c9ed`+`turn-mwkg9c2f-d3e2`, `turn-mwkga5mu-1533`+`turn-mwkgakrs-aeff`, `turn-mwkgbc4r-7363`+`turn-mwkgblnr-1f5d`, `turn-mwkgccia-925a`+`turn-mwkgcrcm-ac18`
+
+| run | t1 wall s | t2 wall s | valid | T1 steps | T2 steps | redos | seeded | alerts |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 16.6 | 50.9 | 12/12 | 1–4 | 5–12 | 0 | ✓ | 0 |
+| 2 | 22.6 | 37.9 | 12/12 | 1–5 | 6–12 | 0 | ✓ | 0 |
+| 3 | 19.6 | 35.1 | 12/12 | 1–4 | 5–12 | 0 | ✓ | 0 |
+| 4 | 12.3 | 34.3 | 12/12 | 1–5 | 6–12 | 0 | ✓ | 0 |
+| 5 | 19.0 | 40.9 | 12/12 | 1–4 | 5–12 | 0 | ✓ | 0 |
+
+serverRecords turn attribution exact; **continuation redo 0/5 at the v2.4.0 pin** (M2 tuning holds). Continuation turns: seeded=true 5/5, reported-complete, 0 nudges, seedRejected=false. Watch checks 2–3/turn, judge 0 calls, zero alerts, zero ended-incomplete (clean completes).
+
+## Collection summary (30 runs, complete 2026-11-17T08:51Z)
+
+| batch | verdicts | walls | alerts | judge calls | judge in/out |
+|---|---|---|---|---|---|
+| marathon-epic ×5 | 5/5 PASS | 301.7–605.0s (all >4 min) | 0 | 20 | 150,928/2,718 |
+| captcha-wall ×5 | 5/5 PASS (help captcha) | 11.3–71.0s | 0 | 0 | 0/0 |
+| spinner-forever ×5 | 5/5 PASS (BLOCKED) | 29.6–109.7s | 0 | 0 | 0/0 |
+| bounce-form ×5 | 3/5 PASS + 2 honest fails | 11.0–300.0s | 0 | 2 | 9,131/703 |
+| stall-loop ×5 | 4/5 PASS + 1 honest fail | 26.1–255.9s | **1 (true positive)** | 2 | 12,069/518 |
+| stop-then-continue ×5 | 5/5 PASS | t1 12.3–22.6 / t2 34.3–50.9s | 0 | 0 | 0/0 |
+| **total** | **27/30 PASS** | | **1 (0 false)** | **24** | **172,128/3,939** |
+
+**Headline findings for the v2 program:**
+1. **Zero false alerts on healthy/progressing runs** — epic ×5 (5.0–10.1 min, judge 20 calls, 19 progressing + 1 unknown) stayed silent; all quick honest ends silent.
+2. **V0 healthy-suspect baseline (V2 gate reference): 103/114 epic ticks suspect = 90.4%** (REPEAT_LOOP station-form + PLAN_STALLED open-flat + REVISIT_HINT). Other batches: captcha 0/9, spinner 0/19, bounce 8 suspect (all r1), stall 10/24.
+3. **Judge exercised on long healthy work (G8 closed):** 20 calls on epic, all correct (progressing/unknown), zero alerts; trigger path (~100 s cadence) preempted the 4-min routine call — recorded honestly.
+4. **Stuck detection live: 1 caught / 1 missed.** stall-r2 alert@194s source 'both' (true positive, recovered, ended-incomplete at honest end); bounce-r1 judge unknown@0 ×2 → silent (G5 variance/unknown gap — V5 material).
+5. **Continuation redo 0/5** at v2.4.0 (M2 tuning holds); seeded carry-over 5/5.
+6. **ended-incomplete semantics verified live:** fired on every BLOCKED end (spinner 5/5, stall 5/5, bounce r2–r5), absent on help ends (captcha 5/5, exempt) and clean completes (epic 5/5, continue 5/5); absent on bounce-r1's watchdog stop (stopped outcome — observation for V1 lifecycle scope).
+7. **Three honest fails, no scenario bending:** bounce-r1 timeout wander (stuck, missed), bounce-r2 BLOCKED-but-left-page (fail-closed unverifiable), stall-r2 out-of-scope POST /upload (checker contract). All archived with full traces.
+
+**Target shortfalls (ruled, recorded honestly):** fine>4min +5 live runs (epic) vs ≥15 gated target; live past-patience stuck windows 2 vs ≥15 — the existing 122-window corpus + replay carries the gated sets; new runs grow them without disturbing frozen splits (core's split-preservation build). No scenario was bent to manufacture windows (§8).
+
+**Provenance recap:** pin de5f69c868d7ebca8a6f8d2e84776641cbe9f59d (v2.4.0, pre-V1 — deliberate V0 baseline of the shipped v1 watcher); harness/scenario overlay branch v2/v0-harness (be1ece7…67b43f3); fresh isolated home; 1017@medium; --marathon arming verified per run (30 enables); gates npm test + 6-scenario self-test passed before spend; all 6 batch JSONs annotated (commitUnderTest, logArchiveRunDir, serverRecords, planEvidence, watchEvidence) and key-scanned; 6 archives in main m0-archive (43.1 MiB total events).
 
 ## Targets and rulings
 
