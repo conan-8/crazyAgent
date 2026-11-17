@@ -661,3 +661,52 @@ test('a malformed chat.watch is ignored fail-closed', () => {
   assert.equal(h.journal.length, 0)
   assert.equal(h.projection().marathon.watch.open, null)
 })
+
+/* ------------------------------------------------------------------ */
+/* V1 alert lifecycle (§3.2): closed treated like dismissed            */
+/* ------------------------------------------------------------------ */
+
+test('V1: a closed frame clears marathon.watch.open and is journaled as remote.watch', () => {
+  const h = hub()
+  h.setSession('session-1')
+  startTurn(h)
+  h.ingest(WATCH_ALERT)
+  assert.equal(h.projection().marathon.watch.open.id, 'watch-1')
+  h.ingest({ type: 'chat.watch', id: 'watch-1', turnId: 'turn-1', kind: 'info', state: 'closed', blocker: null, reason: 'Turn ended.', signals: [], source: 'heuristic', at: '2026-11-16T19:05:00.000Z' })
+  assert.equal(h.projection().marathon.watch.open, null, 'closed clears the open alert')
+  const last = h.journal.at(-1)
+  assert.equal(last.type, 'remote.watch')
+  assert.equal(last.body.state, 'closed')
+  assert.equal(last.body.id, 'watch-1')
+  assert.equal(last.body.reason, 'Turn ended.')
+})
+
+test('V1: ended-incomplete opens then closes; one open notice across the lifecycle', () => {
+  const h = hub()
+  h.setSession('session-1')
+  startTurn(h)
+  h.ingest(WATCH_ALERT)
+  h.ingest({ type: 'chat.watch', id: 'watch-1', turnId: 'turn-1', kind: 'info', state: 'closed', reason: 'Turn ended.', signals: [], source: 'heuristic', at: '2026-11-16T19:05:00.000Z' })
+  assert.equal(h.projection().marathon.watch.open, null)
+  h.ingest({ type: 'chat.watch', id: 'ended-1', turnId: 'turn-1', kind: 'ended-incomplete', state: 'open', blocker: 'ended-incomplete', reason: 'The turn ended with work still open or blocked.', signals: [], source: 'heuristic', at: '2026-11-16T19:05:01.000Z' })
+  assert.equal(h.projection().marathon.watch.open.kind, 'ended-incomplete')
+  assert.equal(h.projection().marathon.watch.open.id, 'ended-1')
+  h.ingest({ type: 'chat.watch', id: 'ended-1', turnId: 'turn-1', kind: 'info', state: 'closed', reason: 'A new turn started.', signals: [], source: 'heuristic', at: '2026-11-16T19:06:00.000Z' })
+  assert.equal(h.projection().marathon.watch.open, null)
+  h.ingest({ type: 'chat.watch', id: 'ended-2', turnId: 'turn-1', kind: 'ended-incomplete', state: 'open', blocker: 'ended-incomplete', reason: 'x', signals: [], source: 'heuristic', at: '2026-11-16T19:07:00.000Z' })
+  h.ingest({ type: 'chat.watch', id: 'ended-2', turnId: 'turn-1', kind: 'info', state: 'dismissed', reason: 'Dismissed.', signals: [], source: 'heuristic', at: '2026-11-16T19:07:30.000Z' })
+  assert.equal(h.projection().marathon.watch.open, null)
+})
+
+test('V1: closed remote.watch notices replay to a reconnecting client', () => {
+  const h = hub()
+  h.setSession('session-1')
+  startTurn(h)
+  h.ingest(WATCH_ALERT)
+  h.ingest({ type: 'chat.watch', id: 'watch-1', turnId: 'turn-1', kind: 'info', state: 'closed', reason: 'Turn ended.', signals: [], source: 'heuristic', at: '2026-11-16T19:05:00.000Z' })
+  const seq = h.journal.at(-1).seq
+  const replay = h.catchUp({ instance: 'inst-a', after: seq - 2 })
+  const watchEvents = replay.events.filter(e => e.type === 'remote.watch')
+  assert.equal(watchEvents.length, 2)
+  assert.deepEqual(watchEvents.map(e => e.body.state), ['open', 'closed'])
+})

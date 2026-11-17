@@ -1261,3 +1261,100 @@ test('M3 fix: a clean marathon turn pushes done; a non-marathon turn pushes done
   assert.equal(plainEnd.marathon, false)
   assert.equal(pushTypeForTurn(plainEnd), 'done')
 })
+
+/* ------------------------------------------------------------------ */
+/* V1 alert lifecycle (§3.2): close frames through the controller      */
+/* ------------------------------------------------------------------ */
+
+async function startMarathonHang(setupResult, clock) {
+  const { controller, runner } = setupResult
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn = controller.submit({ text: 'long task' })
+  await runner.started()
+  runner.event('tool/call', { callId: 'hang-1', name: 'browser_wait_for', arguments: '{}' })
+  clock.advance(240_000)
+  controller.watcher.tick()
+  return turn
+}
+
+test('V1: turn end closes the open mid-turn alert; no stale open notice', async () => {
+  const clock = watchClock()
+  const s = setup({ watch: clock.options })
+  const turn = await startMarathonHang(s, clock)
+  const alertId = s.controller.watchState().open.id
+  s.runner.toolResult({ callId: 'hang-1' })
+  s.runner.current.resolve('DONE — finished')
+  await turn.done
+  const closed = s.frames.find(f => f.type === 'chat.watch' && f.state === 'closed')
+  assert.equal(closed.id, alertId)
+  assert.equal(closed.reason, 'Turn ended.')
+  assert.equal(s.controller.watchState().open, null, 'no stale alert after turn end')
+})
+
+test('V1: ended-incomplete is dismissable through the controller (ack 200)', async () => {
+  const clock = watchClock()
+  const s = setup({ watch: clock.options })
+  const turn = await startMarathonHang(s, clock)
+  s.controller.noteActivity({ kind: 'turn-outcome', turnId: turn.turnId, turn: 1, planOutcome: 'unfinished', planRevision: 2 })
+  s.runner.toolResult({ callId: 'hang-1' })
+  s.runner.current.resolve('PARTIAL — items remain')
+  await turn.done
+  const open = s.controller.watchState().open
+  assert.equal(open.kind, 'ended-incomplete')
+  assert.deepEqual(s.controller.watchAck(open.id), { ok: true })
+  assert.equal(s.controller.watchState().open, null)
+  assert.equal(s.controller.watchAck(open.id).code, 'WATCH_NOT_FOUND')
+})
+
+test('V1: #begin closes the open ended-incomplete BEFORE the new turn first frame', async () => {
+  const clock = watchClock()
+  const s = setup({ watch: clock.options })
+  const turn = await startMarathonHang(s, clock)
+  s.controller.noteActivity({ kind: 'turn-outcome', turnId: turn.turnId, turn: 1, planOutcome: 'unfinished', planRevision: 2 })
+  s.runner.toolResult({ callId: 'hang-1' })
+  s.runner.current.resolve('PARTIAL — items remain')
+  await turn.done
+  const endedId = s.controller.watchState().open.id
+  assert.equal(s.controller.watchState().open.kind, 'ended-incomplete')
+  // Start a new turn; the close frame must precede the new turn's first frame.
+  const before = s.frames.length
+  const turn2 = s.controller.submit({ text: 'continue' })
+  await s.runner.started()
+  const newFrames = s.frames.slice(before)
+  const closedIdx = newFrames.findIndex(f => f.type === 'chat.watch' && f.state === 'closed')
+  const firstTurnFrameIdx = newFrames.findIndex(f => f.type === 'chat.session' || f.type === 'chat.user' || f.type === 'chat.tool_call')
+  assert.ok(closedIdx >= 0, 'a close frame was emitted at turn start')
+  assert.equal(newFrames[closedIdx].id, endedId)
+  assert.equal(newFrames[closedIdx].reason, 'A new turn started.')
+  assert.ok(firstTurnFrameIdx === -1 || closedIdx < firstTurnFrameIdx, 'close precedes the new turn first frame')
+  assert.equal(s.controller.watchState().open, null, 'amber never carries into the new turn')
+  s.runner.current.resolve('done')
+  await turn2.done
+})
+
+test('V1: marathon off clears the open ended-incomplete notice', async () => {
+  const clock = watchClock()
+  const s = setup({ watch: clock.options })
+  const turn = await startMarathonHang(s, clock)
+  s.controller.noteActivity({ kind: 'turn-outcome', turnId: turn.turnId, turn: 1, planOutcome: 'unfinished', planRevision: 2 })
+  s.runner.toolResult({ callId: 'hang-1' })
+  s.runner.current.resolve('PARTIAL — items remain')
+  await turn.done
+  const endedId = s.controller.watchState().open.id
+  s.controller.setMarathon({ enabled: false, origin: 'ui' })
+  assert.equal(s.controller.watchState().open, null)
+  assert.equal(s.controller.watchAck(endedId).code, 'WATCH_NOT_FOUND')
+})
+
+test('V1: newChat clears the open ended-incomplete notice', async () => {
+  const clock = watchClock()
+  const s = setup({ watch: clock.options })
+  const turn = await startMarathonHang(s, clock)
+  s.controller.noteActivity({ kind: 'turn-outcome', turnId: turn.turnId, turn: 1, planOutcome: 'unfinished', planRevision: 2 })
+  s.runner.toolResult({ callId: 'hang-1' })
+  s.runner.current.resolve('PARTIAL — items remain')
+  await turn.done
+  assert.equal(s.controller.watchState().open.kind, 'ended-incomplete')
+  await s.controller.newChat()
+  assert.equal(s.controller.watchState().open, null)
+})

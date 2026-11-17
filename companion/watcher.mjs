@@ -202,6 +202,13 @@ export class Watcher {
     this.pushesThisTurn = 0
     /** @type {null | {id: string, kind: string, at: number, planRevision: number, atIso: string, reason: string}} */
     this.openAlert = null
+    /**
+     * V1: the open `ended-incomplete` notice remembered after a turn ends, until
+     * the next turn start (or an ack). One open notice invariant: a mid-turn
+     * alert and an ended-incomplete notice are never open at the same time.
+     * @type {null | {id: string, kind: string, turnId: string | null, atIso: string, reason: string}}
+     */
+    this.openEndedIncomplete = null
     /** @type {Record<string, number>} */
     this.snoozedUntil = {}
     this.lastAssessment = { level: 'ok', signals: [], hints: [] }
@@ -499,27 +506,47 @@ export class Watcher {
    * @returns {{ok: true} | {ok: false, code: string, message: string, retryable: boolean}}
    */
   ack(id) {
-    if (this.openAlert === null || this.openAlert.id !== id) {
-      return { ok: false, code: 'WATCH_NOT_FOUND', message: 'No watch alert is open on this companion.', retryable: false }
+    if (this.openAlert !== null && this.openAlert.id === id) {
+      const kind = this.openAlert.kind
+      this.snoozedUntil[kind] = this.now() + this.limits.snoozeMs
+      const previous = this.openAlert
+      this.openAlert = null
+      this.publish({
+        type: 'chat.watch',
+        id: previous.id,
+        turnId: this.ledger.state.turnId,
+        kind: 'info',
+        state: 'dismissed',
+        blocker: null,
+        reason: 'Dismissed; this alert kind is snoozed for 15 minutes.',
+        signals: [],
+        source: 'heuristic',
+        at: new Date(this.wallNow()).toISOString(),
+      })
+      this.log('watch.ack', { turnId: this.ledger.state.turnId, kind })
+      return { ok: true }
     }
-    const kind = this.openAlert.kind
-    this.snoozedUntil[kind] = this.now() + this.limits.snoozeMs
-    const previous = this.openAlert
-    this.openAlert = null
-    this.publish({
-      type: 'chat.watch',
-      id: previous.id,
-      turnId: this.ledger.state.turnId,
-      kind: 'info',
-      state: 'dismissed',
-      blocker: null,
-      reason: 'Dismissed; this alert kind is snoozed for 15 minutes.',
-      signals: [],
-      source: 'heuristic',
-      at: new Date(this.wallNow()).toISOString(),
-    })
-    this.log('watch.ack', { turnId: this.ledger.state.turnId, kind })
-    return { ok: true }
+    // V1: "It's fine" on the remembered ended-incomplete notice closes it (200).
+    // No snooze — there is no next tick to suppress.
+    if (this.openEndedIncomplete !== null && this.openEndedIncomplete.id === id) {
+      const previous = this.openEndedIncomplete
+      this.openEndedIncomplete = null
+      this.publish({
+        type: 'chat.watch',
+        id: previous.id,
+        turnId: previous.turnId,
+        kind: 'info',
+        state: 'dismissed',
+        blocker: null,
+        reason: 'Dismissed.',
+        signals: [],
+        source: 'heuristic',
+        at: new Date(this.wallNow()).toISOString(),
+      })
+      this.log('watch.ack', { turnId: previous.turnId, kind: 'ended-incomplete' })
+      return { ok: true }
+    }
+    return { ok: false, code: 'WATCH_NOT_FOUND', message: 'No watch alert is open on this companion.', retryable: false }
   }
 
   /**
@@ -536,18 +563,34 @@ export class Watcher {
     const summary = { checks: this.checks, alerts: this.alertsThisTurn, usage: this.judgeInputTokens + this.judgeOutputTokens }
     const endedIncomplete = decideEndedIncomplete({ ...info, marathon: this.turnMarathon })
     this.lastEndedIncomplete = endedIncomplete
+    // V1: an open mid-turn alert is closed with an explicit frame carrying its
+    // OWN id, so every client collapses the row it shows. If ended-incomplete
+    // fires it supersedes the alert: the alert closes in this same step and
+    // ended-incomplete becomes the one open notice.
+    if (this.openAlert !== null) {
+      this.#closeNotice(this.openAlert.id, state.turnId, 'Turn ended.')
+      this.openAlert = null
+    }
     if (endedIncomplete) {
+      const notice = {
+        id: randomUUID(),
+        kind: 'ended-incomplete',
+        turnId: state.turnId,
+        atIso: new Date(this.wallNow()).toISOString(),
+        reason: ALERT_REASON['ended-incomplete'],
+      }
+      this.openEndedIncomplete = notice
       this.publish({
         type: 'chat.watch',
-        id: randomUUID(),
-        turnId: state.turnId,
+        id: notice.id,
+        turnId: notice.turnId,
         kind: 'ended-incomplete',
         state: 'open',
         blocker: 'ended-incomplete',
-        reason: ALERT_REASON['ended-incomplete'],
+        reason: notice.reason,
         signals: this.lastAssessment.signals.map(signal => ({ ...signal })),
         source: 'heuristic',
-        at: new Date(this.wallNow()).toISOString(),
+        at: notice.atIso,
       })
       this.log('watch.ended_incomplete', { turnId: state.turnId, outcome: info.outcome, planOutcome: info.planOutcome ?? null, label: info.label ?? null }, 'warn')
     }
@@ -561,19 +604,64 @@ export class Watcher {
       cacheReadTokens: this.judgeCacheReadTokens,
       budgetExhausted: this.budgetNoticeEmitted,
     })
-    this.openAlert = null
     this.ledger.endTurn()
     return summary
   }
 
-  /** The /state projection of the open alert (the independent-check surface). */
+  /**
+   * V1: publish an explicit close frame for a notice (its own id), so every
+   * client collapses the row. `closed` is treated like `dismissed` downstream.
+   * @param {string} id @param {string | null} turnId @param {string} reason
+   */
+  #closeNotice(id, turnId, reason) {
+    this.publish({
+      type: 'chat.watch',
+      id,
+      turnId,
+      kind: 'info',
+      state: 'closed',
+      blocker: null,
+      reason,
+      signals: [],
+      source: 'heuristic',
+      at: new Date(this.wallNow()).toISOString(),
+    })
+  }
+
+  /**
+   * V1: close any open ended-incomplete notice at the start of a new turn,
+   * BEFORE the new turn's first frame. Called by the controller's #begin.
+   * @param {string} reason
+   */
+  closeEndedIncomplete(reason) {
+    if (this.openEndedIncomplete === null) return false
+    const notice = this.openEndedIncomplete
+    this.openEndedIncomplete = null
+    this.#closeNotice(notice.id, notice.turnId, reason)
+    this.log('watch.ended_incomplete.closed', { turnId: notice.turnId, reason })
+    return true
+  }
+
+  /**
+   * V1: clear all open notices without a frame (marathon off, /new, a real chat
+   * switch). The marathon.state off frame already tells clients to clear; this
+   * keeps the watcher's internal state consistent so a later ack finds nothing.
+   */
+  clearNotices() {
+    this.openAlert = null
+    this.openEndedIncomplete = null
+  }
+
+  /** The /state projection of the open notice (the independent-check surface). */
   watchProjection() {
+    // V1: one open notice — a mid-turn alert, or the remembered ended-incomplete.
+    const notice = this.openAlert ?? this.openEndedIncomplete
     return {
-      open: this.openAlert === null ? null : {
-        id: this.openAlert.id,
-        kind: this.openAlert.kind,
-        at: this.openAlert.atIso,
-        reason: this.openAlert.reason ?? ALERT_REASON[this.openAlert.kind] ?? 'The agent may be stuck.',
+      open: notice === null ? null : {
+        id: notice.id,
+        kind: notice.kind,
+        at: notice.atIso,
+        reason: notice.reason ?? ALERT_REASON[notice.kind] ?? 'The agent may be stuck.',
       },
       lastVerdict: this.lastVerdict,
       lastCheckAt: this.lastJudgeCheckWallAt ?? (this.checks > 0 ? new Date(this.wallNow()).toISOString() : null),

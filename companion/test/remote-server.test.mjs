@@ -1331,3 +1331,52 @@ test('a confirmation wait sends a high-priority metadata-only push; malformed si
   assert.deepEqual(Object.keys(sends[1].data).sort(), ['instanceId', 'sequence', 'turnId', 'type'])
   assert.ok(!JSON.stringify(sends[1]).includes('Submit it'), 'the action text never rides the push')
 })
+
+test('V1: POST /marathon/watch/ack on ended-incomplete returns 200; next turn closes it (/state)', async t => {
+  let now = 0
+  const ctx = await setup(t, { watch: { now: () => now, wallNow: () => 1_700_000_000_000 + now, setTimer: () => 0, clearTimer: () => {} } })
+  await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body: { clientCommandId: 'v1-on-0001', enabled: true } })
+  const accepted = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'v1-msg-0001', text: 'long task' } })
+  assert.equal(accepted.status, 202)
+  ctx.runner.event('tool/call', { callId: 'hang-1', name: 'browser_wait_for', arguments: '{}' })
+  now += 240_000
+  ctx.controller.watcher.tick()
+  const turnId = (await ctx.call({ path: '/remote/v1/state' })).body.turn.turnId
+  // End the turn unfinished: the mid-turn alert closes, ended-incomplete opens.
+  ctx.controller.noteActivity({ kind: 'turn-outcome', turnId, turn: 1, planOutcome: 'unfinished', planRevision: 2 })
+  ctx.runner.toolResult({ callId: 'hang-1' })
+  ctx.runner.current.resolve('PARTIAL — items remain')
+  await sleep(20)
+  const open = (await ctx.call({ path: '/remote/v1/state' })).body.marathon.watch.open
+  assert.equal(open?.kind, 'ended-incomplete', 'ended-incomplete is the one open notice')
+  const id = open.id
+  // "It's fine" on ended-incomplete returns 200 and closes it.
+  const ack = await ctx.call({ method: 'POST', path: '/remote/v1/marathon/watch/ack', body: { clientCommandId: 'v1-ack-0001', id } })
+  assert.equal(ack.status, 200)
+  assert.equal(ack.body.acknowledged, true)
+  assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.marathon.watch.open, null)
+  assert.equal(ctx.controller.watchAck(id).code, 'WATCH_NOT_FOUND')
+})
+
+test('V1: a new turn closes an open ended-incomplete before its first frame (/state stays clear)', async t => {
+  let now = 0
+  const ctx = await setup(t, { watch: { now: () => now, wallNow: () => 1_700_000_000_000 + now, setTimer: () => 0, clearTimer: () => {} } })
+  await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body: { clientCommandId: 'v1b-on-0001', enabled: true } })
+  await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'v1b-msg-0001', text: 'long task' } })
+  const turnId = (await ctx.call({ path: '/remote/v1/state' })).body.turn.turnId
+  ctx.controller.noteActivity({ kind: 'turn-outcome', turnId, turn: 1, planOutcome: 'unfinished', planRevision: 2 })
+  ctx.runner.current.resolve('PARTIAL — items remain')
+  await sleep(20)
+  const endedId = (await ctx.call({ path: '/remote/v1/state' })).body.marathon.watch.open.id
+  const before = ctx.uiFrames.length
+  // A new turn closes the ended-incomplete notice.
+  await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'v1b-msg-0002', text: 'continue' } })
+  await sleep(20)
+  const newFrames = ctx.uiFrames.slice(before)
+  const closed = newFrames.find(f => f.type === 'chat.watch' && f.state === 'closed')
+  assert.equal(closed?.id, endedId)
+  assert.equal(closed?.reason, 'A new turn started.')
+  assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.marathon.watch.open, null, 'no stale notice into the new turn')
+  ctx.runner.current.resolve('done')
+  await sleep(10)
+})
