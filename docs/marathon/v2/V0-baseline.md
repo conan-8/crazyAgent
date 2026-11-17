@@ -9,12 +9,14 @@
 
 ## Headline gates (gated windows only; legacy-manual reported, never gated)
 
-| Gate | Tune (worst) | Holdout (worst) | Target |
-|---|---|---|---|
-| Fine: zero false alerts | **PASS** (0/8) | **PASS** (0/16) | 0 |
-| Stuck: caught ≥80% | **FAIL** (1/2 = 50%) | **FAIL** (2/4 = 50%) | ≥80% |
+**Gate definitions (lead ruling 2026-11-17):** the **caught GATE is MEAN across k ≥80%** (plan §5 V5: "mean, k=3, tune and holdout each"). **Worst-case caught and stability are DIAGNOSTICS** / V5 keep-rule conditions (stability must not fall), NOT the caught gate. The **false-alert GATE is worst-case 0** on fine windows. V2 done-when "caught not below V0" compares the MEAN.
 
-**Mean** stuck-caught is 100% in both splits (every gated stuck window caught in ≥1 of 3 repeats); **worst-case** (caught in ALL k) is 50%. The v1 judge's sampling variance is the gap: a window reliably caught must survive every repeat. This reproduces the M4 FALLBACK-A gap (stuck detection below the ≥80% target) and is exactly what V2–V5 address. **Zero false alerts on healthy gated turns is met in both splits, mean and worst.**
+| Gate | Tune | Holdout | Target |
+|---|---|---|---|
+| Fine: zero false alerts (worst-case) | **PASS** (0/8) | **PASS** (0/16) | 0 |
+| Stuck: caught MEAN ≥80% | **PASS** (2/2 = 100%) | **PASS** (4/4 = 100%) | ≥80% |
+
+**Diagnostics (not the caught gate):** worst-case stuck-caught (caught in ALL k) is 50% in both splits (tune 1/2, holdout 2/4); stability 90% gated. The v1 judge's sampling variance shows here — a window reliably caught must survive every repeat. **Caveat:** the mean gate passes on a TINY sample (6 easy gated stall-loop windows, all caught in ≥1 repeat); the full corpus (harder stall-loop/wander cases from eval's collection) gives the real number and is the reference for V2–V5. This reproduces the M4 FALLBACK-A nuance (distinct-run detection below target on harder cases). **Zero false alerts on healthy gated turns is met in both splits, mean and worst.**
 
 ## Per-group metrics (k=3)
 
@@ -96,3 +98,25 @@ Per-window cost is the full-turn replay usage (each window = 1 turn; dedup `run#
 
 ## Next (ingestion)
 Eval's new V0 batches (serverRecords schema `be1ece7`, pin `de5f69c`) are landing at `/tmp/crazyagent-v2-v0-harness/e2e/baselines/`; archives in `MAIN_ROOT/.dsh-home/browser-agent/logs/m0-archive/`. Ingest via `watch-label.mjs --build` (split-preservation keeps the holdout fixed), key-scan traces + batch JSONs before commit, re-score **tune** (code unchanged); holdout re-scored once at the final milestone end. The new batches currently lack `logArchiveRunDir`/`commitUnderTest` top-level fields — coordinate the batch→archive mapping with eval before ingestion.
+
+---
+
+## FULL-CORPUS UPDATE (2026-11-17, ingestion complete — TRUE reference)
+
+All 6 collection batches ingested (epic/captcha/spinner/bounce/stall-loop/stop-then-continue ×5; pin de5f69c; 30 runs, 27/30 PASS, 1 true-positive alert, 0 false). The real batches carry `logArchiveRunDir`/`commitUnderTest`/`serverRecords`/`watchEvidence` (the dev smokes lacked them). Corpus **122 → 157 windows**: gatedFine 52, gatedStuck 8, legacyManual 70, fine>4min 7, distinctStuckRuns 7.
+
+**Label-rule bug fix (`a3a17bd`):** the progressable onset loop fired at t0=240 on ANY >240s turn with ≥3 calls without checking for a real no-progress gap — mislabeling healthy continuous-progress epic as stuck. Fixed to require NO station accepted in (a, a+240] per §3.1 (patience unchanged; 0 existing relabels). Without it the gated healthy-fine corpus would be wrong.
+
+**Scenario-stratified rebalance (`1ec66fe`, lead ruling):** the initial global hash put ALL 6 new runs in holdout (tune had no new evidence; V5 keep-rule unmeasurable). Re-assigned NEW collection runs ~1/3 holdout within each scenarioClass by seeded hash (scenario metadata ONLY, never labels/results); OLD 24 runs FROZEN (0 flips). Result: epic→holdout (unbiased binding healthy-long-fine test), bounce-r1 missed-stuck→tune (V5 caught iteration); 20 tune / 10 holdout runs. `splitRule` recorded in manifest meta. Lead ruled KEEP the unbiased stratification (do not move epic to tune).
+
+**Mean-rate metric fix (`349116d`):** groupStats mean rate corrected to the AVERAGE of per-window mean fractions (mean over k repeats, §5 V5), not the share of windows flagged in ≥1 repeat; worst rate (share flagged worst-case) unchanged.
+
+### TRUE V0 reference (v1 watch files == de5f69c, k=3, full corpus)
+| Split | gated fine/stuck | fine FA worst | caught MEAN | caught WORST (diag) | falseRec | stale | stability | gated-fine suspect share |
+|---|---|---|---|---|---|---|---|---|
+| Tune | 27 / 3 | 0 | **0.556** | 0.000 | 3 | 0 | 0.900 | 0.074 |
+| Holdout | 25 / 5 | 0 | **0.867** | 0.600 | 4 | 1 | 0.933 | 0.240 |
+
+Fine zero-false-alerts worst-case PASS both splits. Caught mean tune 55.6% (<80% on hard cases: bounce-r1 missed unknown×2 + stall variance), holdout 86.7% (≥80%). The 6 gated stuck: tune bounce-r1 (mean 0.33 missed) + 2 original stall (0.67); holdout 4 original stall + stall-r2 (caught). Live past-patience stuck only 2 (bounce-r1 missed, stall-r2 caught) — impossible scenarios mostly end honestly <120s. **Targets honest:** ≥15 stuck/10 runs SHORT (8/7), fine>4min SHORT (7/15); gate on what exists (§8), thresholds never bent. Healthy-suspect live reference: epic-120 103/114 = 90.4% (REPEAT_LOOP+PLAN_STALLED+REVISIT_HINT), judge 20 calls 19 progressing+1 unknown, 0 alerts.
+
+Results: `v0-fullcorpus-tune-k3.json`, `v0-fullcorpus-holdout-k3.json` (+ `.rN.json`). This is the reference for V2–V5 (V2 done-when caught mean ≥ these). V2 full-corpus comparison in `docs/marathon/v2/V2-report.md` (V2 branch): hard gates gated-fine FA worst 0 both + caught mean ≥V0 PASS; falseRec tune 3→0 / holdout 4→1 (residual accepted gap, lead OPTION A).

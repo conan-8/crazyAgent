@@ -137,6 +137,37 @@ function loadExistingSplits() {
   return map
 }
 
+/**
+ * V0 measurement-design rebalance (lead ruling 2026-11-17): the OLD corpus runs
+ * keep their FROZEN splits; the NEW collection runs (batch filename 'v2c-') are
+ * assigned SCENARIO-STRATIFIED to ~1/3 holdout — within each scenarioClass, rank
+ * by the seeded hash and take the bottom round(n/3) as holdout. Uses scenario
+ * metadata ONLY (never labels/results), so tune gets representative new evidence
+ * (epic healthy long-fine + a share of stuck windows) and holdout stays an
+ * unbiased ~1/3 final check. Deterministic + reproducible.
+ */
+function assignSplitsStratified(dirs, existing, metaByDir) {
+  const map = new Map()
+  const newByClass = new Map()
+  for (const d of dirs) {
+    const meta = metaByDir.get(d)
+    if (!meta?.collection) {
+      map.set(d, existing.get(d) ?? 'tune') // old run: frozen
+    } else {
+      const cls = meta.cls ?? 'other'
+      if (!newByClass.has(cls)) newByClass.set(cls, [])
+      newByClass.get(cls).push(d)
+    }
+  }
+  for (const [, runs] of newByClass) {
+    const ranked = [...runs].sort((a, b) => runHash(a) < runHash(b) ? -1 : runHash(a) > runHash(b) ? 1 : 0)
+    const holdoutCount = Math.round(runs.length * SPLIT.holdoutFraction)
+    const holdout = new Set(ranked.slice(0, holdoutCount))
+    for (const d of runs) map.set(d, holdout.has(d) ? 'holdout' : 'tune')
+  }
+  return map
+}
+
 function parseArgs(argv) {
   const a = { build: false, ingest: null, only: null, archiveRoot: join(MAIN_ROOT, '.dsh-home/browser-agent/logs/m0-archive') }
   for (let i = 0; i < argv.length; i += 1) {
@@ -168,7 +199,7 @@ function discoverArchives(archiveRoot) {
         // scenario (progressable/impossible) over 'other'.
         const cls = SCENARIO_CLASS[s.name] ?? 'other'
         if (!prev || (prev.cls === 'other' && cls !== 'other')) {
-          byDir.set(dir, { dir, scenario: s.name, cls, batch: f, runs: s.runs ?? [], commitUnderTest: j.commitUnderTest ?? null })
+          byDir.set(dir, { dir, scenario: s.name, cls, batch: f, runs: s.runs ?? [], commitUnderTest: j.commitUnderTest ?? null, collection: /v2c-/.test(f) })
         }
       }
     }
@@ -301,11 +332,16 @@ export function labelTurn(turn, scenario, batchRun, legacyLabel = null) {
       // 240 s since last server-accepted station (or turn start), >=3 calls, running.
       const progressRel = progress.map(p => Math.round((p.atMs - turn.startMs) / 1000)).filter(s => s >= 0 && s <= dur)
       let onset = null
-      // candidate onset points: turn start (0) and each progress event
+      // candidate onset points: turn start (0) and each progress event. t0 = a+240
+      // is a stall onset ONLY IF no station was accepted in (a, t0] (a real 240s
+      // gap with no server progress), >=3 calls in the span, and the turn still
+      // runs. Continuous progress (a station every few seconds) never stalls.
       const anchors = [0, ...progressRel]
       for (const a of anchors) {
         const t0 = a + PATIENCE.progressableSec
         if (t0 > dur) continue // turn ended before patience elapsed
+        const nextProgress = progressRel.find(s => s > a)
+        if (nextProgress !== undefined && nextProgress <= t0) continue // progress within the span: not a stall
         const callsInSpan = turn.toolCallTimes.filter(at => at >= a * 1000 && at <= t0 * 1000).length
         const helpBefore = turn.helpTimes.some(at => at < t0 * 1000)
         const confirmBefore = turn.confirmTimes.some(at => at < t0 * 1000)
@@ -370,15 +406,19 @@ function build(args) {
   let traceBytes = 0
   const dirs = [...byDir.keys()].filter(d => args.only === null || d === args.only || d.includes(args.only))
   const existingSplits = loadExistingSplits()
-  const splitMap = assignSplits(dirs, existingSplits)
-  // Holdout discipline check: every previously-frozen run keeps its split.
+  const splitMap = assignSplitsStratified(dirs, existingSplits, byDir)
+  // Holdout discipline: OLD (non-collection) runs keep their FROZEN split; NEW
+  // collection runs are scenario-stratified (may rebalance from the initial hash).
   let flipped = 0
   for (const [run, split] of existingSplits) {
+    if (byDir.get(run)?.collection) continue // new runs restratified by design
     if (splitMap.has(run) && splitMap.get(run) !== split) flipped += 1
   }
-  if (flipped > 0) { console.error(`FATAL: ${flipped} frozen run splits would flip — refusing to rebuild`); process.exit(1) }
-  const newRuns = dirs.filter(d => !existingSplits.has(d))
-  if (existingSplits.size > 0) console.log(`split preservation: ${existingSplits.size} frozen runs kept; ${newRuns.length} new runs assigned`)
+  if (flipped > 0) { console.error(`FATAL: ${flipped} frozen OLD run splits would flip — refusing to rebuild`); process.exit(1) }
+  const oldRuns = dirs.filter(d => !byDir.get(d)?.collection)
+  const newRuns = dirs.filter(d => byDir.get(d)?.collection)
+  const newHoldout = newRuns.filter(d => splitMap.get(d) === 'holdout').length
+  console.log(`split: ${oldRuns.length} old runs frozen (0 flips); ${newRuns.length} new collection runs scenario-stratified (${newHoldout} holdout / ${newRuns.length - newHoldout} tune)`)
   for (const dir of dirs) {
     const meta = byDir.get(dir)
     const file = join(args.archiveRoot, dir, 'events.jsonl')
@@ -405,12 +445,18 @@ function build(args) {
         legacyLabel: legacy.get(`${dir}#${i}`) ?? null,
         endClass: turn.endInfo.help ? 'help' : turn.endInfo.confirm ? 'confirm' : turn.endInfo.outcome === 'stopped' ? 'stopped' : (turn.endInfo.label ?? turn.endInfo.outcome),
         origin: CONTAMINATED_RUNS.has(dir) ? 'contaminated' : 'clean',
-        synthetic: false, commitUnderTest: meta.commitUnderTest,
+        synthetic: false, commitUnderTest: meta.commitUnderTest, collection: meta.collection === true,
       })
     }
   }
   const manifest = {
     version: 1, createdAt: new Date().toISOString(), patience: PATIENCE, split: SPLIT,
+    splitRule: {
+      method: 'old-frozen + new-collection-scenario-stratified',
+      note: 'OLD corpus runs keep their frozen v0 splits (0 flips asserted). NEW collection runs (batch v2c-) are assigned ~1/3 holdout within each scenarioClass by seeded hash rank (scenario metadata only, never labels/results). Rebalanced 2026-11-17 BEFORE any V2 full-corpus scoring: the initial global hash had put all new runs in holdout, leaving tune with no new evidence; stratification gives tune representative new evidence (epic long-fine + a share of stuck) and holdout an unbiased ~1/3.',
+      holdoutFraction: SPLIT.holdoutFraction, seed: SPLIT.seed,
+      frozenOldRuns: Object.fromEntries(oldRuns.map(d => [d, splitMap.get(d)])),
+    },
     scenarioClass: SCENARIO_CLASS,
     traceStorage: traceBytes <= 10 * 1024 * 1024 ? 'committed' : 'machine-local',
     traceBytes,

@@ -348,17 +348,21 @@ function groupStats(windows) {
   const fine = windows.filter(w => w.label === 'fine')
   const stuck = windows.filter(w => w.label === 'stuck')
   const rate = (arr, field) => (arr.length ? arr.filter(w => w[field]).length / arr.length : 0)
+  // MEAN rate = average of the per-window mean fractions (mean over k repeats of
+  // the caught/false-alert fraction), NOT the share of windows flagged in >=1
+  // repeat. WORST rate = share of windows flagged in the worst case.
+  const mean = (arr, field) => (arr.length ? arr.reduce((n, w) => n + (w[field] ?? 0), 0) / arr.length : 0)
   return {
     windows: windows.length,
     fine: fine.length,
     stuck: stuck.length,
-    fineFalseAlertMeanRate: rate(fine, 'meanFlagged'),
+    fineFalseAlertMeanRate: mean(fine, 'meanFlagged'),
     fineFalseAlertWorstRate: rate(fine, 'worstFlagged'),
     fineZeroAlertsMeanPass: fine.every(w => !w.meanFlagged),
     fineZeroAlertsWorstPass: fine.every(w => !w.worstFlagged),
-    stuckCaughtMeanRate: rate(stuck, 'meanFlagged'),
+    stuckCaughtMeanRate: mean(stuck, 'meanFlagged'),
     stuckCaughtWorstRate: rate(stuck, 'worstFlagged'),
-    stuckCaughtMeanPass: stuck.length ? rate(stuck, 'meanFlagged') >= 0.8 : true,
+    stuckCaughtMeanPass: stuck.length ? mean(stuck, 'meanFlagged') >= 0.8 : true,
     stuckCaughtWorstPass: stuck.length ? rate(stuck, 'worstFlagged') >= 0.8 : true,
     stability: windows.length ? windows.filter(w => w.stable).length / windows.length : 1,
     staleAlertWindows: windows.filter(w => w.worstStaleAlerts > 0).length,
@@ -444,7 +448,9 @@ async function main() {
     outputTokens: totals.outputTokens / (watchedSeconds / 3600),
   } : { judgeCalls: 0, inputTokens: 0, outputTokens: 0 }
 
-  const gatePass = groups.gatedAll.fineZeroAlertsWorstPass && groups.gatedAll.stuckCaughtWorstPass
+  // Gate (lead ruling 2026-11-17): caught GATE = MEAN across k ≥80%; false-alert
+  // GATE = worst-case 0 on fine. Worst-case caught + stability are diagnostics.
+  const gatePass = groups.gatedAll.fineZeroAlertsWorstPass && groups.gatedAll.stuckCaughtMeanPass
   const summary = {
     dryRun: args.dryRun, split: args.split ?? 'all', repeat: args.repeat,
     manifestCreatedAt: manifest.createdAt, manifestWindows: manifest.windows.length,
