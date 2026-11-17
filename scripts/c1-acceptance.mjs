@@ -175,20 +175,31 @@ export function checkSteerEvidence({ steered, turn1Aborted, turn2Ok, countAtStee
  * must survive (still carried afterwards, or continued by the steered turn).
  * The counter is ground truth for no duplicate clicks.
  */
-export function checkSteerPlanEvidence({ steered, turn1Aborted, turn2Ok, turn1PlanRevision, turn2Armed, turn2CarriedRevision, carriedPlanRevisionAfter, turn2PlanRevision, countAtSteer, finalCount }) {
+export function checkSteerPlanEvidence({ steered, turn1Aborted, turn2Ok, turn1PlanRevision, revisionAtSteer, turn2Armed, turn2CarriedRevision, carriedPlanRevisionAfter, turn2PlanRevision, countAtSteer, finalCount }) {
   const reasons = []
   if (steered !== true) return { status: 'fail', reasons: ['steer was not accepted (steered!==true)'] }
   if (turn1Aborted !== true) reasons.push('first turn did not end stopped/aborted')
   if (turn2Ok !== true) reasons.push('second turn did not end ok')
-  if (!Number.isSafeInteger(turn1PlanRevision) || turn1PlanRevision < 1) {
-    return { status: 'fail', reasons: [...reasons, `no plan created before the steer (revision=${JSON.stringify(turn1PlanRevision)})`] }
+  // A steer-aborted (or stopped) turn's turn.end STRUCTURALLY lacks plan
+  // annotation — the runtime is interrupted before plan-runtime endTurn writes
+  // planRevision/planOutcome (both null). The authoritative pre-steer revision
+  // then comes from the plan.updated log activity (revisionAtSteer) and/or the
+  // revision carried into turn 2's prompt, both captured independently. The
+  // fallback is gated on turn1Aborted so a non-aborted turn must still annotate.
+  const safeRev = value => Number.isSafeInteger(value) && value >= 1
+  const planRevisionBeforeSteer = safeRev(turn1PlanRevision) ? turn1PlanRevision
+    : (turn1Aborted === true && safeRev(revisionAtSteer)) ? revisionAtSteer
+      : (turn1Aborted === true && safeRev(turn2CarriedRevision)) ? turn2CarriedRevision
+        : null
+  if (planRevisionBeforeSteer === null) {
+    return { status: 'fail', reasons: [...reasons, `no plan created before the steer (turn.end revision=${JSON.stringify(turn1PlanRevision)}, atSteer=${JSON.stringify(revisionAtSteer)}, carried=${JSON.stringify(turn2CarriedRevision)})`] }
   }
   if (turn2Armed !== true) reasons.push('steered turn is not a marathon turn (chat.done planMode/marathon not true)')
-  if (turn2CarriedRevision !== turn1PlanRevision) {
-    reasons.push(`steered prompt did not carry the plan: carried=${JSON.stringify(turn2CarriedRevision)} expected=${turn1PlanRevision}`)
+  if (turn2CarriedRevision !== planRevisionBeforeSteer) {
+    reasons.push(`steered prompt did not carry the plan: carried=${JSON.stringify(turn2CarriedRevision)} expected=${planRevisionBeforeSteer}`)
   }
-  const planKept = (Number.isSafeInteger(carriedPlanRevisionAfter) && carriedPlanRevisionAfter >= turn1PlanRevision)
-    || (Number.isSafeInteger(turn2PlanRevision) && turn2PlanRevision >= turn1PlanRevision)
+  const planKept = (Number.isSafeInteger(carriedPlanRevisionAfter) && carriedPlanRevisionAfter >= planRevisionBeforeSteer)
+    || (Number.isSafeInteger(turn2PlanRevision) && turn2PlanRevision >= planRevisionBeforeSteer)
   if (!planKept) {
     reasons.push(`plan lost after the steer: carriedAfter=${JSON.stringify(carriedPlanRevisionAfter)} turn2Revision=${JSON.stringify(turn2PlanRevision)}`)
   }
@@ -294,21 +305,28 @@ function selfTest() {
   expect('steer second failed', checkSteerEvidence({ ...goodSteer, turn2Ok: false }), 'fail')
   expect('steer not accepted', checkSteerEvidence({ ...goodSteer, steered: false }), 'fail')
 
+  // Real aborted turn.end shape: planRevision/planOutcome are null (the runtime
+  // is interrupted before plan-runtime annotates). The pre-steer revision is
+  // proven by the plan.updated log activity (revisionAtSteer) and the carry.
   const goodSteerPlan = {
     steered: true, turn1Aborted: true, turn2Ok: true,
-    turn1PlanRevision: 3, turn2Armed: true, turn2CarriedRevision: 3,
+    turn1PlanRevision: null, revisionAtSteer: 3, turn2Armed: true, turn2CarriedRevision: 3,
     carriedPlanRevisionAfter: 3, turn2PlanRevision: null,
     countAtSteer: 4, finalCount: 4,
   }
   expect('steer-plan good', checkSteerPlanEvidence(goodSteerPlan), 'pass')
   expect('steer-plan continued by turn2', checkSteerPlanEvidence({ ...goodSteerPlan, carriedPlanRevisionAfter: null, turn2PlanRevision: 5 }), 'pass')
   expect('steer-plan in-flight click', checkSteerPlanEvidence({ ...goodSteerPlan, finalCount: 5 }), 'pass')
+  expect('steer-plan annotated turn.end still authoritative', checkSteerPlanEvidence({ ...goodSteerPlan, turn1PlanRevision: 3, revisionAtSteer: null }), 'pass')
+  expect('steer-plan aborted, only carried revision proves the plan', checkSteerPlanEvidence({ ...goodSteerPlan, revisionAtSteer: null }), 'pass')
   expect('steer-plan not accepted', checkSteerPlanEvidence({ ...goodSteerPlan, steered: false }), 'fail')
   expect('steer-plan first not stopped', checkSteerPlanEvidence({ ...goodSteerPlan, turn1Aborted: false }), 'fail')
   expect('steer-plan second failed', checkSteerPlanEvidence({ ...goodSteerPlan, turn2Ok: false }), 'fail')
-  expect('steer-plan no plan before steer', checkSteerPlanEvidence({ ...goodSteerPlan, turn1PlanRevision: 0 }), 'fail')
+  expect('steer-plan no plan before steer', checkSteerPlanEvidence({ ...goodSteerPlan, turn1PlanRevision: null, revisionAtSteer: null, turn2CarriedRevision: null }), 'fail')
+  expect('steer-plan non-aborted null turn.end cannot fall back', checkSteerPlanEvidence({ ...goodSteerPlan, turn1Aborted: false, turn1PlanRevision: null }), 'fail')
   expect('steer-plan turn2 not armed', checkSteerPlanEvidence({ ...goodSteerPlan, turn2Armed: false }), 'fail')
   expect('steer-plan wrong carried revision', checkSteerPlanEvidence({ ...goodSteerPlan, turn2CarriedRevision: 0 }), 'fail')
+  expect('steer-plan wrong carried, no atSteer log', checkSteerPlanEvidence({ ...goodSteerPlan, revisionAtSteer: null, turn2CarriedRevision: 0 }), 'fail')
   expect('steer-plan no carry in prompt', checkSteerPlanEvidence({ ...goodSteerPlan, turn2CarriedRevision: null }), 'fail')
   expect('steer-plan plan lost', checkSteerPlanEvidence({ ...goodSteerPlan, carriedPlanRevisionAfter: null, turn2PlanRevision: null }), 'fail')
   expect('steer-plan duplicate clicks', checkSteerPlanEvidence({ ...goodSteerPlan, finalCount: 7 }), 'fail')
