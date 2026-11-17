@@ -1,0 +1,7 @@
+PASS mid-turn alert closed at turn end {"alertId":"ba1d0bd4-9a7c-477d-950e-054ffab25e14","watchOpen":null}
+PASS ended-incomplete is the one open notice {"endedId":"c6cda076-821b-4a00-ab43-3be552d73df8"}
+PASS It's fine on ended-incomplete returns 200 {"status":200,"watchOpen":null}
+PASS next turn closes ended-incomplete before first frame {"endedId2":"54a3a6e9-147b-4cfa-afa8-01f1b0fc05f6","watchOpen":null}
+PASS marathon off clears everything {"watchOpen":null}
+
+V1 lifecycle check PASS — stale alerts 0 on /state after every boundary (5 checks)

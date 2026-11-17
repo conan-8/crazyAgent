@@ -239,3 +239,104 @@ test('stop() clears the timer', () => {
   h.watcher.stop()
   assert.equal(h.watcher.timer, null)
 })
+
+/* ------------------------------------------------------------------ */
+/* V1 alert lifecycle (§3.2): explicit close frames, one open notice   */
+/* ------------------------------------------------------------------ */
+
+function openHardAlert(h) {
+  h.call('hang', 'browser_wait_for')
+  h.advance(WATCH_THRESHOLDS.toolHangHardMs)
+  h.tick()
+  return h.watcher.watchProjection().open
+}
+
+test('V1: turn end closes an open mid-turn alert with its own id (Turn ended.)', () => {
+  const h = harness()
+  const alert = openHardAlert(h)
+  h.watcher.turnEnded({ outcome: 'done', label: 'done', planOutcome: 'reported-complete' })
+  const closed = h.frames.filter(f => f.type === 'chat.watch' && f.state === 'closed')
+  assert.equal(closed.length, 1)
+  assert.equal(closed[0].id, alert.id, 'the close frame carries the alert OWN id')
+  assert.equal(closed[0].kind, 'info')
+  assert.equal(closed[0].reason, 'Turn ended.')
+  assert.equal(closed[0].turnId, 'turn-1')
+  assert.equal(h.watcher.watchProjection().open, null, 'no stale open alert after turn end')
+  assert.equal(h.frames.filter(f => f.type === 'chat.watch' && f.kind === 'ended-incomplete').length, 0)
+})
+
+test('V1: ended-incomplete supersedes the mid-turn alert (closed same step, one open notice)', () => {
+  const h = harness()
+  const alert = openHardAlert(h)
+  h.watcher.turnEnded({ outcome: 'done', label: 'partial', planOutcome: 'unfinished' })
+  const watch = h.frames.filter(f => f.type === 'chat.watch')
+  const closed = watch.filter(f => f.state === 'closed')
+  const ended = watch.filter(f => f.kind === 'ended-incomplete' && f.state === 'open')
+  assert.equal(closed.length, 1)
+  assert.equal(closed[0].id, alert.id, 'the mid-turn alert is closed in the same step')
+  assert.equal(ended.length, 1, 'ended-incomplete becomes the one open notice')
+  assert.ok(watch.indexOf(closed[0]) < watch.indexOf(ended[0]), 'close precedes the ended-incomplete open frame')
+  const open = h.watcher.watchProjection().open
+  assert.equal(open.kind, 'ended-incomplete')
+  assert.equal(open.id, ended[0].id)
+  assert.equal(h.watcher.openAlert, null, 'only one open notice')
+})
+
+test('V1: It\'s fine on ended-incomplete returns 200, closes it, no snooze', () => {
+  const h = harness()
+  openHardAlert(h)
+  h.watcher.turnEnded({ outcome: 'done', label: 'partial', planOutcome: 'unfinished' })
+  const id = h.watcher.watchProjection().open.id
+  const result = h.watcher.ack(id)
+  assert.equal(result.ok, true)
+  const dismissed = h.frames.filter(f => f.type === 'chat.watch' && f.state === 'dismissed')
+  assert.equal(dismissed.length, 1)
+  assert.equal(dismissed[0].id, id)
+  assert.equal(h.watcher.watchProjection().open, null)
+  assert.deepEqual(h.watcher.snoozedUntil, {}, 'no snooze for ended-incomplete')
+  assert.equal(h.watcher.ack(id).code, 'WATCH_NOT_FOUND', 'already closed')
+})
+
+test('V1: closeEndedIncomplete closes the remembered notice before a new turn', () => {
+  const h = harness()
+  h.watcher.turnEnded({ outcome: 'done', label: 'partial', planOutcome: 'unfinished' })
+  const id = h.watcher.watchProjection().open.id
+  assert.equal(h.watcher.closeEndedIncomplete('A new turn started.'), true)
+  const closed = h.frames.filter(f => f.type === 'chat.watch' && f.state === 'closed')
+  assert.equal(closed.length, 1)
+  assert.equal(closed[0].id, id)
+  assert.equal(closed[0].reason, 'A new turn started.')
+  assert.equal(h.watcher.watchProjection().open, null)
+  assert.equal(h.watcher.closeEndedIncomplete('A new turn started.'), false, 'nothing left to close')
+})
+
+test('V1: a clean turn end with no open alert emits no close frame', () => {
+  const h = harness()
+  h.watcher.turnEnded({ outcome: 'done', label: 'done', planOutcome: 'reported-complete' })
+  assert.equal(h.frames.filter(f => f.type === 'chat.watch').length, 0)
+  assert.equal(h.watcher.watchProjection().open, null)
+})
+
+test('V1: clearNotices clears both open notices (marathon off / new / switch)', () => {
+  const h = harness()
+  openHardAlert(h)
+  assert.equal(h.watcher.watchProjection().open.kind, 'TOOL_HANG')
+  h.watcher.clearNotices()
+  assert.equal(h.watcher.watchProjection().open, null)
+  assert.equal(h.watcher.openAlert, null)
+  assert.equal(h.watcher.openEndedIncomplete, null)
+  // ended-incomplete path too
+  h.watcher.turnEnded({ outcome: 'done', label: 'partial', planOutcome: 'unfinished' })
+  assert.equal(h.watcher.watchProjection().open.kind, 'ended-incomplete')
+  h.watcher.clearNotices()
+  assert.equal(h.watcher.watchProjection().open, null)
+})
+
+test('V1: mid-turn ack still snoozes the kind (unchanged behavior)', () => {
+  const h = harness()
+  const alert = openHardAlert(h)
+  const result = h.watcher.ack(alert.id)
+  assert.equal(result.ok, true)
+  assert.ok(h.watcher.snoozedUntil.TOOL_HANG > 0, 'mid-turn alert ack snoozes')
+  assert.equal(h.watcher.watchProjection().open, null)
+})
