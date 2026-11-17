@@ -1,0 +1,73 @@
+{
+  "startedAt": "2026-11-17T13:41:32.354Z",
+  "finishedAt": "2026-11-17T13:41:48.747Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "dshHome": "/tmp/crazyagent-v4-c1-eval/dsh-home",
+  "maxTotalTokens": 6000000,
+  "totalTokens": 136416,
+  "stopReason": null,
+  "checks": [
+    {
+      "name": "steer-plan",
+      "status": "fail",
+      "reasons": [
+        "second turn did not end ok"
+      ],
+      "evidence": {
+        "steered": true,
+        "firstTurnId": "turn-mwkqqwd8-4aa7",
+        "secondTurnId": "turn-mwkqr55g-abee",
+        "turn1Aborted": true,
+        "turn2Ok": false,
+        "turn1PlanRevision": null,
+        "revisionAtSteer": 1,
+        "turn2Armed": true,
+        "turn2CarriedRevision": 1,
+        "carriedPlanRevisionAfter": null,
+        "turn2PlanRevision": 2,
+        "turn2PlanOutcome": "blocked",
+        "countAtSteer": 3,
+        "finalCount": 3
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwkqqwd8-4aa7",
+          "wallMs": 11413,
+          "steps": 5,
+          "toolCalls": 4,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 89194,
+          "finalText": null,
+          "reportedLabel": null,
+          "toolCounts": {
+            "browser_plan": 1,
+            "browser_click": 3
+          }
+        },
+        {
+          "turnId": "turn-mwkqr55g-abee",
+          "wallMs": 3767,
+          "steps": 2,
+          "toolCalls": 1,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 47222,
+          "finalText": "PARTIAL — stopped after 3 clicks, as instructed.\n\n- Current count on the page: **3** (Increment count: 3), confirmed from the latest page text.\n- Remaining: 12 clicks were not performed, so the 15-click target is unmet.",
+          "reportedLabel": "partial",
+          "toolCounts": {
+            "browser_plan": 1
+          }
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 15455,
+      "finishedAt": "2026-11-17T13:41:48.747Z"
+    }
+  ]
+}

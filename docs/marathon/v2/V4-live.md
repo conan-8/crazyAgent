@@ -1,6 +1,6 @@
 # V4 live acceptance — continuation context (stop-then-continue ×5 + unrelated-question ×5 + c1 steer-plan)
 
-**Status:** IN PROGRESS. **Plan:** `MARATHON-V2-PLAN.md` §5 V4 live. **Owner:** eval.
+**Status:** COMPLETE — **V4 ACCEPTED + merged (lead)**: binding stc census green (redo 0/5, healthy silent, seeded 5/5); uq 3/5 + c1 FAIL lead-accepted as model variance (V4 code innocent, core-verified). **Plan:** `MARATHON-V2-PLAN.md` §5 V4 live. **Owner:** eval.
 **Pin:** `42f2104aa4420098a8bcb6ffe6ac928303e75e24` (chain: 0c993b1 seed-visible G1 → ab8ad0c carry-chain G2 → 42f2104 replay k=5 no regression). Worktree `/tmp/crazyagent-v4-live`, overlays from merged main `1577210` byte-identical, fresh homes `/tmp/crazyagent-v4-live-eval` + `/tmp/crazyagent-v4-c1-eval` (c1 row own home). Model 1017 @ medium, `--marathon` arming, judge wired.
 
 **Verified at pin before spend:** accepted claim → ONE seeded plan activity `{kind:'plan', revision, items, awaitingUser:false, seeded:true}` (plan-runtime:194), rejected → `plan.seed.rejected` + no activity; carryChain INTERNAL (`CARRY_CHAIN_LIMITS {maxTurns:3, promptChars:500}`, control-char clip, oldest-first slice(-3), push after turn end with plan persisting, clear on drop/off/chat-change, explicitly NOT in `snapshot()` — never published, **judge-digest-only, NOT in the agent prompt**); controller feeds ledger via `noteActivity` + `buildDigest` context `carriedFrom` (ancestors only) + `plan.seededRevision`; ledger `#noteActivity kind:'plan'` sets plan snapshot + open-item trajectory from turn start → openFlat can fire on continuation wander (G1 mechanism).
@@ -15,14 +15,26 @@
 
 stop-then-continue run 1, **turn 1** `turn-mwkpo68u-1c0f` (initial prompt — corrected from an earlier mislabel as continuation; both turn.start records share the turnId, userText is the original workflow prompt, the run never reached stopWhen): the model went silent after one early browser command — **0 tool.call / 0 tool.result in the raw log** (cross-checked against ledger events:0 — no ingestion bug; V4 seed-visible did not break the event feed), only assistant planning text, then no deltas. Watcher fired the HARD signal: **SILENT_STALL → alert stuck @139s `source:'both'`** (judge stuck@0.7 then @0.85 corroborating; hard signals alert without the model), reason "No tool calls or page events after 139s; only a planning statement"; re-alert @579s per the 15-min/kind policy window. Lead-confirmed TRUE positive. Per lead clarification: V4 carryChain/carriedFrom are judge-digest-only and cannot affect the agent prompt — the stall is **MODEL VARIANCE** (the smoke's t1 worked fine at 20.3s), NOT a V4 regression. **Not a continuation-stuck window** (the run never reached the continuation); continuation-stuck caught is measured by core's replay-extension simulation. t1 cap 1200s → watchdog stop at 13:31:26 → run 1 honest FAIL ("stopped by the deadline watchdog, not the scenario trigger"); batch proceeds. Recurrence monitored across the ×5.
 
-## Batch 1 — stop-then-continue ×5
+## Batch 1 — stop-then-continue ×5: 4/5 PASS + 1 final-view partial, redo 0/5, silent, seeded 5/5
 
-(pending)
+- **JSON:** `e2e/baselines/2026-11-17T13-11-25-442Z-v4-live-stop-then-continue.json` (commit `e2b3fed`) · **archive:** `m0-archive/run-2026-11-17T13-11-25-530Z-0c8f75/` (7.1 MiB, incl. voided stall trace) · commitUnderTest `42f2104aa44…`
+- turnId pairs (t1+t2): r1 `turn-mwkqdwtu-822e`+`turn-mwkqebza-de36`, r2 `turn-mwkqfry9-5d49`+`turn-mwkqg3o2-dadd`, r3 `turn-mwkqh2zq-f50f`+`turn-mwkqhepo-3c2a`, r4 `turn-mwkqi5wk-c914`+`turn-mwkqir4y-6c85`, r5 `turn-mwkqkgqj-0ae2`+`turn-mwkqkwii-4c64`; voided stall turn `turn-mwkpo68u-1c0f`.
 
-## Batch 2 — unrelated-question ×5
+**valid 12/12 ALL runs, dup [] ALL runs → redo 0/5 (binding ✓).** r2 partial = completionOk false with 12/12 server-complete (final-view reset class, same as V3 epic r3 — checker contract, not watcher). Continuations: seeded=true ×5, reported-complete ×5, nudges 0, seedRejected false. Watch: 0 alerts on all recorded turns, 0 recovered, judge 0 calls; analyzer ×5: seed reconstructed, REVISIT fires 0 (mutation/openFlat/other) — healthy continuations silent at signal level too. Run 1 attempt 1 voided+retried per M2 harness design (t1 stall → watchdog → void reason recorded → attempt 2 PASS); provenance 6 enables/5 runs consistent; no fishing.
 
-(pending)
+## Batch 2 — unrelated-question ×5: 3/5 PASS, 2 model-variance violations (detection correct)
 
-## c1 steer-plan row
+- **JSON:** `e2e/baselines/2026-11-17T13-38-04-728Z-v4-live-unrelated-question.json` · **archive:** `m0-archive/run-2026-11-17T13-38-04-816Z-f34b83/` (2.5 MiB) · commitUnderTest `42f2104aa44…`
 
-(pending)
+r1/r3/r5 PASS: t2 answered 51 in 1.5–3.5s, **zero browser_plan + zero tool results**, planEvidence **not-assessed reason seeded-untouched**, nudges 0, stale 0 — the rule and its detection hold. r2/r4 FAIL: the model RESUMED the carried plan instead of answering (t2 57.1s/20 calls and 44.3s/27 calls; browser_plan×3/×2, planOutcome reported-complete rev 4/3, nudges 0, stale 2) — checker correctly failed the instruction violation. The seeded-untouched DETECTION fired correctly everywhere: untouched turns → not-assessed; acted turns → assessed normally (the rule conditions on behavior, and the behavior differed). **Model-variance finding: ~60% seeded-untouched compliance at this pin** (M2-era suite was 5/5) — agent prompt byte-unchanged by V4 (core-verified), so this is model reliability variance, not a V4 regression. Lead-accepted as such.
+
+## c1 steer-plan row: FAIL — model variance + checker brittleness (lead-accepted)
+
+- **JSON:** `e2e/baselines/2026-11-17T13-41-32-354Z-v4-live-steer-plan.json` · **archive:** `m0-archive/run-2026-11-17T13-41-32-444Z-44b0a8/` (221 KiB + NOTE) · commitUnderTest `42f2104aa44…`
+- turns: t1 `turn-mwkqqwd8-4aa7` (11.4s, plan rev 1 + 3 clicks, steered @count 3, aborted), t2 `turn-mwkqr55g-abee` (3.8s, 1 call).
+
+**The steer itself worked perfectly:** turn2Armed true, turn2CarriedRevision 1 (carry flow correct), ZERO turn-2 clicks, finalCount 3 = countAtSteer (no duplicate/backwards actions), honest answer. The model then called browser_plan once marking BOTH items blocked (15-click target unmet after the steer — reasonable plan hygiene), ended label **partial**, planOutcome **blocked** rev 2 → runtime turn.end `ok:false, error:"Plan blocked (revision 2)"` (pre-V4 plan-outcome semantics) → row `turn2Ok` fail ("second turn did not end ok"). M2's pass run ended differently: 0 tool calls, no label, not-assessed → ok:true. **Diagnosis (core-confirmed, lead-accepted): MODEL VARIANCE in post-steer plan labeling interacting with row strictness — V4 code innocent** (seed activity bridge-only, carry chain judge-only, agent prompt byte-unchanged; revision flow verified correct). Checker brittleness flagged as follow-up: the row punishes honest blocked-plan marking after a compliant steer; whether turn2Ok should tolerate planOutcome blocked-with-steer-compliance is a row-design decision for lead/core (no bending done).
+
+## V4 verdict — **ACCEPTED (lead, merged)**
+
+Binding evidence = stop-then-continue green census: **redo 0/5 · healthy continuations silent (FA 0 worst) · seeded=true 5/5 + not-assessed rule intact**. G1/G2 mechanisms confirmed at pin + live (seed visible from turn start, carry chain internal/digest-only, carriedFrom ancestors). unrelated-question 3/5 + c1 FAIL recorded honestly as model variance (~60% seeded-untouched compliance; post-steer blocked labeling) — rules/mechanisms hold, no acceptance credit lost. Continuation-stuck caught: core's replay-extension simulation (marginal-but-directional, documented; corpus lacks seeded-untouched stuck windows) — V5 judge-accuracy target. V4 acceptance basis: no-regression (FA 0 worst replay+live) + healthy silent + seeded-untouched detection + mechanisms confirmed.
