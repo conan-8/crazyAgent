@@ -1,0 +1,7 @@
+[ui-preview] wrote /home/conan/Documents/GitHub/crazyagent-v2-v1/docs/marathon/v2/v1-evidence/ui/watch-alert.png
+[ui-preview] wrote /home/conan/Documents/GitHub/crazyagent-v2-v1/docs/marathon/v2/v1-evidence/ui/watch-dismissed.png
+[ui-preview] wrote /home/conan/Documents/GitHub/crazyagent-v2-v1/docs/marathon/v2/v1-evidence/ui/watch-recovered.png
+[ui-preview] wrote /home/conan/Documents/GitHub/crazyagent-v2-v1/docs/marathon/v2/v1-evidence/ui/watch-ended-incomplete.png
+[ui-preview] wrote /home/conan/Documents/GitHub/crazyagent-v2-v1/docs/marathon/v2/v1-evidence/ui/watch-closed-new-turn.png
+[ui-preview] wrote /home/conan/Documents/GitHub/crazyagent-v2-v1/docs/marathon/v2/v1-evidence/ui/watch-closed-turn-end.png
+[ui-preview] wrote /home/conan/Documents/GitHub/crazyagent-v2-v1/docs/marathon/v2/v1-evidence/ui/watch-narrow.png
