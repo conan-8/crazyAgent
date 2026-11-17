@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "createdAt": "2026-11-17T08:50:58.559Z",
+  "createdAt": "2026-11-17T09:01:07.621Z",
   "patience": {
     "progressableSec": 240,
     "progressableMinCalls": 3,
@@ -15,6 +15,38 @@
     "seed": "marathon-v2-v0",
     "holdoutFraction": 0.3333333333333333
   },
+  "splitRule": {
+    "method": "old-frozen + new-collection-scenario-stratified",
+    "note": "OLD corpus runs keep their frozen v0 splits (0 flips asserted). NEW collection runs (batch v2c-) are assigned ~1/3 holdout within each scenarioClass by seeded hash rank (scenario metadata only, never labels/results). Rebalanced 2026-11-17 BEFORE any V2 full-corpus scoring: the initial global hash had put all new runs in holdout, leaving tune with no new evidence; stratification gives tune representative new evidence (epic long-fine + a share of stuck) and holdout an unbiased ~1/3.",
+    "holdoutFraction": 0.3333333333333333,
+    "seed": "marathon-v2-v0",
+    "frozenOldRuns": {
+      "run-2026-11-17T01-07-02-137Z-f33f10": "tune",
+      "run-2026-11-17T01-07-40-552Z-c02d66": "tune",
+      "run-2026-11-17T01-13-25-223Z-02b684": "holdout",
+      "run-2026-11-17T01-20-21-564Z-2551a4": "holdout",
+      "run-2026-11-17T01-31-31-289Z-b1e4b2": "tune",
+      "run-2026-11-17T01-32-38-591Z-f80ac2": "tune",
+      "run-2026-11-17T02-00-10-884Z-401b96": "tune",
+      "run-2026-11-17T02-02-36-976Z-849181": "tune",
+      "run-2026-11-17T02-14-11-994Z-c82d46": "tune",
+      "run-2026-11-17T02-26-39-794Z-739f46": "tune",
+      "run-2026-11-17T02-38-11-221Z-458428": "tune",
+      "run-2026-11-17T02-44-34-045Z-b5a71b": "tune",
+      "run-2026-11-17T03-00-02-778Z-c3dddb": "tune",
+      "run-2026-11-17T03-07-12-520Z-2c78d2": "holdout",
+      "run-2026-11-17T03-37-05-493Z-6d9d73": "tune",
+      "run-2026-11-17T04-29-11-272Z-dfd724": "holdout",
+      "run-2026-11-17T04-36-10-612Z-805c49": "holdout",
+      "run-2026-11-17T04-52-35-197Z-4296b2": "holdout",
+      "run-2026-11-17T00-36-32-285Z-087d49": "holdout",
+      "run-2026-11-17T00-37-20-119Z-166c12": "tune",
+      "run-2026-11-17T00-43-57-262Z-2ab066": "tune",
+      "run-2026-11-17T00-56-00-693Z-d6d771": "tune",
+      "run-2026-11-17T03-09-45-475Z-a9444a": "tune",
+      "run-2026-11-17T03-34-07-881Z-2f6fb2": "holdout"
+    }
+  },
   "scenarioClass": {
     "marathon-long": "progressable",
     "marathon-epic": "progressable",
@@ -28,18 +60,18 @@
     "unrelated-question": "other"
   },
   "traceStorage": "committed",
-  "traceBytes": 1249338,
+  "traceBytes": 1287054,
   "counts": {
-    "windows": 147,
-    "fine": 137,
+    "windows": 157,
+    "fine": 147,
     "stuck": 10,
-    "gatedFine": 47,
+    "gatedFine": 52,
     "gatedStuck": 8,
-    "legacyManual": 65,
+    "legacyManual": 70,
     "distinctStuckRuns": 7,
     "fineOver4min": 7,
-    "holdoutRuns": 13,
-    "tuneRuns": 16
+    "holdoutRuns": 10,
+    "tuneRuns": 20
   },
   "windows": [
     {
@@ -66,7 +98,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-07-40-552Z-c02d66-t1",
@@ -92,7 +125,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-07-40-552Z-c02d66-t2",
@@ -118,7 +152,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-07-40-552Z-c02d66-t3",
@@ -144,7 +179,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-07-40-552Z-c02d66-t4",
@@ -170,7 +206,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-07-40-552Z-c02d66-t5",
@@ -196,7 +233,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-13-25-223Z-02b684-t1",
@@ -222,7 +260,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-13-25-223Z-02b684-t2",
@@ -248,7 +287,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-13-25-223Z-02b684-t3",
@@ -274,7 +314,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-13-25-223Z-02b684-t4",
@@ -300,7 +341,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-13-25-223Z-02b684-t5",
@@ -326,7 +368,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-20-21-564Z-2551a4-t1",
@@ -352,7 +395,8 @@
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-20-21-564Z-2551a4-t2",
@@ -378,7 +422,8 @@
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-20-21-564Z-2551a4-t3",
@@ -404,7 +449,8 @@
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-20-21-564Z-2551a4-t4",
@@ -430,7 +476,8 @@
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-20-21-564Z-2551a4-t5",
@@ -456,7 +503,8 @@
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8"
+      "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+      "collection": false
     },
     {
       "id": "01-31-31-289Z-b1e4b2-t1",
@@ -482,7 +530,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36"
+      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36",
+      "collection": false
     },
     {
       "id": "01-32-38-591Z-f80ac2-t1",
@@ -508,7 +557,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36"
+      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36",
+      "collection": false
     },
     {
       "id": "01-32-38-591Z-f80ac2-t2",
@@ -534,7 +584,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36"
+      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36",
+      "collection": false
     },
     {
       "id": "01-32-38-591Z-f80ac2-t3",
@@ -560,7 +611,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36"
+      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36",
+      "collection": false
     },
     {
       "id": "01-32-38-591Z-f80ac2-t4",
@@ -586,7 +638,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36"
+      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36",
+      "collection": false
     },
     {
       "id": "01-32-38-591Z-f80ac2-t5",
@@ -612,7 +665,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36"
+      "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36",
+      "collection": false
     },
     {
       "id": "02-00-10-884Z-401b96-t1",
@@ -638,7 +692,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-00-10-884Z-401b96-t2",
@@ -664,7 +719,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-00-10-884Z-401b96-t3",
@@ -690,7 +746,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-00-10-884Z-401b96-t4",
@@ -716,7 +773,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-00-10-884Z-401b96-t5",
@@ -742,7 +800,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-02-36-976Z-849181-t1",
@@ -768,7 +827,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-02-36-976Z-849181-t2",
@@ -794,7 +854,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-02-36-976Z-849181-t3",
@@ -820,7 +881,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-02-36-976Z-849181-t4",
@@ -846,7 +908,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-02-36-976Z-849181-t5",
@@ -872,7 +935,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-14-11-994Z-c82d46-t1",
@@ -898,7 +962,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-14-11-994Z-c82d46-t2",
@@ -924,7 +989,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-14-11-994Z-c82d46-t3",
@@ -950,7 +1016,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-14-11-994Z-c82d46-t4",
@@ -976,7 +1043,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-14-11-994Z-c82d46-t5",
@@ -1002,7 +1070,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-14-11-994Z-c82d46-t6",
@@ -1028,7 +1097,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-14-11-994Z-c82d46-t7",
@@ -1054,7 +1124,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-14-11-994Z-c82d46-t8",
@@ -1080,7 +1151,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-14-11-994Z-c82d46-t9",
@@ -1112,7 +1184,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-14-11-994Z-c82d46-t10",
@@ -1138,7 +1211,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-26-39-794Z-739f46-t1",
@@ -1164,7 +1238,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-26-39-794Z-739f46-t2",
@@ -1190,7 +1265,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-26-39-794Z-739f46-t3",
@@ -1216,7 +1292,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-26-39-794Z-739f46-t4",
@@ -1242,7 +1319,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-26-39-794Z-739f46-t5",
@@ -1268,7 +1346,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-26-39-794Z-739f46-t6",
@@ -1294,7 +1373,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-26-39-794Z-739f46-t7",
@@ -1320,7 +1400,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-26-39-794Z-739f46-t8",
@@ -1346,7 +1427,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-26-39-794Z-739f46-t9",
@@ -1372,7 +1454,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-26-39-794Z-739f46-t10",
@@ -1398,7 +1481,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3"
+      "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+      "collection": false
     },
     {
       "id": "02-38-11-221Z-458428-t1",
@@ -1424,7 +1508,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "02-38-11-221Z-458428-t2",
@@ -1450,7 +1535,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "02-38-11-221Z-458428-t3",
@@ -1476,7 +1562,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "02-38-11-221Z-458428-t4",
@@ -1502,7 +1589,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "02-38-11-221Z-458428-t5",
@@ -1528,7 +1616,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "02-44-34-045Z-b5a71b-t1",
@@ -1554,7 +1643,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "02-44-34-045Z-b5a71b-t2",
@@ -1580,7 +1670,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "02-44-34-045Z-b5a71b-t3",
@@ -1617,7 +1708,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "02-44-34-045Z-b5a71b-t4",
@@ -1643,7 +1735,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "02-44-34-045Z-b5a71b-t5",
@@ -1669,7 +1762,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-00-02-778Z-c3dddb-t1",
@@ -1695,7 +1789,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-00-02-778Z-c3dddb-t2",
@@ -1721,7 +1816,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-00-02-778Z-c3dddb-t3",
@@ -1747,7 +1843,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-00-02-778Z-c3dddb-t4",
@@ -1773,7 +1870,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-00-02-778Z-c3dddb-t5",
@@ -1799,7 +1897,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-00-02-778Z-c3dddb-t6",
@@ -1825,7 +1924,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-00-02-778Z-c3dddb-t7",
@@ -1851,7 +1951,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-00-02-778Z-c3dddb-t8",
@@ -1877,7 +1978,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-00-02-778Z-c3dddb-t9",
@@ -1903,7 +2005,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-00-02-778Z-c3dddb-t10",
@@ -1929,7 +2032,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-07-12-520Z-2c78d2-t1",
@@ -1955,7 +2059,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-07-12-520Z-2c78d2-t2",
@@ -1981,7 +2086,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-07-12-520Z-2c78d2-t3",
@@ -2007,7 +2113,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-07-12-520Z-2c78d2-t4",
@@ -2033,7 +2140,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-07-12-520Z-2c78d2-t5",
@@ -2059,7 +2167,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-07-12-520Z-2c78d2-t6",
@@ -2085,7 +2194,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-07-12-520Z-2c78d2-t7",
@@ -2111,7 +2221,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-07-12-520Z-2c78d2-t8",
@@ -2137,7 +2248,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-07-12-520Z-2c78d2-t9",
@@ -2163,7 +2275,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-07-12-520Z-2c78d2-t10",
@@ -2189,7 +2302,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0"
+      "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+      "collection": false
     },
     {
       "id": "03-37-05-493Z-6d9d73-t1",
@@ -2215,7 +2329,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f"
+      "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f",
+      "collection": false
     },
     {
       "id": "03-37-05-493Z-6d9d73-t2",
@@ -2241,7 +2356,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f"
+      "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f",
+      "collection": false
     },
     {
       "id": "03-37-05-493Z-6d9d73-t3",
@@ -2267,7 +2383,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f"
+      "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f",
+      "collection": false
     },
     {
       "id": "03-37-05-493Z-6d9d73-t4",
@@ -2293,7 +2410,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f"
+      "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f",
+      "collection": false
     },
     {
       "id": "03-37-05-493Z-6d9d73-t5",
@@ -2319,7 +2437,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f"
+      "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f",
+      "collection": false
     },
     {
       "id": "04-29-11-272Z-dfd724-t1",
@@ -2345,7 +2464,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-29-11-272Z-dfd724-t2",
@@ -2371,7 +2491,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-29-11-272Z-dfd724-t3",
@@ -2397,7 +2518,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-29-11-272Z-dfd724-t4",
@@ -2423,7 +2545,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-29-11-272Z-dfd724-t5",
@@ -2449,7 +2572,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-36-10-612Z-805c49-t1",
@@ -2475,7 +2599,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-36-10-612Z-805c49-t2",
@@ -2501,7 +2626,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-36-10-612Z-805c49-t3",
@@ -2527,7 +2653,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-36-10-612Z-805c49-t4",
@@ -2553,7 +2680,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-36-10-612Z-805c49-t5",
@@ -2579,7 +2707,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-52-35-197Z-4296b2-t1",
@@ -2605,7 +2734,8 @@
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-52-35-197Z-4296b2-t2",
@@ -2631,7 +2761,8 @@
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-52-35-197Z-4296b2-t3",
@@ -2657,7 +2788,8 @@
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-52-35-197Z-4296b2-t4",
@@ -2683,7 +2815,8 @@
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "04-52-35-197Z-4296b2-t5",
@@ -2709,7 +2842,8 @@
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4"
+      "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+      "collection": false
     },
     {
       "id": "07-43-49-743Z-2e7bc0-t1",
@@ -2735,7 +2869,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "07-43-49-743Z-2e7bc0-t2",
@@ -2761,7 +2896,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "07-43-49-743Z-2e7bc0-t3",
@@ -2787,7 +2923,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "07-43-49-743Z-2e7bc0-t4",
@@ -2813,7 +2950,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "07-43-49-743Z-2e7bc0-t5",
@@ -2839,7 +2977,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-21-50-933Z-5a20d9-t1",
@@ -2859,13 +2998,14 @@
       "windowEndSec": 71,
       "stuckEndSec": null,
       "durationSec": 71,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-21-50-933Z-5a20d9-t2",
@@ -2885,13 +3025,14 @@
       "windowEndSec": 33,
       "stuckEndSec": null,
       "durationSec": 33,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-21-50-933Z-5a20d9-t3",
@@ -2911,13 +3052,14 @@
       "windowEndSec": 15,
       "stuckEndSec": null,
       "durationSec": 15,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-21-50-933Z-5a20d9-t4",
@@ -2937,13 +3079,14 @@
       "windowEndSec": 11,
       "stuckEndSec": null,
       "durationSec": 11,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-21-50-933Z-5a20d9-t5",
@@ -2963,13 +3106,14 @@
       "windowEndSec": 51,
       "stuckEndSec": null,
       "durationSec": 51,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "help",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-24-54-592Z-3aa97b-t1",
@@ -2989,13 +3133,14 @@
       "windowEndSec": 75,
       "stuckEndSec": null,
       "durationSec": 75,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-24-54-592Z-3aa97b-t2",
@@ -3015,13 +3160,14 @@
       "windowEndSec": 66,
       "stuckEndSec": null,
       "durationSec": 66,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-24-54-592Z-3aa97b-t3",
@@ -3041,13 +3187,14 @@
       "windowEndSec": 110,
       "stuckEndSec": null,
       "durationSec": 110,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-24-54-592Z-3aa97b-t4",
@@ -3067,13 +3214,14 @@
       "windowEndSec": 30,
       "stuckEndSec": null,
       "durationSec": 30,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-24-54-592Z-3aa97b-t5",
@@ -3093,13 +3241,14 @@
       "windowEndSec": 108,
       "stuckEndSec": null,
       "durationSec": 108,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-31-25-910Z-4ce3b5-t1",
@@ -3119,13 +3268,14 @@
       "windowEndSec": 300,
       "stuckEndSec": 300,
       "durationSec": 300,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-31-25-910Z-4ce3b5-t2",
@@ -3145,13 +3295,14 @@
       "windowEndSec": 11,
       "stuckEndSec": null,
       "durationSec": 11,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-31-25-910Z-4ce3b5-t3",
@@ -3171,13 +3322,14 @@
       "windowEndSec": 22,
       "stuckEndSec": null,
       "durationSec": 22,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-31-25-910Z-4ce3b5-t4",
@@ -3197,13 +3349,14 @@
       "windowEndSec": 40,
       "stuckEndSec": null,
       "durationSec": 40,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-31-25-910Z-4ce3b5-t5",
@@ -3223,13 +3376,14 @@
       "windowEndSec": 22,
       "stuckEndSec": null,
       "durationSec": 22,
-      "split": "holdout",
+      "split": "tune",
       "redo": null,
       "legacyLabel": null,
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-38-04-191Z-872770-t1",
@@ -3255,7 +3409,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-38-04-191Z-872770-t2",
@@ -3281,7 +3436,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-38-04-191Z-872770-t3",
@@ -3307,7 +3463,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-38-04-191Z-872770-t4",
@@ -3333,7 +3490,8 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "08-38-04-191Z-872770-t5",
@@ -3359,7 +3517,278 @@
       "endClass": "blocked",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d"
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
+    },
+    {
+      "id": "08-46-26-202Z-ba8385-t1",
+      "run": "run-2026-11-17T08-46-26-202Z-ba8385",
+      "turnId": "turn-mwkg7e8q-9da4",
+      "turnIndex": 0,
+      "scenario": "stop-then-continue",
+      "scenarioClass": "progressable",
+      "trace": "traces/08-46-26-202Z-ba8385-t1.jsonl.gz",
+      "traceSha256": "66869ff97ce77249dfd8516e1c1a273eec6feb000516d1d514e5420def55ea56",
+      "label": "fine",
+      "labelRule": "server-progress-240s",
+      "labelSource": "batch serverRecords[].acceptedAt (fixture server clock)",
+      "gated": true,
+      "onsetSec": null,
+      "windowStartSec": 0,
+      "windowEndSec": 17,
+      "stuckEndSec": null,
+      "durationSec": 17,
+      "split": "tune",
+      "redo": null,
+      "legacyLabel": null,
+      "endClass": "stopped",
+      "origin": "clean",
+      "synthetic": false,
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
+    },
+    {
+      "id": "08-46-26-202Z-ba8385-t2",
+      "run": "run-2026-11-17T08-46-26-202Z-ba8385",
+      "turnId": "turn-mwkg7r1x-c9ba",
+      "turnIndex": 1,
+      "scenario": "stop-then-continue",
+      "scenarioClass": "progressable",
+      "trace": "traces/08-46-26-202Z-ba8385-t2.jsonl.gz",
+      "traceSha256": "106322e11f562345af83310ddd72f3575202c05a6133387676880bbd0648936a",
+      "label": "fine",
+      "labelRule": "legacy-manual",
+      "labelSource": "v1 hand label (no per-step server timestamps in archive)",
+      "gated": false,
+      "onsetSec": null,
+      "windowStartSec": 0,
+      "windowEndSec": 51,
+      "stuckEndSec": null,
+      "durationSec": 51,
+      "split": "tune",
+      "redo": null,
+      "legacyLabel": null,
+      "endClass": "done",
+      "origin": "clean",
+      "synthetic": false,
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
+    },
+    {
+      "id": "08-46-26-202Z-ba8385-t3",
+      "run": "run-2026-11-17T08-46-26-202Z-ba8385",
+      "turnId": "turn-mwkg8ukc-c9ed",
+      "turnIndex": 2,
+      "scenario": "stop-then-continue",
+      "scenarioClass": "progressable",
+      "trace": "traces/08-46-26-202Z-ba8385-t3.jsonl.gz",
+      "traceSha256": "6aa9e1e360d986cb019b10099ac3a0af02ea88fc7755b64fd1cadb4fec2eb971",
+      "label": "fine",
+      "labelRule": "server-progress-240s",
+      "labelSource": "batch serverRecords[].acceptedAt (fixture server clock)",
+      "gated": true,
+      "onsetSec": null,
+      "windowStartSec": 0,
+      "windowEndSec": 23,
+      "stuckEndSec": null,
+      "durationSec": 23,
+      "split": "tune",
+      "redo": null,
+      "legacyLabel": null,
+      "endClass": "stopped",
+      "origin": "clean",
+      "synthetic": false,
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
+    },
+    {
+      "id": "08-46-26-202Z-ba8385-t4",
+      "run": "run-2026-11-17T08-46-26-202Z-ba8385",
+      "turnId": "turn-mwkg9c2f-d3e2",
+      "turnIndex": 3,
+      "scenario": "stop-then-continue",
+      "scenarioClass": "progressable",
+      "trace": "traces/08-46-26-202Z-ba8385-t4.jsonl.gz",
+      "traceSha256": "a002f3ad2173748a9e5a09d3d1344d122f528c724e2347b2518e9f5105162381",
+      "label": "fine",
+      "labelRule": "legacy-manual",
+      "labelSource": "v1 hand label (no per-step server timestamps in archive)",
+      "gated": false,
+      "onsetSec": null,
+      "windowStartSec": 0,
+      "windowEndSec": 38,
+      "stuckEndSec": null,
+      "durationSec": 38,
+      "split": "tune",
+      "redo": null,
+      "legacyLabel": null,
+      "endClass": "done",
+      "origin": "clean",
+      "synthetic": false,
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
+    },
+    {
+      "id": "08-46-26-202Z-ba8385-t5",
+      "run": "run-2026-11-17T08-46-26-202Z-ba8385",
+      "turnId": "turn-mwkga5mu-1533",
+      "turnIndex": 4,
+      "scenario": "stop-then-continue",
+      "scenarioClass": "progressable",
+      "trace": "traces/08-46-26-202Z-ba8385-t5.jsonl.gz",
+      "traceSha256": "6264e4263d7e88468cc30d36e9411237260e2ead65a0fca514ff89685d9c4a28",
+      "label": "fine",
+      "labelRule": "server-progress-240s",
+      "labelSource": "batch serverRecords[].acceptedAt (fixture server clock)",
+      "gated": true,
+      "onsetSec": null,
+      "windowStartSec": 0,
+      "windowEndSec": 20,
+      "stuckEndSec": null,
+      "durationSec": 20,
+      "split": "tune",
+      "redo": null,
+      "legacyLabel": null,
+      "endClass": "stopped",
+      "origin": "clean",
+      "synthetic": false,
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
+    },
+    {
+      "id": "08-46-26-202Z-ba8385-t6",
+      "run": "run-2026-11-17T08-46-26-202Z-ba8385",
+      "turnId": "turn-mwkgakrs-aeff",
+      "turnIndex": 5,
+      "scenario": "stop-then-continue",
+      "scenarioClass": "progressable",
+      "trace": "traces/08-46-26-202Z-ba8385-t6.jsonl.gz",
+      "traceSha256": "e935f37c2ac76d0d7766e86c6c7377a9469ff650a353e6f2fb53326c7fafa5a6",
+      "label": "fine",
+      "labelRule": "legacy-manual",
+      "labelSource": "v1 hand label (no per-step server timestamps in archive)",
+      "gated": false,
+      "onsetSec": null,
+      "windowStartSec": 0,
+      "windowEndSec": 35,
+      "stuckEndSec": null,
+      "durationSec": 35,
+      "split": "tune",
+      "redo": null,
+      "legacyLabel": null,
+      "endClass": "done",
+      "origin": "clean",
+      "synthetic": false,
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
+    },
+    {
+      "id": "08-46-26-202Z-ba8385-t7",
+      "run": "run-2026-11-17T08-46-26-202Z-ba8385",
+      "turnId": "turn-mwkgbc4r-7363",
+      "turnIndex": 6,
+      "scenario": "stop-then-continue",
+      "scenarioClass": "progressable",
+      "trace": "traces/08-46-26-202Z-ba8385-t7.jsonl.gz",
+      "traceSha256": "529c720b0d48affa549f847b76d7f24f0f1c6e5cbc86c060dcc7abb45beea4be",
+      "label": "fine",
+      "labelRule": "server-progress-240s",
+      "labelSource": "batch serverRecords[].acceptedAt (fixture server clock)",
+      "gated": true,
+      "onsetSec": null,
+      "windowStartSec": 0,
+      "windowEndSec": 12,
+      "stuckEndSec": null,
+      "durationSec": 12,
+      "split": "tune",
+      "redo": null,
+      "legacyLabel": null,
+      "endClass": "stopped",
+      "origin": "clean",
+      "synthetic": false,
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
+    },
+    {
+      "id": "08-46-26-202Z-ba8385-t8",
+      "run": "run-2026-11-17T08-46-26-202Z-ba8385",
+      "turnId": "turn-mwkgblnr-1f5d",
+      "turnIndex": 7,
+      "scenario": "stop-then-continue",
+      "scenarioClass": "progressable",
+      "trace": "traces/08-46-26-202Z-ba8385-t8.jsonl.gz",
+      "traceSha256": "0da9f5b935c5d52fb463d08a1cd5e66f9cb788bfa676f169cf8103fbbbcdf1ea",
+      "label": "fine",
+      "labelRule": "legacy-manual",
+      "labelSource": "v1 hand label (no per-step server timestamps in archive)",
+      "gated": false,
+      "onsetSec": null,
+      "windowStartSec": 0,
+      "windowEndSec": 34,
+      "stuckEndSec": null,
+      "durationSec": 34,
+      "split": "tune",
+      "redo": null,
+      "legacyLabel": null,
+      "endClass": "done",
+      "origin": "clean",
+      "synthetic": false,
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
+    },
+    {
+      "id": "08-46-26-202Z-ba8385-t9",
+      "run": "run-2026-11-17T08-46-26-202Z-ba8385",
+      "turnId": "turn-mwkgccia-925a",
+      "turnIndex": 8,
+      "scenario": "stop-then-continue",
+      "scenarioClass": "progressable",
+      "trace": "traces/08-46-26-202Z-ba8385-t9.jsonl.gz",
+      "traceSha256": "f03128efb3b789331c07a08cc93920cd49da8aad85e4f48be1d68848050b1d34",
+      "label": "fine",
+      "labelRule": "server-progress-240s",
+      "labelSource": "batch serverRecords[].acceptedAt (fixture server clock)",
+      "gated": true,
+      "onsetSec": null,
+      "windowStartSec": 0,
+      "windowEndSec": 19,
+      "stuckEndSec": null,
+      "durationSec": 19,
+      "split": "tune",
+      "redo": null,
+      "legacyLabel": null,
+      "endClass": "stopped",
+      "origin": "clean",
+      "synthetic": false,
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
+    },
+    {
+      "id": "08-46-26-202Z-ba8385-t10",
+      "run": "run-2026-11-17T08-46-26-202Z-ba8385",
+      "turnId": "turn-mwkgcrcm-ac18",
+      "turnIndex": 9,
+      "scenario": "stop-then-continue",
+      "scenarioClass": "progressable",
+      "trace": "traces/08-46-26-202Z-ba8385-t10.jsonl.gz",
+      "traceSha256": "9d71718275e4140fca06a3f0ff3b3922f6aee084ab3e33c617844623aea9f636",
+      "label": "fine",
+      "labelRule": "legacy-manual",
+      "labelSource": "v1 hand label (no per-step server timestamps in archive)",
+      "gated": false,
+      "onsetSec": null,
+      "windowStartSec": 0,
+      "windowEndSec": 41,
+      "stuckEndSec": null,
+      "durationSec": 41,
+      "split": "tune",
+      "redo": null,
+      "legacyLabel": null,
+      "endClass": "done",
+      "origin": "clean",
+      "synthetic": false,
+      "commitUnderTest": "de5f69c868d7ebca8a6f8d2e84776641cbe9f59d",
+      "collection": true
     },
     {
       "id": "00-36-32-285Z-087d49-t1",
@@ -3385,7 +3814,8 @@
       "endClass": "done",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-37-20-119Z-166c12-t1",
@@ -3411,7 +3841,8 @@
       "endClass": "done",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-37-20-119Z-166c12-t2",
@@ -3437,7 +3868,8 @@
       "endClass": "done",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-37-20-119Z-166c12-t3",
@@ -3463,7 +3895,8 @@
       "endClass": "done",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-37-20-119Z-166c12-t4",
@@ -3489,7 +3922,8 @@
       "endClass": "done",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-37-20-119Z-166c12-t5",
@@ -3515,7 +3949,8 @@
       "endClass": "done",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-43-57-262Z-2ab066-t1",
@@ -3541,7 +3976,8 @@
       "endClass": "blocked",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-43-57-262Z-2ab066-t2",
@@ -3567,7 +4003,8 @@
       "endClass": "blocked",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-43-57-262Z-2ab066-t3",
@@ -3593,7 +4030,8 @@
       "endClass": "blocked",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-43-57-262Z-2ab066-t4",
@@ -3619,7 +4057,8 @@
       "endClass": "stopped",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-43-57-262Z-2ab066-t5",
@@ -3645,7 +4084,8 @@
       "endClass": "blocked",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-56-00-693Z-d6d771-t1",
@@ -3671,7 +4111,8 @@
       "endClass": "help",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-56-00-693Z-d6d771-t2",
@@ -3697,7 +4138,8 @@
       "endClass": "help",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-56-00-693Z-d6d771-t3",
@@ -3723,7 +4165,8 @@
       "endClass": "help",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-56-00-693Z-d6d771-t4",
@@ -3749,7 +4192,8 @@
       "endClass": "help",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "00-56-00-693Z-d6d771-t5",
@@ -3775,7 +4219,8 @@
       "endClass": "help",
       "origin": "contaminated",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "03-09-45-475Z-a9444a-t1",
@@ -3801,7 +4246,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "03-09-45-475Z-a9444a-t2",
@@ -3827,7 +4273,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "03-34-07-881Z-2f6fb2-t1",
@@ -3853,7 +4300,8 @@
       "endClass": "stopped",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     },
     {
       "id": "03-34-07-881Z-2f6fb2-t2",
@@ -3879,7 +4327,8 @@
       "endClass": "done",
       "origin": "clean",
       "synthetic": false,
-      "commitUnderTest": null
+      "commitUnderTest": null,
+      "collection": false
     }
   ]
 }
