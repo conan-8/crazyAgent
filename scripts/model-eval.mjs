@@ -35,6 +35,11 @@
  *   export async function check(ctx);      // -> {status,reasons,evidence}
  *   export async function tamper?(ctx);    // used by --self-test: must not pass
  *   export async function solve?(ctx);     // used by --self-test: must pass
+ *   export const followUp?;                // {text, maxTurnSeconds?}: M2 multi-turn
+ *   export async function stopWhen?(ctx);  // with followUp: polled every 250ms during
+ *                                          // turn 1; true -> POST /stop (deterministic)
+ *   export async function verifyBetweenTurns?(state, ctx); // with followUp: {ok,reasons,evidence}
+ *                                          // on the between-turn GET /state; !ok -> void+retry
  *
  * ctx = {
  *   fixtureUrl(path), crossOriginUrl(path), currentUrl(), evaluate(expression),
@@ -880,6 +885,13 @@ export function readTurnMetrics(eventsPath, turnId) {
     turnRetries: 0,
     deadTurn: false,
     deadTurnKind: null,
+    // M2 plan carry-over telemetry (additive; null/0 on pre-M2 pins).
+    planOutcome: null,
+    planRevision: null,
+    planSeeded: false,
+    planNudges: 0,
+    planStaleReminders: 0,
+    planFinalReason: null,
   }
   if (!existsSync(eventsPath)) return metrics
   const names = new Map()
@@ -924,12 +936,21 @@ export function readTurnMetrics(eventsPath, turnId) {
       metrics.turnRetries += 1
     } else if (event.type === 'notification' && event.data?.params?.event?.type === 'step/start') {
       metrics.steps += 1
+    } else if (event.type === 'plan.mode.started') {
+      metrics.planSeeded = event.data?.seeded === true
+    } else if (event.type === 'plan.stale') {
+      metrics.planStaleReminders += 1
+    } else if (event.type === 'plan.final') {
+      if (event.data?.action === 'nudge') metrics.planNudges += 1
+      if (typeof event.data?.reason === 'string') metrics.planFinalReason = event.data.reason
     } else if (event.type === 'turn.end') {
       metrics.logOk = event.data?.ok ?? null
       metrics.logWallMs = Number(event.data?.timings?.totalMs) || null
       metrics.usage = event.data?.usage ?? null
       metrics.finalText = typeof event.data?.finalText === 'string' ? event.data.finalText : null
       metrics.reportedLabel = typeof event.data?.label === 'string' ? event.data.label : null
+      metrics.planOutcome = typeof event.data?.planOutcome === 'string' ? event.data.planOutcome : null
+      metrics.planRevision = Number.isSafeInteger(event.data?.planRevision) ? event.data.planRevision : null
       metrics.loggedFailedCalls = Number.isFinite(Number(event.data?.timings?.failedCalls))
         ? Number(event.data.timings.failedCalls)
         : null
@@ -970,6 +991,9 @@ async function loadScenarios(selected) {
       collateral: module.collateral,
       answer: module.answer,
       preAnswerState: module.preAnswerState,
+      followUp: module.followUp,
+      stopWhen: module.stopWhen,
+      verifyBetweenTurns: module.verifyBetweenTurns,
       file,
     }
     if (typeof scenario.name !== 'string' || scenario.name.length === 0) throw new Error(`${file} exports no name`)
@@ -978,6 +1002,12 @@ async function loadScenarios(selected) {
     if (typeof scenario.check !== 'function') throw new Error(`${file} exports no check()`)
     if (scenario.answer !== undefined && scenario.answer !== 'approve' && scenario.answer !== 'deny') throw new Error(`${file} answer must be "approve" or "deny"`)
     if (scenario.answer !== undefined && typeof scenario.preAnswerState !== 'function') throw new Error(`${file} exports answer but no preAnswerState()`)
+    if (scenario.followUp !== undefined) {
+      if (typeof scenario.followUp?.text !== 'string' || scenario.followUp.text.length === 0) throw new Error(`${file} followUp must carry a non-empty text`)
+      if (typeof scenario.stopWhen !== 'function') throw new Error(`${file} exports followUp but no stopWhen()`)
+      if (typeof scenario.verifyBetweenTurns !== 'function') throw new Error(`${file} exports followUp but no verifyBetweenTurns()`)
+      if (scenario.answer !== undefined) throw new Error(`${file} followUp and answer phases are mutually exclusive`)
+    }
     scenarios.push(scenario)
   }
   const requested = selected.length === 0 || selected.includes('all') ? null : new Set(selected)
@@ -1026,6 +1056,12 @@ export const EMPTY_TURN = Object.freeze({
   deadTurn: false,
   deadTurnKind: null,
   recovered: false,
+  planOutcome: null,
+  planRevision: null,
+  planSeeded: false,
+  planNudges: 0,
+  planStaleReminders: 0,
+  planFinalReason: null,
 })
 
 /**
@@ -1066,7 +1102,7 @@ function resetDownloads(downloadsDir) {
   mkdirSync(resolved, { recursive: true })
 }
 
-function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null, answer = null }) {
+function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null, answer = null, followUp = null }) {
   return {
     fixtureUrl: path => `${fixtureServer.baseUrl}/${String(path).replace(/^\/+/u, '')}`,
     crossOriginUrl: path => `${fixtureServer.crossOriginBaseUrl}/${String(path).replace(/^\/+/u, '')}`,
@@ -1090,6 +1126,13 @@ function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null, 
      * ground-truth count of irreversible actions before the answer.
      */
     answer,
+    /**
+     * Multi-turn follow-up phase (M2 carry-over scenarios): the stopped first
+     * turn is ctx.turn; this carries the follow-up turn's telemetry, the
+     * between-turn /state verification, and the after-turn /state projection.
+     * Null for ordinary scenarios and in --self-test.
+     */
+    followUp,
   }
 }
 
@@ -1299,6 +1342,95 @@ export function turnFromState(state) {
   }
 }
 
+/**
+ * Wait for one turn with the independent deadline watchdog (stop at the cap
+ * even if status polling stalls). Shared by the first turn and the M2
+ * follow-up turn so both get identical timeout handling.
+ */
+async function waitForTurnWithWatchdog({ remote, turnId, maxSeconds, label }) {
+  const deadline = Date.now() + maxSeconds * 1_000
+  let state = null
+  let timedOut = false
+  let settled = false
+  const stopTimer = setTimeout(() => {
+    if (settled) return
+    timedOut = true
+    void remote.stop().catch(() => {})
+  }, Math.max(1_000, deadline - Date.now()))
+  stopTimer.unref?.()
+  try {
+    state = await waitForTurn({ remote, turnId, deadline })
+  } catch (error) {
+    if (error.message !== 'turn-timeout') throw error
+    timedOut = true
+    process.stdout.write(`  ${label}: exceeded ${maxSeconds}s, stopping the turn\n`)
+    await remote.stop().catch(() => {})
+    try {
+      state = await waitForTurn({ remote, turnId, deadline: Date.now() + 60_000 })
+    } catch {
+      state = null
+    }
+  } finally {
+    settled = true
+    clearTimeout(stopTimer)
+  }
+  return { state, timedOut }
+}
+
+/**
+ * Assemble one turn's record from the hub projection + the companion run-log
+ * metrics. Shared by every turn the harness runs (first, follow-up) so the
+ * telemetry fields stay identical; the confirmation answer phase keeps its
+ * own historical shape.
+ */
+function assembleTurn(baseTurn, metrics, timedOut, state) {
+  const turn = {
+    ...baseTurn,
+    status: timedOut ? 'timeout' : baseTurn.status,
+    waitingForUser: baseTurn.waitingForUser === true,
+  }
+  turn.steps = metrics.steps
+  turn.toolCalls = metrics.toolCalls
+  turn.failedCalls = metrics.failedCalls
+  turn.failed = metrics.failed
+  turn.toolCounts = metrics.toolCounts
+  turn.inputTokens = Number(metrics.usage?.inputTokens) || 0
+  turn.outputTokens = Number(metrics.usage?.outputTokens) || 0
+  turn.cacheReadTokens = Number(metrics.usage?.cacheReadTokens) || 0
+  turn.totalTokens = Number(metrics.usage?.totalTokens) || turn.inputTokens + turn.outputTokens
+  turn.usage = metrics.usage
+  turn.finalText = metrics.finalText
+  turn.logOk = metrics.logOk
+  turn.logComplete = metrics.logOk !== null
+  turn.reportedLabel = metrics.reportedLabel
+  turn.loggedFailedCalls = metrics.loggedFailedCalls
+  // Q4: dead steps / retries / recovery, read from the same run log.
+  turn.deadSteps = metrics.deadSteps
+  turn.deadRetried = metrics.deadRetried
+  turn.deadGaveUp = metrics.deadGaveUp
+  turn.deadRetryErrors = metrics.deadRetryErrors
+  turn.deadKinds = metrics.deadKinds
+  turn.assistantLeaked = metrics.assistantLeaked
+  turn.turnRetries = metrics.turnRetries
+  turn.retries = metrics.deadRetried + metrics.turnRetries
+  turn.deadTurn = metrics.deadTurn
+  turn.deadTurnKind = metrics.deadTurnKind
+  turn.recovered = (metrics.deadSteps > 0 || metrics.turnRetries > 0) && metrics.logOk === true
+  // M2 plan carry-over telemetry.
+  turn.planOutcome = metrics.planOutcome
+  turn.planRevision = metrics.planRevision
+  turn.planSeeded = metrics.planSeeded
+  turn.planNudges = metrics.planNudges
+  turn.planStaleReminders = metrics.planStaleReminders
+  turn.planFinalReason = metrics.planFinalReason
+  if (turn.wallMs === null || turn.wallMs === 0) turn.wallMs = metrics.logWallMs
+  if (timedOut && turn.status !== 'timeout') turn.status = 'timeout'
+  // The hub projection after the turn shows what panel/phone clients get
+  // (label, usage, failedCalls) without scraping private logs.
+  turn.finalTurnState = state?.turn ?? null
+  return turn
+}
+
 async function runModelBatch(options, scenarios) {
   const apiKey = (process.env.CRAZYAGENT_API_KEY ?? '').trim()
   if (apiKey.length === 0) {
@@ -1366,6 +1498,8 @@ async function runModelBatch(options, scenarios) {
         turn: run.turn,
         answer: run.answer ?? null,
         marathonArm: run.marathonArm ?? null,
+        followUp: run.followUp ?? null,
+        voidedAttempts: run.voidedAttempts ?? null,
         skipped: run.skipped ?? false,
       })),
     })),
@@ -1445,6 +1579,13 @@ async function runModelBatch(options, scenarios) {
           continue
         }
         // Reset page + conversation so every run starts from the same state.
+        // M2 follow-up scenarios get up to 3 setup attempts: a run whose
+        // deterministic stop or between-turn verification does not land is
+        // voided and retried from a fresh chat, with the reason recorded.
+        const maxAttempts = scenario.followUp ? 3 : 1
+        const voidedAttempts = []
+        let runRecord = null
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         await page.reset(scenario.fixture)
         if (typeof scenario.setup === 'function') await scenario.setup(makeCtx({ fixtureServer, page, turn: EMPTY_TURN, edge, downloadsDir }))
         // A settled turn may be idle, waiting_for_user (help/confirmation) or
@@ -1507,75 +1648,96 @@ async function runModelBatch(options, scenarios) {
             throw error
           }
         }
-        const deadline = Date.now() + maxTurnSeconds * 1_000
-        let state = null
-        let timedOut = false
-        let settled = false
-        // Independent watchdog: even if status polling stalls, the turn is told
-        // to stop at the deadline instead of running unbounded.
-        const stopTimer = setTimeout(() => {
-          if (settled) return
-          timedOut = true
-          void remote.stop().catch(() => {})
-        }, Math.max(1_000, deadline - Date.now()))
-        stopTimer.unref?.()
-        try {
-          state = await waitForTurn({ remote, turnId: accepted.turnId, deadline })
-        } catch (error) {
-          if (error.message !== 'turn-timeout') throw error
-          timedOut = true
-          process.stdout.write(`  ${scenario.name} run ${index + 1}: exceeded ${maxTurnSeconds}s, stopping the turn\n`)
-          await remote.stop().catch(() => {})
-          try {
-            state = await waitForTurn({ remote, turnId: accepted.turnId, deadline: Date.now() + 60_000 })
-          } catch {
-            state = null
-          }
-        } finally {
-          settled = true
-          clearTimeout(stopTimer)
+        // M2 stop trigger: while turn 1 runs, poll the scenario's stopWhen
+        // every 250ms and POST /stop the moment it fires (deterministic
+        // mid-turn stop, e.g. right after the fixture server records step 4).
+        let stopTrigger = null
+        let turnSettled = false
+        let stopPoller = Promise.resolve()
+        if (scenario.followUp) {
+          stopPoller = (async () => {
+            for (;;) {
+              await sleep(250)
+              if (turnSettled) return
+              let fire = false
+              try {
+                fire = (await scenario.stopWhen(makeCtx({ fixtureServer, page, turn: EMPTY_TURN, edge, downloadsDir }))) === true
+              } catch { fire = false }
+              if (fire) {
+                stopTrigger = { at: nowIso() }
+                await remote.stop().catch(() => {})
+                return
+              }
+            }
+          })()
         }
+        const waited = await waitForTurnWithWatchdog({ remote, turnId: accepted.turnId, maxSeconds: maxTurnSeconds, label: `${scenario.name} run ${index + 1}` })
+        turnSettled = true
+        await stopPoller
+        const { state, timedOut } = waited
         const baseTurn = state === null ? { ...EMPTY_TURN, status: 'timeout' } : turnFromState(state)
-        const turn = {
-          ...baseTurn,
-          status: timedOut ? 'timeout' : baseTurn.status,
-          waitingForUser: baseTurn.waitingForUser === true,
-        }
         await waitForTurnEndInLog(eventsPath, accepted.turnId)
         const metrics = readTurnMetrics(eventsPath, accepted.turnId)
-        turn.steps = metrics.steps
-        turn.toolCalls = metrics.toolCalls
-        turn.failedCalls = metrics.failedCalls
-        turn.failed = metrics.failed
-        turn.toolCounts = metrics.toolCounts
-        turn.inputTokens = Number(metrics.usage?.inputTokens) || 0
-        turn.outputTokens = Number(metrics.usage?.outputTokens) || 0
-        turn.cacheReadTokens = Number(metrics.usage?.cacheReadTokens) || 0
-        turn.totalTokens = Number(metrics.usage?.totalTokens) || turn.inputTokens + turn.outputTokens
-        turn.usage = metrics.usage
-        turn.finalText = metrics.finalText
-        turn.logOk = metrics.logOk
-        turn.logComplete = metrics.logOk !== null
-        turn.reportedLabel = metrics.reportedLabel
-        turn.loggedFailedCalls = metrics.loggedFailedCalls
-        // Q4: dead steps / retries / recovery, read from the same run log.
-        turn.deadSteps = metrics.deadSteps
-        turn.deadRetried = metrics.deadRetried
-        turn.deadGaveUp = metrics.deadGaveUp
-        turn.deadRetryErrors = metrics.deadRetryErrors
-        turn.deadKinds = metrics.deadKinds
-        turn.assistantLeaked = metrics.assistantLeaked
-        turn.turnRetries = metrics.turnRetries
-        turn.retries = metrics.deadRetried + metrics.turnRetries
-        turn.deadTurn = metrics.deadTurn
-        turn.deadTurnKind = metrics.deadTurnKind
-        turn.recovered = (metrics.deadSteps > 0 || metrics.turnRetries > 0) && metrics.logOk === true
-        if (turn.wallMs === null || turn.wallMs === 0) turn.wallMs = metrics.logWallMs
-        if (timedOut && turn.status !== 'timeout') turn.status = 'timeout'
-        // The hub projection after the turn shows what panel/phone clients get
-        // (label, usage, failedCalls) without scraping private logs.
-        turn.finalTurnState = state?.turn ?? null
+        const turn = assembleTurn(baseTurn, metrics, timedOut, state)
         totalTokens += turn.totalTokens
+
+        // M2 follow-up phase: turn 1 must have been stopped by the scenario
+        // trigger, and the between-turn /state must satisfy the scenario's
+        // verification (stopped, marathon on, carried plan with open items).
+        // Otherwise the run is voided and retried — it must actually exercise
+        // the seed. Turn 2 is the bare follow-up in the SAME chat.
+        let followUp = null
+        if (scenario.followUp) {
+          if (turn.status !== 'stopped' || stopTrigger === null || timedOut) {
+            const reason = turn.status !== 'stopped'
+              ? `turn 1 ended '${turn.status}' before the deterministic stop landed`
+              : 'turn 1 was stopped by the deadline watchdog, not the scenario trigger'
+            voidedAttempts.push({ attempt, reason, turn1Status: turn.status, stopRequested: stopTrigger !== null, turn1WallMs: turn.wallMs ?? null })
+            process.stdout.write(`  ${scenario.name} run ${index + 1} attempt ${attempt}: VOID — ${reason}; retrying from a fresh chat\n`)
+            continue
+          }
+          const betweenState = await remote.state()
+          let verification
+          try {
+            verification = await scenario.verifyBetweenTurns(betweenState, makeCtx({ fixtureServer, page, turn, edge, downloadsDir }))
+          } catch (error) {
+            verification = { ok: false, reasons: [`verifyBetweenTurns threw: ${error.message}`], evidence: null }
+          }
+          if (verification?.ok !== true) {
+            const reason = `between-turn verification failed: ${(verification?.reasons ?? ['no verdict']).join('; ')}`
+            voidedAttempts.push({ attempt, reason, verification: verification ?? null })
+            process.stdout.write(`  ${scenario.name} run ${index + 1} attempt ${attempt}: VOID — ${reason}; retrying from a fresh chat\n`)
+            continue
+          }
+          const followUpSeconds = Number(scenario.followUp.maxTurnSeconds ?? maxTurnSeconds)
+          let accepted2
+          try {
+            accepted2 = await remote.send(scenario.followUp.text)
+          } catch (error) {
+            if (error instanceof ApiError && ['TURN_BUSY', 'TURN_STOPPING', 'SESSION_CHANGING', 'RUNTIME_NOT_READY'].some(code => String(error.body?.error?.code ?? '').includes(code))) {
+              await sleep(1_000)
+              accepted2 = await remote.send(scenario.followUp.text)
+            } else {
+              throw error
+            }
+          }
+          const waited2 = await waitForTurnWithWatchdog({ remote, turnId: accepted2.turnId, maxSeconds: followUpSeconds, label: `${scenario.name} run ${index + 1} follow-up` })
+          const baseTurn2 = waited2.state === null ? { ...EMPTY_TURN, status: 'timeout' } : turnFromState(waited2.state)
+          await waitForTurnEndInLog(eventsPath, accepted2.turnId)
+          const metrics2 = readTurnMetrics(eventsPath, accepted2.turnId)
+          const turn2 = assembleTurn(baseTurn2, metrics2, waited2.timedOut, waited2.state)
+          totalTokens += turn2.totalTokens
+          const afterState = await remote.state()
+          followUp = {
+            text: scenario.followUp.text,
+            turnId: accepted2.turnId,
+            turn: turn2,
+            stop: { requested: true, at: stopTrigger.at, turn1Outcome: turn.outcome ?? null },
+            betweenState: { turn: betweenState?.turn ?? null, marathon: betweenState?.marathon ?? null },
+            verification: verification ?? null,
+            afterState: { turn: afterState?.turn ?? null, marathon: afterState?.marathon ?? null },
+          }
+        }
 
         // Confirmation answer phase (B9a submit-gate): when the scenario arms a
         // decision, read the independent pre-answer ground truth, then answer
@@ -1635,7 +1797,7 @@ async function runModelBatch(options, scenarios) {
           }
         }
 
-        const ctx = makeCtx({ fixtureServer, page, turn, edge, downloadsDir, answer })
+        const ctx = makeCtx({ fixtureServer, page, turn, edge, downloadsDir, answer, followUp })
         let check
         try {
           check = normalizeCheck(await scenario.check(ctx))
@@ -1650,7 +1812,7 @@ async function runModelBatch(options, scenarios) {
             collateral = { ok: false, error: error.message }
           }
         }
-        scenarioRuns.push({
+        runRecord = {
           runIndex: index,
           accepted: { turnId: accepted.turnId, clientMessageId: accepted.clientMessageId },
           check,
@@ -1658,21 +1820,61 @@ async function runModelBatch(options, scenarios) {
           turn,
           answer,
           marathonArm,
+          followUp,
+          voidedAttempts: voidedAttempts.length > 0 ? [...voidedAttempts] : null,
           finishedAt: nowIso(),
-        })
+        }
+        break
+        }
+        if (runRecord === null) {
+          // Every setup attempt was voided: record the run as a fail with the
+          // void reasons rather than silently dropping it.
+          runRecord = {
+            runIndex: index,
+            accepted: null,
+            check: { status: 'fail', reasons: [`setup voided ${maxAttempts}×: ${voidedAttempts.map(entry => entry.reason).join('; ')}`], evidence: { voidedAttempts } },
+            collateral: null,
+            turn: { ...EMPTY_TURN },
+            answer: null,
+            marathonArm: null,
+            followUp: null,
+            voidedAttempts,
+            finishedAt: nowIso(),
+          }
+        }
+        scenarioRuns.push(runRecord)
+        const t1 = runRecord.turn
         printTable([[
           scenario.name,
           index + 1,
-          check.status.toUpperCase(),
-          turn.status,
-          fmtMs(turn.wallMs),
-          turn.steps,
-          turn.toolCalls,
-          turn.failedCalls,
-          retryCell(turn),
-          `${turn.inputTokens}/${turn.outputTokens}`,
-          check.reasons.length > 0 ? check.reasons.join('; ') : (turn.waitingForUser ? 'waiting_for_user' : ''),
+          runRecord.check.status.toUpperCase(),
+          t1.status,
+          fmtMs(t1.wallMs),
+          t1.steps,
+          t1.toolCalls,
+          t1.failedCalls,
+          retryCell(t1),
+          `${t1.inputTokens}/${t1.outputTokens}`,
+          runRecord.followUp
+            ? `stopped; follow-up: ${runRecord.followUp.text.slice(0, 40)}`
+            : (runRecord.check.reasons.length > 0 ? runRecord.check.reasons.join('; ') : (t1.waitingForUser ? 'waiting_for_user' : '')),
         ]])
+        if (runRecord.followUp) {
+          const t2 = runRecord.followUp.turn
+          printTable([[
+            scenario.name,
+            `${index + 1}→2`,
+            runRecord.check.status.toUpperCase(),
+            t2.status,
+            fmtMs(t2.wallMs),
+            t2.steps,
+            t2.toolCalls,
+            t2.failedCalls,
+            retryCell(t2),
+            `${t2.inputTokens}/${t2.outputTokens}`,
+            runRecord.check.reasons.length > 0 ? runRecord.check.reasons.join('; ') : (t2.waitingForUser ? 'waiting_for_user' : ''),
+          ]])
+        }
         writeBatch()
         if (options.maxTotalTokens > 0 && totalTokens >= options.maxTotalTokens) {
           stopReason = `stopped by --max-total-tokens (${totalTokens} >= ${options.maxTotalTokens})`

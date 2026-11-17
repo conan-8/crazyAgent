@@ -55,3 +55,61 @@ Full transcript: [`m2-evidence/independent-check/transcript.json`](m2-evidence/i
 
 - eval task-8 (M1 ×5) → then M2 real-model acceptance from a pinned M2 worktree.
 - M3 (task-4) is blocked by task-3; not started.
+
+---
+
+## Real-model acceptance — PRE-TUNING (eval, task-9, pin 1a248fa)
+
+**Status on this pin: NOT GREEN.** Suite 1 (marathon-long) 5/5 and suite 3 (seeded-untouched) 5/5, but suite 2 (stop-then-continue, the core M2 gate) is **4/5 — one continuation re-done a recorded station**. Lead decision 2026-11-16: no accept-with-caveat, no lucky rerun; the r5 finding below triggered **task-10** (core strengthens the carried-plan continuation guidance in `prompt.mjs` only). Full re-acceptance of ALL suites on the tuning pin follows; this section is the before-tuning evidence picture. steer-plan is held for the tuning pin.
+
+### Setup and provenance (standing rule)
+
+- Worktree `/tmp/crazyagent-m2-accept` pinned at **`1a248fa84904ee0ae8db440517289561ec7b30e3`**; overlays: multi-turn `scripts/model-eval.mjs` (additive, lead-pre-approved: `followUp` + 250 ms `stopWhen` poll → `POST /stop` + `verifyBetweenTurns` on `GET /state` + void+retry ≤3 with recorded reasons + per-turn plan telemetry), `e2e/scenarios/{_marathon-check,marathon-long,stop-then-continue,unrelated-question}.mjs` + README. Fresh isolated home `/tmp/crazyagent-m2-eval/dsh-home`; 1017 @ medium; `--marathon` new-switch arming (per-run OFF-verified → enable → ON-verified → bare prompt); `commitUnderTest` + `armingPath` in every JSON.
+- Gates before spend: `npm test` **1105/1105** on the pin; `c1-acceptance --self-test` green; scenario `--self-test` green for all five (marathon-long semantics frozen: untouched fail / tampered partial / solved pass; stop-then-continue tamper = redo → **fail**; unrelated-question tamper = resumed work → fail).
+- Smokes ×1 each: click-once PASS 6.1 s (single-turn regression after the harness refactor); stop-then-continue PASS (t1 stopped 16.5 s after step 4, t2 35.6 s, 12/12 exactly-once); unrelated-question PASS (t2 1.3 s, 51, 0 calls, not-assessed). Batch: `e2e/baselines/2026-11-17T02-00-10-799Z-m2-smokes.json`.
+
+### Suite 1 — marathon-long ×5 in /marathon vs clean M0
+
+| metric | clean M0 /plan (c2966018) | M2 /marathon (1a248fa) |
+|---|---|---|
+| pass/partial/fail | 5/0/0 | **5/0/0** |
+| redos | 0 | **0** |
+| wall s min–max (med) | 57.5–65.5 (61.9) | 66.0–297.1 (83.9) |
+| steps min–max (med) | 41–55 (51) | 42–65 (46) |
+| calls min–max (med) | 40–54 (50) | 41–64 (45) |
+| failed Σ / retries / dead | 5 / 0 / 0 | 2 / 0 / 0 |
+| non-cached input Σ | 135,398 | 193,356 |
+| output Σ | 22,391 | 52,469 |
+| cacheRead Σ | 8,819,584 | 7,450,069 |
+
+Per run: r1 83.9 s/49/48/0 · r2 110.2 s/65/64/1 · r3 66.0 s/46/45/0 · r4 78.5 s/42/41/1 · r5 297.1 s/42/41/0 (output 34,651 — a long-generation tail with zero failed calls; the output Σ increase is almost entirely this one run). Completion/reliability identical to M0; steps/calls distributions overlap with lower medians; wall has one heavy tail. All runs plan-armed via the switch, `planOutcome=reported-complete`, rev 2–4. No regression signal; distributions + fresh/cache split recorded per the task-8 lesson.
+
+### Suite 2 — stop-then-continue ×5 (core M2 gate): 4/5, one redo
+
+Mechanics were clean in **all five runs, zero voided attempts**: turn 1 stopped deterministically right after the server recorded step 4 (t1 walls 11.0–107.4 s; `stepsAtStop=4` every run), between-turn `/state` verified stopped + marathon on + carried plan with open items (rev 1–2), turn 2 bare `continue` seeded (`planSeeded=true`, no `plan.seed.rejected` anywhere).
+
+| run | verdict | t1 wall/steps/calls | t2 wall/steps/calls | valid | redos | seed rev | t2 outcome |
+|---|---|---|---|---|---|---|---|
+| 1 | pass | 19.0/8/8 | 36.9/19/18 | 12/12 | 0 | 1 | reported-complete rev 3 |
+| 2 | pass | 16.6/8/8 | 47.4/21/20 | 12/12 | 0 | 1 | reported-complete rev 3 |
+| 3 | pass | 11.0/8/8 | 28.1/20/19 | 12/12 | 0 | 1 | reported-complete rev 3 |
+| 4 | pass | 36.6/22/22 | 73.2/45/44 | 12/12 | 0 | 2 | reported-complete rev 4 |
+| 5 | **fail** | 107.4/22/21 | 293.1/47/46 | 11/12 | **1 (station 9 ×2)** | 2 | reported-complete rev 3 |
+
+**The r5 finding (triggered task-10):** the continuation re-submitted station 9. Server record: `perStep` station 9 = 2 POSTs, every other station exactly 1; `stepsAtStop=4` proves both station-9 POSTs happened in turn 2. Archived events show turn 2 issued the **identical** `browser_batch` (type `R8-L6P`, type `summit-window`, click submit) twice — `02:23:38.247Z` and `02:24:08.573Z`, 30 s apart; turn 1 contains zero station-9 calls. The turn wandered (12 navigations incl. revisits, 18 read_text, 38.8k output tokens, 1 recovered `UNKNOWN_LABEL`), and its finalText **falsely claimed** "Completed stations 1–12 in order without resubmitting any accepted station" — the independent server record caught what the model's answer denied. Two identical mutating repeats stay under the executor's 3-repeat guard, so only the server-side step record exposes this. Seed mechanics worked (carried revision used, completion reported); the failure is continuation fidelity — the guidance did not keep the model from re-acting on an already-completed item after a revisit. Diagnostic pattern across ALL five continuations: 0 completion nudges, exactly 2 stale reminders per continuation turn (per-stretch cap), worth watching during tuning.
+
+### Suite 3 — unrelated-question ×5 (seeded-untouched gate): 5/5
+
+Every run: same clean stop-after-step-4 setup (0 voids); turn 2 answered **"51"** in 1.5–2.5 s with **1 model step, 0 tool calls, 0 browser_plan calls**, `planOutcome=not-assessed` (reason `seeded-untouched`), **0 nudges / 0 stale reminders**, and the carried plan (rev 1) still present in `/state` afterwards. The carried plan did not hijack a single unrelated question.
+
+### steer-plan (c1-acceptance row)
+
+**Held for the tuning pin** per lead decision (the prompt change affects every seeded turn; full re-acceptance there).
+
+### Evidence (pre-tuning)
+
+- `e2e/baselines/2026-11-17T02-02-36-891Z-m2-marathon-long-marathon.json` · archive `m0-archive/run-2026-11-17T02-02-36-976Z-849181/` (5.2 MiB)
+- `e2e/baselines/2026-11-17T02-14-11-909Z-m2-stop-then-continue.json` · archive `m0-archive/run-2026-11-17T02-14-11-994Z-c82d46/` (5.6 MiB; r5's duplicate station-9 batches timestamped in turn 2)
+- `e2e/baselines/2026-11-17T02-26-39-703Z-m2-unrelated-question.json` · archive `m0-archive/run-2026-11-17T02-26-39-794Z-739f46/` (1.5 MiB)
+- smokes: `e2e/baselines/2026-11-17T02-00-10-799Z-m2-smokes.json` · archive `m0-archive/run-2026-11-17T02-00-10-884Z-401b96/`
+- All archives under `.dsh-home/browser-agent/logs/m0-archive/` (gitignored, prune-safe); every JSON carries `commitUnderTest`, `armingPath`, per-run `marathonArm`, per-turn `planEvidence`, void records, and the between/after `/state` seed chain.

@@ -1,0 +1,1694 @@
+{
+  "startedAt": "2026-11-17T02:26:39.702Z",
+  "finishedAt": "2026-11-17T02:28:30.042Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": true,
+  "armingPath": "POST /marathon {enabled:true} then bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-m2-eval/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 1410264,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "unrelated-question",
+      "fixture": "marathon-01.html",
+      "prompt": "Work through the expedition permit workflow on the site I have open, from station 1 to station 12. Each station page shows its dispatch word and seal. At every station, enter the dispatch word shown on that page plus the receipt from the previous station (station 1 shows a start receipt), submit the station form, and carry the new receipt to the next station via the link. Complete all 12 stations in order without re-submitting a station that was already accepted, finish on the completion page, and tell me the permit ID.",
+      "file": "unrelated-question.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwk2n04u-f6ec",
+          "status": "pass",
+          "reasons": [
+            "answered 51 with zero plan calls, zero tool results, no nudges (not-assessed), and the carried plan still present"
+          ],
+          "evidence": {
+            "followUpText": "What is 17 * 3? Reply with just the number.",
+            "turn2Status": "done",
+            "answerText": "51",
+            "answerOk": true,
+            "turn2ToolCalls": 0,
+            "turn2ToolCounts": {},
+            "zeroPlanCalls": true,
+            "zeroToolCalls": true,
+            "turn2PlanOutcome": "not-assessed",
+            "turn2PlanFinalReason": "seeded-untouched",
+            "turn2PlanSeeded": true,
+            "turn2PlanNudges": 0,
+            "turn2PlanStaleReminders": 0,
+            "notAssessed": true,
+            "zeroNudges": true,
+            "stepRecordsAtStop": 4,
+            "stepRecordsNow": 4,
+            "noNewWork": true,
+            "planCarriedAfter": true,
+            "carriedPlanRevision": 1,
+            "switchStillOn": true,
+            "turn1WallMs": 18551,
+            "turn2WallMs": 1989
+          },
+          "collateral": null,
+          "turn": {
+            "status": "stopped",
+            "waitingForUser": false,
+            "wallMs": 18551,
+            "error": null,
+            "outcome": "stopped",
+            "confirm": null,
+            "steps": 10,
+            "toolCalls": 10,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 1,
+              "browser_batch": 4,
+              "browser_click": 3,
+              "browser_read_text": 1,
+              "browser_screenshot": 1
+            },
+            "inputTokens": 7742,
+            "outputTokens": 1649,
+            "cacheReadTokens": 423552,
+            "totalTokens": 432943,
+            "usage": {
+              "inputTokens": 7742,
+              "outputTokens": 1649,
+              "totalTokens": 432943,
+              "cacheReadTokens": 423552
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 1,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk2n04u-f6ec",
+              "origin": "remote",
+              "clientMessageId": "5a6c1c53-0d8f-40df-9bf5-b498689ff451",
+              "startedAt": "2026-11-17T02:26:40.879Z",
+              "endedAt": "2026-11-17T02:26:59.430Z",
+              "outcome": "stopped",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 7742,
+                "outputTokens": 1649,
+                "totalTokens": 432943,
+                "cacheReadTokens": 423552
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 7
+          },
+          "followUp": {
+            "text": "What is 17 * 3? Reply with just the number.",
+            "turnId": "turn-mwk2neip-ad8d",
+            "turn": {
+              "status": "done",
+              "waitingForUser": false,
+              "wallMs": 1989,
+              "error": null,
+              "outcome": "done",
+              "confirm": null,
+              "steps": 1,
+              "toolCalls": 0,
+              "failedCalls": 0,
+              "failed": [],
+              "toolCounts": {},
+              "inputTokens": 5438,
+              "outputTokens": 104,
+              "cacheReadTokens": 39680,
+              "totalTokens": 45222,
+              "usage": {
+                "inputTokens": 5438,
+                "outputTokens": 104,
+                "totalTokens": 45222,
+                "cacheReadTokens": 39680
+              },
+              "finalText": "51",
+              "logOk": true,
+              "logComplete": true,
+              "reportedLabel": null,
+              "loggedFailedCalls": 0,
+              "deadSteps": 0,
+              "deadRetried": 0,
+              "deadGaveUp": 0,
+              "deadRetryErrors": 0,
+              "deadKinds": {
+                "markup": 0,
+                "empty": 0,
+                "unknown": 0
+              },
+              "assistantLeaked": 0,
+              "turnRetries": 0,
+              "retries": 0,
+              "deadTurn": false,
+              "deadTurnKind": null,
+              "recovered": false,
+              "planOutcome": "not-assessed",
+              "planRevision": 1,
+              "planSeeded": true,
+              "planNudges": 0,
+              "planStaleReminders": 0,
+              "planFinalReason": "seeded-untouched",
+              "finalTurnState": {
+                "status": "idle",
+                "turnId": "turn-mwk2neip-ad8d",
+                "origin": "remote",
+                "clientMessageId": "a5316db7-e2eb-49c5-ab48-78a6a771764b",
+                "startedAt": "2026-11-17T02:26:59.521Z",
+                "endedAt": "2026-11-17T02:27:01.510Z",
+                "outcome": "done",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 5438,
+                  "outputTokens": 104,
+                  "totalTokens": 45222,
+                  "cacheReadTokens": 39680
+                },
+                "failedCalls": 0
+              }
+            },
+            "stop": {
+              "requested": true,
+              "at": "2026-11-17T02:26:59.400Z",
+              "turn1Outcome": "stopped"
+            },
+            "betweenState": {
+              "turn": {
+                "status": "idle",
+                "turnId": "turn-mwk2n04u-f6ec",
+                "origin": "remote",
+                "clientMessageId": "5a6c1c53-0d8f-40df-9bf5-b498689ff451",
+                "startedAt": "2026-11-17T02:26:40.879Z",
+                "endedAt": "2026-11-17T02:26:59.430Z",
+                "outcome": "stopped",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 7742,
+                  "outputTokens": 1649,
+                  "totalTokens": 432943,
+                  "cacheReadTokens": 423552
+                },
+                "failedCalls": 0
+              },
+              "marathon": {
+                "enabled": true,
+                "since": "2026-11-17T02:26:40.874Z",
+                "plan": {
+                  "revision": 1,
+                  "items": [
+                    {
+                      "content": "Submit station 1 with start receipt START-7Q4 and word basecamp",
+                      "status": "in_progress"
+                    },
+                    {
+                      "content": "Submit stations 2-11 in order, carrying receipts forward",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Submit station 12 and reach completion page",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Verify completion page and report permit ID",
+                      "status": "pending"
+                    }
+                  ],
+                  "updatedAt": "2026-11-17T02:26:42.111Z",
+                  "turnId": "turn-mwk2n04u-f6ec"
+                },
+                "watch": {
+                  "open": null,
+                  "lastVerdict": null,
+                  "lastCheckAt": null,
+                  "checks": 0
+                }
+              }
+            },
+            "verification": {
+              "ok": true,
+              "reasons": [],
+              "evidence": {
+                "turnOutcome": "stopped",
+                "marathonEnabled": true,
+                "planRevision": 1,
+                "openItems": 4,
+                "itemCount": 4,
+                "stepRecordsAtStop": 4
+              }
+            },
+            "afterState": {
+              "turn": {
+                "status": "idle",
+                "turnId": "turn-mwk2neip-ad8d",
+                "origin": "remote",
+                "clientMessageId": "a5316db7-e2eb-49c5-ab48-78a6a771764b",
+                "startedAt": "2026-11-17T02:26:59.521Z",
+                "endedAt": "2026-11-17T02:27:01.510Z",
+                "outcome": "done",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 5438,
+                  "outputTokens": 104,
+                  "totalTokens": 45222,
+                  "cacheReadTokens": 39680
+                },
+                "failedCalls": 0
+              },
+              "marathon": {
+                "enabled": true,
+                "since": "2026-11-17T02:26:40.874Z",
+                "plan": {
+                  "revision": 1,
+                  "items": [
+                    {
+                      "content": "Submit station 1 with start receipt START-7Q4 and word basecamp",
+                      "status": "in_progress"
+                    },
+                    {
+                      "content": "Submit stations 2-11 in order, carrying receipts forward",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Submit station 12 and reach completion page",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Verify completion page and report permit ID",
+                      "status": "pending"
+                    }
+                  ],
+                  "updatedAt": "2026-11-17T02:26:42.111Z",
+                  "turnId": "turn-mwk2n04u-f6ec"
+                },
+                "watch": {
+                  "open": null,
+                  "lastVerdict": null,
+                  "lastCheckAt": null,
+                  "checks": 0
+                }
+              }
+            },
+            "planEvidence": {
+              "planModeStarted": true,
+              "planSeeded": true,
+              "planOutcome": "not-assessed",
+              "planRevision": 1,
+              "browserPlanCalls": 0,
+              "planModeEndedOutcome": "not-assessed",
+              "planNudges": 0,
+              "planStaleReminders": 0,
+              "planFinalReason": "seeded-untouched",
+              "seedRejected": false
+            }
+          },
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "browserPlanCalls": 1,
+            "planModeEndedOutcome": "unfinished",
+            "planNudges": 0,
+            "planStaleReminders": 1,
+            "planFinalReason": null,
+            "seedRejected": false
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T02-26-39-794Z-739f46/events.jsonl"
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwk2ngc8-ba5c",
+          "status": "pass",
+          "reasons": [
+            "answered 51 with zero plan calls, zero tool results, no nudges (not-assessed), and the carried plan still present"
+          ],
+          "evidence": {
+            "followUpText": "What is 17 * 3? Reply with just the number.",
+            "turn2Status": "done",
+            "answerText": "51",
+            "answerOk": true,
+            "turn2ToolCalls": 0,
+            "turn2ToolCounts": {},
+            "zeroPlanCalls": true,
+            "zeroToolCalls": true,
+            "turn2PlanOutcome": "not-assessed",
+            "turn2PlanFinalReason": "seeded-untouched",
+            "turn2PlanSeeded": true,
+            "turn2PlanNudges": 0,
+            "turn2PlanStaleReminders": 0,
+            "notAssessed": true,
+            "zeroNudges": true,
+            "stepRecordsAtStop": 4,
+            "stepRecordsNow": 4,
+            "noNewWork": true,
+            "planCarriedAfter": true,
+            "carriedPlanRevision": 1,
+            "switchStillOn": true,
+            "turn1WallMs": 24802,
+            "turn2WallMs": 2253
+          },
+          "collateral": null,
+          "turn": {
+            "status": "stopped",
+            "waitingForUser": false,
+            "wallMs": 24802,
+            "error": null,
+            "outcome": "stopped",
+            "confirm": null,
+            "steps": 8,
+            "toolCalls": 8,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 1,
+              "browser_batch": 4,
+              "browser_click": 3
+            },
+            "inputTokens": 7963,
+            "outputTokens": 781,
+            "cacheReadTokens": 191360,
+            "totalTokens": 200104,
+            "usage": {
+              "inputTokens": 7963,
+              "outputTokens": 781,
+              "totalTokens": 200104,
+              "cacheReadTokens": 191360
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 1,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk2ngc8-ba5c",
+              "origin": "remote",
+              "clientMessageId": "66cdae07-87d2-429d-94a0-704703b503ae",
+              "startedAt": "2026-11-17T02:27:01.880Z",
+              "endedAt": "2026-11-17T02:27:26.682Z",
+              "outcome": "stopped",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 7963,
+                "outputTokens": 781,
+                "totalTokens": 200104,
+                "cacheReadTokens": 191360
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 526
+          },
+          "followUp": {
+            "text": "What is 17 * 3? Reply with just the number.",
+            "turnId": "turn-mwk2nzk2-1f95",
+            "turn": {
+              "status": "done",
+              "waitingForUser": false,
+              "wallMs": 2253,
+              "error": null,
+              "outcome": "done",
+              "confirm": null,
+              "steps": 1,
+              "toolCalls": 0,
+              "failedCalls": 0,
+              "failed": [],
+              "toolCounts": {},
+              "inputTokens": 4638,
+              "outputTokens": 23,
+              "cacheReadTokens": 22400,
+              "totalTokens": 27061,
+              "usage": {
+                "inputTokens": 4638,
+                "outputTokens": 23,
+                "totalTokens": 27061,
+                "cacheReadTokens": 22400
+              },
+              "finalText": "51",
+              "logOk": true,
+              "logComplete": true,
+              "reportedLabel": null,
+              "loggedFailedCalls": 0,
+              "deadSteps": 0,
+              "deadRetried": 0,
+              "deadGaveUp": 0,
+              "deadRetryErrors": 0,
+              "deadKinds": {
+                "markup": 0,
+                "empty": 0,
+                "unknown": 0
+              },
+              "assistantLeaked": 0,
+              "turnRetries": 0,
+              "retries": 0,
+              "deadTurn": false,
+              "deadTurnKind": null,
+              "recovered": false,
+              "planOutcome": "not-assessed",
+              "planRevision": 1,
+              "planSeeded": true,
+              "planNudges": 0,
+              "planStaleReminders": 0,
+              "planFinalReason": "seeded-untouched",
+              "finalTurnState": {
+                "status": "idle",
+                "turnId": "turn-mwk2nzk2-1f95",
+                "origin": "remote",
+                "clientMessageId": "280b9865-ebe9-4e2c-b18a-16145fae6b75",
+                "startedAt": "2026-11-17T02:27:26.787Z",
+                "endedAt": "2026-11-17T02:27:29.040Z",
+                "outcome": "done",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 4638,
+                  "outputTokens": 23,
+                  "totalTokens": 27061,
+                  "cacheReadTokens": 22400
+                },
+                "failedCalls": 0
+              }
+            },
+            "stop": {
+              "requested": true,
+              "at": "2026-11-17T02:27:26.655Z",
+              "turn1Outcome": "stopped"
+            },
+            "betweenState": {
+              "turn": {
+                "status": "idle",
+                "turnId": "turn-mwk2ngc8-ba5c",
+                "origin": "remote",
+                "clientMessageId": "66cdae07-87d2-429d-94a0-704703b503ae",
+                "startedAt": "2026-11-17T02:27:01.880Z",
+                "endedAt": "2026-11-17T02:27:26.682Z",
+                "outcome": "stopped",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 7963,
+                  "outputTokens": 781,
+                  "totalTokens": 200104,
+                  "cacheReadTokens": 191360
+                },
+                "failedCalls": 0
+              },
+              "marathon": {
+                "enabled": true,
+                "since": "2026-11-17T02:27:01.875Z",
+                "plan": {
+                  "revision": 1,
+                  "items": [
+                    {
+                      "content": "Submit stations 1-4 with dispatch words and chained receipts",
+                      "status": "in_progress"
+                    },
+                    {
+                      "content": "Submit stations 5-8",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Submit stations 9-12",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Reach completion page and record permit ID",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Verify final completion state",
+                      "status": "pending"
+                    }
+                  ],
+                  "updatedAt": "2026-11-17T02:27:04.537Z",
+                  "turnId": "turn-mwk2ngc8-ba5c"
+                },
+                "watch": {
+                  "open": null,
+                  "lastVerdict": null,
+                  "lastCheckAt": null,
+                  "checks": 0
+                }
+              }
+            },
+            "verification": {
+              "ok": true,
+              "reasons": [],
+              "evidence": {
+                "turnOutcome": "stopped",
+                "marathonEnabled": true,
+                "planRevision": 1,
+                "openItems": 5,
+                "itemCount": 5,
+                "stepRecordsAtStop": 4
+              }
+            },
+            "afterState": {
+              "turn": {
+                "status": "idle",
+                "turnId": "turn-mwk2nzk2-1f95",
+                "origin": "remote",
+                "clientMessageId": "280b9865-ebe9-4e2c-b18a-16145fae6b75",
+                "startedAt": "2026-11-17T02:27:26.787Z",
+                "endedAt": "2026-11-17T02:27:29.040Z",
+                "outcome": "done",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 4638,
+                  "outputTokens": 23,
+                  "totalTokens": 27061,
+                  "cacheReadTokens": 22400
+                },
+                "failedCalls": 0
+              },
+              "marathon": {
+                "enabled": true,
+                "since": "2026-11-17T02:27:01.875Z",
+                "plan": {
+                  "revision": 1,
+                  "items": [
+                    {
+                      "content": "Submit stations 1-4 with dispatch words and chained receipts",
+                      "status": "in_progress"
+                    },
+                    {
+                      "content": "Submit stations 5-8",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Submit stations 9-12",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Reach completion page and record permit ID",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Verify final completion state",
+                      "status": "pending"
+                    }
+                  ],
+                  "updatedAt": "2026-11-17T02:27:04.537Z",
+                  "turnId": "turn-mwk2ngc8-ba5c"
+                },
+                "watch": {
+                  "open": null,
+                  "lastVerdict": null,
+                  "lastCheckAt": null,
+                  "checks": 0
+                }
+              }
+            },
+            "planEvidence": {
+              "planModeStarted": true,
+              "planSeeded": true,
+              "planOutcome": "not-assessed",
+              "planRevision": 1,
+              "browserPlanCalls": 0,
+              "planModeEndedOutcome": "not-assessed",
+              "planNudges": 0,
+              "planStaleReminders": 0,
+              "planFinalReason": "seeded-untouched",
+              "seedRejected": false
+            }
+          },
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "browserPlanCalls": 1,
+            "planModeEndedOutcome": "unfinished",
+            "planNudges": 0,
+            "planStaleReminders": 1,
+            "planFinalReason": null,
+            "seedRejected": false
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T02-26-39-794Z-739f46/events.jsonl"
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwk2o1lv-3f8c",
+          "status": "pass",
+          "reasons": [
+            "answered 51 with zero plan calls, zero tool results, no nudges (not-assessed), and the carried plan still present"
+          ],
+          "evidence": {
+            "followUpText": "What is 17 * 3? Reply with just the number.",
+            "turn2Status": "done",
+            "answerText": "51",
+            "answerOk": true,
+            "turn2ToolCalls": 0,
+            "turn2ToolCounts": {},
+            "zeroPlanCalls": true,
+            "zeroToolCalls": true,
+            "turn2PlanOutcome": "not-assessed",
+            "turn2PlanFinalReason": "seeded-untouched",
+            "turn2PlanSeeded": true,
+            "turn2PlanNudges": 0,
+            "turn2PlanStaleReminders": 0,
+            "notAssessed": true,
+            "zeroNudges": true,
+            "stepRecordsAtStop": 4,
+            "stepRecordsNow": 4,
+            "noNewWork": true,
+            "planCarriedAfter": true,
+            "carriedPlanRevision": 1,
+            "switchStillOn": true,
+            "turn1WallMs": 13553,
+            "turn2WallMs": 1500
+          },
+          "collateral": null,
+          "turn": {
+            "status": "stopped",
+            "waitingForUser": false,
+            "wallMs": 13553,
+            "error": null,
+            "outcome": "stopped",
+            "confirm": null,
+            "steps": 10,
+            "toolCalls": 9,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 1,
+              "browser_batch": 6,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 6807,
+            "outputTokens": 1134,
+            "cacheReadTokens": 213120,
+            "totalTokens": 221061,
+            "usage": {
+              "inputTokens": 6807,
+              "outputTokens": 1134,
+              "totalTokens": 221061,
+              "cacheReadTokens": 213120
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 1,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk2o1lv-3f8c",
+              "origin": "remote",
+              "clientMessageId": "f561b0ab-560e-4b94-b23f-0b372b40aff6",
+              "startedAt": "2026-11-17T02:27:29.443Z",
+              "endedAt": "2026-11-17T02:27:42.996Z",
+              "outcome": "stopped",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 6807,
+                "outputTokens": 1134,
+                "totalTokens": 221061,
+                "cacheReadTokens": 213120
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 651
+          },
+          "followUp": {
+            "text": "What is 17 * 3? Reply with just the number.",
+            "turnId": "turn-mwk2oc5j-4a21",
+            "turn": {
+              "status": "done",
+              "waitingForUser": false,
+              "wallMs": 1500,
+              "error": null,
+              "outcome": "done",
+              "confirm": null,
+              "steps": 1,
+              "toolCalls": 0,
+              "failedCalls": 0,
+              "failed": [],
+              "toolCounts": {},
+              "inputTokens": 5415,
+              "outputTokens": 3,
+              "cacheReadTokens": 22272,
+              "totalTokens": 27690,
+              "usage": {
+                "inputTokens": 5415,
+                "outputTokens": 3,
+                "totalTokens": 27690,
+                "cacheReadTokens": 22272
+              },
+              "finalText": "51",
+              "logOk": true,
+              "logComplete": true,
+              "reportedLabel": null,
+              "loggedFailedCalls": 0,
+              "deadSteps": 0,
+              "deadRetried": 0,
+              "deadGaveUp": 0,
+              "deadRetryErrors": 0,
+              "deadKinds": {
+                "markup": 0,
+                "empty": 0,
+                "unknown": 0
+              },
+              "assistantLeaked": 0,
+              "turnRetries": 0,
+              "retries": 0,
+              "deadTurn": false,
+              "deadTurnKind": null,
+              "recovered": false,
+              "planOutcome": "not-assessed",
+              "planRevision": 1,
+              "planSeeded": true,
+              "planNudges": 0,
+              "planStaleReminders": 0,
+              "planFinalReason": "seeded-untouched",
+              "finalTurnState": {
+                "status": "idle",
+                "turnId": "turn-mwk2oc5j-4a21",
+                "origin": "remote",
+                "clientMessageId": "83a999a3-0e88-4573-8c70-d97a2b3fbfe6",
+                "startedAt": "2026-11-17T02:27:43.111Z",
+                "endedAt": "2026-11-17T02:27:44.611Z",
+                "outcome": "done",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 5415,
+                  "outputTokens": 3,
+                  "totalTokens": 27690,
+                  "cacheReadTokens": 22272
+                },
+                "failedCalls": 0
+              }
+            },
+            "stop": {
+              "requested": true,
+              "at": "2026-11-17T02:27:42.954Z",
+              "turn1Outcome": "stopped"
+            },
+            "betweenState": {
+              "turn": {
+                "status": "idle",
+                "turnId": "turn-mwk2o1lv-3f8c",
+                "origin": "remote",
+                "clientMessageId": "f561b0ab-560e-4b94-b23f-0b372b40aff6",
+                "startedAt": "2026-11-17T02:27:29.443Z",
+                "endedAt": "2026-11-17T02:27:42.996Z",
+                "outcome": "stopped",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 6807,
+                  "outputTokens": 1134,
+                  "totalTokens": 221061,
+                  "cacheReadTokens": 213120
+                },
+                "failedCalls": 0
+              },
+              "marathon": {
+                "enabled": true,
+                "since": "2026-11-17T02:27:29.439Z",
+                "plan": {
+                  "revision": 1,
+                  "items": [
+                    {
+                      "content": "Submit station 1 with start receipt START-7Q4 and word basecamp",
+                      "status": "in_progress"
+                    },
+                    {
+                      "content": "Work through stations 2-12 in order, carrying each receipt forward",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Reach completion page and record permit ID",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Verify final state on completion page",
+                      "status": "pending"
+                    }
+                  ],
+                  "updatedAt": "2026-11-17T02:27:30.441Z",
+                  "turnId": "turn-mwk2o1lv-3f8c"
+                },
+                "watch": {
+                  "open": null,
+                  "lastVerdict": null,
+                  "lastCheckAt": null,
+                  "checks": 0
+                }
+              }
+            },
+            "verification": {
+              "ok": true,
+              "reasons": [],
+              "evidence": {
+                "turnOutcome": "stopped",
+                "marathonEnabled": true,
+                "planRevision": 1,
+                "openItems": 4,
+                "itemCount": 4,
+                "stepRecordsAtStop": 4
+              }
+            },
+            "afterState": {
+              "turn": {
+                "status": "idle",
+                "turnId": "turn-mwk2oc5j-4a21",
+                "origin": "remote",
+                "clientMessageId": "83a999a3-0e88-4573-8c70-d97a2b3fbfe6",
+                "startedAt": "2026-11-17T02:27:43.111Z",
+                "endedAt": "2026-11-17T02:27:44.611Z",
+                "outcome": "done",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 5415,
+                  "outputTokens": 3,
+                  "totalTokens": 27690,
+                  "cacheReadTokens": 22272
+                },
+                "failedCalls": 0
+              },
+              "marathon": {
+                "enabled": true,
+                "since": "2026-11-17T02:27:29.439Z",
+                "plan": {
+                  "revision": 1,
+                  "items": [
+                    {
+                      "content": "Submit station 1 with start receipt START-7Q4 and word basecamp",
+                      "status": "in_progress"
+                    },
+                    {
+                      "content": "Work through stations 2-12 in order, carrying each receipt forward",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Reach completion page and record permit ID",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Verify final state on completion page",
+                      "status": "pending"
+                    }
+                  ],
+                  "updatedAt": "2026-11-17T02:27:30.441Z",
+                  "turnId": "turn-mwk2o1lv-3f8c"
+                },
+                "watch": {
+                  "open": null,
+                  "lastVerdict": null,
+                  "lastCheckAt": null,
+                  "checks": 0
+                }
+              }
+            },
+            "planEvidence": {
+              "planModeStarted": true,
+              "planSeeded": true,
+              "planOutcome": "not-assessed",
+              "planRevision": 1,
+              "browserPlanCalls": 0,
+              "planModeEndedOutcome": "not-assessed",
+              "planNudges": 0,
+              "planStaleReminders": 0,
+              "planFinalReason": "seeded-untouched",
+              "seedRejected": false
+            }
+          },
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "browserPlanCalls": 1,
+            "planModeEndedOutcome": "unfinished",
+            "planNudges": 0,
+            "planStaleReminders": 1,
+            "planFinalReason": null,
+            "seedRejected": false
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T02-26-39-794Z-739f46/events.jsonl"
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwk2odkx-1360",
+          "status": "pass",
+          "reasons": [
+            "answered 51 with zero plan calls, zero tool results, no nudges (not-assessed), and the carried plan still present"
+          ],
+          "evidence": {
+            "followUpText": "What is 17 * 3? Reply with just the number.",
+            "turn2Status": "done",
+            "answerText": "51",
+            "answerOk": true,
+            "turn2ToolCalls": 0,
+            "turn2ToolCounts": {},
+            "zeroPlanCalls": true,
+            "zeroToolCalls": true,
+            "turn2PlanOutcome": "not-assessed",
+            "turn2PlanFinalReason": "seeded-untouched",
+            "turn2PlanSeeded": true,
+            "turn2PlanNudges": 0,
+            "turn2PlanStaleReminders": 0,
+            "notAssessed": true,
+            "zeroNudges": true,
+            "stepRecordsAtStop": 4,
+            "stepRecordsNow": 4,
+            "noNewWork": true,
+            "planCarriedAfter": true,
+            "carriedPlanRevision": 1,
+            "switchStillOn": true,
+            "turn1WallMs": 18793,
+            "turn2WallMs": 2283
+          },
+          "collateral": null,
+          "turn": {
+            "status": "stopped",
+            "waitingForUser": false,
+            "wallMs": 18793,
+            "error": null,
+            "outcome": "stopped",
+            "confirm": null,
+            "steps": 8,
+            "toolCalls": 8,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 1,
+              "browser_batch": 4,
+              "browser_click": 3
+            },
+            "inputTokens": 7998,
+            "outputTokens": 1077,
+            "cacheReadTokens": 191872,
+            "totalTokens": 200947,
+            "usage": {
+              "inputTokens": 7998,
+              "outputTokens": 1077,
+              "totalTokens": 200947,
+              "cacheReadTokens": 191872
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 1,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk2odkx-1360",
+              "origin": "remote",
+              "clientMessageId": "8395251e-2c87-428e-ad98-63e84fec0cd5",
+              "startedAt": "2026-11-17T02:27:44.961Z",
+              "endedAt": "2026-11-17T02:28:03.754Z",
+              "outcome": "stopped",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 7998,
+                "outputTokens": 1077,
+                "totalTokens": 200947,
+                "cacheReadTokens": 191872
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 825
+          },
+          "followUp": {
+            "text": "What is 17 * 3? Reply with just the number.",
+            "turnId": "turn-mwk2os6j-6f2e",
+            "turn": {
+              "status": "done",
+              "waitingForUser": false,
+              "wallMs": 2283,
+              "error": null,
+              "outcome": "done",
+              "confirm": null,
+              "steps": 1,
+              "toolCalls": 0,
+              "failedCalls": 0,
+              "failed": [],
+              "toolCounts": {},
+              "inputTokens": 4989,
+              "outputTokens": 82,
+              "cacheReadTokens": 22272,
+              "totalTokens": 27343,
+              "usage": {
+                "inputTokens": 4989,
+                "outputTokens": 82,
+                "totalTokens": 27343,
+                "cacheReadTokens": 22272
+              },
+              "finalText": "51",
+              "logOk": true,
+              "logComplete": true,
+              "reportedLabel": null,
+              "loggedFailedCalls": 0,
+              "deadSteps": 0,
+              "deadRetried": 0,
+              "deadGaveUp": 0,
+              "deadRetryErrors": 0,
+              "deadKinds": {
+                "markup": 0,
+                "empty": 0,
+                "unknown": 0
+              },
+              "assistantLeaked": 0,
+              "turnRetries": 0,
+              "retries": 0,
+              "deadTurn": false,
+              "deadTurnKind": null,
+              "recovered": false,
+              "planOutcome": "not-assessed",
+              "planRevision": 1,
+              "planSeeded": true,
+              "planNudges": 0,
+              "planStaleReminders": 0,
+              "planFinalReason": "seeded-untouched",
+              "finalTurnState": {
+                "status": "idle",
+                "turnId": "turn-mwk2os6j-6f2e",
+                "origin": "remote",
+                "clientMessageId": "ffaa27a7-2f2c-4882-8b51-a02f0a5b41e6",
+                "startedAt": "2026-11-17T02:28:03.883Z",
+                "endedAt": "2026-11-17T02:28:06.166Z",
+                "outcome": "done",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 4989,
+                  "outputTokens": 82,
+                  "totalTokens": 27343,
+                  "cacheReadTokens": 22272
+                },
+                "failedCalls": 0
+              }
+            },
+            "stop": {
+              "requested": true,
+              "at": "2026-11-17T02:28:03.731Z",
+              "turn1Outcome": "stopped"
+            },
+            "betweenState": {
+              "turn": {
+                "status": "idle",
+                "turnId": "turn-mwk2odkx-1360",
+                "origin": "remote",
+                "clientMessageId": "8395251e-2c87-428e-ad98-63e84fec0cd5",
+                "startedAt": "2026-11-17T02:27:44.961Z",
+                "endedAt": "2026-11-17T02:28:03.754Z",
+                "outcome": "stopped",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 7998,
+                  "outputTokens": 1077,
+                  "totalTokens": 200947,
+                  "cacheReadTokens": 191872
+                },
+                "failedCalls": 0
+              },
+              "marathon": {
+                "enabled": true,
+                "since": "2026-11-17T02:27:44.956Z",
+                "plan": {
+                  "revision": 1,
+                  "items": [
+                    {
+                      "content": "Submit stations 1-12 in order, carrying receipts",
+                      "status": "in_progress"
+                    },
+                    {
+                      "content": "Verify completion page and capture permit ID",
+                      "status": "pending"
+                    }
+                  ],
+                  "updatedAt": "2026-11-17T02:27:48.150Z",
+                  "turnId": "turn-mwk2odkx-1360"
+                },
+                "watch": {
+                  "open": null,
+                  "lastVerdict": null,
+                  "lastCheckAt": null,
+                  "checks": 0
+                }
+              }
+            },
+            "verification": {
+              "ok": true,
+              "reasons": [],
+              "evidence": {
+                "turnOutcome": "stopped",
+                "marathonEnabled": true,
+                "planRevision": 1,
+                "openItems": 2,
+                "itemCount": 2,
+                "stepRecordsAtStop": 4
+              }
+            },
+            "afterState": {
+              "turn": {
+                "status": "idle",
+                "turnId": "turn-mwk2os6j-6f2e",
+                "origin": "remote",
+                "clientMessageId": "ffaa27a7-2f2c-4882-8b51-a02f0a5b41e6",
+                "startedAt": "2026-11-17T02:28:03.883Z",
+                "endedAt": "2026-11-17T02:28:06.166Z",
+                "outcome": "done",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 4989,
+                  "outputTokens": 82,
+                  "totalTokens": 27343,
+                  "cacheReadTokens": 22272
+                },
+                "failedCalls": 0
+              },
+              "marathon": {
+                "enabled": true,
+                "since": "2026-11-17T02:27:44.956Z",
+                "plan": {
+                  "revision": 1,
+                  "items": [
+                    {
+                      "content": "Submit stations 1-12 in order, carrying receipts",
+                      "status": "in_progress"
+                    },
+                    {
+                      "content": "Verify completion page and capture permit ID",
+                      "status": "pending"
+                    }
+                  ],
+                  "updatedAt": "2026-11-17T02:27:48.150Z",
+                  "turnId": "turn-mwk2odkx-1360"
+                },
+                "watch": {
+                  "open": null,
+                  "lastVerdict": null,
+                  "lastCheckAt": null,
+                  "checks": 0
+                }
+              }
+            },
+            "planEvidence": {
+              "planModeStarted": true,
+              "planSeeded": true,
+              "planOutcome": "not-assessed",
+              "planRevision": 1,
+              "browserPlanCalls": 0,
+              "planModeEndedOutcome": "not-assessed",
+              "planNudges": 0,
+              "planStaleReminders": 0,
+              "planFinalReason": "seeded-untouched",
+              "seedRejected": false
+            }
+          },
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "browserPlanCalls": 1,
+            "planModeEndedOutcome": "unfinished",
+            "planNudges": 0,
+            "planStaleReminders": 1,
+            "planFinalReason": null,
+            "seedRejected": false
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T02-26-39-794Z-739f46/events.jsonl"
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwk2ou8c-f794",
+          "status": "pass",
+          "reasons": [
+            "answered 51 with zero plan calls, zero tool results, no nudges (not-assessed), and the carried plan still present"
+          ],
+          "evidence": {
+            "followUpText": "What is 17 * 3? Reply with just the number.",
+            "turn2Status": "done",
+            "answerText": "51",
+            "answerOk": true,
+            "turn2ToolCalls": 0,
+            "turn2ToolCounts": {},
+            "zeroPlanCalls": true,
+            "zeroToolCalls": true,
+            "turn2PlanOutcome": "not-assessed",
+            "turn2PlanFinalReason": "seeded-untouched",
+            "turn2PlanSeeded": true,
+            "turn2PlanNudges": 0,
+            "turn2PlanStaleReminders": 0,
+            "notAssessed": true,
+            "zeroNudges": true,
+            "stepRecordsAtStop": 4,
+            "stepRecordsNow": 4,
+            "noNewWork": true,
+            "planCarriedAfter": true,
+            "carriedPlanRevision": 1,
+            "switchStillOn": true,
+            "turn1WallMs": 20797,
+            "turn2WallMs": 2513
+          },
+          "collateral": null,
+          "turn": {
+            "status": "stopped",
+            "waitingForUser": false,
+            "wallMs": 20797,
+            "error": null,
+            "outcome": "stopped",
+            "confirm": null,
+            "steps": 8,
+            "toolCalls": 8,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 1,
+              "browser_batch": 4,
+              "browser_click": 1,
+              "browser_navigate": 2
+            },
+            "inputTokens": 10079,
+            "outputTokens": 929,
+            "cacheReadTokens": 189696,
+            "totalTokens": 200704,
+            "usage": {
+              "inputTokens": 10079,
+              "outputTokens": 929,
+              "totalTokens": 200704,
+              "cacheReadTokens": 189696
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 1,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk2ou8c-f794",
+              "origin": "remote",
+              "clientMessageId": "ef8c9fda-5de0-4d51-beec-c5db8659964f",
+              "startedAt": "2026-11-17T02:28:06.540Z",
+              "endedAt": "2026-11-17T02:28:27.337Z",
+              "outcome": "stopped",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 10079,
+                "outputTokens": 929,
+                "totalTokens": 200704,
+                "cacheReadTokens": 189696
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 1084
+          },
+          "followUp": {
+            "text": "What is 17 * 3? Reply with just the number.",
+            "turnId": "turn-mwk2pabt-c5b5",
+            "turn": {
+              "status": "done",
+              "waitingForUser": false,
+              "wallMs": 2513,
+              "error": null,
+              "outcome": "done",
+              "confirm": null,
+              "steps": 1,
+              "toolCalls": 0,
+              "failedCalls": 0,
+              "failed": [],
+              "toolCounts": {},
+              "inputTokens": 5170,
+              "outputTokens": 3,
+              "cacheReadTokens": 22016,
+              "totalTokens": 27189,
+              "usage": {
+                "inputTokens": 5170,
+                "outputTokens": 3,
+                "totalTokens": 27189,
+                "cacheReadTokens": 22016
+              },
+              "finalText": "51",
+              "logOk": true,
+              "logComplete": true,
+              "reportedLabel": null,
+              "loggedFailedCalls": 0,
+              "deadSteps": 0,
+              "deadRetried": 0,
+              "deadGaveUp": 0,
+              "deadRetryErrors": 0,
+              "deadKinds": {
+                "markup": 0,
+                "empty": 0,
+                "unknown": 0
+              },
+              "assistantLeaked": 0,
+              "turnRetries": 0,
+              "retries": 0,
+              "deadTurn": false,
+              "deadTurnKind": null,
+              "recovered": false,
+              "planOutcome": "not-assessed",
+              "planRevision": 1,
+              "planSeeded": true,
+              "planNudges": 0,
+              "planStaleReminders": 0,
+              "planFinalReason": "seeded-untouched",
+              "finalTurnState": {
+                "status": "idle",
+                "turnId": "turn-mwk2pabt-c5b5",
+                "origin": "remote",
+                "clientMessageId": "1e9a0537-6bb4-469b-938a-b4ddb27c99e1",
+                "startedAt": "2026-11-17T02:28:27.401Z",
+                "endedAt": "2026-11-17T02:28:29.914Z",
+                "outcome": "done",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 5170,
+                  "outputTokens": 3,
+                  "totalTokens": 27189,
+                  "cacheReadTokens": 22016
+                },
+                "failedCalls": 0
+              }
+            },
+            "stop": {
+              "requested": true,
+              "at": "2026-11-17T02:28:27.310Z",
+              "turn1Outcome": "stopped"
+            },
+            "betweenState": {
+              "turn": {
+                "status": "idle",
+                "turnId": "turn-mwk2ou8c-f794",
+                "origin": "remote",
+                "clientMessageId": "ef8c9fda-5de0-4d51-beec-c5db8659964f",
+                "startedAt": "2026-11-17T02:28:06.540Z",
+                "endedAt": "2026-11-17T02:28:27.337Z",
+                "outcome": "stopped",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 10079,
+                  "outputTokens": 929,
+                  "totalTokens": 200704,
+                  "cacheReadTokens": 189696
+                },
+                "failedCalls": 0
+              },
+              "marathon": {
+                "enabled": true,
+                "since": "2026-11-17T02:28:06.536Z",
+                "plan": {
+                  "revision": 1,
+                  "items": [
+                    {
+                      "content": "Submit stations 1-4 with dispatch words and carried receipts",
+                      "status": "in_progress"
+                    },
+                    {
+                      "content": "Submit stations 5-8 with dispatch words and carried receipts",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Submit stations 9-12 with dispatch words and carried receipts",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Reach completion page and verify permit ID",
+                      "status": "pending"
+                    }
+                  ],
+                  "updatedAt": "2026-11-17T02:28:08.969Z",
+                  "turnId": "turn-mwk2ou8c-f794"
+                },
+                "watch": {
+                  "open": null,
+                  "lastVerdict": null,
+                  "lastCheckAt": null,
+                  "checks": 0
+                }
+              }
+            },
+            "verification": {
+              "ok": true,
+              "reasons": [],
+              "evidence": {
+                "turnOutcome": "stopped",
+                "marathonEnabled": true,
+                "planRevision": 1,
+                "openItems": 4,
+                "itemCount": 4,
+                "stepRecordsAtStop": 4
+              }
+            },
+            "afterState": {
+              "turn": {
+                "status": "idle",
+                "turnId": "turn-mwk2pabt-c5b5",
+                "origin": "remote",
+                "clientMessageId": "1e9a0537-6bb4-469b-938a-b4ddb27c99e1",
+                "startedAt": "2026-11-17T02:28:27.401Z",
+                "endedAt": "2026-11-17T02:28:29.914Z",
+                "outcome": "done",
+                "error": null,
+                "label": null,
+                "usage": {
+                  "inputTokens": 5170,
+                  "outputTokens": 3,
+                  "totalTokens": 27189,
+                  "cacheReadTokens": 22016
+                },
+                "failedCalls": 0
+              },
+              "marathon": {
+                "enabled": true,
+                "since": "2026-11-17T02:28:06.536Z",
+                "plan": {
+                  "revision": 1,
+                  "items": [
+                    {
+                      "content": "Submit stations 1-4 with dispatch words and carried receipts",
+                      "status": "in_progress"
+                    },
+                    {
+                      "content": "Submit stations 5-8 with dispatch words and carried receipts",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Submit stations 9-12 with dispatch words and carried receipts",
+                      "status": "pending"
+                    },
+                    {
+                      "content": "Reach completion page and verify permit ID",
+                      "status": "pending"
+                    }
+                  ],
+                  "updatedAt": "2026-11-17T02:28:08.969Z",
+                  "turnId": "turn-mwk2ou8c-f794"
+                },
+                "watch": {
+                  "open": null,
+                  "lastVerdict": null,
+                  "lastCheckAt": null,
+                  "checks": 0
+                }
+              }
+            },
+            "planEvidence": {
+              "planModeStarted": true,
+              "planSeeded": true,
+              "planOutcome": "not-assessed",
+              "planRevision": 1,
+              "browserPlanCalls": 0,
+              "planModeEndedOutcome": "not-assessed",
+              "planNudges": 0,
+              "planStaleReminders": 0,
+              "planFinalReason": "seeded-untouched",
+              "seedRejected": false
+            }
+          },
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "browserPlanCalls": 1,
+            "planModeEndedOutcome": "unfinished",
+            "planNudges": 0,
+            "planStaleReminders": 1,
+            "planFinalReason": null,
+            "seedRejected": false
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T02-26-39-794Z-739f46/events.jsonl"
+        }
+      ],
+      "effectiveMaxTurnSeconds": 1200
+    }
+  ],
+  "logArchiveRoot": ".dsh-home/browser-agent/logs/m0-archive",
+  "logArchiveRunDir": "run-2026-11-17T02-26-39-794Z-739f46",
+  "commitUnderTest": "1a248fa84904ee0ae8db440517289561ec7b30e3",
+  "worktree": "/tmp/crazyagent-m2-accept",
+  "provenance": "git worktree pinned at commitUnderTest; only harness/scenario/fixture files overlaid; live working tree not used"
+}
