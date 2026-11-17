@@ -348,7 +348,7 @@ test('decideWatch with judgeKind respects snooze, budgets, and one-open-alert', 
   const base = {
     hardKind: null, judgeKind: 'stuck', judgeReason: 'r', judgeBlocker: 'loop', judgeSource: 'both',
     signals: [{ kind: 'REPEAT_LOOP', level: 'suspect', detail: '' }],
-    openAlert: null, recovery: { okResults: 0, okMutation: false, planRevision: false },
+    openAlert: null, recovery: { effectfulActs: 0, completedUp: false, signalsAbsentTicks: 0 },
     snoozedUntil: {}, now: 1000, alertsThisTurn: 0, pushesThisTurn: 0,
   }
   assert.equal(decideWatch(base).emit.kind, 'stuck')
