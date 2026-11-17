@@ -104,6 +104,8 @@ export class SessionController {
     if (this.watchEnabled) this.watcher.start()
     /** @type {{checks: number, alerts: number, usage: number} | undefined} */
     this.watchTurnSummary = undefined
+    /** The watcher's authoritative ended-incomplete decision for this turn (M3). */
+    this.watchEndedIncomplete = false
     /** @type {string | undefined} */
     this.turnId = undefined
     /** @type {{status: string, reason?: string} | undefined} */
@@ -228,6 +230,13 @@ export class SessionController {
    */
   noteActivity(frame) {
     if (!isRecord(frame) || !this.running || this.turnId === undefined || frame.turnId !== this.turnId) return
+    // M3 fix: live provider activities (plan/text/reasoning/model-start/...)
+    // arrive here, not through publish. Feed the watch ledger so the digest has
+    // the plan, the reasoning tail, and model-delta timestamps — without this
+    // PLAN_STALLED can never fire live. Wrap as chat.activity (the ledger routes
+    // on type); unknown kinds only bump lastEventAt. Tool events still flow via
+    // publish, so there is no double feed.
+    this.ledger.noteFrame({ ...frame, type: 'chat.activity' })
     if (frame.kind === 'help-request') {
       const help = normalizeHelpRequest(frame)
       if (help !== undefined) this.helpTurnRequest = help
@@ -355,6 +364,10 @@ export class SessionController {
   #finishWatch(info) {
     if (this.watchTurnSummary !== undefined) return this.watchTurnSummary
     this.watchTurnSummary = this.watcher.turnEnded(info)
+    // Capture the watcher's actual decision (not a recomputation) so the push
+    // type and the transcript notice agree by construction. The chat.done watch
+    // summary keeps its {checks,alerts,usage} shape.
+    this.watchEndedIncomplete = this.watcher.lastEndedIncomplete === true
     return this.watchTurnSummary
   }
 
@@ -456,6 +469,7 @@ export class SessionController {
     this.helpTurnRequest = undefined
     this.confirmTurnRequest = undefined
     this.watchTurnSummary = undefined
+    this.watchEndedIncomplete = false
     // Any prompt answers an open confirmation; an approve/deny answer already
     // consumed it in submit(). The same session continues either way.
     this.pendingConfirmation = undefined
@@ -668,7 +682,7 @@ export class SessionController {
     // runner rejects and never returns its collected event list.
     const turnStats = { failedCalls: 0, usage: emptyUsageTotals() }
     /** @type {{outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}}} */
-    let ending = { outcome: 'error', error: 'turn ended unexpectedly' }
+    let ending = { outcome: 'error', error: 'turn ended unexpectedly', marathon: planMode, endedIncomplete: this.watchEndedIncomplete }
 
     bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard, planSeed })
     logStore.turnStart(turnId, prompt, {
@@ -872,7 +886,7 @@ export class SessionController {
         // any kind clears this; only an answer while it is set may decide.
         this.pendingConfirmation = { action: confirm.action, target: confirm.target, turnId, sessionId: result.sessionId }
       }
-      ending = { outcome: 'done', sessionId: result.sessionId, label, usage, timings, ...(help === undefined ? {} : { help }), ...(confirm === undefined ? {} : { confirm }) }
+      ending = { outcome: 'done', sessionId: result.sessionId, label, usage, timings, marathon: planMode, planOutcome: plan?.outcome ?? null, deadTurn, endedIncomplete: this.watchEndedIncomplete, ...(help === undefined ? {} : { help }), ...(confirm === undefined ? {} : { confirm }) }
     } catch (error) {
       const message = errorMessage(error)
       const timings = {
@@ -912,14 +926,14 @@ export class SessionController {
           watch,
         })
         this.sendStatus('idle')
-        ending = { outcome: 'stopped', sessionId: sessionId ?? null, label, usage, timings }
+        ending = { outcome: 'stopped', sessionId: sessionId ?? null, label, usage, timings, marathon: planMode, endedIncomplete: this.watchEndedIncomplete }
       } else {
         logStore.error(message, { turnId, code: 'TURN_ERROR' })
         const watch = this.#finishWatch({ outcome: 'error', label })
         logStore.turnEnd(turnId, { ok: false, error: message, timings, usage, label, watch })
         this.publish({ v: PROTOCOL_VERSION, type: 'chat.error', message, recoverable: true, watch })
         this.sendStatus('error')
-        ending = { outcome: 'error', error: message, label, usage, timings }
+        ending = { outcome: 'error', error: message, label, usage, timings, marathon: planMode, endedIncomplete: this.watchEndedIncomplete }
       }
     } finally {
       this.#notify('turnEnded', { turnId, ...ending })

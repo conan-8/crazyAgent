@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { BUSY_MESSAGE, NOT_READY_MESSAGE, STOPPING_MESSAGE, SessionController, confirmationPromptBlock, isLeakedToolCallText, normalizeConfirmRequest, parseReportedLabel, uiRejectionFrame } from '../session-controller.mjs'
 import { FakeRunner, fakeBridge, fakeLogStore } from './remote-fixtures.mjs'
+import { assess } from '../watch-ledger.mjs'
+import { pushTypeForTurn } from '../remote-push.mjs'
 
 function setup(options = {}) {
   const runner = options.runner === null ? undefined : (options.runner ?? new FakeRunner())
@@ -1168,4 +1170,94 @@ test('watchAck dismisses the open alert through the controller', async () => {
   runner.toolResult({ callId: 'hang-1' })
   runner.current.resolve('done')
   await turn.done
+})
+
+test('M3 fix: live activities via noteActivity reach the ledger (plan/text/reasoning/model-start)', async () => {
+  const clock = watchClock()
+  const { controller, runner } = setup({ watch: clock.options })
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn = controller.submit({ text: 'long task' })
+  await runner.started()
+  // These arrive through the provider onActivity path, NOT publish.
+  controller.noteActivity({ kind: 'plan', turnId: turn.turnId, revision: 1, items: [{ content: 'Fill the form', status: 'in_progress' }] })
+  controller.noteActivity({ kind: 'text', turnId: turn.turnId, text: 'working on it' })
+  controller.noteActivity({ kind: 'reasoning', turnId: turn.turnId, text: 'thinking hard' })
+  controller.noteActivity({ kind: 'model-start', turnId: turn.turnId })
+  const snap = controller.ledger.snapshot()
+  assert.equal(snap.plan?.revision, 1, 'the plan reached the ledger via noteActivity')
+  assert.equal(snap.plan.items[0].content, 'Fill the form')
+  assert.match(snap.assistantTail, /working on it/)
+  assert.match(snap.reasoningTail, /thinking hard/)
+  assert.notEqual(snap.lastModelDeltaAt, null, 'model-start/text/reasoning bump the model-delta timestamp')
+  // A stale-turn activity is still ignored by the guard.
+  controller.noteActivity({ kind: 'plan', turnId: 'turn-old', revision: 9, items: [{ content: 'x', status: 'pending' }] })
+  assert.equal(controller.ledger.snapshot().plan.revision, 1)
+  runner.current.resolve('done')
+  await turn.done
+})
+
+test('M3 fix: PLAN_STALLED is reachable live via the activity path (plan via noteActivity)', async () => {
+  const clock = watchClock()
+  const { controller, runner } = setup({ watch: clock.options })
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn = controller.submit({ text: 'long task' })
+  await runner.started()
+  // The plan arrives via noteActivity (the live path); without the fix the
+  // ledger would have no plan and PLAN_STALLED could never fire.
+  controller.noteActivity({ kind: 'plan', turnId: turn.turnId, revision: 1, items: [{ content: 'Step', status: 'in_progress' }] })
+  // 25 successful mutations via the runner (publish path), distinct args.
+  for (let i = 0; i < 25; i += 1) {
+    runner.toolCall(`p${i}`, 'browser_click', JSON.stringify({ label: i }))
+    runner.toolResult({ callId: `p${i}` })
+  }
+  clock.advance(1_000)
+  const assessment = assess(controller.ledger.snapshot(), clock.options.now())
+  assert.ok(assessment.signals.some(signal => signal.kind === 'PLAN_STALLED' && signal.level === 'suspect'),
+    `PLAN_STALLED must fire via activities: ${JSON.stringify(assessment.signals)}`)
+  // A plan revision (via noteActivity) resets the stall counter.
+  controller.noteActivity({ kind: 'plan', turnId: turn.turnId, revision: 2, items: [{ content: 'Step', status: 'in_progress' }] })
+  assert.ok(!assess(controller.ledger.snapshot(), clock.options.now()).signals.some(signal => signal.kind === 'PLAN_STALLED'))
+  runner.current.resolve('done')
+  await turn.done
+})
+
+test('M3 fix: turnEnded ending info drives pushTypeForTurn to watch for an unfinished marathon turn (real wiring)', async () => {
+  const clock = watchClock()
+  const { controller, runner, observed } = setup({ watch: clock.options })
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn = controller.submit({ text: 'long task' })
+  await runner.started()
+  controller.noteActivity({ kind: 'turn-outcome', turnId: turn.turnId, turn: 1, planOutcome: 'unfinished', planRevision: 2 })
+  runner.current.resolve('PARTIAL — items remain')
+  await turn.done
+  const endInfo = observed.find(([kind]) => kind === 'end')[1]
+  assert.equal(endInfo.marathon, true)
+  assert.equal(endInfo.endedIncomplete, true, 'the authoritative watcher decision is carried')
+  assert.equal(endInfo.planOutcome, 'unfinished')
+  assert.equal(pushTypeForTurn(endInfo), 'watch', 'the real controller→push wiring yields a watch push')
+  // The chat.done watch summary keeps its {checks,alerts,usage} shape.
+  assert.deepEqual(Object.keys(endInfo).filter(k => k === 'watch'), [], 'ending info has no watch blob; summary rides chat.done')
+})
+
+test('M3 fix: a clean marathon turn pushes done; a non-marathon turn pushes done', async () => {
+  const clock = watchClock()
+  const clean = setup({ watch: clock.options })
+  clean.controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn = clean.controller.submit({ text: 'task' })
+  await clean.runner.started()
+  clean.controller.noteActivity({ kind: 'turn-outcome', turn: 1, planOutcome: 'reported-complete', planRevision: 1 })
+  clean.runner.current.resolve('DONE — all complete')
+  await turn.done
+  const cleanEnd = clean.observed.find(([kind]) => kind === 'end')[1]
+  assert.equal(cleanEnd.endedIncomplete, false)
+  assert.equal(pushTypeForTurn(cleanEnd), 'done')
+
+  const plain = setup({ watch: watchClock().options })
+  const turn2 = plain.controller.submit({ text: 'quick' })
+  await plain.runner.started()
+  plain.runner.current.resolve('done')
+  await turn2.done
+  const plainEnd = plain.observed.find(([kind]) => kind === 'end')[1]
+  assert.equal(plainEnd.marathon, false)
+  assert.equal(pushTypeForTurn(plainEnd), 'done')
 })
