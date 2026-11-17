@@ -256,7 +256,7 @@ export class Watcher {
   }
 
   /** Reset per-turn counters; the ledger is reset separately by the companion. */
-  turnStarted({ marathon }) {
+  turnStarted({ marathon, carry = null }) {
     this.checks = 0
     this.alertsThisTurn = 0
     this.pushesThisTurn = 0
@@ -264,6 +264,9 @@ export class Watcher {
     this.snoozedUntil = {}
     this.lastAssessment = { level: 'ok', signals: [], hints: [] }
     this.turnMarathon = marathon === true
+    // V4 (§3.5, G2): internal carry context for the judge digest (ancestor prompts
+    // + marathon carried-plan revision when seeded). Never published to clients.
+    this.carryContext = carry
     this.lastEndedIncomplete = false
     const at = this.now()
     this.judgeCalls = 0
@@ -368,7 +371,7 @@ export class Watcher {
     this.judgeInFlight = true
     const turnId = state.turnId
     const callAt = now
-    const digest = buildDigest(state, now, { signals: assessment.signals, hints: assessment.hints, previousVerdicts: this.previousVerdicts })
+    const digest = buildDigest(state, now, { signals: assessment.signals, hints: assessment.hints, previousVerdicts: this.previousVerdicts, carry: this.carryContext ?? null })
     this.log('watch.judge.start', { turnId, trigger, elapsedSec: Math.round((now - state.turnStartAt) / 1000), events: digest.events.length, signals: digest.signals })
     const promise = this.judge.check({ turnId, digest }).then(result => {
       this.judgeInFlight = false

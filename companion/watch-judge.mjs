@@ -105,11 +105,23 @@ export function buildDigest(state, now, context = {}) {
     secSinceRevision: sec(now - state.lastPlanRevisionAt),
     items: state.plan.items.map(item => ({ status: item.status, content: item.content })),
   }
+  // V4 (§3.5, G2): when the turn was seeded, the judge learns the originating task
+  // via the internal carry chain (ancestor prompts, oldest first, each ≤500 chars,
+  // ≤3 → digest growth ≤~400 tokens) + the marathon carried-plan revision. The
+  // current turn prompt stays `task`; carriedFrom is ancestors only. Not seeded →
+  // no carriedFrom (a fresh turn carries no ancestor context).
+  const carry = context.carry ?? null
+  const seeded = carry?.seeded === true
+  if (plan !== null && seeded && Number.isSafeInteger(carry.seededRevision)) plan.seededRevision = carry.seededRevision
+  const carriedFrom = seeded
+    ? (carry.carriedFrom ?? []).slice(0, 3).map(entry => ({ prompt: String(entry.prompt ?? '').slice(0, 500) }))
+    : []
   return {
     task: state.prompt,
     elapsedSec: sec(now - state.turnStartAt),
     marathon: state.marathon === true,
     plan,
+    ...(carriedFrom.length > 0 ? { carriedFrom } : {}),
     signals,
     events: state.events.map(event => ({
       n: event.n,

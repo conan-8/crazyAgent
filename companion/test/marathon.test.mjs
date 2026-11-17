@@ -131,3 +131,67 @@ test('normalizeMarathonPlan validates the full snapshot shape fail-closed', () =
   copy.items[0].content = 'changed'
   assert.equal(PLAN.items[0].content, 'Fill the form')
 })
+
+/* ------------------------------------------------------------------ */
+/* V4 carry chain (§3.5, G2): internal ancestor prompts                */
+/* ------------------------------------------------------------------ */
+
+test('V4: carry chain appends ancestor prompts, clips 500, trims to last 3 oldest first', () => {
+  const m = new MarathonState({ now: fixedNow })
+  m.set({ enabled: true, sessionId: 's' })
+  m.pushCarryPrompt('first task', 't1')
+  m.pushCarryPrompt('x'.repeat(600), 't2')
+  m.pushCarryPrompt('third task', 't3')
+  m.pushCarryPrompt('fourth task', 't4')
+  const chain = m.carryChainForDigest()
+  assert.equal(chain.length, 3, 'trimmed to last 3')
+  assert.deepEqual(chain.map(e => e.turnId), ['t2', 't3', 't4'], 'oldest first, oldest dropped')
+  assert.equal(chain[0].prompt.length, 500, 'clipped to 500 chars')
+  assert.equal(chain[2].prompt, 'fourth task')
+})
+
+test('V4: carry chain is INTERNAL — not in the published snapshot', () => {
+  const m = new MarathonState({ now: fixedNow })
+  m.set({ enabled: true, sessionId: 's' })
+  m.pushCarryPrompt('secret ancestor task', 't1')
+  assert.equal(m.carryChainForDigest().length, 1)
+  const snap = m.snapshot()
+  assert.equal(snap.carryChain, undefined, 'snapshot excludes carryChain')
+  assert.deepEqual(Object.keys(snap).sort(), ['enabled', 'origin', 'plan', 'sessionId', 'since'])
+  assert.equal(marathonFrameBody(snap).carryChain, undefined, 'frame body excludes carryChain')
+})
+
+test('V4: carry chain resets on marathon off, reset (chat/new), and carried-plan drop', () => {
+  const m = new MarathonState({ now: fixedNow })
+  m.set({ enabled: true, sessionId: 's' })
+  m.pushCarryPrompt('a', 't1')
+  m.set({ enabled: false })
+  assert.equal(m.carryChainForDigest().length, 0, 'marathon off resets')
+  m.set({ enabled: true, sessionId: 's' })
+  m.pushCarryPrompt('b', 't2')
+  m.reset()
+  assert.equal(m.carryChainForDigest().length, 0, 'reset (new chat / chat switch) resets')
+  m.set({ enabled: true, sessionId: 's' })
+  m.pushCarryPrompt('c', 't3')
+  m.storePlan(PLAN) // open plan persists -> chain kept
+  assert.equal(m.carryChainForDigest().length, 1, 'persisting plan keeps chain')
+  m.storePlan({ ...PLAN, items: [{ content: 'Fill the form', status: 'completed' }, { content: 'Verify', status: 'completed' }] })
+  assert.equal(m.carryChainForDigest().length, 0, 'dropped (terminal) plan resets chain')
+})
+
+test('V4: pushCarryPrompt is a no-op while marathon is off', () => {
+  const m = new MarathonState({ now: fixedNow })
+  m.pushCarryPrompt('a', 't1')
+  assert.equal(m.carryChainForDigest().length, 0)
+})
+
+test('V4: carryChainForDigest returns a copy (no mutation through it)', () => {
+  const m = new MarathonState({ now: fixedNow })
+  m.set({ enabled: true, sessionId: 's' })
+  m.pushCarryPrompt('a', 't1')
+  const copy = m.carryChainForDigest()
+  copy[0].prompt = 'changed'
+  copy.push({ prompt: 'extra', turnId: 'x' })
+  assert.equal(m.carryChainForDigest()[0].prompt, 'a')
+  assert.equal(m.carryChainForDigest().length, 1)
+})

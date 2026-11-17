@@ -498,8 +498,19 @@ export class SessionController {
     this.watcher.closeEndedIncomplete('A new turn started.')
     // M3: the ledger records every turn; the watcher only alerts on marathon
     // turns. Starting them here means a mid-turn toggle already has history.
+    const planSeed = this.#carriedPlanSeed()
     this.ledger.startTurn({ turnId, prompt: shownText, marathon: planMode })
-    this.watcher.turnStarted({ marathon: planMode })
+    // V4 (§3.5, G2): the judge learns the task — pass the internal carry chain
+    // (ancestor prompts) + the marathon carried-plan revision when this turn is
+    // seeded. The current prompt stays the digest `task`; carriedFrom is ancestors.
+    this.watcher.turnStarted({
+      marathon: planMode,
+      carry: {
+        seeded: planSeed !== null,
+        seededRevision: this.marathon.state.plan?.revision ?? null,
+        carriedFrom: this.marathon.carryChainForDigest(),
+      },
+    })
     this.#notify('turnStarted', {
       turnId,
       origin,
@@ -519,7 +530,7 @@ export class SessionController {
       // desktop input instead of colliding with it.
       this.publish({ v: PROTOCOL_VERSION, type: 'chat.user', turnId, origin, text: shownText, imageCount: images.length, ...(planMode ? { marathon: true } : {}) })
     }
-    const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode, confirmGuard, planSeed: this.#carriedPlanSeed() })
+    const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode, confirmGuard, planSeed })
     return { turnId, done }
   }
 
@@ -965,6 +976,10 @@ export class SessionController {
           this.logStore.record('companion', 'marathon.plan.carried', { revision: stored.state.plan?.revision ?? null, open: stored.state.plan !== null }, { severity: 'info' })
           this.#publishMarathon()
         }
+        // V4 (§3.5): if the carried plan persists, this turn's prompt becomes an
+        // ancestor for the next continuation turn (carry chain, internal). A
+        // dropped plan already reset the chain in storePlan.
+        if (stored.state.plan !== null) this.marathon.pushCarryPrompt(prompt, turnId)
       }
       this.planTurnSnapshot = undefined
       this.#startPendingSteer()

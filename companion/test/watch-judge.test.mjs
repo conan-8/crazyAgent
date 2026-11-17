@@ -153,6 +153,45 @@ test('buildDigest produces the §3.3.3 shape from a ledger snapshot', () => {
   assert.equal(JSON.stringify(digest).includes('base64'), false)
 })
 
+test('V4: buildDigest adds carriedFrom (ancestors) + plan.seededRevision when seeded', () => {
+  let now = 0
+  const ledger = new WatchLedger({ now: () => now })
+  ledger.startTurn({ turnId: 't', prompt: 'continue', marathon: true })
+  ledger.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 4, items: [{ content: 'step', status: 'in_progress' }] })
+  now = 1000
+  const digest = buildDigest(ledger.snapshot(), now, {
+    carry: { seeded: true, seededRevision: 4, carriedFrom: [{ prompt: 'fill the shipping form', turnId: 't0' }, { prompt: 'place the order', turnId: 't1' }] },
+  })
+  assert.equal(digest.task, 'continue', 'current prompt stays the task')
+  assert.deepEqual(digest.carriedFrom, [{ prompt: 'fill the shipping form' }, { prompt: 'place the order' }], 'ancestors only, oldest first')
+  assert.equal(digest.plan.seededRevision, 4, 'marathon carried-plan revision')
+})
+
+test('V4: buildDigest omits carriedFrom when not seeded', () => {
+  let now = 0
+  const ledger = new WatchLedger({ now: () => now })
+  ledger.startTurn({ turnId: 't', prompt: 'a fresh task', marathon: true })
+  const digest = buildDigest(ledger.snapshot(), now, { carry: { seeded: false, seededRevision: null, carriedFrom: [] } })
+  assert.equal(digest.carriedFrom, undefined, 'no carriedFrom for a fresh turn')
+  const noCarry = buildDigest(ledger.snapshot(), now, {})
+  assert.equal(noCarry.carriedFrom, undefined)
+})
+
+test('V4: buildDigest carriedFrom bounded to 3 prompts x 500 chars (~400 tokens)', () => {
+  let now = 0
+  const ledger = new WatchLedger({ now: () => now })
+  ledger.startTurn({ turnId: 't', prompt: 'continue', marathon: true })
+  ledger.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 1, items: [{ content: 's', status: 'in_progress' }] })
+  const long = 'x'.repeat(900)
+  const digest = buildDigest(ledger.snapshot(), now, {
+    carry: { seeded: true, seededRevision: 1, carriedFrom: [{ prompt: long }, { prompt: long }, { prompt: long }, { prompt: long }] },
+  })
+  assert.equal(digest.carriedFrom.length, 3, 'at most 3 ancestors')
+  for (const entry of digest.carriedFrom) assert.ok(entry.prompt.length <= 500, 'each prompt clipped to 500')
+  const totalChars = digest.carriedFrom.reduce((n, e) => n + e.prompt.length, 0)
+  assert.ok(totalChars <= 1500, 'carriedFrom total <= 1500 chars (~400 tokens)')
+})
+
 /* ------------------------------------------------------------------ */
 /* parseCompletion — defensive                                         */
 /* ------------------------------------------------------------------ */
