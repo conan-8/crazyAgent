@@ -1137,6 +1137,27 @@ async function playWatchScenario(page, capture) {
   assert.deepEqual((await row()).buttons, ['Stop', 'Steer…', "It's fine"])
   await capture('ended-incomplete')
 
+  // 4b. V1: the next turn start closes the ended-incomplete notice (own id,
+  // 'A new turn started.'); the row collapses and the amber chip clears.
+  await recv({ v: 1, type: 'chat.watch', id: 'watch-ended', turnId: 'turn-watch', kind: 'info', state: 'closed', blocker: null, reason: 'A new turn started.', signals: [], source: 'heuristic', at: '2026-11-16T19:09:00.000Z' })
+  await sleep(200)
+  assert.equal((await row()).collapsed, true)
+  assert.equal((await row()).buttons.length, 0)
+  assert.equal((await chip()).alert, false)
+  await capture('closed-new-turn')
+
+  // 4c. V1: a fresh mid-turn alert is closed at turn end ('Turn ended.').
+  await recv(alertFrame('watch-hang2', 'TOOL_HANG', 'A browser call has not returned for several minutes.'))
+  await sleep(200)
+  assert.equal((await row()).kind, 'TOOL_HANG')
+  assert.equal((await chip()).alert, true)
+  await recv({ v: 1, type: 'chat.watch', id: 'watch-hang2', turnId: 'turn-watch', kind: 'info', state: 'closed', blocker: null, reason: 'Turn ended.', signals: [], source: 'heuristic', at: '2026-11-16T19:10:00.000Z' })
+  await sleep(200)
+  assert.equal((await row()).collapsed, true)
+  assert.equal((await row()).buttons.length, 0)
+  assert.equal((await chip()).alert, false)
+  await capture('closed-turn-end')
+
   // 5. The alert row fits the narrowest panel.
   await page.send('Emulation.setDeviceMetricsOverride', { width: 280, height: 940, deviceScaleFactor: 2, mobile: false })
   await sleep(250)
