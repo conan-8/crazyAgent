@@ -1,20 +1,34 @@
 /**
- * Watcher scheduler (MARATHON-PLAN.md §3.3.4), WITHOUT the judge (M4 wires it).
+ * Watcher scheduler (MARATHON-PLAN.md §3.3.4) with the model judge (M4).
  *
  * A deterministic tick every 20 s while a turn runs with marathon on. Hard
- * signals from assess() alert immediately, without the model. The alert policy
- * (decideWatch) and the end-of-turn decision (decideEndedIncomplete) are pure
- * functions so every branch is unit-tested with a fake clock.
+ * signals from assess() alert immediately, without the model — the judge can
+ * never veto them. The judge (companion/watch-judge.mjs) adds soft, semantic
+ * opinion on a cadence: first call 4 min into the turn, then every 6 min with
+ * ±15% jitter, growing to 10 min after two consecutive `progressing` verdicts
+ * and returning to 4 min on any other verdict; a suspect assessment brings a
+ * call forward when ≥90 s have passed since the last one. A per-turn budget
+ * (40 calls / 150k input tokens) falls back to deterministic-only with one
+ * notice; HTTP 429/timeout skips a check and doubles the next interval once.
  *
- * The watcher only reports. It NEVER steers, stops, sends a bridge command,
- * captures, changes ok/label/plan/docsVerification, or triggers a retry. It
- * emits chat.watch frames (the companion also journals them as remote.watch)
- * and an additive per-turn watch summary. Timers are injected for tests and
+ * A judge verdict of stuck/blocked with confidence ≥0.6 alerts ONLY with the
+ * two-strike rule: a deterministic signal is also present, or the previous
+ * verdict was also not progressing. A single unsupported model opinion never
+ * alerts.
+ *
+ * The alert policy (decideWatch) and the end-of-turn decision
+ * (decideEndedIncomplete) are pure functions so every branch is unit-tested
+ * with a fake clock. The watcher only reports. It NEVER steers, stops, sends a
+ * bridge command, captures, changes ok/label/plan/docsVerification, or triggers
+ * a retry. It emits chat.watch frames (the companion also journals them as
+ * remote.watch) and an additive per-turn watch summary. Judge usage is reported
+ * separately from the agent's usage. Timers are injected for tests and
  * .unref()'d in production so a watcher never keeps the process alive.
  */
 
 import { randomUUID } from 'node:crypto'
 import { assess } from './watch-ledger.mjs'
+import { buildDigest } from './watch-judge.mjs'
 
 export const WATCH_TICK_MS = 20_000
 
@@ -24,6 +38,21 @@ export const WATCH_ALERT_LIMITS = Object.freeze({
   maxPushesPerTurn: 3,
   snoozeMs: 15 * 60_000,
   recoveryOkResults: 3,
+})
+
+/** Judge cadence and budget (§3.3.4). Injected/overridable for tests. */
+export const WATCH_JUDGE_LIMITS = Object.freeze({
+  firstCallMs: 4 * 60_000,
+  routineMs: 6 * 60_000,
+  calmMs: 10 * 60_000,
+  alertMs: 4 * 60_000,
+  jitter: 0.15,
+  triggerFloorMs: 90_000,
+  maxCallsPerTurn: 40,
+  maxInputTokensPerTurn: 150_000,
+  progressingStreakForCalm: 2,
+  confidenceAlertMin: 0.6,
+  previousVerdictsKept: 6,
 })
 
 /** Hard-signal kinds that may alert without the model, in priority order. */
@@ -41,14 +70,19 @@ function isRecord(value) {
 }
 
 /**
- * Pure alert policy (§3.3.4). A hard signal alerts immediately; one open alert
- * at a time; a new alert only on a kind change or after reAlertMs with the
- * condition still held; at most maxAlertsPerTurn alerts and maxPushesPerTurn
- * pushes. A snoozed kind ("It's fine") is suppressed until its snooze expires.
- * Recovery (3 successful results including one mutation, or a plan revision)
- * emits a recovered notice and clears the open alert.
+ * Pure alert policy (§3.3.4). A hard signal alerts immediately; a judge verdict
+ * (judgeKind) alerts only when passed in (the caller applies the two-strike
+ * rule). One open alert at a time; a new alert only on a kind change or after
+ * reAlertMs with the condition still held; at most maxAlertsPerTurn alerts and
+ * maxPushesPerTurn pushes. A snoozed kind ("It's fine") is suppressed until its
+ * snooze expires. Recovery (3 successful results including one mutation, or a
+ * plan revision) emits a recovered notice and clears the open alert.
  * @param {{
  *   hardKind: string | null,
+ *   judgeKind?: string | null,
+ *   judgeReason?: string,
+ *   judgeBlocker?: string | null,
+ *   judgeSource?: 'watcher' | 'both',
  *   signals: Array<{kind: string, level: string, detail: string}>,
  *   openAlert: null | {kind: string, at: number, planRevision: number},
  *   recovery: {okResults: number, okMutation: boolean, planRevision: boolean},
@@ -58,11 +92,12 @@ function isRecord(value) {
  *   pushesThisTurn: number,
  *   limits?: typeof WATCH_ALERT_LIMITS,
  * }} input
- * @returns {{emit: null | {type: 'alert' | 'recovered', kind: string, reason: string, signals: Array<any>, push: boolean}}}
+ * @returns {{emit: null | {type: 'alert' | 'recovered', kind: string, reason: string, signals: Array<any>, push: boolean, source?: string, blocker?: string | null}}}
  */
 export function decideWatch(input) {
   const limits = input.limits ?? WATCH_ALERT_LIMITS
   const { hardKind, signals, openAlert, recovery, snoozedUntil, now, alertsThisTurn, pushesThisTurn } = input
+  const judgeKind = input.judgeKind ?? null
 
   // Recovery first: an open alert clears once the run visibly progresses.
   if (openAlert !== null) {
@@ -72,22 +107,39 @@ export function decideWatch(input) {
     }
   }
 
-  if (hardKind === null) return { emit: null }
-  if ((snoozedUntil[hardKind] ?? 0) > now) return { emit: null }
+  // Hard deterministic signals alert immediately; the judge can never veto them.
+  const kind = hardKind !== null ? hardKind : judgeKind
+  if (kind === null) return { emit: null }
+  if ((snoozedUntil[kind] ?? 0) > now) return { emit: null }
   if (alertsThisTurn >= limits.maxAlertsPerTurn) return { emit: null }
 
-  const isNewKind = openAlert === null || openAlert.kind !== hardKind
-  const reAlertDue = openAlert !== null && openAlert.kind === hardKind && (now - openAlert.at) >= limits.reAlertMs
+  const isNewKind = openAlert === null || openAlert.kind !== kind
+  const reAlertDue = openAlert !== null && openAlert.kind === kind && (now - openAlert.at) >= limits.reAlertMs
   if (!isNewKind && !reAlertDue) return { emit: null }
 
   const push = pushesThisTurn < limits.maxPushesPerTurn
+  if (hardKind !== null) {
+    return {
+      emit: {
+        type: 'alert',
+        kind: hardKind,
+        reason: ALERT_REASON[hardKind] ?? 'The agent may be stuck.',
+        signals,
+        push,
+        source: 'heuristic',
+        blocker: hardKind,
+      },
+    }
+  }
   return {
     emit: {
       type: 'alert',
-      kind: hardKind,
-      reason: ALERT_REASON[hardKind] ?? 'The agent may be stuck.',
+      kind: judgeKind,
+      reason: input.judgeReason ?? 'The agent may be stuck.',
       signals,
       push,
+      source: input.judgeSource ?? 'watcher',
+      blocker: input.judgeBlocker ?? null,
     },
   }
 }
@@ -116,38 +168,65 @@ export class Watcher {
    *   ledger: import('./watch-ledger.mjs').WatchLedger,
    *   marathonEnabled: () => boolean,
    *   publish: (frame: Record<string, any>) => void,
+   *   judge?: ReturnType<import('./watch-judge.mjs').createWatchJudge> | null,
    *   now?: () => number,
    *   wallNow?: () => number,
    *   setTimer?: (fn: () => void, ms: number) => any,
    *   clearTimer?: (handle: any) => void,
    *   push?: (meta: {type: string, turnId: string | null, kind: string}) => void,
    *   log?: (type: string, data: Record<string, any>, severity?: string) => void,
+   *   random?: () => number,
    *   tickMs?: number,
    *   limits?: typeof WATCH_ALERT_LIMITS,
+   *   judgeLimits?: typeof WATCH_JUDGE_LIMITS,
    * }} options
    */
   constructor(options) {
     this.ledger = options.ledger
     this.marathonEnabled = options.marathonEnabled
     this.publish = options.publish
+    this.judge = options.judge ?? null
     this.now = options.now ?? (() => performance.now())
     this.wallNow = options.wallNow ?? Date.now
     this.setTimer = options.setTimer ?? ((fn, ms) => { const handle = setInterval(fn, ms); handle.unref?.(); return handle })
     this.clearTimer = options.clearTimer ?? clearInterval
     this.push = options.push ?? (() => {})
     this.log = options.log ?? (() => {})
+    this.random = options.random ?? Math.random
     this.tickMs = options.tickMs ?? WATCH_TICK_MS
     this.limits = options.limits ?? WATCH_ALERT_LIMITS
+    this.judgeLimits = options.judgeLimits ?? WATCH_JUDGE_LIMITS
     this.timer = null
     this.checks = 0
     this.alertsThisTurn = 0
     this.pushesThisTurn = 0
-    /** @type {null | {id: string, kind: string, at: number, planRevision: number, atIso: string}} */
+    /** @type {null | {id: string, kind: string, at: number, planRevision: number, atIso: string, reason: string}} */
     this.openAlert = null
     /** @type {Record<string, number>} */
     this.snoozedUntil = {}
     this.lastAssessment = { level: 'ok', signals: [], hints: [] }
     this.turnMarathon = false
+    /** The authoritative ended-incomplete decision for the last turn end (M3). */
+    this.lastEndedIncomplete = false
+    // Judge per-turn state (reset in turnStarted).
+    this.judgeCalls = 0
+    this.judgeSkipped = 0
+    this.judgeInputTokens = 0
+    this.judgeOutputTokens = 0
+    this.judgeReasoningTokens = 0
+    this.judgeCacheReadTokens = 0
+    this.judgeLastCallAt = 0
+    this.nextJudgeAt = 0
+    this.judgeIntervalMs = this.judgeLimits.routineMs
+    this.progressingStreak = 0
+    /** @type {Array<{at: number, state: string, confidence: number, blocker: string | null}>} */
+    this.previousVerdicts = []
+    this.lastVerdict = null
+    this.lastJudgeCheckWallAt = null
+    this.judgeInFlight = false
+    this.judgePending = null
+    this.budgetNoticeEmitted = false
+    this.backoffUntil = 0
   }
 
   start() {
@@ -171,6 +250,30 @@ export class Watcher {
     this.snoozedUntil = {}
     this.lastAssessment = { level: 'ok', signals: [], hints: [] }
     this.turnMarathon = marathon === true
+    this.lastEndedIncomplete = false
+    const at = this.now()
+    this.judgeCalls = 0
+    this.judgeSkipped = 0
+    this.judgeInputTokens = 0
+    this.judgeOutputTokens = 0
+    this.judgeReasoningTokens = 0
+    this.judgeCacheReadTokens = 0
+    this.judgeLastCallAt = at
+    this.nextJudgeAt = at + this.judgeLimits.firstCallMs
+    this.judgeIntervalMs = this.judgeLimits.routineMs
+    this.progressingStreak = 0
+    this.previousVerdicts = []
+    this.lastVerdict = null
+    this.lastJudgeCheckWallAt = null
+    this.judgeInFlight = false
+    this.judgePending = null
+    this.budgetNoticeEmitted = false
+    this.backoffUntil = 0
+  }
+
+  /** Await the in-flight judge call (tests/replay); a no-op when idle. */
+  settleJudge() {
+    return this.judgePending ?? Promise.resolve()
   }
 
   /** One deterministic tick. Only assesses/alerts while a marathon turn runs. */
@@ -183,7 +286,25 @@ export class Watcher {
     this.lastAssessment = assessment
     const hardKind = HARD_ALERT_KINDS.find(kind => assessment.signals.some(signal => signal.kind === kind && signal.level === 'hard')) ?? null
 
-    // Recovery progress since the open alert was raised.
+    const decision = decideWatch({
+      hardKind,
+      signals: assessment.signals,
+      openAlert: this.openAlert,
+      recovery: this.#recoverySince(state),
+      snoozedUntil: this.snoozedUntil,
+      now,
+      alertsThisTurn: this.alertsThisTurn,
+      pushesThisTurn: this.pushesThisTurn,
+      limits: this.limits,
+    })
+    if (decision.emit !== null) this.#emit(decision.emit, state, assessment)
+    this.#maybeJudge(state, assessment, now)
+    this.log('watch.tick', { turnId: state.turnId, checks: this.checks, level: assessment.level, hardKind, open: this.openAlert?.kind ?? null })
+    return assessment
+  }
+
+  /** Recovery progress since the open alert was raised. */
+  #recoverySince(state) {
     const recovery = { okResults: 0, okMutation: false, planRevision: false }
     if (this.openAlert !== null) {
       for (const event of state.events) {
@@ -195,21 +316,137 @@ export class Watcher {
       }
       recovery.planRevision = state.planRevision > this.openAlert.planRevision
     }
+    return recovery
+  }
 
-    const decision = decideWatch({
-      hardKind,
-      signals: assessment.signals,
-      openAlert: this.openAlert,
-      recovery,
-      snoozedUntil: this.snoozedUntil,
-      now,
-      alertsThisTurn: this.alertsThisTurn,
-      pushesThisTurn: this.pushesThisTurn,
-      limits: this.limits,
+  /** Decide whether a judge call is due now (routine cadence or suspect trigger). */
+  #maybeJudge(state, assessment, now) {
+    if (this.judge === null || this.judgeInFlight) return
+    if (this.judgeCalls >= this.judgeLimits.maxCallsPerTurn || this.judgeInputTokens >= this.judgeLimits.maxInputTokensPerTurn) {
+      if (!this.budgetNoticeEmitted) {
+        this.budgetNoticeEmitted = true
+        this.publish({
+          type: 'chat.watch',
+          id: randomUUID(),
+          turnId: state.turnId,
+          kind: 'info',
+          state: 'open',
+          blocker: null,
+          reason: 'Judge budget spent for this turn; watching with deterministic signals only.',
+          signals: [],
+          source: 'heuristic',
+          at: new Date(this.wallNow()).toISOString(),
+        })
+        this.log('watch.judge.budget', { turnId: state.turnId, calls: this.judgeCalls, inputTokens: this.judgeInputTokens })
+      }
+      return
+    }
+    if (now < this.backoffUntil) return
+    const dueRoutine = now >= this.nextJudgeAt
+    const dueTrigger = assessment.level === 'suspect' && (now - this.judgeLastCallAt) >= this.judgeLimits.triggerFloorMs
+    if (!dueRoutine && !dueTrigger) return
+    this.#startJudgeCall(state, assessment, now, dueRoutine ? 'routine' : 'trigger')
+  }
+
+  #startJudgeCall(state, assessment, now, trigger) {
+    this.judgeInFlight = true
+    const turnId = state.turnId
+    const callAt = now
+    const digest = buildDigest(state, now, { signals: assessment.signals, hints: assessment.hints, previousVerdicts: this.previousVerdicts })
+    this.log('watch.judge.start', { turnId, trigger, elapsedSec: Math.round((now - state.turnStartAt) / 1000), events: digest.events.length, signals: digest.signals })
+    const promise = this.judge.check({ turnId, digest }).then(result => {
+      this.judgeInFlight = false
+      this.judgePending = null
+      const current = this.ledger.snapshot()
+      // A result for a turn that has ended (or changed) is discarded.
+      if (!current.running || current.turnId !== turnId) {
+        this.log('watch.judge.discard', { turnId, status: result.status })
+        return
+      }
+      this.#applyJudgeResult(result, callAt, trigger)
+    }, error => {
+      this.judgeInFlight = false
+      this.judgePending = null
+      this.log('watch.judge.error', { turnId, message: String(error?.message ?? error).slice(0, 120) }, 'warn')
     })
-    if (decision.emit !== null) this.#emit(decision.emit, state, assessment)
-    this.log('watch.tick', { turnId: state.turnId, checks: this.checks, level: assessment.level, hardKind, open: this.openAlert?.kind ?? null })
-    return assessment
+    this.judgePending = promise
+  }
+
+  #scheduleNextJudge(callAt, intervalMs) {
+    const factor = 1 + this.judgeLimits.jitter * (2 * this.random() - 1)
+    this.nextJudgeAt = callAt + Math.round(intervalMs * factor)
+  }
+
+  #applyJudgeResult(result, callAt, trigger) {
+    const now = this.now()
+    const state = this.ledger.snapshot()
+    this.judgeCalls += 1
+    this.judgeInputTokens += result.usage.inputTokens
+    this.judgeOutputTokens += result.usage.outputTokens
+    this.judgeReasoningTokens += result.usage.reasoningTokens
+    this.judgeCacheReadTokens += result.usage.cacheReadTokens
+    this.judgeLastCallAt = callAt
+    this.lastJudgeCheckWallAt = new Date(this.wallNow()).toISOString()
+
+    const status = result.status
+    if (status === 'rate-limited' || status === 'timeout') {
+      // Skip the check; double the next interval once (no trigger spam meanwhile).
+      this.judgeSkipped += 1
+      this.backoffUntil = callAt + 2 * this.judgeIntervalMs
+      this.nextJudgeAt = this.backoffUntil
+      this.log('watch.judge.skip', { turnId: state.turnId, status, backoffMs: 2 * this.judgeIntervalMs })
+      return
+    }
+    if (status !== 'ok') {
+      this.judgeSkipped += 1
+      this.#scheduleNextJudge(callAt, this.judgeIntervalMs)
+      this.log('watch.judge.skip', { turnId: state.turnId, status })
+      return
+    }
+
+    const verdict = result.verdict
+    this.lastVerdict = verdict.state
+    const previous = this.previousVerdicts.length > 0 ? this.previousVerdicts[this.previousVerdicts.length - 1] : null
+    this.previousVerdicts.push({ at: callAt, state: verdict.state, confidence: verdict.confidence, blocker: verdict.blocker })
+    if (this.previousVerdicts.length > this.judgeLimits.previousVerdictsKept) this.previousVerdicts.shift()
+
+    if (verdict.state === 'progressing') {
+      this.progressingStreak += 1
+      this.judgeIntervalMs = this.progressingStreak >= this.judgeLimits.progressingStreakForCalm ? this.judgeLimits.calmMs : this.judgeLimits.routineMs
+    } else {
+      this.progressingStreak = 0
+      this.judgeIntervalMs = this.judgeLimits.alertMs
+    }
+    this.#scheduleNextJudge(callAt, this.judgeIntervalMs)
+    this.log('watch.judge.verdict', { turnId: state.turnId, trigger, state: verdict.state, confidence: verdict.confidence, blocker: verdict.blocker, intervalMs: this.judgeIntervalMs, calls: this.judgeCalls })
+
+    // Two-strike alert rule: a single unsupported model opinion never alerts.
+    if ((verdict.state === 'stuck' || verdict.state === 'blocked') && verdict.confidence >= this.judgeLimits.confidenceAlertMin) {
+      const assessment = assess(state, now)
+      const deterministicSupport = assessment.signals.length > 0
+      const previousSupport = previous !== null && previous.state !== 'progressing'
+      if (deterministicSupport || previousSupport) {
+        const hardKind = HARD_ALERT_KINDS.find(kind => assessment.signals.some(signal => signal.kind === kind && signal.level === 'hard')) ?? null
+        const decision = decideWatch({
+          hardKind,
+          judgeKind: hardKind === null ? verdict.state : null,
+          judgeReason: verdict.reason,
+          judgeBlocker: verdict.blocker,
+          judgeSource: deterministicSupport ? 'both' : 'watcher',
+          signals: assessment.signals,
+          openAlert: this.openAlert,
+          recovery: this.#recoverySince(state),
+          snoozedUntil: this.snoozedUntil,
+          now,
+          alertsThisTurn: this.alertsThisTurn,
+          pushesThisTurn: this.pushesThisTurn,
+          limits: this.limits,
+        })
+        if (decision.emit !== null) this.#emit(decision.emit, state, assessment)
+      } else {
+        this.log('watch.judge.suppressed', { turnId: state.turnId, state: verdict.state, confidence: verdict.confidence })
+      }
+    }
   }
 
   #emit(emit, state, assessment) {
@@ -235,7 +472,8 @@ export class Watcher {
     // A new alert (first, kind change, or re-alert).
     this.alertsThisTurn += 1
     const id = randomUUID()
-    this.openAlert = { id, kind: emit.kind, at: this.now(), planRevision: state.planRevision, atIso }
+    const reason = emit.reason
+    this.openAlert = { id, kind: emit.kind, at: this.now(), planRevision: state.planRevision, atIso, reason }
     if (emit.push) {
       this.pushesThisTurn += 1
       this.push({ type: 'watch', turnId: state.turnId, kind: emit.kind })
@@ -246,13 +484,13 @@ export class Watcher {
       turnId: state.turnId,
       kind: emit.kind,
       state: 'open',
-      blocker: emit.kind,
-      reason: emit.reason,
+      blocker: emit.blocker ?? emit.kind,
+      reason,
       signals: assessment.signals.map(signal => ({ ...signal })),
-      source: 'heuristic',
+      source: emit.source ?? 'heuristic',
       at: atIso,
     })
-    this.log('watch.alert', { turnId: state.turnId, kind: emit.kind, alerts: this.alertsThisTurn, pushes: this.pushesThisTurn, signals: assessment.signals }, 'warn')
+    this.log('watch.alert', { turnId: state.turnId, kind: emit.kind, source: emit.source ?? 'heuristic', alerts: this.alertsThisTurn, pushes: this.pushesThisTurn, signals: assessment.signals }, 'warn')
   }
 
   /**
@@ -285,15 +523,20 @@ export class Watcher {
   }
 
   /**
-   * End of turn: the deterministic ended-incomplete notice plus the per-turn
-   * watch summary. Never changes the turn's outcome.
+   * End of turn: abort any in-flight judge call, emit the deterministic
+   * ended-incomplete notice, and return the per-turn watch summary. Judge usage
+   * is reported separately from the agent's usage. Never changes the outcome.
    * @param {{outcome: string, label?: string | null, planOutcome?: string | null, help?: unknown, confirm?: unknown, deadTurn?: boolean}} info
    * @returns {{checks: number, alerts: number, usage: number}}
    */
   turnEnded(info) {
     const state = this.ledger.snapshot()
-    const summary = { checks: this.checks, alerts: this.alertsThisTurn, usage: 0 }
-    if (decideEndedIncomplete({ ...info, marathon: this.turnMarathon })) {
+    if (this.judge !== null) this.judge.abort(state.turnId)
+    this.judgeInFlight = false
+    const summary = { checks: this.checks, alerts: this.alertsThisTurn, usage: this.judgeInputTokens + this.judgeOutputTokens }
+    const endedIncomplete = decideEndedIncomplete({ ...info, marathon: this.turnMarathon })
+    this.lastEndedIncomplete = endedIncomplete
+    if (endedIncomplete) {
       this.publish({
         type: 'chat.watch',
         id: randomUUID(),
@@ -308,6 +551,16 @@ export class Watcher {
       })
       this.log('watch.ended_incomplete', { turnId: state.turnId, outcome: info.outcome, planOutcome: info.planOutcome ?? null, label: info.label ?? null }, 'warn')
     }
+    this.log('watch.judge.summary', {
+      turnId: state.turnId,
+      calls: this.judgeCalls,
+      skipped: this.judgeSkipped,
+      inputTokens: this.judgeInputTokens,
+      outputTokens: this.judgeOutputTokens,
+      reasoningTokens: this.judgeReasoningTokens,
+      cacheReadTokens: this.judgeCacheReadTokens,
+      budgetExhausted: this.budgetNoticeEmitted,
+    })
     this.openAlert = null
     this.ledger.endTurn()
     return summary
@@ -320,10 +573,10 @@ export class Watcher {
         id: this.openAlert.id,
         kind: this.openAlert.kind,
         at: this.openAlert.atIso,
-        reason: ALERT_REASON[this.openAlert.kind] ?? 'The agent may be stuck.',
+        reason: this.openAlert.reason ?? ALERT_REASON[this.openAlert.kind] ?? 'The agent may be stuck.',
       },
-      lastVerdict: null,
-      lastCheckAt: this.checks > 0 ? new Date(this.wallNow()).toISOString() : null,
+      lastVerdict: this.lastVerdict,
+      lastCheckAt: this.lastJudgeCheckWallAt ?? (this.checks > 0 ? new Date(this.wallNow()).toISOString() : null),
       checks: this.checks,
     }
   }
