@@ -41,7 +41,7 @@
 
 ## Still unrun / follow-ups (recorded)
 - **Still unrun:** WATCH/test push delivery via `conan-evo-x3` (key + restart, user action); on-phone V6/V7/V8 appearance; live docked-panel visual; V8 real-model PLAN_* gate outcome; 1017 full reliability batches; signed 0.8.0(7) APK install.
-- **Follow-ups:** V3 tune caught trade-off (multi-page stuck corroboration; restored by V5); model-variance seeded-untouched ~60% + c1 steer-plan row brittleness; epic-120 completion-view reload-reset tolerance; REPEAT_LOOP multi-page residual; **V9 restart persistence DEFERRED (decision #10)**.
+- **Follow-ups:** V3 tune caught trade-off (multi-page stuck corroboration; restored by V5); model-variance seeded-untouched ~60% + c1 steer-plan row brittleness; epic-120 completion-view reload-reset tolerance; REPEAT_LOOP multi-page residual; **V9 restart persistence DEFERRED (decision #10)**; **V5.1 judge token budget (task-25, judge post-release)** — V5-live bounded risk: long-turn ~20–24k-char digests consume v1 `max_tokens:400` by low-effort reasoning → `finish_reason:LENGTH` defensive `unknown`s (c3 stabilizes routing not token budget; hard stalls alert unconditionally, so only large-digest varied-activity wander can evade judge corroboration); fix = `max_tokens` 400→1200 keeping low effort + c3 routing/seed, isolated from c2's effort raise; monitor schema-deviation `unknown` rate.
 
 ## Finalize checklist (after lead confirms V5+V8 live green)
 1. Rebase onto the final merged main (V5+V8 live evidence commits).
