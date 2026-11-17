@@ -1,0 +1,1676 @@
+{
+  "steps": {
+    "initial": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "sessionId": "fake-session-1",
+      "latestSequence": 3,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": null,
+        "origin": null,
+        "clientMessageId": null,
+        "startedAt": null,
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    "toggleOn": {
+      "status": 200,
+      "body": {
+        "clientCommandId": "demo-marathon-on",
+        "enabled": true,
+        "sessionId": "fake-session-1",
+        "sequence": 4,
+        "instanceId": "companion-mwk50w3y-71d7575929d7"
+      }
+    },
+    "stateAfterOn": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "sessionId": "fake-session-1",
+      "latestSequence": 4,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": null,
+        "origin": null,
+        "clientMessageId": null,
+        "startedAt": null,
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T03:33:28.117Z",
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    "send": {
+      "status": 202,
+      "body": {
+        "accepted": true,
+        "clientMessageId": "demo-msg-1",
+        "turnId": "turn-mwk50w56-9ee6",
+        "instanceId": "companion-mwk50w3y-71d7575929d7",
+        "sessionId": "fake-session-1",
+        "sequence": 7
+      }
+    },
+    "alert": {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 22,
+      "type": "remote.watch",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:33.082Z",
+      "body": {
+        "id": "f576ed51-d51d-481a-a042-5548ae36a182",
+        "turnId": "turn-mwk50w56-9ee6",
+        "kind": "TOOL_HANG",
+        "state": "open",
+        "blocker": "TOOL_HANG",
+        "reason": "A browser call has not returned for several minutes.",
+        "signals": [
+          {
+            "kind": "TOOL_HANG",
+            "level": "hard",
+            "detail": "browser_wait_for unanswered for 248s"
+          }
+        ],
+        "source": "heuristic",
+        "at": "2026-11-17T03:33:33.081Z"
+      }
+    },
+    "stateAtAlert": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "sessionId": "fake-session-1",
+      "latestSequence": 22,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "running",
+        "turnId": "turn-mwk50w56-9ee6",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-1",
+        "startedAt": "2026-11-17T03:33:28.123Z",
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null
+      },
+      "phase": {
+        "status": "tool",
+        "tool": "browser_wait_for"
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:28.123Z",
+          "body": {
+            "text": "marathon-stuck demo",
+            "origin": "remote",
+            "clientMessageId": "demo-msg-1",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 18,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:28.940Z",
+          "body": {
+            "text": "Fake companion turn 1. You said: \"marathon-stuck demo\"",
+            "replacesStreamId": "turn-mwk50w56-9ee6:s1"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 20,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:28.941Z",
+          "body": {
+            "callId": "fake-hang-1",
+            "name": "browser_wait_for",
+            "args": "{\"selector\":\"#order-confirm\"}",
+            "replacesStreamId": "turn-mwk50w56-9ee6:s2"
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T03:33:28.117Z",
+        "plan": null,
+        "watch": {
+          "open": {
+            "id": "f576ed51-d51d-481a-a042-5548ae36a182",
+            "kind": "TOOL_HANG",
+            "at": "2026-11-17T03:33:33.081Z",
+            "reason": "A browser call has not returned for several minutes."
+          },
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    "ack": {
+      "status": 200,
+      "body": {
+        "clientCommandId": "demo-ack-1",
+        "acknowledged": true,
+        "id": "f576ed51-d51d-481a-a042-5548ae36a182",
+        "instanceId": "companion-mwk50w3y-71d7575929d7"
+      }
+    },
+    "dismissed": {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 23,
+      "type": "remote.watch",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:33.150Z",
+      "body": {
+        "id": "f576ed51-d51d-481a-a042-5548ae36a182",
+        "turnId": "turn-mwk50w56-9ee6",
+        "kind": "info",
+        "state": "dismissed",
+        "blocker": null,
+        "reason": "Dismissed; this alert kind is snoozed for 15 minutes.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T03:33:33.150Z"
+      }
+    },
+    "stateAfterAck": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "sessionId": "fake-session-1",
+      "latestSequence": 23,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "running",
+        "turnId": "turn-mwk50w56-9ee6",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-1",
+        "startedAt": "2026-11-17T03:33:28.123Z",
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null
+      },
+      "phase": {
+        "status": "tool",
+        "tool": "browser_wait_for"
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:28.123Z",
+          "body": {
+            "text": "marathon-stuck demo",
+            "origin": "remote",
+            "clientMessageId": "demo-msg-1",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 18,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:28.940Z",
+          "body": {
+            "text": "Fake companion turn 1. You said: \"marathon-stuck demo\"",
+            "replacesStreamId": "turn-mwk50w56-9ee6:s1"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 20,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:28.941Z",
+          "body": {
+            "callId": "fake-hang-1",
+            "name": "browser_wait_for",
+            "args": "{\"selector\":\"#order-confirm\"}",
+            "replacesStreamId": "turn-mwk50w56-9ee6:s2"
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T03:33:28.117Z",
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    "done": {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 43,
+      "type": "chat.done",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.364Z",
+      "body": {
+        "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+        "timings": {
+          "totalMs": 8239,
+          "autoCaptureMs": 0,
+          "firstEventMs": 12,
+          "toolCalls": 4,
+          "failedCalls": 0,
+          "promptTextBytes": 1661,
+          "imageBytes": 0,
+          "images": 0
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "label": "partial",
+        "model": "fake/scripted",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": true,
+        "marathon": true,
+        "planOutcome": "unfinished",
+        "planRevision": 2,
+        "watch": {
+          "checks": 33,
+          "alerts": 1,
+          "usage": 0
+        }
+      }
+    },
+    "planFrame": {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 45,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-1",
+      "occurredAt": "2026-11-17T03:33:36.364Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "fake-session-1",
+        "since": "2026-11-17T03:33:28.117Z",
+        "origin": "remote",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T03:33:36.362Z",
+          "turnId": "turn-mwk50w56-9ee6"
+        },
+        "watcher": {
+          "active": false,
+          "checks": 33,
+          "lastCheckAt": "2026-11-17T03:33:36.364Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    "endedIncomplete": {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 42,
+      "type": "remote.watch",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.363Z",
+      "body": {
+        "id": "6d968fb3-c3fb-45f2-a5e4-0c4908c261fa",
+        "turnId": "turn-mwk50w56-9ee6",
+        "kind": "ended-incomplete",
+        "state": "open",
+        "blocker": "ended-incomplete",
+        "reason": "The turn ended with work still open or blocked.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T03:33:36.363Z"
+      }
+    },
+    "stateAtEnd": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "sessionId": "fake-session-1",
+      "latestSequence": 45,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-mwk50w56-9ee6",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-1",
+        "startedAt": "2026-11-17T03:33:28.123Z",
+        "endedAt": "2026-11-17T03:33:36.364Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:28.123Z",
+          "body": {
+            "text": "marathon-stuck demo",
+            "origin": "remote",
+            "clientMessageId": "demo-msg-1",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 18,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:28.940Z",
+          "body": {
+            "text": "Fake companion turn 1. You said: \"marathon-stuck demo\"",
+            "replacesStreamId": "turn-mwk50w56-9ee6:s1"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 20,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:28.941Z",
+          "body": {
+            "callId": "fake-hang-1",
+            "name": "browser_wait_for",
+            "args": "{\"selector\":\"#order-confirm\"}",
+            "replacesStreamId": "turn-mwk50w56-9ee6:s2"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 24,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:35.442Z",
+          "body": {
+            "callId": "fake-hang-1",
+            "ok": true,
+            "text": "Fake page text: the confirmation section appeared."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 27,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:35.459Z",
+          "body": {
+            "callId": "fake-recover-1-0",
+            "name": "browser_read_text",
+            "args": "{\"max_chars\":500}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 29,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:35.760Z",
+          "body": {
+            "callId": "fake-recover-1-0",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 31,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:35.760Z",
+          "body": {
+            "callId": "fake-recover-1-1",
+            "name": "browser_click",
+            "args": "{\"label\":\"Place order\"}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 33,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:36.061Z",
+          "body": {
+            "callId": "fake-recover-1-1",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 35,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:36.061Z",
+          "body": {
+            "callId": "fake-recover-1-2",
+            "name": "browser_click",
+            "args": "{\"label\":\"Confirm\"}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 37,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:36.361Z",
+          "body": {
+            "callId": "fake-recover-1-2",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 40,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:36.362Z",
+          "body": {
+            "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+            "replacesStreamId": "turn-mwk50w56-9ee6:s3"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "seq": 43,
+          "type": "chat.done",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwk50w56-9ee6",
+          "occurredAt": "2026-11-17T03:33:36.364Z",
+          "body": {
+            "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+            "timings": {
+              "totalMs": 8239,
+              "autoCaptureMs": 0,
+              "firstEventMs": 12,
+              "toolCalls": 4,
+              "failedCalls": 0,
+              "promptTextBytes": 1661,
+              "imageBytes": 0,
+              "images": 0
+            },
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "label": "partial",
+            "model": "fake/scripted",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": true,
+            "marathon": true,
+            "planOutcome": "unfinished",
+            "planRevision": 2,
+            "watch": {
+              "checks": 33,
+              "alerts": 1,
+              "usage": 0
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-462aef0ecae6d05378c5e34d",
+      "latestScreenshot": {
+        "screenshotId": "shot-462aef0ecae6d05378c5e34d",
+        "callId": null,
+        "capturedAt": "2026-11-17T03:33:35.459Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14259,
+        "source": "tool"
+      },
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T03:33:28.117Z",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T03:33:36.362Z",
+          "turnId": "turn-mwk50w56-9ee6"
+        },
+        "watch": {
+          "open": {
+            "id": "6d968fb3-c3fb-45f2-a5e4-0c4908c261fa",
+            "kind": "ended-incomplete",
+            "at": "2026-11-17T03:33:36.363Z",
+            "reason": "The turn ended with work still open or blocked."
+          },
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-17T03:33:36.364Z",
+          "checks": 33
+        }
+      }
+    },
+    "newChat": {
+      "status": 200,
+      "body": {
+        "clientCommandId": "demo-new",
+        "sessionId": "fake-session-2",
+        "instanceId": "companion-mwk50w3y-71d7575929d7"
+      }
+    },
+    "stateAfterNew": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "sessionId": "fake-session-2",
+      "latestSequence": 47,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-mwk50w56-9ee6",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-1",
+        "startedAt": "2026-11-17T03:33:28.123Z",
+        "endedAt": "2026-11-17T03:33:36.364Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    "watchPushes": [
+      {
+        "type": "watch",
+        "turnId": "turn-mwk50w56-9ee6",
+        "kind": "TOOL_HANG",
+        "at": "2026-11-17T03:33:33.081Z"
+      }
+    ]
+  },
+  "frames": [
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 3,
+      "type": "remote.resync",
+      "sessionId": "fake-session-1",
+      "occurredAt": "2026-11-17T03:33:28.093Z",
+      "body": {
+        "reason": "no-instance",
+        "state": {
+          "protocol": 1,
+          "server": {
+            "name": "crazyagent-companion",
+            "version": "fake-companion"
+          },
+          "instanceId": "companion-mwk50w3y-71d7575929d7",
+          "sessionId": "fake-session-1",
+          "latestSequence": 3,
+          "oldestSequence": 1,
+          "turn": {
+            "status": "idle",
+            "turnId": null,
+            "origin": null,
+            "clientMessageId": null,
+            "startedAt": null,
+            "endedAt": null,
+            "outcome": null,
+            "error": null,
+            "label": null,
+            "usage": null,
+            "failedCalls": null
+          },
+          "phase": {
+            "status": null,
+            "tool": null
+          },
+          "health": {
+            "uiConnected": true,
+            "toolsConnected": true,
+            "dsh": "ready",
+            "dshMessage": null,
+            "provider": "fake",
+            "model": "fake/scripted",
+            "autoCapture": false,
+            "contextWindow": null,
+            "contextTokens": null
+          },
+          "messages": [],
+          "draft": null,
+          "latestScreenshotId": null,
+          "latestScreenshot": null,
+          "help": null,
+          "confirm": null,
+          "marathon": {
+            "enabled": false,
+            "since": null,
+            "plan": null,
+            "watch": {
+              "open": null,
+              "lastVerdict": null,
+              "lastCheckAt": null,
+              "checks": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 4,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-1",
+      "occurredAt": "2026-11-17T03:33:28.117Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "fake-session-1",
+        "since": "2026-11-17T03:33:28.117Z",
+        "origin": "remote",
+        "plan": null,
+        "watcher": {
+          "active": false,
+          "checks": 0,
+          "lastCheckAt": null,
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 5,
+      "type": "chat.user",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.123Z",
+      "body": {
+        "text": "marathon-stuck demo",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-1",
+        "imageCount": 0,
+        "marathon": true
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 6,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.124Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 7,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.136Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "reasoning",
+        "offset": 0,
+        "delta": "Planning a fake reply."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 8,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.237Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "text",
+        "offset": 0,
+        "delta": "Fake "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 9,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.337Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "text",
+        "offset": 5,
+        "delta": "companion "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 10,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.438Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "text",
+        "offset": 15,
+        "delta": "turn "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 11,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.538Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "text",
+        "offset": 20,
+        "delta": "1. "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 12,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.638Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "text",
+        "offset": 23,
+        "delta": "You "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 13,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.739Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "text",
+        "offset": 27,
+        "delta": "said: "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 14,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.839Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "text",
+        "offset": 33,
+        "delta": "\"marathon-stuck "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 15,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.940Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "text",
+        "offset": 49,
+        "delta": "demo\""
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 16,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.940Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "tool",
+        "toolCallId": "fake-call-1",
+        "name": "browser_read_text",
+        "offset": 0,
+        "delta": "{\"max_chars\":"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 17,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.940Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s1",
+        "channel": "tool",
+        "toolCallId": "fake-call-1",
+        "name": "browser_read_text",
+        "offset": 13,
+        "delta": "2000}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 18,
+      "type": "chat.assistant",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.940Z",
+      "body": {
+        "text": "Fake companion turn 1. You said: \"marathon-stuck demo\"",
+        "replacesStreamId": "turn-mwk50w56-9ee6:s1"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 19,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.941Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s2",
+        "channel": "tool",
+        "toolCallId": "fake-hang-1",
+        "name": "browser_wait_for",
+        "offset": 0,
+        "delta": "{\"selector\":\"#order-confirm\"}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 20,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.941Z",
+      "body": {
+        "callId": "fake-hang-1",
+        "name": "browser_wait_for",
+        "args": "{\"selector\":\"#order-confirm\"}",
+        "replacesStreamId": "turn-mwk50w56-9ee6:s2"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 21,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:28.941Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_wait_for",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 22,
+      "type": "remote.watch",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:33.082Z",
+      "body": {
+        "id": "f576ed51-d51d-481a-a042-5548ae36a182",
+        "turnId": "turn-mwk50w56-9ee6",
+        "kind": "TOOL_HANG",
+        "state": "open",
+        "blocker": "TOOL_HANG",
+        "reason": "A browser call has not returned for several minutes.",
+        "signals": [
+          {
+            "kind": "TOOL_HANG",
+            "level": "hard",
+            "detail": "browser_wait_for unanswered for 248s"
+          }
+        ],
+        "source": "heuristic",
+        "at": "2026-11-17T03:33:33.081Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 23,
+      "type": "remote.watch",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:33.150Z",
+      "body": {
+        "id": "f576ed51-d51d-481a-a042-5548ae36a182",
+        "turnId": "turn-mwk50w56-9ee6",
+        "kind": "info",
+        "state": "dismissed",
+        "blocker": null,
+        "reason": "Dismissed; this alert kind is snoozed for 15 minutes.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T03:33:33.150Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 24,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:35.442Z",
+      "body": {
+        "callId": "fake-hang-1",
+        "ok": true,
+        "text": "Fake page text: the confirmation section appeared."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 25,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:35.442Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 26,
+      "type": "remote.screenshot",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:35.459Z",
+      "body": {
+        "screenshotId": "shot-462aef0ecae6d05378c5e34d",
+        "callId": null,
+        "capturedAt": "2026-11-17T03:33:35.459Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14259,
+        "source": "tool"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 27,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:35.459Z",
+      "body": {
+        "callId": "fake-recover-1-0",
+        "name": "browser_read_text",
+        "args": "{\"max_chars\":500}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 28,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:35.459Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_read_text",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 29,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:35.760Z",
+      "body": {
+        "callId": "fake-recover-1-0",
+        "ok": true,
+        "text": "Fake page text: ok."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 30,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:35.760Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 31,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:35.760Z",
+      "body": {
+        "callId": "fake-recover-1-1",
+        "name": "browser_click",
+        "args": "{\"label\":\"Place order\"}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 32,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:35.760Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_click",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 33,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.061Z",
+      "body": {
+        "callId": "fake-recover-1-1",
+        "ok": true,
+        "text": "Fake page text: ok."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 34,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.061Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 35,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.061Z",
+      "body": {
+        "callId": "fake-recover-1-2",
+        "name": "browser_click",
+        "args": "{\"label\":\"Confirm\"}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 36,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.061Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_click",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 37,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.361Z",
+      "body": {
+        "callId": "fake-recover-1-2",
+        "ok": true,
+        "text": "Fake page text: ok."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 38,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.362Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 39,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.362Z",
+      "body": {
+        "streamId": "turn-mwk50w56-9ee6:s3",
+        "channel": "text",
+        "offset": 0,
+        "delta": "PARTIAL — the fake marathon task still has open items (the order was not placed)."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 40,
+      "type": "chat.assistant",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.362Z",
+      "body": {
+        "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+        "replacesStreamId": "turn-mwk50w56-9ee6:s3"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 41,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.363Z",
+      "body": {
+        "status": "idle",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 42,
+      "type": "remote.watch",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.363Z",
+      "body": {
+        "id": "6d968fb3-c3fb-45f2-a5e4-0c4908c261fa",
+        "turnId": "turn-mwk50w56-9ee6",
+        "kind": "ended-incomplete",
+        "state": "open",
+        "blocker": "ended-incomplete",
+        "reason": "The turn ended with work still open or blocked.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T03:33:36.363Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 43,
+      "type": "chat.done",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.364Z",
+      "body": {
+        "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+        "timings": {
+          "totalMs": 8239,
+          "autoCaptureMs": 0,
+          "firstEventMs": 12,
+          "toolCalls": 4,
+          "failedCalls": 0,
+          "promptTextBytes": 1661,
+          "imageBytes": 0,
+          "images": 0
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "label": "partial",
+        "model": "fake/scripted",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": true,
+        "marathon": true,
+        "planOutcome": "unfinished",
+        "planRevision": 2,
+        "watch": {
+          "checks": 33,
+          "alerts": 1,
+          "usage": 0
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 44,
+      "type": "chat.turn",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwk50w56-9ee6",
+      "occurredAt": "2026-11-17T03:33:36.364Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-mwk50w56-9ee6",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-1",
+        "startedAt": "2026-11-17T03:33:28.123Z",
+        "endedAt": "2026-11-17T03:33:36.364Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 45,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-1",
+      "occurredAt": "2026-11-17T03:33:36.364Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "fake-session-1",
+        "since": "2026-11-17T03:33:28.117Z",
+        "origin": "remote",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T03:33:36.362Z",
+          "turnId": "turn-mwk50w56-9ee6"
+        },
+        "watcher": {
+          "active": false,
+          "checks": 33,
+          "lastCheckAt": "2026-11-17T03:33:36.364Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 46,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-1",
+      "occurredAt": "2026-11-17T03:33:36.368Z",
+      "body": {
+        "enabled": false,
+        "sessionId": null,
+        "since": null,
+        "origin": null,
+        "plan": null,
+        "watcher": {
+          "active": false,
+          "checks": 33,
+          "lastCheckAt": "2026-11-17T03:33:36.368Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwk50w3y-71d7575929d7",
+      "seq": 47,
+      "type": "chat.session",
+      "sessionId": "fake-session-2",
+      "occurredAt": "2026-11-17T03:33:36.368Z",
+      "body": {
+        "sessionId": "fake-session-2"
+      }
+    }
+  ]
+}

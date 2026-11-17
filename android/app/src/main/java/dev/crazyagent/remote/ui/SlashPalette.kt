@@ -89,16 +89,45 @@ fun SlashPalette(
     }
 }
 
-/** `.plan-mode`: the line above the composer while the next turn is armed for a plan. */
+/**
+ * `.marathon-mode`: the chip above the composer while the companion-owned
+ * marathon switch is on (M5). It stays visible and tappable while a turn runs;
+ * tapping it (or the ×) asks the companion to toggle the shared switch — the
+ * chip itself only changes when the authoritative `remote.marathon` arrives.
+ * [alert] ambers it while a watch alert is open, like the panel.
+ */
 @Composable
-fun PlanModeRow(onCancel: () -> Unit) {
+fun MarathonChip(copy: String, alert: Boolean, enabled: Boolean, onToggle: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 8.dp),
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 18.dp, end = 18.dp, bottom = 8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onToggle)
+            .padding(horizontal = 2.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        AgentBadge("Plan")
-        Text("Next turn uses a live checklist", style = AgentType.Tiny, color = AgentMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        AgentIconButton(AppIcons.Close, "Cancel plan mode", onCancel, size = 22.dp, iconSize = 12.dp, tint = AgentMuted)
+        // `.marathon-mode.alert .marathon-mode-badge`: solid yellow while an alert is open.
+        val badgeShape = RoundedCornerShape(50)
+        Text(
+            "MARATHON",
+            style = AgentType.Badge,
+            color = if (alert) Color(0xFF1A1A1A) else AgentYellow,
+            maxLines = 1,
+            modifier = Modifier
+                .background(if (alert) AgentYellow else AgentYellowSoft, badgeShape)
+                .border(1.dp, AgentYellow.copy(alpha = if (alert) 0.85f else 0.35f), badgeShape)
+                .padding(horizontal = 7.dp, vertical = 2.dp),
+        )
+        Text(
+            copy,
+            style = if (alert) AgentType.Tiny.copy(fontWeight = FontWeight.SemiBold) else AgentType.Tiny,
+            color = if (alert) AgentYellow else AgentMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        AgentIconButton(AppIcons.Close, "Turn marathon mode off", onToggle, enabled = enabled, size = 22.dp, iconSize = 12.dp, tint = AgentMuted)
     }
 }

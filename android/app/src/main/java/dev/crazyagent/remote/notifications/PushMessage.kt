@@ -6,7 +6,7 @@ package dev.crazyagent.remote.notifications
  * fetched over the authenticated remote API.
  */
 data class PushMessage(val type: Type, val turnId: String, val instanceId: String, val sequence: Long) {
-    enum class Type(val wire: String) { HELP("help"), CONFIRM("confirm"), DONE("done"), ERROR("error") }
+    enum class Type(val wire: String) { HELP("help"), CONFIRM("confirm"), DONE("done"), ERROR("error"), WATCH("watch") }
 
     companion object {
         private val ID = Regex("^[A-Za-z0-9_.:-]{1,128}$")
@@ -36,6 +36,7 @@ data class PushMessage(val type: Type, val turnId: String, val instanceId: Strin
             Type.CONFIRM -> "crazyAgent needs your approval"
             Type.DONE -> "crazyAgent finished"
             Type.ERROR -> "crazyAgent stopped on an error"
+            Type.WATCH -> "crazyAgent may be stuck"
         }
 
     val text: String
@@ -44,6 +45,7 @@ data class PushMessage(val type: Type, val turnId: String, val instanceId: Strin
             Type.CONFIRM -> "Open to approve or deny the action."
             Type.DONE -> "Open to read the result."
             Type.ERROR -> "Open to see what went wrong."
+            Type.WATCH -> "Open to see what it is doing."
         }
 
     /** One notification per turn: a later push for the same turn replaces it. */

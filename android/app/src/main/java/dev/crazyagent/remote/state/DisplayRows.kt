@@ -101,6 +101,61 @@ fun helpTitle(category: String?): String = when (category) {
     else -> "Your help needed"
 }
 
+/** The panel's watch-row badge labels (extension/sidepanel/watch-row.js). */
+fun watchKindLabel(kind: String): String = when (kind) {
+    "SILENT_STALL" -> "Gone quiet"
+    "TOOL_HANG" -> "Call not returning"
+    "EXECUTOR_DOWN" -> "Executor disconnected"
+    "stuck" -> "Stuck"
+    "blocked" -> "Blocked"
+    "ended-incomplete" -> "Ended incomplete"
+    "recovered" -> "Recovered"
+    else -> "Watch"
+}
+
+/** The watch card's title: an ended turn reads differently from a live alert. */
+fun watchTitle(kind: String): String = when (kind) {
+    "ended-incomplete" -> "The turn ended incomplete"
+    else -> "The agent may be stuck"
+}
+
+/**
+ * The marathon chip's copy, mirroring the panel's renderMarathonChip: an open
+ * alert ambers it; otherwise it says whether the watcher is on this turn or
+ * when it last checked. [busy] stands in for the watcher's `active` flag,
+ * which the companion computes as enabled && running.
+ */
+fun marathonChipCopy(marathon: MarathonState, busy: Boolean, nowMs: Long): String = when {
+    marathon.watch.open != null -> "May be stuck — review the alert"
+    busy -> "Watching this turn"
+    marathon.watch.checks > 0 && marathon.watch.lastCheckAt != null -> "Checked ${watchCheckedAgo(marathon.watch.lastCheckAt, nowMs)}"
+    else -> "Every turn uses a live checklist"
+}
+
+/** "3m ago" style relative label for the last deterministic watch check. */
+fun watchCheckedAgo(iso: String?, nowMs: Long): String {
+    val at = iso?.let { parseIsoUtc(it) } ?: return "recently"
+    val seconds = maxOf(0L, (nowMs - at) / 1000)
+    if (seconds < 60) return "${seconds}s ago"
+    val minutes = Math.round(seconds / 60.0)
+    if (minutes < 60) return "${minutes}m ago"
+    return "${Math.round(minutes / 60.0)}h ago"
+}
+
+/** Parse the companion's ISO-8601 UTC timestamps; null when unusable. */
+private fun parseIsoUtc(value: String): Long? = try {
+    java.time.Instant.parse(value).toEpochMilli()
+} catch (_: Exception) {
+    null
+}
+
+/** One-line summary of a carried plan for the checklist card's header. */
+fun planSummary(plan: MarathonPlan): String {
+    val open = plan.openCount
+    val openText = if (open == 1) "1 open" else "$open open"
+    return "Revision ${plan.revision} · $openText of ${plan.items.size}"
+}
+
 /** One-line description of what the running turn is doing. */
 fun activityLine(turn: TurnInfo, phase: Phase): String? = when {
     turn.status == "stopping" -> "Stopping…"

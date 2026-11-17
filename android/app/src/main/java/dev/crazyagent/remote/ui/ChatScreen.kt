@@ -68,6 +68,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -93,9 +95,15 @@ import dev.crazyagent.remote.notifications.PushState
 import dev.crazyagent.remote.state.DisplayRow
 import dev.crazyagent.remote.state.Draft
 import dev.crazyagent.remote.state.Health
+import dev.crazyagent.remote.state.MarathonPlan
 import dev.crazyagent.remote.state.NoteKind
+import dev.crazyagent.remote.state.WatchNotice
 import dev.crazyagent.remote.state.activityLine
 import dev.crazyagent.remote.state.displayRows
+import dev.crazyagent.remote.state.marathonChipCopy
+import dev.crazyagent.remote.state.planSummary
+import dev.crazyagent.remote.state.watchKindLabel
+import dev.crazyagent.remote.state.watchTitle
 import kotlinx.coroutines.flow.conflate
 
 class ChatActions(
@@ -117,10 +125,14 @@ class ChatActions(
     val onOpenHistory: (String) -> Unit,
     val onCloseHistory: () -> Unit,
     val onResumeChat: (String) -> Unit,
-    val onTogglePlanMode: () -> Unit,
+    val onToggleMarathon: () -> Unit,
     val onCaptureScreen: () -> Unit,
     val onEnableNotifications: () -> Unit,
     val onConfirm: (String) -> Unit,
+    /** Watch card: Steer… focuses the composer and says what sending will do. */
+    val onWatchSteer: () -> Unit,
+    /** Watch card: It's fine dismisses the alert and snoozes its kind. */
+    val onWatchAck: () -> Unit,
 )
 
 private enum class UtilityPanel { SETTINGS, DIAGNOSTICS, HISTORY }
@@ -155,6 +167,10 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
     val liveBitmap = rememberLiveBitmap(state.liveImage)
     var viewerOpen by rememberSaveable { mutableStateOf(false) }
     var liveCollapsed by rememberSaveable { mutableStateOf(false) }
+    // The carried plan's checklist keeps the user's collapse choice across updates.
+    var planCollapsed by rememberSaveable { mutableStateOf(false) }
+    // The watch card's Steer… focuses the composer without leaving the screen.
+    val composerFocus = remember { FocusRequester() }
     // A coarse clock so the capture's age stays honest while the screen is open.
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -245,16 +261,39 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
                 onAnswer = actions.onConfirm,
             )
         }
+        // M5: the watcher's notice — an open alert card with Stop / Steer… /
+        // It's fine, collapsing to a summary line on recovery or dismissal.
+        SmoothPresence(state.chat.watchNotice) { notice ->
+            WatchCard(
+                notice = notice,
+                canStop = state.canStop,
+                canSteer = state.link.status == LinkStatus.LIVE && state.chat.synced,
+                canAck = state.canAckWatch,
+                onStop = actions.onStop,
+                onSteer = {
+                    composerFocus.requestFocus()
+                    actions.onWatchSteer()
+                },
+                onAck = actions.onWatchAck,
+            )
+        }
+        // M5: the carried marathon plan — the phone's first checklist.
+        SmoothPresence(state.chat.marathon.plan) { plan ->
+            PlanChecklistCard(plan, collapsed = planCollapsed, onToggle = { planCollapsed = !planCollapsed })
+        }
         Composer(
             state = state,
             actions = actions,
             highlight = empty,
+            nowMs = nowMs,
+            composerFocus = composerFocus,
             onSlashCommand = { command ->
                 actions.onComposer("")
                 when (command) {
                     "new" -> if (state.canStartNew) confirmNew = true
                     "model" -> if (!state.busy) panel = UtilityPanel.SETTINGS
-                    "plan" -> if (!state.busy && state.pending == null) actions.onTogglePlanMode()
+                    // /plan resolves to this same command as an unlisted alias.
+                    "marathon" -> if (state.canToggleMarathon) actions.onToggleMarathon()
                 }
             },
         )
@@ -573,6 +612,139 @@ private fun ConfirmCard(
     }
 }
 
+/**
+ * M5: the marathon watcher's notice, modeled on the help card. An open
+ * actionable alert (hard signal, judge stuck/blocked, or ended-incomplete)
+ * shows the reason and Stop / Steer… / It's fine; recovered/dismissed notices
+ * collapse to a quiet summary line. Stop is the ordinary Stop; Steer… focuses
+ * the composer; It's fine acks the alert and snoozes its kind for 15 minutes.
+ */
+@Composable
+private fun WatchCard(
+    notice: WatchNotice,
+    canStop: Boolean,
+    canSteer: Boolean,
+    canAck: Boolean,
+    onStop: () -> Unit,
+    onSteer: () -> Unit,
+    onAck: () -> Unit,
+) {
+    if (!notice.actionable) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 8.dp).heightIn(min = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            val color = if (notice.kind == "recovered") AgentGreen else AgentDim
+            Box(Modifier.size(6.dp).background(color, CircleShape))
+            Text(
+                "${watchKindLabel(notice.kind)} — ${notice.reason.ifEmpty { watchKindLabel(notice.kind) }}",
+                style = AgentType.Note,
+                color = AgentMuted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        return
+    }
+    RequestCard {
+        AgentBadge(watchKindLabel(notice.kind))
+        Text(watchTitle(notice.kind), style = RequestTitle, color = AgentYellow, modifier = Modifier.padding(top = 2.dp))
+        SelectionContainer {
+            Text(
+                notice.reason.ifEmpty { watchKindLabel(notice.kind) },
+                style = AgentType.Note,
+                color = AgentText,
+                modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()),
+            )
+        }
+        Text(
+            if (notice.kind == "ended-incomplete") {
+                "Steer to continue the work, or dismiss this notice."
+            } else {
+                "Stop ends the turn. Steer redirects it. It's fine snoozes this kind of alert for 15 minutes."
+            },
+            style = RequestDetail,
+            color = AgentMuted,
+        )
+        // `.watch-row-actions`: Stop carries the panel's red border/text.
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+            AgentButton("Stop", onStop, danger = true, enabled = canStop)
+            AgentButton("Steer…", onSteer, enabled = canSteer)
+            AgentButton("It's fine", onAck, primary = true, enabled = canAck)
+        }
+    }
+}
+
+/**
+ * M5: the carried marathon plan as a collapsible checklist card. Items arrive
+ * with `remote.marathon` at the turn end (and on resync); statuses mirror the
+ * provider's plan: pending, in_progress, completed, blocked.
+ */
+@Composable
+private fun PlanChecklistCard(plan: MarathonPlan, collapsed: Boolean, onToggle: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    val chevronAngle by animateFloatAsState(if (collapsed) -90f else 0f, Motion.base(), label = "plan-chevron")
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+            .background(AgentPanel, shape)
+            .border(1.dp, AgentBorder, shape),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onToggle)
+                .padding(horizontal = 12.dp, vertical = 9.dp)
+                .semantics { contentDescription = "Marathon plan, ${planSummary(plan)}. Tap to ${if (collapsed) "expand" else "collapse"}." },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Text("Marathon plan", style = AgentType.Step, color = AgentStepTitle)
+            Text(
+                planSummary(plan),
+                style = AgentType.Meta,
+                color = AgentMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(AppIcons.Chevron, contentDescription = if (collapsed) "Expand" else "Collapse", tint = AgentSubtle, modifier = Modifier.size(12.dp).rotate(chevronAngle))
+        }
+        AnimatedVisibility(!collapsed, enter = Motion.rowEnter, exit = Motion.rowExit) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                for (item in plan.items) {
+                    val (dot, text) = when (item.status) {
+                        "completed" -> AgentGreen to AgentMuted
+                        "in_progress" -> AgentYellow to AgentText
+                        "blocked" -> AgentDanger to AgentDanger
+                        else -> AgentDim to AgentLabel
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.size(6.dp).background(dot, CircleShape))
+                        Text(
+                            item.content,
+                            style = AgentType.Note,
+                            color = text,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun LinkBanner(state: UiState, actions: ChatActions) {
     val link = state.link
@@ -809,7 +981,7 @@ private fun PendingView(pending: PendingPrompt, state: UiState, actions: ChatAct
 }
 
 @Composable
-private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, onSlashCommand: (String) -> Unit) {
+private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, nowMs: Long, composerFocus: FocusRequester, onSlashCommand: (String) -> Unit) {
     var showContext by rememberSaveable { mutableStateOf(false) }
     val contextWindow = state.chat.health.contextWindow?.takeIf { it > 0 }
     val contextTokens = (state.chat.health.contextTokens ?: 0).coerceAtLeast(0)
@@ -821,14 +993,23 @@ private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, o
                 when (command.id) {
                     "new" -> state.canStartNew
                     "model" -> !state.busy
-                    "plan" -> !state.busy && state.pending == null
+                    // The shared switch toggles mid-turn too (M5).
+                    "marathon" -> state.canToggleMarathon
                     else -> false
                 }
             },
             onSelect = { command -> onSlashCommand(command.id) },
         )
     }
-    AnimatedVisibility(state.planMode, enter = Motion.rowEnter, exit = Motion.rowExit) { PlanModeRow(actions.onTogglePlanMode) }
+    // The chip renders only the companion's state; it stays tappable while busy.
+    AnimatedVisibility(state.chat.marathon.enabled, enter = Motion.rowEnter, exit = Motion.rowExit) {
+        MarathonChip(
+            copy = marathonChipCopy(state.chat.marathon, state.busy, nowMs),
+            alert = state.chat.marathon.watch.open != null,
+            enabled = state.canToggleMarathon,
+            onToggle = actions.onToggleMarathon,
+        )
+    }
     val composerBorder by animateColorAsState(if (highlight) AgentYellow else AgentBorder, Motion.slow(), label = "composer-border")
     // `.composer` (0 12px 8px) around `.composer-field` (12px 10px 10px 14px, 6px between rows).
     val composerShape = RoundedCornerShape(20.dp)
@@ -850,13 +1031,13 @@ private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, o
                 !state.runtimeReady -> "The model runtime is not ready"
                 state.busy -> "Steer the agent: send to redirect this turn…"
                 state.pending != null -> "Waiting for the last message"
-                state.planMode -> "Describe a long task to plan and complete…"
+                state.chat.marathon.enabled -> "Describe a long task to plan and complete…"
                 else -> "Ask or tell me what to do…"
             }
             BasicTextField(
                 value = state.composer,
                 onValueChange = actions.onComposer,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp, max = 132.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp, max = 132.dp).focusRequester(composerFocus),
                 textStyle = AgentType.Input.copy(color = AgentText),
                 cursorBrush = SolidColor(AgentYellow),
                 maxLines = 6,
@@ -951,7 +1132,7 @@ private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, o
                         val sendEnabled = if (exactCommand == null) state.canSend else when (exactCommand.id) {
                             "new" -> state.canStartNew
                             "model" -> !state.busy
-                            "plan" -> !state.busy && state.pending == null
+                            "marathon" -> state.canToggleMarathon
                             else -> false
                         }
                         val sendBackground by animateColorAsState(if (sendEnabled) AgentYellow else AgentControl, Motion.base(), label = "send-background")
@@ -1099,7 +1280,7 @@ private fun SettingsContent(state: UiState, onEditPairing: () -> Unit, onForget:
             AgentButton("Allow notifications", onEnableNotifications, wide = true)
         }
         Text(
-            "A notification only says that the agent needs you, finished, or failed. It never contains your prompt, the answer, or a screenshot. \"On\" means the computer has this phone's address, not that a notification is guaranteed to arrive.",
+            "A notification only says that the agent needs you, may be stuck, finished, or failed. It never contains your prompt, the answer, or a screenshot. \"On\" means the computer has this phone's address, not that a notification is guaranteed to arrive.",
             style = AgentType.Hint,
             color = AgentHint,
         )

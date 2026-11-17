@@ -25,6 +25,7 @@ import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -159,15 +160,175 @@ class RemoteControllerTest {
         assertEquals("done", done.chat.turn.outcome)
     }
 
-    @Test fun planModeIsSentOnceAndConsumed() {
+    @Test fun marathonToggleIsCompanionOwnedAndAllowedMidTurn() {
         val c = controller().start()
         c.awaitLive()
-        c.togglePlanMode()
+        assertEquals(false, c.state.value.chat.marathon.enabled)
+        c.toggleMarathon()
+        // No optimistic flip: while the POST is in flight the chip stays off.
+        val inFlight = c.await { it.marathonInFlight }
+        assertEquals(false, inFlight.chat.marathon.enabled)
+        val on = c.await { it.chat.marathon.enabled && !it.marathonInFlight }
+        assertEquals("true", fake.marathonPosts.single()["enabled"]?.jsonPrimitive?.content)
+        assertNotNull(fake.marathonPosts.single()["clientCommandId"])
+        assertTrue(on.canToggleMarathon)
+
+        // Messages never carry a per-message plan flag anymore.
         c.type("plan the work")
         c.send()
-        val running = c.await { it.chat.turn.isActive && it.pending == null }
-        assertEquals("true", fake.messagePosts.single()["planMode"]?.jsonPrimitive?.content)
-        assertEquals(false, running.planMode)
+        c.await { it.chat.turn.isActive && it.pending == null }
+        assertNull(fake.messagePosts.single()["planMode"])
+
+        // Toggling off mid-turn is allowed: the switch is chat-level state.
+        c.toggleMarathon()
+        val off = c.await { !it.chat.marathon.enabled && !it.marathonInFlight }
+        assertTrue(off.chat.turn.isActive)
+        assertEquals(2, fake.marathonPosts.size)
+        assertEquals("false", fake.marathonPosts.last()["enabled"]?.jsonPrimitive?.content)
+        // A new chat also clears the switch (the session reset).
+        fake.finishTurn("done")
+        c.await { !it.chat.turn.isActive }
+        c.toggleMarathon()
+        c.await { it.chat.marathon.enabled }
+        c.newChat()
+        val fresh = c.await { it.chat.sessionId == "session-2" }
+        assertEquals(false, fresh.chat.marathon.enabled)
+    }
+
+    @Test fun anUncertainMarathonToggleKeepsItsIdForTheNextTap() {
+        val c = controller().start()
+        c.awaitLive()
+        // Lose the toggle response: the command ID must be reused, not doubled.
+        fake.loseNextMarathon = true
+        c.toggleMarathon()
+        c.await { it.notice?.contains("Marathon was not confirmed") == true }
+        assertEquals(1, fake.marathonPosts.size)
+        c.dismissNotice()
+        c.toggleMarathon()
+        c.await { it.chat.marathon.enabled && !it.marathonInFlight }
+        assertEquals(2, fake.marathonPosts.size)
+        assertEquals(
+            fake.marathonPosts[0]["clientCommandId"]?.jsonPrimitive?.content,
+            fake.marathonPosts[1]["clientCommandId"]?.jsonPrimitive?.content,
+        )
+    }
+
+    @Test fun watchAlertAckIsPostedOnceAndTheDismissalArrivesOnTheStream() {
+        val c = controller().start()
+        c.awaitLive()
+        c.toggleMarathon()
+        c.await { it.chat.marathon.enabled }
+        c.type("long task")
+        c.send()
+        c.await { it.chat.turn.isActive && it.pending == null }
+        fake.openWatchAlert("watch-1", "TOOL_HANG")
+        val alert = c.await { it.chat.marathon.watch.open?.id == "watch-1" }
+        assertTrue(alert.chat.watchNotice!!.actionable)
+        assertTrue(alert.canAckWatch)
+        c.ackWatch()
+        val dismissed = c.await { it.chat.marathon.watch.open == null && !it.watchAckInFlight }
+        assertEquals(1, fake.watchAckPosts.size)
+        assertEquals("watch-1", fake.watchAckPosts.single()["id"]?.jsonPrimitive?.content)
+        assertNotNull(fake.watchAckPosts.single()["clientCommandId"])
+        assertEquals("dismissed", dismissed.chat.watchNotice?.state)
+        // With nothing open, another ack posts nothing.
+        c.ackWatch()
+        runBlocking { delay(150) }
+        assertEquals(1, fake.watchAckPosts.size)
+    }
+
+    @Test fun aWatchAckForAnAlreadyGoneAlertIsTolerated() {
+        val c = controller().start()
+        c.awaitLive()
+        fake.openWatchAlert("watch-1", "stuck", "The same click repeats.")
+        c.await { it.chat.marathon.watch.open?.id == "watch-1" }
+        fake.loseWatchAlert = 1
+        c.ackWatch()
+        c.await { !it.watchAckInFlight }
+        assertEquals(1, fake.watchAckPosts.size)
+        // 404 WATCH_NOT_FOUND is not an auth failure and raises no banner.
+        assertEquals(LinkStatus.LIVE, c.state.value.link.status)
+        assertNull(c.state.value.notice)
+    }
+
+    @Test fun anOpenWatchAlertSurvivesAFullResync() {
+        val c = controller().start()
+        c.awaitLive()
+        c.toggleMarathon()
+        c.await { it.chat.marathon.enabled }
+        // The alert lands while the stream is stalled; a skipped sequence then
+        // forces the reconnect into a full resync from the projection.
+        fake.muteLive = true
+        fake.openWatchAlert("watch-1", "blocked", "A sign-in wall is blocking the task.")
+        fake.skipSequence()
+        fake.muteLive = false
+        fake.dropStreams()
+        c.nudge()
+        fake.screenshot("shot-resync", byteArrayOf(1))
+        val back = c.await {
+            it.link.status == LinkStatus.LIVE && it.chat.synced &&
+                it.chat.screenshot?.id == "shot-resync" && it.chat.marathon.watch.open?.id == "watch-1"
+        }
+        assertNull(fake.eventRequests.last().url.queryParameter("instance"))
+        assertTrue(back.chat.marathon.enabled)
+        assertTrue(back.chat.watchNotice!!.actionable)
+        assertEquals("blocked", back.chat.watchNotice!!.kind)
+        assertEquals("A sign-in wall is blocking the task.", back.chat.watchNotice!!.reason)
+    }
+
+    @Test fun aRecoveredWatchAlertCollapsesTheCardWithoutAnAck() {
+        val c = controller().start()
+        c.awaitLive()
+        c.toggleMarathon()
+        c.await { it.chat.marathon.enabled }
+        c.type("long task")
+        c.send()
+        c.await { it.chat.turn.isActive && it.pending == null }
+        fake.openWatchAlert("watch-1", "SILENT_STALL")
+        c.await { it.chat.marathon.watch.open?.id == "watch-1" }
+        fake.recoverWatchAlert("watch-1")
+        val recovered = c.await { it.chat.watchNotice?.state == "recovered" }
+        assertNull(recovered.chat.marathon.watch.open)
+        assertFalse(recovered.chat.watchNotice!!.actionable)
+        assertEquals("The agent is making progress again.", recovered.chat.watchNotice!!.reason)
+        assertTrue(recovered.chat.turn.isActive)
+    }
+
+    @Test fun oldStoredPlanModePendingArmsMarathonThenSendsPlainly() {
+        // A pre-M5 stored pending: the old per-message plan flag maps to a
+        // marathon-on call, and the message itself goes out without planMode.
+        val persisted = MemoryPendingStore(StoredPending("client-legacy1", "old queued plan task", 0, "fake-1", planMode = true))
+        val c = controller(persisted)
+        runBlocking { c.restore() }
+        c.start()
+        val done = c.await { it.pending == null && it.chat.items.isNotEmpty() }
+        assertEquals(1, fake.marathonPosts.size)
+        assertEquals("true", fake.marathonPosts.single()["enabled"]?.jsonPrimitive?.content)
+        assertEquals("client-legacy1-marathon", fake.marathonPosts.single()["clientCommandId"]?.jsonPrimitive?.content)
+        val post = fake.messagePosts.single()
+        assertEquals("client-legacy1", post["clientMessageId"]?.jsonPrimitive?.content)
+        assertNull(post["planMode"])
+        assertEquals("old queued plan task", (done.chat.items.single() as ChatItem.User).text)
+        assertTrue(done.chat.marathon.enabled)
+        awaitStoreCleared()
+    }
+
+    @Test fun editingAnOldPlanPendingKeepsTheMarathonOnMapping() {
+        val persisted = MemoryPendingStore(StoredPending("client-legacy2", "review then resend", 0, "fake-0", planMode = true))
+        val c = controller(persisted)
+        runBlocking { c.restore() }
+        c.start()
+        c.await { it.pending?.phase == PendingPhase.NEEDS_REVIEW }
+        c.editPending()
+        val edited = c.await { it.pending == null && it.composer == "review then resend" }
+        assertTrue(edited.legacyPlanMode)
+        assertEquals(false, edited.chat.marathon.enabled)
+        c.send()
+        c.await { it.pending == null && it.chat.items.isNotEmpty() }
+        assertEquals("true", fake.marathonPosts.single()["enabled"]?.jsonPrimitive?.content)
+        assertEquals("client-0001-marathon", fake.marathonPosts.single()["clientCommandId"]?.jsonPrimitive?.content)
+        assertNull(fake.messagePosts.single()["planMode"])
+        assertEquals(false, c.state.value.legacyPlanMode)
     }
 
     @Test fun confirmAnswerSendsTheDecisionOnceAndOnlyWhileWaiting() {
@@ -317,21 +478,18 @@ class RemoteControllerTest {
         fake.muteLive = true
         // Restart before the client can reconcile: the old cache and instance are gone.
         fake.refuseUpgrades = 100
-        c.togglePlanMode()
         c.type("pay the invoice")
         c.send()
         fake.restart("fake-2")
         val review = c.await { it.pending?.phase == PendingPhase.NEEDS_REVIEW }
         assertTrue(review.pending!!.note!!.contains("restarted"))
-        assertEquals(true, review.pending!!.planMode)
         assertEquals(1, fake.messagePosts.size)
         assertEquals(0, fake.userMessageCount())
-        awaitStoreSaved { it?.planMode == true }
+        awaitStoreSaved { it != null }
         assertNotNull(store.value)
-        assertEquals(true, store.value?.planMode)
 
         c.editPending()
-        val restored = c.await { it.pending == null && it.planMode }
+        val restored = c.await { it.pending == null && it.composer == "pay the invoice" }
         assertEquals("pay the invoice", restored.composer)
         awaitStoreCleared(2_000)
     }

@@ -15,6 +15,8 @@ class PushMessageTest {
         assertEquals(PushMessage.Type.DONE, PushMessage.parse(good + ("type" to "done"))!!.type)
         assertEquals(PushMessage.Type.ERROR, PushMessage.parse(good + ("type" to "error"))!!.type)
         assertEquals(PushMessage.Type.CONFIRM, PushMessage.parse(good + ("type" to "confirm"))!!.type)
+        // M5: the watch type is additive; an old APK drops it, this one accepts it.
+        assertEquals(PushMessage.Type.WATCH, PushMessage.parse(good + ("type" to "watch"))!!.type)
     }
 
     @Test fun anythingElseIsDropped() {
@@ -42,17 +44,22 @@ class PushMessageTest {
         val done = PushMessage.parse(good + ("type" to "done"))!!
         val confirm = PushMessage.parse(good + ("type" to "confirm"))!!
         val error = PushMessage.parse(good + ("type" to "error"))!!
+        val watch = PushMessage.parse(good + ("type" to "watch"))!!
         assertEquals("crazyAgent needs you", help.title)
         assertEquals("crazyAgent finished", done.title)
         assertEquals("crazyAgent needs your approval", confirm.title)
         // Q10: a malformed-reply turn ends as chat.error and pushes the error type.
         assertEquals("crazyAgent stopped on an error", error.title)
         assertEquals("Open to see what went wrong.", error.text)
+        // M5: generic watch wording only — the reason is fetched after the tap.
+        assertEquals("crazyAgent may be stuck", watch.title)
+        assertEquals("Open to see what it is doing.", watch.text)
         // A later push for the same turn replaces the earlier notification.
         assertEquals(help.notificationId, done.notificationId)
         assertEquals(help.notificationId, confirm.notificationId)
         assertEquals(help.notificationId, error.notificationId)
-        for (message in listOf(help, done, confirm, error)) {
+        assertEquals(help.notificationId, watch.notificationId)
+        for (message in listOf(help, done, confirm, error, watch)) {
             for (text in listOf(message.title, message.text)) {
                 assertFalse(text.contains(message.turnId))
                 assertFalse(text.contains(message.instanceId))

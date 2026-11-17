@@ -400,8 +400,128 @@ function deadTurn() {
   return { ...fixture, checkpoints: { afterError, afterBlocked, afterRecovery } }
 }
 
+/**
+ * M5: the marathon switch, the carried plan checklist, and watch notices —
+ * a hard deterministic alert, M4 judge stuck/blocked verdicts (same envelope,
+ * source watcher/both), recovery collapse, an ended-incomplete turn end with
+ * its additive watch summary, an "It's fine" dismissal, and the new-chat reset.
+ * Every frame is recorded from the real RemoteHub exactly as a phone receives it.
+ */
+function marathonWatch() {
+  const s = scenario('companion-fixture-g')
+  s.connect()
+  const since = '2026-11-06T12:00:01.000Z'
+  const marathonState = (plan, watcher) => ({
+    type: 'marathon.state',
+    enabled: true,
+    sessionId: 'session-1',
+    since,
+    origin: 'remote',
+    plan,
+    watcher,
+  })
+  const watch = (id, kind, state, extra = {}) => ({
+    type: 'chat.watch',
+    id,
+    turnId: 'turn-14',
+    kind,
+    state,
+    blocker: null,
+    reason: '',
+    signals: [],
+    source: 'heuristic',
+    at: '2026-11-06T12:01:20.000Z',
+    ...extra,
+  })
+  // The phone's chip turned the shared switch on.
+  s.hub.ingest(marathonState(null, { active: false, checks: 0, lastCheckAt: null, lastVerdict: null }))
+  startTurn(s, 'turn-14', 'Fill in the shipping form and place the order', { marathon: true })
+  s.modelStart()
+  s.text('Working through the checkout.')
+  s.hub.ingest(marathonState(null, { active: true, checks: 3, lastCheckAt: '2026-11-06T12:01:00.000Z', lastVerdict: null }))
+  // A hard deterministic alert: one tool call has not returned.
+  s.hub.ingest(watch('watch-fixture-1', 'TOOL_HANG', 'open', {
+    blocker: 'TOOL_HANG',
+    reason: 'A browser call has not returned for several minutes.',
+    signals: [{ kind: 'TOOL_HANG', level: 'hard', detail: 'browser_wait_for unanswered for 250s' }],
+  }))
+  const afterAlert = s.hub.projection()
+  // M4 judge verdicts ride the same envelope: kind is the verdict state.
+  s.hub.ingest(watch('watch-fixture-2', 'stuck', 'open', {
+    blocker: 'loop',
+    reason: 'The same click repeats and the page does not change.',
+    signals: [{ kind: 'REPEAT_LOOP', level: 'suspect', detail: 'browser_click 4 of the last 8 calls' }],
+    source: 'watcher',
+    at: '2026-11-06T12:02:00.000Z',
+  }))
+  const afterJudge = s.hub.projection()
+  s.hub.ingest(watch('watch-fixture-3', 'blocked', 'open', {
+    blocker: 'login',
+    reason: 'A sign-in wall is blocking the task while the agent keeps acting.',
+    source: 'both',
+    at: '2026-11-06T12:03:00.000Z',
+  }))
+  const afterBlocked = s.hub.projection()
+  // Recovery collapses the notice; no push rides a recovery.
+  s.hub.ingest(watch('watch-fixture-3', 'recovered', 'recovered', {
+    reason: 'The agent is making progress again.',
+    at: '2026-11-06T12:04:00.000Z',
+  }))
+  // The turn ends with open items: the plan carries into marathon.state —
+  // the phone's first checklist — and chat.done carries both mode flags plus
+  // the additive watch summary.
+  const carriedPlan = {
+    revision: 2,
+    items: [
+      { content: 'Fill the shipping form', status: 'completed' },
+      { content: 'Place the order', status: 'in_progress' },
+      { content: 'Verify the confirmation page', status: 'pending' },
+    ],
+    updatedAt: '2026-11-06T12:04:30.000Z',
+    turnId: 'turn-14',
+  }
+  s.hub.ingest(marathonState(carriedPlan, { active: false, checks: 6, lastCheckAt: '2026-11-06T12:04:40.000Z', lastVerdict: null }))
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'PARTIAL — the shipping form is filled but the order was not placed.',
+    label: 'partial',
+    model: 'fixture/model',
+    planMode: true,
+    marathon: true,
+    planOutcome: 'unfinished',
+    planRevision: 2,
+    watch: { checks: 6, alerts: 3, usage: 0 },
+    timings: { totalMs: 280_000, toolCalls: 14, failedCalls: 2 },
+    usage: { inputTokens: 40_000, outputTokens: 900, totalTokens: 40_900 },
+  })
+  s.hub.ingest(watch('watch-fixture-4', 'ended-incomplete', 'open', {
+    blocker: 'ended-incomplete',
+    reason: 'The turn ended with work still open or blocked.',
+    at: '2026-11-06T12:04:41.000Z',
+  }))
+  s.hub.turnEnded({
+    turnId: 'turn-14',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: 'partial',
+    usage: { inputTokens: 40_000, outputTokens: 900, totalTokens: 40_900 },
+    timings: { totalMs: 280_000, toolCalls: 14, failedCalls: 2 },
+  })
+  const afterEnded = s.hub.projection()
+  // "It's fine": the ack dismisses the open alert and snoozes its kind.
+  s.hub.ingest(watch('watch-fixture-4', 'info', 'dismissed', {
+    reason: 'Dismissed; this alert kind is snoozed for 15 minutes.',
+    at: '2026-11-06T12:05:00.000Z',
+  }))
+  // A new chat resets the switch, the plan, and every watch state.
+  s.hub.setSession('session-2')
+  const fixture = s.done('marathon-watch')
+  return { ...fixture, checkpoints: { afterAlert, afterJudge, afterBlocked, afterEnded } }
+}
+
 export function buildFixtures() {
-  return [turnStream(), midTurnResync(), lifecycle(), helpRequest(), confirmRequest(), deadTurn()]
+  return [turnStream(), midTurnResync(), lifecycle(), helpRequest(), confirmRequest(), deadTurn(), marathonWatch()]
 }
 
 export function fixtureFiles() {

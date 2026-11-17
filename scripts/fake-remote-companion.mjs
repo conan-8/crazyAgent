@@ -15,9 +15,18 @@
  * Prompt keywords: "slow" makes a ~40 s turn (for force-close/network tests),
  * "fail" ends the turn with an error. "captcha"/"login"/"stuck" end waiting
  * for help, and "confirm" ends waiting for an Approve/Deny (the answer turn
- * then says which decision arrived). Everything else takes ~8 s. Every turn
- * also publishes synthetic 1280x800 screenshots for the phone's live view;
- * "tall" (720x2400) and "square" (900x900) change their shape.
+ * then says which decision arrived). "marathon-stuck" (M5) runs a marathon
+ * turn that hangs a tool call until the deterministic watcher alerts, recovers,
+ * and ends PARTIAL with open plan items — turn the marathon switch on first
+ * (the chip or /marathon), since the watcher only alerts on marathon turns.
+ * Everything else takes ~8 s. Every turn also publishes synthetic 1280x800
+ * screenshots for the phone's live view; "tall" (720x2400) and "square"
+ * (900x900) change their shape.
+ *
+ * The fake runs the real watcher on an accelerated deterministic clock
+ * (60x, 250 ms ticks) so the marathon-stuck alert lands in seconds; healthy
+ * scripted turns never cross a hard threshold. Watch push requests are
+ * recorded on the returned `watchPushes` array (the fake sends no FCM).
  *
  * The token printed here belongs to this fake server only. It is stored in
  * `.dsh-home/fake-remote/remote-token` (git-ignored), never in the real
@@ -98,7 +107,7 @@ export function fakeScreenshotPng(width, height, step) {
  * committed assistant message and a tool call/result.
  */
 export class ScriptedRunner {
-  /** @param {{ingestActivity: (frame: Record<string, any>) => void, addScreenshot?: (input: Record<string, any>) => void, stepMs?: number}} options */
+  /** @param {{ingestActivity: (frame: Record<string, any>) => void, addScreenshot?: (input: Record<string, any>) => void, stepMs?: number, hangMs?: number, requestPlan?: (plan: Record<string, any>) => void, requestOutcome?: (outcome: Record<string, any>) => void}} options */
   constructor(options) {
     this.ingestActivity = options.ingestActivity
     this.addScreenshot = options.addScreenshot ?? (() => {})
@@ -106,8 +115,14 @@ export class ScriptedRunner {
     this.requestHelp = options.requestHelp ?? (() => {})
     /** Stands in for the provider's confirm-request activity (agent_request_confirmation). */
     this.requestConfirm = options.requestConfirm ?? (() => {})
+    /** Stands in for the provider's browser_plan activity (the carried checklist). */
+    this.requestPlan = options.requestPlan ?? (() => {})
+    /** Stands in for the provider's turn-outcome activity (planOutcome). */
+    this.requestOutcome = options.requestOutcome ?? (() => {})
     this.shots = 0
     this.stepMs = options.stepMs ?? 300
+    /** How long the marathon-stuck turn holds its unanswered tool call. */
+    this.hangMs = options.hangMs ?? 6_500
     this.sessionId = 'fake-session-1'
     this.resumeSessionId = undefined
     this.sessions = 1
@@ -160,6 +175,46 @@ export class ScriptedRunner {
       this.ingestActivity({ type: 'chat.activity', kind: 'tool-call-delta', id: callId, name: 'browser_read_text', argumentsDelta: '{"max_chars":' })
       this.ingestActivity({ type: 'chat.activity', kind: 'tool-call-delta', id: callId, argumentsDelta: '2000}' })
       event('assistant/message', { message: { content: [{ type: 'text', text: intro }] } })
+      // "marathon-stuck" (M5): hang a tool call until the deterministic watcher
+      // alerts (TOOL_HANG), recover with three successful results including a
+      // mutation, then end PARTIAL with open plan items — the phone sees the
+      // alert card, its recovery collapse, the carried checklist, and the
+      // ended-incomplete notice. Requires the marathon switch to be on.
+      if (/\bmarathon-stuck\b/iu.test(prompt)) {
+        this.requestPlan({ revision: 1, items: [
+          { content: 'Fill the shipping form', status: 'in_progress' },
+          { content: 'Place the order', status: 'pending' },
+          { content: 'Verify the confirmation page', status: 'pending' },
+        ] })
+        const hangId = `fake-hang-${this.turns}`
+        this.ingestActivity({ type: 'chat.activity', kind: 'tool-call-delta', id: hangId, name: 'browser_wait_for', argumentsDelta: '{"selector":"#order-confirm"}' })
+        event('tool/call', { callId: hangId, name: 'browser_wait_for', arguments: '{"selector":"#order-confirm"}' })
+        // Unanswered: on the fake's 60x watch clock this crosses the 240 s hard
+        // TOOL_HANG threshold in a few real seconds.
+        await wait(this.hangMs)
+        event('tool/result', { message: { source: { callId: hangId }, content: [{ type: 'text', text: 'Fake page text: the confirmation section appeared.' }] } })
+        shoot(null)
+        // Recovery: three successful results including one mutation close the alert.
+        const recovery = [['browser_read_text', '{"max_chars":500}'], ['browser_click', '{"label":"Place order"}'], ['browser_click', '{"label":"Confirm"}']]
+        for (const [index, [name, args]] of recovery.entries()) {
+          const recoverId = `fake-recover-${this.turns}-${index}`
+          event('tool/call', { callId: recoverId, name, arguments: args })
+          await wait(this.stepMs)
+          event('tool/result', { message: { source: { callId: recoverId }, content: [{ type: 'text', text: 'Fake page text: ok.' }] } })
+        }
+        // The plan advances but stays open; the turn ends PARTIAL.
+        this.requestPlan({ revision: 2, items: [
+          { content: 'Fill the shipping form', status: 'completed' },
+          { content: 'Place the order', status: 'in_progress' },
+          { content: 'Verify the confirmation page', status: 'pending' },
+        ] })
+        this.requestOutcome({ planOutcome: 'unfinished', planRevision: 2 })
+        const partial = 'PARTIAL — the fake marathon task still has open items (the order was not placed).'
+        this.ingestActivity({ type: 'chat.activity', kind: 'text', text: partial })
+        event('assistant/message', { message: { content: [{ type: 'text', text: partial }] } })
+        onNotification?.({ method: 'session.status', params: { status: 'idle' } })
+        return { sessionId: this.sessionId, finalResponse: partial, events: [] }
+      }
       event('tool/call', { callId, name: 'browser_read_text', arguments: '{"max_chars":2000}' })
       await wait(slow ? 8 * this.stepMs : this.stepMs)
       if (fail) throw new Error('Scripted failure requested by the prompt.')
@@ -245,7 +300,7 @@ function promptText(blocks) {
 
 /**
  * Start a fake companion. Port 0 picks a free port (tests).
- * @param {{port?: number, tokenFile?: string, publicHost?: string, stepMs?: number, log?: (line: string) => void}} [options]
+ * @param {{port?: number, tokenFile?: string, publicHost?: string, stepMs?: number, hangMs?: number, watchSpeed?: number, log?: (line: string) => void}} [options]
  */
 export async function startFakeCompanion(options = {}) {
   const tokenFile = options.tokenFile ?? DEFAULT_FAKE_TOKEN_FILE
@@ -259,8 +314,16 @@ export async function startFakeCompanion(options = {}) {
     addScreenshot: input => hub.addScreenshot(input),
     requestHelp: request => controller.noteActivity({ type: 'chat.activity', kind: 'help-request', turnId: controller.turnId, ...request }),
     requestConfirm: request => controller.noteActivity({ type: 'chat.activity', kind: 'confirm-request', turnId: controller.turnId, ...request }),
+    requestPlan: plan => controller.noteActivity({ type: 'chat.activity', kind: 'plan', turnId: controller.turnId, ...plan }),
+    requestOutcome: outcome => controller.noteActivity({ type: 'chat.activity', kind: 'turn-outcome', turnId: controller.turnId, turn: 1, ...outcome }),
     stepMs: options.stepMs,
+    hangMs: options.hangMs,
   })
+  // M5: the real deterministic watcher on an accelerated clock so the
+  // marathon-stuck demo alerts in seconds. Healthy scripted turns never cross
+  // a hard threshold; the push hook records requests (the fake sends no FCM).
+  const watchSpeed = options.watchSpeed ?? 60
+  const watchPushes = []
   controller = new SessionController({
     bridge: {
       setTurnId() {},
@@ -282,6 +345,11 @@ export async function startFakeCompanion(options = {}) {
     provider: 'fake',
     getModelId: () => health.model,
     publish: frame => hub.ingest(frame),
+    watch: {
+      now: () => performance.now() * watchSpeed,
+      tickMs: 250,
+      push: meta => watchPushes.push({ ...meta, at: new Date().toISOString() }),
+    },
     observers: [{
       turnStarted: info => {
         runner.nextPrompt = info.text
@@ -308,6 +376,8 @@ export async function startFakeCompanion(options = {}) {
     server,
     token,
     tokenFile,
+    /** Watch push requests the watcher made (metadata only; no FCM here). */
+    watchPushes,
     url: `http://127.0.0.1:${server.port}`,
     /** Flip simulated desktop health (for exercising the phone's indicators). */
     setHealth(next) {
@@ -315,6 +385,7 @@ export async function startFakeCompanion(options = {}) {
       hub.updateHealth()
     },
     async stop() {
+      controller.dispose()
       await server.stop()
       hub.close()
     },
@@ -361,6 +432,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     args.publicHost ? `  phone via Serve: https://${args.publicHost}` : '  phone via Serve: rerun with --public-host <name>.ts.net',
     `  token (fake server only): ${fake.token}`,
     '  prompts containing "slow" run ~40 s; "fail" ends with an error; "captcha" asks for help; "confirm" asks for Approve/Deny.',
+    '  "marathon-stuck" (with the marathon switch on) alerts the watcher, recovers, and ends PARTIAL with a carried checklist.',
     '  Ctrl+C stops (a restart gets a new instance).',
     '',
   ].join('\n'))

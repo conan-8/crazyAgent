@@ -52,7 +52,9 @@ object Notifier {
             for ((key, value) in message.toMap()) putExtra(EXTRA_PREFIX + key, value)
         }
         val pending = PendingIntent.getActivity(context, message.notificationId, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val urgent = message.type == PushMessage.Type.HELP || message.type == PushMessage.Type.CONFIRM
+        // M5: a watch alert needs the user like help does — same high-importance
+        // channel, generic wording; the reason is fetched after the tap.
+        val urgent = message.type == PushMessage.Type.HELP || message.type == PushMessage.Type.CONFIRM || message.type == PushMessage.Type.WATCH
         val notification = NotificationCompat.Builder(context, if (urgent) CHANNEL_HELP else CHANNEL_TURNS)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(message.title)

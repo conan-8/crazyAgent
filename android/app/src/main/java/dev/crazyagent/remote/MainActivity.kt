@@ -159,9 +159,11 @@ class MainActivity : ComponentActivity() {
                 onOpenHistory = controller::openHistory,
                 onCloseHistory = controller::closeHistory,
                 onResumeChat = controller::resumeChat,
-                onTogglePlanMode = controller::togglePlanMode,
+                onToggleMarathon = controller::toggleMarathon,
                 onCaptureScreen = controller::captureScreen,
                 onConfirm = controller::sendConfirm,
+                onWatchSteer = controller::steerFromWatch,
+                onWatchAck = controller::ackWatch,
                 onEnableNotifications = {
                     if (android.os.Build.VERSION.SDK_INT >= 33 && canAskForNotifications()) {
                         askedForNotifications = true

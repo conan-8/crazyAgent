@@ -48,6 +48,15 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
     private var pendingSteer: Pair<String, JsonObject>? = null
     private var help: JsonObject? = null
     private var confirm: JsonObject? = null
+    /** M5: the companion-owned marathon switch and the open watch alert. */
+    private var marathonEnabled = false
+    private var marathonSince: String? = null
+    private var watchOpen: JsonObject? = null
+    private var watchChecks = 0
+    val marathonPosts = CopyOnWriteArrayList<JsonObject>()
+    val watchAckPosts = CopyOnWriteArrayList<JsonObject>()
+    /** Answer the next N watch acks with 404 WATCH_NOT_FOUND (alert already gone). */
+    @Volatile var loseWatchAlert = 0
     val snapshotPosts = CopyOnWriteArrayList<JsonObject>()
     /** Registered push devices: device ID to the body it sent. */
     val pushDevices = java.util.concurrent.ConcurrentHashMap<String, JsonObject>()
@@ -71,6 +80,8 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
 
     /** Drop the next /messages response without processing it (lost on the way in). */
     @Volatile var loseNextMessage = false
+    /** Drop the next /marathon response without processing it (lost on the way in). */
+    @Volatile var loseNextMarathon = false
     /** Process the next /messages request but drop its response (lost on the way back). */
     @Volatile var dropNextAcceptance = false
     /** Refuse the next N event upgrades with this HTTP status. */
@@ -98,6 +109,8 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
                 postResume(path.removeSuffix("/resume").substringAfterLast('/'), body(request))
             path == "/remote/v1/stop" && request.method == "POST" -> postStop(body(request))
             path == "/remote/v1/new" && request.method == "POST" -> postNew(body(request))
+            path == "/remote/v1/marathon" && request.method == "POST" -> postMarathon(body(request))
+            path == "/remote/v1/marathon/watch/ack" && request.method == "POST" -> postWatchAck(body(request))
             path == "/remote/v1/snapshots" && request.method == "POST" -> postSnapshot(body(request))
             path.startsWith("/remote/v1/push/devices/") && request.method == "PUT" -> {
                 val device = path.substringAfterLast('/')
@@ -195,6 +208,9 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
             committed.clear()
             help = null
             confirm = null
+            marathonEnabled = false
+            marathonSince = null
+            watchOpen = null
             turnStatus = "idle"
             latestScreenshot = null
             publish("chat.session", buildJsonObject { put("sessionId", sessionId) }, null)
@@ -202,6 +218,91 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
         }
         outcomes[id] = outcome
         json(outcome.first, outcome.second)
+    }
+
+    /**
+     * M5: the shared marathon switch. Accepted in any turn state; idempotent
+     * per clientCommandId; the authoritative remote.marathon envelope is the
+     * only way the phone's chip changes.
+     */
+    private fun postMarathon(body: JsonObject): MockResponse = synchronized(lock) {
+        marathonPosts += body
+        if (loseNextMarathon) {
+            loseNextMarathon = false
+            return MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build()
+        }
+        val id = body.str("clientCommandId")
+        outcomes[id]?.let { return json(it.first, it.second) }
+        val enabled = body["enabled"] == JsonPrimitive(true)
+        if (enabled != marathonEnabled) {
+            marathonEnabled = enabled
+            marathonSince = if (enabled) "2026-11-06T12:00:00.000Z" else null
+            if (!enabled) watchOpen = null
+            publish("remote.marathon", marathonBody(), null)
+        }
+        val outcome = 200 to buildJsonObject {
+            put("clientCommandId", id); put("enabled", marathonEnabled); put("sessionId", sessionId); put("sequence", seq); put("instanceId", instanceId)
+        }
+        outcomes[id] = outcome
+        json(outcome.first, outcome.second)
+    }
+
+    /** M5: "It's fine" — dismiss the open alert, or 404 when it is already gone. */
+    private fun postWatchAck(body: JsonObject): MockResponse = synchronized(lock) {
+        watchAckPosts += body
+        val id = body.str("clientCommandId")
+        outcomes[id]?.let { return json(it.first, it.second) }
+        val alertId = body.str("id")
+        val open = watchOpen
+        val outcome = if (loseWatchAlert > 0 || open == null || open.str("id") != alertId) {
+            loseWatchAlert = maxOf(0, loseWatchAlert - 1)
+            404 to JsonObject(error("WATCH_NOT_FOUND", "No watch alert is open on this companion.") + ("clientCommandId" to JsonPrimitive(id)))
+        } else {
+            watchOpen = null
+            publish("remote.watch", buildJsonObject {
+                put("id", alertId); put("turnId", turnId); put("kind", "info"); put("state", "dismissed")
+                put("blocker", null as String?); put("reason", "Dismissed; this alert kind is snoozed for 15 minutes.")
+                put("signals", JsonArray(emptyList())); put("source", "heuristic"); put("at", "2026-11-06T12:00:00.000Z")
+            }, turnId)
+            200 to buildJsonObject { put("clientCommandId", id); put("acknowledged", true); put("id", alertId); put("instanceId", instanceId) }
+        }
+        outcomes[id] = outcome
+        json(outcome.first, outcome.second)
+    }
+
+    private fun marathonBody(): JsonObject = buildJsonObject {
+        put("enabled", marathonEnabled)
+        put("sessionId", if (marathonEnabled) sessionId else null as String?)
+        put("since", marathonSince)
+        put("origin", if (marathonEnabled) "remote" else null as String?)
+        put("plan", JsonNull)
+        put("watcher", buildJsonObject {
+            put("active", marathonEnabled && turnId != null); put("checks", watchChecks)
+            put("lastCheckAt", null as String?); put("lastVerdict", null as String?)
+        })
+    }
+
+    /** Scenario control: open a watch alert exactly as the hub journals it. */
+    fun openWatchAlert(id: String, kind: String, reason: String = "A browser call has not returned for several minutes.") = synchronized(lock) {
+        watchChecks += 1
+        val at = "2026-11-06T12:00:00.000Z"
+        watchOpen = buildJsonObject { put("id", id); put("kind", kind); put("at", at); put("reason", reason) }
+        publish("remote.watch", buildJsonObject {
+            put("id", id); put("turnId", turnId); put("kind", kind); put("state", "open")
+            put("blocker", kind); put("reason", reason)
+            put("signals", JsonArray(emptyList())); put("source", if (kind == "stuck" || kind == "blocked") "watcher" else "heuristic")
+            put("at", at)
+        }, turnId)
+    }
+
+    /** Scenario control: collapse the open alert with a recovered notice. */
+    fun recoverWatchAlert(id: String) = synchronized(lock) {
+        watchOpen = null
+        publish("remote.watch", buildJsonObject {
+            put("id", id); put("turnId", turnId); put("kind", "recovered"); put("state", "recovered")
+            put("blocker", null as String?); put("reason", "The agent is making progress again.")
+            put("signals", JsonArray(emptyList())); put("source", "heuristic"); put("at", "2026-11-06T12:00:00.000Z")
+        }, turnId)
     }
 
     private fun events(request: RecordedRequest): MockResponse {
@@ -415,6 +516,10 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
             latestScreenshot = null
             help = null
             confirm = null
+            marathonEnabled = false
+            marathonSince = null
+            watchOpen = null
+            watchChecks = 0
         }
         closeStreams(1001, "shutdown")
     }
@@ -485,6 +590,17 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
         put("latestScreenshot", latestScreenshot ?: JsonNull)
         put("help", help ?: JsonNull)
         put("confirm", confirm ?: JsonNull)
+        put("marathon", buildJsonObject {
+            put("enabled", marathonEnabled)
+            put("since", marathonSince)
+            put("plan", JsonNull)
+            put("watch", buildJsonObject {
+                put("open", watchOpen ?: JsonNull)
+                put("lastVerdict", null as String?)
+                put("lastCheckAt", null as String?)
+                put("checks", watchChecks)
+            })
+        })
     }
 
     private fun body(request: RecordedRequest): JsonObject =

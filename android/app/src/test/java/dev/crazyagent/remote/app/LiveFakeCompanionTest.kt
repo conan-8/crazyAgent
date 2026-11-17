@@ -13,6 +13,8 @@ import kotlinx.coroutines.withTimeout
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -85,6 +87,76 @@ class LiveFakeCompanionTest {
             // This companion has no FCM key: registering must say so, not claim it is on.
             runBlocking { c.registerPush("android-live-test", "fcm-token-" + "a".repeat(120), "0.3.0") }
             assertEquals(dev.crazyagent.remote.notifications.PushState.Status.OFF_ON_COMPUTER, c.state.value.push.status)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /**
+     * M5 gate: the real phone client against the real Node fake API's
+     * "marathon-stuck" turn — the chip flips only on remote.marathon, the
+     * watcher's TOOL_HANG alert opens the watch card mid-turn (chip still
+     * tappable), "It's fine" acks through POST /marathon/watch/ack, and the
+     * PARTIAL ending carries the plan checklist plus an ended-incomplete card.
+     */
+    @Test fun marathonStuckShowsChipWatchCardAndChecklist() {
+        val url = System.getenv("CRAZYAGENT_FAKE_URL")
+        val tokenFile = System.getenv("CRAZYAGENT_FAKE_TOKEN_FILE")
+        assumeTrue("set CRAZYAGENT_FAKE_URL and CRAZYAGENT_FAKE_TOKEN_FILE", !url.isNullOrBlank() && !tokenFile.isNullOrBlank())
+        val token = java.io.File(tokenFile!!).readText().trim()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val c = RemoteController(ServerConfig(url!!.toHttpUrl(), token), OkHttpClient(), MemoryPendingStore(), scope)
+            scope.launch { c.run() }
+            fun await(ms: Long = 30_000, p: (UiState) -> Boolean) = runBlocking { withTimeout(ms) { c.state.first(p) } }
+
+            await { it.link.status == LinkStatus.LIVE && it.chat.synced }
+            assertEquals(false, c.state.value.chat.marathon.enabled)
+
+            // The chip: no optimistic flip — it lights only on remote.marathon.
+            c.toggleMarathon()
+            val on = await { it.chat.marathon.enabled && !it.marathonInFlight }
+            assertTrue(on.canToggleMarathon)
+
+            c.updateComposer("marathon-stuck demo")
+            c.send()
+            await { it.chat.turn.isActive && it.pending == null }
+
+            // The deterministic watcher alerts mid-turn; the card is actionable
+            // and the chip stays visible and tappable while busy.
+            val alert = await { it.chat.watchNotice?.actionable == true && it.chat.marathon.watch.open != null }
+            assertEquals("TOOL_HANG", alert.chat.marathon.watch.open!!.kind)
+            assertTrue(alert.chat.turn.isActive)
+            assertTrue(alert.canToggleMarathon)
+            assertTrue(alert.canAckWatch)
+
+            // "It's fine" goes through the real ack route and the dismissal
+            // arrives on the stream.
+            c.ackWatch()
+            val dismissed = await { it.chat.marathon.watch.open == null && !it.watchAckInFlight }
+            assertEquals("dismissed", dismissed.chat.watchNotice?.state)
+
+            // The turn ends PARTIAL: the carried checklist arrives with
+            // remote.marathon and the ended-incomplete notice opens the card.
+            val ended = await { !it.chat.turn.isActive && it.chat.marathon.plan != null && it.chat.watchNotice?.kind == "ended-incomplete" }
+            assertTrue(ended.chat.watchNotice!!.actionable)
+            assertEquals("ended-incomplete", ended.chat.marathon.watch.open?.kind)
+            val plan = ended.chat.marathon.plan!!
+            assertEquals(2, plan.revision)
+            assertEquals(3, plan.items.size)
+            assertEquals(2, plan.openCount)
+            assertEquals(listOf("completed", "in_progress", "pending"), plan.items.map { it.status })
+            assertEquals("Fill the shipping form", plan.items[0].content)
+            // The switch survives the turn; the checklist is the phone's first.
+            assertTrue(ended.chat.marathon.enabled)
+
+            // A new chat resets the switch, the plan, and the notice.
+            val session = ended.chat.sessionId
+            c.newChat()
+            val fresh = await { it.chat.sessionId != session }
+            assertEquals(false, fresh.chat.marathon.enabled)
+            assertNull(fresh.chat.marathon.plan)
+            assertNull(fresh.chat.watchNotice)
         } finally {
             scope.cancel()
         }

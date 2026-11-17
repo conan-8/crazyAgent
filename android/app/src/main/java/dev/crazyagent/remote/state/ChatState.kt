@@ -151,6 +151,67 @@ data class SessionSummary(
     val running: Boolean,
 )
 
+/** One carried-plan item; [status] is pending/in_progress/completed/blocked. */
+data class MarathonPlanItem(val content: String, val status: String)
+
+/**
+ * The plan the companion carried out of the last marathon turn (M2). The phone
+ * receives it with `remote.marathon` — its first checklist (M5).
+ */
+data class MarathonPlan(
+    val revision: Int,
+    val items: List<MarathonPlanItem>,
+    val updatedAt: String,
+    val turnId: String,
+) {
+    val openCount: Int get() = items.count { it.status == "pending" || it.status == "in_progress" }
+}
+
+/** The open watch alert exactly as the `/state` projection carries it. */
+data class WatchOpen(val id: String, val kind: String, val at: String?, val reason: String)
+
+/** The watcher's per-chat counters and last check (M3; verdicts arrive with M4). */
+data class MarathonWatch(
+    val open: WatchOpen? = null,
+    val lastVerdict: String? = null,
+    val lastCheckAt: String? = null,
+    val checks: Int = 0,
+)
+
+/**
+ * The companion-owned marathon switch, mirrored from `remote.marathon` and the
+ * `/state` projection (M5). The phone renders it and never assumes or
+ * optimistically flips it; off is the fail-safe default.
+ */
+data class MarathonState(
+    val enabled: Boolean = false,
+    val since: String? = null,
+    val plan: MarathonPlan? = null,
+    val watch: MarathonWatch = MarathonWatch(),
+)
+
+/**
+ * The latest watch notice for the card above the composer. An open actionable
+ * alert shows Stop / Steer… / It's fine; recovered/dismissed notices collapse
+ * to a summary line. Only the open alert survives a full resync (the projection
+ * carries no collapsed history), which is deliberate: the companion is
+ * authoritative.
+ */
+data class WatchNotice(
+    val id: String,
+    val kind: String,
+    val state: String,
+    val reason: String,
+    val at: String?,
+) {
+    /**
+     * Open and actionable: the hard alert kinds, the M4 judge verdict kinds
+     * (stuck/blocked), or ended-incomplete.
+     */
+    val actionable: Boolean
+        get() = state == "open" && kind in setOf("SILENT_STALL", "TOOL_HANG", "EXECUTOR_DOWN", "stuck", "blocked", "ended-incomplete")
+}
+
 /**
  * Everything the phone knows about the companion's shared chat. Built only by
  * [ChatReducer] from `/state`, `remote.resync`, and sequenced events.
@@ -172,6 +233,10 @@ data class ChatState(
     val help: HelpRequest? = null,
     /** Open only while the turn status is `waiting_for_user` (B9a confirmation). */
     val confirm: ConfirmRequest? = null,
+    /** The companion-owned marathon switch and its carried plan (M5). */
+    val marathon: MarathonState = MarathonState(),
+    /** The latest watch notice: an open alert card or its collapsed summary. */
+    val watchNotice: WatchNotice? = null,
     /** Frames that could not be understood; shown in diagnostics only. */
     val malformedFrames: Int = 0,
 ) {

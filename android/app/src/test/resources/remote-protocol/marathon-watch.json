@@ -1,0 +1,853 @@
+{
+  "name": "marathon-watch",
+  "frames": [
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 3,
+      "type": "remote.resync",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:04.000Z",
+      "body": {
+        "reason": "no-instance",
+        "state": {
+          "protocol": 1,
+          "server": {
+            "name": "crazyagent-companion",
+            "version": "fixture"
+          },
+          "instanceId": "companion-fixture-g",
+          "sessionId": "session-1",
+          "latestSequence": 3,
+          "oldestSequence": 1,
+          "turn": {
+            "status": "idle",
+            "turnId": null,
+            "origin": null,
+            "clientMessageId": null,
+            "startedAt": null,
+            "endedAt": null,
+            "outcome": null,
+            "error": null,
+            "label": null,
+            "usage": null,
+            "failedCalls": null
+          },
+          "phase": {
+            "status": null,
+            "tool": null
+          },
+          "health": {
+            "uiConnected": true,
+            "toolsConnected": true,
+            "dsh": "ready",
+            "dshMessage": null,
+            "provider": "openrouter",
+            "model": "fixture/model",
+            "autoCapture": true,
+            "contextWindow": null,
+            "contextTokens": null
+          },
+          "messages": [],
+          "draft": null,
+          "latestScreenshotId": null,
+          "latestScreenshot": null,
+          "help": null,
+          "confirm": null,
+          "marathon": {
+            "enabled": false,
+            "since": null,
+            "plan": null,
+            "watch": {
+              "open": null,
+              "lastVerdict": null,
+              "lastCheckAt": null,
+              "checks": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 4,
+      "type": "remote.marathon",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:05.000Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "session-1",
+        "since": "2026-11-06T12:00:01.000Z",
+        "origin": "remote",
+        "plan": null,
+        "watcher": {
+          "active": false,
+          "checks": 0,
+          "lastCheckAt": null,
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 5,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:07.000Z",
+      "body": {
+        "text": "Fill in the shipping form and place the order",
+        "origin": "remote",
+        "clientMessageId": "client-turn-14",
+        "imageCount": 0,
+        "marathon": true
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 6,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:08.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 7,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:09.000Z",
+      "body": {
+        "streamId": "turn-14:s1",
+        "channel": "text",
+        "offset": 0,
+        "delta": "Working through the checkout."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 8,
+      "type": "remote.marathon",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:10.000Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "session-1",
+        "since": "2026-11-06T12:00:01.000Z",
+        "origin": "remote",
+        "plan": null,
+        "watcher": {
+          "active": true,
+          "checks": 3,
+          "lastCheckAt": "2026-11-06T12:01:00.000Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 9,
+      "type": "remote.watch",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:11.000Z",
+      "body": {
+        "id": "watch-fixture-1",
+        "turnId": "turn-14",
+        "kind": "TOOL_HANG",
+        "state": "open",
+        "blocker": "TOOL_HANG",
+        "reason": "A browser call has not returned for several minutes.",
+        "signals": [
+          {
+            "kind": "TOOL_HANG",
+            "level": "hard",
+            "detail": "browser_wait_for unanswered for 250s"
+          }
+        ],
+        "source": "heuristic",
+        "at": "2026-11-06T12:01:20.000Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 10,
+      "type": "remote.watch",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:12.000Z",
+      "body": {
+        "id": "watch-fixture-2",
+        "turnId": "turn-14",
+        "kind": "stuck",
+        "state": "open",
+        "blocker": "loop",
+        "reason": "The same click repeats and the page does not change.",
+        "signals": [
+          {
+            "kind": "REPEAT_LOOP",
+            "level": "suspect",
+            "detail": "browser_click 4 of the last 8 calls"
+          }
+        ],
+        "source": "watcher",
+        "at": "2026-11-06T12:02:00.000Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 11,
+      "type": "remote.watch",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:13.000Z",
+      "body": {
+        "id": "watch-fixture-3",
+        "turnId": "turn-14",
+        "kind": "blocked",
+        "state": "open",
+        "blocker": "login",
+        "reason": "A sign-in wall is blocking the task while the agent keeps acting.",
+        "signals": [],
+        "source": "both",
+        "at": "2026-11-06T12:03:00.000Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 12,
+      "type": "remote.watch",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:14.000Z",
+      "body": {
+        "id": "watch-fixture-3",
+        "turnId": "turn-14",
+        "kind": "recovered",
+        "state": "recovered",
+        "blocker": null,
+        "reason": "The agent is making progress again.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-06T12:04:00.000Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 13,
+      "type": "remote.marathon",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:15.000Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "session-1",
+        "since": "2026-11-06T12:00:01.000Z",
+        "origin": "remote",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-06T12:04:30.000Z",
+          "turnId": "turn-14"
+        },
+        "watcher": {
+          "active": false,
+          "checks": 6,
+          "lastCheckAt": "2026-11-06T12:04:40.000Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 14,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:16.000Z",
+      "body": {
+        "text": "PARTIAL — the shipping form is filled but the order was not placed.",
+        "timings": {
+          "totalMs": 280000,
+          "toolCalls": 14,
+          "failedCalls": 2
+        },
+        "usage": {
+          "inputTokens": 40000,
+          "outputTokens": 900,
+          "totalTokens": 40900
+        },
+        "label": "partial",
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": true,
+        "marathon": true,
+        "planOutcome": "unfinished",
+        "planRevision": 2,
+        "watch": {
+          "checks": 6,
+          "alerts": 3,
+          "usage": 0
+        },
+        "replacesStreamId": "turn-14:s1"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 15,
+      "type": "remote.watch",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:17.000Z",
+      "body": {
+        "id": "watch-fixture-4",
+        "turnId": "turn-14",
+        "kind": "ended-incomplete",
+        "state": "open",
+        "blocker": "ended-incomplete",
+        "reason": "The turn ended with work still open or blocked.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-06T12:04:41.000Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 16,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:19.000Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-14",
+        "origin": "remote",
+        "clientMessageId": "client-turn-14",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": "2026-11-06T12:00:18.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 40000,
+          "outputTokens": 900,
+          "totalTokens": 40900
+        },
+        "failedCalls": 2
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 17,
+      "type": "remote.watch",
+      "sessionId": "session-1",
+      "turnId": "turn-14",
+      "occurredAt": "2026-11-06T12:00:20.000Z",
+      "body": {
+        "id": "watch-fixture-4",
+        "turnId": "turn-14",
+        "kind": "info",
+        "state": "dismissed",
+        "blocker": null,
+        "reason": "Dismissed; this alert kind is snoozed for 15 minutes.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-06T12:05:00.000Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-g",
+      "seq": 18,
+      "type": "chat.session",
+      "sessionId": "session-2",
+      "occurredAt": "2026-11-06T12:00:21.000Z",
+      "body": {
+        "sessionId": "session-2"
+      }
+    }
+  ],
+  "final": {
+    "protocol": 1,
+    "server": {
+      "name": "crazyagent-companion",
+      "version": "fixture"
+    },
+    "instanceId": "companion-fixture-g",
+    "sessionId": "session-2",
+    "latestSequence": 18,
+    "oldestSequence": 1,
+    "turn": {
+      "status": "idle",
+      "turnId": "turn-14",
+      "origin": "remote",
+      "clientMessageId": "client-turn-14",
+      "startedAt": "2026-11-06T12:00:06.000Z",
+      "endedAt": "2026-11-06T12:00:18.000Z",
+      "outcome": "done",
+      "error": null,
+      "label": "partial",
+      "usage": {
+        "inputTokens": 40000,
+        "outputTokens": 900,
+        "totalTokens": 40900
+      },
+      "failedCalls": 2
+    },
+    "phase": {
+      "status": null,
+      "tool": null
+    },
+    "health": {
+      "uiConnected": true,
+      "toolsConnected": true,
+      "dsh": "ready",
+      "dshMessage": null,
+      "provider": "openrouter",
+      "model": "fixture/model",
+      "autoCapture": true,
+      "contextWindow": null,
+      "contextTokens": null
+    },
+    "messages": [],
+    "draft": null,
+    "latestScreenshotId": null,
+    "latestScreenshot": null,
+    "help": null,
+    "confirm": null,
+    "marathon": {
+      "enabled": false,
+      "since": null,
+      "plan": null,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      }
+    }
+  },
+  "checkpoints": {
+    "afterAlert": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-g",
+      "sessionId": "session-1",
+      "latestSequence": 9,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "running",
+        "turnId": "turn-14",
+        "origin": "remote",
+        "clientMessageId": "client-turn-14",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null
+      },
+      "phase": {
+        "status": "thinking",
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-g",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-14",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Fill in the shipping form and place the order",
+            "origin": "remote",
+            "clientMessageId": "client-turn-14",
+            "imageCount": 0,
+            "marathon": true
+          }
+        }
+      ],
+      "draft": {
+        "turnId": "turn-14",
+        "streamId": "turn-14:s1",
+        "text": "Working through the checkout.",
+        "reasoning": "",
+        "tools": []
+      },
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-06T12:00:01.000Z",
+        "plan": null,
+        "watch": {
+          "open": {
+            "id": "watch-fixture-1",
+            "kind": "TOOL_HANG",
+            "at": "2026-11-06T12:01:20.000Z",
+            "reason": "A browser call has not returned for several minutes."
+          },
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-06T12:01:00.000Z",
+          "checks": 3
+        }
+      }
+    },
+    "afterJudge": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-g",
+      "sessionId": "session-1",
+      "latestSequence": 10,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "running",
+        "turnId": "turn-14",
+        "origin": "remote",
+        "clientMessageId": "client-turn-14",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null
+      },
+      "phase": {
+        "status": "thinking",
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-g",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-14",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Fill in the shipping form and place the order",
+            "origin": "remote",
+            "clientMessageId": "client-turn-14",
+            "imageCount": 0,
+            "marathon": true
+          }
+        }
+      ],
+      "draft": {
+        "turnId": "turn-14",
+        "streamId": "turn-14:s1",
+        "text": "Working through the checkout.",
+        "reasoning": "",
+        "tools": []
+      },
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-06T12:00:01.000Z",
+        "plan": null,
+        "watch": {
+          "open": {
+            "id": "watch-fixture-2",
+            "kind": "stuck",
+            "at": "2026-11-06T12:02:00.000Z",
+            "reason": "The same click repeats and the page does not change."
+          },
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-06T12:01:00.000Z",
+          "checks": 3
+        }
+      }
+    },
+    "afterBlocked": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-g",
+      "sessionId": "session-1",
+      "latestSequence": 11,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "running",
+        "turnId": "turn-14",
+        "origin": "remote",
+        "clientMessageId": "client-turn-14",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null
+      },
+      "phase": {
+        "status": "thinking",
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-g",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-14",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Fill in the shipping form and place the order",
+            "origin": "remote",
+            "clientMessageId": "client-turn-14",
+            "imageCount": 0,
+            "marathon": true
+          }
+        }
+      ],
+      "draft": {
+        "turnId": "turn-14",
+        "streamId": "turn-14:s1",
+        "text": "Working through the checkout.",
+        "reasoning": "",
+        "tools": []
+      },
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-06T12:00:01.000Z",
+        "plan": null,
+        "watch": {
+          "open": {
+            "id": "watch-fixture-3",
+            "kind": "blocked",
+            "at": "2026-11-06T12:03:00.000Z",
+            "reason": "A sign-in wall is blocking the task while the agent keeps acting."
+          },
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-06T12:01:00.000Z",
+          "checks": 3
+        }
+      }
+    },
+    "afterEnded": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-g",
+      "sessionId": "session-1",
+      "latestSequence": 16,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-14",
+        "origin": "remote",
+        "clientMessageId": "client-turn-14",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": "2026-11-06T12:00:18.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 40000,
+          "outputTokens": 900,
+          "totalTokens": 40900
+        },
+        "failedCalls": 2
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-g",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-14",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Fill in the shipping form and place the order",
+            "origin": "remote",
+            "clientMessageId": "client-turn-14",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-g",
+          "seq": 14,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-14",
+          "occurredAt": "2026-11-06T12:00:16.000Z",
+          "body": {
+            "text": "PARTIAL — the shipping form is filled but the order was not placed.",
+            "timings": {
+              "totalMs": 280000,
+              "toolCalls": 14,
+              "failedCalls": 2
+            },
+            "usage": {
+              "inputTokens": 40000,
+              "outputTokens": 900,
+              "totalTokens": 40900
+            },
+            "label": "partial",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": true,
+            "marathon": true,
+            "planOutcome": "unfinished",
+            "planRevision": 2,
+            "watch": {
+              "checks": 6,
+              "alerts": 3,
+              "usage": 0
+            },
+            "replacesStreamId": "turn-14:s1"
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-06T12:00:01.000Z",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-06T12:04:30.000Z",
+          "turnId": "turn-14"
+        },
+        "watch": {
+          "open": {
+            "id": "watch-fixture-4",
+            "kind": "ended-incomplete",
+            "at": "2026-11-06T12:04:41.000Z",
+            "reason": "The turn ended with work still open or blocked."
+          },
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-06T12:04:40.000Z",
+          "checks": 6
+        }
+      }
+    }
+  }
+}

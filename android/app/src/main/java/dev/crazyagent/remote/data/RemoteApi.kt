@@ -92,12 +92,15 @@ class RemoteApi(private val client: OkHttpClient, private val config: ServerConf
     suspend fun resumeSession(sessionId: String, clientCommandId: String): ApiResult =
         post("sessions/$sessionId/resume", JsonObject(mapOf("clientCommandId" to JsonPrimitive(clientCommandId))))
 
-    /** [steer] stops a running turn and starts this message as the next one. [confirm] answers an open confirmation. */
-    suspend fun sendMessage(clientMessageId: String, text: String, images: List<PromptImage>, planMode: Boolean = false, steer: Boolean = false, confirm: String? = null): ApiResult {
+    /**
+     * [steer] stops a running turn and starts this message as the next one.
+     * [confirm] answers an open confirmation. Marathon is a companion-owned
+     * switch ([setMarathon]), not a per-message flag (M5).
+     */
+    suspend fun sendMessage(clientMessageId: String, text: String, images: List<PromptImage>, steer: Boolean = false, confirm: String? = null): ApiResult {
         val body = JsonObject(buildMap {
             put("clientMessageId", JsonPrimitive(clientMessageId))
             put("text", JsonPrimitive(text))
-            if (planMode) put("planMode", JsonPrimitive(true))
             if (steer) put("steer", JsonPrimitive(true))
             if (confirm != null) put("confirm", JsonPrimitive(confirm))
             if (images.isNotEmpty()) {
@@ -112,6 +115,18 @@ class RemoteApi(private val client: OkHttpClient, private val config: ServerConf
         })
         return post("messages", body)
     }
+
+    /**
+     * Flip the shared marathon switch (M5). Accepted in any turn state; the
+     * companion publishes the authoritative `remote.marathon` — the phone never
+     * flips its own chip optimistically.
+     */
+    suspend fun setMarathon(enabled: Boolean, clientCommandId: String): ApiResult =
+        post("marathon", JsonObject(mapOf("enabled" to JsonPrimitive(enabled), "clientCommandId" to JsonPrimitive(clientCommandId))))
+
+    /** "It's fine": dismiss the open watch alert and snooze its kind for 15 minutes. */
+    suspend fun ackWatch(id: String, clientCommandId: String): ApiResult =
+        post("marathon/watch/ack", JsonObject(mapOf("id" to JsonPrimitive(id), "clientCommandId" to JsonPrimitive(clientCommandId))))
 
     /** Register (or replace) this phone's FCM token for metadata-only pushes. */
     suspend fun registerPush(deviceId: String, fcmToken: String, appVersion: String): ApiResult = execute(

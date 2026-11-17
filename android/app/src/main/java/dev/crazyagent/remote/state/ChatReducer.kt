@@ -88,9 +88,19 @@ object ChatReducer {
             val type = envelope.string("type") ?: continue
             state = applyEvent(state, type, envelope).state
         }
-        // Re-apply the authoritative turn after committed messages (chat.user sets running).
-        state = state.copy(turn = projection.obj("turn")?.let(::turnOf) ?: state.turn)
-        state = state.copy(draft = projection.obj("draft")?.let(::draftOf), help = help, confirm = confirm)
+        // Re-apply the authoritative turn and phase after committed messages
+        // (chat.user sets running and clears the phase; a mid-turn resync must
+        // still show what the agent is doing right now).
+        state = state.copy(
+            turn = projection.obj("turn")?.let(::turnOf) ?: state.turn,
+            phase = projection.obj("phase")?.let { Phase(it.string("status"), it.string("tool")) } ?: state.phase,
+        )
+        // The marathon mirror is authoritative too: remote.marathon/remote.watch
+        // are journaled but not committed messages, so the projection's block is
+        // the only source for a resync (M5).
+        val marathon = projection.obj("marathon")?.let(::marathonProjectionOf) ?: MarathonState()
+        val watchNotice = marathon.watch.open?.let { WatchNotice(it.id, it.kind, "open", it.reason, it.at) }
+        state = state.copy(draft = projection.obj("draft")?.let(::draftOf), help = help, confirm = confirm, marathon = marathon, watchNotice = watchNotice)
         return state
     }
 
@@ -119,6 +129,10 @@ object ChatReducer {
                     help = null,
                     // Any prompt also answers (or abandons) an open confirmation.
                     confirm = null,
+                    // A new turn keeps the open watch alert (the hub mirrors it
+                    // until the watcher or an ack clears it) but drops a
+                    // collapsed recovered/dismissed summary.
+                    watchNotice = state.watchNotice?.takeIf { state.marathon.watch.open?.id == it.id },
                 )
             }
             "chat.assistant" -> {
@@ -171,10 +185,32 @@ object ChatReducer {
                 screenshot = null,
                 help = null,
                 confirm = null,
+                // The switch and any watch notice belong to the chat just left;
+                // the hub resets its mirror the same way (the controller
+                // publishes the authoritative off state separately).
+                marathon = MarathonState(),
+                watchNotice = null,
                 turn = if (state.turn.isWaiting) state.turn.copy(status = "idle") else state.turn,
             )
             "remote.help" -> state.copy(help = helpOf(body) ?: state.help)
             "remote.confirm" -> state.copy(confirm = confirmOf(body) ?: state.confirm)
+            "remote.marathon" -> {
+                val next = marathonOf(body, state.marathon)
+                // Off clears the open alert and any collapsed summary with it.
+                state.copy(marathon = next, watchNotice = if (next.enabled) state.watchNotice else null)
+            }
+            "remote.watch" -> {
+                val notice = watchNoticeOf(body)
+                if (notice == null) state else {
+                    // Same rule as the hub: an open notice that is neither info
+                    // nor recovered is the open alert (hard kinds, judge
+                    // stuck/blocked, ended-incomplete, or a future kind).
+                    val open = if (notice.state == "open" && notice.kind != "info" && notice.kind != "recovered") {
+                        WatchOpen(notice.id, notice.kind, notice.at, notice.reason)
+                    } else null
+                    state.copy(watchNotice = notice, marathon = state.marathon.copy(watch = state.marathon.watch.copy(open = open)))
+                }
+            }
             "remote.screenshot" -> state.copy(screenshot = screenshotOf(body) ?: state.screenshot)
             "remote.health" -> state.copy(health = healthOf(body))
             "chat.draft" -> return applyDraft(state, turnId, body)
@@ -306,6 +342,94 @@ object ChatReducer {
 
     /** Same shape the server accepts; the ID becomes a URL path segment. */
     private val SCREENSHOT_ID = Regex("^[A-Za-z0-9_-]{1,128}$")
+
+    /** The provider's plan item statuses (packages/dsh-browser-extension/lib/plan.js). */
+    private val PLAN_STATUSES = setOf("pending", "in_progress", "completed", "blocked")
+
+    /**
+     * The carried plan, validated fail-closed exactly like the companion's
+     * `normalizeMarathonPlan`: a non-negative integral revision, string
+     * updatedAt/turnId, 1–40 items with non-blank unique content and a known
+     * status. Anything malformed is null, never a partial plan.
+     */
+    private fun planOf(body: JsonObject?): MarathonPlan? {
+        if (body == null) return null
+        val revision = body.long("revision")?.takeIf { it >= 0 && it <= Int.MAX_VALUE } ?: return null
+        val updatedAt = body.string("updatedAt") ?: return null
+        val turnId = body.string("turnId") ?: return null
+        val items = body.array("items")?.takeIf { it.isNotEmpty() && it.size <= 40 } ?: return null
+        val contents = HashSet<String>()
+        val parsed = items.map { element ->
+            val item = element as? JsonObject ?: return null
+            val content = item.string("content")?.takeIf { it.isNotBlank() } ?: return null
+            val status = item.string("status")?.takeIf { it in PLAN_STATUSES } ?: return null
+            if (!contents.add(content)) return null
+            MarathonPlanItem(content, status)
+        }
+        return MarathonPlan(revision.toInt(), parsed, updatedAt, turnId)
+    }
+
+    private fun watchChecks(body: JsonObject?): Int =
+        body?.long("checks")?.takeIf { it >= 0 && it <= Int.MAX_VALUE }?.toInt() ?: 0
+
+    /**
+     * One `remote.marathon` envelope: the switch, the carried plan, and the
+     * watcher counters. The open alert is tracked by `remote.watch` and
+     * survives a state change, exactly like the hub's mirror; off clears
+     * everything (fail-safe).
+     */
+    private fun marathonOf(body: JsonObject, current: MarathonState): MarathonState {
+        if (body.bool("enabled") != true) return MarathonState()
+        val watcher = body.obj("watcher")
+        return MarathonState(
+            enabled = true,
+            since = body.string("since"),
+            plan = planOf(body.obj("plan")),
+            watch = current.watch.copy(
+                checks = watchChecks(watcher),
+                lastCheckAt = watcher?.string("lastCheckAt"),
+                lastVerdict = watcher?.string("lastVerdict"),
+            ),
+        )
+    }
+
+    /** The `/state` projection's marathon block (watch.open included). */
+    private fun marathonProjectionOf(body: JsonObject): MarathonState {
+        val watch = body.obj("watch")
+        return MarathonState(
+            enabled = body.bool("enabled") == true,
+            since = body.string("since"),
+            plan = planOf(body.obj("plan")),
+            watch = MarathonWatch(
+                open = watch?.obj("open")?.let(::watchOpenOf),
+                lastVerdict = watch?.string("lastVerdict"),
+                lastCheckAt = watch?.string("lastCheckAt"),
+                checks = watchChecks(watch),
+            ),
+        )
+    }
+
+    private fun watchOpenOf(body: JsonObject): WatchOpen? {
+        val id = body.string("id")?.takeIf { it.isNotEmpty() } ?: return null
+        return WatchOpen(id, body.string("kind") ?: "info", body.string("at"), body.string("reason").orEmpty())
+    }
+
+    /**
+     * One watch notice (`remote.watch`). The card shows kind and reason; the
+     * projection's open alert carries exactly those, so a resync reconstructs
+     * the same card. Signals/blocker/source are diagnostic on the wire and are
+     * not mirrored.
+     */
+    private fun watchNoticeOf(body: JsonObject): WatchNotice? {
+        val id = body.string("id")?.takeIf { it.isNotEmpty() } ?: return null
+        return WatchNotice(
+            id = id,
+            kind = body.string("kind") ?: "info",
+            state = body.string("state") ?: "open",
+            reason = body.string("reason").orEmpty().take(500),
+            at = body.string("at"),
+        )
+    }
 
     private fun draftOf(body: JsonObject): Draft? {
         val streamId = body.string("streamId") ?: return null

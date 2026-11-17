@@ -68,6 +68,11 @@ data class PendingPrompt(
     val instanceId: String?,
     val phase: PendingPhase,
     val note: String? = null,
+    /**
+     * Legacy only (M5): restored from a pre-M5 [StoredPending.planMode] and
+     * mapped to a marathon-on call at delivery. New sends never set it; the
+     * visible switch is the companion's [dev.crazyagent.remote.state.MarathonState].
+     */
     val planMode: Boolean = false,
     val steer: Boolean = false,
     /** "approve" or "deny" when this prompt answers an open confirmation (B9b). */
@@ -98,7 +103,14 @@ data class UiState(
     val resumeInFlight: Boolean = false,
     val historyLoading: Boolean = false,
     val historyOpen: ArchivedChat? = null,
-    val planMode: Boolean = false,
+    /**
+     * A pre-M5 stored pending's plan flag, carried through Edit/Send again.
+     * It is never a local arming: delivery maps it to a marathon-on call, and
+     * the visible switch is only [ChatState.marathon].
+     */
+    val legacyPlanMode: Boolean = false,
+    val marathonInFlight: Boolean = false,
+    val watchAckInFlight: Boolean = false,
     val notice: String? = null,
     /** Last screenshot that finished downloading; kept while a newer one loads. */
     val liveImage: LiveImage? = null,
@@ -131,6 +143,12 @@ data class UiState(
     /** An open confirmation can be answered only while the chat waits, with no send in flight. */
     val canConfirm: Boolean
         get() = link.status == LinkStatus.LIVE && chat.synced && pending == null && !busy && chat.confirm != null
+    /** The shared switch toggles in any turn state — mid-turn included (M5). */
+    val canToggleMarathon: Boolean
+        get() = link.status == LinkStatus.LIVE && chat.synced && !marathonInFlight
+    /** "It's fine" needs an open alert and a live connection. */
+    val canAckWatch: Boolean
+        get() = link.status == LinkStatus.LIVE && chat.synced && chat.marathon.watch.open != null && !watchAckInFlight
 }
 
 /**
@@ -165,6 +183,10 @@ class RemoteController(
     private var newCommandId: String? = null
     private var resumeCommand: Pair<String, String>? = null
     private var snapshotCommandId: String? = null
+    /** The marathon toggle in flight: target state to its idempotent command ID. */
+    private var marathonCommand: Pair<Boolean, String>? = null
+    /** The watch ack in flight: alert ID to its idempotent command ID. */
+    private var watchAckCommand: Pair<String, String>? = null
     /** A tapped notification waiting for the next full resync to be checked against. */
     private var openedFrom: PushMessage? = null
     private var imageJob: Job? = null
@@ -196,8 +218,62 @@ class RemoteController(
 
     fun updateComposer(text: String) = _state.update { it.copy(composer = text) }
 
-    fun togglePlanMode() = _state.update {
-        it.copy(planMode = !it.planMode, notice = if (it.planMode) "Plan mode canceled" else "Plan mode armed for the next turn")
+    /**
+     * Toggle the companion-owned marathon switch (M5). No optimistic flip: the
+     * chip changes only when the authoritative `remote.marathon` arrives.
+     * Accepted mid-turn; an uncertain toggle keeps its ID so tapping again
+     * repeats the same command.
+     */
+    fun toggleMarathon() {
+        val current = _state.value
+        if (!current.canToggleMarathon) return
+        val target = !current.chat.marathon.enabled
+        val id = marathonCommand?.takeIf { it.first == target }?.second ?: newId().also { marathonCommand = target to it }
+        _state.update { it.copy(marathonInFlight = true) }
+        scope.launch {
+            val result = api.setMarathon(target, id)
+            _state.update { it.copy(marathonInFlight = false) }
+            when (result) {
+                is ApiResult.Ok -> marathonCommand = null
+                is ApiResult.Rejected -> {
+                    marathonCommand = null
+                    onRejected(result)
+                }
+                // Keep the ID so tapping again repeats the same command.
+                is ApiResult.Unreachable -> notice("Marathon was not confirmed. ${result.reason}")
+            }
+        }
+    }
+
+    /**
+     * "It's fine" on the watch card: dismiss the open alert and snooze its kind
+     * for 15 minutes. A 404 means the alert is already gone; the stream's
+     * dismissed/recovered notice reconciles the card.
+     */
+    fun ackWatch() {
+        val current = _state.value
+        val open = current.chat.marathon.watch.open ?: return
+        if (!current.canAckWatch) return
+        val id = watchAckCommand?.takeIf { it.first == open.id }?.second ?: newId().also { watchAckCommand = open.id to it }
+        _state.update { it.copy(watchAckInFlight = true) }
+        scope.launch {
+            val result = api.ackWatch(open.id, id)
+            _state.update { it.copy(watchAckInFlight = false) }
+            when (result) {
+                is ApiResult.Ok -> watchAckCommand = null
+                is ApiResult.Rejected -> {
+                    watchAckCommand = null
+                    if (result.code != "WATCH_NOT_FOUND") onRejected(result)
+                }
+                // Keep the ID so tapping again repeats the same command.
+                is ApiResult.Unreachable -> notice("The alert was not dismissed. ${result.reason}")
+            }
+        }
+    }
+
+    /** The watch card's Steer… action: the composer takes it from here. */
+    fun steerFromWatch() {
+        notice(if (_state.value.busy) "Type a steer message and send — it replaces the running turn" else "Type a message and send")
     }
 
     fun addImages(images: List<PromptImage>) = _state.update { it.copy(attachments = (it.attachments + images).take(MAX_IMAGES)) }
@@ -254,11 +330,11 @@ class RemoteController(
                 imageCount = current.attachments.size,
                 instanceId = current.chat.instanceId,
                 phase = PendingPhase.SENDING,
-                planMode = current.planMode,
+                planMode = current.legacyPlanMode,
                 steer = current.busy,
             )
             created = prompt
-            current.copy(composer = "", attachments = emptyList(), pending = prompt, planMode = false, notice = null)
+            current.copy(composer = "", attachments = emptyList(), pending = prompt, legacyPlanMode = false, notice = null)
         }
         val prompt = created ?: return
         scope.launch {
@@ -322,7 +398,7 @@ class RemoteController(
         val pending = _state.value.pending ?: return
         if (pending.phase != PendingPhase.NEEDS_REVIEW) return
         reconcileJob?.cancel()
-        _state.update { it.copy(pending = null, composer = pending.text, attachments = pending.images, planMode = it.planMode || pending.planMode) }
+        _state.update { it.copy(pending = null, composer = pending.text, attachments = pending.images, legacyPlanMode = it.legacyPlanMode || pending.planMode) }
         scope.launch { pendingStore.clear() }
     }
 
@@ -634,8 +710,22 @@ class RemoteController(
 
     // ---- delivery -------------------------------------------------------
 
-    private suspend fun deliver(prompt: PendingPrompt) = deliveryLock.withLock {
-        handleSendResult(prompt, api.sendMessage(prompt.clientMessageId, prompt.text, prompt.images, prompt.planMode, prompt.steer, prompt.confirm))
+    private suspend fun deliver(prompt: PendingPrompt) = deliveryLock.withLock { deliverLocked(prompt) }
+
+    /** Delivery under [deliveryLock]; the reconcile retry path shares it. */
+    private suspend fun deliverLocked(prompt: PendingPrompt) {
+        if (prompt.planMode) {
+            // A pre-M5 stored pending: the old per-message plan flag maps to a
+            // marathon-on call before the plain send, so old queued items keep
+            // working. Idempotent per message ID; a failed arming never blocks
+            // the message itself — the switch stays companion-owned.
+            val armed = api.setMarathon(true, "${prompt.clientMessageId}-marathon")
+            if (armed is ApiResult.Rejected && armed.status == 401) {
+                handleSendResult(prompt, armed)
+                return
+            }
+        }
+        handleSendResult(prompt, api.sendMessage(prompt.clientMessageId, prompt.text, prompt.images, prompt.steer, prompt.confirm))
     }
 
     private suspend fun handleSendResult(prompt: PendingPrompt, result: ApiResult) {
@@ -701,7 +791,7 @@ class RemoteController(
                     deliveryLock.withLock {
                         val current = _state.value.pending
                         if (current?.clientMessageId == pending.clientMessageId && current.phase == PendingPhase.UNCERTAIN) {
-                            handleSendResult(current, api.sendMessage(current.clientMessageId, current.text, current.images, current.planMode, current.steer, current.confirm))
+                            deliverLocked(current)
                         }
                     }
                 }

@@ -275,8 +275,86 @@ class ReducerFixtureTest {
         assertTrue(displayRows(afterRecovery.items).any { it is DisplayRow.Assistant && it.text == "DONE: all set." })
     }
 
+    /**
+     * M5: the marathon switch, watch notices (hard alert, judge stuck/blocked,
+     * recovery, ended-incomplete, dismissal), and the carried plan checklist,
+     * all recorded from the real RemoteHub. The live stream must reach each of
+     * the hub's own checkpoint projections, and the final new-chat reset.
+     */
+    @Test fun marathonWatchMatchesHubProjection() {
+        assertMatchesProjection("marathon-watch")
+        val f = fixture("marathon-watch")
+        val all = frames(f)
+        val checkpoints = f["checkpoints"]!!.jsonObject
+        fun checkpoint(name: String) = ChatReducer.fromProjection(checkpoints[name]!!.jsonObject)!!
+        fun type(frame: JsonObject) = frame["type"].toString().trim('"')
+        fun body(frame: JsonObject) = frame["body"]!!.jsonObject
+        fun field(frame: JsonObject, key: String) = body(frame)[key].toString().trim('"')
+        fun upTo(predicate: (JsonObject) -> Boolean) = replay(all.take(all.indexOfFirst(predicate) + 1))
+
+        // The switch mirrors remote.marathon; the armed turn's prompt carries marathon:true.
+        val on = upTo { type(it) == "remote.marathon" }
+        assertTrue(on.marathon.enabled)
+        assertEquals("2026-11-06T12:00:01.000Z", on.marathon.since)
+
+        // A hard deterministic alert opens the card and the projection alert.
+        val alert = upTo { type(it) == "remote.watch" && field(it, "kind") == "TOOL_HANG" }
+        assertEquals(checkpoint("afterAlert"), alert)
+        assertTrue(alert.watchNotice!!.actionable)
+        assertEquals("TOOL_HANG", alert.marathon.watch.open?.kind)
+        assertEquals(3, alert.marathon.watch.checks)
+
+        // M4 judge verdicts ride the same envelope and are actionable too.
+        val judge = upTo { type(it) == "remote.watch" && field(it, "kind") == "stuck" }
+        assertEquals(checkpoint("afterJudge"), judge)
+        assertTrue(judge.watchNotice!!.actionable)
+        assertEquals("loop", body(all.first { type(it) == "remote.watch" && field(it, "kind") == "stuck" })["blocker"].toString().trim('"'))
+        val blocked = upTo { type(it) == "remote.watch" && field(it, "kind") == "blocked" }
+        assertEquals(checkpoint("afterBlocked"), blocked)
+        assertTrue(blocked.watchNotice!!.actionable)
+
+        // Recovery collapses the notice and clears the open alert.
+        val recovered = upTo { type(it) == "remote.watch" && field(it, "state") == "recovered" }
+        assertNull(recovered.marathon.watch.open)
+        assertEquals("recovered", recovered.watchNotice?.state)
+        assertFalse(recovered.watchNotice!!.actionable)
+
+        // The carried plan arrives with remote.marathon — the phone's first checklist.
+        val carried = upTo { type(it) == "remote.marathon" && body(it)["plan"] is JsonObject }
+        val plan = carried.marathon.plan!!
+        assertEquals(2, plan.revision)
+        assertEquals(listOf("completed", "in_progress", "pending"), plan.items.map { it.status })
+        assertEquals(2, plan.openCount)
+        assertEquals("turn-14", plan.turnId)
+
+        // chat.done carries both mode flags and the additive watch summary; the
+        // ended-incomplete notice opens the card again after the turn is over.
+        val doneBody = body(all.first { type(it) == "chat.done" })
+        assertEquals("true", doneBody["marathon"].toString())
+        assertEquals("true", doneBody["planMode"].toString())
+        assertEquals("unfinished", doneBody["planOutcome"].toString().trim('"'))
+        assertEquals(6, doneBody["watch"]!!.jsonObject["checks"]!!.jsonPrimitive.int)
+        val ended = upTo { type(it) == "chat.turn" }
+        assertEquals(checkpoint("afterEnded"), ended)
+        assertEquals("idle", ended.turn.status)
+        assertEquals("done", ended.turn.outcome)
+        assertTrue(ended.watchNotice!!.actionable)
+        assertEquals("ended-incomplete", ended.marathon.watch.open?.kind)
+        assertEquals(2, ended.marathon.plan?.revision)
+
+        // "It's fine" dismisses the alert; a new chat resets switch, plan, watch.
+        val dismissed = upTo { type(it) == "remote.watch" && field(it, "state") == "dismissed" }
+        assertNull(dismissed.marathon.watch.open)
+        assertFalse(dismissed.watchNotice!!.actionable)
+        val end = replay(all)
+        assertEquals("session-2", end.sessionId)
+        assertEquals(MarathonState(), end.marathon)
+        assertNull(end.watchNotice)
+        assertTrue(end.items.isEmpty())
+    }
+
     @Test fun resyncFramesAreOnlyEverFirst() {
-        for (name in listOf("turn-stream", "mid-turn-resync", "lifecycle", "help-request", "confirm-request", "dead-turn")) {
+        for (name in listOf("turn-stream", "mid-turn-resync", "lifecycle", "help-request", "confirm-request", "dead-turn", "marathon-watch")) {
             val all = (fixture(name)["frames"] as JsonArray).map { it.jsonObject["type"].toString() }
             assertEquals("\"remote.resync\"", all.first())
             assertTrue(all.drop(1).none { it == "\"remote.resync\"" })
