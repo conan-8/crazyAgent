@@ -143,7 +143,14 @@ function digestAggregates(aggregates, now) {
     calls: aggregates.calls,
     distinctFingerprints: aggregates.distinctFingerprints,
     okMutations: aggregates.okMutations,
-    mutationRevisits: aggregates.mutationRevisits,
+    // V3 isolation (lead-authorized, measurement-justified deviation from §3.4's
+    // digest-annotation detail): the judge digest carries V2-EQUIVALENT bare
+    // mutationRevisits (tool+args+count+ok+sameOutcome). The pageKey/controlName
+    // annotation biased the judge to read cross-page navigation revisits as
+    // exploration (progressing), reducing caught (tune k=5 isolation evidence).
+    // pageKey/controlName remain in the ledger aggregates as a replay-only metric;
+    // the page-scoped REVISIT_HINT signal (the real V3 benefit) is unchanged.
+    mutationRevisits: (aggregates.mutationRevisits ?? []).map(({ tool, args, count, ok, sameOutcome }) => ({ tool, args, count, ok, sameOutcome })),
     navRevisits: aggregates.navRevisits,
     openItems: {
       first: open.first,

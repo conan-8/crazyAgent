@@ -22,14 +22,45 @@ const PENDING = n => Array.from({ length: n }, (_, i) => ({ content: `step ${i}`
 /* REVISIT_HINT — mutation-revisit signature                           */
 /* ------------------------------------------------------------------ */
 
-test('mutationRevisit: 2 identical successful mutations do not fire, 3 do', () => {
+test('V3 mutationRevisit: page-scoped — 2 identical effectful acts on the SAME page fire (threshold 2)', () => {
   const t = clock(); const l = ledger(t)
-  for (let i = 0; i < 2; i += 1) { call(l, `a${i}`, 'browser_click', { label: 'Submit' }); result(l, `a${i}`, true, 'submitted ok') }
-  assert.equal(has(assess(l.snapshot(), t.now()), 'REVISIT_HINT'), false)
-  call(l, 'a2', 'browser_click', { label: 'Submit' }); result(l, 'a2', true, 'submitted ok')
+  const page = 'tab 1 "Form" https://x.test/form'
+  const head = 'clicked label 1: button "Submit"'
+  call(l, 'a0', 'browser_click', { label: 'Submit' }); result(l, 'a0', true, `${page}\n${head}`)
+  assert.equal(has(assess(l.snapshot(), t.now()), 'REVISIT_HINT'), false, '1 act is not a revisit')
+  call(l, 'a1', 'browser_click', { label: 'Submit' }); result(l, 'a1', true, `${page}\n${head}`)
   const a = assess(l.snapshot(), t.now())
-  assert.equal(has(a, 'REVISIT_HINT'), true)
+  assert.equal(has(a, 'REVISIT_HINT'), true, '2 identical effectful acts same page+control+outcome fire')
   assert.equal(a.signals.find(s => s.kind === 'REVISIT_HINT').level, 'suspect')
+})
+
+test('V3 mutationRevisit: same click on DIFFERENT pages is NOT a revisit (multi-page fix)', () => {
+  const t = clock(); const l = ledger(t)
+  const head = 'clicked label 1: button "Submit"'
+  for (let i = 0; i < 4; i += 1) {
+    call(l, `a${i}`, 'browser_click', { label: 'Submit' })
+    result(l, `a${i}`, true, `tab 1 "Station ${i}" https://x.test/station?n=${i}\n${head}`)
+  }
+  assert.equal(has(assess(l.snapshot(), t.now()), 'REVISIT_HINT'), false, 'query-distinct pages do not merge into a revisit')
+})
+
+test('V3 mutationRevisit: unknown page excludes acts (fails toward silence)', () => {
+  const t = clock(); const l = ledger(t)
+  // No tab line / navigate URL anywhere -> page unknown -> excluded even at 4 repeats.
+  for (let i = 0; i < 4; i += 1) { call(l, `a${i}`, 'browser_click', { label: 'Submit' }); result(l, `a${i}`, true, 'clicked label 1: button "Submit"') }
+  const s = l.snapshot()
+  assert.equal(has(assess(s, t.now()), 'REVISIT_HINT'), false, 'unknown page -> no revisit signal')
+  assert.equal(s.aggregates.pageIdentity.unknownPageShare, 1, 'all act results unknown page')
+  assert.equal(s.aggregates.mutationRevisit, false)
+})
+
+test('V3 mutationRevisit: no-effect acts feed NO_EFFECT, not revisits', () => {
+  const t = clock(); const l = ledger(t)
+  const page = 'tab 1 "Form" https://x.test/form'
+  for (let i = 0; i < 4; i += 1) { call(l, `a${i}`, 'browser_click', { label: 'Submit' }); result(l, `a${i}`, true, `${page}\nresult: NO VISIBLE CHANGE — the page did not change`) }
+  const a = assess(l.snapshot(), t.now())
+  assert.equal(has(a, 'REVISIT_HINT'), false, 'no-effect acts are not effectful revisits')
+  assert.equal(has(a, 'NO_EFFECT'), true, 'they feed NO_EFFECT instead')
 })
 
 test('mutationRevisit: varying result heads suppress it (forward progress, not a redo)', () => {

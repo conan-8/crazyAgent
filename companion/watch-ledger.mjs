@@ -105,6 +105,48 @@ export function resultCode(text) {
   return match ? match[1] : null
 }
 
+/**
+ * V3 (§3.4): best-effort page key from a result text — the URL named by a tab
+ * line (`tab <id> "<title>" <url>`) or a navigate result (`navigated [back|forward]
+ * to <url>` / `reloaded <url>`). Returns the full URL or null (unknown). The most
+ * recent result naming a URL wins; a result naming none keeps the previous key.
+ * @param {unknown} text
+ * @returns {string | null}
+ */
+export function parsePageKey(text) {
+  const value = String(text ?? '')
+  const tab = /tab\s+\S+\s+"[^"]*"\s+(https?:\/\/\S+)/u.exec(value)
+  if (tab) return tab[1]
+  const nav = /(?:navigated\s+(?:back\s+|forward\s+)?to|reloaded)\s+(https?:\/\/\S+)/u.exec(value)
+  if (nav) return nav[1]
+  return null
+}
+
+/**
+ * V3 (§3.4): the acted control's name from a result head — `clicked label N:
+ * <role> "<name>"` (quoted name) or `typed into [N]` (field label). Untrusted
+ * text: clipped + control chars stripped, plain text only. Null when no control
+ * is named (grouped by tool+args alone).
+ * @param {unknown} head
+ * @returns {string | null}
+ */
+export function parseControlName(head) {
+  const value = String(head ?? '')
+  const clicked = /clicked label\s+\d+:\s+\S+\s+"([^"]*)"/u.exec(value)
+  if (clicked) return clip(clicked[1], 80) || null
+  const typed = /typed into\s+\[(\d+)\]/u.exec(value)
+  if (typed) return `field ${typed[1]}`
+  return null
+}
+
+/** V3: the URL path only (≤60 chars) for the readable digest; fail-safe clip. */
+export function pageKeyPath(url) {
+  if (typeof url !== 'string' || url.length === 0) return null
+  let path = url
+  try { path = new URL(url).pathname } catch { /* keep raw */ }
+  return clip(path, 60)
+}
+
 function emptyLedgerState() {
   return {
     turnId: null,
@@ -151,6 +193,15 @@ function emptyLedgerState() {
     okMutationsSinceOpenDecrease: 0,
     /** @type {Array<{at: number, open: number}>} */
     planOpenSamples: [],
+    // V3 (§3.4): best-effort page identity for repeated work. currentPageKey is
+    // the most recent URL named by a result (null = unknown); pageActStats groups
+    // effectful acts by (pageKey|fingerprint|controlName) for page-scoped revisits.
+    /** @type {string | null} */
+    currentPageKey: null,
+    /** @type {Map<string, {count: number, ok: number, headsVary: boolean, firstHead: string, pageKey: string, name: string, argsDigest: string, controlName: string | null}>} */
+    pageActStats: new Map(),
+    actResultsTotal: 0,
+    actResultsUnknownPage: 0,
   }
 }
 
@@ -165,6 +216,10 @@ export const WATCH_AGGREGATE_LIMITS = Object.freeze({
   digestOpenSamples: 8,
   digestArgsChars: 60,
   revisitCount: 3,
+  // V3 (§3.4): page-scoped revisit grouping (full URL identity, path digest).
+  pageActKeys: 1000,
+  pageRevisitCount: 2,
+  digestPagePathChars: 60,
   openFlatMs: 150_000,
   openFlatMutations: 3,
 })
@@ -278,6 +333,10 @@ export class WatchLedger {
     const fingerprint = toolFingerprint(name, args)
     const head = clip(text, WATCH_LIMITS.headChars)
     this.state.lastToolResultAt = at
+    // V3 (§3.4): the most recent result naming a URL updates the page key; a
+    // result naming none keeps the previous key (a click does not change pages).
+    const namedPage = parsePageKey(text)
+    if (namedPage !== null) this.state.currentPageKey = namedPage
     // V2: an ok ACT result whose text matches the provider's NO VISIBLE CHANGE
     // marker made no effect (shared predicate, agree by construction).
     const noEffect = ok && cls === 'act' && noProgressResultText(text)
@@ -321,6 +380,27 @@ export class WatchLedger {
         if (existing !== undefined) this.state.navTargetCounts.set(target, existing + 1)
       }
     }
+    // V3 (§3.4): page-scoped repeated-work grouping. Fed ONLY by effectful act
+    // results (ok, not no-effect) with a KNOWN page key; unknown page → excluded
+    // (fails toward silence). Key = full URL | fingerprint | control name.
+    const controlName = cls === 'act' ? parseControlName(head) : null
+    const pageKey = this.state.currentPageKey
+    if (cls === 'act') {
+      this.state.actResultsTotal += 1
+      if (pageKey === null) {
+        this.state.actResultsUnknownPage += 1
+      } else if (ok && !noEffect) {
+        const pkey = `${pageKey}|${fingerprint}|${controlName ?? ''}`
+        const pst = this.state.pageActStats.get(pkey)
+        if (pst !== undefined) {
+          pst.count += 1
+          pst.ok += 1
+          if (!pst.headsVary && head !== pst.firstHead) pst.headsVary = true
+        } else if (this.state.pageActStats.size < WATCH_AGGREGATE_LIMITS.pageActKeys) {
+          this.state.pageActStats.set(pkey, { count: 1, ok: 1, headsVary: false, firstHead: head, pageKey, name, argsDigest, controlName })
+        }
+      }
+    }
     this.state.events.push({
       n: this.state.eventCount,
       at,
@@ -334,6 +414,8 @@ export class WatchLedger {
       readOnly,
       toolClass: cls,
       noEffect,
+      pageKey,
+      controlName,
     })
     if (this.state.events.length > WATCH_LIMITS.toolEvents) this.state.events.shift()
     const down = this.#executorDown()
@@ -419,13 +501,17 @@ export class WatchLedger {
   #aggregates() {
     const s = this.state
     const lim = WATCH_AGGREGATE_LIMITS
-    const stats = [...s.fingerprintStats.values()]
-    const mutationRevisit = stats.some(st => !st.readOnly && st.count >= lim.revisitCount && st.ok >= 1 && !st.headsVary)
-    const mutationRevisits = stats
-      .filter(st => !st.readOnly && st.count >= 2)
+    // V3 (§3.4): the mutation-revisit signature is PAGE-SCOPED — an effectful act
+    // repeated on the same page against the same control with the same outcome
+    // (>=2). Unknown-page acts are excluded (fail toward silence), so multi-page
+    // work no longer creates false revisits. openFlat (below) is unchanged (V4).
+    const pageStats = [...s.pageActStats.values()]
+    const mutationRevisit = pageStats.some(st => st.count >= lim.pageRevisitCount && st.ok >= 1 && !st.headsVary)
+    const mutationRevisits = pageStats
+      .filter(st => st.count >= lim.pageRevisitCount)
       .sort((a, b) => b.count - a.count)
       .slice(0, lim.digestRevisits)
-      .map(st => ({ tool: st.name, args: st.argsDigest.slice(0, lim.digestArgsChars), count: st.count, ok: st.ok, sameOutcome: !st.headsVary }))
+      .map(st => ({ tool: st.name, args: st.argsDigest.slice(0, lim.digestArgsChars), count: st.count, ok: st.ok, sameOutcome: !st.headsVary, pageKey: pageKeyPath(st.pageKey), controlName: st.controlName }))
     const navRevisits = [...s.navTargetCounts.entries()]
       .filter(([, count]) => count >= 2)
       .sort((a, b) => b[1] - a[1])
@@ -438,6 +524,14 @@ export class WatchLedger {
       mutationRevisit,
       mutationRevisits,
       navRevisits,
+      // V3: how often the page was unknown for act results (compact views carry
+      // no URL → those acts are excluded from revisit counting; risk metric).
+      pageIdentity: {
+        actResults: s.actResultsTotal,
+        unknownPage: s.actResultsUnknownPage,
+        unknownPageShare: s.actResultsTotal > 0 ? s.actResultsUnknownPage / s.actResultsTotal : 0,
+        distinctPages: new Set([...s.pageActStats.values()].map(st => st.pageKey)).size,
+      },
       openItems: {
         first: s.firstPlanOpen,
         current: s.currentPlanOpen,
@@ -539,14 +633,15 @@ export function assess(state, now) {
     else if (sinceRevisionMs >= t.planStalledMs) push('PLAN_STALLED', 'suspect', `no plan revision for ${Math.round(sinceRevisionMs / 1000)}s`)
   }
 
-  // REVISIT_HINT (M4) — a soft suspect signal for wander the last-40 window
-  // misses. It NEVER alerts alone (like every soft signal): it brings the next
-  // judge call forward and corroborates a stuck verdict under the two-strike
-  // rule, exactly like PLAN_STALLED. It prioritizes the redo signature — a
-  // repeated successful MUTATION with the same outcome across the whole turn —
-  // and open items flat/rising while mutations continue. Mere navigation
-  // revisits are digest info (aggregates.navRevisits), NOT corroboration, so a
-  // faithful re-reading wander does not corroborate a wrong stuck verdict.
+  // REVISIT_HINT (M4, V3 page-scoped) — a soft suspect signal for wander the
+  // last-40 window misses. It NEVER alerts alone (like every soft signal): it
+  // brings the next judge call forward and corroborates a stuck verdict under the
+  // two-strike rule, exactly like PLAN_STALLED. V3 (§3.4): the redo signature is
+  // an effectful act repeated on the SAME PAGE against the SAME CONTROL with the
+  // same outcome (>=2); unknown-page acts are excluded (fail toward silence), so
+  // multi-page work no longer creates false revisits. open items flat/rising while
+  // mutations continue is the other branch (V4 owns continuation context). Mere
+  // navigation revisits are digest info (aggregates.navRevisits), NOT corroboration.
   if (state.running && state.aggregates !== undefined) {
     const ag = state.aggregates
     const open = ag.openItems
@@ -554,7 +649,7 @@ export function assess(state, now) {
     const openFlat = open.current !== null && open.current > 0
       && openFlatMs >= WATCH_AGGREGATE_LIMITS.openFlatMs
       && open.okMutationsSinceDecrease >= WATCH_AGGREGATE_LIMITS.openFlatMutations
-    if (ag.mutationRevisit) push('REVISIT_HINT', 'suspect', 'a successful mutation repeats with the same outcome across the turn')
+    if (ag.mutationRevisit) push('REVISIT_HINT', 'suspect', 'an effectful action repeats on the same page against the same control with the same outcome')
     else if (openFlat) push('REVISIT_HINT', 'suspect', `open plan items flat for ${Math.round(openFlatMs / 1000)}s while mutations continue`)
   }
 
