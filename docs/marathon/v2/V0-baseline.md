@@ -9,12 +9,14 @@
 
 ## Headline gates (gated windows only; legacy-manual reported, never gated)
 
-| Gate | Tune (worst) | Holdout (worst) | Target |
-|---|---|---|---|
-| Fine: zero false alerts | **PASS** (0/8) | **PASS** (0/16) | 0 |
-| Stuck: caught ≥80% | **FAIL** (1/2 = 50%) | **FAIL** (2/4 = 50%) | ≥80% |
+**Gate definitions (lead ruling 2026-11-17):** the **caught GATE is MEAN across k ≥80%** (plan §5 V5: "mean, k=3, tune and holdout each"). **Worst-case caught and stability are DIAGNOSTICS** / V5 keep-rule conditions (stability must not fall), NOT the caught gate. The **false-alert GATE is worst-case 0** on fine windows. V2 done-when "caught not below V0" compares the MEAN.
 
-**Mean** stuck-caught is 100% in both splits (every gated stuck window caught in ≥1 of 3 repeats); **worst-case** (caught in ALL k) is 50%. The v1 judge's sampling variance is the gap: a window reliably caught must survive every repeat. This reproduces the M4 FALLBACK-A gap (stuck detection below the ≥80% target) and is exactly what V2–V5 address. **Zero false alerts on healthy gated turns is met in both splits, mean and worst.**
+| Gate | Tune | Holdout | Target |
+|---|---|---|---|
+| Fine: zero false alerts (worst-case) | **PASS** (0/8) | **PASS** (0/16) | 0 |
+| Stuck: caught MEAN ≥80% | **PASS** (2/2 = 100%) | **PASS** (4/4 = 100%) | ≥80% |
+
+**Diagnostics (not the caught gate):** worst-case stuck-caught (caught in ALL k) is 50% in both splits (tune 1/2, holdout 2/4); stability 90% gated. The v1 judge's sampling variance shows here — a window reliably caught must survive every repeat. **Caveat:** the mean gate passes on a TINY sample (6 easy gated stall-loop windows, all caught in ≥1 repeat); the full corpus (harder stall-loop/wander cases from eval's collection) gives the real number and is the reference for V2–V5. This reproduces the M4 FALLBACK-A nuance (distinct-run detection below target on harder cases). **Zero false alerts on healthy gated turns is met in both splits, mean and worst.**
 
 ## Per-group metrics (k=3)
 

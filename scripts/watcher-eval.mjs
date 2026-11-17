@@ -444,7 +444,9 @@ async function main() {
     outputTokens: totals.outputTokens / (watchedSeconds / 3600),
   } : { judgeCalls: 0, inputTokens: 0, outputTokens: 0 }
 
-  const gatePass = groups.gatedAll.fineZeroAlertsWorstPass && groups.gatedAll.stuckCaughtWorstPass
+  // Gate (lead ruling 2026-11-17): caught GATE = MEAN across k ≥80%; false-alert
+  // GATE = worst-case 0 on fine. Worst-case caught + stability are diagnostics.
+  const gatePass = groups.gatedAll.fineZeroAlertsWorstPass && groups.gatedAll.stuckCaughtMeanPass
   const summary = {
     dryRun: args.dryRun, split: args.split ?? 'all', repeat: args.repeat,
     manifestCreatedAt: manifest.createdAt, manifestWindows: manifest.windows.length,
