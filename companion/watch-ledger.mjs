@@ -17,6 +17,28 @@ export const READ_ONLY_TOOLS = Object.freeze(new Set([
   'browser_places', 'browser_docs_read', 'browser_downloads', 'browser_wait_for',
 ]))
 
+/**
+ * V2 control tools (§3.3): plan/help/confirmation are not page actions. Their
+ * results are excluded from FAIL_STREAK, SAME_ERROR, REPEAT_LOOP, OBSERVE_ONLY,
+ * the mutation counters, and recovery. A PLAN_* error is plan friction (V8),
+ * not a stuck browser. Plan calls still feed the plan snapshot via activity.
+ */
+export const CONTROL_TOOLS = Object.freeze(new Set([
+  'browser_plan', 'agent_request_help', 'agent_request_confirmation',
+]))
+
+/**
+ * V2 tool class (§3.3): observe (observation), control (none of the counters),
+ * act (page actions). Replaces the single read-only list as the progress basis.
+ * @param {string} name
+ * @returns {'observe' | 'control' | 'act'}
+ */
+export function toolClass(name) {
+  if (READ_ONLY_TOOLS.has(name)) return 'observe'
+  if (CONTROL_TOOLS.has(name)) return 'control'
+  return 'act'
+}
+
 export const WATCH_LIMITS = Object.freeze({
   toolEvents: 40,
   argsDigestChars: 200,
@@ -239,20 +261,32 @@ export class WatchLedger {
     const ok = frame.ok === true
     const text = typeof frame.text === 'string' ? frame.text : ''
     const code = ok ? null : resultCode(text)
-    const readOnly = READ_ONLY_TOOLS.has(name)
+    const cls = toolClass(name)
+    const readOnly = cls === 'observe'
+    const control = cls === 'control'
     const durationMs = pending ? Math.max(0, at - pending.since) : null
     const argsDigest = clip(stableStringify(args), WATCH_LIMITS.argsDigestChars)
     const fingerprint = toolFingerprint(name, args)
     const head = clip(text, WATCH_LIMITS.headChars)
     this.state.lastToolResultAt = at
-    if (ok && !readOnly) {
+    // V2: only an ok ACT result is a mutation; control and observe are not.
+    if (ok && cls === 'act') {
       this.state.lastOkMutationAt = at
       this.state.okMutationCount += 1
       this.state.okMutationsSinceOpenDecrease += 1
     }
+    // Connectivity streak is about the executor, not progress: keep for all.
     if (code === 'SIDE_PANEL_CLOSED') this.state.sidePanelClosedStreak += 1
     else if (ok) this.state.sidePanelClosedStreak = 0
-    if (!readOnly) this.state.nonPlanResultsSinceRevision += 1
+    // V2: control results are left out of every progress counter and the event
+    // window (FAIL_STREAK/SAME_ERROR/REPEAT_LOOP/OBSERVE_ONLY read `events`).
+    if (control) {
+      const down = this.#executorDown()
+      if (down && this.state.executorDownSince === null) this.state.executorDownSince = at
+      if (!down) this.state.executorDownSince = null
+      return
+    }
+    if (cls === 'act') this.state.nonPlanResultsSinceRevision += 1
     this.state.eventCount += 1
     // M4 whole-turn aggregates: fingerprint occurrence + outcome variation, and
     // navigation-target revisits (digest info; the redo signature is a repeated
@@ -263,7 +297,7 @@ export class WatchLedger {
       if (ok) stats.ok += 1
       if (!stats.headsVary && head !== stats.firstHead) stats.headsVary = true
     } else if (this.state.fingerprintStats.size < WATCH_AGGREGATE_LIMITS.fingerprintKeys) {
-      this.state.fingerprintStats.set(fingerprint, { count: 1, ok: ok ? 1 : 0, headsVary: false, firstHead: head, name, argsDigest, readOnly })
+      this.state.fingerprintStats.set(fingerprint, { count: 1, ok: ok ? 1 : 0, headsVary: false, firstHead: head, name, argsDigest, readOnly, toolClass: cls })
     }
     if (name === 'browser_navigate') {
       const target = navigationTarget(args)
@@ -285,6 +319,7 @@ export class WatchLedger {
       head,
       durationMs,
       readOnly,
+      toolClass: cls,
     })
     if (this.state.events.length > WATCH_LIMITS.toolEvents) this.state.events.shift()
     const down = this.#executorDown()
