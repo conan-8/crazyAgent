@@ -153,3 +153,38 @@ test('M4 judge kinds stuck/blocked render actionable with their labels and sourc
   // A 'both' source (deterministic + judge) passes through too.
   assert.equal(watchNotice({ ...alertFrame, kind: 'stuck', source: 'both' }).source, 'both')
 })
+
+test('V1: a closed notice collapses the row (no buttons), like dismissed', () => {
+  const document = new FakeDocument()
+  const root = document.createElement('div')
+  // Open actionable alert first.
+  renderWatchRow(root, watchNotice(alertFrame), {})
+  assert.equal(root.classList.contains('collapsed'), false)
+  assert.equal(byClass(root, 'watch-row-actions').children.length, 3)
+  // Closed at turn end (kind info, state closed, own id) collapses it.
+  const closed = watchNotice({ ...alertFrame, kind: 'info', state: 'closed', blocker: null, reason: 'Turn ended.', signals: [] })
+  assert.equal(watchIsActionable(closed), false)
+  renderWatchRow(root, closed, {})
+  assert.equal(root.classList.contains('collapsed'), true)
+  assert.equal(root.classList.contains('alert'), false)
+  assert.equal(byClass(root, 'watch-row-actions'), null, 'no buttons on a closed row')
+  assert.equal(byClass(root, 'watch-row-reason').textContent, 'Turn ended.')
+  assert.equal(root.dataset.watchState, 'closed')
+})
+
+test('V1: ended-incomplete is actionable while open, collapses when closed at next turn start', () => {
+  const document = new FakeDocument()
+  const root = document.createElement('div')
+  const ended = watchNotice({ ...alertFrame, id: 'ended-1', kind: 'ended-incomplete', state: 'open', blocker: 'ended-incomplete', reason: 'The turn ended with work still open or blocked.', signals: [] })
+  assert.equal(watchIsActionable(ended), true)
+  renderWatchRow(root, ended, {})
+  assert.deepEqual(byClass(root, 'watch-row-actions').children.map(b => b.textContent), ['Stop', 'Steer…', "It's fine"])
+  // Closed at the next turn start.
+  renderWatchRow(root, watchNotice({ ...alertFrame, id: 'ended-1', kind: 'info', state: 'closed', reason: 'A new turn started.', signals: [] }), {})
+  assert.equal(root.classList.contains('collapsed'), true)
+  assert.equal(byClass(root, 'watch-row-actions'), null)
+  assert.equal(byClass(root, 'watch-row-reason').textContent, 'A new turn started.')
+  // Ack-dismissed also collapses.
+  renderWatchRow(root, watchNotice({ ...alertFrame, id: 'ended-1', kind: 'info', state: 'dismissed', reason: 'Dismissed.', signals: [] }), {})
+  assert.equal(root.classList.contains('collapsed'), true)
+})
