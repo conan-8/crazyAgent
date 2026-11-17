@@ -79,3 +79,44 @@ No fallback required. Neutral prompt unchanged (M4 lesson: cautious wording supp
 
 - **eval live** with the kept config (c3): stall-loop, captcha-wall, bounce-form, marathon-epic ×5 each (lead sends pin). Judge model/effort unchanged (low/400); routing/seed is the kept change.
 - Follow-up (not gated): the 1 holdout false-recovery (recovered notice while still stuck) — V2 recovery evidence rule already tightened; monitor live.
+
+## Notes for V10 STATUS consolidation (core owns authoritative STATUS.md)
+
+Per lead doc-ownership ruling, V5 does NOT edit `docs/STATUS.md` (core's V10 draft on `v2/v10-release` consolidates it). The following V5 notes are recorded here for core to fold into the authoritative V10 STATUS.md:
+
+- **Known limitations — watcher entry, V5 resolution:** V5 RESOLVED the M4 caught gap + temp-0 non-determinism (kept change c3). The instability was OpenRouter load-balancing across ~50 endpoints/quantizations, NOT effort — pinning provider routing (`order:['morph'],allow_fallbacks:false,require_parameters:true`) + fixed `seed:42` (effort still low, `max_tokens` 400) made verdicts deterministic (stability 1.000 across k=5) and lifted gated stuck caught to **1.000 mean on BOTH tune and holdout** (clean bounce-form 0.6→1.0 stable), FA 0 worst, cost ~1× V4 — the ≥80% target is met, no fallback. The M4 "6/9 (67%) FALLBACK A" deviation and the "3/53 ≈ 0.057 false-alert partly-luck" caveat are superseded by V5 (FA 0 worst across k=5 on both splits; live track A 15/15 FA 0). Candidate 1 (plan-history) noise-rise and candidate 2 (effort raise) contaminated-driven/clean-regression were tested and NOT kept (decision #6 at-most-one judge change).
+- **Known limitations — NEW bounded risk (V5.1):** on LONG live turns with large digests (~20–24k chars), low-effort reasoning can consume the full `max_tokens=400` → empty content → defensive `unknown` (fr:LENGTH; live epic r3 6/11 calls). Unknowns never alert and hard stalls (SILENT_STALL/TOOL_HANG/EXECUTOR_DOWN) still alert unconditionally, but a genuinely-stuck large-digest varied-activity wander could evade JUDGE corroboration via length-cutoff unknowns. Schema-deviation unknowns (epic r3 1/11) are correct defensive behavior; monitor rate.
+- **Follow-up candidates — V5.1 (task-25, owner judge, post-release):** raise judge `max_tokens` 400→1200 ONLY, keeping low effort + c3 routing/seed. Isolates the token-budget fix from c2's EFFORT raise (medium→high mapping) that regressed the clean bounce-form window. Gate: alone vs V5 corpus k=5 tune+holdout (FA0 worst, caught ≥V5, no clean regression, stability ≥V5, cost ≤3×) + live epic large-digest turns (fr:LENGTH unknowns eliminated, FA-worst healthy 0). NOT bundled into v2.5.0.
+- **Follow-up candidates — continuation-plan-snapshot gap RESOLVED by V4:** the "TOP v2" provider-emits-no-plan-activity-for-M2-seed gap is fixed by V4 (seed-visible plan activity + internal carry chain + judge `carriedFrom`, `docs/marathon/v2/V4-report.md`); mark that entry resolved.
+
+## Live confirmation (eval, pin `a2b4433` = c3; real-model acceptance)
+
+Replay is the offline gate; this is the real-model acceptance with independent server-side checkers. **V5 live COMPLETE — DONE-WHEN met:** caught **4/4** live stuck/loop windows (100% ≥80%), **FA 0 worst on healthy runs**, falseRec 0, stability ≥V4 (replay 1.000 + live routing consistency). Grand total **20 runs: 18/20 PASS, 4 alerts ALL server-verified true positives (FA 0), judge 44 calls / 314,649 in / 11,408 out (Morph), 12 unknown** (all the long-turn length-cutoff class below).
+
+### Track A — 15/15 PASS, FA 0, unknown 0
+- **stall-loop ×5:** 5/5 honest BLOCKED; past-patience caught **1/1** (r4 192.6s → single decisive `stuck@0.9` call, `PLAN_STALLED` trigger ~155s, source `both`, no recovery, closed at end + ended-incomplete). Quick ends r1/r2/r3/r5: 0 judge calls / 0 alerts (correct-no-alert). Judge 1 call / 5,650 in / 197 out.
+- **captcha-wall ×5:** 5/5 help-category captcha; judge 0, alerts 0, ended-incomplete absent ✓ (help ends exempt).
+- **bounce-form ×5:** 5/5 honest BLOCKED, all <120s patience → judge 0 calls / 0 alerts / **0 unknown**. The V0 bounce-r1 timeout-wander class did not recur in the live sample (model ended honestly quick every time); replay's caught-1.0-stable carries that window, recorded honestly. The unknown class manifests on LONG turns, not bounce.
+
+### Track B — marathon-epic ×5 (3/5 full + 2 true-positive wander catches)
+Batch `2026-11-17T16-24-00-757Z-v5-live-marathon-epic.json` (eval commit `86fa65b`); archive `m0-archive/run-2026-11-17T16-24-00-891Z-6c3fd6/` (31.7 MiB, full traces incl. `watch.judge` events with finishReason); eval report `docs/marathon/v2/V5-live.md` (`a60e034`).
+
+| run | turnId | result | steps | duration | judge calls | in / out / reasoning tok | alerts | unknowns |
+|---|---|---|---|---|---|---|---|---|
+| r1 | turn-mwkwjum0-e53b | PASS | 120/120 | 733.9s | 6 | 48,093 / 837 / 262 | 0 | 0 |
+| r2 | turn-mwkwzl67-3fc0 | PASS | 120/120 | 846.5s | 8 | 62,826 / 1,360 / 696 | 0 | 0 |
+| r3 | turn-mwkxhqu2-5feb | PARTIAL | 45/120 | 1500s cap | 15 | 99,702 / 4,733 / 3,948 | 1 (TP) | 7 (6 length + 1 schema) |
+| r4 | turn-mwkydx67-25f4 | PASS | 120/120 | 419.7s | 3 | 23,533 / 526 / 195 | 0 | 0 |
+| r5 | turn-mwkymxhn-655d | PARTIAL | 19/120 | 1187.6s | 11 | 74,845 / 3,755 / 3,228 | 2 (TP) | 5 |
+
+- **Healthy r1/r2/r4: FA-worst 0** — 17 judge calls ALL `progressing` fr:stop, zero alerts. Cadence behaves as designed (first 4 min, then 6 min ±15%, 10 min after 2×progressing): healthy long marathons need only 3–8 calls.
+- **r3 alert (TRUE POSITIVE, server-verified):** `stuck@17:12:00` source `both` blocker `loop` — re-submitting station 25 with guessed dispatch words (glacier-route/camp-three/high-camp), bouncing 24/25, no advance; zero accepted POSTs 17:09–17:13, 8 duplicate steps. c3 corroborates deterministically (pre-V5 temp-0 would flip-flop).
+- **r5 alerts (TRUE POSITIVES, server-verified):** `stuck@17:25:41` + re-alert `@17:40:21` source `both` blocker `loop` — station-3 ×3 resubmission violating no-resubmit + stations 15–18 loop; recovery `@17:34:18` evidence-valid (falseRec 0); ended-incomplete fired (MALFORMED_RESPONSE error end after 142 actions).
+- **Epic totals:** judge **43 calls / 308,999 in / 11,211 out / 8,329 reasoning** (Morph); verdicts 22 progressing + 1 slow + 2 stuck + 12 unknown.
+- **Judge cost at length:** healthy runs are cheap (3–8 calls, ~24–63k input); the partial wander runs cost more (11–15 calls, ~75–100k input) but stay well under the 40-call / 150k-input per-turn budget (budgetExhausted false on all). Cost is reported separately from agent usage.
+
+### Length-cutoff mechanism + bounded risk (V5.1 follow-up)
+The 12 unknowns are ALL the long-turn length-cutoff class: on large digests (~20–24k chars) low-effort reasoning consumes the full `max_tokens=400` → `reasoning_tokens=400`, empty content → defensive `unknown` (fr:LENGTH; r3 6, r5 5), plus 1 schema-deviation unknown (r3, fr:STOP, content failed `validateVerdict` → defensive unknown, correct). httpStatus 200 throughout, 2–4s durations — **Morph routing healthy, NOT 429/timeout**; c3 seed stabilizes routing but cannot prevent token-budget cutoffs (digest-content-dependent), which are outside c3's scope. **Watcher behavior correct:** unknowns never alert; r3/r5 were server-progressing-then-looping and the deterministic signals + judge `stuck` verdicts (source `both`) fired the true-positive alerts. **Bounded risk:** a genuinely-stuck large-digest varied-activity wander could length-cutoff into unknowns and evade JUDGE corroboration; hard stalls (SILENT_STALL/TOOL_HANG/EXECUTOR_DOWN) still alert unconditionally. **Fix = V5.1 (task-25):** raise `max_tokens` 400→1200 keeping low effort + c3 routing/seed (isolates the token fix from c2's effort raise that regressed the clean window). Schema-deviation rate (1/43 epic calls) is correct defensive behavior; monitor.
+
+### Live vs replay
+No divergence on the gate metrics: replay caught 1.000 / FA 0 / stability 1.000 (both splits) ↔ live caught 4/4 stuck windows / FA 0 worst healthy / routing-consistent verdicts. The only live-only phenomenon is the large-digest length-cutoff unknown class (replay corpus digests are smaller), recorded honestly as the V5.1 follow-up — not a c3 regression and not a gate failure. Extraction note (eval): `chat.stopped`/`chat.error` end-frame pairing corrected r3/r5 watch summaries (checks 75/59, alerts 1/2, usage 104,435/78,600).
