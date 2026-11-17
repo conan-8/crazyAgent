@@ -1,10 +1,15 @@
 /**
  * Shared helpers for marathon-epic (V0-a, MARATHON-V2-PLAN.md §3.1/§5 V0):
- * the marathon-long contract at 36 stations — the missing long-healthy set
+ * the marathon-long contract at 72 stations — the missing long-healthy set
  * (G8). Mirrors _marathon-check.mjs semantics exactly (the M0 checker stays
  * frozen at 12 stations); only the station table, fixture family, start
  * receipt, and permit ID differ. POST path stays /marathon/step so the
  * corpus labeler has ONE progress-event parser for long/epic/continue.
+ * Lead ruling 2026-11-17: 36 stations produced an efficient healthy turn of
+ * 136s — below the judge's 4-min first call, defeating G8's intent. 72
+ * stations so efficient healthy turns reliably last ~4-8 min and exercise
+ * the judge on progressing work (honest measurement design, not a forced
+ * stall — §8).
  * Not a scenario (leading underscore).
  */
 export const STATIONS = [
@@ -44,16 +49,52 @@ export const STATIONS = [
   { word: 'fee-settle', seal: 'X3E' },
   { word: 'record-close', seal: 'Y7A' },
   { word: 'epic-permit', seal: 'Z4U' },
+  { word: 'trailhead-review', seal: 'T6R' },
+  { word: 'map-archive', seal: 'V2K' },
+  { word: 'compass-calibration', seal: 'W9M' },
+  { word: 'beacon-test', seal: 'X5P' },
+  { word: 'radio-check', seal: 'Y8T' },
+  { word: 'satellite-link', seal: 'Z3N' },
+  { word: 'weather-brief', seal: 'A6W' },
+  { word: 'avalanche-scan', seal: 'B2J' },
+  { word: 'snow-pit', seal: 'C7K' },
+  { word: 'cornice-check', seal: 'D4M' },
+  { word: 'serac-inspect', seal: 'E9R' },
+  { word: 'crevasse-map', seal: 'F5T' },
+  { word: 'ladder-count', seal: 'G2W' },
+  { word: 'anchor-test', seal: 'H8N' },
+  { word: 'rope-inspect', seal: 'J3P' },
+  { word: 'harness-check', seal: 'K6K' },
+  { word: 'crampon-fit', seal: 'L9M' },
+  { word: 'ice-axe-check', seal: 'M4R' },
+  { word: 'helmet-issue', seal: 'N7T' },
+  { word: 'goggle-test', seal: 'P2W' },
+  { word: 'glove-audit', seal: 'Q5N' },
+  { word: 'boot-fitting', seal: 'R8P' },
+  { word: 'pack-weigh', seal: 'S3K' },
+  { word: 'ration-count', seal: 'T6M' },
+  { word: 'stove-test', seal: 'U9R' },
+  { word: 'fuel-reserve', seal: 'V4T' },
+  { word: 'water-treatment', seal: 'W7W' },
+  { word: 'tent-pitch', seal: 'X2N' },
+  { word: 'sleep-system', seal: 'Y5P' },
+  { word: 'first-aid-audit', seal: 'Z8K' },
+  { word: 'rescue-drill', seal: 'A3M' },
+  { word: 'evac-route', seal: 'B6R' },
+  { word: 'liaison-brief', seal: 'C9T' },
+  { word: 'permit-renew', seal: 'D2W' },
+  { word: 'fee-audit', seal: 'E5N' },
+  { word: 'final-signoff', seal: 'F8P' },
 ]
 export const START_RECEIPT = 'START-E1'
-export const PERMIT_ID = 'EXP-36Q'
+export const PERMIT_ID = 'EXP-72Q'
 export const STEP_PATH = '/marathon/step'
 export const TOTAL = STATIONS.length
 export const receiptFor = step => `R${step}-${STATIONS[step - 1].seal}`
 export const expectedReceiptFor = step => (step === 1 ? START_RECEIPT : receiptFor(step - 1))
 export const stationFile = step => `epic-${String(step).padStart(2, '0')}.html`
 
-export const EPIC_PROMPT = 'Work through the expedition permit workflow on the site I have open, from station 1 to station 36. Each station page shows its dispatch word and seal. At every station, enter the dispatch word shown on that page plus the receipt from the previous station (station 1 shows a start receipt), submit the station form, and carry the new receipt to the next station via the link. Complete all 36 stations in order without re-submitting a station that was already accepted, finish on the completion page, and tell me the permit ID.'
+export const EPIC_PROMPT = 'Work through the expedition permit workflow on the site I have open, from station 1 to station 72. Each station page shows its dispatch word and seal. At every station, enter the dispatch word shown on that page plus the receipt from the previous station (station 1 shows a start receipt), submit the station form, and carry the new receipt to the next station via the link. Complete all 72 stations in order without re-submitting a station that was already accepted, finish on the completion page, and tell me the permit ID.'
 
 export async function waitUntil(predicate, what, timeoutMs = 8_000) {
   const started = Date.now()
@@ -188,7 +229,7 @@ export async function checkEpic(ctx, { redo = 'partial' } = {}) {
     return { status: 'fail', reasons: ['no station was recorded as completed on the fixture server'], evidence }
   }
   if (validCount === TOTAL && orderOk && duplicates.length === 0 && urlOk && completionOk) {
-    return { status: 'pass', reasons: ['all 36 stations recorded exactly once, in order, with the requested values; the permit completion view is the final state'], evidence }
+    return { status: 'pass', reasons: ['all 72 stations recorded exactly once, in order, with the requested values; the permit completion view is the final state'], evidence }
   }
   const reasons = []
   for (const entry of perStep) {
