@@ -27,7 +27,15 @@
  *   - max_tokens 400, temperature 0.
  */
 
-export const JUDGE_MAX_TOKENS = 400
+// V5 candidate 2 (§3.6): raise the judge's reasoning budget. max_tokens 1200
+// because reasoning tokens count against it (v1's 400 sometimes length-cutoff
+// to unknown). Effort is REQUESTED 'medium'; the model's supported_efforts are
+// [max,high,low,none] so OpenRouter maps medium to the nearest supported level —
+// the EFFECTIVE effort is verified empirically via usage.reasoning_tokens and
+// recorded in the V5 report. The agent acceptance effort stays medium (plan §6);
+// only the judge effort is a V5 candidate.
+export const JUDGE_MAX_TOKENS = 1200
+export const JUDGE_REASONING_EFFORT = 'medium'
 export const JUDGE_TIMEOUT_MS = 45_000
 export const JUDGE_REASON_CHARS = 240
 export const JUDGE_EVIDENCE_MAX = 40
@@ -169,12 +177,6 @@ function digestAggregates(aggregates, now) {
       current: open.current,
       secSinceDecrease: open.current !== null && open.current > 0 ? sec(now - open.lastDecreaseAt) : 0,
       trajectory: open.samples.map(sample => ({ ageSec: sec(now - sample.at), open: sample.open })),
-      // V5 candidate 1 (§3.6): completed-count history alongside the open-count
-      // trajectory so the judge sees stalls AND reversals (a complete count that
-      // drops or stays flat while the agent keeps acting). Pure digest evidence.
-      completedFirst: open.completedFirst ?? null,
-      completedCurrent: open.completedCurrent ?? null,
-      completedTrajectory: (open.completedSamples ?? []).map(sample => ({ ageSec: sec(now - sample.at), completed: sample.completed })),
     },
   }
 }
@@ -298,9 +300,10 @@ export function createWatchJudge(options) {
       temperature: 0,
       response_format: { type: 'json_object' },
       stream: false,
-      // Low reasoning effort only when the configured model reasons; the
-      // model's default effort is high, so this must be explicit.
-      ...(model.reasoning === true ? { reasoning: { effort: 'low' } } : {}),
+      // V5 candidate 2: requested judge effort (medium; effective verified via
+      // usage.reasoning_tokens) only when the configured model reasons. Explicit
+      // because the model's default effort is high.
+      ...(model.reasoning === true ? { reasoning: { effort: JUDGE_REASONING_EFFORT } } : {}),
     }
     const digestChars = body.messages[1].content.length
 
