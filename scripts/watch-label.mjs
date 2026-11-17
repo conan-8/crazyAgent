@@ -88,6 +88,17 @@ export function scenarioFromPrompt(prompt) {
  * the fraction is exact for any run count and no run appears on both sides. */
 export const SPLIT = Object.freeze({ seed: 'marathon-v2-v0', holdoutFraction: 1 / 3 })
 
+/** Contaminated-origin runs (M1-code mid-flux diagnostics). Lead ruling
+ * 2026-11-17: ACCEPT as gated (labels from independent state; replay runs the
+ * pinned v1 watcher; isolated fixture data). Marked origin:'contaminated';
+ * V0-baseline reports gated metrics with AND without them (sensitivity). */
+export const CONTAMINATED_RUNS = Object.freeze(new Set([
+  'run-2026-11-17T00-36-32-285Z-087d49',
+  'run-2026-11-17T00-37-20-119Z-166c12',
+  'run-2026-11-17T00-43-57-262Z-2ab066',
+  'run-2026-11-17T00-56-00-693Z-d6d771',
+]))
+
 function runHash(runId) {
   return createHash('sha256').update(`${SPLIT.seed}:${runId}`).digest('hex')
 }
@@ -238,11 +249,12 @@ function redoForRun(batchRun) {
 export function labelTurn(turn, scenario, batchRun, legacyLabel = null) {
   const cls = SCENARIO_CLASS[scenario] ?? 'other'
   const dur = turn.durationSec
-  const fine = { label: 'fine', labelRule: null, labelSource: null, gated: false, onsetSec: null, windowStartSec: 0, windowEndSec: dur }
-  const stuck = (t0, rule, source) => ({
+  const fine = { label: 'fine', labelRule: null, labelSource: null, gated: false, onsetSec: null, windowStartSec: 0, windowEndSec: dur, stuckEndSec: null }
+  const stuck = (t0, rule, source, stuckEnd = dur) => ({
     label: 'stuck', labelRule: rule, labelSource: source, gated: true, onsetSec: t0,
     windowStartSec: Math.max(0, t0 - PATIENCE.stuckWindowPreSec),
     windowEndSec: Math.min(dur, t0 + PATIENCE.stuckWindowPostSec),
+    stuckEndSec: stuckEnd,
   })
 
   if (cls === 'impossible') {
@@ -274,7 +286,10 @@ export function labelTurn(turn, scenario, batchRun, legacyLabel = null) {
         const confirmBefore = turn.confirmTimes.some(at => at < t0 * 1000)
         if (callsInSpan >= PATIENCE.progressableMinCalls && !helpBefore && !confirmBefore) { onset = t0; break }
       }
-      if (onset !== null) return stuck(onset, 'server-progress-240s', 'batch serverRecords[].acceptedAt (fixture server clock)')
+      if (onset !== null) {
+        const nextProgress = progressRel.find(s => s > onset)
+        return stuck(onset, 'server-progress-240s', 'batch serverRecords[].acceptedAt (fixture server clock)', nextProgress ?? dur)
+      }
       return { ...fine, labelRule: 'server-progress-240s', labelSource: 'batch serverRecords[].acceptedAt (fixture server clock)', gated: true }
     }
     // Old archive without per-step server timestamps -> legacy-manual, not gated.
@@ -351,10 +366,11 @@ function build(args) {
         run: dir, turnId: turn.turnId, turnIndex: i, scenario, scenarioClass: SCENARIO_CLASS[scenario] ?? 'other',
         trace: trace.file, traceSha256: trace.sha256,
         label: lab.label, labelRule: lab.labelRule, labelSource: lab.labelSource, gated: lab.gated,
-        onsetSec: lab.onsetSec, windowStartSec: lab.windowStartSec, windowEndSec: lab.windowEndSec,
+        onsetSec: lab.onsetSec, windowStartSec: lab.windowStartSec, windowEndSec: lab.windowEndSec, stuckEndSec: lab.stuckEndSec,
         durationSec: turn.durationSec, split, redo: redo.length ? redo : null,
         legacyLabel: legacy.get(`${dir}#${i}`) ?? null,
         endClass: turn.endInfo.help ? 'help' : turn.endInfo.confirm ? 'confirm' : turn.endInfo.outcome === 'stopped' ? 'stopped' : (turn.endInfo.label ?? turn.endInfo.outcome),
+        origin: CONTAMINATED_RUNS.has(dir) ? 'contaminated' : 'clean',
         synthetic: false, commitUnderTest: meta.commitUnderTest,
       })
     }
