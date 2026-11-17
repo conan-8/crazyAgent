@@ -55,3 +55,50 @@
 
 - eval task-9 (M2 re-acceptance on tuning pin `a31f7f9`) → then M3 real-model zero-alert batch from a pinned M3 worktree.
 - M4 (task-5) is blocked by task-4; not started.
+
+---
+
+## Real-model acceptance — zero false alerts (eval, task-11, pin 2abb065)
+
+**Verdict: GREEN.** `marathon-long` ×5 in `/marathon`: **5/5 PASS, 12/12 exactly-once every run, 0 redos, 0 dead turns, 0 retries — and ZERO watcher alerts across all five runs**, verified from the authoritative surfaces (live `GET /state marathon.watch`, `chat.watch` frames, `chat.done` watch summaries, archived `watch.tick`/`watch.judge.summary` events — not the transcript). `ended-incomplete` did NOT fire on any clean `reported-complete` turn. The watcher genuinely ran (21 deterministic checks total); the judge was unwired at this pin (0 calls, 0 tokens — deterministic-only as specified).
+
+### Provenance
+
+- Lead acceptance pin **`2abb065e9f923bba35b2f4d67ae83acceb71d55f`** (chain: M4 judge head `cbe50ee` → **M3 fixes `3f02e2e`** (live ledger activity feed so PLAN_STALLED can fire live; authoritative ended-incomplete in turnEnded info) → M4 prep `1e3c2dc` → steer-plan row fix `9b856df` → WATCH push `2abb065`). The board text's original pin `d266ada` was moved by lead to this corrected-wiring pin; the judge's `index.mjs` wiring lands AFTER it, so this batch tests the deterministic-only watcher.
+- Worktree `/tmp/crazyagent-accept-2abb065` (harness/scenarios committed at the pin via `11ba028` ancestry — no overlays); fresh isolated home `/tmp/crazyagent-m3-eval/dsh-home`; 1017 @ medium; `--marathon` new-switch arming (per-run OFF-verified → enable → ON-verified → bare prompt; 5 `marathon.set` enables verified); `commitUnderTest` + `armingPath` in the batch JSON.
+- Gates before spend: `npm test` **1201/1201** on the pin (matches Android's isolation evidence), c1 + scenario self-tests green. Same pin as the M2 steer-plan rerun (task-9 closed GREEN first).
+
+### Per-run results and watch telemetry
+
+| run | verdict | wall s | steps | calls | failed | watch {checks, alerts, usage} | tick levels (ok/suspect/hard) | judge calls | planOutcome |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | pass | 44.7 | 28 | 27 | 0 | {2, 0, 0} | 0/2/0 | 0 | reported-complete |
+| 2 | pass | 43.2 | 43 | 44 | 6 | {2, 0, 0} | 2/0/0 | 0 | reported-complete |
+| 3 | pass | 221.3 | 71 | 70 | 2 | {11, 0, 0} | 3/8/0 | 0 | reported-complete |
+| 4 | pass | 66.4 | 60 | 59 | 0 | {3, 0, 0} | 3/0/0 | 0 | reported-complete |
+| 5 | pass | 59.5 | 27 | 36 | 0 | {3, 0, 0} | 2/1/0 | 0 | reported-complete |
+
+All 12 stations recorded exactly once in every run (server-side step record); all failed calls recovered; `chat.done` label `done`, `planOutcome=reported-complete` ×5; **zero `chat.watch` frames of any kind** (no alert, no recovered, no ended-incomplete, no info).
+
+### Verification sources (independent of the transcript)
+
+1. **Live `GET /state` poller** (1 s cadence, isolated companion's own test token, port discovered read-only from its cmdline): **436 samples across all 5 turns; `marathon.watch.open` null in every sample**; `watch.checks` rose to 11; `lastVerdict` null throughout (no judge). Trajectory: `e2e/baselines/2026-11-17T03-37-05-390Z-m3-watch-trajectory.json`.
+2. **`chat.done` frame.watch** (authoritative per-turn summary, extracted from archived `frame.out` records by turn time-window): alerts 0 / usage 0 / checks 2,2,11,3,3 — consistent with the per-turn `watch.tick` counts.
+3. **Archived `watch.tick` events**: 21 total (10 ok, 11 suspect, **0 hard**); `open:null` on every tick. **`watch.judge.summary`**: calls 0, skipped 0, all token fields 0, budgetExhausted false ×5.
+4. **Negative space**: zero `chat.watch` frames in the whole run log; zero `ended-incomplete`.
+
+### Observations for M4 (recorded, not gates)
+
+- **Soft suspects on healthy runs are real and frequent**: 11 of 21 ticks were `suspect` (r1 ×2, r3 ×8, r5 ×1) — correctly never alerted (soft signals alone never alert; judge unwired). When M4 wires the judge, suspects will bring judge calls forward on healthy runs; the two-strike rule + deterministic-corroboration requirement must keep false alerts at zero. r3's 8 suspects came from the known 221 s single-turn wander mode (M2 report cross-pin rates: wander 16%, redo 4%); it still completed faithfully with 0 redos.
+- Healthy-turn checks scale with wall (2–3 checks for 43–66 s turns, 11 for the 221 s wander) — the 20 s cadence behaves as designed; deterministic-only cost is zero model tokens.
+
+### Comparison vs clean M0
+
+Completion/reliability identical: 5/5, 0 redos, 0 dead, 0 retries. Wall 43.2–221.3 s (med 59.5) vs M0 57.5–65.5 (med 61.9) — the median matches; the upper tail is the documented wander mode (r3: 601k non-cached input from a cache-miss pattern, output 5.8k normal). Failed Σ8 (all recovered) vs M0 Σ5 — same failure classes (stale labels/validation), within the documented variance. No regression signal from the watcher's presence; the watcher never steered, stopped, or mutated anything (read-only invariant held — turns completed normally with it ticking).
+
+### Evidence
+
+- Batch: `e2e/baselines/2026-11-17T03-37-05-390Z-m3-marathon-long-marathon.json` (annotated: `commitUnderTest`, `armingPath`, per-run `marathonArm`, `planEvidence`, `watchEvidence` {summary, tick levels, judge summary, chat.watch kinds}).
+- Live trajectory: `e2e/baselines/2026-11-17T03-37-05-390Z-m3-watch-trajectory.json` (436 samples + summary).
+- Archived log: `.dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T03-37-05-493Z-6d9d73/events.jsonl` (4.7 MiB, gitignored, key-scan clean).
+

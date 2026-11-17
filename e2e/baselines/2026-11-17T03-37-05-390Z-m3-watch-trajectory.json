@@ -1,0 +1,6141 @@
+{
+  "summary": {
+    "home": "/tmp/crazyagent-m3-eval/dsh-home",
+    "remotePort": 46141,
+    "companionPid": 3094435,
+    "startedAt": "2026-11-17T03:37:05.347Z",
+    "finishedAt": "2026-11-17T03:44:44.213Z",
+    "stopReason": "SIGTERM",
+    "sampleCount": 436,
+    "turnsSeen": [
+      "turn-mwk55kph-c213",
+      "turn-mwk56jir-1bf5",
+      "turn-mwk57h4x-49a8",
+      "turn-mwk5c863-792e",
+      "turn-mwk5dns4-e516"
+    ],
+    "maxWatchChecks": 11,
+    "openAlertSamples": 0,
+    "openAlerts": [],
+    "lastSample": {
+      "at": "2026-11-17T03:44:22.534Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    }
+  },
+  "samples": [
+    {
+      "at": "2026-11-17T03:37:06.394Z",
+      "turnId": null,
+      "turnStatus": "idle",
+      "turnOutcome": null,
+      "marathonEnabled": false,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:07.398Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:08.401Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:09.403Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:10.406Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:11.409Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:12.411Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:13.413Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:14.416Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:15.420Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:16.422Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:17.425Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:18.427Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:19.430Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:20.432Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:21.435Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:22.437Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:23.442Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:24.445Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:25.448Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:26.450Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:27.452Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:28.455Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:29.458Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:30.461Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:31.463Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:32.466Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:33.468Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:34.470Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:35.473Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:36.476Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:37.478Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:38.481Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:39.483Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:40.486Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:41.489Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:42.492Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:43.495Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:44.497Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:45.500Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:46.502Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:47.504Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:48.507Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:49.510Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:50.512Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:51.515Z",
+      "turnId": "turn-mwk55kph-c213",
+      "turnStatus": "idle",
+      "turnOutcome": "done",
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:52.517Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:53.520Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:54.521Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:55.523Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:56.526Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:57.528Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:58.531Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:37:59.533Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:00.536Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:01.539Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:02.541Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:03.544Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:04.547Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:05.549Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:06.552Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:07.554Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:08.557Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:09.560Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:10.563Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:11.566Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:12.569Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:13.571Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:14.573Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:15.576Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:16.578Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:17.581Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:18.584Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:19.587Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:20.588Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:21.591Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:22.594Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:23.597Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:24.600Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:25.603Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:26.606Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:27.609Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:28.612Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:29.614Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:30.617Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:31.620Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:32.622Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:33.624Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:34.626Z",
+      "turnId": "turn-mwk56jir-1bf5",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:37:51.695Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:35.629Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:36.631Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:37.633Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:38.636Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:39.638Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:40.641Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:41.643Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:42.646Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:43.648Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:44.651Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:45.653Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:46.654Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:47.656Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:48.659Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:49.660Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:50.663Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:51.666Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:52.668Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:53.671Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:54.673Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:55.675Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:56.678Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:57.681Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:58.683Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:38:59.686Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:00.689Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:01.691Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:02.694Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:03.697Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:04.700Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:05.702Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:06.705Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:07.707Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:08.710Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:09.713Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:10.715Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:11.718Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:12.720Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:13.723Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:14.726Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:15.728Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:16.731Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:17.733Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:18.735Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:19.737Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:20.740Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:21.742Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:22.745Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:23.748Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:24.751Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:25.753Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:26.756Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:27.758Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:28.761Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:29.763Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:30.766Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:31.768Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:32.771Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:33.774Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:34.775Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:35.779Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:36.781Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:37.784Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:38.786Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:39.789Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:40.792Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:41.795Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:42.798Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:43.801Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:44.804Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:45.807Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:46.810Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:47.813Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:48.815Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:49.817Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:50.820Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:51.824Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:52.826Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:53.829Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:54.832Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:55.835Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:56.837Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:57.840Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:58.842Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:39:59.844Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:00.847Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:01.850Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:02.852Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:03.855Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:04.857Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:05.860Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:06.863Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:07.866Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:08.867Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:09.870Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:10.873Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:11.875Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:12.878Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:13.881Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:14.883Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:15.886Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:16.888Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:17.891Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:18.893Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:19.896Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:20.899Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:21.901Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:22.903Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:23.905Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:24.908Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:25.911Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:26.914Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:27.916Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:28.919Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:29.921Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:30.924Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:31.927Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:32.929Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:33.933Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:34.935Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:35.937Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:36.940Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:37.943Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:38.945Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:39.948Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:40.951Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:41.952Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:42.955Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:43.960Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:44.963Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:45.965Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:46.968Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:47.971Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:48.974Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:49.977Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:50.980Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:51.982Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:52.985Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:53.988Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:54.991Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:55.994Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:56.996Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:57.997Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:40:59.000Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:00.003Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:01.006Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:02.008Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:03.011Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:04.013Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:05.015Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:06.019Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:07.021Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:08.024Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:09.027Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:10.030Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:11.033Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:12.035Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:13.038Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:14.044Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:15.046Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:16.049Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:17.053Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:18.056Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:19.059Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:20.063Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:21.066Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:22.067Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:23.070Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:24.073Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:25.076Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:26.078Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:27.080Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:28.083Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:29.086Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:30.090Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:31.092Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:32.095Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:33.099Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:34.102Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:35.103Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:36.106Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:37.109Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:38.112Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:39.115Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:40.118Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:41.121Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:42.125Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:43.126Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:44.129Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:45.131Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:46.134Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:47.137Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:48.139Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:49.142Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:50.144Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:51.147Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:52.150Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:53.154Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:54.156Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:55.158Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:56.162Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:57.165Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:58.168Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:41:59.170Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:00.173Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:01.177Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:02.180Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:03.183Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:04.185Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:05.187Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:06.190Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:07.193Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:08.196Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:09.199Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:10.203Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:11.206Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:12.210Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:13.212Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:14.215Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:15.218Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:16.221Z",
+      "turnId": "turn-mwk57h4x-49a8",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:38:35.260Z",
+        "checks": 2
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:17.222Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:18.225Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:19.227Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:20.228Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:21.230Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:22.233Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:23.236Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:24.238Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:25.240Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:26.243Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:27.245Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:28.248Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:29.249Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:30.252Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:31.255Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:32.258Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:33.259Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:34.262Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:35.265Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:36.267Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:37.270Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:38.272Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:39.275Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:40.277Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:41.280Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:42.283Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:43.285Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:44.288Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:45.291Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:46.293Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:47.296Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:48.299Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:49.302Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:50.304Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:51.307Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:52.309Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:53.311Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:54.314Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:55.316Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:56.317Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:57.321Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:58.323Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:42:59.325Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:00.329Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:01.332Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:02.334Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:03.337Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:04.340Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:05.341Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:06.344Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:07.346Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:08.349Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:09.352Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:10.355Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:11.358Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:12.361Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:13.364Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:14.367Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:15.370Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:16.373Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:17.377Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:18.379Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:19.383Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:20.386Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:21.389Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:22.393Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:23.397Z",
+      "turnId": "turn-mwk5c863-792e",
+      "turnStatus": "idle",
+      "turnOutcome": "done",
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:42:16.919Z",
+        "checks": 11
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:24.399Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:25.401Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:26.404Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:27.407Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:28.408Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:29.411Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:30.412Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:31.415Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:32.416Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:33.419Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:34.422Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:35.424Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:36.425Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:37.427Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:38.430Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:39.432Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:40.433Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:41.436Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:42.438Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:43.442Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:44.444Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:45.447Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:46.449Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:47.452Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:48.455Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:49.458Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:50.461Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:51.463Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:52.465Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:53.468Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:54.469Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:55.471Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:56.472Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:57.475Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:58.478Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:43:59.479Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:00.482Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:01.484Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:02.487Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:03.488Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:04.491Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:05.494Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:06.496Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:07.499Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:08.501Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:09.503Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:10.504Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:11.506Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:12.510Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:13.512Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:14.515Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:15.517Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:16.520Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:17.523Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:18.526Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:19.527Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:20.530Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:21.532Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    },
+    {
+      "at": "2026-11-17T03:44:22.534Z",
+      "turnId": "turn-mwk5dns4-e516",
+      "turnStatus": "running",
+      "turnOutcome": null,
+      "marathonEnabled": true,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": "2026-11-17T03:43:23.808Z",
+        "checks": 3
+      },
+      "planRevision": null
+    }
+  ]
+}
