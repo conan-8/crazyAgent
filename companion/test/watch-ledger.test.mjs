@@ -302,3 +302,89 @@ test('V2: OBSERVE_ONLY fires on observe-only act window; control does not mask i
   const assessment = assess(l.snapshot(), t.now())
   assert.ok(kinds(assessment).some(k => k.startsWith('OBSERVE_ONLY')), 'control calls do not count as progress against OBSERVE_ONLY')
 })
+
+/* ------------------------------------------------------------------ */
+/* V2 no-effect predicate, NO_EFFECT signal, effectful recovery basis  */
+/* ------------------------------------------------------------------ */
+
+import { noProgressResultText } from '../../packages/dsh-browser-extension/lib/repeat-guards.js'
+
+test('V2: the shared no-progress predicate matches NO VISIBLE CHANGE (case-insensitive)', () => {
+  assert.equal(noProgressResultText('result: NO VISIBLE CHANGE — the pixels did not change'), true)
+  assert.equal(noProgressResultText('no visible change'), true)
+  assert.equal(noProgressResultText('clicked label 1: button "Go"'), false)
+  assert.equal(noProgressResultText(''), false)
+  assert.equal(noProgressResultText(null), false)
+  assert.equal(noProgressResultText(undefined), false)
+})
+
+test('V2: noEffect flags ok act results with the marker; not observe/control/failed', () => {
+  const t = clock()
+  const l = ledger(t)
+  call(l, 'a1', 'browser_click'); result(l, 'a1', { text: 'result: NO VISIBLE CHANGE — the page did not change' })
+  call(l, 'a2', 'browser_click'); result(l, 'a2', { text: 'clicked label 1: button "Go"' })
+  call(l, 'a3', 'browser_click'); result(l, 'a3', { ok: false, text: 'NO VISIBLE CHANGE' })
+  call(l, 'o1', 'browser_read_text'); result(l, 'o1', { text: 'NO VISIBLE CHANGE' })
+  const events = l.snapshot().events
+  assert.equal(events[0].noEffect, true, 'ok act with marker is no-effect')
+  assert.equal(events[1].noEffect, false, 'ok act without marker is effectful')
+  assert.equal(events[2].noEffect, false, 'a failed act is not no-effect (it is a failure)')
+  assert.equal(events[3].noEffect, false, 'observe is never no-effect')
+})
+
+test('V2: okEffectfulActCount counts ok effectful acts only', () => {
+  const t = clock()
+  const l = ledger(t)
+  call(l, 'a1', 'browser_click'); result(l, 'a1', { text: 'clicked label 1' })
+  call(l, 'a2', 'browser_click'); result(l, 'a2', { text: 'NO VISIBLE CHANGE — nope' })
+  call(l, 'a3', 'browser_type'); result(l, 'a3', { text: 'typed into field' })
+  call(l, 'o1', 'browser_read_text'); result(l, 'o1', { text: 'page text' })
+  call(l, 'p1', 'browser_plan'); result(l, 'p1', { text: 'plan updated' })
+  call(l, 'a4', 'browser_click'); result(l, 'a4', { ok: false, text: 'STALE_VIEW' })
+  assert.equal(l.snapshot().okEffectfulActCount, 2, 'a1 + a3 effectful; a2 no-effect, o1 observe, p1 control, a4 failed')
+})
+
+test('V2: NO_EFFECT fires at >=4 of last 8 act results no-effect (soft, never hard)', () => {
+  const t = clock()
+  const l = ledger(t)
+  // 3 no-effect acts: below threshold.
+  for (let i = 0; i < 3; i += 1) { call(l, `n${i}`, 'browser_click'); result(l, `n${i}`, { text: 'NO VISIBLE CHANGE — nope' }) }
+  assert.ok(!kinds(assess(l.snapshot(), t.now())).some(k => k.startsWith('NO_EFFECT')), '3 no-effect is below threshold')
+  // 4th no-effect act: fires suspect.
+  call(l, 'n3', 'browser_click'); result(l, 'n3', { text: 'NO VISIBLE CHANGE — nope' })
+  const a = assess(l.snapshot(), t.now())
+  assert.ok(kinds(a).some(k => k === 'NO_EFFECT:suspect'), '4 of last 8 act no-effect fires NO_EFFECT suspect')
+  assert.equal(a.level, 'suspect', 'NO_EFFECT never alerts alone (no hard)')
+})
+
+test('V2: NO_EFFECT counts only act results; effectful acts dilute the window', () => {
+  const t = clock()
+  const l = ledger(t)
+  // 4 no-effect + 4 effectful acts in the last 8 -> 4 no-effect still fires.
+  for (let i = 0; i < 4; i += 1) { call(l, `n${i}`, 'browser_click'); result(l, `n${i}`, { text: 'NO VISIBLE CHANGE' }) }
+  for (let i = 0; i < 4; i += 1) { call(l, `e${i}`, 'browser_click'); result(l, `e${i}`, { text: 'clicked label 1' }) }
+  assert.ok(kinds(assess(l.snapshot(), t.now())).some(k => k.startsWith('NO_EFFECT')), '4 of last 8')
+  // One more effectful act pushes a no-effect out of the last-8 window -> 3 -> clears.
+  call(l, 'e9', 'browser_click'); result(l, 'e9', { text: 'clicked label 2' })
+  assert.ok(!kinds(assess(l.snapshot(), t.now())).some(k => k.startsWith('NO_EFFECT')), '3 of last 8 clears')
+  // Observe/control results never count toward NO_EFFECT.
+  const l2 = ledger(t)
+  for (let i = 0; i < 8; i += 1) { call(l2, `o${i}`, 'browser_read_text'); result(l2, `o${i}`, { text: 'NO VISIBLE CHANGE' }) }
+  assert.ok(!kinds(assess(l2.snapshot(), t.now())).some(k => k.startsWith('NO_EFFECT')), 'observe excluded')
+})
+
+test('V2: planCompletedCount rises only on completion, not revision or blocked', () => {
+  const t = clock()
+  const l = ledger(t)
+  l.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 1, items: [{ content: 'A', status: 'in_progress' }, { content: 'B', status: 'pending' }] })
+  assert.equal(l.snapshot().planCompletedCount, 0)
+  // Revision bump, same items: completed unchanged.
+  l.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 2, items: [{ content: 'A', status: 'in_progress' }, { content: 'B', status: 'pending' }] })
+  assert.equal(l.snapshot().planCompletedCount, 0)
+  // Marking blocked: completed unchanged.
+  l.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 3, items: [{ content: 'A', status: 'blocked' }, { content: 'B', status: 'pending' }] })
+  assert.equal(l.snapshot().planCompletedCount, 0)
+  // Completing A: completed rises.
+  l.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 4, items: [{ content: 'A', status: 'completed' }, { content: 'B', status: 'pending' }] })
+  assert.equal(l.snapshot().planCompletedCount, 1)
+})

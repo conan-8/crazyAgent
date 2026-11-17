@@ -11,6 +11,8 @@
  * the next judge call forward (M4). Hard signals alert without the model.
  */
 
+import { noProgressResultText } from '../packages/dsh-browser-extension/lib/repeat-guards.js'
+
 /** Observation tools that mutate nothing (the OBSERVE_ONLY list, §3.3.2). */
 export const READ_ONLY_TOOLS = Object.freeze(new Set([
   'browser_screenshot', 'browser_read_text', 'browser_find', 'browser_tabs',
@@ -63,6 +65,8 @@ export const WATCH_THRESHOLDS = Object.freeze({
   sameErrorWindow: 10,
   sameErrorCount: 4,
   observeOnlyWindow: 12,
+  noEffectWindow: 8,
+  noEffectCount: 4,
   planStalledResults: 25,
   planStalledMs: 600_000,
   sidePanelClosedTrigger: 2,
@@ -136,6 +140,11 @@ function emptyLedgerState() {
     /** @type {Map<string, number>} */
     navTargetCounts: new Map(),
     okMutationCount: 0,
+    // V2 (§3.3): effectful act results (ok, not no-effect, not control) for
+    // evidence-based recovery, and the plan completed count (a rise clears an
+    // alert; a revision alone or marking blocked never does).
+    okEffectfulActCount: 0,
+    planCompletedCount: 0,
     firstPlanOpen: null,
     currentPlanOpen: null,
     openLastDecreasedAt: 0,
@@ -269,11 +278,15 @@ export class WatchLedger {
     const fingerprint = toolFingerprint(name, args)
     const head = clip(text, WATCH_LIMITS.headChars)
     this.state.lastToolResultAt = at
+    // V2: an ok ACT result whose text matches the provider's NO VISIBLE CHANGE
+    // marker made no effect (shared predicate, agree by construction).
+    const noEffect = ok && cls === 'act' && noProgressResultText(text)
     // V2: only an ok ACT result is a mutation; control and observe are not.
     if (ok && cls === 'act') {
       this.state.lastOkMutationAt = at
       this.state.okMutationCount += 1
       this.state.okMutationsSinceOpenDecrease += 1
+      if (!noEffect) this.state.okEffectfulActCount += 1
     }
     // Connectivity streak is about the executor, not progress: keep for all.
     if (code === 'SIDE_PANEL_CLOSED') this.state.sidePanelClosedStreak += 1
@@ -320,6 +333,7 @@ export class WatchLedger {
       durationMs,
       readOnly,
       toolClass: cls,
+      noEffect,
     })
     if (this.state.events.length > WATCH_LIMITS.toolEvents) this.state.events.shift()
     const down = this.#executorDown()
@@ -347,6 +361,9 @@ export class WatchLedger {
       }
       if (Array.isArray(frame.items)) {
         this.state.plan = { revision, items: frame.items.map(item => ({ content: String(item?.content ?? ''), status: String(item?.status ?? '') })) }
+        // V2: the completed count rises only when items actually complete; a
+        // revision alone or marking items blocked never raises it.
+        this.state.planCompletedCount = this.state.plan.items.filter(item => item.status === 'completed').length
         // M4 open-item trajectory: a decrease resets the flat clock; flat/rising
         // open items while mutations continue is the wander/stall signature.
         const open = this.state.plan.items.filter(item => item.status === 'pending' || item.status === 'in_progress').length
@@ -388,6 +405,8 @@ export class WatchLedger {
       plan: s.plan === null ? null : { revision: s.plan.revision, items: s.plan.items.map(item => ({ ...item })) },
       planRevision: s.planRevision,
       nonPlanResultsSinceRevision: s.nonPlanResultsSinceRevision,
+      okEffectfulActCount: s.okEffectfulActCount,
+      planCompletedCount: s.planCompletedCount,
       sidePanelClosedStreak: s.sidePanelClosedStreak,
       uiConnected: s.uiConnected,
       toolsConnected: s.toolsConnected,
@@ -501,6 +520,15 @@ export function assess(state, now) {
   const last12 = events.slice(-t.observeOnlyWindow)
   if (last12.length >= t.observeOnlyWindow && last12.every(event => event.readOnly)) {
     push('OBSERVE_ONLY', 'suspect', `last ${last12.length} calls are all observation`)
+  }
+
+  // NO_EFFECT (V2) — at least 4 of the last 8 ACT results had no visible effect
+  // (the provider's NO VISIBLE CHANGE marker). Soft: never alerts alone; brings
+  // the judge call forward and corroborates a stuck verdict under two-strike.
+  const lastAct = events.filter(event => event.toolClass === 'act').slice(-t.noEffectWindow)
+  if (lastAct.length >= t.noEffectCount) {
+    const noEffect = lastAct.filter(event => event.noEffect).length
+    if (noEffect >= t.noEffectCount) push('NO_EFFECT', 'suspect', `${noEffect} of the last ${lastAct.length} actions had no visible effect`)
   }
 
   // PLAN_STALLED — open items and no revision for 25 non-plan results or 10 min.

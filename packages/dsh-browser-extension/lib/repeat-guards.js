@@ -225,4 +225,18 @@ function toolResultText(message) {
   return parts.join('\n')
 }
 
-export { NAVIGATION_KEYS, createCallGuard, toolResultText }
+/**
+ * V2 (§3.3): the shared no-progress marker test on a result's plain text. An ok
+ * action whose text matches `NO VISIBLE CHANGE` made no effect on the page. This
+ * is the SAME predicate the provider uses for reasoning escalation
+ * (toolResultNoProgress) and the watch ledger uses for the NO_EFFECT signal and
+ * effectful-recovery — exported here and re-exported from lib/index.js so both
+ * sides agree by construction.
+ * @param {unknown} text
+ * @returns {boolean}
+ */
+function noProgressResultText(text) {
+  return /NO VISIBLE CHANGE/iu.test(String(text ?? ''))
+}
+
+export { NAVIGATION_KEYS, createCallGuard, toolResultText, noProgressResultText }

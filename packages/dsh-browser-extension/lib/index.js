@@ -56,7 +56,10 @@ import {
   validateDocsWriteBlocks,
 } from './validate.js'
 export { unknownArgumentMessage } from './validate.js'
-import { NAVIGATION_KEYS, createCallGuard, toolResultText } from './repeat-guards.js'
+import { NAVIGATION_KEYS, createCallGuard, toolResultText, noProgressResultText } from './repeat-guards.js'
+// V2 (§3.3): re-export the shared no-progress predicate so the watch ledger and
+// the provider agree by construction (the ledger imports it from repeat-guards).
+export { noProgressResultText } from './repeat-guards.js'
 
 export const name = 'browser-use-extension'
 export const inject = ['browserUse', 'tools', 'systemPrompt']
@@ -600,7 +603,7 @@ function toolResultNoProgress(data) {
   if (data.ok === false) return true
   if (data.error !== undefined) return true
   if (isRecord(data.message) && data.message.isError === true) return true
-  return /NO VISIBLE CHANGE/iu.test(toolResultText(data.message))
+  return noProgressResultText(toolResultText(data.message))
 }
 
 const DOCS_MUTATION_ACTIONS = new Set([
