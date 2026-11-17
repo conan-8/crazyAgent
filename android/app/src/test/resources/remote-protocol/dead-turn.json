@@ -31,7 +31,8 @@
             "error": null,
             "label": null,
             "usage": null,
-            "failedCalls": null
+            "failedCalls": null,
+            "plan": null
           },
           "phase": {
             "status": null,
@@ -196,7 +197,8 @@
           "outputTokens": 205,
           "totalTokens": 22168
         },
-        "failedCalls": 0
+        "failedCalls": 0,
+        "plan": null
       }
     },
     {
@@ -360,7 +362,8 @@
           "totalTokens": 22373,
           "cacheReadTokens": 12000
         },
-        "failedCalls": 0
+        "failedCalls": 0,
+        "plan": null
       }
     },
     {
@@ -454,7 +457,8 @@
           "outputTokens": 12,
           "totalTokens": 22385
         },
-        "failedCalls": 0
+        "failedCalls": 0,
+        "plan": null
       }
     }
   ],
@@ -483,7 +487,8 @@
         "outputTokens": 12,
         "totalTokens": 22385
       },
-      "failedCalls": 0
+      "failedCalls": 0,
+      "plan": null
     },
     "phase": {
       "status": null,
@@ -676,7 +681,8 @@
           "outputTokens": 205,
           "totalTokens": 22168
         },
-        "failedCalls": 0
+        "failedCalls": 0,
+        "plan": null
       },
       "phase": {
         "status": null,
@@ -767,7 +773,8 @@
           "totalTokens": 22373,
           "cacheReadTokens": 12000
         },
-        "failedCalls": 0
+        "failedCalls": 0,
+        "plan": null
       },
       "phase": {
         "status": null,
@@ -905,7 +912,8 @@
           "outputTokens": 12,
           "totalTokens": 22385
         },
-        "failedCalls": 0
+        "failedCalls": 0,
+        "plan": null
       },
       "phase": {
         "status": null,

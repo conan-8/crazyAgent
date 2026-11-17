@@ -710,3 +710,137 @@ test('V1: closed remote.watch notices replay to a reconnecting client', () => {
   assert.equal(watchEvents.length, 2)
   assert.deepEqual(watchEvents.map(e => e.body.state), ['open', 'closed'])
 })
+
+// --- V6: the live checklist (remote.plan + /state.turn.plan) ----------------
+
+const planActivity = (revision, items, extra = {}) => ({ type: 'chat.activity', kind: 'plan', revision, items, ...extra })
+const LIVE_ITEMS = [
+  { content: 'Fill the shipping form', status: 'in_progress' },
+  { content: 'Verify the confirmation page', status: 'pending' },
+]
+
+test('V6: a plan activity is journaled as remote.plan and projected on /state.turn.plan', () => {
+  const h = hub()
+  startTurn(h)
+  h.ingest(planActivity(1, LIVE_ITEMS))
+  const envelope = h.journal.at(-1)
+  assert.equal(envelope.type, 'remote.plan')
+  assert.equal(envelope.turnId, 'turn-1')
+  assert.deepEqual(envelope.body, { turnId: 'turn-1', revision: 1, items: LIVE_ITEMS, awaitingUser: false })
+  assert.deepEqual(h.projection().turn.plan, { turnId: 'turn-1', revision: 1, items: LIVE_ITEMS, awaitingUser: false })
+  // The projection is a copy: mutating it never touches the hub mirror.
+  const projected = h.projection().turn.plan
+  projected.items[0].content = 'hacked'
+  projected.revision = 99
+  assert.equal(h.projection().turn.plan.items[0].content, 'Fill the shipping form')
+  assert.equal(h.projection().turn.plan.revision, 1)
+  // A later revision replaces the list; awaitingUser rides along.
+  h.ingest(planActivity(2, [{ content: 'Fill the shipping form', status: 'completed' }, { content: 'Verify the confirmation page', status: 'in_progress' }], { awaitingUser: true }))
+  assert.deepEqual(h.projection().turn.plan, {
+    turnId: 'turn-1',
+    revision: 2,
+    items: [{ content: 'Fill the shipping form', status: 'completed' }, { content: 'Verify the confirmation page', status: 'in_progress' }],
+    awaitingUser: true,
+  })
+})
+
+test('V6: malformed plan activities are dropped fail-closed, never a partial plan', () => {
+  const h = hub()
+  startTurn(h)
+  h.ingest(planActivity(1, LIVE_ITEMS))
+  const seq = h.seq
+  const bad = [
+    planActivity(-1, LIVE_ITEMS),
+    planActivity(1.5, LIVE_ITEMS),
+    planActivity('1', LIVE_ITEMS),
+    planActivity(1, []),
+    planActivity(1, [{ content: '  ', status: 'pending' }]),
+    planActivity(1, [{ content: 'x', status: 'done' }]),
+    planActivity(1, [{ content: 'x', status: 'pending' }, { content: 'x', status: 'completed' }]),
+    planActivity(1, [{ content: 'x' }]),
+    planActivity(1, 'not a list'),
+    planActivity(1, Array.from({ length: 41 }, (_, i) => ({ content: `item ${i}`, status: 'pending' }))),
+    { type: 'chat.activity', kind: 'plan', items: LIVE_ITEMS },
+  ]
+  for (const frame of bad) h.ingest(frame)
+  assert.equal(h.seq, seq, 'no malformed plan publishes anything')
+  assert.deepEqual(h.projection().turn.plan.items, LIVE_ITEMS, 'the last good plan survives')
+})
+
+test('V6: an identical consecutive plan is a no-op; revision or awaitingUser changes publish', () => {
+  const h = hub()
+  startTurn(h)
+  h.ingest(planActivity(1, LIVE_ITEMS))
+  const seq = h.seq
+  // The same list again (a V4 seed re-emit) changes nothing.
+  h.ingest(planActivity(1, LIVE_ITEMS.map(item => ({ ...item }))))
+  assert.equal(h.seq, seq)
+  // awaitingUser flips without a revision change: that is a real update.
+  h.ingest(planActivity(1, LIVE_ITEMS, { awaitingUser: true }))
+  assert.equal(h.seq, seq + 1)
+  assert.equal(h.projection().turn.plan.awaitingUser, true)
+  // A new revision publishes even with the same items.
+  h.ingest(planActivity(2, LIVE_ITEMS, { awaitingUser: true }))
+  assert.equal(h.seq, seq + 2)
+  assert.equal(h.projection().turn.plan.revision, 2)
+})
+
+test('V6: plan activities outside a running turn are ignored', () => {
+  const h = hub()
+  h.ingest(planActivity(1, LIVE_ITEMS))
+  assert.equal(h.seq, 0, 'no active turn: nothing journaled')
+  assert.equal(h.projection().turn.plan, null)
+  startTurn(h)
+  h.ingest(planActivity(1, LIVE_ITEMS))
+  h.turnEnded({ turnId: 'turn-1', outcome: 'done', sessionId: 'session-1', label: 'done' })
+  const seq = h.seq
+  h.ingest(planActivity(2, LIVE_ITEMS))
+  assert.equal(h.seq, seq, 'after the turn ended: nothing journaled')
+  assert.equal(h.projection().turn.plan, null)
+})
+
+test('V6: the live plan clears at turn end and session change; remote.marathon takes over', () => {
+  const h = hub()
+  h.setSession('session-1')
+  startTurn(h)
+  h.ingest(planActivity(2, LIVE_ITEMS))
+  assert.notEqual(h.projection().turn.plan, null)
+  // Turn end: the live plan is gone; the carried list arrives via marathon.state.
+  h.turnEnded({ turnId: 'turn-1', outcome: 'done', sessionId: 'session-1', label: 'partial' })
+  assert.equal(h.projection().turn.plan, null)
+  const carried = { revision: 2, items: LIVE_ITEMS, updatedAt: '2026-11-17T12:05:00.000Z', turnId: 'turn-1' }
+  h.ingest({ ...MARATHON_ON_FRAME, plan: carried })
+  assert.deepEqual(h.projection().marathon.plan, carried)
+  assert.equal(h.projection().turn.plan, null, 'the carried list never re-opens the live plan')
+  // A new turn starts empty again.
+  startTurn(h, 'turn-2', 'continue')
+  assert.equal(h.projection().turn.plan, null)
+  h.ingest(planActivity(3, LIVE_ITEMS))
+  // A session change clears the live plan.
+  h.setSession('session-2')
+  assert.equal(h.projection().turn.plan, null)
+})
+
+test('V6: remote.plan replays to a reconnecting client and resync carries turn.plan', () => {
+  const h = hub()
+  startTurn(h)
+  h.ingest(planActivity(1, LIVE_ITEMS))
+  const envelope = h.journal.at(-1)
+  const replay = h.catchUp({ instance: 'inst-a', after: envelope.seq - 1 })
+  assert.equal(replay.mode, 'replay')
+  assert.deepEqual(replay.events.map(event => event.type), ['remote.plan'])
+  assert.deepEqual(replay.events[0].body, { turnId: 'turn-1', revision: 1, items: LIVE_ITEMS, awaitingUser: false })
+  assert.deepEqual(h.resyncFrame('no-instance').body.state.turn.plan, h.projection().turn.plan)
+  // remote.plan is journaled but not a committed message (projection-authoritative).
+  assert.ok(h.messages.every(message => message.type !== 'remote.plan'))
+})
+
+test('V6: chat.turn carries the plan state at the turn boundary', () => {
+  const h = hub()
+  startTurn(h)
+  h.ingest(planActivity(1, LIVE_ITEMS))
+  h.turnEnded({ turnId: 'turn-1', outcome: 'done', sessionId: 'session-1', label: 'done' })
+  const turnFrame = h.journal.filter(e => e.type === 'chat.turn').at(-1)
+  assert.equal(turnFrame.body.plan, null)
+  assert.equal(turnFrame.body.status, 'idle')
+})
