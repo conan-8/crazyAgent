@@ -37,7 +37,11 @@ export const WATCH_ALERT_LIMITS = Object.freeze({
   maxAlertsPerTurn: 3,
   maxPushesPerTurn: 3,
   snoozeMs: 15 * 60_000,
-  recoveryOkResults: 3,
+  // V2 (§3.3): recovery needs evidence — >=2 effectful act results since the
+  // alert AND the alert's own signals absent 2 consecutive ticks; OR the plan
+  // completed count rose. A plan revision alone or marking blocked never counts.
+  recoveryEffectfulActs: 2,
+  recoveryAbsentTicks: 2,
 })
 
 /** Judge cadence and budget (§3.3.4). Injected/overridable for tests. */
@@ -85,7 +89,7 @@ function isRecord(value) {
  *   judgeSource?: 'watcher' | 'both',
  *   signals: Array<{kind: string, level: string, detail: string}>,
  *   openAlert: null | {kind: string, at: number, planRevision: number},
- *   recovery: {okResults: number, okMutation: boolean, planRevision: boolean},
+ *   recovery: {effectfulActs: number, completedUp: boolean, signalsAbsentTicks: number},
  *   snoozedUntil: Record<string, number>,
  *   now: number,
  *   alertsThisTurn: number,
@@ -99,9 +103,12 @@ export function decideWatch(input) {
   const { hardKind, signals, openAlert, recovery, snoozedUntil, now, alertsThisTurn, pushesThisTurn } = input
   const judgeKind = input.judgeKind ?? null
 
-  // Recovery first: an open alert clears once the run visibly progresses.
+  // Recovery first (V2): an open alert clears only on evidence of progress —
+  // >=2 effectful act results since the alert AND its own signals absent for 2
+  // consecutive ticks, OR the plan completed count rose since the alert. A plan
+  // revision alone, or marking items blocked, is not progress.
   if (openAlert !== null) {
-    const recovered = (recovery.okResults >= limits.recoveryOkResults && recovery.okMutation) || recovery.planRevision
+    const recovered = (recovery.effectfulActs >= limits.recoveryEffectfulActs && recovery.signalsAbsentTicks >= limits.recoveryAbsentTicks) || recovery.completedUp
     if (recovered) {
       return { emit: { type: 'recovered', kind: openAlert.kind, reason: 'The agent is making progress again.', signals: [], push: false } }
     }
@@ -291,6 +298,13 @@ export class Watcher {
     const now = this.now()
     const assessment = assess(state, now)
     this.lastAssessment = assessment
+    // V2: track how many consecutive ticks the open alert's own signals have
+    // been absent (recovery needs >=2 alongside effectful actions).
+    if (this.openAlert !== null) {
+      const kinds = this.openAlert.signalKinds ?? []
+      const present = assessment.signals.some(signal => kinds.includes(signal.kind))
+      this.openAlert.absentTicks = present ? 0 : (this.openAlert.absentTicks ?? 0) + 1
+    }
     const hardKind = HARD_ALERT_KINDS.find(kind => assessment.signals.some(signal => signal.kind === kind && signal.level === 'hard')) ?? null
 
     const decision = decideWatch({
@@ -310,18 +324,13 @@ export class Watcher {
     return assessment
   }
 
-  /** Recovery progress since the open alert was raised. */
+  /** Recovery evidence since the open alert was raised (V2 §3.3). */
   #recoverySince(state) {
-    const recovery = { okResults: 0, okMutation: false, planRevision: false }
+    const recovery = { effectfulActs: 0, completedUp: false, signalsAbsentTicks: 0 }
     if (this.openAlert !== null) {
-      for (const event of state.events) {
-        if (event.at <= this.openAlert.at) continue
-        if (event.ok) {
-          recovery.okResults += 1
-          if (!event.readOnly) recovery.okMutation = true
-        }
-      }
-      recovery.planRevision = state.planRevision > this.openAlert.planRevision
+      recovery.effectfulActs = Math.max(0, (state.okEffectfulActCount ?? 0) - (this.openAlert.effectfulActCountAtAlert ?? 0))
+      recovery.completedUp = (state.planCompletedCount ?? 0) > (this.openAlert.completedCountAtAlert ?? 0)
+      recovery.signalsAbsentTicks = this.openAlert.absentTicks ?? 0
     }
     return recovery
   }
@@ -480,7 +489,15 @@ export class Watcher {
     this.alertsThisTurn += 1
     const id = randomUUID()
     const reason = emit.reason
-    this.openAlert = { id, kind: emit.kind, at: this.now(), planRevision: state.planRevision, atIso, reason }
+    this.openAlert = {
+      id, kind: emit.kind, at: this.now(), planRevision: state.planRevision, atIso, reason,
+      // V2 recovery baseline: effectful-act and completed counts at alert time,
+      // the alert's own signal kinds, and the consecutive-absent tick counter.
+      effectfulActCountAtAlert: state.okEffectfulActCount ?? 0,
+      completedCountAtAlert: state.planCompletedCount ?? 0,
+      signalKinds: [...new Set((emit.signals ?? []).map(signal => signal.kind))],
+      absentTicks: 0,
+    }
     if (emit.push) {
       this.pushesThisTurn += 1
       this.push({ type: 'watch', turnId: state.turnId, kind: emit.kind })

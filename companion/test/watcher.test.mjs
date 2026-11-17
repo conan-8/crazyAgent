@@ -10,7 +10,7 @@ function baseInput(overrides = {}) {
     hardKind: 'TOOL_HANG',
     signals: [{ kind: 'TOOL_HANG', level: 'hard', detail: 'unanswered' }],
     openAlert: null,
-    recovery: { okResults: 0, okMutation: false, planRevision: false },
+    recovery: { effectfulActs: 0, completedUp: false, signalsAbsentTicks: 0 },
     snoozedUntil: {},
     now: 1_000_000,
     alertsThisTurn: 0,
@@ -50,16 +50,23 @@ test('decideWatch: same kind waits for reAlertMs; a kind change alerts at once',
   assert.equal(decideWatch(baseInput({ openAlert, hardKind: 'EXECUTOR_DOWN', now: 1_000_001 })).emit.type, 'alert')
 })
 
-test('decideWatch: recovery clears the open alert (3 ok incl mutation, or a plan revision)', () => {
+test('decideWatch: V2 recovery needs >=2 effectful acts AND signals absent 2 ticks, OR completed-count up', () => {
   const openAlert = { kind: 'TOOL_HANG', at: 0, planRevision: 0 }
-  assert.equal(decideWatch(baseInput({ openAlert, hardKind: null, recovery: { okResults: 2, okMutation: true, planRevision: false } })).emit, null)
-  const recovered = decideWatch(baseInput({ openAlert, hardKind: 'TOOL_HANG', recovery: { okResults: 3, okMutation: true, planRevision: false } }))
+  // 1 effectful act (even with signals absent 2 ticks) is not enough.
+  assert.equal(decideWatch(baseInput({ openAlert, hardKind: null, recovery: { effectfulActs: 1, completedUp: false, signalsAbsentTicks: 2 } })).emit, null)
+  // 2 effectful acts but signals absent only 1 tick is not enough.
+  assert.equal(decideWatch(baseInput({ openAlert, hardKind: null, recovery: { effectfulActs: 2, completedUp: false, signalsAbsentTicks: 1 } })).emit, null)
+  // 2 effectful acts AND signals absent 2 ticks -> recovered (even if a hard signal still shows this tick).
+  const recovered = decideWatch(baseInput({ openAlert, hardKind: 'TOOL_HANG', recovery: { effectfulActs: 2, completedUp: false, signalsAbsentTicks: 2 } }))
   assert.equal(recovered.emit.type, 'recovered')
   assert.equal(recovered.emit.push, false)
-  const byRevision = decideWatch(baseInput({ openAlert, hardKind: null, recovery: { okResults: 0, okMutation: false, planRevision: true } }))
-  assert.equal(byRevision.emit.type, 'recovered')
-  // Three ok results without a mutation are not recovery.
-  assert.equal(decideWatch(baseInput({ openAlert, hardKind: null, recovery: { okResults: 3, okMutation: false, planRevision: false } })).emit, null)
+  // Completed count up alone recovers (no effectful acts / absent ticks needed).
+  const byCompleted = decideWatch(baseInput({ openAlert, hardKind: null, recovery: { effectfulActs: 0, completedUp: true, signalsAbsentTicks: 0 } }))
+  assert.equal(byCompleted.emit.type, 'recovered')
+  // Effectful acts without signals absent (signals still present) is not recovery.
+  assert.equal(decideWatch(baseInput({ openAlert, hardKind: null, recovery: { effectfulActs: 3, completedUp: false, signalsAbsentTicks: 0 } })).emit, null)
+  // A plan revision alone (completedUp false) is NOT recovery anymore.
+  assert.equal(decideWatch(baseInput({ openAlert, hardKind: null, recovery: { effectfulActs: 0, completedUp: false, signalsAbsentTicks: 5 } })).emit, null)
 })
 
 test('decideEndedIncomplete follows the plan table', () => {
@@ -146,7 +153,7 @@ test('the scheduler does not re-alert before reAlertMs, then re-alerts, capped a
   assert.equal(h.pushes.length, 3, 'capped at 3 pushes')
 })
 
-test('recovery emits a recovered notice and clears the open alert', () => {
+test('recovery emits a recovered notice after >=2 effectful acts AND signals absent 2 ticks', () => {
   const h = harness()
   h.call('hang', 'browser_wait_for')
   h.advance(WATCH_THRESHOLDS.toolHangHardMs)
@@ -154,12 +161,53 @@ test('recovery emits a recovered notice and clears the open alert', () => {
   h.result('hang')
   h.advance(1_000)
   for (let i = 0; i < 3; i += 1) { h.call(`ok${i}`, 'browser_click', { label: i }); h.result(`ok${i}`) }
+  // First tick with the hang signal absent: absentTicks=1, not yet recovered.
+  h.advance(WATCH_TICK_MS)
+  h.tick()
+  assert.equal(h.frames.filter(f => f.type === 'chat.watch' && f.kind === 'recovered').length, 0, 'one absent tick is not enough')
+  assert.equal(h.watcher.watchProjection().open?.kind, 'TOOL_HANG')
+  // Second consecutive absent tick: absentTicks=2 + 3 effectful acts -> recovered.
   h.advance(WATCH_TICK_MS)
   h.tick()
   const recovered = h.frames.filter(f => f.type === 'chat.watch' && f.kind === 'recovered')
   assert.equal(recovered.length, 1)
   assert.equal(recovered[0].state, 'recovered')
   assert.equal(h.watcher.watchProjection().open, null)
+})
+
+test('V2: no-effect acts do not recover an alert; a completed plan item does', () => {
+  const h = harness()
+  h.call('hang', 'browser_wait_for')
+  h.advance(WATCH_THRESHOLDS.toolHangHardMs)
+  h.tick()
+  h.result('hang')
+  h.advance(1_000)
+  // 4 ok acts but all NO VISIBLE CHANGE: no effectful acts -> no recovery.
+  for (let i = 0; i < 4; i += 1) { h.call(`ne${i}`, 'browser_click', { label: i }); h.result(`ne${i}`, true, 'result: NO VISIBLE CHANGE — the page did not change') }
+  h.advance(WATCH_TICK_MS); h.tick()
+  h.advance(WATCH_TICK_MS); h.tick()
+  assert.equal(h.frames.filter(f => f.type === 'chat.watch' && f.kind === 'recovered').length, 0, 'no-effect acts are not progress')
+  assert.equal(h.watcher.watchProjection().open?.kind, 'TOOL_HANG')
+  // A plan item completes -> completed count up -> recovery (even without effectful acts).
+  h.ledger.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 2, items: [{ content: 'A', status: 'completed' }, { content: 'B', status: 'pending' }] })
+  h.advance(WATCH_TICK_MS); h.tick()
+  assert.equal(h.frames.filter(f => f.type === 'chat.watch' && f.kind === 'recovered').length, 1, 'completed count up recovers')
+  assert.equal(h.watcher.watchProjection().open, null)
+})
+
+test('V2: a plan revision alone (no completion) does not recover an alert', () => {
+  const h = harness()
+  h.call('hang', 'browser_wait_for')
+  h.advance(WATCH_THRESHOLDS.toolHangHardMs)
+  h.tick()
+  h.result('hang')
+  h.advance(1_000)
+  // Revision bumps but no item completes; marking blocked is not progress.
+  h.ledger.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 2, items: [{ content: 'A', status: 'in_progress' }, { content: 'B', status: 'blocked' }] })
+  h.advance(WATCH_TICK_MS); h.tick()
+  h.advance(WATCH_TICK_MS); h.tick()
+  assert.equal(h.frames.filter(f => f.type === 'chat.watch' && f.kind === 'recovered').length, 0, 'revision/blocked is not recovery')
+  assert.equal(h.watcher.watchProjection().open?.kind, 'TOOL_HANG')
 })
 
 test('ack dismisses the alert, snoozes the kind, and suppresses re-alerts', () => {
