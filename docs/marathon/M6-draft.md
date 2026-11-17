@@ -106,7 +106,7 @@ Already updated incrementally for M1–M3; M6 verifies completeness and adds M4/
 **Exact locations (current → target):**
 - `package.json:3` `"version": "2.3.0"` → **2.4.0**.
 - `extension/manifest.json:4` `"version": "2.3.0"` → **2.4.0** (numeric update version).
-- `companion/index.mjs:50` `const VERSION = '2.3.0'` → **2.4.0** (flows to `RemoteHub.serverVersion` → `/state server.version` and `/health`).
+- `companion/index.mjs` `const VERSION = '2.3.0'` → **2.4.0** (flows to `RemoteHub.serverVersion` → `/state server.version` and `/health`). **Locate by content, not line number** (the line shifts with concurrent edits). **ISOLATION REQUIRED:** the main tree may carry the user's uncommitted parallel work (e.g. an auto-updater feature touching index.mjs/bridge.mjs/background*/service/dev.mjs). The M6 version bump must stage ONLY the VERSION line via a targeted edit + explicit hunk staging (`git add -p`), verifying the staged diff contains solely the version change; never sweep unrelated uncommitted work into the release. Same explicit-path/hunk discipline for every M6 bump and doc edit; secret-scan + review the staged diff before committing.
 - `android/app/build.gradle.kts:27` `versionCode = 5` → **6** and `:28` `versionName = "0.6.0"` → **0.7.0** (**APPROVED by lead 2026-11-16** — new phone features, additive protocol, minor bump matches the established scheme; product version stays 2.4.0 per plan).
 - Docs that hard-code versions: README.md, RELEASE-NOTES.md, HANDOFF-QUICK.md "Current build", docs/STATUS.md — update to 2.4.0 / Android target.
 - Check for any other `2.3.0` literal (grep at M6 go) — e.g. config/service files, android/README.md.
