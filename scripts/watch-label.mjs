@@ -67,13 +67,22 @@ export const SCENARIO_CLASS = Object.freeze({
   'unrelated-question': 'other',
 })
 
-/** Holdout split: by RUN, deterministic, fixed before scoring (~1/3 holdout). */
+/** Holdout split: by RUN, deterministic, fixed before scoring (~1/3 holdout).
+ * Runs are ranked by a seeded hash and the bottom third assigned to holdout, so
+ * the fraction is exact for any run count and no run appears on both sides. */
 export const SPLIT = Object.freeze({ seed: 'marathon-v2-v0', holdoutFraction: 1 / 3 })
 
-function runSplit(runId) {
-  const h = createHash('sha256').update(`${SPLIT.seed}:${runId}`).digest()
-  const frac = h.readUInt32BE(0) / 0xffffffff
-  return frac < SPLIT.holdoutFraction ? 'holdout' : 'tune'
+function runHash(runId) {
+  return createHash('sha256').update(`${SPLIT.seed}:${runId}`).digest('hex')
+}
+
+function assignSplits(dirs) {
+  const ranked = [...dirs].sort((a, b) => runHash(a) < runHash(b) ? -1 : runHash(a) > runHash(b) ? 1 : 0)
+  const holdoutCount = Math.max(1, Math.round(ranked.length * SPLIT.holdoutFraction))
+  const holdout = new Set(ranked.slice(0, holdoutCount))
+  const map = new Map()
+  for (const d of dirs) map.set(d, holdout.has(d) ? 'holdout' : 'tune')
+  return map
 }
 
 function parseArgs(argv) {
@@ -304,13 +313,14 @@ function build(args) {
   const windows = []
   let traceBytes = 0
   const dirs = [...byDir.keys()].filter(d => args.only === null || d === args.only || d.includes(args.only))
+  const splitMap = assignSplits(dirs)
   for (const dir of dirs) {
     const meta = byDir.get(dir)
     const file = join(args.archiveRoot, dir, 'events.jsonl')
     if (!existsSync(file)) { console.error(`skip ${dir}: no events.jsonl`); continue }
     const events = readEvents(file)
     const turns = turnsFromEvents(events)
-    const split = runSplit(dir)
+    const split = splitMap.get(dir)
     for (let i = 0; i < turns.length; i += 1) {
       const turn = turns[i]
       // match batch run by turnId (or index)
