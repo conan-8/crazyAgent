@@ -103,12 +103,37 @@ function runHash(runId) {
   return createHash('sha256').update(`${SPLIT.seed}:${runId}`).digest('hex')
 }
 
-function assignSplits(dirs) {
-  const ranked = [...dirs].sort((a, b) => runHash(a) < runHash(b) ? -1 : runHash(a) > runHash(b) ? 1 : 0)
-  const holdoutCount = Math.max(1, Math.round(ranked.length * SPLIT.holdoutFraction))
-  const holdout = new Set(ranked.slice(0, holdoutCount))
+function assignSplits(dirs, existing = new Map()) {
+  // V0 holdout discipline: runs already assigned in the frozen manifest KEEP
+  // their split verbatim; only NEW runs are assigned (deterministically, by the
+  // same seeded hash rank among themselves). This prevents ingesting new eval
+  // batches from flipping the fixed holdout/tune assignments.
   const map = new Map()
-  for (const d of dirs) map.set(d, holdout.has(d) ? 'holdout' : 'tune')
+  const fresh = []
+  for (const d of dirs) {
+    if (existing.has(d)) map.set(d, existing.get(d))
+    else fresh.push(d)
+  }
+  if (fresh.length > 0) {
+    const ranked = [...fresh].sort((a, b) => runHash(a) < runHash(b) ? -1 : runHash(a) > runHash(b) ? 1 : 0)
+    const holdoutCount = Math.max(1, Math.round(ranked.length * SPLIT.holdoutFraction))
+    const holdout = new Set(ranked.slice(0, holdoutCount))
+    for (const d of fresh) map.set(d, holdout.has(d) ? 'holdout' : 'tune')
+  }
+  return map
+}
+
+/** Read the frozen manifest's run→split map (empty if no manifest yet). */
+function loadExistingSplits() {
+  const file = join(CORPUS, 'manifest.json')
+  const map = new Map()
+  if (!existsSync(file)) return map
+  try {
+    const manifest = JSON.parse(readFileSync(file, 'utf8'))
+    for (const w of manifest.windows ?? []) {
+      if (w.run && (w.split === 'tune' || w.split === 'holdout') && !map.has(w.run)) map.set(w.run, w.split)
+    }
+  } catch { /* fall through to fresh assignment */ }
   return map
 }
 
@@ -344,7 +369,16 @@ function build(args) {
   const windows = []
   let traceBytes = 0
   const dirs = [...byDir.keys()].filter(d => args.only === null || d === args.only || d.includes(args.only))
-  const splitMap = assignSplits(dirs)
+  const existingSplits = loadExistingSplits()
+  const splitMap = assignSplits(dirs, existingSplits)
+  // Holdout discipline check: every previously-frozen run keeps its split.
+  let flipped = 0
+  for (const [run, split] of existingSplits) {
+    if (splitMap.has(run) && splitMap.get(run) !== split) flipped += 1
+  }
+  if (flipped > 0) { console.error(`FATAL: ${flipped} frozen run splits would flip — refusing to rebuild`); process.exit(1) }
+  const newRuns = dirs.filter(d => !existingSplits.has(d))
+  if (existingSplits.size > 0) console.log(`split preservation: ${existingSplits.size} frozen runs kept; ${newRuns.length} new runs assigned`)
   for (const dir of dirs) {
     const meta = byDir.get(dir)
     const file = join(args.archiveRoot, dir, 'events.jsonl')
