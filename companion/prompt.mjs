@@ -52,13 +52,18 @@ export function normalizePlanSeed(seed) {
 /**
  * The carried-plan text appended inside <marathon_mode> when a seed exists.
  * Only open items are listed, capped at PLAN_LIMITS.openSummaryItems lines.
+ *
+ * M2 tuning (task-10): the continuation header stresses fidelity — completed
+ * work is final and must not be repeated, resume from the first open item, and
+ * verify current page state before re-acting when unsure. General wording, no
+ * task-specific knowledge; a long continuation must not redo accepted work.
  * @param {{revision: number, items: Array<{content: string, status: string}>}} seed
  */
 export function formatCarriedPlan(seed) {
   const open = seed.items.filter(item => item.status === 'pending' || item.status === 'in_progress')
   const listed = open.slice(0, PLAN_LIMITS.openSummaryItems)
   const lines = [
-    `Carried plan, revision ${seed.revision} (${open.length} open). If this message continues that work, keep going and use expected_revision:${seed.revision}.`,
+    `Carried plan, revision ${seed.revision} (${open.length} open). If this message continues that work, use expected_revision:${seed.revision}. Completed items are final: never repeat their actions or re-submit anything already accepted. Resume from the first open item below. When unsure what is already done, read the current page state before acting rather than redoing work.`,
     'If it is a different task, replace the plan with acknowledge_open_removal:true and a reason.',
     ...listed.map(item => `- [${item.status}] ${item.content}`),
   ]

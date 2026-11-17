@@ -113,3 +113,35 @@ Every run: same clean stop-after-step-4 setup (0 voids); turn 2 answered **"51"*
 - `e2e/baselines/2026-11-17T02-26-39-703Z-m2-unrelated-question.json` · archive `m0-archive/run-2026-11-17T02-26-39-794Z-739f46/` (1.5 MiB)
 - smokes: `e2e/baselines/2026-11-17T02-00-10-799Z-m2-smokes.json` · archive `m0-archive/run-2026-11-17T02-00-10-884Z-401b96/`
 - All archives under `.dsh-home/browser-agent/logs/m0-archive/` (gitignored, prune-safe); every JSON carries `commitUnderTest`, `armingPath`, per-run `marathonArm`, per-turn `planEvidence`, void records, and the between/after `/state` seed chain.
+
+## M2 tuning — continuation-fidelity guidance (task-10, core)
+
+**Trigger:** suite 2 r5 above — a wandering 293 s / 47-step continuation re-submitted station 9 (two identical `browser_batch` POSTs in turn 2), and the model's finalText falsely denied it. The server-side step record caught the redo.
+
+**Root cause (lead's read, confirmed by the code):** continuation-fidelity drift on a long turn, **not** a seeding bug. The seed mechanics worked in all five runs (`planSeeded=true`, carried revision used, no `plan.seed.rejected`). The carried-plan header told the model to "keep going" but never said that completed work is final, that it should resume from the first open item, or that it should verify current page state before re-acting after a revisit. Two identical mutating repeats stay under the executor's 3-repeat guard, so only the independent server record exposes this — the guidance is the right lever.
+
+**The one change (`companion/prompt.mjs`, `formatCarriedPlan` carried-plan header only):** general wording, no fixture knowledge, no limit/counter changes, no new tools.
+
+Old header line:
+```
+Carried plan, revision N (K open). If this message continues that work, keep going and use expected_revision:N.
+```
+New header line:
+```
+Carried plan, revision N (K open). If this message continues that work, use expected_revision:N. Completed items are final: never repeat their actions or re-submit anything already accepted. Resume from the first open item below. When unsure what is already done, read the current page state before acting rather than redoing work.
+```
+The three required clauses are present verbatim: completed items final / never repeat; resume from the first open item; read current page state before acting when unsure. The "different task → acknowledge_open_removal" line and the 8-line open-item cap are unchanged. The fixed `MARATHON_MODE_GUIDANCE` block is **untouched**.
+
+**Budget numbers:**
+- Fixed `MARATHON_MODE_GUIDANCE`: **1233 chars** (unchanged; ceiling 1500, 267 headroom preserved).
+- Carried header line: 135 → **331 chars** (per-turn carried text, outside the fixed-part ceiling).
+- Full `<marathon_mode>` block: 1518 → **1738 chars** with a 2-item seed; **1852 chars** with a 12-item seed (8 listed). All per-turn conditional text, outside the 17,100 core+Docs ceiling (unchanged: 12,402 non-Docs / 18,092 Docs; core+docs 17,096).
+- Carried item list still capped at `PLAN_LIMITS.openSummaryItems` = 8 lines.
+
+**Gates (all green):**
+- `prompt.test` + `plan.test` + `plan-runtime.test`: 59/59 (the carried-plan test now asserts the three fidelity clauses; the old "keep going" assertion replaced).
+- Full `npm test`: **1152/1152** (`m2-evidence/tuning/npm-test.txt`).
+- `ui-preview --scenario marathon`: PASS, carried plan still renders at turn start (`m2-evidence/tuning/ui-marathon.txt`, `marathon-carried-plan.png`).
+- Independent check G (carried plan through the real panel + remote API): PASS — `Carried plan, revision 2 (2 open)` and `use expected_revision:2` still in the prompt; DOM renders the carried checklist (`m2-evidence/tuning/independent-check.txt`, `independent-06-carried-plan.png`).
+
+**Held:** eval re-runs ALL M2 suites (marathon-long ×5, stop-then-continue ×5, unrelated-question ×5, steer-plan) on the tuning pin for final M2 acceptance. The 2 stale reminders per continuation turn remain diagnostic only — no counter change this iteration (one change at a time). M3 was paused for this tuning and resumes after the commit.

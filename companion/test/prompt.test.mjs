@@ -71,7 +71,11 @@ test('a carried plan appends its open items inside the marathon block, capped at
   const text = buildPromptBlocks(view(), 'keep going with the shipment', now, [], { planMode: true, marathon: { seed } })[0].text
   assert.ok(text.includes(MARATHON_MODE_GUIDANCE.replace('</marathon_mode>', '')), 'the fixed guidance stays intact')
   assert.match(text, /Carried plan, revision 4 \(2 open\)/)
-  assert.match(text, /keep going and use expected_revision:4/)
+  assert.match(text, /use expected_revision:4/)
+  // M2 tuning: continuation-fidelity wording (general, no task knowledge).
+  assert.match(text, /Completed items are final: never repeat their actions or re-submit anything already accepted\./)
+  assert.match(text, /Resume from the first open item below\./)
+  assert.match(text, /When unsure what is already done, read the current page state before acting rather than redoing work\./)
   assert.match(text, /If it is a different task, replace the plan with acknowledge_open_removal:true and a reason\./)
   assert.match(text, /- \[in_progress\] Fill the shipping form/)
   assert.match(text, /- \[pending\] Verify the confirmation page/)
