@@ -1,8 +1,8 @@
 /**
  * V0-a long-healthy scenario (MARATHON-V2-PLAN.md §3.1/§5 V0, gap G8): the
- * marathon-long contract at 72 stations, so efficient healthy turns reliably
+ * marathon-long contract at 120 stations, so efficient healthy turns reliably
  * run ~4–8 minutes and actually reach the judge's 4-minute first-call
- * threshold (lead ruling 2026-11-17: 36 stations gave 136s — too short).
+ * threshold (lead ruling 2026-11-17: 36 gave 136s, 72 gave 193.4s — too short).
  * Honest by construction — every station is completable; nothing is built to
  * force a stall (§8). Progress events are the server-accepted station POSTs
  * (/marathon/step), recorded with server timestamps in the batch JSON for
@@ -31,7 +31,7 @@ export async function check(ctx) {
   return checkEpic(ctx, { redo: 'partial' })
 }
 
-/** Harness-made correct end state: drive all 72 real forms with the receipt chain. */
+/** Harness-made correct end state: drive all 120 real forms with the receipt chain. */
 export async function solve(ctx) {
   let receipt = START_RECEIPT
   for (let step = 1; step <= TOTAL; step += 1) {

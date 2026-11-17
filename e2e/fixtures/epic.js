@@ -1,5 +1,5 @@
-// Shared station logic for the marathon-epic fixture pages (epic-01..72.html).
-// Identical contract to marathon.js at 72 stations: a submit is accepted only
+// Shared station logic for the marathon-epic fixture pages (epic-01..120.html).
+// Identical contract to marathon.js at 120 stations: a submit is accepted only
 // with this station's dispatch word plus the previous station's receipt
 // (station 1 uses the printed start receipt). An accepted submit POSTs
 // {step, word, receipt} to /marathon/step — the fixture server's request log
