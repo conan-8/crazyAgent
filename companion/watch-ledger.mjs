@@ -106,7 +106,46 @@ function emptyLedgerState() {
     uiConnected: true,
     toolsConnected: true,
     executorDownSince: null,
+    // M4 bounded per-turn aggregates (cheap counters; no new I/O). They surface
+    // wander that the last-40 event window misses: whole-turn fingerprint and
+    // navigation-target occurrence counts, and the open-item trajectory.
+    /** @type {Map<string, {count: number, ok: number, headsVary: boolean, firstHead: string, name: string, argsDigest: string, readOnly: boolean}>} */
+    fingerprintStats: new Map(),
+    /** @type {Map<string, number>} */
+    navTargetCounts: new Map(),
+    okMutationCount: 0,
+    firstPlanOpen: null,
+    currentPlanOpen: null,
+    openLastDecreasedAt: 0,
+    okMutationsSinceOpenDecrease: 0,
+    /** @type {Array<{at: number, open: number}>} */
+    planOpenSamples: [],
   }
+}
+
+/** Bounds for the M4 aggregates (keep them cheap and the digest ~200 tokens). */
+export const WATCH_AGGREGATE_LIMITS = Object.freeze({
+  fingerprintKeys: 1000,
+  navTargetKeys: 200,
+  navTargetChars: 120,
+  planOpenSamples: 40,
+  digestRevisits: 5,
+  digestNavRevisits: 3,
+  digestOpenSamples: 8,
+  digestArgsChars: 60,
+  revisitCount: 3,
+  openFlatMs: 150_000,
+  openFlatMutations: 3,
+})
+
+/** The navigation target of a browser_navigate call (url, or history direction). */
+function navigationTarget(args) {
+  if (args === null || typeof args !== 'object') return null
+  const raw = typeof args.url === 'string' ? args.url
+    : typeof args.target === 'string' ? args.target
+      : typeof args.history === 'string' ? `history:${args.history}` : null
+  if (raw === null) return null
+  return raw.length > WATCH_AGGREGATE_LIMITS.navTargetChars ? raw.slice(0, WATCH_AGGREGATE_LIMITS.navTargetChars) : raw
 }
 
 export class WatchLedger {
@@ -202,21 +241,48 @@ export class WatchLedger {
     const code = ok ? null : resultCode(text)
     const readOnly = READ_ONLY_TOOLS.has(name)
     const durationMs = pending ? Math.max(0, at - pending.since) : null
+    const argsDigest = clip(stableStringify(args), WATCH_LIMITS.argsDigestChars)
+    const fingerprint = toolFingerprint(name, args)
+    const head = clip(text, WATCH_LIMITS.headChars)
     this.state.lastToolResultAt = at
-    if (ok && !readOnly) this.state.lastOkMutationAt = at
+    if (ok && !readOnly) {
+      this.state.lastOkMutationAt = at
+      this.state.okMutationCount += 1
+      this.state.okMutationsSinceOpenDecrease += 1
+    }
     if (code === 'SIDE_PANEL_CLOSED') this.state.sidePanelClosedStreak += 1
     else if (ok) this.state.sidePanelClosedStreak = 0
     if (!readOnly) this.state.nonPlanResultsSinceRevision += 1
     this.state.eventCount += 1
+    // M4 whole-turn aggregates: fingerprint occurrence + outcome variation, and
+    // navigation-target revisits (digest info; the redo signature is a repeated
+    // successful MUTATION with the same outcome, not mere navigation).
+    const stats = this.state.fingerprintStats.get(fingerprint)
+    if (stats !== undefined) {
+      stats.count += 1
+      if (ok) stats.ok += 1
+      if (!stats.headsVary && head !== stats.firstHead) stats.headsVary = true
+    } else if (this.state.fingerprintStats.size < WATCH_AGGREGATE_LIMITS.fingerprintKeys) {
+      this.state.fingerprintStats.set(fingerprint, { count: 1, ok: ok ? 1 : 0, headsVary: false, firstHead: head, name, argsDigest, readOnly })
+    }
+    if (name === 'browser_navigate') {
+      const target = navigationTarget(args)
+      if (target !== null && this.state.navTargetCounts.size < WATCH_AGGREGATE_LIMITS.navTargetKeys) {
+        this.state.navTargetCounts.set(target, (this.state.navTargetCounts.get(target) ?? 0) + 1)
+      } else if (target !== null) {
+        const existing = this.state.navTargetCounts.get(target)
+        if (existing !== undefined) this.state.navTargetCounts.set(target, existing + 1)
+      }
+    }
     this.state.events.push({
       n: this.state.eventCount,
       at,
       name,
-      argsDigest: clip(stableStringify(args), WATCH_LIMITS.argsDigestChars),
-      fingerprint: toolFingerprint(name, args),
+      argsDigest,
+      fingerprint,
       ok,
       code,
-      head: clip(text, WATCH_LIMITS.headChars),
+      head,
       durationMs,
       readOnly,
     })
@@ -246,6 +312,20 @@ export class WatchLedger {
       }
       if (Array.isArray(frame.items)) {
         this.state.plan = { revision, items: frame.items.map(item => ({ content: String(item?.content ?? ''), status: String(item?.status ?? '') })) }
+        // M4 open-item trajectory: a decrease resets the flat clock; flat/rising
+        // open items while mutations continue is the wander/stall signature.
+        const open = this.state.plan.items.filter(item => item.status === 'pending' || item.status === 'in_progress').length
+        if (this.state.firstPlanOpen === null) {
+          this.state.firstPlanOpen = open
+          this.state.openLastDecreasedAt = at
+          this.state.okMutationsSinceOpenDecrease = 0
+        } else if (this.state.currentPlanOpen !== null && open < this.state.currentPlanOpen) {
+          this.state.openLastDecreasedAt = at
+          this.state.okMutationsSinceOpenDecrease = 0
+        }
+        this.state.currentPlanOpen = open
+        this.state.planOpenSamples.push({ at, open })
+        if (this.state.planOpenSamples.length > WATCH_AGGREGATE_LIMITS.planOpenSamples) this.state.planOpenSamples.shift()
       }
     }
   }
@@ -277,6 +357,40 @@ export class WatchLedger {
       uiConnected: s.uiConnected,
       toolsConnected: s.toolsConnected,
       executorDownSince: s.executorDownSince,
+      aggregates: this.#aggregates(),
+    }
+  }
+
+  /** Bounded M4 turn aggregates for assess() and the judge digest. */
+  #aggregates() {
+    const s = this.state
+    const lim = WATCH_AGGREGATE_LIMITS
+    const stats = [...s.fingerprintStats.values()]
+    const mutationRevisit = stats.some(st => !st.readOnly && st.count >= lim.revisitCount && st.ok >= 1 && !st.headsVary)
+    const mutationRevisits = stats
+      .filter(st => !st.readOnly && st.count >= 2)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, lim.digestRevisits)
+      .map(st => ({ tool: st.name, args: st.argsDigest.slice(0, lim.digestArgsChars), count: st.count, ok: st.ok, sameOutcome: !st.headsVary }))
+    const navRevisits = [...s.navTargetCounts.entries()]
+      .filter(([, count]) => count >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, lim.digestNavRevisits)
+      .map(([target, count]) => ({ target: target.slice(0, lim.digestArgsChars), count }))
+    return {
+      calls: s.eventCount,
+      distinctFingerprints: s.fingerprintStats.size,
+      okMutations: s.okMutationCount,
+      mutationRevisit,
+      mutationRevisits,
+      navRevisits,
+      openItems: {
+        first: s.firstPlanOpen,
+        current: s.currentPlanOpen,
+        lastDecreaseAt: s.openLastDecreasedAt,
+        okMutationsSinceDecrease: s.okMutationsSinceOpenDecrease,
+        samples: s.planOpenSamples.slice(-lim.digestOpenSamples).map(sample => ({ ...sample })),
+      },
     }
   }
 }
@@ -360,6 +474,25 @@ export function assess(state, now) {
     const sinceRevisionMs = now - state.lastPlanRevisionAt
     if (state.nonPlanResultsSinceRevision >= t.planStalledResults) push('PLAN_STALLED', 'suspect', `${state.nonPlanResultsSinceRevision} results without a plan revision`)
     else if (sinceRevisionMs >= t.planStalledMs) push('PLAN_STALLED', 'suspect', `no plan revision for ${Math.round(sinceRevisionMs / 1000)}s`)
+  }
+
+  // REVISIT_HINT (M4) — a soft suspect signal for wander the last-40 window
+  // misses. It NEVER alerts alone (like every soft signal): it brings the next
+  // judge call forward and corroborates a stuck verdict under the two-strike
+  // rule, exactly like PLAN_STALLED. It prioritizes the redo signature — a
+  // repeated successful MUTATION with the same outcome across the whole turn —
+  // and open items flat/rising while mutations continue. Mere navigation
+  // revisits are digest info (aggregates.navRevisits), NOT corroboration, so a
+  // faithful re-reading wander does not corroborate a wrong stuck verdict.
+  if (state.running && state.aggregates !== undefined) {
+    const ag = state.aggregates
+    const open = ag.openItems
+    const openFlatMs = open.current !== null && open.current > 0 ? now - open.lastDecreaseAt : 0
+    const openFlat = open.current !== null && open.current > 0
+      && openFlatMs >= WATCH_AGGREGATE_LIMITS.openFlatMs
+      && open.okMutationsSinceDecrease >= WATCH_AGGREGATE_LIMITS.openFlatMutations
+    if (ag.mutationRevisit) push('REVISIT_HINT', 'suspect', 'a successful mutation repeats with the same outcome across the turn')
+    else if (openFlat) push('REVISIT_HINT', 'suspect', `open plan items flat for ${Math.round(openFlatMs / 1000)}s while mutations continue`)
   }
 
   // WALL_HINT — a wall pattern in recent result text while the agent keeps acting.

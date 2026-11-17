@@ -1,0 +1,1475 @@
+{
+  "gate": {
+    "fineWindows": 53,
+    "fineFalseAlerts": 0,
+    "fineZeroAlertsPass": true,
+    "stuckWindows": 9,
+    "stuckSemanticWindows": 6,
+    "stuckFlaggedWithinTwo": 6,
+    "stuckFlaggedRate": 0.6666666666666666,
+    "stuckSemanticFlaggedWithinTwo": 3,
+    "stuckPass": false,
+    "endedIncompleteCorrect": "53/53",
+    "falseAlertCaveat": "0 observed false alerts in 53 fine windows bounds the true rate near 3/53 (~0.057); small-sample, correlated slices noted."
+  },
+  "cost": {
+    "judgeCalls": 28,
+    "inputTokens": 134467,
+    "outputTokens": 8289,
+    "reasoningTokens": 6870,
+    "model": "deepseek/deepseek-v4.1-flash-1017",
+    "effort": "low",
+    "maxTokensPerCall": 400
+  },
+  "dryRun": false,
+  "generatedAt": "2026-11-17T04:19:14.014Z",
+  "windows": [
+    {
+      "id": "m0Smoke-r1",
+      "label": "fine",
+      "scenario": "click-once smoke",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 5,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Long-r1",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 61,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Long-r2",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 65,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Long-r3",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 57,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Long-r4",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 62,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Long-r5",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 65,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Stall-r1",
+      "label": "fine",
+      "scenario": "stall-loop",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 45,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": true,
+      "expectEndedIncomplete": true,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Stall-r2",
+      "label": "fine",
+      "scenario": "stall-loop",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 101,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": true,
+      "expectEndedIncomplete": true,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Stall-r3",
+      "label": "fine",
+      "scenario": "stall-loop",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 59,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": true,
+      "expectEndedIncomplete": true,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Stall-r5",
+      "label": "fine",
+      "scenario": "stall-loop",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 21,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": true,
+      "expectEndedIncomplete": true,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Stall-r4",
+      "label": "stuck",
+      "scenario": "stall-loop",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 153,
+      "flagged": true,
+      "checksAtAlert": 1,
+      "flaggedWithinTwo": true,
+      "alertKind": "stuck",
+      "alertSource": "both",
+      "alertReason": "Repeated clicks on 'Next record' produce no visible change; agent then wandered to unrelated fixture pages and source URLs without ever reaching record 12 or reading any access code.",
+      "judgeCalls": 1,
+      "usage": {
+        "inputTokens": 4555,
+        "outputTokens": 228,
+        "reasoningTokens": 149
+      },
+      "verdicts": [
+        {
+          "atSec": 140,
+          "state": "stuck",
+          "confidence": 0.85,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "m0Signin-r1",
+      "label": "fine",
+      "scenario": "sign-in-wall",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 10,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Signin-r2",
+      "label": "fine",
+      "scenario": "sign-in-wall",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 9,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Signin-r3",
+      "label": "fine",
+      "scenario": "sign-in-wall",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 10,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Signin-r4",
+      "label": "fine",
+      "scenario": "sign-in-wall",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 14,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m0Signin-r5",
+      "label": "fine",
+      "scenario": "sign-in-wall",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 17,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m1Long-r1",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 98,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m1Long-r2",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 52,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m1Long-r3",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 80,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m1Long-r4",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 40,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m1Long-r5",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 114,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Long-r1",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 84,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Long-r2",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 110,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 1,
+      "usage": {
+        "inputTokens": 6164,
+        "outputTokens": 84,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": [
+        {
+          "atSec": 100,
+          "state": "progressing",
+          "confidence": 0.9,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "m2Long-r3",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 66,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Long-r4",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 78,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Long-r5",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 297,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 2,
+      "usage": {
+        "inputTokens": 8897,
+        "outputTokens": 800,
+        "reasoningTokens": 800
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": [
+        {
+          "atSec": 100,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        },
+        {
+          "atSec": 200,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "m2tSuite1-r1",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 57,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2tSuite1-r2",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 56,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2tSuite1-r4",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 68,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2tSuite1-r5",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 42,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2tSuite1-r3",
+      "label": "stuck",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 642,
+      "flagged": true,
+      "checksAtAlert": 2,
+      "flaggedWithinTwo": true,
+      "alertKind": "stuck",
+      "alertSource": "both",
+      "alertReason": "Stations 1-4 accepted, but since station 5 the agent has been cycling back/forward between stations 3-5 and re-submitting station 5 with inconsistent receipts (R4-4T0 then R4-Q7D), with no forward progress for ~75s.",
+      "judgeCalls": 6,
+      "usage": {
+        "inputTokens": 36645,
+        "outputTokens": 2108,
+        "reasoningTokens": 1854
+      },
+      "verdicts": [
+        {
+          "atSec": 100,
+          "state": "progressing",
+          "confidence": 0.85,
+          "status": "ok"
+        },
+        {
+          "atSec": 220,
+          "state": "stuck",
+          "confidence": 0.82,
+          "status": "ok"
+        },
+        {
+          "atSec": 320,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        },
+        {
+          "atSec": 420,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        },
+        {
+          "atSec": 520,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        },
+        {
+          "atSec": 620,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "m2Suite2-r1",
+      "label": "fine",
+      "scenario": "stop-then-continue",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 19,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Suite2-r2",
+      "label": "fine",
+      "scenario": "stop-then-continue",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 37,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Suite2-r3",
+      "label": "fine",
+      "scenario": "stop-then-continue",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 17,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Suite2-r4",
+      "label": "fine",
+      "scenario": "stop-then-continue",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 47,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Suite2-r5",
+      "label": "fine",
+      "scenario": "stop-then-continue",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 11,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Suite2-r6",
+      "label": "fine",
+      "scenario": "stop-then-continue",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 28,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Suite2-r7",
+      "label": "fine",
+      "scenario": "stop-then-continue",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 37,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Suite2-r8",
+      "label": "fine",
+      "scenario": "stop-then-continue",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 73,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Suite2-r9",
+      "label": "fine",
+      "scenario": "stop-then-continue",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 107,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Suite2-r10",
+      "label": "stuck",
+      "scenario": "stop-then-continue",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 293,
+      "flagged": false,
+      "checksAtAlert": null,
+      "flaggedWithinTwo": false,
+      "alertKind": null,
+      "alertSource": null,
+      "alertReason": null,
+      "judgeCalls": 2,
+      "usage": {
+        "inputTokens": 9825,
+        "outputTokens": 443,
+        "reasoningTokens": 287
+      },
+      "verdicts": [
+        {
+          "atSec": 140,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        },
+        {
+          "atSec": 240,
+          "state": "slow",
+          "confidence": 0.6,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "m2Unrelated-r1",
+      "label": "fine",
+      "scenario": "unrelated-question",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 19,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Unrelated-r2",
+      "label": "fine",
+      "scenario": "unrelated-question",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 2,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Unrelated-r3",
+      "label": "fine",
+      "scenario": "unrelated-question",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 25,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Unrelated-r4",
+      "label": "fine",
+      "scenario": "unrelated-question",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 2,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Unrelated-r5",
+      "label": "fine",
+      "scenario": "unrelated-question",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 14,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Unrelated-r6",
+      "label": "fine",
+      "scenario": "unrelated-question",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 1,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Unrelated-r7",
+      "label": "fine",
+      "scenario": "unrelated-question",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 19,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Unrelated-r8",
+      "label": "fine",
+      "scenario": "unrelated-question",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 2,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Unrelated-r9",
+      "label": "fine",
+      "scenario": "unrelated-question",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 21,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m2Unrelated-r10",
+      "label": "fine",
+      "scenario": "unrelated-question",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 3,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m3Long-r1",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 45,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m3Long-r2",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 43,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m3Long-r3",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 221,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 2,
+      "usage": {
+        "inputTokens": 12246,
+        "outputTokens": 366,
+        "reasoningTokens": 179
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": [
+        {
+          "atSec": 100,
+          "state": "progressing",
+          "confidence": 0.78,
+          "status": "ok"
+        },
+        {
+          "atSec": 200,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "m3Long-r4",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 66,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "m3Long-r5",
+      "label": "fine",
+      "scenario": "marathon-long",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 59,
+      "falseAlert": false,
+      "alerts": [],
+      "judgeCalls": 0,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0
+      },
+      "endedIncomplete": false,
+      "expectEndedIncomplete": false,
+      "endedIncompleteCorrect": true,
+      "verdicts": []
+    },
+    {
+      "id": "contaminatedStall-r4",
+      "label": "stuck",
+      "scenario": "stall-loop",
+      "synthetic": false,
+      "slice": false,
+      "durationSec": 420,
+      "flagged": true,
+      "checksAtAlert": 1,
+      "flaggedWithinTwo": true,
+      "alertKind": "stuck",
+      "alertSource": "both",
+      "alertReason": "The Next record button produces no visible change on stall-loop.html; repeated clicks, key presses, reloads, and view-source attempts all fail, and a wait_for 'Record 2 of 12' timed out. No progress toward record 12 after 160s.",
+      "judgeCalls": 3,
+      "usage": {
+        "inputTokens": 14120,
+        "outputTokens": 986,
+        "reasoningTokens": 772
+      },
+      "verdicts": [
+        {
+          "atSec": 160,
+          "state": "stuck",
+          "confidence": 0.82,
+          "status": "ok"
+        },
+        {
+          "atSec": 260,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        },
+        {
+          "atSec": 360,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "contaminatedStall-r4-late",
+      "label": "stuck",
+      "scenario": "stall-loop",
+      "synthetic": false,
+      "slice": true,
+      "durationSec": 180,
+      "flagged": false,
+      "checksAtAlert": null,
+      "flaggedWithinTwo": false,
+      "alertKind": null,
+      "alertSource": null,
+      "alertReason": null,
+      "judgeCalls": 2,
+      "usage": {
+        "inputTokens": 10883,
+        "outputTokens": 643,
+        "reasoningTokens": 517
+      },
+      "verdicts": [
+        {
+          "atSec": 160,
+          "state": "stuck",
+          "confidence": 0.82,
+          "status": "ok"
+        },
+        {
+          "atSec": 260,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        },
+        {
+          "atSec": 360,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "m2tSuite1-r3-late",
+      "label": "stuck",
+      "scenario": "stall-loop",
+      "synthetic": false,
+      "slice": true,
+      "durationSec": 342,
+      "flagged": false,
+      "checksAtAlert": null,
+      "flaggedWithinTwo": false,
+      "alertKind": null,
+      "alertSource": null,
+      "alertReason": null,
+      "judgeCalls": 4,
+      "usage": {
+        "inputTokens": 29007,
+        "outputTokens": 1600,
+        "reasoningTokens": 1524
+      },
+      "verdicts": [
+        {
+          "atSec": 100,
+          "state": "progressing",
+          "confidence": 0.85,
+          "status": "ok"
+        },
+        {
+          "atSec": 220,
+          "state": "stuck",
+          "confidence": 0.82,
+          "status": "ok"
+        },
+        {
+          "atSec": 320,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        },
+        {
+          "atSec": 420,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        },
+        {
+          "atSec": 520,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        },
+        {
+          "atSec": 620,
+          "state": "unknown",
+          "confidence": 0,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "synthetic-TOOL_HANG",
+      "label": "stuck",
+      "scenario": "TOOL_HANG",
+      "synthetic": true,
+      "slice": false,
+      "durationSec": 300,
+      "flagged": true,
+      "checksAtAlert": 1,
+      "flaggedWithinTwo": true,
+      "alertKind": "stuck",
+      "alertSource": "both",
+      "alertReason": "No events or tool calls are recorded; the only signal is TOOL_HANG, so there is no observable progress.",
+      "judgeCalls": 2,
+      "usage": {
+        "inputTokens": 794,
+        "outputTokens": 439,
+        "reasoningTokens": 364
+      },
+      "verdicts": [
+        {
+          "atSec": 100,
+          "state": "stuck",
+          "confidence": 0.6,
+          "status": "ok"
+        },
+        {
+          "atSec": 200,
+          "state": "stuck",
+          "confidence": 0.8,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "synthetic-EXECUTOR_DOWN",
+      "label": "stuck",
+      "scenario": "EXECUTOR_DOWN",
+      "synthetic": true,
+      "slice": false,
+      "durationSec": 300,
+      "flagged": true,
+      "checksAtAlert": 1,
+      "flaggedWithinTwo": true,
+      "alertKind": "blocked",
+      "alertSource": "both",
+      "alertReason": "Executor is down and no further browser activity is occurring; only one click is recorded, so no progress can be verified.",
+      "judgeCalls": 1,
+      "usage": {
+        "inputTokens": 441,
+        "outputTokens": 130,
+        "reasoningTokens": 81
+      },
+      "verdicts": [
+        {
+          "atSec": 100,
+          "state": "blocked",
+          "confidence": 0.8,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "synthetic-SILENT_STALL",
+      "label": "stuck",
+      "scenario": "SILENT_STALL",
+      "synthetic": true,
+      "slice": false,
+      "durationSec": 360,
+      "flagged": true,
+      "checksAtAlert": 1,
+      "flaggedWithinTwo": true,
+      "alertKind": "stuck",
+      "alertSource": "both",
+      "alertReason": "Only one successful click is recorded, with no subsequent navigation, text, or reasoning; the SILENT_STALL signal and 140s elapsed time indicate no observable progress.",
+      "judgeCalls": 2,
+      "usage": {
+        "inputTokens": 890,
+        "outputTokens": 462,
+        "reasoningTokens": 343
+      },
+      "verdicts": [
+        {
+          "atSec": 140,
+          "state": "stuck",
+          "confidence": 0.7,
+          "status": "ok"
+        },
+        {
+          "atSec": 240,
+          "state": "stuck",
+          "confidence": 0.8,
+          "status": "ok"
+        }
+      ]
+    }
+  ]
+}
