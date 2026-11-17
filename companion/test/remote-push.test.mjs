@@ -108,22 +108,54 @@ test('a push carries exactly the metadata keys, as strings, with help at high pr
   assert.equal(audits.filter(entry => entry.event === 'push.delivery').length, 4)
 })
 
-test('one turn is announced once per device, and nothing is sent without a provider, devices, or a valid event', async () => {
+test('one push per turn, type, and ordinal; nothing is sent without a provider, devices, or a valid event', async () => {
   const provider = fakeProvider()
   const registry = new PushRegistry()
   const service = new PushService({ registry, provider })
   assert.equal((await service.notify({ type: 'done', turnId: 'turn-0', instanceId: 'i', sequence: 1 })).skipped, 'no-devices')
   registry.put('phone-1', reg(TOKEN_A))
   assert.equal((await service.notify({ type: 'done', turnId: 'turn-1', instanceId: 'i', sequence: 2 })).sent, 1)
-  assert.equal((await service.notify({ type: 'done', turnId: 'turn-1', instanceId: 'i', sequence: 3 })).skipped, 'duplicate-turn')
-  assert.equal((await service.notify({ type: 'help', turnId: 'turn-1', instanceId: 'i', sequence: 3 })).skipped, 'duplicate-turn')
+  // The same logical push (same type and ordinal) is deduped even at a new sequence.
+  assert.equal((await service.notify({ type: 'done', turnId: 'turn-1', instanceId: 'i', sequence: 3 })).skipped, 'duplicate-push')
+  // M5: the key is turnId:type:ordinal — a different type for the same turn is
+  // its own announcement (a mid-turn watch push must not swallow the turn end).
+  assert.equal((await service.notify({ type: 'help', turnId: 'turn-1', instanceId: 'i', sequence: 3 })).sent, 1)
   assert.equal((await service.notify({ type: 'tool_call', turnId: 'turn-2', instanceId: 'i', sequence: 4 })).skipped, 'invalid-event')
   assert.equal((await service.notify({ type: 'done', turnId: '', instanceId: 'i', sequence: 4 })).skipped, 'invalid-event')
-  assert.equal(provider.sends.length, 1)
+  assert.equal((await service.notify({ type: 'watch', turnId: 'turn-2', instanceId: 'i', sequence: 4, ordinal: -1 })).skipped, 'invalid-event')
+  assert.equal((await service.notify({ type: 'watch', turnId: 'turn-2', instanceId: 'i', sequence: 4, ordinal: 1.5 })).skipped, 'invalid-event')
+  assert.equal(provider.sends.length, 2)
 
   const off = new PushService({ registry })
   assert.equal(off.configured, false)
   assert.equal((await off.notify({ type: 'help', turnId: 'turn-3', instanceId: 'i', sequence: 5 })).skipped, 'not-configured')
+})
+
+test('M5: watch pushes are high priority, metadata-only, and dedupe per turnId:type:ordinal', async () => {
+  const provider = fakeProvider()
+  const registry = new PushRegistry()
+  registry.put('phone-1', reg(TOKEN_A))
+  const service = new PushService({ registry, provider })
+  // A mid-turn watch alert, then the turn-end push for the SAME turn: both go out.
+  assert.equal((await service.notify({ type: 'watch', turnId: 'turn-7', instanceId: 'inst-7', sequence: 10 })).sent, 1)
+  assert.equal((await service.notify({ type: 'done', turnId: 'turn-7', instanceId: 'inst-7', sequence: 20 })).sent, 1)
+  // A retried identical watch alert is deduped; the next ordinal is a new alert.
+  assert.equal((await service.notify({ type: 'watch', turnId: 'turn-7', instanceId: 'inst-7', sequence: 21 })).skipped, 'duplicate-push')
+  assert.equal((await service.notify({ type: 'watch', turnId: 'turn-7', instanceId: 'inst-7', sequence: 22, ordinal: 1 })).sent, 1)
+  assert.equal((await service.notify({ type: 'watch', turnId: 'turn-7', instanceId: 'inst-7', sequence: 23, ordinal: 2 })).sent, 1)
+  assert.equal((await service.notify({ type: 'watch', turnId: 'turn-7', instanceId: 'inst-7', sequence: 24, ordinal: 2 })).skipped, 'duplicate-push')
+  // Another turn starts its own ordinal count.
+  assert.equal((await service.notify({ type: 'watch', turnId: 'turn-8', instanceId: 'inst-7', sequence: 25 })).sent, 1)
+  assert.equal(provider.sends.length, 5)
+  for (const send of provider.sends) {
+    assert.deepEqual(Object.keys(send.data).sort(), ['instanceId', 'sequence', 'turnId', 'type'])
+    for (const value of Object.values(send.data)) assert.equal(typeof value, 'string')
+  }
+  const watchSends = provider.sends.filter(send => send.data.type === 'watch')
+  assert.equal(watchSends.length, 4)
+  for (const send of watchSends) assert.deepEqual(send.options, { priority: 'high' })
+  assert.deepEqual(watchSends[0].data, { type: 'watch', turnId: 'turn-7', instanceId: 'inst-7', sequence: '10' })
+  assert.deepEqual(provider.sends.find(send => send.data.type === 'done').options, { priority: 'normal' })
 })
 
 test('retries are bounded and classified; a dead token is pruned without touching other devices', async () => {
@@ -218,4 +250,29 @@ test('only finished and failed turns are announced', () => {
   assert.equal(pushTypeForTurn({ outcome: 'done', confirm: { action: 'Submit it', target: 'Submit button' } }), 'confirm')
   assert.equal(pushTypeForTurn({ outcome: 'done', help: { category: 'login', reason: 'x' }, confirm: { action: 'Submit it', target: 'Submit button' } }), 'help')
   assert.equal(pushTypeForTurn({ outcome: 'stopped', confirm: { action: 'Submit it', target: 'Submit button' } }), null)
+})
+
+test('M5: an ended-incomplete marathon turn is announced as watch, never as plain done/error', () => {
+  // The watcher's own decision, passed explicitly by the turn-end path.
+  assert.equal(pushTypeForTurn({ outcome: 'done', marathon: true, endedIncomplete: true }), 'watch')
+  assert.equal(pushTypeForTurn({ outcome: 'error', marathon: true, endedIncomplete: true }), 'watch')
+  // Without the flag, the same pure rule the watcher uses decides: an armed
+  // turn with a partial/blocked label, an unfinished/blocked plan, or a dead
+  // turn; an error on a marathon turn always ended incomplete.
+  assert.equal(pushTypeForTurn({ outcome: 'done', marathon: true, label: 'partial' }), 'watch')
+  assert.equal(pushTypeForTurn({ outcome: 'done', marathon: true, label: 'blocked' }), 'watch')
+  assert.equal(pushTypeForTurn({ outcome: 'done', marathon: true, planOutcome: 'unfinished' }), 'watch')
+  assert.equal(pushTypeForTurn({ outcome: 'done', marathon: true, planOutcome: 'blocked' }), 'watch')
+  assert.equal(pushTypeForTurn({ outcome: 'done', marathon: true, deadTurn: true }), 'watch')
+  assert.equal(pushTypeForTurn({ outcome: 'error', marathon: true, error: 'x' }), 'watch')
+  // A clean marathon completion stays a done push; asking for the user wins.
+  assert.equal(pushTypeForTurn({ outcome: 'done', marathon: true, label: 'done', planOutcome: 'reported-complete' }), 'done')
+  assert.equal(pushTypeForTurn({ outcome: 'done', marathon: true, label: 'partial', help: { category: 'login', reason: 'x' } }), 'help')
+  assert.equal(pushTypeForTurn({ outcome: 'done', marathon: true, label: 'partial', confirm: { action: 'Submit it', target: 'Submit button' } }), 'confirm')
+  // A user stop announces nothing, marathon or not.
+  assert.equal(pushTypeForTurn({ outcome: 'stopped', marathon: true, label: 'partial' }), null)
+  // Non-marathon turns keep the pre-M5 behavior even with a partial label.
+  assert.equal(pushTypeForTurn({ outcome: 'done', label: 'partial' }), 'done')
+  assert.equal(pushTypeForTurn({ outcome: 'done', marathon: false, label: 'blocked' }), 'done')
+  assert.equal(pushTypeForTurn({ outcome: 'error', marathon: false, error: 'x' }), 'error')
 })

@@ -18,8 +18,12 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { errorMessage, isRecord } from './protocol.mjs'
+import { decideEndedIncomplete } from './watcher.mjs'
 
-export const PUSH_TYPES = Object.freeze(['help', 'confirm', 'done', 'error'])
+// M5: `watch` announces a marathon watch alert (mid-turn) or an ended-incomplete
+// turn end. An old APK drops the unknown type by design; the payload stays
+// exactly {type, turnId, instanceId, sequence}.
+export const PUSH_TYPES = Object.freeze(['help', 'confirm', 'done', 'error', 'watch'])
 export const MAX_PUSH_DEVICES = 8
 export const MAX_FCM_TOKEN_CHARS = 4_096
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/u
@@ -174,8 +178,13 @@ export class PushService {
     this.sleep = options.sleep ?? (ms => new Promise(resolve => { setTimeout(resolve, ms).unref?.() }))
     this.log = options.log ?? (() => {})
     this.audit = options.audit ?? (() => {})
-    /** Turns already announced, so one turn produces one notification per device. */
-    this.sentTurns = new Set()
+    /**
+     * Pushes already announced, keyed `turnId:type:ordinal` (M5). Per-turn
+     * dedupe would let a mid-turn `watch` push swallow the turn-end push, so
+     * each type gets its own slot; `ordinal` (default 0) separates the up-to-3
+     * watch alerts of one turn while a retried identical push stays deduped.
+     */
+    this.sentPushes = new Set()
   }
 
   /** Whether a provider is configured; without one, registration is refused. */
@@ -184,21 +193,23 @@ export class PushService {
   }
 
   /**
-   * Announce the end of one turn to every registered device. Call only after
-   * the corresponding state is committed, so the phone can fetch what the
+   * Announce one turn event to every registered device. Call only after the
+   * corresponding state is committed, so the phone can fetch what the
    * notification refers to. Never throws.
-   * @param {{type: string, turnId: string, instanceId: string, sequence: number}} event
+   * @param {{type: string, turnId: string, instanceId: string, sequence: number, ordinal?: number}} event
    * @returns {Promise<{sent: number, failed: number, pruned: number, skipped?: string}>}
    */
   async notify(event) {
     const summary = { sent: 0, failed: 0, pruned: 0 }
     if (this.provider === undefined) return { ...summary, skipped: 'not-configured' }
-    if (!PUSH_TYPES.includes(event.type) || typeof event.turnId !== 'string' || event.turnId.length === 0) {
+    const ordinal = event.ordinal ?? 0
+    if (!PUSH_TYPES.includes(event.type) || typeof event.turnId !== 'string' || event.turnId.length === 0 || !Number.isSafeInteger(ordinal) || ordinal < 0) {
       return { ...summary, skipped: 'invalid-event' }
     }
-    if (this.sentTurns.has(event.turnId)) return { ...summary, skipped: 'duplicate-turn' }
-    this.sentTurns.add(event.turnId)
-    while (this.sentTurns.size > 200) this.sentTurns.delete(this.sentTurns.values().next().value)
+    const key = `${event.turnId}:${event.type}:${ordinal}`
+    if (this.sentPushes.has(key)) return { ...summary, skipped: 'duplicate-push' }
+    this.sentPushes.add(key)
+    while (this.sentPushes.size > 200) this.sentPushes.delete(this.sentPushes.values().next().value)
     const devices = this.registry.list()
     if (devices.length === 0) return { ...summary, skipped: 'no-devices' }
     // Exactly these keys, all strings: FCM data values must be strings.
@@ -208,7 +219,7 @@ export class PushService {
       instanceId: String(event.instanceId),
       sequence: String(event.sequence),
     }
-    const priority = event.type === 'help' || event.type === 'confirm' ? 'high' : 'normal'
+    const priority = event.type === 'help' || event.type === 'confirm' || event.type === 'watch' ? 'high' : 'normal'
     await Promise.all(devices.map(async device => {
       const result = await this.#deliver(device.fcmToken, data, priority)
       if (result.ok) {
@@ -339,15 +350,25 @@ export async function createFcmProvider(options) {
  * What kind of push, if any, the end of a turn deserves. A stopped turn was
  * ended by the user and announces nothing. A confirmation wait (B9b) is
  * announced like help: high priority, metadata only.
- * @param {{outcome: string, help?: unknown, confirm?: unknown}} info
- * @returns {'help' | 'confirm' | 'done' | 'error' | null}
+ *
+ * M5: a marathon turn that ended incomplete (the watcher's `ended-incomplete`
+ * notice) is announced as `watch` instead of `done`/`error`. The caller passes
+ * the turn-end info; `marathon` marks the armed turn and `endedIncomplete`
+ * (when present) is the watcher's own decision. Without the explicit flag the
+ * same pure rule the watcher uses (`decideEndedIncomplete`) is applied, so the
+ * push and the transcript notice can never disagree. Help/confirm waits win:
+ * a turn that asked for the user did not end incomplete.
+ * @param {{outcome: string, help?: unknown, confirm?: unknown, marathon?: boolean, endedIncomplete?: boolean, label?: string | null, planOutcome?: string | null, deadTurn?: boolean}} info
+ * @returns {'help' | 'confirm' | 'done' | 'error' | 'watch' | null}
  */
 export function pushTypeForTurn(info) {
+  const endedIncomplete = info.endedIncomplete === true ||
+    decideEndedIncomplete({ ...info, marathon: info.marathon === true })
   if (info.outcome === 'done') {
     if (isRecord(info.help)) return 'help'
     if (isRecord(info.confirm)) return 'confirm'
-    return 'done'
+    return endedIncomplete ? 'watch' : 'done'
   }
-  if (info.outcome === 'error') return 'error'
+  if (info.outcome === 'error') return endedIncomplete ? 'watch' : 'error'
   return null
 }
