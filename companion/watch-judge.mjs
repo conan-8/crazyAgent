@@ -145,9 +145,11 @@ function digestAggregates(aggregates, now) {
     okMutations: aggregates.okMutations,
     mutationRevisits: aggregates.mutationRevisits,
     navRevisits: aggregates.navRevisits,
-    // V3 (§3.4): page identity — mutationRevisits entries carry pageKey (URL path)
-    // + controlName; pageIdentity reports how often the page was unknown.
-    pageIdentity: aggregates.pageIdentity ?? null,
+    // V3 (§3.4): mutationRevisits entries carry pageKey (URL path) + controlName.
+    // pageIdentity is deliberately NOT in the judge digest — it is a replay-only
+    // risk metric; showing distinctPages biased the judge to read multi-page
+    // wander as exploration (caught regression, tune k=5 evidence; lead-authorized
+    // bug fix). The judge digest gets only the intended pageKey annotation.
     openItems: {
       first: open.first,
       current: open.current,
