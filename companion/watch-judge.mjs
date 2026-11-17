@@ -42,6 +42,25 @@ export const JUDGE_PROVIDER_ORDER = Object.freeze(['morph'])
 export const JUDGE_PROVIDER_ALLOW_FALLBACKS = false
 export const JUDGE_PROVIDER_REQUIRE_PARAMETERS = true
 export const JUDGE_SEED = 42
+// The pin was measured only for this model on OpenRouter. Morph serves a small
+// part of OpenRouter's catalog and `provider` is an OpenRouter extension, so with
+// any other model or base URL the pinned request would fail on every call and
+// leave the watcher without its judge. Those configurations send the unpinned
+// request instead (the v2.4.0 shape), which works with any model.
+export const JUDGE_PINNED_MODELS = Object.freeze(new Set(['deepseek/deepseek-v4.1-flash-1017']))
+
+/**
+ * True when the measured routing pin applies: OpenRouter's API and a model the
+ * pin was measured on. Anything else, including an unparsable URL, is unpinned.
+ * @param {unknown} baseUrl @param {unknown} modelId
+ * @returns {boolean}
+ */
+export function judgeRoutingPinned(baseUrl, modelId) {
+  if (typeof baseUrl !== 'string' || typeof modelId !== 'string') return false
+  let host
+  try { host = new URL(baseUrl).hostname.toLowerCase() } catch { return false }
+  return host === 'openrouter.ai' && JUDGE_PINNED_MODELS.has(modelId)
+}
 export const JUDGE_TIMEOUT_MS = 45_000
 export const JUDGE_REASON_CHARS = 240
 export const JUDGE_EVIDENCE_MAX = 40
@@ -296,6 +315,7 @@ export function createWatchJudge(options) {
     let timedOut = false
     const timer = setTimer(() => { timedOut = true; controller.abort() }, timeoutMs)
 
+    const routing = judgeRoutingPinned(baseUrl, model.id) ? 'pinned' : 'default'
     const body = {
       model: model.id,
       messages: [
@@ -307,14 +327,17 @@ export function createWatchJudge(options) {
       response_format: { type: 'json_object' },
       stream: false,
       // V5 candidate 3: pinned provider routing + fixed seed for verdict
-      // stability (see JUDGE_PROVIDER_ORDER note). require_parameters guarantees
-      // the provider supports seed + reasoning; allow_fallbacks pins the list.
-      provider: {
-        order: [...JUDGE_PROVIDER_ORDER],
-        allow_fallbacks: JUDGE_PROVIDER_ALLOW_FALLBACKS,
-        require_parameters: JUDGE_PROVIDER_REQUIRE_PARAMETERS,
-      },
-      seed: JUDGE_SEED,
+      // stability (see JUDGE_PROVIDER_ORDER note), only where it was measured
+      // (judgeRoutingPinned). require_parameters guarantees the provider
+      // supports seed + reasoning; allow_fallbacks pins the list.
+      ...(routing === 'pinned' ? {
+        provider: {
+          order: [...JUDGE_PROVIDER_ORDER],
+          allow_fallbacks: JUDGE_PROVIDER_ALLOW_FALLBACKS,
+          require_parameters: JUDGE_PROVIDER_REQUIRE_PARAMETERS,
+        },
+        seed: JUDGE_SEED,
+      } : {}),
       // Judge effort only when the configured model reasons; the model's default
       // effort is high, so this must be explicit.
       ...(model.reasoning === true ? { reasoning: { effort: JUDGE_REASONING_EFFORT } } : {}),
@@ -359,7 +382,7 @@ export function createWatchJudge(options) {
     if (!response.ok) {
       const status = response.status === 429 ? 'rate-limited' : 'http-error'
       const result = fail(status, response.status)
-      log('watch.judge', { turnId, status, httpStatus: response.status, digestChars, durationMs: result.durationMs }, 'warn')
+      log('watch.judge', { turnId, status, httpStatus: response.status, routing, digestChars, durationMs: result.durationMs }, 'warn')
       return result
     }
     let parsedBody
@@ -376,6 +399,7 @@ export function createWatchJudge(options) {
       turnId,
       status: 'ok',
       httpStatus: response.status,
+      routing,
       digestChars,
       durationMs,
       finishReason,

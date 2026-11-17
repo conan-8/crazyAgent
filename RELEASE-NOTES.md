@@ -1,3 +1,10 @@
+# Unreleased (post-v2.5.0)
+
+- **The watcher's judge works with any model again.** v2.5.0 pinned every judge call to one OpenRouter provider (Morph). Morph serves only part of OpenRouter's catalog, so with most other models every judge call failed and the watcher quietly ran on its deterministic signals alone. The pin, and the fixed seed sent with it, now apply only to the configuration they were measured on: `deepseek/deepseek-v4.1-flash-1017` on OpenRouter. Other models and base URLs send the unpinned request, as v2.4.0 did. The judge log now records which routing a call used.
+- **The "judge budget spent" notice no longer hides an open alert.** When the judge's per-turn budget ran out while an alert was open, the notice replaced the alert: the panel chip went off, the phone card changed, and `/state` showed no open alert. The notice now waits until no alert is open, and the turn's judge summary reports when the budget ran out.
+
+Unit-tested (`npm test` 1320/1320); no real-model or phone run yet.
+
 # crazyAgent v2.5.0
 
 Changes since **v2.4.0**. This release ships **marathon v2 (V1–V8)** — watcher reliability and plan-friction improvements on top of the v2.4.0 marathon mode. The acceptance evidence below is **marathon-scoped** (isolated harness, `deepseek/deepseek-v4.1-flash-1017` @ medium, independent checkers). The maintainer's **automatic-updater** feature (`cdcd9d1`) is **preserved verbatim** from v2.4.0 (see below) — it was landed and verified by the maintainer, **not** independently accepted by the marathon team.

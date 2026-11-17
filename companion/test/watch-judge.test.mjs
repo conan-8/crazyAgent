@@ -4,6 +4,7 @@ import {
   createWatchJudge, validateVerdict, unknownVerdict, buildDigest, parseCompletion,
   JUDGE_SYSTEM_PROMPT, JUDGE_MAX_TOKENS, JUDGE_REASONING_EFFORT, JUDGE_REASON_CHARS, VERDICT_STATES, VERDICT_BLOCKERS,
   JUDGE_PROVIDER_ORDER, JUDGE_PROVIDER_ALLOW_FALLBACKS, JUDGE_PROVIDER_REQUIRE_PARAMETERS, JUDGE_SEED,
+  JUDGE_PINNED_MODELS, judgeRoutingPinned,
 } from '../watch-judge.mjs'
 import { WatchLedger } from '../watch-ledger.mjs'
 
@@ -249,6 +250,50 @@ test('check sends one stateless request with the verified OpenRouter shape', asy
   // key never logged
   assert.equal(logs.some(entry => JSON.stringify(entry.data).includes(KEY)), false)
   assert.equal(logs.some(entry => entry.type === 'watch.judge' && entry.data.status === 'ok'), true)
+})
+
+test('the routing pin applies only to the measured model on OpenRouter', () => {
+  assert.equal(judgeRoutingPinned(BASE, MODEL.id), true)
+  assert.equal(judgeRoutingPinned(`${BASE}/`, MODEL.id), true)
+  assert.equal(judgeRoutingPinned('HTTPS://OpenRouter.ai/api/v1', MODEL.id), true)
+  assert.equal(judgeRoutingPinned(BASE, 'anthropic/claude-sonnet-5.5'), false)
+  assert.equal(judgeRoutingPinned('https://api.example.com/v1', MODEL.id), false)
+  assert.equal(judgeRoutingPinned('https://openrouter.ai.example.com/api/v1', MODEL.id), false)
+  assert.equal(judgeRoutingPinned('not a url', MODEL.id), false)
+  assert.equal(judgeRoutingPinned(undefined, MODEL.id), false)
+  assert.equal(judgeRoutingPinned(BASE, undefined), false)
+  assert.equal(JUDGE_PINNED_MODELS.has(MODEL.id), true)
+})
+
+test('another model, or another base URL, sends the unpinned request and still gets a verdict', async () => {
+  for (const over of [
+    { getModel: () => ({ id: 'anthropic/claude-sonnet-5.5', reasoning: true }) },
+    { getBaseUrl: () => 'https://llm.example.com/v1' },
+  ]) {
+    const fetchImpl = fakeFetch(() => jsonResponse(completion(verdictJson())))
+    const { judge, logs } = makeJudge({ fetchImpl, ...over })
+    const result = await judge.check({ turnId: 't', digest: DIGEST })
+    assert.equal(result.status, 'ok')
+    assert.equal(result.verdict.state, 'progressing')
+    const body = JSON.parse(fetchImpl.requests[0].init.body)
+    assert.equal(body.provider, undefined, 'no provider pin outside the measured configuration')
+    assert.equal(body.seed, undefined)
+    assert.deepEqual(body.reasoning, { effort: JUDGE_REASONING_EFFORT })
+    assert.equal(body.max_tokens, JUDGE_MAX_TOKENS)
+    assert.equal(body.temperature, 0)
+    assert.equal(logs.find(entry => entry.type === 'watch.judge').data.routing, 'default')
+  }
+})
+
+test('the judge log names the routing, so an endpoint refusal is diagnosable', async () => {
+  const fetchImpl = fakeFetch(() => jsonResponse({ error: { message: 'No endpoints found' } }, 404))
+  const { judge, logs } = makeJudge({ fetchImpl })
+  const result = await judge.check({ turnId: 't', digest: DIGEST })
+  assert.equal(result.status, 'http-error')
+  assert.equal(result.verdict.state, 'unknown')
+  const entry = logs.find(item => item.type === 'watch.judge')
+  assert.equal(entry.data.httpStatus, 404)
+  assert.equal(entry.data.routing, 'pinned')
 })
 
 test('check omits reasoning when the model does not reason', async () => {

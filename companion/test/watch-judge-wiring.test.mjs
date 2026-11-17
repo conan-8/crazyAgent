@@ -183,6 +183,43 @@ test('the input-token budget falls back to deterministic-only with one notice', 
   assert.equal(h.frames.filter(f => f.kind === 'info' && /budget/u.test(f.reason)).length, 1)
 })
 
+// Every client shows the latest notice, so a budget notice sent while an alert
+// is open would hide that alert (chip off, phone card replaced, /state null).
+function stuckUntilBudget(h, judge) {
+  repeatLoop(h)
+  return (async () => {
+    for (let i = 0; i < 6; i += 1) { h.advance(100_000); keepLooping(h); h.tick(); await h.settle() }
+    assert.equal(judge.calls.length, 2)
+  })()
+}
+const budgetNotices = h => h.frames.filter(f => f.type === 'chat.watch' && f.kind === 'info' && /budget/u.test(f.reason))
+
+test('the budget notice waits while an alert is open, then follows once', async () => {
+  const judge = fakeJudge(() => okResult('stuck'))
+  const h = harness({ judge, judgeLimits: { ...L, maxCallsPerTurn: 2 } })
+  await stuckUntilBudget(h, judge)
+  const [alert] = h.alerts()
+  assert.ok(alert, 'the corroborated stuck verdict opened an alert')
+  assert.equal(budgetNotices(h).length, 0, 'no budget notice while the alert is open')
+  assert.equal(h.watcher.watchProjection().open.id, alert.id, 'the alert stays the open notice')
+  assert.equal(h.logs.filter(l => l.type === 'watch.judge.budget').length, 1, 'exhaustion is logged once')
+  assert.deepEqual(h.watcher.ack(alert.id), { ok: true })
+  h.advance(20_000); keepLooping(h); h.tick(); await h.settle()
+  assert.equal(budgetNotices(h).length, 1, 'the notice follows once no alert is open')
+  h.advance(20_000); keepLooping(h); h.tick(); await h.settle()
+  assert.equal(budgetNotices(h).length, 1, 'still one notice per turn')
+  assert.equal(judge.calls.length, 2)
+})
+
+test('the turn summary reports budget exhaustion even when the notice never showed', async () => {
+  const judge = fakeJudge(() => okResult('stuck'))
+  const h = harness({ judge, judgeLimits: { ...L, maxCallsPerTurn: 2 } })
+  await stuckUntilBudget(h, judge)
+  h.watcher.turnEnded({ outcome: 'stopped' })
+  assert.equal(budgetNotices(h).length, 0)
+  assert.equal(h.logs.find(l => l.type === 'watch.judge.summary').data.budgetExhausted, true)
+})
+
 /* ------------------------------------------------------------------ */
 /* Backoff                                                             */
 /* ------------------------------------------------------------------ */

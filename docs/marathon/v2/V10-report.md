@@ -1,4 +1,4 @@
-# V10 report — documents and v2.5.0 release (DRAFT)
+# V10 report — documents and v2.5.0 release
 
 **Date:** 2026-11-17 · **Task:** task-24 (core) · **Plan:** `MARATHON-V2-PLAN.md` §5 V10 + §6
 **Branch:** `v2/v10-release` rebased onto final merged main `5bc4f6a` (V0–V8 + V5-live/V8-live evidence; npm 1315). **Status:** FINAL — V5 live + V8 live done-when MET (lead FINAL GO); lead reviews + merges + tags `v2.5.0` + publishes. Activation stays the user's.
@@ -49,7 +49,10 @@
 3. ✅ V8 live PLAN_* **2 ≤ 2** + pass-rates/end-distributions unchanged vs M4 (9 OPEN_REMOVAL_ACK eliminated); V5 live caught **4/4 = 100%**, FA0 worst healthy, falseRec 0, 4 true-positive alerts server-verified (epic r3/r5 wander loops), 12 length-cutoff unknowns documented (V5.1).
 4. ✅ Versions **2.5.0** (package.json/lock root+workspace, manifest version+version_name, companion/index.mjs VERSION by content) + Android **0.8.0 (7)**. Build/unsigned release APK SHA-256 recorded below; the **signed** APK is a user-keystore action (still-unrun, as v2.4.0 artifact `8c74976`) — not claimed signed.
 5. ✅ Updater `cdcd9d1` preserved verbatim (comment + test fixtures); marathon-scoped acceptance only.
-6. ⏳ Lead reviews diff (versions/docs accuracy/updater isolation/secrets scan) + npm test clean + merges + tags `v2.5.0` + publishes the GitHub release (gh authenticated, `--latest`). Activation stays the user's (reload extension then restart companion).
+6. ✅ Lead reviewed, merged, tagged `v2.5.0` (`b2ef9eb`), and published the GitHub release (2026-11-17T20:04:26Z, Latest, no assets attached). Activation stays the user's (reload extension then restart companion).
+
+## Post-release review (2026-11-17)
+An independent review of the release found two bugs, fixed on `main` after the tag (see `RELEASE-NOTES.md` "Unreleased" and `docs/STATUS.md`): the judge's Morph routing pin was sent for every model and base URL, which made judge calls fail for models Morph does not serve; and the judge-budget notice replaced an open alert on every surface. It also found that the per-turn judge budget runs out about 35–45 minutes into a turn (STATUS follow-up 8). V9 was deferred by the lead under delegated authority (`LEAD-LOG.md` ruling 1), not by the user.
 
 ## Build artifact
 - Unsigned release APK (`assembleRelease`, no `keystore.properties`, BUILD SUCCESSFUL): `app/build/outputs/apk/release/app-release-unsigned.apk`, SHA-256 **`1de9dfea10800bada737d64336a8307dadaade917927ad9d61682896871e9200`**. Signing with the maintainer keystore + publishing the signed `0.8.0 (7)` APK is the user's action (still-unrun, as the v2.4.0 artifact `8c74976`); the unsigned APK is not installable.

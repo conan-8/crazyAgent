@@ -239,6 +239,7 @@ export class Watcher {
     this.lastJudgeCheckWallAt = null
     this.judgeInFlight = false
     this.judgePending = null
+    this.budgetExhausted = false
     this.budgetNoticeEmitted = false
     this.backoffUntil = 0
   }
@@ -284,6 +285,7 @@ export class Watcher {
     this.lastJudgeCheckWallAt = null
     this.judgeInFlight = false
     this.judgePending = null
+    this.budgetExhausted = false
     this.budgetNoticeEmitted = false
     this.backoffUntil = 0
   }
@@ -342,7 +344,14 @@ export class Watcher {
   #maybeJudge(state, assessment, now) {
     if (this.judge === null || this.judgeInFlight) return
     if (this.judgeCalls >= this.judgeLimits.maxCallsPerTurn || this.judgeInputTokens >= this.judgeLimits.maxInputTokensPerTurn) {
-      if (!this.budgetNoticeEmitted) {
+      if (!this.budgetExhausted) {
+        this.budgetExhausted = true
+        this.log('watch.judge.budget', { turnId: state.turnId, calls: this.judgeCalls, inputTokens: this.judgeInputTokens })
+      }
+      // The budget notice is informational. Every client shows the latest notice
+      // (the panel chip, the phone card, /state marathon.watch.open), so while an
+      // alert is open the notice would hide it; it waits until no alert is open.
+      if (!this.budgetNoticeEmitted && this.openAlert === null) {
         this.budgetNoticeEmitted = true
         this.publish({
           type: 'chat.watch',
@@ -356,7 +365,6 @@ export class Watcher {
           source: 'heuristic',
           at: new Date(this.wallNow()).toISOString(),
         })
-        this.log('watch.judge.budget', { turnId: state.turnId, calls: this.judgeCalls, inputTokens: this.judgeInputTokens })
       }
       return
     }
@@ -622,7 +630,7 @@ export class Watcher {
       outputTokens: this.judgeOutputTokens,
       reasoningTokens: this.judgeReasoningTokens,
       cacheReadTokens: this.judgeCacheReadTokens,
-      budgetExhausted: this.budgetNoticeEmitted,
+      budgetExhausted: this.budgetExhausted,
     })
     this.ledger.endTurn()
     return summary
