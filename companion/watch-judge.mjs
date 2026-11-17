@@ -273,7 +273,8 @@ export function createWatchJudge(options) {
       const status = aborted ? (timedOut ? 'timeout' : 'aborted') : 'error'
       const result = fail(status)
       // Never log the key or the digest content; sizes/status only.
-      log('watch.judge', { turnId, status, digestChars, durationMs: result.durationMs, message: aborted ? undefined : String(error?.message ?? error).slice(0, 120) }, 'warn')
+      // Never log raw error text (zero key-leak risk); the error name is enough.
+      log('watch.judge', { turnId, status, digestChars, durationMs: result.durationMs, errorName: aborted ? undefined : String(error?.name ?? 'Error') }, 'warn')
       return result
     }
     clearTimer(timer)

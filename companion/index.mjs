@@ -23,6 +23,7 @@ import { DshRunner } from './dsh.mjs'
 import { LogStore } from './log-store.mjs'
 import { SessionController, uiRejectionFrame } from './session-controller.mjs'
 import { marathonFrameBody } from './marathon.mjs'
+import { createWatchJudge } from './watch-judge.mjs'
 import { RemoteHub } from './remote-hub.mjs'
 import { DEFAULT_REMOTE_PORT, RemoteServer } from './remote-server.mjs'
 import { createRemoteTokenSource, resolveRemoteToken } from './remote-token.mjs'
@@ -762,6 +763,16 @@ const bridge = new Bridge({
   },
 })
 
+// M4: the model watcher judge reuses the companion's existing key/baseUrl/model
+// through injected getters (never duplicated, never logged). Plain HTTP only —
+// not a second DSH runner. Absent config -> checks skip (deterministic-only).
+const watchJudge = createWatchJudge({
+  getApiKey: () => apiKey,
+  getBaseUrl: () => llmConfig?.baseUrl ?? baseUrlOption,
+  getModel: () => llmConfig?.model ?? null,
+  log: (type, data, severity) => logStore.record('companion', type, data, { severity: severity ?? 'info' }),
+})
+
 const controller = new SessionController({
   bridge,
   getRunner: () => runner,
@@ -773,6 +784,7 @@ const controller = new SessionController({
   getModelId: () => llmConfig?.model.id,
   getConfirmIrreversible: confirmIrreversiblePolicy,
   publish,
+  watch: { judge: watchJudge },
 })
 
 if (remoteEnabled) {
