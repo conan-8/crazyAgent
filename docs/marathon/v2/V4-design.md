@@ -35,8 +35,10 @@
 - **V6 hub dedupe:** seeded activity identical to carried snapshot → deduped (no double remote.plan).
 - **Replay gate (after implement):** V4 vs V3 baseline tune k=5 (caught mean should RISE on continuation stuck windows — open-flat/REVISIT now fire with the seed snapshot; suspect ticks on healthy continuations must not rise — V2 control exclusion + V3 page-scoping hold); holdout once k=5 at milestone end.
 
-## Open questions for lead (at implement go)
-- Carry-chain feed point: controller `#begin` when `planMode && marathon.plan` present (seeded) — confirm the exact hook + that `shownText` is the right prompt source.
-- `plan.seededRevision` source: the ledger plan revision at seed time vs the marathon carried-plan revision — confirm which the digest should report.
-- Whether `carriedFrom` should include the CURRENT turn prompt or only ancestors (design: ancestors only; `task` is the current prompt).
-- Digest token bound measurement: char proxy (≤1500) vs actual tokenizer — design uses char proxy + a conservative cap.
+## Lead rulings (design approved, finalized for implement go after V3 merge)
+1. **Carry-chain feed hook:** at `#begin` when `planMode && marathon.plan` exists (seeded turn). `carryChain` holds **ANCESTOR** prompts (previous turns in the carried-plan chain); `carriedFrom` = chain (oldest first, ≤3, clip 500). The CURRENT turn prompt stays the digest `task`. **After a turn ends with the carried plan persisting, push the current prompt into the chain** (becomes an ancestor for the next turn). Reset chain on carried-plan drop / marathon off / real chat switch / `/new`.
+2. **`plan.seededRevision` source:** the **MARATHON carried-plan revision** (`marathon.plan.revision`, companion-owned authoritative), passed to `buildDigest` when the turn was seeded. NOT the ledger's (ledger reflects activities; the seed revision is the marathon carried revision).
+3. **`carriedFrom` ANCESTORS-ONLY: CONFIRMED** — `task` = current prompt; `carriedFrom` = up to 3 prior prompts oldest first (fixes G2).
+4. **Token-bound char proxy:** clip 500 chars/prompt × ≤3 = ≤1500 chars ≈ ~400 tokens (chars/4 proxy); **test-enforce the char bound + digest growth ≤~400 tokens**. Acceptable proxy.
+- **Seed activity:** exactly ONE `bridge.activity {kind:'plan', revision, items, awaitingUser:false, seeded:true}` on accepted `claim()`; rejected seed → NO activity (fail closed). **Verify V6 hub `remote.plan` dedupe key covers revision+items+awaitingUser** (seeded re-emit = no-op). Seeded-untouched stores back same list (M2 not-assessed unchanged).
+- **Replay vs V3 tune k=5:** caught should RISE on continuation stuck (G1 seed snapshot enables open-flat); healthy-continuation suspects must NOT rise (V2 control exclusion + V3 page-scoping hold). **V4 done-when:** continuation stuck windows caught + healthy continuations silent worst case + seeded-untouched 5/5. Implement after V3 merge (branch `v2/v4-context` from merged main).
