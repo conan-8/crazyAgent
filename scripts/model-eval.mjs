@@ -1102,7 +1102,7 @@ function resetDownloads(downloadsDir) {
   mkdirSync(resolved, { recursive: true })
 }
 
-function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null, answer = null, followUp = null }) {
+function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null, answer = null, followUp = null, help = null }) {
   return {
     fixtureUrl: path => `${fixtureServer.baseUrl}/${String(path).replace(/^\/+/u, '')}`,
     crossOriginUrl: path => `${fixtureServer.crossOriginBaseUrl}/${String(path).replace(/^\/+/u, '')}`,
@@ -1133,6 +1133,12 @@ function makeCtx({ fixtureServer, page, turn, edge = null, downloadsDir = null, 
      * Null for ordinary scenarios and in --self-test.
      */
     followUp,
+    /**
+     * The hub's help projection at turn settle ({category, reason} or null):
+     * independent evidence of WHAT the agent asked the user for (V0-a
+     * captcha-wall verifies category 'captcha'). Null in --self-test.
+     */
+    help,
   }
 }
 
@@ -1846,7 +1852,7 @@ async function runModelBatch(options, scenarios) {
           }
         }
 
-        const ctx = makeCtx({ fixtureServer, page, turn, edge, downloadsDir, answer, followUp })
+        const ctx = makeCtx({ fixtureServer, page, turn, edge, downloadsDir, answer, followUp, help: state?.help ?? null })
         let check
         try {
           check = normalizeCheck(await scenario.check(ctx))
