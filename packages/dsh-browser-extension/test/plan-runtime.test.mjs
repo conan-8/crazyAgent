@@ -36,8 +36,8 @@ function fixture(t) {
   return { tools, activities, logEvents, session, agent, steered, runtime }
 }
 
-function activate(fake, turnId = 'turn-companion-1') {
-  fake.runtime.setMode({ enabled: true, turnId })
+function activate(fake, turnId = 'turn-companion-1', seed = undefined) {
+  fake.runtime.setMode({ enabled: true, turnId, ...(seed === undefined ? {} : { seed }) })
   fake.runtime.claim(fake.agent, 1)
   assert.equal(fake.tools.has('browser_plan'), true)
 }
@@ -98,7 +98,7 @@ test('normal turns never register browser_plan and planned turns clean it up', t
 
   activate(fake)
   assert.deepEqual(fake.logEvents.at(-1).data, {
-    turnId: 'turn-companion-1', sessionId: 'session-1', turn: 1, revision: 0,
+    turnId: 'turn-companion-1', sessionId: 'session-1', turn: 1, revision: 0, seeded: false,
   })
   fake.runtime.setMode({ enabled: true, turnId: 'turn-companion-1' })
   fake.runtime.claim(fake.agent, 1)
@@ -261,4 +261,120 @@ test('waiting for user input requires an actual plan and disposal retires the to
   fake.runtime.setMode({ enabled: true, turnId: 'disposed' })
   fake.runtime.claim(fake.agent, 2)
   assert.equal(fake.tools.has('browser_plan'), false)
+})
+
+/* ------------------------------------------------------------------ */
+/* M2: carried-plan seeding and the seeded-but-untouched rule          */
+/* ------------------------------------------------------------------ */
+
+test('a valid seed starts the turn at the carried revision with fresh budgets', async t => {
+  const fake = fixture(t)
+  activate(fake, 'turn-carried', { revision: 4, items: openItems() })
+  assert.deepEqual(fake.logEvents.at(-1).data, {
+    turnId: 'turn-carried', sessionId: 'session-1', turn: 1, revision: 4, seeded: true,
+  })
+  // The model continues from the carried revision, not from 0.
+  const conflict = await callPlan(fake, { items: openItems(), expected_revision: 0 })
+  assert.match(conflict.error?.message, /PLAN_REVISION_CONFLICT/)
+  assert.match(conflict.error?.message, /current revision 4/)
+  const progressed = await callPlan(fake, {
+    items: [task('Inspect current state', 'completed'), task('Apply the requested change', 'in_progress'), task('Verify the resulting state')],
+    expected_revision: 4,
+  }, 'plan-continue')
+  assert.equal(progressed.error, undefined)
+  assert.equal(progressed.result.structuredContent.revision, 5)
+  assert.deepEqual(fake.activities.at(-1), {
+    kind: 'plan',
+    revision: 5,
+    items: [task('Inspect current state', 'completed'), task('Apply the requested change', 'in_progress'), task('Verify the resulting state')],
+    awaitingUser: false,
+  })
+})
+
+test('an invalid seed falls back to an empty plan and logs plan.seed.rejected', async t => {
+  const fake = fixture(t)
+  activate(fake, 'turn-bad-seed', { revision: 4, items: [task('One', 'in_progress'), task('Two', 'in_progress')] })
+  const rejected = fake.logEvents.find(event => event.type === 'plan.seed.rejected')
+  assert.ok(rejected, 'the rejection is logged')
+  assert.equal(rejected.severity, 'warn')
+  assert.deepEqual(fake.logEvents.at(-1).data, {
+    turnId: 'turn-bad-seed', sessionId: 'session-1', turn: 1, revision: 0, seeded: false,
+  })
+  // Fail closed: the model starts at revision 0 and recovers from there.
+  const created = await callPlan(fake, { items: openItems(), expected_revision: 0 }, 'plan-fresh')
+  assert.equal(created.error, undefined)
+  assert.equal(created.result.structuredContent.revision, 1)
+})
+
+test('a seeded but untouched turn allows the answer with not-assessed', async t => {
+  const fake = fixture(t)
+  activate(fake, 'turn-untouched', { revision: 4, items: openItems() })
+  const signal = new AbortController().signal
+  // No browser_plan call, no tool results: an unrelated quick question.
+  assert.equal(fake.runtime.stopping({ agent: fake.agent, turn: 1, signal }), false)
+  assert.equal(fake.steered.length, 0, 'no nudge about the old plan')
+  const data = { turn: 1 }
+  fake.runtime.endTurn(fake.session, 1, data)
+  assert.equal(data.planOutcome, 'not-assessed')
+  assert.equal(data.planRevision, 4)
+  const final = fake.logEvents.filter(event => event.type === 'plan.final').at(-1)
+  assert.equal(final.data.reason, 'seeded-untouched')
+})
+
+test('any tool activity on a seeded turn restores the ordinary nudge path', async t => {
+  const fake = fixture(t)
+  activate(fake, 'turn-touched', { revision: 4, items: openItems() })
+  nonPlanResult(fake, 0)
+  const signal = new AbortController().signal
+  assert.equal(fake.runtime.stopping({ agent: fake.agent, turn: 1, signal }), true)
+  assert.match(fake.steered[0].content[0].text, /Completion nudge 1 of 2/)
+  assert.match(fake.steered[0].content[0].text, /expected_revision:4/)
+})
+
+test('a browser_plan call on a seeded turn also restores the ordinary nudge path', async t => {
+  const fake = fixture(t)
+  activate(fake, 'turn-plan-call', { revision: 4, items: openItems() })
+  // An unchanged-list call is refused (PLAN_UNCHANGED) but still counts as a
+  // plan call: the model engaged with the plan, so nudges apply again.
+  const unchanged = await callPlan(fake, { items: openItems(), expected_revision: 4 }, 'plan-unchanged')
+  assert.match(unchanged.error?.message, /PLAN_UNCHANGED/)
+  const signal = new AbortController().signal
+  assert.equal(fake.runtime.stopping({ agent: fake.agent, turn: 1, signal }), true)
+  assert.match(fake.steered[0].content[0].text, /Completion nudge 1 of 2/)
+})
+
+test('an aborted seeded turn still reports aborted, not seeded-untouched', async t => {
+  const fake = fixture(t)
+  activate(fake, 'turn-aborted', { revision: 4, items: openItems() })
+  const controller = new AbortController()
+  controller.abort()
+  // Aborted stops bypass the seeded-untouched rule and keep the aborted outcome.
+  assert.equal(fake.runtime.stopping({ agent: fake.agent, turn: 1, signal: controller.signal }), true)
+  assert.equal(fake.steered.length, 0)
+  const data = { turn: 1 }
+  fake.runtime.endTurn(fake.session, 1, data)
+  assert.equal(data.planOutcome, 'aborted')
+  const final = fake.logEvents.filter(event => event.type === 'plan.final').at(-1)
+  assert.equal(final.data.reason, 'aborted')
+})
+
+test('accepted revisions refill stretch budgets inside the runtime too', async t => {
+  const fake = fixture(t)
+  activate(fake)
+  await callPlan(fake, { items: openItems(), expected_revision: 0 }, 'plan-initial')
+  const signal = new AbortController().signal
+  assert.equal(fake.runtime.stopping({ agent: fake.agent, turn: 1, signal }), true)
+  assert.equal(fake.runtime.stopping({ agent: fake.agent, turn: 1, signal }), true)
+  assert.equal(fake.runtime.stopping({ agent: fake.agent, turn: 1, signal }), false)
+  assert.equal(fake.steered.length, 2)
+  // An accepted revision refills: two more nudges are allowed this turn.
+  await callPlan(fake, {
+    items: [task('Inspect current state', 'completed'), task('Apply the requested change', 'in_progress'), task('Verify the resulting state')],
+    expected_revision: 1,
+  }, 'plan-revise')
+  assert.equal(fake.runtime.stopping({ agent: fake.agent, turn: 1, signal }), true)
+  assert.match(fake.steered[2].content[0].text, /Completion nudge 1 of 2 this stretch; 3 of 12 this turn/)
+  assert.equal(fake.runtime.stopping({ agent: fake.agent, turn: 1, signal }), true)
+  assert.equal(fake.runtime.stopping({ agent: fake.agent, turn: 1, signal }), false)
+  assert.equal(fake.steered.length, 4)
 })

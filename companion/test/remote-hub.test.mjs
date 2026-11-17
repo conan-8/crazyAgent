@@ -533,6 +533,33 @@ test('a session change resets the marathon mirror to off', () => {
   assert.equal(h.projection().marathon.enabled, false, 'a resumed chat never inherits the switch')
 })
 
+test('a carried plan is journaled, projected, and cleared fail-closed (M2)', () => {
+  const h = hub()
+  h.setSession('session-1')
+  const plan = {
+    revision: 4,
+    items: [{ content: 'Fill the shipping form', status: 'in_progress' }, { content: 'Verify the confirmation page', status: 'pending' }],
+    updatedAt: '2026-11-16T19:05:00.000Z',
+    turnId: 'turn-carried',
+  }
+  h.ingest({ ...MARATHON_ON_FRAME, plan })
+  const envelope = h.journal.at(-1)
+  assert.equal(envelope.type, 'remote.marathon')
+  assert.deepEqual(envelope.body.plan, plan)
+  assert.deepEqual(h.projection().marathon.plan, plan)
+  // The projection is a copy: mutating it never touches the hub mirror.
+  const projected = h.projection().marathon.plan
+  projected.items[0].content = 'hacked'
+  assert.equal(h.projection().marathon.plan.items[0].content, 'Fill the shipping form')
+  // A malformed plan fails closed to null without dropping the switch state.
+  h.ingest({ ...MARATHON_ON_FRAME, plan: { revision: 5, items: [], updatedAt: 'x', turnId: 'y' } })
+  assert.equal(h.projection().marathon.plan, null)
+  assert.equal(h.projection().marathon.enabled, true)
+  // Off clears the carried plan.
+  h.ingest({ ...MARATHON_ON_FRAME, enabled: false, sessionId: null, since: null, origin: null, plan })
+  assert.equal(h.projection().marathon.plan, null)
+})
+
 test('chat.done carries marathon beside planMode and chat.user marks armed foreign turns', () => {
   const h = hub()
   h.turnStarted({ turnId: 'turn-1', origin: 'remote', clientMessageId: 'client-0001', text: 'planned', imageCount: 0, sessionId: 'session-1', planMode: true, marathon: true })

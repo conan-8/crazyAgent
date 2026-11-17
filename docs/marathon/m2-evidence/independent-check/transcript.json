@@ -1,0 +1,245 @@
+{
+  "checks": [
+    {
+      "step": "stack",
+      "at": "2026-11-17T01:40:28.426Z",
+      "bridgePort": 42241,
+      "remotePort": 35057,
+      "profileDir": "/tmp/crazyagent-m1-check-O38KjE/edge-profile"
+    },
+    {
+      "step": "initial",
+      "at": "2026-11-17T01:40:31.175Z",
+      "stateMarathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      },
+      "chip": {
+        "visible": false,
+        "badge": "Marathon",
+        "placeholder": "Ask or tell me what to do…"
+      }
+    },
+    {
+      "step": "A-remote-to-panel",
+      "at": "2026-11-17T01:40:31.653Z",
+      "post": {
+        "clientCommandId": "m1-check-on-0001",
+        "enabled": true,
+        "sessionId": "fake-session-2",
+        "sequence": 6,
+        "instanceId": "companion-mwk0zkw7-1a5803582ba9"
+      },
+      "chip": {
+        "visible": true,
+        "badge": "Marathon",
+        "placeholder": "Describe a long task to plan and complete…"
+      },
+      "stateMarathon": {
+        "enabled": true,
+        "since": "2026-11-17T01:40:31.645Z",
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    {
+      "step": "B-panel-to-remote",
+      "at": "2026-11-17T01:40:32.118Z",
+      "stateMarathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      },
+      "chipHidden": true
+    },
+    {
+      "step": "C-slash-both-ways",
+      "at": "2026-11-17T01:40:32.600Z",
+      "onMarathon": {
+        "enabled": true,
+        "since": "2026-11-17T01:40:32.591Z",
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      },
+      "offAgain": true
+    },
+    {
+      "step": "D-legacy-plan-turn",
+      "at": "2026-11-17T01:40:33.235Z",
+      "accepted": {
+        "accepted": true,
+        "clientMessageId": "m1-check-legacy-0001",
+        "turnId": "turn-mwk0zo4b-7cf5",
+        "instanceId": "companion-mwk0zkw7-1a5803582ba9",
+        "sessionId": "fake-session-2",
+        "sequence": 13
+      },
+      "done": {
+        "planMode": true,
+        "marathon": true
+      },
+      "promptHasPlanMode": true,
+      "domBadge": "Marathon",
+      "stateMarathon": {
+        "enabled": true,
+        "since": "2026-11-17T01:40:32.603Z",
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    {
+      "step": "E-sticky-and-new-reset",
+      "at": "2026-11-17T01:40:34.192Z",
+      "stickyPromptHasPlanMode": true,
+      "newSession": "fake-session-3",
+      "stateMarathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    {
+      "step": "F-mid-turn-off",
+      "at": "2026-11-17T01:40:40.618Z",
+      "midOff": {
+        "clientCommandId": "m1-check-off-0002",
+        "enabled": false,
+        "sessionId": "fake-session-3",
+        "sequence": 114,
+        "instanceId": "companion-mwk0zkw7-1a5803582ba9"
+      },
+      "runningKeptPlan": true,
+      "nextTurnUnarmed": true
+    },
+    {
+      "step": "G-carried-plan",
+      "at": "2026-11-17T01:40:46.822Z",
+      "carriedRevision": 2,
+      "dom": {
+        "visible": true,
+        "heading": "Marathon plan",
+        "count": "0/2 done",
+        "contents": [
+          "Fill the shipping form",
+          "Verify the confirmation page"
+        ]
+      },
+      "promptCarriesRevision": 2
+    },
+    {
+      "step": "journal",
+      "at": "2026-11-17T01:40:46.822Z",
+      "remoteMarathonEnvelopes": [
+        {
+          "seq": 6,
+          "enabled": true,
+          "origin": "remote"
+        },
+        {
+          "seq": 7,
+          "enabled": false,
+          "origin": null
+        },
+        {
+          "seq": 8,
+          "enabled": true,
+          "origin": "ui"
+        },
+        {
+          "seq": 9,
+          "enabled": false,
+          "origin": null
+        },
+        {
+          "seq": 10,
+          "enabled": true,
+          "origin": "remote"
+        },
+        {
+          "seq": 89,
+          "enabled": false,
+          "origin": null
+        },
+        {
+          "seq": 91,
+          "enabled": true,
+          "origin": "remote"
+        },
+        {
+          "seq": 114,
+          "enabled": false,
+          "origin": null
+        },
+        {
+          "seq": 207,
+          "enabled": true,
+          "origin": "remote"
+        },
+        {
+          "seq": 283,
+          "enabled": true,
+          "origin": "remote"
+        }
+      ]
+    }
+  ],
+  "finalState": {
+    "enabled": true,
+    "since": "2026-11-17T01:40:40.621Z",
+    "plan": {
+      "revision": 2,
+      "items": [
+        {
+          "content": "Fill the shipping form",
+          "status": "in_progress"
+        },
+        {
+          "content": "Verify the confirmation page",
+          "status": "pending"
+        }
+      ],
+      "updatedAt": "2026-11-17T01:40:40.627Z",
+      "turnId": "turn-mwk0zub4-879d"
+    },
+    "watch": {
+      "open": null,
+      "lastVerdict": null,
+      "lastCheckAt": null,
+      "checks": 0
+    }
+  }
+}

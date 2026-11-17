@@ -200,7 +200,7 @@ export class Bridge {
     })
   }
 
-  /** @param {string | undefined} turnId @param {{planMode?: boolean, confirmMode?: boolean}} [options] */
+  /** @param {string | undefined} turnId @param {{planMode?: boolean, confirmMode?: boolean, planSeed?: {revision: number, items: Array<{content: string, status: string}>} | null}} [options] */
   setTurnId(turnId, options = {}) {
     this.currentTurnId = turnId
     this.currentPlanMode = turnId !== undefined && options.planMode === true
@@ -208,6 +208,9 @@ export class Bridge {
     // Backstop for the confirmation setting: on for a turn that has the
     // setting on and did not start from the user's approval.
     this.currentConfirmGuard = turnId !== undefined && options.confirmGuard === true
+    // M2: the carried plan snapshot for this turn (null when none). The
+    // provider validates it strictly (seedPlanState) and fails closed.
+    this.currentPlanSeed = turnId !== undefined && isRecord(options.planSeed) ? options.planSeed : null
     this.#syncPlanMode()
     this.#syncConfirmMode()
   }
@@ -218,6 +221,7 @@ export class Bridge {
       type: 'plan.mode',
       turnId: this.currentTurnId ?? null,
       enabled: this.currentPlanMode,
+      seed: this.currentPlanSeed ?? null,
     })
   }
 

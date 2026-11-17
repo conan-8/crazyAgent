@@ -22,7 +22,7 @@
  *   node scripts/ui-preview.mjs --scenario composer   # image paste + model search + dictation dots
  *   node scripts/ui-preview.mjs --scenario slash      # slash-command palette: filter, keys, execution
  *   node scripts/ui-preview.mjs --scenario plan       # marathon arm, live checklist, queue/race preservation
- *   node scripts/ui-preview.mjs --scenario marathon   # shared chip: remote-origin toggle, mid-turn off, carried-plan placeholder
+ *   node scripts/ui-preview.mjs --scenario marathon   # shared chip: remote-origin toggle, mid-turn off, carried-plan rendering
  *   node scripts/ui-preview.mjs --scenario remote     # phone-started turns: render, queue, lost-race requeue
  *   node scripts/ui-preview.mjs --scenario confirm    # approval card: approve/deny, abandonment, settings toggle
  *   node scripts/ui-preview.mjs --scenario stopped    # stop, reload, restore, and continue a saved chat
@@ -1045,7 +1045,7 @@ async function playPlanScenario(page, capture) {
 
 /**
  * M1 marathon scenario: the shared chip, a toggle from a simulated remote
- * origin, mid-turn semantics, and the carried-plan rendering placeholder
+ * origin, mid-turn semantics, and carried-plan rendering at turn start
  * (the plan itself renders from marathon.state.plan in M2).
  */
 async function playMarathonScenario(page, capture) {
@@ -1101,9 +1101,9 @@ async function playMarathonScenario(page, capture) {
   await sleep(150)
   assert.equal((await chip()).visible, false)
 
-  // 4. Carried-plan rendering placeholder (M2): a plan-bearing marathon.state
-  // is accepted and mirrored; the dock stays empty until M2 renders the
-  // carried list at turn start. The chip is unaffected.
+  // 4. Carried plan (M2): a plan-bearing marathon.state is mirrored, and the
+  // next turn renders the carried list at turn start — before any live plan
+  // activity arrives.
   await recv(stateFrame(true, {
     origin: 'remote',
     plan: {
@@ -1121,8 +1121,43 @@ async function playMarathonScenario(page, capture) {
   assert.deepEqual(await page.evaluate(`(() => ({
     hidden: document.getElementById('plan-dock').hidden,
     children: document.getElementById('plan-dock').children.length,
-  }))()`), { hidden: true, children: 0 }, 'M1 stores the carried plan; rendering lands in M2')
-  await capture('carried-plan-placeholder')
+  }))()`), { hidden: true, children: 0 }, 'the carried plan renders at turn start, not on the state frame')
+  await sendPrompt(page, 'Continue the carried work')
+  await sleep(200)
+  const carried = await page.evaluate(`(() => {
+    const root = document.querySelector('#plan-dock .plan-panel');
+    return {
+      present: Boolean(root),
+      visible: Boolean(root && !root.hidden),
+      heading: root?.querySelector('.plan-panel-heading')?.textContent,
+      count: root?.querySelector('.plan-panel-count')?.textContent,
+      statuses: [...(root?.querySelectorAll('.plan-panel-item') ?? [])].map(row => row.dataset.status),
+      contents: [...(root?.querySelectorAll('.plan-panel-item-content') ?? [])].map(el => el.textContent),
+    };
+  })()`)
+  assert.deepEqual(carried, {
+    present: true,
+    visible: true,
+    heading: 'Marathon plan',
+    count: '0/2 done',
+    statuses: ['in_progress', 'pending'],
+    contents: ['Fill the shipping form', 'Verify the confirmation page'],
+  }, 'the carried list renders at turn start from marathon.state.plan')
+  await capture('carried-plan')
+  // A live plan activity then updates the carried list as usual.
+  await recv({
+    v: 1,
+    type: 'chat.activity',
+    kind: 'plan',
+    revision: 5,
+    items: [
+      { content: 'Fill the shipping form', status: 'completed' },
+      { content: 'Verify the confirmation page', status: 'in_progress' },
+    ],
+  })
+  await sleep(150)
+  assert.equal(await page.evaluate(`document.querySelector('#plan-dock .plan-panel-count')?.textContent`), '1/2 done')
+  await finishPrompt(page, 'session-preview0001', 'Carried work done.')
 
   // 5. Mid-turn off (§2.4): the chip clears while the turn keeps running; the
   // running turn keeps its checklist, the next turn starts unarmed.

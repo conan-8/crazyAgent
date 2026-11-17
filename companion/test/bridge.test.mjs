@@ -513,11 +513,11 @@ test('plan mode follows the current turn and synchronizes on provider connect', 
   const tools = await connect(url, 'tools')
   t.after(() => tools.ws.close())
   const initial = await tools.messages.next(message => message.type === 'plan.mode')
-  assert.deepEqual(initial, { v: 1, type: 'plan.mode', turnId: 'turn-planned', enabled: true })
+  assert.deepEqual(initial, { v: 1, type: 'plan.mode', turnId: 'turn-planned', enabled: true, seed: null })
 
   bridge.setTurnId('turn-ordinary', { planMode: false })
   const ordinary = await tools.messages.next(message => message.type === 'plan.mode')
-  assert.deepEqual(ordinary, { v: 1, type: 'plan.mode', turnId: 'turn-ordinary', enabled: false })
+  assert.deepEqual(ordinary, { v: 1, type: 'plan.mode', turnId: 'turn-ordinary', enabled: false, seed: null })
 
   bridge.setTurnId('turn-resumed', { planMode: true })
   await tools.messages.next(message => message.type === 'plan.mode' && message.turnId === 'turn-resumed')
@@ -526,11 +526,30 @@ test('plan mode follows the current turn and synchronizes on provider connect', 
   const resumed = await connect(url, 'tools')
   t.after(() => resumed.ws.close())
   const replayed = await resumed.messages.next(message => message.type === 'plan.mode')
-  assert.deepEqual(replayed, { v: 1, type: 'plan.mode', turnId: 'turn-resumed', enabled: true })
+  assert.deepEqual(replayed, { v: 1, type: 'plan.mode', turnId: 'turn-resumed', enabled: true, seed: null })
 
   bridge.setTurnId(undefined)
   const cleared = await resumed.messages.next(message => message.type === 'plan.mode')
-  assert.deepEqual(cleared, { v: 1, type: 'plan.mode', turnId: null, enabled: false })
+  assert.deepEqual(cleared, { v: 1, type: 'plan.mode', turnId: null, enabled: false, seed: null })
+})
+
+test('plan mode carries the M2 plan seed and clears it with the turn', async t => {
+  const { bridge, url } = await setup(t)
+  const seed = { revision: 4, items: [{ content: 'Fill the form', status: 'in_progress' }, { content: 'Verify', status: 'pending' }] }
+  bridge.setTurnId('turn-seeded', { planMode: true, planSeed: seed })
+  const tools = await connect(url, 'tools')
+  t.after(() => tools.ws.close())
+  const initial = await tools.messages.next(message => message.type === 'plan.mode')
+  assert.deepEqual(initial, { v: 1, type: 'plan.mode', turnId: 'turn-seeded', enabled: true, seed })
+
+  // A non-record seed is dropped (the provider validates strictly anyway).
+  bridge.setTurnId('turn-bad-seed', { planMode: true, planSeed: 'nope' })
+  const bad = await tools.messages.next(message => message.type === 'plan.mode' && message.turnId === 'turn-bad-seed')
+  assert.equal(bad.seed, null)
+
+  bridge.setTurnId(undefined)
+  const cleared = await tools.messages.next(message => message.type === 'plan.mode' && message.turnId === null)
+  assert.deepEqual(cleared, { v: 1, type: 'plan.mode', turnId: null, enabled: false, seed: null })
 })
 
 test('confirm mode follows the current turn and synchronizes on provider connect', async t => {
@@ -554,7 +573,7 @@ test('confirm mode follows the current turn and synchronizes on provider connect
   const replayed = await resumed.messages.next(message => message.type === 'confirm.mode')
   assert.deepEqual(replayed, { v: 1, type: 'confirm.mode', turnId: 'turn-resumed', enabled: true })
   const planReplayed = await resumed.messages.next(message => message.type === 'plan.mode')
-  assert.deepEqual(planReplayed, { v: 1, type: 'plan.mode', turnId: 'turn-resumed', enabled: true })
+  assert.deepEqual(planReplayed, { v: 1, type: 'plan.mode', turnId: 'turn-resumed', enabled: true, seed: null })
 
   bridge.setTurnId(undefined)
   const cleared = await resumed.messages.next(message => message.type === 'confirm.mode')

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CONFIRM_MODE_GUIDANCE, PLAN_MODE_GUIDANCE, buildPromptBlocks, formatViewText, isDocsDocumentUrl, normalizeImageAttachments, promptStats } from '../prompt.mjs'
+import { CONFIRM_MODE_GUIDANCE, MARATHON_MODE_GUIDANCE, buildPromptBlocks, formatViewText, isDocsDocumentUrl, normalizeImageAttachments, promptStats } from '../prompt.mjs'
 import { CORE_GUIDANCE, DOCS_MODE_GUIDANCE } from '../../packages/dsh-browser-extension/lib/guidance.js'
 
 function view(overrides = {}) {
@@ -36,21 +36,67 @@ test('buildPromptBlocks puts metadata and user text before one image', () => {
   assert.equal(blocks[1].mimeType, 'image/jpeg')
 })
 
-test('plan mode adds checklist instructions only when explicitly enabled', () => {
+test('marathon mode adds checklist instructions only when armed', () => {
   const now = new Date('2026-11-09T12:00:00.000Z')
   const ordinary = buildPromptBlocks(view(), 'Complete the long task', now)[0].text
   const plannedBlocks = buildPromptBlocks(view(), 'Complete the long task', now, [], { planMode: true })
   const planned = plannedBlocks[0].text
-  assert.doesNotMatch(ordinary, /<plan_mode>|browser_plan/)
-  assert.ok(planned.includes(PLAN_MODE_GUIDANCE))
-  assert.match(planned, /explicitly armed by the user's exact \/plan command/)
+  assert.doesNotMatch(ordinary, /<marathon_mode>|browser_plan/)
+  assert.ok(planned.includes(MARATHON_MODE_GUIDANCE))
+  assert.match(planned, /Marathon mode is on/)
+  assert.match(planned, /every turn while the switch stays on/)
   assert.match(planned, /expected_revision:0/)
   assert.match(planned, /independent final-state verification/)
   assert.match(planned, /user_input_needed:true/)
-  assert.ok(planned.indexOf('<plan_mode>') < planned.indexOf('Complete the long task'))
+  assert.ok(planned.indexOf('<marathon_mode>') < planned.indexOf('Complete the long task'))
   assert.ok(planned.endsWith('Complete the long task'))
   assert.equal(plannedBlocks.length, 2)
   assert.equal(plannedBlocks[1].data, 'AAAA')
+  // M2 budget: the fixed part stays small; it is per-turn text outside the
+  // 17,100-character core+Docs ceiling.
+  assert.ok(MARATHON_MODE_GUIDANCE.length <= 1_500, `marathon guidance fixed part must stay under 1500 chars, got ${MARATHON_MODE_GUIDANCE.length}`)
+})
+
+test('a carried plan appends its open items inside the marathon block, capped at eight lines', () => {
+  const now = new Date('2026-11-16T12:00:00.000Z')
+  const seed = {
+    revision: 4,
+    items: [
+      { content: 'Fill the shipping form', status: 'in_progress' },
+      { content: 'Verify the confirmation page', status: 'pending' },
+      { content: 'Already done', status: 'completed' },
+      { content: 'Blocked on login', status: 'blocked' },
+    ],
+  }
+  const text = buildPromptBlocks(view(), 'keep going with the shipment', now, [], { planMode: true, marathon: { seed } })[0].text
+  assert.ok(text.includes(MARATHON_MODE_GUIDANCE.replace('</marathon_mode>', '')), 'the fixed guidance stays intact')
+  assert.match(text, /Carried plan, revision 4 \(2 open\)/)
+  assert.match(text, /keep going and use expected_revision:4/)
+  assert.match(text, /If it is a different task, replace the plan with acknowledge_open_removal:true and a reason\./)
+  assert.match(text, /- \[in_progress\] Fill the shipping form/)
+  assert.match(text, /- \[pending\] Verify the confirmation page/)
+  assert.ok(!text.includes('- [completed]'), 'only open items are listed')
+  assert.ok(!text.includes('- [blocked]'))
+  assert.ok(text.indexOf('Carried plan') < text.indexOf('keep going with the shipment'))
+  assert.ok(text.endsWith('keep going with the shipment'))
+
+  // More than eight open items: the list caps at eight lines plus a note.
+  const many = { revision: 9, items: Array.from({ length: 12 }, (_, i) => ({ content: `Step ${i + 1}`, status: i === 0 ? 'in_progress' : 'pending' })) }
+  const manyText = buildPromptBlocks(view(), 'continue', now, [], { planMode: true, marathon: { seed: many } })[0].text
+  const itemLines = manyText.split('\n').filter(line => /^- \[(pending|in_progress)\]/.test(line))
+  assert.equal(itemLines.length, 8)
+  assert.match(manyText, /…and 4 more open item\(s\) not listed\./)
+  assert.match(manyText, /Carried plan, revision 9 \(12 open\)/)
+
+  // No seed / invalid seed: the fixed block alone, never a guessed list.
+  const plain = buildPromptBlocks(view(), 'x', now, [], { planMode: true })[0].text
+  assert.ok(plain.includes(MARATHON_MODE_GUIDANCE))
+  assert.ok(!plain.includes('Carried plan'))
+  for (const bad of [null, {}, { revision: -1, items: seed.items }, { revision: 1.5, items: seed.items }, { revision: 1, items: [] }, { revision: 1, items: [{ content: 'x', status: 'done' }] }, { revision: 1, items: 'no' }]) {
+    const badText = buildPromptBlocks(view(), 'x', now, [], { planMode: true, marathon: { seed: bad } })[0].text
+    assert.ok(!badText.includes('Carried plan'), JSON.stringify(bad))
+    assert.ok(badText.includes(MARATHON_MODE_GUIDANCE))
+  }
 })
 
 test('confirm mode adds the approval instructions only when the setting is on', () => {
@@ -69,7 +115,7 @@ test('confirm mode adds the approval instructions only when the setting is on', 
   assert.ok(CONFIRM_MODE_GUIDANCE.length <= 600, `confirm guidance must stay under 600 chars, got ${CONFIRM_MODE_GUIDANCE.length}`)
   // Both conditional blocks can ride one turn, each before the user text.
   const both = buildPromptBlocks(view(), 'Plan and submit', now, [], { planMode: true, confirmMode: true })[0].text
-  assert.ok(both.includes(PLAN_MODE_GUIDANCE))
+  assert.ok(both.includes(MARATHON_MODE_GUIDANCE))
   assert.ok(both.includes(CONFIRM_MODE_GUIDANCE))
   assert.ok(both.endsWith('Plan and submit'))
 })
@@ -103,7 +149,7 @@ test('docs mode appends the conditional Docs block only when armed, alongside pl
   assert.ok(armed.endsWith('Edit the document'))
   // All three conditionals can ride one turn, each before the user text.
   const all = buildPromptBlocks(view(), 'Plan, confirm, edit', now, [], { planMode: true, confirmMode: true, docsMode: true })[0].text
-  assert.ok(all.includes(PLAN_MODE_GUIDANCE))
+  assert.ok(all.includes(MARATHON_MODE_GUIDANCE))
   assert.ok(all.includes(CONFIRM_MODE_GUIDANCE))
   assert.ok(all.includes(DOCS_MODE_GUIDANCE))
   assert.ok(all.endsWith('Plan, confirm, edit'))

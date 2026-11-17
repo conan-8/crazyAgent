@@ -6,6 +6,7 @@ import {
   decidePlanFinalAnswer,
   recordPlanActivity,
   replacePlan,
+  seedPlanState,
   summarizePlan,
 } from './plan.js'
 
@@ -69,6 +70,7 @@ function toolContent(plan, prefix) {
 
 export function createPlanRuntime({ ctx, bridge }) {
   let pendingTurnId = null
+  let pendingSeed = null
   let active = null
   let disposed = false
 
@@ -95,15 +97,20 @@ export function createPlanRuntime({ ctx, bridge }) {
     if (disposed) return
     if (frame?.enabled !== true || typeof frame.turnId !== 'string' || frame.turnId.length === 0) {
       pendingTurnId = null
+      pendingSeed = null
       return
     }
     if (active?.turnId === frame.turnId) return
     pendingTurnId = frame.turnId
+    // M2: the companion may carry the previous turn's open plan into this one.
+    // Validation happens at claim (seedPlanState); an invalid seed falls back
+    // to an empty plan and logs plan.seed.rejected — fail closed.
+    pendingSeed = isRecord(frame.seed) ? frame.seed : null
   }
 
   async function replace(plan, args) {
     if (disposed || active !== plan) {
-      throw planError('PLAN_MODE_INACTIVE', 'browser_plan is available only in the active turn explicitly started with /plan')
+      throw planError('PLAN_MODE_INACTIVE', 'browser_plan is available only in the active marathon turn (started with /marathon or the legacy /plan alias)')
     }
     if (isRecord(args) && args.user_input_needed !== undefined && typeof args.user_input_needed !== 'boolean') {
       throw planError('PLAN_WAIT_INVALID', 'user_input_needed must be a boolean')
@@ -161,19 +168,36 @@ export function createPlanRuntime({ ctx, bridge }) {
     const sessionId = String(agent.session.id)
     if (active?.key === turnKey(sessionId, turn)) {
       pendingTurnId = null
+      pendingSeed = null
       return
     }
     if (active) cleanup(active, 'superseded')
     const turnId = pendingTurnId
+    const seed = pendingSeed
     pendingTurnId = null
+    pendingSeed = null
+    let state = createPlanState()
+    let seeded = false
+    if (seed !== null) {
+      const seededState = seedPlanState(seed)
+      if (seededState === null) {
+        log('plan.seed.rejected', { turnId, sessionId, turn }, 'warn')
+      } else {
+        state = seededState
+        seeded = true
+      }
+    }
     const plan = {
       key: turnKey(sessionId, turn),
       turnId,
       sessionId,
       turn,
       agent,
-      state: createPlanState(),
+      state,
+      seeded,
       callIds: new Set(),
+      planCalls: 0,
+      nonPlanResults: 0,
       waitingForUser: false,
       finalOutcome: null,
       unregister: null,
@@ -185,7 +209,7 @@ export function createPlanRuntime({ ctx, bridge }) {
       })
       plan.unregister = ctx.tools.register(definition)
       active = plan
-      log('plan.mode.started', { turnId, sessionId, turn, revision: 0 })
+      log('plan.mode.started', { turnId, sessionId, turn, revision: state.revision, seeded })
     } catch (error) {
       log('plan.mode.error', {
         turnId,
@@ -205,6 +229,7 @@ export function createPlanRuntime({ ctx, bridge }) {
     const plan = forTurn(session?.id, data.turn)
     if (!plan || data.name !== BROWSER_PLAN_TOOL.name || typeof data.callId !== 'string') return
     plan.callIds.add(data.callId)
+    plan.planCalls += 1
   }
 
   function observeToolResult(session, data) {
@@ -213,6 +238,7 @@ export function createPlanRuntime({ ctx, bridge }) {
     if (!plan) return
     const id = callId(data)
     if (typeof id === 'string' && plan.callIds.delete(id)) return
+    plan.nonPlanResults += 1
     const result = recordPlanActivity(plan.state)
     plan.state = result.state
     if (!result.reminder) return
@@ -240,6 +266,25 @@ export function createPlanRuntime({ ctx, bridge }) {
   function stopping({ agent, turn, signal }) {
     const plan = forTurn(agent?.session?.id, turn)
     if (!plan) return false
+    // M2 seeded-but-untouched rule: a carried plan must not hijack an unrelated
+    // quick question. When the plan was seeded, the model made no browser_plan
+    // call, and the turn had zero non-plan tool results, allow the answer with
+    // outcome not-assessed. Any tool activity makes the ordinary nudge apply.
+    if (plan.seeded && plan.planCalls === 0 && plan.nonPlanResults === 0
+      && signal?.aborted !== true && !plan.waitingForUser) {
+      plan.finalOutcome = 'not-assessed'
+      log('plan.final', {
+        turnId: plan.turnId,
+        sessionId: plan.sessionId,
+        turn,
+        action: 'allow',
+        reason: 'seeded-untouched',
+        outcome: 'not-assessed',
+        revision: plan.state.revision,
+        completionNudges: 0,
+      })
+      return false
+    }
     const decision = decidePlanFinalAnswer(plan.state, {
       aborted: signal?.aborted === true,
       userInputNeeded: plan.waitingForUser,
@@ -296,6 +341,7 @@ export function createPlanRuntime({ ctx, bridge }) {
   function dispose() {
     disposed = true
     pendingTurnId = null
+    pendingSeed = null
     if (active) cleanup(active)
   }
 

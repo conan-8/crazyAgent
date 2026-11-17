@@ -7,18 +7,71 @@
  */
 
 import { DOCS_MODE_GUIDANCE } from '../packages/dsh-browser-extension/lib/guidance.js'
+import { PLAN_LIMITS } from '../packages/dsh-browser-extension/lib/plan.js'
 
 const MAX_PROMPT_IMAGES = 4
 const MAX_PROMPT_IMAGE_BYTES = 5_000_000
 const MAX_PROMPT_TOTAL_IMAGE_BYTES = 12_000_000
 const PROMPT_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 
-export const PLAN_MODE_GUIDANCE = `<plan_mode>
-This turn was explicitly armed by the user's exact /plan command. Use browser_plan for this multi-step task; it is available only for this turn.
-Before browser work, create a concise 2-7 item checklist with expected_revision:0 and exactly one in_progress item. Include an independent final-state verification item. Do not substitute narration or a prose to-do list for the tool, and do not stop after planning: execute the plan.
+/**
+ * M2: the marathon guidance block (renamed from PLAN_MODE_GUIDANCE). Sent on
+ * every turn armed by the companion-owned marathon switch (or the legacy
+ * planMode alias). Per-turn text outside the 17,100-character core+Docs
+ * ceiling, with its own test ceiling of 1,500 characters for this fixed part;
+ * a carried plan appends at most PLAN_LIMITS.openSummaryItems item lines.
+ */
+export const MARATHON_MODE_GUIDANCE = `<marathon_mode>
+Marathon mode is on: this chat plans and executes multi-step work with browser_plan, available on every turn while the switch stays on.
+Before browser work, create a concise 2-7 item checklist with expected_revision:0 and exactly one in_progress item — unless a carried plan is listed below, then continue from its revision. Include an independent final-state verification item. Do not substitute narration or a prose to-do list for the tool, and do not stop after planning: execute the plan.
 After real work, replace the COMPLETE list with the latest returned revision. Keep one item in_progress while pending work remains. Report completed only after the item's own evidence supports it; completion is still a model report, not independent verification. Preserve open items unless acknowledge_open_removal:true and a specific reason honestly record a scope change.
 If genuinely blocked after real attempts, mark the affected item blocked with the reason. If user input is needed, call browser_plan with the unchanged complete list and user_input_needed:true, then ask the user. Finish only when every item is completed or blocked, or report remaining work honestly after the bounded harness nudges.
-</plan_mode>`
+</marathon_mode>`
+
+const PLAN_ITEM_STATUSES = new Set(['pending', 'in_progress', 'completed', 'blocked'])
+
+/**
+ * Validate a carried-plan seed for prompt rendering (the provider validates
+ * strictly via seedPlanState; an invalid seed here simply renders no list).
+ * @param {unknown} seed
+ * @returns {{revision: number, items: Array<{content: string, status: string}>} | null}
+ */
+export function normalizePlanSeed(seed) {
+  if (seed === null || typeof seed !== 'object' || Array.isArray(seed)) return null
+  if (!Number.isSafeInteger(seed.revision) || seed.revision < 0) return null
+  if (!Array.isArray(seed.items) || seed.items.length === 0 || seed.items.length > PLAN_LIMITS.maxItems) return null
+  const items = []
+  for (const item of seed.items) {
+    if (item === null || typeof item !== 'object' || typeof item.content !== 'string' || item.content.trim().length === 0) return null
+    if (typeof item.status !== 'string' || !PLAN_ITEM_STATUSES.has(item.status)) return null
+    items.push({ content: item.content, status: item.status })
+  }
+  return { revision: seed.revision, items }
+}
+
+/**
+ * The carried-plan text appended inside <marathon_mode> when a seed exists.
+ * Only open items are listed, capped at PLAN_LIMITS.openSummaryItems lines.
+ * @param {{revision: number, items: Array<{content: string, status: string}>}} seed
+ */
+export function formatCarriedPlan(seed) {
+  const open = seed.items.filter(item => item.status === 'pending' || item.status === 'in_progress')
+  const listed = open.slice(0, PLAN_LIMITS.openSummaryItems)
+  const lines = [
+    `Carried plan, revision ${seed.revision} (${open.length} open). If this message continues that work, keep going and use expected_revision:${seed.revision}.`,
+    'If it is a different task, replace the plan with acknowledge_open_removal:true and a reason.',
+    ...listed.map(item => `- [${item.status}] ${item.content}`),
+  ]
+  if (open.length > listed.length) lines.push(`…and ${open.length - listed.length} more open item(s) not listed.`)
+  return lines.join('\n')
+}
+
+/** The full marathon block for one turn: fixed guidance plus any carried plan. */
+export function marathonModeBlock(seed) {
+  const normalized = normalizePlanSeed(seed)
+  if (normalized === null) return MARATHON_MODE_GUIDANCE
+  return MARATHON_MODE_GUIDANCE.replace('</marathon_mode>', `${formatCarriedPlan(normalized)}\n</marathon_mode>`)
+}
 
 /**
  * B9a: sent only on turns where the companion's opt-in `confirmIrreversible`
@@ -131,14 +184,14 @@ function formatTimeContext(now) {
  * @param {string} text
  * @param {Date} now
  * @param {Array<{mimeType: string, data: string}>} images
- * @param {{planMode?: boolean, confirmMode?: boolean, docsMode?: boolean}} [options]
+ * @param {{planMode?: boolean, confirmMode?: boolean, docsMode?: boolean, marathon?: {seed?: unknown}}} [options]
  * @returns {Array<Record<string, unknown>>}
  */
 export function buildPromptBlocks(view, text, now = new Date(), images = [], options = {}) {
   const header = view?.image?.data === undefined
     ? `${formatViewText(view)}\n(No screenshot is attached for this turn. Use browser_screenshot if you need to see the page.)`
     : formatViewText(view)
-  const planGuidance = options.planMode === true ? `\n\n${PLAN_MODE_GUIDANCE}` : ''
+  const planGuidance = options.planMode === true ? `\n\n${marathonModeBlock(options.marathon?.seed)}` : ''
   const confirmGuidance = options.confirmMode === true ? `\n\n${CONFIRM_MODE_GUIDANCE}` : ''
   const docsGuidance = options.docsMode === true ? `\n\n${DOCS_MODE_GUIDANCE}` : ''
   /** @type {Array<Record<string, unknown>>} */

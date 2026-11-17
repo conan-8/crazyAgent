@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { MARATHON_ORIGINS, MARATHON_WATCHER_IDLE, MarathonState, initialMarathonState, marathonFrameBody } from '../marathon.mjs'
+import { MARATHON_ORIGINS, MARATHON_WATCHER_IDLE, MarathonState, initialMarathonState, marathonFrameBody, normalizeMarathonPlan } from '../marathon.mjs'
 
 const fixedNow = () => new Date('2026-11-16T19:00:00.000Z')
 
@@ -75,4 +75,59 @@ test('the frame body carries the idle watcher projection until M3', () => {
   assert.deepEqual(MARATHON_WATCHER_IDLE, body.watcher)
   body.watcher.checks = 99
   assert.equal(MARATHON_WATCHER_IDLE.checks, 0, 'the idle constant is never mutated through a frame')
+})
+
+/* M2: carried-plan storage */
+
+const PLAN = Object.freeze({
+  revision: 4,
+  items: [{ content: 'Fill the form', status: 'in_progress' }, { content: 'Verify', status: 'pending' }],
+  updatedAt: '2026-11-16T19:05:00.000Z',
+  turnId: 'turn-1',
+})
+
+test('storePlan keeps an open plan only while enabled, and drops terminal plans', () => {
+  const marathon = new MarathonState({ now: fixedNow })
+  // Off: never stores.
+  assert.equal(marathon.storePlan(PLAN).changed, false)
+  assert.equal(marathon.snapshot().plan, null)
+  marathon.set({ enabled: true, origin: 'ui' })
+  const stored = marathon.storePlan(PLAN)
+  assert.equal(stored.changed, true)
+  assert.deepEqual(stored.state.plan, PLAN)
+  // Identical store is a no-op.
+  assert.equal(marathon.storePlan(PLAN).changed, false)
+  // All-terminal plan drops the carry.
+  const terminal = { ...PLAN, revision: 5, items: [{ content: 'Fill the form', status: 'completed' }, { content: 'Verify', status: 'blocked' }] }
+  assert.equal(marathon.storePlan(terminal).changed, true)
+  assert.equal(marathon.snapshot().plan, null)
+  // Malformed snapshots fail closed to null.
+  marathon.storePlan(PLAN)
+  assert.equal(marathon.storePlan({ ...PLAN, revision: -1 }).state.plan, null)
+  // Off clears a stored plan.
+  marathon.storePlan(PLAN)
+  marathon.set({ enabled: false })
+  assert.equal(marathon.snapshot().plan, null)
+})
+
+test('normalizeMarathonPlan validates the full snapshot shape fail-closed', () => {
+  assert.deepEqual(normalizeMarathonPlan(PLAN), PLAN)
+  for (const bad of [
+    null, undefined, 'plan', [], {},
+    { ...PLAN, revision: -1 },
+    { ...PLAN, revision: 1.5 },
+    { ...PLAN, updatedAt: 5 },
+    { ...PLAN, turnId: null },
+    { ...PLAN, items: [] },
+    { ...PLAN, items: [{ content: 'x', status: 'done' }] },
+    { ...PLAN, items: [{ content: '  ', status: 'pending' }] },
+    { ...PLAN, items: [{ content: 'x', status: 'pending' }, { content: 'x', status: 'completed' }] },
+    { ...PLAN, items: Array.from({ length: 41 }, (_, i) => ({ content: `Task ${i}`, status: 'pending' })) },
+  ]) {
+    assert.equal(normalizeMarathonPlan(bad), null, JSON.stringify(bad))
+  }
+  // The result is a copy, not the input reference.
+  const copy = normalizeMarathonPlan(PLAN)
+  copy.items[0].content = 'changed'
+  assert.equal(PLAN.items[0].content, 'Fill the form')
 })

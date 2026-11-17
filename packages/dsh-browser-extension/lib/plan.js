@@ -6,8 +6,12 @@ export const PLAN_LIMITS = deepFreeze({
   maxReasonChars: 240,
   openSummaryItems: 8,
   staleAfterActivities: 6,
+  // Per-stretch budgets: refilled by each accepted revision (M2).
   maxStaleReminders: 2,
   maxCompletionNudges: 2,
+  // Lifetime budgets per turn: never refilled (M2).
+  maxStaleRemindersLifetime: 12,
+  maxCompletionNudgesLifetime: 12,
 })
 
 export const BROWSER_PLAN_TOOL = deepFreeze({
@@ -41,10 +45,11 @@ export const BROWSER_PLAN_TOOL = deepFreeze({
   },
 })
 
-const STATE_VERSION = 1
+const STATE_VERSION = 2
 const STATE_KEYS = [
   'version', 'revision', 'items', 'activitiesSinceRevision', 'activityCount',
   'staleReminderCount', 'lastStaleReminderActivity', 'completionNudges',
+  'staleRemindersLifetime', 'completionNudgesLifetime',
 ]
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/u
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key)
@@ -149,11 +154,18 @@ function assertPlanState(state) {
   for (const key of ['revision', 'activitiesSinceRevision', 'activityCount', 'lastStaleReminderActivity']) {
     if (!Number.isSafeInteger(state[key]) || state[key] < 0) throw stateError(`${key} must be a non-negative safe integer`)
   }
-  for (const [key, maximum] of [['staleReminderCount', PLAN_LIMITS.maxStaleReminders], ['completionNudges', PLAN_LIMITS.maxCompletionNudges]]) {
+  for (const [key, maximum] of [
+    ['staleReminderCount', PLAN_LIMITS.maxStaleReminders],
+    ['completionNudges', PLAN_LIMITS.maxCompletionNudges],
+    ['staleRemindersLifetime', PLAN_LIMITS.maxStaleRemindersLifetime],
+    ['completionNudgesLifetime', PLAN_LIMITS.maxCompletionNudgesLifetime],
+  ]) {
     if (!Number.isSafeInteger(state[key]) || state[key] < 0 || state[key] > maximum) {
       throw stateError(`${key} must be an integer from 0 to ${maximum}`)
     }
   }
+  if (state.staleReminderCount > state.staleRemindersLifetime) throw stateError('staleReminderCount cannot exceed staleRemindersLifetime')
+  if (state.completionNudges > state.completionNudgesLifetime) throw stateError('completionNudges cannot exceed completionNudgesLifetime')
   if (state.activitiesSinceRevision > state.activityCount) throw stateError('activitiesSinceRevision cannot exceed activityCount')
   if (state.lastStaleReminderActivity > state.activityCount) throw stateError('lastStaleReminderActivity cannot exceed activityCount')
 }
@@ -191,6 +203,39 @@ export function createPlanState() {
     staleReminderCount: 0,
     lastStaleReminderActivity: 0,
     completionNudges: 0,
+    staleRemindersLifetime: 0,
+    completionNudgesLifetime: 0,
+  })
+}
+
+/**
+ * M2: build a turn state from a carried plan snapshot. The seed must carry a
+ * non-negative safe-integer revision and a non-empty item list that passes the
+ * same normalizeItems validation as a model replacement. Counters start at
+ * zero (a new turn gets fresh stretch budgets). Anything invalid returns null;
+ * the caller falls back to createPlanState() and logs plan.seed.rejected —
+ * fail closed, no guessing. The model's first call then sees revision 0 and
+ * recovers through PLAN_REVISION_CONFLICT.
+ * @param {unknown} seed `{revision, items}` from the companion
+ * @returns {ReturnType<typeof createPlanState> | null}
+ */
+export function seedPlanState(seed) {
+  if (!isRecord(seed)) return null
+  if (!Number.isSafeInteger(seed.revision) || seed.revision < 0) return null
+  if (!Array.isArray(seed.items) || seed.items.length === 0) return null
+  const normalized = normalizeItems(seed.items)
+  if (normalized.error) return null
+  return deepFreeze({
+    version: STATE_VERSION,
+    revision: seed.revision,
+    items: cloneItems(normalized.items),
+    activitiesSinceRevision: 0,
+    activityCount: 0,
+    staleReminderCount: 0,
+    lastStaleReminderActivity: 0,
+    completionNudges: 0,
+    staleRemindersLifetime: 0,
+    completionNudgesLifetime: 0,
   })
 }
 
@@ -284,6 +329,11 @@ export function replacePlan(state, args) {
     revision: state.revision + 1,
     items: cloneItems(normalized.items),
     activitiesSinceRevision: 0,
+    // M2 refill: an accepted revision starts a new stretch, so the per-stretch
+    // budgets reset. The lifetime counters keep counting; PLAN_UNCHANGED above
+    // prevents refilling by resubmitting the same list.
+    staleReminderCount: 0,
+    completionNudges: 0,
   })
   const audit = deepFreeze({
     previousRevision: state.revision,
@@ -307,17 +357,19 @@ export function recordPlanActivity(state) {
     && activitiesSinceRevision >= PLAN_LIMITS.staleAfterActivities
     && enoughNewActivity
     && state.staleReminderCount < PLAN_LIMITS.maxStaleReminders
+    && state.staleRemindersLifetime < PLAN_LIMITS.maxStaleRemindersLifetime
   const nextState = deepFreeze({
     ...state,
     items: cloneItems(state.items),
     activityCount,
     activitiesSinceRevision,
     staleReminderCount: state.staleReminderCount + (shouldRemind ? 1 : 0),
+    staleRemindersLifetime: state.staleRemindersLifetime + (shouldRemind ? 1 : 0),
     lastStaleReminderActivity: shouldRemind ? activityCount : state.lastStaleReminderActivity,
   })
   if (!shouldRemind) return { state: nextState, reminder: null }
   const reminderCount = nextState.staleReminderCount
-  const text = `[harness] Plan revision ${state.revision} is stale after ${activitiesSinceRevision} non-plan activities and still has ${summary.counts.open} open item(s). Continue the in-progress item and update browser_plan only when actual status or scope changes; do not rewrite it merely to clear this reminder. If work is genuinely impossible after real attempts, mark it blocked with the reason. Reported completion is not independent verification. (Stale-plan reminder ${reminderCount} of ${PLAN_LIMITS.maxStaleReminders}.)\n${summary.openItems.map(item => `- ${item.content}`).join('\n')}${summary.omittedOpenItems > 0 ? `\n…and ${summary.omittedOpenItems} more.` : ''}`
+  const text = `[harness] Plan revision ${state.revision} is stale after ${activitiesSinceRevision} non-plan activities and still has ${summary.counts.open} open item(s). Continue the in-progress item and update browser_plan only when actual status or scope changes; do not rewrite it merely to clear this reminder. If work is genuinely impossible after real attempts, mark it blocked with the reason. Reported completion is not independent verification. (Stale-plan reminder ${reminderCount} of ${PLAN_LIMITS.maxStaleReminders} this stretch; ${nextState.staleRemindersLifetime} of ${PLAN_LIMITS.maxStaleRemindersLifetime} this turn.)\n${summary.openItems.map(item => `- ${item.content}`).join('\n')}${summary.omittedOpenItems > 0 ? `\n…and ${summary.omittedOpenItems} more.` : ''}`
   return {
     state: nextState,
     reminder: deepFreeze({
@@ -349,6 +401,8 @@ export function decidePlanFinalAnswer(state, options = {}) {
     outcome,
     completionNudges: state.completionNudges,
     maxCompletionNudges: PLAN_LIMITS.maxCompletionNudges,
+    completionNudgesLifetime: state.completionNudgesLifetime,
+    maxCompletionNudgesLifetime: PLAN_LIMITS.maxCompletionNudgesLifetime,
     summary,
     ...extra,
   })
@@ -359,16 +413,18 @@ export function decidePlanFinalAnswer(state, options = {}) {
     if (summary.counts.blocked > 0) return decision('allow', 'blocked-items', 'blocked')
     return decision('allow', 'reported-complete', 'reported-complete')
   }
-  if (state.completionNudges >= PLAN_LIMITS.maxCompletionNudges) {
+  if (state.completionNudges >= PLAN_LIMITS.maxCompletionNudges
+    || state.completionNudgesLifetime >= PLAN_LIMITS.maxCompletionNudgesLifetime) {
     return decision('allow', 'nudge-limit', 'unfinished')
   }
   const nextState = deepFreeze({
     ...state,
     items: cloneItems(state.items),
     completionNudges: state.completionNudges + 1,
+    completionNudgesLifetime: state.completionNudgesLifetime + 1,
   })
   const nudge = nextState.completionNudges
-  const message = `[harness] Not finished: plan revision ${state.revision} still has ${summary.counts.open} item(s) pending or in_progress.\n${summary.openItems.map(item => `- ${item.content}`).join('\n')}${summary.omittedOpenItems > 0 ? `\n…and ${summary.omittedOpenItems} more.` : ''}\nDo the next item now. To change the plan, call browser_plan with the COMPLETE list and expected_revision:${state.revision}. Mark items completed only to report completion; that status is not independent verification. Mark an item blocked only after genuine attempts, and ask the user when input is needed. Do not erase open work: removal or content rewrites require explicit acknowledgement and a reason. Answer again only when every item is completed or blocked. (Completion nudge ${nudge} of ${PLAN_LIMITS.maxCompletionNudges}.)`
+  const message = `[harness] Not finished: plan revision ${state.revision} still has ${summary.counts.open} item(s) pending or in_progress.\n${summary.openItems.map(item => `- ${item.content}`).join('\n')}${summary.omittedOpenItems > 0 ? `\n…and ${summary.omittedOpenItems} more.` : ''}\nDo the next item now. To change the plan, call browser_plan with the COMPLETE list and expected_revision:${state.revision}. Mark items completed only to report completion; that status is not independent verification. Mark an item blocked only after genuine attempts, and ask the user when input is needed. Do not erase open work: removal or content rewrites require explicit acknowledgement and a reason. Answer again only when every item is completed or blocked. (Completion nudge ${nudge} of ${PLAN_LIMITS.maxCompletionNudges} this stretch; ${nextState.completionNudgesLifetime} of ${PLAN_LIMITS.maxCompletionNudgesLifetime} this turn.)`
   return {
     state: nextState,
     action: 'nudge',
@@ -376,6 +432,8 @@ export function decidePlanFinalAnswer(state, options = {}) {
     outcome: 'unfinished',
     completionNudges: nudge,
     maxCompletionNudges: PLAN_LIMITS.maxCompletionNudges,
+    completionNudgesLifetime: nextState.completionNudgesLifetime,
+    maxCompletionNudgesLifetime: PLAN_LIMITS.maxCompletionNudgesLifetime,
     summary,
     message,
   }

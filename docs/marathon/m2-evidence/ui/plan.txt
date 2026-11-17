@@ -1,0 +1,5 @@
+[ui-preview] wrote /tmp/m2-ui-plan/plan-live.png
+[ui-preview] wrote /tmp/m2-ui-plan/plan-sticky.png
+[ui-preview] wrote /tmp/m2-ui-plan/plan-collapsed.png
+[ui-preview] wrote /tmp/m2-ui-plan/plan-unfinished.png
+[ui-preview] wrote /tmp/m2-ui-plan/plan-armed-narrow.png

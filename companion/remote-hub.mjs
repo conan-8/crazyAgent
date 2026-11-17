@@ -17,6 +17,7 @@
 
 import { createHash, randomBytes } from 'node:crypto'
 import { isRecord } from './protocol.mjs'
+import { normalizeMarathonPlan } from './marathon.mjs'
 import { RemoteHistoryStore } from './remote-history.mjs'
 
 export const REMOTE_PROTOCOL_VERSION = 1
@@ -596,7 +597,7 @@ export class RemoteHub {
     return {
       enabled,
       since,
-      plan: plan === null ? null : { ...plan },
+      plan: plan === null ? null : { ...plan, items: plan.items.map(item => ({ ...item })) },
       watch: {
         open: null,
         lastVerdict: watcher.lastVerdict,
@@ -617,14 +618,15 @@ export class RemoteHub {
       sessionId: stringOrNull(frame.sessionId),
       since: stringOrNull(frame.since),
       origin: frame.origin === 'ui' || frame.origin === 'remote' ? frame.origin : null,
-      // M1 carries no plan; anything else fails closed to null until M2.
-      plan: null,
+      // M2: the carried plan snapshot, validated fail-closed (null until set).
+      plan: normalizeMarathonPlan(frame.plan),
       watcher: normalizeWatcher(frame.watcher),
     }
     if (!next.enabled) {
       next.sessionId = null
       next.since = null
       next.origin = null
+      next.plan = null
     }
     if (JSON.stringify(next) === JSON.stringify(this.marathon)) return
     this.marathon = next
@@ -633,7 +635,7 @@ export class RemoteHub {
       sessionId: next.sessionId,
       since: next.since,
       origin: next.origin,
-      plan: next.plan,
+      plan: next.plan === null ? null : { ...next.plan, items: next.plan.items.map(item => ({ ...item })) },
       watcher: { ...next.watcher },
     }, { turnId: null })
   }

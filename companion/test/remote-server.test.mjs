@@ -202,7 +202,7 @@ test('POST /messages carries explicit plan mode with validation and idempotency'
   const ctx = await setup(t)
   const body = { clientMessageId: 'client-plan-0001', text: 'plan this task', planMode: true }
   assert.equal((await ctx.call({ method: 'POST', path: '/remote/v1/messages', body })).status, 202)
-  assert.match(ctx.runner.runs[0][0].text, /<plan_mode>/u)
+  assert.match(ctx.runner.runs[0][0].text, /<marathon_mode>/u)
   await ctx.call({ method: 'POST', path: '/remote/v1/messages', body })
   assert.equal(ctx.runner.runs.length, 1)
   const changed = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { ...body, planMode: false } })
@@ -334,7 +334,7 @@ test('a legacy planMode:true remote message turns marathon on and arms the plan 
   const ctx = await setup(t)
   const accepted = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-legacy-0001', text: 'old APK task', planMode: true } })
   assert.equal(accepted.status, 202)
-  assert.match(ctx.runner.runs[0][0].text, /<plan_mode>/u)
+  assert.match(ctx.runner.runs[0][0].text, /<marathon_mode>/u)
   const state = (await ctx.call({ path: '/remote/v1/state' })).body
   assert.equal(state.marathon.enabled, true)
   const user = state.messages.find(message => message.type === 'chat.user')
@@ -347,7 +347,7 @@ test('a legacy planMode:true remote message turns marathon on and arms the plan 
   // Sticky: the next ordinary remote message is a marathon turn too.
   const next = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-legacy-0002', text: 'follow-up' } })
   assert.equal(next.status, 202)
-  assert.match(ctx.runner.runs[1][0].text, /<plan_mode>/u)
+  assert.match(ctx.runner.runs[1][0].text, /<marathon_mode>/u)
   ctx.runner.current.resolve('done')
   await sleep(10)
 })

@@ -15,10 +15,12 @@
  *   A. POST /marathon on  -> panel DOM chip lights; GET /state agrees.
  *   B. panel chip ×       -> GET /state marathon off; DOM chip hidden.
  *   C. panel /marathon    -> GET /state on; /marathon again -> off.
- *   D. legacy planMode:true message -> plan turn (prompt carries <plan_mode>),
+ *   D. legacy planMode:true message -> plan turn (prompt carries <marathon_mode>),
  *      chat.done planMode+marathon, switch on, foreign turn badge in the DOM.
  *   E. sticky next turn; POST /new resets off in /state AND the DOM.
  *   F. mid-turn off: running turn keeps planMode; the next turn is unarmed.
+ *   G. M2 carry-over: a plan activity is carried into the next turn's prompt
+ *      and rendered by the real panel at turn start.
  *
  * Evidence: screenshots + a JSON transcript under --out
  * (default docs/marathon/m1-evidence/independent-check).
@@ -336,7 +338,7 @@ async function main() {
   const stateD = await waitTurnIdle()
   assert.equal(stateD.marathon.enabled, true, 'the legacy flag turned the shared switch on')
   const promptD = capturedBlocks[beforeD].filter(b => b.type === 'text').map(b => b.text).join('\n')
-  assert.ok(promptD.includes('<plan_mode>'), 'the legacy turn carried the plan guidance')
+  assert.ok(promptD.includes('<marathon_mode>'), 'the legacy turn carried the plan guidance')
   const doneD = stateD.messages.filter(m => m.type === 'chat.done').at(-1)
   assert.equal(doneD.body.planMode, true)
   assert.equal(doneD.body.marathon, true)
@@ -352,7 +354,7 @@ async function main() {
   assert.equal(sticky.status, 202)
   await waitTurnIdle()
   const promptE = capturedBlocks[beforeE].filter(b => b.type === 'text').map(b => b.text).join('\n')
-  assert.ok(promptE.includes('<plan_mode>'), 'the switch is sticky: the next turn arms too')
+  assert.ok(promptE.includes('<marathon_mode>'), 'the switch is sticky: the next turn arms too')
   const fresh = await remote(remotePort, remoteToken, 'POST', '/new', { clientCommandId: 'm1-check-new-0001' })
   assert.equal(fresh.status, 200)
   await waitChip(page, false)
@@ -378,14 +380,67 @@ async function main() {
   assert.equal(doneF.body.planMode, true, 'the running turn kept browser_plan to the end')
   assert.equal(doneF.body.marathon, true)
   const promptF = capturedBlocks[beforeF].filter(b => b.type === 'text').map(b => b.text).join('\n')
-  assert.ok(promptF.includes('<plan_mode>'))
+  assert.ok(promptF.includes('<marathon_mode>'))
   const beforeG = capturedBlocks.length
   const after = await remote(remotePort, remoteToken, 'POST', '/messages', { clientMessageId: 'm1-check-after-0001', text: 'quick question after off' })
   assert.equal(after.status, 202)
   await waitTurnIdle()
   const promptG = capturedBlocks[beforeG].filter(b => b.type === 'text').map(b => b.text).join('\n')
-  assert.ok(!promptG.includes('<plan_mode>'), 'the next turn is unarmed after off')
+  assert.ok(!promptG.includes('<marathon_mode>'), 'the next turn is unarmed after off')
   record('F-mid-turn-off', { midOff: midOff.body, runningKeptPlan: doneF.body.planMode, nextTurnUnarmed: true })
+
+  // G. M2 carry-over: a plan activity during a marathon turn is carried into
+  // the next turn's prompt AND rendered by the real panel at turn start. The
+  // scripted runner emits no plan activity, so the harness injects one exactly
+  // as the provider would (controller.noteActivity is the provider's path).
+  await remote(remotePort, remoteToken, 'POST', '/marathon', { clientCommandId: 'm2-check-on-0001', enabled: true })
+  await waitChip(page, true)
+  const planned = await remote(remotePort, remoteToken, 'POST', '/messages', { clientMessageId: 'm2-check-plan-0001', text: 'slow marathon task that plans' })
+  assert.equal(planned.status, 202)
+  let planTurnId = null
+  for (const deadline = Date.now() + 8_000; Date.now() < deadline;) {
+    const s = await state()
+    if (s.turn.status === 'running' && s.turn.turnId === planned.body.turnId) { planTurnId = s.turn.turnId; break }
+    await sleep(100)
+  }
+  assert.ok(planTurnId, 'the planned turn became active')
+  const carriedItems = [
+    { content: 'Fill the shipping form', status: 'in_progress' },
+    { content: 'Verify the confirmation page', status: 'pending' },
+  ]
+  controller.noteActivity({ type: 'chat.activity', kind: 'plan', turnId: planTurnId, revision: 2, items: carriedItems, awaitingUser: false })
+  const stateH = await waitTurnIdle()
+  assert.equal(stateH.marathon.plan?.revision, 2, 'the open plan is carried at turn end')
+  assert.deepEqual(stateH.marathon.plan.items, carriedItems)
+  await waitChip(page, true)
+  // The next turn starts FROM THE PANEL: it must render the carried plan at
+  // turn start and its prompt must carry revision 2.
+  const beforeI = capturedBlocks.length
+  await page.evaluate(`(() => { const i = document.getElementById('input'); i.value = 'continue the carried work'; i.dispatchEvent(new Event('input')); document.getElementById('composer').requestSubmit(); })()`)
+  for (const deadline = Date.now() + 8_000; Date.now() < deadline && capturedBlocks.length <= beforeI;) await sleep(100)
+  assert.ok(capturedBlocks.length > beforeI, 'the panel turn started')
+  await sleep(300)
+  const carriedDom = await page.evaluate(`(() => {
+    const root = document.querySelector('#plan-dock .plan-panel');
+    return {
+      visible: Boolean(root && !root.hidden),
+      heading: root?.querySelector('.plan-panel-heading')?.textContent ?? null,
+      count: root?.querySelector('.plan-panel-count')?.textContent ?? null,
+      contents: [...(root?.querySelectorAll('.plan-panel-item-content') ?? [])].map(el => el.textContent),
+    };
+  })()`)
+  assert.deepEqual(carriedDom, {
+    visible: true,
+    heading: 'Marathon plan',
+    count: '0/2 done',
+    contents: ['Fill the shipping form', 'Verify the confirmation page'],
+  }, 'the real panel rendered the carried plan at turn start')
+  await shot('06-carried-plan')
+  const promptI = capturedBlocks[beforeI].filter(b => b.type === 'text').map(b => b.text).join('\n')
+  assert.ok(promptI.includes('Carried plan, revision 2 (2 open)'), 'the panel turn prompt carries the plan')
+  assert.ok(promptI.includes('use expected_revision:2'))
+  await waitTurnIdle()
+  record('G-carried-plan', { carriedRevision: stateH.marathon.plan.revision, dom: carriedDom, promptCarriesRevision: 2 })
 
   // The event stream journaled every toggle (replay is unit-tested separately).
   const journal = hub.journal.filter(e => e.type === 'remote.marathon').map(e => ({ seq: e.seq, enabled: e.body.enabled, origin: e.body.origin }))
@@ -393,7 +448,7 @@ async function main() {
   record('journal', { remoteMarathonEnvelopes: journal })
 
   writeFileSync(join(OUT, 'transcript.json'), `${JSON.stringify({ checks: transcript, finalState: (await state()).marathon }, null, 2)}\n`)
-  log('PASS: both directions agree; legacy planMode produces a plan turn; mid-turn semantics hold')
+  log('PASS: both directions agree; legacy planMode produces a plan turn; mid-turn semantics hold; carried plan renders')
 
   page.close()
   const version = await (await fetch(`${cdp}/json/version`)).json()

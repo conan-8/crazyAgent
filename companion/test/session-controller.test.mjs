@@ -193,7 +193,7 @@ test('provider turn-outcome reaches plan and Docs metadata without annotating tu
   const turn = controller.submit({ text: 'complete the long task', origin: 'ui', planMode: true })
   assert.deepEqual(bridge.turnModes[0], { id: turn.turnId, planMode: true })
   assert.equal(observed[0][1].planMode, true)
-  assert.match(runner.runs[0][0].text, /<plan_mode>/)
+  assert.match(runner.runs[0][0].text, /<marathon_mode>/)
   assert.match(runner.runs[0][0].text, /browser_plan/)
 
   controller.noteActivity({
@@ -253,7 +253,7 @@ test('remote prompts opt into plan mode only explicitly and ordinary prompts sta
   const turn = remote.controller.submit({ text: 'from phone', origin: 'remote', planMode: true })
   assert.deepEqual(remote.bridge.turnModes[0], { id: turn.turnId, planMode: true })
   assert.equal(remote.observed[0][1].planMode, true)
-  assert.match(remote.runner.runs[0][0].text, /<plan_mode>|browser_plan/)
+  assert.match(remote.runner.runs[0][0].text, /<marathon_mode>|browser_plan/)
   remote.runner.current.resolve()
   await turn.done
   assert.equal(remote.frames.find(frame => frame.type === 'chat.done').planMode, true)
@@ -261,7 +261,7 @@ test('remote prompts opt into plan mode only explicitly and ordinary prompts sta
   const ordinary = setup()
   const own = ordinary.controller.submit({ text: 'ordinary panel task', origin: 'ui' })
   assert.equal(ordinary.observed[0][1].planMode, false)
-  assert.doesNotMatch(ordinary.runner.runs[0][0].text, /<plan_mode>|browser_plan/)
+  assert.doesNotMatch(ordinary.runner.runs[0][0].text, /<marathon_mode>|browser_plan/)
   ordinary.runner.current.resolve()
   await own.done
   assert.equal(ordinary.frames.find(frame => frame.type === 'chat.done').planMode, false)
@@ -795,7 +795,7 @@ test('with marathon on, every turn arms without planMode and chat.done carries b
   assert.deepEqual(bridge.turnModes[0], { id: first.turnId, planMode: true })
   assert.equal(observed[0][1].planMode, true)
   assert.equal(observed[0][1].marathon, true)
-  assert.match(runner.runs[0][0].text, /<plan_mode>/)
+  assert.match(runner.runs[0][0].text, /<marathon_mode>/)
   runner.current.resolve('DONE: one')
   await first.done
   const firstDone = frames.find(frame => frame.type === 'chat.done')
@@ -805,7 +805,7 @@ test('with marathon on, every turn arms without planMode and chat.done carries b
   // Sticky: the next turn arms too, with no per-message flag anywhere.
   const second = controller.submit({ text: 'step two' })
   assert.deepEqual(bridge.turnModes.at(-1), { id: second.turnId, planMode: true })
-  assert.match(runner.runs[1][0].text, /<plan_mode>/)
+  assert.match(runner.runs[1][0].text, /<marathon_mode>/)
   runner.current.resolve('DONE: two')
   await second.done
 
@@ -813,7 +813,7 @@ test('with marathon on, every turn arms without planMode and chat.done carries b
   controller.setMarathon({ enabled: false, origin: 'ui' })
   const third = controller.submit({ text: 'quick question' })
   assert.deepEqual(bridge.turnModes.at(-1), { id: third.turnId, planMode: false })
-  assert.doesNotMatch(runner.runs[2][0].text, /<plan_mode>/)
+  assert.doesNotMatch(runner.runs[2][0].text, /<marathon_mode>/)
   runner.current.resolve('42')
   await third.done
   const thirdDone = frames.filter(frame => frame.type === 'chat.done').at(-1)
@@ -829,7 +829,7 @@ test('legacy planMode:true first turns marathon on with the sender origin, then 
     assert.equal(controller.marathonState().enabled, true)
     assert.equal(controller.marathonState().origin, origin)
     assert.deepEqual(bridge.turnModes[0], { id: turn.turnId, planMode: true })
-    assert.match(runner.runs[0][0].text, /<plan_mode>/)
+    assert.match(runner.runs[0][0].text, /<marathon_mode>/)
     if (origin === 'remote') {
       const user = frames.find(frame => frame.type === 'chat.user')
       assert.equal(user.marathon, true)
@@ -864,7 +864,7 @@ test('a legacy planMode steer arms the shared switch when the steered turn begin
   assert.equal(controller.marathonState().enabled, true)
   assert.equal(controller.marathonState().origin, 'remote')
   await runner.started()
-  assert.match(runner.runs[1][0].text, /<plan_mode>/)
+  assert.match(runner.runs[1][0].text, /<marathon_mode>/)
   runner.current.resolve('done')
   await steer.done
 })
@@ -877,7 +877,7 @@ test('mid-turn toggles never re-arm the running turn; the next turn picks the ne
   assert.deepEqual(bridge.turnModes[0], { id: plain.turnId, planMode: false })
   controller.setMarathon({ enabled: true, origin: 'remote' })
   assert.deepEqual(bridge.turnModes.at(-1), { id: plain.turnId, planMode: false }, 'no plan.mode re-sync mid-turn')
-  assert.doesNotMatch(runner.runs[0][0].text, /<plan_mode>/)
+  assert.doesNotMatch(runner.runs[0][0].text, /<marathon_mode>/)
   runner.current.resolve('done')
   await plain.done
   const armed = controller.submit({ text: 'next task' })
@@ -931,4 +931,130 @@ test('a fresh controller (companion restart) starts with marathon off — fail-s
   const restarted = setup()
   assert.equal(restarted.controller.marathonState().enabled, false)
   assert.deepEqual(restarted.controller.marathonState(), { enabled: false, sessionId: null, since: null, origin: null, plan: null })
+})
+
+/* ------------------------------------------------------------------ */
+/* M2: plan carry-over (§3.2)                                          */
+/* ------------------------------------------------------------------ */
+
+const CARRIED_ITEMS = [
+  { content: 'Step one', status: 'completed' },
+  { content: 'Step two', status: 'in_progress' },
+  { content: 'Step three', status: 'pending' },
+]
+
+test('plan activities become the carried snapshot; the next turn seeds from it', async () => {
+  const { controller, runner, bridge, frames } = setup()
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const first = controller.submit({ text: 'long task' })
+  await runner.started()
+  assert.equal(bridge.turnSeeds[0].seed, null, 'the first turn has nothing to carry')
+  assert.doesNotMatch(runner.runs[0][0].text, /Carried plan/)
+  controller.noteActivity({ kind: 'plan', turnId: first.turnId, revision: 1, items: CARRIED_ITEMS, awaitingUser: false })
+  // Malformed plan frames are ignored, never stored.
+  controller.noteActivity({ kind: 'plan', turnId: first.turnId, revision: 'one', items: CARRIED_ITEMS })
+  controller.noteActivity({ kind: 'plan', turnId: first.turnId, revision: 2, items: [{ content: 'x', status: 'done' }] })
+  controller.noteActivity({ kind: 'plan', turnId: 'turn-old', revision: 9, items: CARRIED_ITEMS })
+  runner.current.resolve('PARTIAL — two items remain')
+  await first.done
+
+  const plan = controller.marathonState().plan
+  assert.ok(plan, 'open items keep the snapshot')
+  assert.equal(plan.revision, 1)
+  assert.deepEqual(plan.items, CARRIED_ITEMS)
+  assert.equal(plan.turnId, first.turnId)
+  assert.equal(typeof plan.updatedAt, 'string')
+  const stateFrame = frames.filter(frame => frame.type === 'marathon.state').at(-1)
+  assert.deepEqual(stateFrame.plan, plan, 'clients see the carried plan')
+
+  const second = controller.submit({ text: 'continue' })
+  assert.deepEqual(bridge.turnSeeds.at(-1).seed, { revision: 1, items: CARRIED_ITEMS })
+  assert.match(runner.runs[1][0].text, /Carried plan, revision 1 \(2 open\)/)
+  assert.match(runner.runs[1][0].text, /use expected_revision:1/)
+  runner.current.resolve('DONE — all steps complete')
+  await second.done
+  // No plan activity this turn: the carried snapshot survives untouched.
+  assert.deepEqual(controller.marathonState().plan, plan)
+})
+
+test('a fully completed plan is dropped at turn end; marathon off never carries', async () => {
+  const { controller, runner } = setup()
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const first = controller.submit({ text: 'task' })
+  await runner.started()
+  controller.noteActivity({ kind: 'plan', turnId: first.turnId, revision: 2, items: [{ content: 'Only step', status: 'completed' }] })
+  runner.current.resolve('DONE')
+  await first.done
+  assert.equal(controller.marathonState().plan, null, 'no open items → dropped')
+
+  // With the switch off, plan activities never become a carried plan.
+  controller.setMarathon({ enabled: false, origin: 'ui' })
+  const second = controller.submit({ text: 'ordinary task', planMode: false })
+  await runner.started()
+  controller.noteActivity({ kind: 'plan', turnId: second.turnId, revision: 1, items: CARRIED_ITEMS })
+  runner.current.resolve('done')
+  await second.done
+  assert.equal(controller.marathonState().enabled, false)
+  assert.equal(controller.marathonState().plan, null)
+})
+
+test('the MALFORMED_RESPONSE rerun re-arms with the CURRENT snapshot, not the turn-start one', async () => {
+  const { controller, runner, bridge } = setup()
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  // Carry a revision-1 plan into this turn.
+  const warm = controller.submit({ text: 'warm-up' })
+  await runner.started()
+  controller.noteActivity({ kind: 'plan', turnId: warm.turnId, revision: 1, items: CARRIED_ITEMS })
+  runner.current.resolve('PARTIAL')
+  await warm.done
+
+  const turn = controller.submit({ text: 'continue the work' })
+  await runner.started()
+  assert.deepEqual(bridge.turnSeeds.at(-1).seed, { revision: 1, items: CARRIED_ITEMS })
+  // The turn advances the plan to revision 3 before the malformed ending.
+  controller.noteActivity({ kind: 'plan', turnId: turn.turnId, revision: 3, items: [{ content: 'Step two', status: 'in_progress' }, { content: 'Step three', status: 'pending' }] })
+  runner.event('turn/end', { turn: 1, reason: { kind: 'error', error: { code: 'MALFORMED_RESPONSE', message: 'bad JSON' } } })
+  runner.current.resolve('')
+  await new Promise(resolve => setImmediate(resolve))
+  await runner.started()
+  assert.equal(runner.runs.length, 3)
+  assert.deepEqual(bridge.turnSeeds.at(-1).seed, { revision: 3, items: [{ content: 'Step two', status: 'in_progress' }, { content: 'Step three', status: 'pending' }] }, 'the rerun seeds the latest snapshot')
+  assert.match(runner.runs[2][0].text, /Carried plan, revision 3 \(2 open\)/)
+  assert.match(runner.runs[2][0].text, /Automatic notice, not a new request/)
+  runner.event('turn/end', { turn: 2, reason: { kind: 'completed' } })
+  runner.current.resolve('DONE')
+  await turn.done
+  assert.equal(controller.marathonState().plan.revision, 3)
+})
+
+test('a steered turn inherits the stopped turn’s plan snapshot', async () => {
+  const { controller, runner, bridge } = setup()
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const first = controller.submit({ text: 'long task' })
+  await runner.started()
+  controller.noteActivity({ kind: 'plan', turnId: first.turnId, revision: 3, items: CARRIED_ITEMS })
+  const steer = controller.submit({ text: 'go left instead', steer: true })
+  assert.equal(steer.steered, true)
+  await first.done
+  await runner.started()
+  assert.deepEqual(bridge.turnSeeds.at(-1).seed, { revision: 3, items: CARRIED_ITEMS })
+  assert.match(runner.runs[1][0].text, /Carried plan, revision 3/)
+  assert.match(runner.runs[1][0].text, /go left instead/)
+  runner.current.resolve('went left')
+  await steer.done
+})
+
+test('a new chat drops the carried plan with the switch', async () => {
+  const { controller, runner, frames } = setup()
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn = controller.submit({ text: 'task' })
+  await runner.started()
+  controller.noteActivity({ kind: 'plan', turnId: turn.turnId, revision: 2, items: CARRIED_ITEMS })
+  runner.current.resolve('PARTIAL')
+  await turn.done
+  assert.ok(controller.marathonState().plan)
+  await controller.newChat()
+  assert.equal(controller.marathonState().plan, null)
+  assert.equal(controller.marathonState().enabled, false)
+  assert.equal(frames.filter(frame => frame.type === 'marathon.state').at(-1).plan, null)
 })

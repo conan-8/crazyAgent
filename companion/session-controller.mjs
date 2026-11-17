@@ -13,7 +13,7 @@
 
 import { randomBytes } from 'node:crypto'
 import { MarathonState, marathonFrameBody } from './marathon.mjs'
-import { buildPromptBlocks, isDocsDocumentUrl, normalizeImageAttachments, promptStats } from './prompt.mjs'
+import { buildPromptBlocks, isDocsDocumentUrl, normalizeImageAttachments, normalizePlanSeed, promptStats } from './prompt.mjs'
 import { PROTOCOL_VERSION, errorMessage, isRecord } from './protocol.mjs'
 
 export const BUSY_MESSAGE = 'A turn is already running. Wait for it to finish.'
@@ -73,6 +73,13 @@ export class SessionController {
     this.docsTurnVerification = undefined
     /** @type {{outcome: string, revision?: number} | undefined} */
     this.planTurnOutcome = undefined
+    /**
+     * M2: the latest plan snapshot observed during the running turn (provider
+     * `plan` activities). Kept into marathon.state at turn end iff open items
+     * remain; re-seeds the next turn and the MALFORMED_RESPONSE rerun.
+     * @type {undefined | {revision: number, items: Array<{content: string, status: string}>, updatedAt: string, turnId: string}}
+     */
+    this.planTurnSnapshot = undefined
     /**
      * The model's structured "I need the user" request for the running turn
      * (agent_request_help), received as a provider `help-request` activity.
@@ -192,6 +199,15 @@ export class SessionController {
     if (frame.kind === 'confirm-request') {
       const confirm = normalizeConfirmRequest(frame)
       if (confirm !== undefined) this.confirmTurnRequest = confirm
+      return
+    }
+    if (frame.kind === 'plan') {
+      // M2: capture the live plan as the carry-over snapshot. Malformed frames
+      // are ignored (fail closed); the provider already validated the list.
+      const seed = normalizePlanSeed(frame)
+      if (seed !== null) {
+        this.planTurnSnapshot = { ...seed, updatedAt: new Date().toISOString(), turnId: this.turnId }
+      }
       return
     }
     if (frame.kind !== 'turn-outcome' || !Number.isSafeInteger(frame.turn)) return
@@ -352,6 +368,7 @@ export class SessionController {
     this.running = true
     this.docsTurnVerification = undefined
     this.planTurnOutcome = undefined
+    this.planTurnSnapshot = undefined
     this.helpTurnRequest = undefined
     this.confirmTurnRequest = undefined
     // Any prompt answers an open confirmation; an approve/deny answer already
@@ -388,8 +405,27 @@ export class SessionController {
       // desktop input instead of colliding with it.
       this.publish({ v: PROTOCOL_VERSION, type: 'chat.user', turnId, origin, text: shownText, imageCount: images.length, ...(planMode ? { marathon: true } : {}) })
     }
-    const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode, confirmGuard })
+    const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode, confirmGuard, planSeed: this.#carriedPlanSeed() })
     return { turnId, done }
+  }
+
+  /**
+   * M2: the seed for a turn about to start — the carried marathon plan, if any.
+   * @returns {null | {revision: number, items: Array<{content: string, status: string}>}}
+   */
+  #carriedPlanSeed() {
+    const plan = this.marathon.state.plan
+    return plan === null ? null : { revision: plan.revision, items: plan.items.map(item => ({ ...item })) }
+  }
+
+  /**
+   * M2: the CURRENT snapshot for the MALFORMED_RESPONSE rerun — the latest
+   * plan observed this turn, falling back to the carried one (§3.2).
+   */
+  #currentPlanSeed() {
+    const snapshot = this.planTurnSnapshot
+    if (snapshot !== undefined) return { revision: snapshot.revision, items: snapshot.items.map(item => ({ ...item })) }
+    return this.#carriedPlanSeed()
   }
 
   /** Start the message that was waiting to steer, now that the slot is free. */
@@ -526,9 +562,9 @@ export class SessionController {
   }
 
   /**
-   * @param {{turnId: string, runner: any, prompt: string, images: any[], autoCaptureFlag: unknown, origin: string, planMode: boolean, confirmMode: boolean}} turn
+   * @param {{turnId: string, runner: any, prompt: string, images: any[], autoCaptureFlag: unknown, origin: string, planMode: boolean, confirmMode: boolean, planSeed?: {revision: number, items: Array<{content: string, status: string}>} | null}} turn
    */
-  async #runTurn({ turnId, runner, prompt, images, autoCaptureFlag, planMode, confirmMode, confirmGuard = false }) {
+  async #runTurn({ turnId, runner, prompt, images, autoCaptureFlag, planMode, confirmMode, confirmGuard = false, planSeed = null }) {
     const logStore = this.logStore
     const bridge = this.bridge
     const turnStart = performance.now()
@@ -545,10 +581,12 @@ export class SessionController {
     /** @type {{outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}}} */
     let ending = { outcome: 'error', error: 'turn ended unexpectedly' }
 
-    bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard })
+    bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard, planSeed })
     logStore.turnStart(turnId, prompt, {
       autoCapture: wantAutoCapture,
       planMode,
+      marathon: planMode,
+      planSeedRevision: planSeed?.revision ?? null,
       confirmMode,
       provider: this.provider,
       model: this.getModelId(),
@@ -595,7 +633,7 @@ export class SessionController {
       // guidance block; a mid-turn switch is covered by the provider's
       // first-Docs-call fail-safe.
       const docsMode = isDocsDocumentUrl(view?.tab?.url)
-      const blocks = buildPromptBlocks(view, prompt, new Date(), images, { planMode, confirmMode, docsMode })
+      const blocks = buildPromptBlocks(view, prompt, new Date(), images, { planMode, confirmMode, docsMode, marathon: { seed: planSeed } })
       const stats = promptStats(blocks)
       promptTextBytes = stats.textBytes
       imageBytes = stats.imageBytes
@@ -622,8 +660,10 @@ export class SessionController {
       if (turnStats.endError?.code === 'MALFORMED_RESPONSE' && toolCalls.size === 0 && !this.stopRequested) {
         logStore.record('companion', 'turn.retry', { reason: 'malformed-response' }, { turnId, severity: 'warn' })
         turnStats.endError = undefined
-        bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard })
-        result = await run(buildPromptBlocks(null, MALFORMED_RETRY_NOTICE, new Date(), [], { planMode, confirmMode, docsMode }))
+        // M2: re-arm with the CURRENT plan snapshot, not the turn-start one.
+        const currentSeed = this.#currentPlanSeed()
+        bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard, planSeed: currentSeed })
+        result = await run(buildPromptBlocks(null, MALFORMED_RETRY_NOTICE, new Date(), [], { planMode, confirmMode, docsMode, marathon: { seed: currentSeed } }))
       }
       // A run that still ended in a runtime error is a failed turn, never an
       // empty successful one.
@@ -794,6 +834,17 @@ export class SessionController {
       this.confirmTurnRequest = undefined
       this.turnId = undefined
       bridge.setTurnId(undefined)
+      // M2: keep the observed plan into the next turn iff open items remain
+      // (a completed/blocked-only plan is dropped). A turn that never touched
+      // the plan leaves the carried snapshot untouched (seeded-untouched).
+      if (this.planTurnSnapshot !== undefined && this.marathon.state.enabled) {
+        const stored = this.marathon.storePlan(this.planTurnSnapshot)
+        if (stored.changed) {
+          this.logStore.record('companion', 'marathon.plan.carried', { revision: stored.state.plan?.revision ?? null, open: stored.state.plan !== null }, { severity: 'info' })
+          this.#publishMarathon()
+        }
+      }
+      this.planTurnSnapshot = undefined
       this.#startPendingSteer()
     }
   }

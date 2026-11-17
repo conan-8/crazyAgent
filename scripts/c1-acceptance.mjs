@@ -25,6 +25,10 @@
  *   steer      steer:true mid-turn; first turn stopped, second ran once, the
  *              fixture counter shows no duplicate action (ground truth is the
  *              counter, not tool results).
+ *   steer-plan M2: steer mid-marathon keeps the plan. Turn 1 arms via the
+ *              marathon switch (POST /marathon), creates a plan, and clicks;
+ *              the steered turn's prompt must carry turn 1's final plan
+ *              revision and the plan must survive (carried or continued).
  *   cycles     20 Stop/New cycles with 4 live remote-token rotations
  *              (--new-remote-token one-shot; the running companion re-reads the
  *              file). No stuck TURN_BUSY, no orphaned turn slot, old token
@@ -78,7 +82,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const BASELINES_DIR = join(ROOT, 'e2e', 'baselines')
 const COMPANION_ENTRY = join(ROOT, 'companion', 'index.mjs')
 const DEFAULT_C1_HOME = join(tmpdir(), 'crazyagent-c1', 'dsh-home')
-const CHECK_NAMES = ['plan', 'resume', 'steer', 'cycles', 'minimized']
+const CHECK_NAMES = ['plan', 'resume', 'steer', 'steer-plan', 'cycles', 'minimized']
 
 // ---------------------------------------------------------------------------
 // Pure checkers (evidence in, verdict out). Mutation-checked by --self-test.
@@ -159,6 +163,40 @@ export function checkSteerEvidence({ steered, turn1Aborted, turn2Ok, countAtStee
     if (finalCount < countAtSteer) reasons.push(`counter went backwards: ${countAtSteer} -> ${finalCount}`)
     if (finalCount > countAtSteer + 1) reasons.push(`duplicate/extra actions after steer: counter ${countAtSteer} -> ${finalCount}`)
     if (finalCount > target) reasons.push(`counter exceeded the original target ${target}: ${finalCount}`)
+  }
+  if (reasons.length > 0) return { status: 'fail', reasons }
+  return { status: 'pass', reasons: [] }
+}
+
+/**
+ * C1(f) M2: steering a running marathon turn keeps the plan. The first turn
+ * must have created a plan (revision >= 1); the steered turn must be armed,
+ * its prompt must carry exactly the first turn's final revision, and the plan
+ * must survive (still carried afterwards, or continued by the steered turn).
+ * The counter is ground truth for no duplicate clicks.
+ */
+export function checkSteerPlanEvidence({ steered, turn1Aborted, turn2Ok, turn1PlanRevision, turn2Armed, turn2CarriedRevision, carriedPlanRevisionAfter, turn2PlanRevision, countAtSteer, finalCount }) {
+  const reasons = []
+  if (steered !== true) return { status: 'fail', reasons: ['steer was not accepted (steered!==true)'] }
+  if (turn1Aborted !== true) reasons.push('first turn did not end stopped/aborted')
+  if (turn2Ok !== true) reasons.push('second turn did not end ok')
+  if (!Number.isSafeInteger(turn1PlanRevision) || turn1PlanRevision < 1) {
+    return { status: 'fail', reasons: [...reasons, `no plan created before the steer (revision=${JSON.stringify(turn1PlanRevision)})`] }
+  }
+  if (turn2Armed !== true) reasons.push('steered turn is not a marathon turn (chat.done planMode/marathon not true)')
+  if (turn2CarriedRevision !== turn1PlanRevision) {
+    reasons.push(`steered prompt did not carry the plan: carried=${JSON.stringify(turn2CarriedRevision)} expected=${turn1PlanRevision}`)
+  }
+  const planKept = (Number.isSafeInteger(carriedPlanRevisionAfter) && carriedPlanRevisionAfter >= turn1PlanRevision)
+    || (Number.isSafeInteger(turn2PlanRevision) && turn2PlanRevision >= turn1PlanRevision)
+  if (!planKept) {
+    reasons.push(`plan lost after the steer: carriedAfter=${JSON.stringify(carriedPlanRevisionAfter)} turn2Revision=${JSON.stringify(turn2PlanRevision)}`)
+  }
+  if (!Number.isFinite(countAtSteer) || !Number.isFinite(finalCount)) {
+    reasons.push(`counter unreadable: atSteer=${countAtSteer} final=${finalCount}`)
+  } else {
+    if (finalCount < countAtSteer) reasons.push(`counter went backwards: ${countAtSteer} -> ${finalCount}`)
+    if (finalCount > countAtSteer + 1) reasons.push(`duplicate/extra clicks after steer: counter ${countAtSteer} -> ${finalCount}`)
   }
   if (reasons.length > 0) return { status: 'fail', reasons }
   return { status: 'pass', reasons: [] }
@@ -256,6 +294,25 @@ function selfTest() {
   expect('steer second failed', checkSteerEvidence({ ...goodSteer, turn2Ok: false }), 'fail')
   expect('steer not accepted', checkSteerEvidence({ ...goodSteer, steered: false }), 'fail')
 
+  const goodSteerPlan = {
+    steered: true, turn1Aborted: true, turn2Ok: true,
+    turn1PlanRevision: 3, turn2Armed: true, turn2CarriedRevision: 3,
+    carriedPlanRevisionAfter: 3, turn2PlanRevision: null,
+    countAtSteer: 4, finalCount: 4,
+  }
+  expect('steer-plan good', checkSteerPlanEvidence(goodSteerPlan), 'pass')
+  expect('steer-plan continued by turn2', checkSteerPlanEvidence({ ...goodSteerPlan, carriedPlanRevisionAfter: null, turn2PlanRevision: 5 }), 'pass')
+  expect('steer-plan in-flight click', checkSteerPlanEvidence({ ...goodSteerPlan, finalCount: 5 }), 'pass')
+  expect('steer-plan not accepted', checkSteerPlanEvidence({ ...goodSteerPlan, steered: false }), 'fail')
+  expect('steer-plan first not stopped', checkSteerPlanEvidence({ ...goodSteerPlan, turn1Aborted: false }), 'fail')
+  expect('steer-plan second failed', checkSteerPlanEvidence({ ...goodSteerPlan, turn2Ok: false }), 'fail')
+  expect('steer-plan no plan before steer', checkSteerPlanEvidence({ ...goodSteerPlan, turn1PlanRevision: 0 }), 'fail')
+  expect('steer-plan turn2 not armed', checkSteerPlanEvidence({ ...goodSteerPlan, turn2Armed: false }), 'fail')
+  expect('steer-plan wrong carried revision', checkSteerPlanEvidence({ ...goodSteerPlan, turn2CarriedRevision: 0 }), 'fail')
+  expect('steer-plan no carry in prompt', checkSteerPlanEvidence({ ...goodSteerPlan, turn2CarriedRevision: null }), 'fail')
+  expect('steer-plan plan lost', checkSteerPlanEvidence({ ...goodSteerPlan, carriedPlanRevisionAfter: null, turn2PlanRevision: null }), 'fail')
+  expect('steer-plan duplicate clicks', checkSteerPlanEvidence({ ...goodSteerPlan, finalCount: 7 }), 'fail')
+
   const goodCycles = {
     cycles: Array.from({ length: 20 }, (_, index) => ({ index, busy: false, settled: true, nextAccepted: true })),
     rotations: [4, 9, 14, 19].map(afterCycle => ({ afterCycle, oldRevoked: true, newWorks: true })),
@@ -326,6 +383,35 @@ function turnEndExtras(eventsPath, turnId) {
     extras.planRevision = Number.isSafeInteger(event.data?.planRevision) ? event.data.planRevision : null
   }
   return extras
+}
+
+/** The latest plan.updated revision recorded for a turn (M2 steer-plan row). */
+function planRevisionFromLog(eventsPath, turnId) {
+  let revision = null
+  if (!existsSync(eventsPath)) return null
+  for (const line of readFileSync(eventsPath, 'utf8').split('\n')) {
+    if (!line.includes(turnId) || !line.includes('"type":"plan.updated"')) continue
+    let event
+    try { event = JSON.parse(line) } catch { continue }
+    if (event.turnId !== turnId || event.type !== 'plan.updated') continue
+    if (Number.isSafeInteger(event.data?.revision)) revision = event.data.revision
+  }
+  return revision
+}
+
+/** The carried-plan revision in a turn's prompt.build text (M2 steer-plan row). */
+function carriedRevisionFromLog(eventsPath, turnId) {
+  if (!existsSync(eventsPath)) return null
+  let carried = null
+  for (const line of readFileSync(eventsPath, 'utf8').split('\n')) {
+    if (!line.includes(turnId) || !line.includes('"type":"prompt.build"')) continue
+    let event
+    try { event = JSON.parse(line) } catch { continue }
+    if (event.turnId !== turnId || event.type !== 'prompt.build') continue
+    const match = /Carried plan, revision (\d+)/u.exec(String(event.data?.text ?? ''))
+    if (match) carried = Number(match[1])
+  }
+  return carried
 }
 
 function metricsOf(eventsPath, turnId) {
@@ -570,6 +656,88 @@ async function runSteerCheck(runtime) {
     return { verdict, evidence, metrics, attempts: attempt }
   }
   return { verdict: { status: 'blocked', reasons: ['steer check exhausted attempts'] }, evidence: {}, metrics: [], attempts: 2 }
+}
+
+/**
+ * C1(f) M2: steer mid-marathon keeps the plan. Turn 1 runs with the marathon
+ * switch on (armed via POST /marathon, not a per-message flag), creates a plan,
+ * and starts clicking. Once a plan exists and the counter is moving, a steer
+ * stops it; the steered turn must carry the same plan revision in its prompt
+ * and the plan must survive. Real-model run is eval's (held until task-8).
+ */
+async function runSteerPlanCheck(runtime) {
+  const { remote, page, eventsPath, budget, remoteUrl } = runtime
+  const readCount = () => page.evaluate(`Number(document.getElementById('count')?.textContent ?? NaN)`)
+  await newChatSettled(remote)
+  const marathonOn = await rawApi(remoteUrl, runtime.token(), 'POST', '/marathon', { clientCommandId: randomUUID(), enabled: true })
+  if (!marathonOn.ok || marathonOn.json?.enabled !== true) {
+    return { verdict: { status: 'blocked', reasons: [`could not enable marathon: ${marathonOn.status} ${JSON.stringify(marathonOn.json?.error ?? null)}`] }, evidence: {}, metrics: [], attempts: 1 }
+  }
+  await page.reset('click.html')
+  const first = await runtime.sendPaced(`Plan this task first with the browser_plan tool, then carry it out: click the Increment button on this page ${STEER_TARGET} times, one click per step, then tell me the final count.`)
+  let countAtSteer = null
+  let steerResponse = null
+  let tooLate = false
+  const deadline = Date.now() + 150_000
+  while (Date.now() < deadline) {
+    const state = await remote.state()
+    const active = state.turn?.turnId === first.turnId && ['running', 'starting'].includes(String(state.turn?.status))
+    const count = await readCount().catch(() => NaN)
+    const revision = planRevisionFromLog(eventsPath, first.turnId)
+    if (active && revision !== null && revision >= 1 && Number.isFinite(count) && count >= 3) {
+      countAtSteer = count
+      steerResponse = await runtime.sendPaced('Stop clicking now. Do not click anything else. Tell me the current count shown on the page.', { steer: true })
+      break
+    }
+    if (!active && state.turn?.turnId === first.turnId && !['running', 'stopping', 'starting'].includes(String(state.turn?.status))) {
+      tooLate = true
+      break
+    }
+    await sleep(400)
+  }
+  if (tooLate || steerResponse === null) {
+    await waitForTurn({ remote, turnId: first.turnId, deadline: Date.now() + 60_000 }).catch(() => null)
+    await waitForTurnEndInLog(eventsPath, first.turnId)
+    budget.spend([metricsOf(eventsPath, first.turnId)])
+    return {
+      verdict: { status: 'blocked', reasons: ['turn completed before a plan existed and a mid-turn steer could land'] },
+      evidence: { tooLate: true }, metrics: [], attempts: 1,
+    }
+  }
+  const secondTurnId = steerResponse.turnId
+  await until('the steering turn to become the active turn', async () => {
+    const state = await remote.state()
+    return state.turn?.turnId === secondTurnId ? state : null
+  }, 60_000, 200)
+  const secondState = await waitForTurn({ remote, turnId: secondTurnId, deadline: Date.now() + 120_000 })
+  await waitForTurnEndInLog(eventsPath, first.turnId)
+  await waitForTurnEndInLog(eventsPath, secondTurnId)
+  const finalCount = await readCount().catch(() => NaN)
+  const firstEnd = turnEndExtras(eventsPath, first.turnId)
+  const secondEnd = turnEndExtras(eventsPath, secondTurnId)
+  const secondDone = lastChatDone(secondState, secondTurnId)
+  const afterState = await remote.state()
+  const evidence = {
+    steered: steerResponse.steered === true,
+    firstTurnId: first.turnId,
+    secondTurnId,
+    turn1Aborted: firstEnd.aborted === true,
+    turn2Ok: secondEnd.ok === true,
+    // The authoritative carried revision is turn 1's FINAL plan revision.
+    turn1PlanRevision: firstEnd.planRevision,
+    revisionAtSteer: planRevisionFromLog(eventsPath, first.turnId),
+    turn2Armed: secondDone?.planMode === true && secondDone?.marathon === true,
+    turn2CarriedRevision: carriedRevisionFromLog(eventsPath, secondTurnId),
+    carriedPlanRevisionAfter: Number.isSafeInteger(afterState.marathon?.plan?.revision) ? afterState.marathon.plan.revision : null,
+    turn2PlanRevision: secondEnd.planRevision,
+    turn2PlanOutcome: secondEnd.planOutcome,
+    countAtSteer,
+    finalCount,
+  }
+  const verdict = checkSteerPlanEvidence(evidence)
+  const metrics = [metricsOf(eventsPath, first.turnId), metricsOf(eventsPath, secondTurnId)]
+  budget.spend(metrics)
+  return { verdict, evidence, metrics, attempts: 1 }
 }
 
 async function runCyclesCheck(runtime) {
@@ -1018,7 +1186,7 @@ async function main() {
       const started = Date.now()
       let outcome
       try {
-        const runner = { plan: runPlanCheck, resume: runResumeCheck, steer: runSteerCheck, cycles: runCyclesCheck, minimized: runMinimizedCheck }[name]
+        const runner = { plan: runPlanCheck, resume: runResumeCheck, steer: runSteerCheck, 'steer-plan': runSteerPlanCheck, cycles: runCyclesCheck, minimized: runMinimizedCheck }[name]
         outcome = await runner(runtime)
       } catch (error) {
         outcome = { verdict: { status: 'fail', reasons: [`check threw: ${error.message}`] }, evidence: { error: String(error.stack ?? error.message).slice(0, 600) }, metrics: [], attempts: 1 }

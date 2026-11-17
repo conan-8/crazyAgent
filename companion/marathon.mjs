@@ -6,12 +6,41 @@
  * the remote API change the switch ("one runner, one turn slot" applies to
  * chat-level state too). Clients render the state; they never assume it.
  *
- * M1 scope: the shared sticky switch only. `plan` stays null until M2 wires
- * plan carry-over; the watcher fields stay idle until M3/M4.
+ * M1: the shared sticky switch. M2: the carried plan snapshot. The watcher
+ * fields stay idle until M3/M4.
  */
+
+import { PLAN_LIMITS, PLAN_STATUSES } from '../packages/dsh-browser-extension/lib/plan.js'
 
 /** Origins allowed to flip the switch. */
 export const MARATHON_ORIGINS = Object.freeze(['ui', 'remote'])
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * M2: validate a carried-plan snapshot ({revision, items, updatedAt, turnId}).
+ * Fail closed: anything malformed returns null rather than a partial plan.
+ * @param {unknown} value
+ * @returns {null | {revision: number, items: Array<{content: string, status: string}>, updatedAt: string, turnId: string}}
+ */
+export function normalizeMarathonPlan(value) {
+  if (!isRecord(value)) return null
+  if (!Number.isSafeInteger(value.revision) || value.revision < 0) return null
+  if (typeof value.updatedAt !== 'string' || typeof value.turnId !== 'string') return null
+  if (!Array.isArray(value.items) || value.items.length === 0 || value.items.length > PLAN_LIMITS.maxItems) return null
+  const items = []
+  const contents = new Set()
+  for (const item of value.items) {
+    if (!isRecord(item) || typeof item.content !== 'string' || item.content.trim().length === 0) return null
+    if (typeof item.status !== 'string' || !PLAN_STATUSES.includes(item.status)) return null
+    if (contents.has(item.content)) return null
+    contents.add(item.content)
+    items.push({ content: item.content, status: item.status })
+  }
+  return { revision: value.revision, items, updatedAt: value.updatedAt, turnId: value.turnId }
+}
 
 /**
  * The watcher projection while no watcher exists (M1). M3 replaces this with
@@ -91,6 +120,22 @@ export class MarathonState {
   reset() {
     const changed = this.state.enabled || this.state.plan !== null
     this.state = initialMarathonState()
+    return { changed, state: this.snapshot() }
+  }
+
+  /**
+   * M2: store the carried plan at turn end. Only while enabled (off clears the
+   * plan); a snapshot with no open items drops the carried plan instead.
+   * @param {null | {revision: number, items: Array<{content: string, status: string}>, updatedAt: string, turnId: string}} snapshot
+   * @returns {{changed: boolean, state: MarathonSnapshot}}
+   */
+  storePlan(snapshot) {
+    if (!this.state.enabled) return { changed: false, state: this.snapshot() }
+    const normalized = normalizeMarathonPlan(snapshot)
+    const open = normalized !== null && normalized.items.some(item => item.status === 'pending' || item.status === 'in_progress')
+    const next = open ? normalized : null
+    const changed = JSON.stringify(next) !== JSON.stringify(this.state.plan)
+    this.state = { ...this.state, plan: next }
     return { changed, state: this.snapshot() }
   }
 }

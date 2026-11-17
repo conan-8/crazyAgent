@@ -1,0 +1,3 @@
+  "chars": 12402,
+  "guidanceChars": 11408,
+  "docsTurnChars": 18092,

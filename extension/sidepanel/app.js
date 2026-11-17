@@ -2038,6 +2038,11 @@ function startTurn(text, attachments = [], options = {}) {
   const planModel = options.marathon === true ? createPlanPanelModel() : null
   const planRoot = options.marathon === true ? document.createElement('div') : null
   if (planRoot) {
+    // M2: a carried plan renders at the start of the turn from the mirrored
+    // marathon.state.plan; live plan activities then update it as usual.
+    if (planModel && marathonState.plan && Array.isArray(marathonState.plan.items)) {
+      planModel.update(marathonState.plan.items)
+    }
     els.planDock.replaceChildren(planRoot)
     els.planDock.hidden = true
   }

@@ -8,6 +8,7 @@ import {
   decidePlanFinalAnswer,
   recordPlanActivity,
   replacePlan,
+  seedPlanState,
   summarizePlan,
 } from '../lib/plan.js'
 
@@ -312,23 +313,57 @@ test('stale reminders wait for six activities, are spaced, and stop at two', () 
   assert.equal(later.state.activityCount, 42)
 })
 
-test('plan revisions reset stale elapsed work but never reset the reminder budget', () => {
+test('plan revisions refill the per-stretch reminder budget while the lifetime cap keeps counting', () => {
   const state = openPlan()
   const first = activities(state, 6)
   assert.equal(first.reminders.length, 1)
   const revised = accepted(first.state, [...openItems(), task('Report the outcome')]).state
   assert.equal(revised.activitiesSinceRevision, 0)
-  assert.equal(revised.staleReminderCount, 1)
+  // M2: an accepted revision starts a new stretch — the per-stretch counter
+  // refills, the lifetime counter keeps counting.
+  assert.equal(revised.staleReminderCount, 0)
+  assert.equal(revised.staleRemindersLifetime, 1)
   assert.equal(revised.completionNudges, 0)
   const second = activities(revised, 6)
   assert.equal(second.reminders.length, 1)
-  assert.equal(second.reminders[0].reminder, 2)
+  assert.equal(second.reminders[0].reminder, 1, 'the new stretch starts at reminder 1 again')
+  assert.equal(second.state.staleRemindersLifetime, 2)
+  assert.match(second.reminders[0].text, /Stale-plan reminder 1 of 2 this stretch; 2 of 12 this turn/)
   const revisedAgain = accepted(second.state, [
     ...openItems(), task('Report the outcome'), task('Record assumptions'),
   ]).state
+  assert.equal(revisedAgain.staleReminderCount, 0)
+  assert.equal(revisedAgain.staleRemindersLifetime, 2)
   const later = activities(revisedAgain, 12)
-  assert.equal(later.reminders.length, 0)
+  assert.equal(later.reminders.length, 2, 'a fresh stretch may remind twice again')
   assert.equal(later.state.staleReminderCount, 2)
+  assert.equal(later.state.staleRemindersLifetime, 4)
+})
+
+test('the lifetime reminder cap stops reminders even across refills', () => {
+  let state = openPlan()
+  let lifetime = 0
+  const extras = []
+  // Two reminders per stretch, refilled by each accepted revision, until the
+  // lifetime cap (12) holds even though every stretch refills.
+  for (let stretch = 0; stretch < 8; stretch += 1) {
+    const result = activities(state, 12)
+    lifetime += result.reminders.length
+    state = result.state
+    if (state.staleRemindersLifetime >= PLAN_LIMITS.maxStaleRemindersLifetime) break
+    extras.push(task(`Extra step ${stretch}`))
+    state = accepted(state, [...openItems(), ...extras]).state
+  }
+  assert.equal(state.staleRemindersLifetime, PLAN_LIMITS.maxStaleRemindersLifetime)
+  assert.equal(lifetime, PLAN_LIMITS.maxStaleRemindersLifetime)
+  const afterCap = activities(state, 60)
+  assert.equal(afterCap.reminders.length, 0)
+  assert.equal(afterCap.state.staleRemindersLifetime, PLAN_LIMITS.maxStaleRemindersLifetime)
+  // Even a further accepted revision cannot refill past the lifetime cap.
+  const revised = accepted(afterCap.state, [...openItems(), ...extras, task('One more')]).state
+  assert.equal(revised.staleReminderCount, 0)
+  const stillCapped = activities(revised, 30)
+  assert.equal(stillCapped.reminders.length, 0)
 })
 
 test('empty and terminal plans never produce stale reminders', () => {
@@ -370,28 +405,102 @@ test('open final answers receive exactly two nudges before an unfinished stop is
   assert.equal(decidePlanFinalAnswer(third.state).completionNudges, 2)
 })
 
-test('plan rewrites do not reset the two-completion-nudge budget', () => {
+test('plan rewrites refill the per-stretch nudge budget while the lifetime cap keeps counting', () => {
   const state = openPlan()
   const first = decidePlanFinalAnswer(state)
+  assert.equal(first.completionNudgesLifetime, 1)
   const revised = accepted(first.state, [
     task('Inspect current state'),
     task('Apply the requested change', 'in_progress'),
     task('Check the resulting state'),
   ]).state
-  assert.equal(revised.completionNudges, 1)
+  // M2: the accepted revision refills the stretch budget.
+  assert.equal(revised.completionNudges, 0)
+  assert.equal(revised.completionNudgesLifetime, 1)
   const second = decidePlanFinalAnswer(revised)
   assert.equal(second.action, 'nudge')
-  assert.equal(second.completionNudges, 2)
+  assert.equal(second.completionNudges, 1)
+  assert.equal(second.completionNudgesLifetime, 2)
+  assert.match(second.message, /Completion nudge 1 of 2 this stretch; 2 of 12 this turn/)
   const revisedAgain = accepted(second.state, [
     task('Inspect current state', 'in_progress'),
     task('Apply the requested change'),
     task('Check the resulting state'),
     task('Report the outcome'),
   ]).state
-  const final = decidePlanFinalAnswer(revisedAgain)
+  assert.equal(revisedAgain.completionNudges, 0)
+  assert.equal(revisedAgain.completionNudgesLifetime, 2)
+  const third = decidePlanFinalAnswer(revisedAgain)
+  assert.equal(third.action, 'nudge')
+  assert.equal(third.completionNudgesLifetime, 3)
+})
+
+test('the lifetime nudge cap allows an unfinished stop even across refills', () => {
+  let state = openPlan()
+  const extras = []
+  let nudges = 0
+  for (let stretch = 0; stretch < 10; stretch += 1) {
+    // Two nudges per stretch, then an accepted revision refills the stretch.
+    for (let i = 0; i < 2; i += 1) {
+      const decision = decidePlanFinalAnswer(state)
+      if (decision.action !== 'nudge') break
+      nudges += 1
+      state = decision.state
+    }
+    if (state.completionNudgesLifetime >= PLAN_LIMITS.maxCompletionNudgesLifetime) break
+    extras.push(task(`Extra step ${stretch}`))
+    state = accepted(state, [...openItems(), ...extras]).state
+  }
+  assert.equal(state.completionNudgesLifetime, PLAN_LIMITS.maxCompletionNudgesLifetime)
+  assert.equal(nudges, PLAN_LIMITS.maxCompletionNudgesLifetime)
+  const final = decidePlanFinalAnswer(state)
   assert.equal(final.action, 'allow')
   assert.equal(final.reason, 'nudge-limit')
   assert.equal(final.outcome, 'unfinished')
+  // A further revision refills the stretch but cannot exceed the lifetime cap.
+  const revised = accepted(state, [...openItems(), ...extras, task('One more')]).state
+  assert.equal(revised.completionNudges, 0)
+  const stillCapped = decidePlanFinalAnswer(revised)
+  assert.equal(stillCapped.action, 'allow')
+  assert.equal(stillCapped.reason, 'nudge-limit')
+})
+
+test('seedPlanState validates strictly and fails closed to null', () => {
+  const items = openItems()
+  const seeded = seedPlanState({ revision: 4, items })
+  assert.ok(seeded)
+  assert.equal(seeded.version, 2)
+  assert.equal(seeded.revision, 4)
+  assert.deepEqual(seeded.items, items)
+  assert.equal(seeded.completionNudges, 0)
+  assert.equal(seeded.completionNudgesLifetime, 0)
+  assert.equal(seeded.staleReminderCount, 0)
+  assert.equal(seeded.staleRemindersLifetime, 0)
+  assert.equal(seeded.activityCount, 0)
+  assert.ok(Object.isFrozen(seeded))
+  // The seeded state is a normal state: replacements continue from revision 4.
+  const next = accepted(seeded, [...items, task('Report the outcome')])
+  assert.equal(next.state.revision, 5)
+  assert.equal(summarizePlan(seeded).text.includes('plan revision 4'), true)
+  for (const bad of [
+    null, undefined, 'seed', [], {},
+    { revision: -1, items },
+    { revision: 1.5, items },
+    { revision: '4', items },
+    { revision: Number.MAX_SAFE_INTEGER + 1, items },
+    { revision: 4, items: [] },
+    { revision: 4, items: 'no' },
+    { revision: 4, items: [task('One', 'in_progress'), task('Two', 'in_progress')] },
+    { revision: 4, items: [task('One'), task('Two', 'blocked')] },
+    { revision: 4, items: [{ content: 'x', status: 'done' }] },
+    { revision: 4, items: [{ content: 'x', status: 'pending', extra: true }] },
+    { revision: 4, items: Array.from({ length: 41 }, (_, i) => task(`Task ${i}`)) },
+  ]) {
+    assert.equal(seedPlanState(bad), null, JSON.stringify(bad))
+  }
+  // Normalization applies: trimmed content is accepted and stored normalized.
+  const trimmed = seedPlanState({ revision: 0, items: [task('  Inspect current state  ', 'in_progress')] })
+  assert.deepEqual(trimmed.items, [task('Inspect current state', 'in_progress')])
 })
 
 test('reported-complete and blocked terminal plans allow honest final outcomes', () => {
@@ -419,7 +528,10 @@ test('a nudge followed by reported completion permits a final answer without mor
   const final = decidePlanFinalAnswer(completed)
   assert.equal(final.action, 'allow')
   assert.equal(final.outcome, 'reported-complete')
-  assert.equal(final.completionNudges, 1)
+  // M2: the accepted revision refilled the stretch budget; the lifetime keeps
+  // the record of the one nudge already spent.
+  assert.equal(final.completionNudges, 0)
+  assert.equal(final.completionNudgesLifetime, 1)
 })
 
 test('user-input-needed and aborted stops bypass open-work nudges without consuming budget', () => {
@@ -448,12 +560,18 @@ test('final-gate options are strict and malformed restored states fail closed', 
   const invalidStates = [
     {},
     { ...restored, extra: true },
-    { ...restored, version: 2 },
+    { ...restored, version: 1 },
+    { ...restored, version: 3 },
     { ...restored, revision: -1 },
     { ...restored, items: [task('One', 'in_progress'), task('Two', 'in_progress')] },
     { ...restored, items: [task('  unnormalized  ', 'completed')] },
     { ...restored, completionNudges: 3 },
     { ...restored, staleReminderCount: 3 },
+    { ...restored, completionNudgesLifetime: 13 },
+    { ...restored, staleRemindersLifetime: 13 },
+    { ...restored, completionNudgesLifetime: -1 },
+    { ...restored, completionNudges: 2, completionNudgesLifetime: 1 },
+    { ...restored, staleReminderCount: 2, staleRemindersLifetime: 1 },
     { ...restored, activitiesSinceRevision: restored.activityCount + 1 },
     { ...restored, lastStaleReminderActivity: restored.activityCount + 1 },
   ]
