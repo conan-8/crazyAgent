@@ -1,6 +1,7 @@
 package dev.crazyagent.remote.ui
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -10,20 +11,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,11 +28,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.crazyagent.remote.app.Screen
@@ -61,99 +56,98 @@ fun PairingScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(28.dp))
-        Icon(AppIcons.Cursor, contentDescription = null, tint = AgentYellow, modifier = Modifier.size(64.dp))
+        Icon(AppIcons.Cursor, contentDescription = null, tint = AgentYellow, modifier = Modifier.size(56.dp))
         Spacer(Modifier.height(18.dp))
-        Text("Connect to crazyAgent", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Text("Connect to crazyAgent", style = MaterialTheme.typography.headlineSmall, color = AgentText, textAlign = TextAlign.Center)
         Text(
             "Control the browser agent in your desktop side panel from this phone.",
-            style = MaterialTheme.typography.bodyMedium,
+            style = agentType(13f, 1.55f, FontWeight.Normal),
             color = AgentMuted,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 8.dp, bottom = 26.dp),
+            modifier = Modifier.widthIn(max = 300.dp).padding(top = 8.dp, bottom = 24.dp),
         )
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = AgentPanel,
-            border = BorderStroke(1.dp, AgentBorder),
-            modifier = Modifier.fillMaxWidth(),
+        val shape = RoundedCornerShape(18.dp)
+        Column(
+            Modifier.fillMaxWidth().background(AgentPanel, shape).border(1.dp, AgentBorder, shape).padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(
-                    "Start the companion with --remote, then run --pair-remote on the computer. Connect this phone to Tailscale first.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AgentMuted,
-                )
-                Surface(shape = RoundedCornerShape(10.dp), color = AgentPanelRaised, modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        "npm run dev -- --pair-remote",
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = AgentTextSoft,
-                        modifier = Modifier.padding(12.dp),
-                    )
-                }
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    label = { Text("Server address") },
-                    placeholder = { Text("https://host.tailnet.ts.net") },
-                    singleLine = true,
-                    isError = screen.urlError != null,
-                    supportingText = screen.urlError?.let { { Text(it) } },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !screen.busy,
-                    colors = pairingFieldColors(),
-                )
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it },
-                    label = { Text("Remote token") },
-                    singleLine = true,
-                    isError = screen.tokenError != null,
-                    supportingText = screen.tokenError?.let { { Text(it) } },
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done, autoCorrectEnabled = false),
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !screen.busy,
-                    colors = pairingFieldColors(),
-                )
-                screen.error?.let {
-                    Text(it, color = AgentDanger, style = MaterialTheme.typography.bodySmall, modifier = Modifier.semantics { contentDescription = "Pairing error: $it" })
-                }
-                Button(
-                    onClick = { onPair(url, token) },
-                    enabled = !screen.busy,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AgentYellow, contentColor = AgentBackground),
-                    modifier = Modifier.fillMaxWidth().height(46.dp),
-                ) {
-                    if (screen.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = AgentBackground) else Text("Connect")
-                }
-                if (screen.canCancel) {
-                    TextButton(onClick = onCancel, enabled = !screen.busy, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
-                }
+            Text(
+                "Start the companion with --remote, then run --pair-remote on the computer. Connect this phone to Tailscale first.",
+                style = AgentType.Hint,
+                color = AgentMuted,
+            )
+            Text(
+                "npm run dev -- --pair-remote",
+                style = AgentType.Mono,
+                color = AgentBannerText,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(AgentBackground, RoundedCornerShape(10.dp))
+                    .border(1.dp, AgentChipBorder, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            )
+            PairingField(
+                label = "Server address",
+                value = url,
+                onValueChange = { url = it },
+                placeholder = "https://host.tailnet.ts.net",
+                error = screen.urlError,
+                enabled = !screen.busy,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
+            )
+            PairingField(
+                label = "Remote token",
+                value = token,
+                onValueChange = { token = it },
+                placeholder = "",
+                error = screen.tokenError,
+                enabled = !screen.busy,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done, autoCorrectEnabled = false),
+            )
+            screen.error?.let {
+                Text(it, color = AgentDanger, style = AgentType.Note, modifier = Modifier.semantics { contentDescription = "Pairing error: $it" })
+            }
+            AgentButton("Connect", { onPair(url, token) }, primary = true, wide = true, enabled = !screen.busy, loading = screen.busy)
+            if (screen.canCancel) {
+                AgentButton("Cancel", onCancel, wide = true, enabled = !screen.busy)
             }
         }
         Text(
             "Your token is encrypted with this phone's keystore and is only sent to this server.",
-            style = MaterialTheme.typography.bodySmall,
-            color = AgentFaint,
+            style = AgentType.Hint,
+            color = AgentHint,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 18.dp),
+            modifier = Modifier.widthIn(max = 300.dp).padding(horizontal = 12.dp, vertical = 18.dp),
         )
     }
 }
 
+/** `.field`: a 13px label over a 38px input, with any error below it. */
 @Composable
-private fun pairingFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = AgentYellow,
-    unfocusedBorderColor = AgentBorder,
-    focusedLabelColor = AgentYellow,
-    unfocusedLabelColor = AgentMuted,
-    focusedTextColor = AgentText,
-    unfocusedTextColor = AgentText,
-    cursorColor = AgentYellow,
-    focusedContainerColor = AgentBackground,
-    unfocusedContainerColor = AgentBackground,
-)
+private fun PairingField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    error: String?,
+    enabled: Boolean,
+    keyboardOptions: KeyboardOptions,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text(label, style = AgentType.Small, color = AgentLabel)
+        AgentField(
+            value = value,
+            onValueChange = onValueChange,
+            placeholder = placeholder,
+            container = AgentBackground,
+            isError = error != null,
+            enabled = enabled,
+            visualTransformation = visualTransformation,
+            keyboardOptions = keyboardOptions,
+            modifier = Modifier.semantics { contentDescription = label },
+        )
+        if (error != null) Text(error, style = AgentType.Note, color = AgentDanger)
+    }
+}

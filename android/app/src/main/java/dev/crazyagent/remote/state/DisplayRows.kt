@@ -6,7 +6,8 @@ import java.util.Locale
 sealed interface DisplayRow {
     val key: String
 
-    data class User(override val key: String, val text: String, val from: String, val imageCount: Int) : DisplayRow
+    /** [own] marks a prompt sent from a phone: like the panel, the app labels only prompts that came from elsewhere. */
+    data class User(override val key: String, val text: String, val from: String, val imageCount: Int, val own: Boolean = false) : DisplayRow
     data class Assistant(override val key: String, val text: String) : DisplayRow
     data class Tool(override val key: String, val name: String, val args: String, val result: ToolResult?) : DisplayRow
     data class Note(override val key: String, val text: String, val kind: NoteKind) : DisplayRow
@@ -31,7 +32,7 @@ fun displayRows(items: List<ChatItem>): List<DisplayRow> {
     for (item in items) {
         when (item) {
             is ChatItem.User -> {
-                rows += DisplayRow.User(item.key, item.text, originLabel(item.origin), item.imageCount)
+                rows += DisplayRow.User(item.key, item.text, originLabel(item.origin), item.imageCount, own = item.origin == "remote")
                 lastAssistant = null
             }
             is ChatItem.Assistant -> {

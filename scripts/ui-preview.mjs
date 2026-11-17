@@ -13,6 +13,7 @@
  *   node scripts/ui-preview.mjs --scenario waiting    # pre-stream bouncing ball
  *   node scripts/ui-preview.mjs --scenario motion     # frame-sampled enter/exit transitions and yellow action label
  *   node scripts/ui-preview.mjs --scenario states     # finished feed / expanded step / new chat
+ *   node scripts/ui-preview.mjs --scenario rail       # prompt rail: narrow dashes, hover popup (RAIL_ASSERT=0 for baseline)
  *   node scripts/ui-preview.mjs --scenario tools      # browser-command rows + tab-list card
  *   node scripts/ui-preview.mjs --scenario modals     # settings + debug log modals
  *   node scripts/ui-preview.mjs --scenario disclaimer # one-time full-screen notice after a reload
@@ -1796,8 +1797,9 @@ async function main() {
   }
 
   const shotFormat = process.env.SHOT_FORMAT ?? 'png'
-  const shot = async name => {
-    await page.send('Page.bringToFront').catch(() => {})
+  const shot = async (name, bringFront = true) => {
+    // bringToFront can drop synthetic CDP hover; hover-state shots skip it.
+    if (bringFront) await page.send('Page.bringToFront').catch(() => {})
     await sleep(250)
     const params = shotFormat === 'jpeg'
       ? { format: 'jpeg', quality: 86, fromSurface: true, captureBeyondViewport: false }
@@ -2091,6 +2093,154 @@ async function main() {
     await page.evaluate(`document.getElementById('new-chat').click()`)
     await sleep(300)
     await shot('new-chat')
+  } else if (SCENARIO === 'rail') {
+    // Prompt rail: narrow horizontal dashes at the right edge; hovering a dash
+    // widens it and opens the past-prompts popup, with dash/row hover sync.
+    // RAIL_ASSERT=0 measures and shoots the old UI as a baseline.
+    const assertRail = process.env.RAIL_ASSERT !== '0'
+    // The headless compositor can freeze opacity transitions mid-fade; the
+    // product's reduced-motion path makes every state settle instantly.
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    const { batch } = makePage(page)
+    await batch(HELLO_FRAMES)
+    await sleep(300)
+    const railPrompts = [
+      'tell me all new changes',
+      'tell me the changes in simple words',
+      'what do i still gotta do before calling notifications fully ready?',
+    ]
+    for (const text of railPrompts) {
+      await sendPrompt(page, text)
+      await finishPrompt(page, 'session-preview0001', `DONE: ${text} ${'Here is a fairly long answer line to give the feed some height. '.repeat(12)}`)
+    }
+    await sleep(400)
+    const measureRail = () => page.evaluate(`(() => {
+      const box = el => { const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } };
+      const rail = document.getElementById('prompt-rail');
+      const dots = [...document.querySelectorAll('#prompt-rail-list > button')];
+      const popup = document.getElementById('prompt-rail-popup');
+      const rows = popup ? [...popup.querySelectorAll('button')] : [];
+      return {
+        railHidden: rail.classList.contains('hidden'),
+        railBox: box(rail),
+        dots: dots.map(d => ({ box: box(d), bg: getComputedStyle(d).backgroundColor, active: d.classList.contains('active'), hover: d.classList.contains('hover') })),
+        popup: popup ? { box: box(popup), opacity: getComputedStyle(popup).opacity, pointerEvents: getComputedStyle(popup).pointerEvents,
+          rows: rows.map(r => ({ box: box(r), text: r.textContent, active: r.classList.contains('active'), hover: r.classList.contains('hover'), color: getComputedStyle(r).color })) } : null,
+        feedTop: Math.round(document.getElementById('activity-log').getBoundingClientRect().top),
+        firstTurnTop: Math.round(document.querySelector('.activity-turn')?.getBoundingClientRect().top ?? 0),
+        vw: window.innerWidth,
+        feedPadRight: parseFloat(getComputedStyle(document.getElementById('activity-log')).paddingRight),
+      };
+    })()`)
+    const rest = await measureRail()
+    log('rail rest:', JSON.stringify(rest))
+    await shot('rest')
+    if (assertRail) {
+      assert.equal(rest.railHidden, false)
+      assert.equal(rest.dots.length, railPrompts.length)
+      assert.ok(rest.railBox.x + rest.railBox.w >= rest.vw - 10, 'rail sits at the right edge')
+      assert.ok(rest.feedPadRight >= 40, 'chat text keeps a gutter clear of the rail')
+      assert.ok(rest.dots.every(d => d.box.x > rest.vw - rest.feedPadRight), 'dashes never sit over the chat text')
+      for (const dot of rest.dots) {
+        assert.ok(dot.box.w > dot.box.h, 'dashes are horizontal')
+        assert.ok(dot.box.w <= 18 && dot.box.h <= 5, 'dashes are very not wide')
+      }
+      assert.equal(rest.dots.at(-1).active, true, 'bottom turn is active at rest')
+      assert.equal(rest.dots.at(-1).bg, 'rgb(255, 195, 0)', 'active dash keeps the yellow accent')
+      assert.ok(rest.popup && rest.popup.opacity === '0', 'popup hidden at rest')
+    }
+    const move = (x, y) => page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    const middle = rest.dots[1].box
+    await move(middle.x + middle.w / 2, middle.y + middle.h / 2)
+    await sleep(350)
+    const hoverDash = await measureRail()
+    log('rail hover-dash:', JSON.stringify(hoverDash))
+    // The headless compositor can freeze fades mid-flight; settle them so the
+    // screenshots show the true end state.
+    const settle = async () => {
+      await page.evaluate(`(() => { for (const a of document.getAnimations()) { try { a.finish() } catch {} } })()`)
+      await sleep(120)
+    }
+    // Captures drop synthetic CDP hover, so the design shots freeze the exact
+    // open-state styles inline; the real hover contract is asserted above.
+    const freezeHover = (dotIndex, rowIndex) => page.evaluate(`(() => {
+      const popup = document.getElementById('prompt-rail-popup');
+      popup.style.opacity = '1'; popup.style.pointerEvents = 'auto'; popup.style.transform = 'translate(0, -50%)';
+      document.querySelectorAll('#prompt-rail-list > button')[${dotIndex}].classList.add('hover');
+      document.querySelectorAll('#prompt-rail-popup > button')[${rowIndex}].classList.add('hover');
+    })()`)
+    const unfreeze = () => page.evaluate(`(() => {
+      const popup = document.getElementById('prompt-rail-popup');
+      popup.style.opacity = ''; popup.style.pointerEvents = ''; popup.style.transform = '';
+      for (const el of document.querySelectorAll('#prompt-rail .hover')) el.classList.remove('hover');
+    })()`)
+    await freezeHover(1, 1)
+    await settle()
+    await shot('hover-dash', false)
+    await unfreeze()
+    if (assertRail) {
+      assert.ok(hoverDash.popup && hoverDash.popup.opacity === '1', 'popup opens on dash hover')
+      assert.equal(hoverDash.popup.pointerEvents, 'auto', 'popup takes clicks while open')
+      assert.deepEqual(hoverDash.popup.rows.map(r => r.text), railPrompts)
+      assert.ok(hoverDash.dots[1].box.w >= rest.dots[1].box.w + 6, 'hovered dash widens')
+      assert.equal(hoverDash.popup.rows[1].hover, true, 'popup row syncs with hovered dash')
+      assert.equal(hoverDash.dots.at(-1).bg, 'rgb(255, 195, 0)', 'active dash stays yellow while open')
+      assert.equal(hoverDash.popup.rows.at(-1).active, true, 'active row highlighted in the popup')
+    }
+    if (hoverDash.popup) {
+      // Headless screenshots can drop synthetic hover; re-hover the dash and
+      // re-measure the row boxes while the popup is open before walking on.
+      const rehover = async () => {
+        await move(middle.x + middle.w / 2, middle.y + middle.h / 2)
+        await sleep(250)
+        return measureRail()
+      }
+      const reopened = await rehover()
+      const row = reopened.popup.rows[0].box
+      await move(row.x + row.w / 2, row.y + row.h / 2)
+      await sleep(350)
+      const hoverRow = await measureRail()
+      log('rail hover-row:', JSON.stringify(hoverRow))
+      await freezeHover(0, 0)
+      await settle()
+      await shot('hover-row', false)
+      await unfreeze()
+      if (assertRail) {
+        assert.equal(hoverRow.popup.opacity, '1', 'popup stays open while moving onto it')
+        assert.equal(hoverRow.dots[0].hover, true, 'dash syncs with hovered row')
+        assert.ok(hoverRow.dots[0].box.w >= rest.dots[0].box.w + 6, 'synced dash widens')
+      }
+      // Clicking a row jumps the feed to that turn (re-hover after the shot).
+      const forClick = await rehover()
+      const clickRow = forClick.popup.rows[0].box
+      await move(clickRow.x + clickRow.w / 2, clickRow.y + clickRow.h / 2)
+      await sleep(150)
+      await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: clickRow.x + clickRow.w / 2, y: clickRow.y + clickRow.h / 2, button: 'left', clickCount: 1 })
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: clickRow.x + clickRow.w / 2, y: clickRow.y + clickRow.h / 2, button: 'left', clickCount: 1 })
+      // Wait for the smooth scroll to settle, then one frame for the scroll
+      // event that recomputes the active dash.
+      for (let i = 0; i < 40; i += 1) {
+        if (await page.evaluate(`document.getElementById('activity-log').scrollTop === 0`)) break
+        await sleep(50)
+      }
+      await sleep(150)
+      const jumped = await measureRail()
+      log('rail row-click:', JSON.stringify({ firstTurnTop: jumped.firstTurnTop, feedTop: jumped.feedTop, active: jumped.dots.findIndex(d => d.active) }))
+      await shot('row-click')
+      if (assertRail) {
+        assert.ok(jumped.firstTurnTop - jumped.feedTop < 90, 'feed scrolled to the first turn')
+        assert.equal(jumped.dots.findIndex(d => d.active), 0, 'active dash follows the scroll')
+      }
+    }
+    await move(300, 880)
+    await sleep(350)
+    const after = await measureRail()
+    log('rail after:', JSON.stringify(after))
+    await shot('rest-after')
+    if (assertRail) {
+      assert.ok(after.popup && after.popup.opacity === '0', 'popup closes when the pointer leaves')
+      assert.ok(after.dots.every((d, i) => d.box.w === rest.dots[i].box.w), 'dashes narrow again')
+    }
   } else if (SCENARIO === 'tools') {
     await playToolScenario(page)
     await sleep(400)

@@ -42,4 +42,20 @@ class MarkdownParserTest {
         val blocks = parseMarkdown("```text\n**not bold**\n- not a list\n```")
         assertEquals(listOf(MarkdownBlock.Code("text", "**not bold**\n- not a list")), blocks)
     }
+
+    @Test fun tableColumnsShareSpareRoomByContent() {
+        // Everything fits on one line: the table still spans the chat.
+        assertEquals(listOf(200, 600), tableColumnWidths(intArrayOf(10, 10), intArrayOf(100, 300), 800).toList())
+        assertEquals(listOf(400), tableColumnWidths(intArrayOf(10), intArrayOf(90), 400).toList())
+    }
+
+    @Test fun tableColumnsShrinkTowardTheirLongestWordThenOverflow() {
+        // Too wide for one line: each column gives up room in proportion to what it can lose.
+        val shrunk = tableColumnWidths(intArrayOf(50, 50), intArrayOf(200, 600), 400)
+        assertEquals(listOf(114, 286), shrunk.toList())
+        assertEquals(400, shrunk.sum())
+        // Even the longest words do not fit: keep them whole and let the table scroll.
+        assertEquals(listOf(300, 300), tableColumnWidths(intArrayOf(300, 300), intArrayOf(500, 900), 400).toList())
+        assertEquals(emptyList<Int>(), tableColumnWidths(IntArray(0), IntArray(0), 400).toList())
+    }
 }

@@ -26,6 +26,7 @@ internal object AppIcons {
     val Plus = lineIcon("M12 5v14M5 12h14")
     val History = lineIcon("M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2")
     val Close = lineIcon("m6 6 12 12M18 6 6 18")
+    val Search = lineIcon("M4 11a7 7 0 1 0 14 0 7 7 0 1 0-14 0M20 20l-4-4")
     val Chevron = lineIcon("m7 10 5 5 5-5")
     val ArrowUp = lineIcon("m6 11 6-6 6 6M12 5v14")
     val Refresh = lineIcon("M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6 6.5L4 9M5.5 15A7 7 0 0 0 18 17.5l2-2.5")

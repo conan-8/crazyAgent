@@ -218,6 +218,7 @@ const els = {
   planModeCancel: $('plan-mode-cancel'),
   promptRail: $('prompt-rail'),
   promptRailList: $('prompt-rail-list'),
+  promptRailPopup: $('prompt-rail-popup'),
   settingsStatus: $('settings-status'),
 }
 
@@ -1766,19 +1767,29 @@ function renderPromptRail() {
   els.backHome.classList.toggle('hidden', !chatOpen)
   els.promptRail.classList.toggle('hidden', !chatOpen)
   els.promptRailList.replaceChildren()
+  els.promptRailPopup.replaceChildren()
   prompts.forEach((prompt, index) => {
+    const title = prompt.querySelector('.turn-prompt')?.textContent || `Message ${index + 1}`
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'prompt-rail-dot'
-    button.title = prompt.querySelector('.turn-prompt')?.textContent || `Message ${index + 1}`
-    button.setAttribute('aria-label', button.title)
-    const label = document.createElement('span')
-    label.className = 'prompt-rail-label'
-    label.textContent = button.title
-    label.setAttribute('aria-hidden', 'true')
-    button.appendChild(label)
-    button.addEventListener('click', () => prompt.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    button.title = title
+    button.setAttribute('aria-label', title)
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'prompt-rail-row'
+    row.textContent = title
+    row.title = title
+    const jump = () => prompt.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    button.addEventListener('click', jump)
+    row.addEventListener('click', jump)
+    // Hovering either surface widens the dash and highlights the matching row.
+    button.addEventListener('mouseenter', () => row.classList.add('hover'))
+    button.addEventListener('mouseleave', () => row.classList.remove('hover'))
+    row.addEventListener('mouseenter', () => button.classList.add('hover'))
+    row.addEventListener('mouseleave', () => button.classList.remove('hover'))
     els.promptRailList.appendChild(button)
+    els.promptRailPopup.appendChild(row)
   })
   updatePromptRail()
 }
@@ -1786,12 +1797,14 @@ function renderPromptRail() {
 function updatePromptRail() {
   const prompts = [...els.activityLog.querySelectorAll('.activity-turn')]
   const dots = [...els.promptRailList.children]
+  const rows = [...els.promptRailPopup.children]
   const feedTop = els.activityLog.getBoundingClientRect().top
   let active = 0
   prompts.forEach((prompt, index) => {
     if (prompt.getBoundingClientRect().top - feedTop < els.activityLog.clientHeight * 0.4) active = index
   })
   dots.forEach((dot, index) => dot.classList.toggle('active', index === active))
+  rows.forEach((row, index) => row.classList.toggle('active', index === active))
 }
 
 /** True while a turn is being rendered (used by the live footer). */

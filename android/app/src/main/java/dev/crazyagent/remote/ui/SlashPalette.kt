@@ -1,23 +1,19 @@
 package dev.crazyagent.remote.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -25,9 +21,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 @Composable
 fun SlashPalette(
@@ -37,56 +33,72 @@ fun SlashPalette(
 ) {
     if (commands.isEmpty()) return
     var selected by remember(commands) { mutableIntStateOf(0) }
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = AgentPanelRaised,
-        border = BorderStroke(1.dp, AgentBorder),
-        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
+    // `.slash-menu`: the panel's floating surface, sitting on the composer's top edge.
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, bottom = 1.dp)
+            .background(AgentMenu, shape)
+            .border(1.dp, AgentMenuBorder, shape)
+            .padding(6.dp),
     ) {
-        Column(Modifier.padding(6.dp)) {
-            commands.forEachIndexed { index, command ->
-                val enabled = enabledFor(command)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (index == selected) AgentYellow.copy(alpha = 0.10f) else Color.Transparent)
-                        .clickable(enabled = enabled) {
-                            selected = index
-                            onSelect(command)
-                        }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                ) {
-                    Text(command.usage, color = if (enabled) AgentYellow else AgentFaint, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                    Text(
-                        command.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (enabled) AgentMuted else AgentFaint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 12.dp).weight(1f),
-                    )
-                }
+        commands.forEachIndexed { index, command ->
+            val enabled = enabledFor(command)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (index == selected) AgentYellowSoft else Color.Transparent)
+                    .clickable(enabled = enabled) {
+                        selected = index
+                        onSelect(command)
+                    }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    command.usage,
+                    style = agentType(12.5f, weight = FontWeight.SemiBold, family = FontFamily.Monospace),
+                    color = if (enabled) AgentYellow else AgentFaint,
+                    modifier = Modifier.alignByBaseline(),
+                )
+                Text(
+                    command.description,
+                    style = AgentType.Meta,
+                    color = when {
+                        !enabled -> AgentFaint
+                        index == selected -> AgentTextSoft
+                        else -> Color(0xFF9A9A9A)
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).alignByBaseline(),
+                )
             }
-            Text(
-                "Tap a command · other slash-leading text is sent normally",
-                style = MaterialTheme.typography.labelSmall,
-                color = AgentFaint,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            )
         }
+        HorizontalDivider(color = AgentBorder, modifier = Modifier.padding(top = 4.dp))
+        Text(
+            "Tap a command · other slash-leading text is sent normally",
+            style = agentType(10.5f, 1.4f),
+            color = AgentFaint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 2.dp),
+        )
     }
 }
 
+/** `.plan-mode`: the line above the composer while the next turn is armed for a plan. */
 @Composable
-fun PlanModeChip(onCancel: () -> Unit) {
-    Surface(shape = RoundedCornerShape(50), color = AgentYellow.copy(alpha = 0.10f)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 9.dp)) {
-            Text("Plan mode · next turn", style = MaterialTheme.typography.labelSmall, color = AgentYellow)
-            IconButton(onClick = onCancel, modifier = Modifier.size(25.dp)) {
-                Icon(AppIcons.Close, contentDescription = "Cancel plan mode", tint = AgentYellow, modifier = Modifier.size(13.dp))
-            }
-        }
+fun PlanModeRow(onCancel: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        AgentBadge("Plan")
+        Text("Next turn uses a live checklist", style = AgentType.Tiny, color = AgentMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        AgentIconButton(AppIcons.Close, "Cancel plan mode", onCancel, size = 22.dp, iconSize = 12.dp, tint = AgentMuted)
     }
 }

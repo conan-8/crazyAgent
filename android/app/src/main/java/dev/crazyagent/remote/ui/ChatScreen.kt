@@ -13,10 +13,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -27,11 +27,13 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -45,17 +47,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -75,6 +70,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
@@ -82,12 +78,11 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.crazyagent.remote.app.LinkStatus
 import dev.crazyagent.remote.app.PendingPhase
@@ -191,7 +186,7 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
         AnimatedVisibility(state.historyLoading, enter = Motion.rowEnter, exit = Motion.rowExit) {
             Row(Modifier.padding(horizontal = 20.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = AgentYellow)
-                Text("Loading saved chat…", style = MaterialTheme.typography.bodySmall, color = AgentMuted)
+                Text("Loading saved chat…", style = AgentType.Meta, color = AgentMuted)
             }
         }
         Crossfade(targetState = empty, animationSpec = Motion.base(), label = "chat-body", modifier = Modifier.weight(1f).fillMaxWidth()) { isEmpty ->
@@ -209,7 +204,7 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
                     state = listState,
                     // Nothing a row draws may leave the list's own area.
                     modifier = Modifier.fillMaxSize().clipToBounds(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 28.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     items(rows, key = { it.key }) { row -> SmoothItem { RowView(row) } }
@@ -218,13 +213,14 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
                     activity?.let { line ->
                         item(key = "activity") {
                             SmoothItem {
+                                // The current action, in the yellow of a running step's title.
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.padding(vertical = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                    modifier = Modifier.heightIn(min = 28.dp).semantics { liveRegion = LiveRegionMode.Polite },
                                 ) {
-                                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = AgentYellow)
-                                    SmoothText(line, MaterialTheme.typography.bodySmall, AgentYellow)
+                                    CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = AgentYellow, trackColor = AgentYellow.copy(alpha = 0.2f))
+                                    SmoothText(line, AgentType.Step, AgentYellow)
                                 }
                             }
                         }
@@ -262,12 +258,12 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
                 }
             },
         )
+        // `.footer`: 9px on a 12px line.
         Text(
             "Shared with the desktop side panel",
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = 9.sp,
-            color = AgentFaint,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 3.dp),
+            style = agentType(9f, 12f / 9f),
+            color = AgentFooter,
+            modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 5.dp),
             textAlign = TextAlign.Center,
         )
     }
@@ -377,23 +373,22 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
         )
     }
     if (confirmNew) {
-        AlertDialog(
-            onDismissRequest = { confirmNew = false },
-            containerColor = AgentPanelRaised,
-            title = { Text("Start a new chat?") },
-            text = { Text("This starts a new session for the desktop side panel too.") },
-            confirmButton = { TextButton(onClick = { confirmNew = false; actions.onNewChat() }) { Text("New chat") } },
-            dismissButton = { TextButton(onClick = { confirmNew = false }) { Text("Cancel") } },
+        AgentAlert(
+            title = "Start a new chat?",
+            text = "This starts a new session for the desktop side panel too.",
+            confirm = "New chat",
+            onConfirm = { confirmNew = false; actions.onNewChat() },
+            onDismiss = { confirmNew = false },
         )
     }
     if (confirmForget) {
-        AlertDialog(
-            onDismissRequest = { confirmForget = false },
-            containerColor = AgentPanelRaised,
-            title = { Text("Forget this pairing?") },
-            text = { Text("The token is deleted from this phone. To also lock out a lost phone, rotate the token on the computer with --new-remote-token.") },
-            confirmButton = { TextButton(onClick = { confirmForget = false; actions.onForget() }) { Text("Forget", color = AgentDanger) } },
-            dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } },
+        AgentAlert(
+            title = "Forget this pairing?",
+            text = "The token is deleted from this phone. To also lock out a lost phone, rotate the token on the computer with --new-remote-token.",
+            confirm = "Forget",
+            danger = true,
+            onConfirm = { confirmForget = false; actions.onForget() },
+            onDismiss = { confirmForget = false },
         )
     }
 }
@@ -401,41 +396,34 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
 @Composable
 private fun Header(state: UiState, onNew: () -> Unit, onHistory: () -> Unit, onDiagnostics: () -> Unit, onSettings: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 8.dp, bottom = 2.dp),
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 14.dp, top = 10.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(AppIcons.Cursor, contentDescription = null, tint = AgentYellow, modifier = Modifier.size(23.dp))
-        Text(
-            "crazyAgent",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 9.dp).weight(1f),
-        )
-        Surface(shape = CircleShape, color = AgentPanelRaised, border = BorderStroke(1.dp, AgentBorder)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onNew, enabled = state.canStartNew, modifier = Modifier.size(38.dp)) {
-                    Crossfade(targetState = state.newInFlight, animationSpec = Motion.fast(), label = "new-chat-icon") { inFlight ->
-                        if (inFlight) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(AppIcons.Plus, contentDescription = "New chat", modifier = Modifier.size(19.dp))
-                        }
+        Icon(AppIcons.Cursor, contentDescription = null, tint = AgentYellow, modifier = Modifier.size(20.dp))
+        Text("crazyAgent", style = AgentType.Title, color = AgentText, modifier = Modifier.padding(start = 9.dp).weight(1f))
+        // `.top-actions`: the panel's glass pill of 34px icon buttons, laid out in a row here.
+        Row(
+            Modifier.background(AgentGlass, CircleShape).border(1.dp, AgentGlassBorder, CircleShape).padding(5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Crossfade(targetState = state.newInFlight, animationSpec = Motion.fast(), label = "new-chat-icon") { inFlight ->
+                if (inFlight) {
+                    Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = AgentYellow)
                     }
-                }
-                IconButton(onClick = onHistory, modifier = Modifier.size(38.dp)) {
-                    Icon(AppIcons.History, contentDescription = "Chat history", modifier = Modifier.size(18.dp))
-                }
-                IconButton(onClick = onDiagnostics, modifier = Modifier.size(38.dp)) {
-                    Icon(AppIcons.Diagnostics, contentDescription = "Connection diagnostics", modifier = Modifier.size(18.dp))
-                }
-                IconButton(onClick = onSettings, modifier = Modifier.size(38.dp)) {
-                    Icon(AppIcons.Settings, contentDescription = "Settings", modifier = Modifier.size(18.dp))
+                } else {
+                    AgentIconButton(AppIcons.Plus, "New chat", onNew, enabled = state.canStartNew)
                 }
             }
+            AgentIconButton(AppIcons.History, "Chat history", onHistory)
+            AgentIconButton(AppIcons.Diagnostics, "Connection diagnostics", onDiagnostics)
+            AgentIconButton(AppIcons.Settings, "Settings", onSettings)
         }
     }
 }
 
+/** `.activity-head`: a 6px state dot, the phase, and the quieter detail beside it. */
 @Composable
 private fun StatusLine(state: UiState, onClick: () -> Unit) {
     val activity = activityLine(state.chat.turn, state.chat.phase)
@@ -452,21 +440,21 @@ private fun StatusLine(state: UiState, onClick: () -> Unit) {
         state.link.status == LinkStatus.LIVE && state.chat.synced && state.chat.turn.isWaiting -> AgentYellow
         state.link.status == LinkStatus.LIVE && state.chat.synced -> AgentGreen
         state.link.status == LinkStatus.AUTH_FAILED || state.link.status == LinkStatus.HOST_REJECTED -> AgentDanger
-        else -> AgentFaint
+        else -> AgentDim
     }
     val color by animateColorAsState(target, Motion.base(), label = "status-dot")
-    val labelColor by animateColorAsState(if (activity != null) AgentYellow else AgentMuted, Motion.base(), label = "status-label")
+    val labelColor by animateColorAsState(if (activity != null) AgentYellow else AgentPhase, Motion.base(), label = "status-label")
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 7.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Box(Modifier.size(6.dp).background(color, CircleShape))
-        SmoothText(label, MaterialTheme.typography.labelMedium, labelColor, maxLines = 1)
+        SmoothText(label, AgentType.Meta, labelColor, maxLines = 1)
         Text(
             state.host,
-            style = MaterialTheme.typography.labelSmall,
-            color = AgentFaint,
+            style = AgentType.Tiny,
+            color = AgentDim,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.End,
@@ -481,8 +469,8 @@ private fun EmptyState(state: UiState, onOpenHistory: (String) -> Unit, onViewAl
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (!synced) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    CircularProgressIndicator(color = AgentYellow, modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
-                    Text("Connecting to your companion…", style = MaterialTheme.typography.bodySmall, color = AgentMuted)
+                    CircularProgressIndicator(color = AgentYellow, modifier = Modifier.size(28.dp), strokeWidth = 2.dp, trackColor = AgentYellow.copy(alpha = 0.2f))
+                    Text("Connecting to your companion…", style = AgentType.Meta, color = AgentMuted)
                 }
             } else {
                 Column(
@@ -496,39 +484,50 @@ private fun EmptyState(state: UiState, onOpenHistory: (String) -> Unit, onViewAl
     }
 }
 
+/** `.confirm-card`: the yellow-washed card above the composer while the chat waits for the user. */
+@Composable
+private fun RequestCard(content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+            .background(AgentYellowWash, shape)
+            .border(1.dp, AgentYellow.copy(alpha = 0.4f), shape)
+            .padding(12.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        content = content,
+    )
+}
+
+private val RequestTitle = AgentType.Small.copy(fontWeight = FontWeight.SemiBold)
+private val RequestDetail = agentType(11f, 1.4f)
+
 /**
  * The agent's own structured request for the user. It offers no Approve/Deny:
  * the only way forward is an ordinary reply, which continues this chat.
  */
 @Composable
 private fun HelpCard(help: dev.crazyagent.remote.state.HelpRequest, canShowScreen: Boolean, onShowScreen: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF242112),
-        border = BorderStroke(1.dp, AgentYellow.copy(alpha = 0.45f)),
-        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
-    ) {
-        Column(
-            Modifier.padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(dev.crazyagent.remote.state.helpTitle(help.category), style = MaterialTheme.typography.labelLarge, color = AgentYellow, fontWeight = FontWeight.SemiBold)
-            SelectionContainer {
-                Text(help.reason, style = MaterialTheme.typography.bodySmall, color = AgentTextSoft, modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    when {
-                        help.screenshotId == null -> "No screenshot was captured. Reply below to continue."
-                        canShowScreen -> "Reply below to continue."
-                        else -> "Its screenshot is no longer shown. Reply below to continue."
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AgentMuted,
-                    modifier = Modifier.weight(1f),
-                )
-                if (canShowScreen) TextButton(onClick = onShowScreen) { Text("Show screen", color = AgentYellow, maxLines = 1) }
-            }
+    RequestCard {
+        AgentBadge("Help")
+        Text(dev.crazyagent.remote.state.helpTitle(help.category), style = RequestTitle, color = AgentYellow, modifier = Modifier.padding(top = 2.dp))
+        SelectionContainer {
+            Text(help.reason, style = AgentType.Note, color = AgentText, modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    help.screenshotId == null -> "No screenshot was captured. Reply below to continue."
+                    canShowScreen -> "Reply below to continue."
+                    else -> "Its screenshot is no longer shown. Reply below to continue."
+                },
+                style = RequestDetail,
+                color = AgentMuted,
+                modifier = Modifier.weight(1f),
+            )
+            if (canShowScreen) AgentLink("Show screen", onShowScreen)
         }
     }
 }
@@ -546,47 +545,30 @@ private fun ConfirmCard(
     onShowScreen: () -> Unit,
     onAnswer: (String) -> Unit,
 ) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF242112),
-        border = BorderStroke(1.dp, AgentYellow.copy(alpha = 0.45f)),
-        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
-    ) {
-        Column(
-            Modifier.padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text("Waiting for your approval", style = MaterialTheme.typography.labelLarge, color = AgentYellow, fontWeight = FontWeight.SemiBold)
-            SelectionContainer {
-                Text(confirm.action, style = MaterialTheme.typography.bodySmall, color = AgentTextSoft, modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()))
-            }
-            Text("Target: ${confirm.target}", style = MaterialTheme.typography.labelSmall, color = AgentMuted)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    when {
-                        confirm.screenshotId == null -> "No screenshot was captured."
-                        canShowScreen -> "Approve only if this is what you want."
-                        else -> "Its screenshot is no longer shown."
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AgentMuted,
-                    modifier = Modifier.weight(1f),
-                )
-                if (canShowScreen) TextButton(onClick = onShowScreen) { Text("Show screen", color = AgentYellow, maxLines = 1) }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { onAnswer("deny") }, enabled = canAnswer, modifier = Modifier.weight(1f)) {
-                    Text("Deny", maxLines = 1)
-                }
-                Button(
-                    onClick = { onAnswer("approve") },
-                    enabled = canAnswer,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = AgentYellow, contentColor = Color(0xFF1A1A1A)),
-                ) {
-                    Text("Approve", maxLines = 1)
-                }
-            }
+    RequestCard {
+        AgentBadge("Approval")
+        Text("Waiting for your approval", style = RequestTitle, color = AgentYellow, modifier = Modifier.padding(top = 2.dp))
+        SelectionContainer {
+            Text(confirm.action, style = AgentType.Note, color = AgentText, modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()))
+        }
+        Text("Target: ${confirm.target}", style = RequestDetail, color = AgentMuted)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    confirm.screenshotId == null -> "No screenshot was captured."
+                    canShowScreen -> "Approve only if this is what you want."
+                    else -> "Its screenshot is no longer shown."
+                },
+                style = RequestDetail,
+                color = AgentMuted,
+                modifier = Modifier.weight(1f),
+            )
+            if (canShowScreen) AgentLink("Show screen", onShowScreen)
+        }
+        // `.confirm-card-actions`: right-aligned, 10px below the copy.
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+            AgentButton("Deny", { onAnswer("deny") }, enabled = canAnswer, modifier = Modifier.defaultMinSize(minWidth = 84.dp))
+            AgentButton("Approve", { onAnswer("approve") }, primary = true, enabled = canAnswer, modifier = Modifier.defaultMinSize(minWidth = 84.dp))
         }
     }
 }
@@ -616,118 +598,153 @@ private fun healthIssue(state: UiState): String? {
     }
 }
 
+/** `.banner`: 12px text beside a `.link`, whose touch padding takes the place of part of the row's own. */
 @Composable
 private fun Banner(message: String, actionLabel: String, onAction: () -> Unit, danger: Boolean) {
-    val accent = if (danger) AgentDanger else AgentYellow
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = if (danger) Color(0xFF241919) else Color(0xFF242112),
-        border = BorderStroke(1.dp, accent.copy(alpha = 0.28f)),
-        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
+            .background(if (danger) Color(0xFF241919) else AgentYellowWash, shape)
+            .border(1.dp, (if (danger) AgentDanger else AgentYellow).copy(alpha = 0.25f), shape)
+            .padding(start = 12.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Row(Modifier.padding(start = 12.dp, end = 6.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                message,
-                style = MaterialTheme.typography.bodySmall,
-                color = AgentTextSoft,
-                modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
-            )
-            TextButton(onClick = onAction) { Text(actionLabel, color = AgentYellow, maxLines = 1) }
-        }
+        Text(
+            message,
+            style = AgentType.Note,
+            color = AgentBannerText,
+            modifier = Modifier.weight(1f).padding(vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        AgentLink(actionLabel, onAction)
     }
 }
 
 @Composable
 internal fun RowView(row: DisplayRow) {
     when (row) {
-        is DisplayRow.User -> UserBubble(label = row.from) {
-            if (row.text.isNotEmpty()) SelectionContainer { Text(row.text, style = MaterialTheme.typography.bodyMedium, lineHeight = 21.sp) }
-            if (row.imageCount > 0) Text(if (row.imageCount == 1) "1 image" else "${row.imageCount} images", style = MaterialTheme.typography.labelSmall, color = AgentMuted)
+        is DisplayRow.User -> UserBubble(label = row.from.takeUnless { row.own }) {
+            if (row.text.isNotEmpty()) SelectionContainer { Text(row.text, style = AgentType.Bubble, color = AgentText) }
+            if (row.imageCount > 0) Text(if (row.imageCount == 1) "1 image" else "${row.imageCount} images", style = AgentType.Meta, color = AgentMuted)
         }
-        is DisplayRow.Assistant -> SelectionContainer(Modifier.padding(vertical = 8.dp)) {
+        // `.activity-answer`
+        is DisplayRow.Assistant -> SelectionContainer(Modifier.padding(top = 6.dp, bottom = 4.dp)) {
             MarkdownContent(row.text)
         }
         is DisplayRow.Tool -> ToolView(row)
+        // The end of a turn: the panel's `.agent-turn-summary` line, and its 22px gap before the next turn.
         is DisplayRow.Note -> Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
-            modifier = Modifier.padding(vertical = 8.dp),
+            modifier = Modifier.padding(bottom = 19.dp).heightIn(min = 26.dp),
         ) {
             val color = when (row.kind) {
                 NoteKind.ERROR -> AgentDanger
                 NoteKind.DONE -> AgentGreen
-                NoteKind.STOPPED -> AgentMuted
+                NoteKind.STOPPED -> AgentDim
             }
-            Box(Modifier.size(5.dp).background(color, CircleShape))
-            Text(
-                row.text,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (row.kind == NoteKind.ERROR) AgentDanger else AgentMuted,
-                fontWeight = if (row.kind == NoteKind.ERROR) FontWeight.SemiBold else FontWeight.Normal,
-            )
+            Box(Modifier.size(6.dp).background(color, CircleShape))
+            Text(row.text, style = AgentType.Step, color = if (row.kind == NoteKind.ERROR) AgentDanger else AgentMuted)
         }
     }
 }
 
+/**
+ * `.activity-turn` + `.user-bubble`: right-aligned, at most 82% wide. [label]
+ * is the panel's `.user-origin` pill, shown only when there is something to say.
+ */
 @Composable
-private fun UserBubble(label: String, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth().padding(start = 44.dp, top = 6.dp, bottom = 12.dp), contentAlignment = Alignment.CenterEnd) {
-        Surface(shape = RoundedCornerShape(16.dp), color = AgentPanelRaised, border = BorderStroke(1.dp, AgentBorder)) {
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                SmoothText(label, MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), AgentMuted)
+private fun UserBubble(label: String?, content: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 16.dp)) {
+        Spacer(Modifier.weight(0.18f))
+        Box(Modifier.weight(0.82f), contentAlignment = Alignment.CenterEnd) {
+            val shape = RoundedCornerShape(16.dp)
+            Column(
+                Modifier.background(AgentPanelRaised, shape).border(1.dp, AgentBorder, shape).padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                if (label != null) {
+                    Box(Modifier.border(1.dp, AgentBorder, RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 1.dp)) {
+                        SmoothText(label, AgentType.Tiny.copy(letterSpacing = 0.02.em), AgentMuted)
+                    }
+                }
                 content()
             }
         }
     }
 }
 
+/** `.activity-step`: a 28px head (icon, title, state, caret) over a body behind a dashed rule. */
 @Composable
 private fun ToolView(row: DisplayRow.Tool) {
     var open by remember { mutableStateOf(false) }
+    val running = row.result == null
+    val failed = row.result?.ok == false
     val status = when (row.result?.ok) {
         true -> "Done"
         false -> "Failed"
         null -> "Running"
     }
     val statusColor by animateColorAsState(
-        when (row.result?.ok) {
-            true -> AgentFaint
-            false -> AgentDanger
-            null -> AgentYellow
+        when {
+            running -> AgentYellow
+            failed -> AgentDanger
+            else -> AgentStepMeta
         },
         Motion.base(),
         label = "tool-status",
     )
     // The tool still running is the current action.
-    val titleColor by animateColorAsState(if (row.result == null) AgentYellow else AgentTextSoft, Motion.base(), label = "tool-title")
+    val titleColor by animateColorAsState(
+        when {
+            running -> AgentYellow
+            open -> AgentStepTitle
+            else -> AgentLabel
+        },
+        Motion.base(),
+        label = "tool-title",
+    )
+    val iconColor by animateColorAsState(
+        when {
+            running -> AgentYellow
+            failed -> AgentDanger
+            else -> AgentStepIcon
+        },
+        Motion.base(),
+        label = "tool-icon",
+    )
     val chevronAngle by animateFloatAsState(if (open) 0f else -90f, Motion.base(), label = "tool-chevron")
-    Column(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+    Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
+                .heightIn(min = 28.dp)
+                .clip(RoundedCornerShape(6.dp))
                 .clickable { open = !open }
-                .semantics { contentDescription = "Tool ${row.name}, $status. Tap for details." }
-                .padding(vertical = 6.dp),
+                .semantics { contentDescription = "Tool ${row.name}, $status. Tap for details." },
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Icon(AppIcons.Tool, contentDescription = null, tint = if (row.result?.ok == false) AgentDanger else AgentMuted, modifier = Modifier.size(17.dp))
-            Text(toolTitle(row.name), style = MaterialTheme.typography.bodyMedium, color = titleColor, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            SmoothText(status, MaterialTheme.typography.labelSmall, statusColor)
-            Icon(AppIcons.Chevron, contentDescription = if (open) "Collapse" else "Expand", tint = AgentFaint, modifier = Modifier.size(14.dp).rotate(chevronAngle))
+            Icon(AppIcons.Tool, contentDescription = null, tint = iconColor, modifier = Modifier.size(17.dp))
+            Text(toolTitle(row.name), style = AgentType.Step, color = titleColor, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            SmoothText(status, AgentType.Meta, statusColor)
+            Icon(AppIcons.Chevron, contentDescription = if (open) "Collapse" else "Expand", tint = AgentSubtle, modifier = Modifier.size(12.dp).rotate(chevronAngle))
         }
         AnimatedVisibility(open, enter = Motion.rowEnter, exit = Motion.rowExit) {
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = AgentPanel,
-                border = BorderStroke(1.dp, AgentBorder),
-                modifier = Modifier.fillMaxWidth().padding(start = 25.dp, bottom = 7.dp),
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, bottom = 8.dp)
+                    .heightIn(max = 240.dp)
+                    .dashedStartRule()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 17.dp, top = 2.dp, bottom = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (row.args.isNotBlank()) Text(row.args.take(2_000), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = AgentMuted)
-                    row.result?.text?.takeIf { it.isNotBlank() }?.let { Text(it.take(4_000), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = AgentTextSoft) }
-                }
+                if (row.args.isNotBlank()) Text(row.args.take(2_000), style = AgentType.Mono, color = AgentMuted)
+                row.result?.text?.takeIf { it.isNotBlank() }?.let { Text(it.take(4_000), style = AgentType.Entry, color = if (failed) AgentDanger else AgentLabel) }
             }
         }
     }
@@ -740,21 +757,27 @@ private fun toolTitle(name: String): String = name
 
 @Composable
 private fun DraftView(draft: Draft) {
-    Column(Modifier.fillMaxWidth().animateContentSize(Motion.fast()).padding(vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        SmoothText(if (draft.text.isEmpty()) "Thinking…" else "Responding", MaterialTheme.typography.labelMedium, AgentYellow)
+    Column(Modifier.fillMaxWidth().animateContentSize(Motion.fast()).padding(top = 2.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        val thinking = draft.text.isEmpty()
+        // `.thinking-wait` until the first token, then a running step's title.
+        SmoothText(
+            if (thinking) "Thinking…" else "Responding",
+            if (thinking) AgentType.Small.copy(lineHeight = 24.sp, letterSpacing = 0.01.em) else AgentType.Step,
+            if (thinking) AgentThinking else AgentYellow,
+        )
         Crossfade(targetState = draft.text.isNotEmpty(), animationSpec = Motion.base(), label = "draft-body") { hasText ->
             if (hasText) {
                 SelectionContainer { MarkdownContent(draft.text) }
             } else if (draft.reasoning.isNotEmpty()) {
-                Text(draft.reasoning.takeLast(400), style = MaterialTheme.typography.bodySmall, color = AgentMuted)
+                Text(draft.reasoning.takeLast(400), style = AgentType.Entry, color = AgentMuted)
             }
         }
         for (tool in draft.tools) {
             key(tool.id) {
                 EnterOnce {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(AppIcons.Tool, contentDescription = null, tint = AgentYellow, modifier = Modifier.size(16.dp))
-                        Text("${toolTitle(tool.name ?: "tool")}…", style = MaterialTheme.typography.bodySmall, color = AgentYellow)
+                    Row(Modifier.heightIn(min = 28.dp), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(AppIcons.Tool, contentDescription = null, tint = AgentYellow, modifier = Modifier.size(17.dp))
+                        Text("${toolTitle(tool.name ?: "tool")}…", style = AgentType.Step, color = AgentYellow)
                     }
                 }
             }
@@ -770,16 +793,16 @@ private fun PendingView(pending: PendingPrompt, state: UiState, actions: ChatAct
         PendingPhase.NEEDS_REVIEW -> "Not confirmed"
         PendingPhase.STEERING -> "Steering…"
     }) {
-        Text(pending.text, style = MaterialTheme.typography.bodyMedium)
-        if (pending.imageCount > 0) Text("${pending.imageCount} image(s)", style = MaterialTheme.typography.labelSmall, color = AgentMuted)
-        SmoothPresence(pending.note) { Text(it, style = MaterialTheme.typography.bodySmall, color = AgentYellow, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+        Text(pending.text, style = AgentType.Bubble, color = AgentText)
+        if (pending.imageCount > 0) Text(if (pending.imageCount == 1) "1 image" else "${pending.imageCount} images", style = AgentType.Meta, color = AgentMuted)
+        SmoothPresence(pending.note) { Text(it, style = AgentType.Note, color = AgentYellow, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
         AnimatedVisibility(pending.phase == PendingPhase.NEEDS_REVIEW, enter = Motion.rowEnter, exit = Motion.rowExit) {
             val sameInstance = pending.instanceId == state.chat.instanceId && pending.images.size == pending.imageCount
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                if (sameInstance) TextButton(onClick = actions.onRetryPending) { Text("Retry") }
-                TextButton(onClick = actions.onResendPending, enabled = state.link.status == LinkStatus.LIVE && !state.busy) { Text("Send again") }
-                TextButton(onClick = actions.onEditPending) { Text("Edit") }
-                TextButton(onClick = actions.onDiscardPending) { Text("Discard") }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (sameInstance) AgentLink("Retry", actions.onRetryPending)
+                AgentLink("Send again", actions.onResendPending, enabled = state.link.status == LinkStatus.LIVE && !state.busy)
+                AgentLink("Edit", actions.onEditPending)
+                AgentLink("Discard", actions.onDiscardPending)
             }
         }
     }
@@ -805,17 +828,20 @@ private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, o
             onSelect = { command -> onSlashCommand(command.id) },
         )
     }
+    AnimatedVisibility(state.planMode, enter = Motion.rowEnter, exit = Motion.rowExit) { PlanModeRow(actions.onTogglePlanMode) }
     val composerBorder by animateColorAsState(if (highlight) AgentYellow else AgentBorder, Motion.slow(), label = "composer-border")
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = AgentPanel,
-        border = BorderStroke(1.dp, composerBorder),
-        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 5.dp),
+    // `.composer` (0 12px 8px) around `.composer-field` (12px 10px 10px 14px, 6px between rows).
+    val composerShape = RoundedCornerShape(20.dp)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
+            .background(AgentPanel, composerShape)
+            .border(1.dp, composerBorder, composerShape),
     ) {
-        Column(Modifier.padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            AnimatedVisibility(state.planMode, enter = Motion.rowEnter, exit = Motion.rowExit) { PlanModeChip(actions.onTogglePlanMode) }
+        Column(Modifier.padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             SmoothPresence(state.attachments.takeIf { it.isNotEmpty() }) { attachments ->
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     attachments.forEachIndexed { index, image -> Attachment(image, index, actions.onRemoveImage) }
                 }
             }
@@ -831,85 +857,94 @@ private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, o
                 value = state.composer,
                 onValueChange = actions.onComposer,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp, max = 132.dp),
-                textStyle = TextStyle(color = AgentText, fontSize = 14.sp, lineHeight = 21.sp),
+                textStyle = AgentType.Input.copy(color = AgentText),
                 cursorBrush = SolidColor(AgentYellow),
                 maxLines = 6,
                 decorationBox = { innerTextField ->
                     Box {
                         val hintAlpha by animateFloatAsState(if (state.composer.isEmpty()) 1f else 0f, Motion.fast(), label = "composer-hint")
-                        if (hintAlpha > 0f) SmoothText(hint, MaterialTheme.typography.bodyMedium, AgentFaint, modifier = Modifier.alpha(hintAlpha))
+                        if (hintAlpha > 0f) SmoothText(hint, AgentType.Input, AgentFaint, modifier = Modifier.alpha(hintAlpha))
                         innerTextField()
                     }
                 },
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = actions.onPickImages,
-                    enabled = state.attachments.size < 4 && state.pending == null,
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(AppIcons.Attachment, contentDescription = if (state.attachments.isEmpty()) "Add images" else "Add images, ${state.attachments.size} of 4 attached", modifier = Modifier.size(19.dp))
-                }
-                if (contextWindow != null) {
-                    val ratio by animateFloatAsState(contextTokens.toFloat() / contextWindow.toFloat(), Motion.slow(), label = "context-ring")
-                    IconButton(
-                        onClick = { showContext = true },
-                        modifier = Modifier.size(28.dp).semantics {
-                            contentDescription = "Context usage: ${formatTokens(contextTokens)} of ${formatTokens(contextWindow)} tokens, ${contextPercent(contextTokens, contextWindow)} percent"
-                        },
-                    ) {
-                        Canvas(Modifier.size(18.dp)) {
-                            val stroke = Stroke(width = 1.5.dp.toPx())
-                            drawCircle(AgentYellow.copy(alpha = 0.18f), radius = size.minDimension / 2, style = stroke)
-                            drawArc(
-                                color = AgentYellow,
-                                startAngle = -90f,
-                                sweepAngle = 360f * ratio.coerceIn(0f, 1f),
-                                useCenter = false,
-                                style = stroke,
-                            )
+            // `.composer-controls`: a 36px row. The attach button takes the panel's mic slot
+            // (32px, pulled 6px toward the edge), then the 16px context ring and the model name.
+            Row(Modifier.heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).offset(x = (-6).dp), verticalAlignment = Alignment.CenterVertically) {
+                    AgentIconButton(
+                        AppIcons.Attachment,
+                        if (state.attachments.isEmpty()) "Add images" else "Add images, ${state.attachments.size} of 4 attached",
+                        actions.onPickImages,
+                        enabled = state.attachments.size < 4 && state.pending == null,
+                        size = 32.dp,
+                        tint = AgentQuietIcon,
+                    )
+                    if (contextWindow != null) {
+                        val ratio by animateFloatAsState(contextTokens.toFloat() / contextWindow.toFloat(), Motion.slow(), label = "context-ring")
+                        Box(
+                            Modifier.size(28.dp).clip(CircleShape).clickable(role = androidx.compose.ui.semantics.Role.Button) { showContext = true }.semantics {
+                                contentDescription = "Context usage: ${formatTokens(contextTokens)} of ${formatTokens(contextWindow)} tokens, ${contextPercent(contextTokens, contextWindow)} percent"
+                            },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Canvas(Modifier.size(14.dp)) {
+                                // A 2px stroke centered on a 14px circle fills the panel's 16px ring.
+                                val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                                drawCircle(AgentYellow.copy(alpha = 0.18f), radius = size.minDimension / 2, style = stroke)
+                                drawArc(
+                                    color = AgentYellow,
+                                    startAngle = -90f,
+                                    sweepAngle = 360f * ratio.coerceIn(0f, 1f),
+                                    useCenter = false,
+                                    style = stroke,
+                                )
+                            }
                         }
                     }
+                    Text(
+                        state.chat.health.model?.substringAfterLast('/') ?: "Model unavailable",
+                        style = AgentType.Small,
+                        color = AgentAnswer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 8.dp).weight(1f),
+                    )
                 }
-                Text(
-                    state.chat.health.model?.substringAfterLast('/') ?: "Model unavailable",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AgentTextSoft,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = 7.dp).weight(1f),
-                )
-                val steerBackground by animateColorAsState(if (state.canSteer) AgentYellow else AgentPanelHover, Motion.base(), label = "steer-background")
-                val steerTint by animateColorAsState(if (state.canSteer) AgentBackground else AgentMuted, Motion.base(), label = "steer-tint")
+                // `.send`: 36px, yellow with a dark arrow; #2a2a2a with a grey arrow when it cannot send.
+                val steerBackground by animateColorAsState(if (state.canSteer) AgentYellow else AgentControl, Motion.base(), label = "steer-background")
+                val steerTint by animateColorAsState(if (state.canSteer) AgentBackground else AgentStepMeta, Motion.base(), label = "steer-tint")
                 AnimatedVisibility(
                     visible = state.busy && state.composer.isNotBlank() && resolveSlashCommand(state.composer) == null,
                     enter = fadeIn(Motion.base()) + expandHorizontally(Motion.base()),
                     exit = fadeOut(Motion.fast()) + shrinkHorizontally(Motion.base()),
                 ) {
-                    IconButton(
-                        onClick = actions.onSend,
+                    AgentIconButton(
+                        AppIcons.ArrowUp,
+                        "Steer: stop the current turn and send this message",
+                        actions.onSend,
+                        modifier = Modifier.padding(end = 6.dp).background(steerBackground, CircleShape),
                         enabled = state.canSteer,
-                        modifier = Modifier.padding(end = 6.dp).size(40.dp).background(steerBackground, CircleShape).semantics {
-                            contentDescription = "Steer: stop the current turn and send this message"
-                        },
-                    ) {
-                        Icon(AppIcons.ArrowUp, contentDescription = null, tint = steerTint, modifier = Modifier.size(20.dp))
-                    }
+                        size = 36.dp,
+                        iconSize = 18.dp,
+                        tint = steerTint,
+                    )
                 }
                 Crossfade(targetState = state.busy, animationSpec = Motion.fast(), label = "send-or-stop") { busy ->
                     if (busy) {
-                        IconButton(
-                            onClick = actions.onStop,
-                            enabled = state.canStop,
-                            modifier = Modifier.size(40.dp).semantics {
-                                contentDescription = if (state.chat.turn.status == "stopping" || state.stopInFlight) "Stopping current turn" else "Stop current turn"
-                            },
+                        // `.stop`: a 12px red square on a #262626 disc.
+                        Box(
+                            Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(AgentPanelHover)
+                                .clickable(enabled = state.canStop, role = androidx.compose.ui.semantics.Role.Button, onClick = actions.onStop)
+                                .semantics {
+                                    contentDescription = if (state.chat.turn.status == "stopping" || state.stopInFlight) "Stopping current turn" else "Stop current turn"
+                                },
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Surface(shape = CircleShape, color = AgentPanelHover, modifier = Modifier.size(38.dp)) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Box(Modifier.size(12.dp).background(AgentDanger, RoundedCornerShape(3.dp)))
-                                }
-                            }
+                            Box(Modifier.size(12.dp).background(AgentDanger, RoundedCornerShape(3.dp)))
                         }
                     } else {
                         val exactCommand = resolveSlashCommand(state.composer)
@@ -919,32 +954,32 @@ private fun Composer(state: UiState, actions: ChatActions, highlight: Boolean, o
                             "plan" -> !state.busy && state.pending == null
                             else -> false
                         }
-                        val sendBackground by animateColorAsState(if (sendEnabled) AgentYellow else AgentPanelHover, Motion.base(), label = "send-background")
-                        val sendTint by animateColorAsState(if (sendEnabled) AgentBackground else AgentMuted, Motion.base(), label = "send-tint")
-                        IconButton(
-                            onClick = { if (exactCommand == null) actions.onSend() else onSlashCommand(exactCommand.id) },
+                        val sendBackground by animateColorAsState(if (sendEnabled) AgentYellow else AgentControl, Motion.base(), label = "send-background")
+                        val sendTint by animateColorAsState(if (sendEnabled) AgentBackground else AgentStepMeta, Motion.base(), label = "send-tint")
+                        AgentIconButton(
+                            AppIcons.ArrowUp,
+                            "Send",
+                            { if (exactCommand == null) actions.onSend() else onSlashCommand(exactCommand.id) },
+                            modifier = Modifier.background(sendBackground, CircleShape),
                             enabled = sendEnabled,
-                            modifier = Modifier.size(40.dp).background(sendBackground, CircleShape),
-                        ) {
-                            Icon(AppIcons.ArrowUp, contentDescription = "Send", tint = sendTint, modifier = Modifier.size(20.dp))
-                        }
+                            size = 36.dp,
+                            iconSize = 18.dp,
+                            tint = sendTint,
+                        )
                     }
                 }
             }
         }
     }
     if (showContext && contextWindow != null) {
-        AlertDialog(
-            onDismissRequest = { showContext = false },
-            containerColor = AgentPanelRaised,
-            title = { Text("Context usage") },
-            text = {
-                Text(
-                    "${formatTokens(contextTokens)} / ${formatTokens(contextWindow)} tokens\n" +
-                        "${contextPercent(contextTokens, contextWindow)}% of the selected model's context is used.",
-                )
-            },
-            confirmButton = { TextButton(onClick = { showContext = false }) { Text("OK") } },
+        AgentAlert(
+            title = "Context usage",
+            text = "${formatTokens(contextTokens)} / ${formatTokens(contextWindow)} tokens\n" +
+                "${contextPercent(contextTokens, contextWindow)}% of the selected model's context is used.",
+            confirm = "OK",
+            dismiss = null,
+            onConfirm = { showContext = false },
+            onDismiss = { showContext = false },
         )
     }
 }
@@ -962,23 +997,25 @@ private fun Attachment(image: PromptImage, index: Int, onRemove: (Int) -> Unit) 
         val options = BitmapFactory.Options().apply { inSampleSize = 8 }
         BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size, options)?.asImageBitmap()
     }
-    Surface(shape = RoundedCornerShape(10.dp), color = AgentPanelRaised, border = BorderStroke(1.dp, AgentBorder)) {
-        Row(Modifier.padding(4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            if (bitmap != null) {
-                Image(
-                    bitmap,
-                    contentDescription = "Attached image ${index + 1}",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)),
-                )
-            } else {
-                Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) { Text("IMG", style = MaterialTheme.typography.labelSmall, color = AgentMuted) }
-            }
-            Text(image.name, style = MaterialTheme.typography.labelSmall, color = AgentTextSoft, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 100.dp))
-            IconButton(onClick = { onRemove(index) }, modifier = Modifier.size(26.dp)) {
-                Icon(AppIcons.Close, contentDescription = "Remove image ${index + 1}", modifier = Modifier.size(14.dp))
-            }
+    // `.image-chips > *`
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        Modifier.heightIn(min = 42.dp).background(Color(0xFF222222), shape).border(1.dp, AgentChipBorder, shape).padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap,
+                contentDescription = "Attached image ${index + 1}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(6.dp)),
+            )
+        } else {
+            Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { Text("IMG", style = AgentType.Tiny, color = AgentMuted) }
         }
+        Text(image.name, style = AgentType.Meta, color = Color(0xFFCFCFCF), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 100.dp))
+        AgentIconButton(AppIcons.Close, "Remove image ${index + 1}", { onRemove(index) }, size = 22.dp, iconSize = 13.dp, tint = AgentMuted)
     }
 }
 
@@ -995,8 +1032,9 @@ private fun UtilityDialog(
 ) {
     Surface(Modifier.fillMaxSize(), color = AgentBackground) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            // `.modal-head`
             Row(
-                Modifier.fillMaxWidth().padding(start = 20.dp, end = 14.dp, top = 12.dp, bottom = 8.dp),
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 14.dp, top = 18.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -1005,24 +1043,25 @@ private fun UtilityDialog(
                         UtilityPanel.DIAGNOSTICS -> "Diagnostics"
                         UtilityPanel.HISTORY -> "History"
                     },
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Medium,
+                    style = AgentType.Title,
+                    color = AgentText,
                     modifier = Modifier.weight(1f),
                 )
-                Surface(shape = CircleShape, color = AgentPanelRaised, border = BorderStroke(1.dp, AgentBorder)) {
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(38.dp)) {
-                        Icon(AppIcons.Close, contentDescription = "Close", modifier = Modifier.size(17.dp))
-                    }
-                }
+                AgentCloseButton("Close", onDismiss)
             }
-            Column(
-                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(22.dp),
-            ) {
-                when (panel) {
-                    UtilityPanel.SETTINGS -> SettingsContent(state, onEditPairing, onForget, onEnableNotifications)
-                    UtilityPanel.DIAGNOSTICS -> DiagnosticsContent(state, onReconnect)
-                    UtilityPanel.HISTORY -> HistoryPanel(state.chat.sessions, onOpenHistory)
+            if (panel == UtilityPanel.HISTORY) {
+                HistoryPanel(state.chat.sessions, onOpenHistory, Modifier.weight(1f))
+            } else {
+                // `.modal-body`
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(26.dp),
+                ) {
+                    if (panel == UtilityPanel.SETTINGS) {
+                        SettingsContent(state, onEditPairing, onForget, onEnableNotifications)
+                    } else {
+                        DiagnosticsContent(state, onReconnect)
+                    }
                 }
             }
         }
@@ -1036,8 +1075,8 @@ private fun SettingsContent(state: UiState, onEditPairing: () -> Unit, onForget:
             KeyValue("Current model", state.chat.health.model?.substringAfterLast('/') ?: "Unavailable")
             Text(
                 "Choose the model and reasoning effort in the desktop side panel. The phone remote API is read-only for model settings.",
-                style = MaterialTheme.typography.bodySmall,
-                color = AgentMuted,
+                style = AgentType.Hint,
+                color = AgentHint,
             )
         }
     }
@@ -1054,36 +1093,25 @@ private fun SettingsContent(state: UiState, onEditPairing: () -> Unit, onForget:
                     else -> Level.WARN
                 },
             )
-            state.push.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AgentMuted) }
+            state.push.detail?.let { Text(it, style = AgentType.Hint, color = AgentHint) }
         }
         if (status == PushState.Status.NEEDS_PERMISSION) {
-            OutlinedButton(onClick = onEnableNotifications, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) { Text("Allow notifications") }
+            AgentButton("Allow notifications", onEnableNotifications, wide = true)
         }
         Text(
             "A notification only says that the agent needs you, finished, or failed. It never contains your prompt, the answer, or a screenshot. \"On\" means the computer has this phone's address, not that a notification is guaranteed to arrive.",
-            style = MaterialTheme.typography.bodySmall,
-            color = AgentFaint,
+            style = AgentType.Hint,
+            color = AgentHint,
         )
     }
     Section("Connection") {
         InfoCard { KeyValue("Server", state.host) }
-        Button(
-            onClick = onEditPairing,
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = AgentYellow, contentColor = AgentBackground),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Update pairing and token") }
-        OutlinedButton(
-            onClick = onForget,
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, AgentDanger.copy(alpha = 0.45f)),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = AgentDanger),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Forget pairing") }
+        AgentButton("Update pairing and token", onEditPairing, primary = true, wide = true)
+        AgentButton("Forget pairing", onForget, danger = true, wide = true)
         Text(
             "The token is encrypted on this phone and is never shown here. Forgetting it does not rotate the token on the computer.",
-            style = MaterialTheme.typography.bodySmall,
-            color = AgentFaint,
+            style = AgentType.Hint,
+            color = AgentHint,
         )
     }
 }
@@ -1118,11 +1146,9 @@ private fun DiagnosticsContent(state: UiState, onReconnect: () -> Unit) {
                 else -> Level.BAD
             })
         }
-        state.link.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AgentMuted) }
-        OutlinedButton(onClick = onReconnect, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Icon(AppIcons.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.size(7.dp))
-            Text("Reconnect now")
+        state.link.detail?.let { Text(it, style = AgentType.Hint, color = AgentHint) }
+        AgentButton("Reconnect now", onReconnect, wide = true) {
+            Icon(AppIcons.Refresh, contentDescription = null, tint = AgentTextSoft, modifier = Modifier.size(14.dp))
         }
     }
     Section("Session") {
@@ -1139,8 +1165,8 @@ private fun DiagnosticsContent(state: UiState, onReconnect: () -> Unit) {
         }
         Text(
             "Diagnostics contain connection state only. Pairing tokens and authorization headers are never displayed.",
-            style = MaterialTheme.typography.bodySmall,
-            color = AgentFaint,
+            style = AgentType.Hint,
+            color = AgentHint,
         )
     }
 }
@@ -1168,40 +1194,47 @@ private fun runtimeLevel(health: Health, live: Boolean): Level = when {
     else -> Level.BAD
 }
 
+/** `.settings-section`: a quiet 13px heading over its content. */
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(title, style = MaterialTheme.typography.titleSmall, color = AgentMuted)
-        content()
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(title, style = AgentType.Section, color = AgentHint)
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) { content() }
     }
 }
 
+/** `.log-stats`: a bordered panel of small values. */
 @Composable
 private fun InfoCard(content: @Composable () -> Unit) {
-    Surface(shape = RoundedCornerShape(14.dp), color = AgentPanel, border = BorderStroke(1.dp, AgentBorder), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
-    }
+    val shape = RoundedCornerShape(13.dp)
+    Column(
+        Modifier.fillMaxWidth().background(AgentPanel, shape).border(1.dp, AgentBorder, shape).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) { content() }
 }
+
+private val StatValue = agentType(12f, 1.65f)
 
 @Composable
 private fun KeyValue(label: String, value: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = AgentFaint)
-        Text(value, style = MaterialTheme.typography.bodySmall, color = AgentTextSoft)
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text(label, style = AgentType.Tiny, color = AgentSubtle)
+        Text(value, style = StatValue, color = AgentStat)
     }
 }
 
+/** `.log-signal`: a 6px state dot before a 12px line. */
 @Composable
 private fun HealthRow(label: String, value: String, level: Level) {
     val color = when (level) {
         Level.OK -> AgentGreen
         Level.WARN -> AgentYellow
         Level.BAD -> AgentDanger
-        Level.UNKNOWN -> AgentFaint
+        Level.UNKNOWN -> AgentDim
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(Modifier.size(7.dp).background(color, CircleShape))
-        Text(label, style = MaterialTheme.typography.bodySmall, color = AgentMuted, modifier = Modifier.weight(1f))
-        Text(value, style = MaterialTheme.typography.bodySmall, color = AgentTextSoft, maxLines = 2, textAlign = TextAlign.End)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.size(6.dp).background(color, CircleShape))
+        Text(label, style = AgentType.Note, color = AgentLabel, modifier = Modifier.weight(1f))
+        Text(value, style = AgentType.Note, color = AgentStat, maxLines = 2, textAlign = TextAlign.End)
     }
 }

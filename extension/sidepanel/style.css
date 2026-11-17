@@ -755,12 +755,14 @@ textarea {
   white-space: pre-wrap;
 }
 
+/* Past prompts ride the right edge as short horizontal dashes; the hovered dash
+   widens and the whole list opens as a popup beside the rail. */
 .prompt-rail {
   position: absolute;
   top: 50%;
   right: 0;
   z-index: 10;
-  padding: 12px 10px 12px 12px;
+  padding: 12px 8px 12px 10px;
   transform: translateY(-50%);
 }
 
@@ -768,26 +770,27 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 8px;
+  gap: 9px;
+  width: 26px;
 }
 
 .prompt-rail-list > button,
 .prompt-rail-list > [role="button"] {
   position: relative;
-  width: 4px;
-  height: 22px;
+  width: 12px;
+  height: 3px;
   flex: 0 0 auto;
   padding: 0;
   border: 0;
   border-radius: 999px;
   background: #3a3a3a;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, width 0.15s ease;
 }
 
 .prompt-rail-list > button::before,
 .prompt-rail-list > [role="button"]::before {
   position: absolute;
-  inset: -6px -8px;
+  inset: -4px -6px;
   border-radius: 999px;
   content: "";
 }
@@ -798,39 +801,72 @@ textarea {
 }
 
 .prompt-rail-list > button:hover,
-.prompt-rail-list > [role="button"]:hover {
+.prompt-rail-list > button.hover,
+.prompt-rail-list > [role="button"]:hover,
+.prompt-rail-list > [role="button"].hover {
+  width: 26px;
   background: #777;
 }
 
-.prompt-rail-list > button.active:hover {
+.prompt-rail-list > button.active:hover,
+.prompt-rail-list > button.active.hover {
   background: var(--accent);
 }
 
-.prompt-rail-label {
+/* The popup overlaps the rail's padding so the pointer never crosses a dead
+   gap between a dash and the list; hovering either keeps it open. */
+.prompt-rail-popup {
   position: absolute;
   top: 50%;
-  right: 16px;
-  width: min(220px, calc(100vw - 64px));
-  padding: 7px 10px;
-  overflow: hidden;
-  border-radius: 9px;
+  right: calc(100% - 6px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min(280px, calc(100vw - 64px));
+  max-height: min(480px, 70vh);
+  padding: 8px;
+  overflow-y: auto;
+  border-radius: 14px;
   background: rgba(28, 28, 28, 0.94);
-  color: #b0b0b0;
-  font-size: 13px;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  box-shadow: var(--shadow);
   opacity: 0;
   pointer-events: none;
   transform: translate(6px, -50%);
   transition: opacity 0.15s ease, transform 0.15s ease;
   backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
-.prompt-rail-list > button:hover .prompt-rail-label,
-.prompt-rail-list > button:focus-visible .prompt-rail-label {
+.prompt-rail:hover .prompt-rail-popup,
+.prompt-rail:has(:focus-visible) .prompt-rail-popup {
   opacity: 1;
+  pointer-events: auto;
   transform: translate(0, -50%);
+}
+
+.prompt-rail-row {
+  padding: 8px 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #b0b0b0;
+  font-size: 13px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.prompt-rail-row:hover,
+.prompt-rail-row.hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #d0d0d0;
+}
+
+.prompt-rail-row.active {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .banner {
@@ -3366,6 +3402,8 @@ input::placeholder {
 
 .app.chat-open .activity-log {
   padding-top: 56px;
+  /* Gutter so chat text never runs under the prompt rail's dashes. */
+  padding-right: 44px;
 }
 
 /* The floating back button covers the top-left of the feed; shift the activity
