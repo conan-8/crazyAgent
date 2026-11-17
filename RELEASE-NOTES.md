@@ -2,7 +2,7 @@
 
 Changes since **v2.3.0**. This release adds **marathon mode** — a sticky, companion-owned planning switch with plan carry-over and a read-only watcher (deterministic alerts plus an optional model judge) — and the maintainer's **automatic updates** feature. Marathon M1–M5 real-model acceptance is green on the isolated harness; the acceptance evidence below is **marathon-scoped**. The automatic-updater feature was landed and verified by the maintainer (its own tests + a real scratch-clone update), **not** independently accepted by the marathon team.
 
-The extension uses numeric update version `2.4.0`. The Android app is version `0.7.0` with version code `6`; **the signed v2.4.0 release APK is pending maintainer publication** (the marathon phone features ship in it once available).
+The extension uses numeric update version `2.4.0`. The Android app is version `0.7.0` with version code `6`. The signed release APK has SHA-256 `863fb04cd028f02cd574e68cd8e8c82a0c7af8a273796892d9f5776edb2f9592`; `apksigner verify` accepted it with the same signing certificate as the previous release.
 
 ## Marathon mode (M1–M5)
 
@@ -34,6 +34,13 @@ Marathon per-commit test counts: 1055 pre-M1 / 1085 M1 / 1105 M2+tuning / 1152 M
 - **Wait steps wear a stopwatch icon** (`icon-step-wait`) instead of the generic tool wrench. Gated by the `wait` preview scenario (icon href asserted, baseline failed first).
 - **The composer's reasoning label abbreviates `medium` as `med`** so more of the model name fits on the line; the tooltip still says "Reasoning effort: Medium". Gated by the `tools` preview scenario (baseline failed first).
 - `npm test` **1055/1055** after the changes; `ui-preview` `queue`, `wait`, and `tools` (1017 model display) scenarios pass.
+
+## Release artifact and activation
+
+- Signed Android release APK `0.7.0 (6)`: [`app-release.apk`](https://github.com/conan-8/crazyAgent/releases/download/v2.4.0/app-release.apk), SHA-256 `863fb04cd028f02cd574e68cd8e8c82a0c7af8a273796892d9f5776edb2f9592`, signature-verified with the existing release certificate.
+- Reload the unpacked extension and reopen the side panel, then restart the companion to activate v2.4.0. The signed Android APK still needs separate on-device installation and acceptance.
+
+---
 
 # crazyAgent v2.3.0
 

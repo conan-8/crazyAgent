@@ -39,7 +39,7 @@ Verified on the working tree at the release content; **re-verified at a clean ch
 - **Release commit:** the commit tagged `v2.4.0` (explicit paths/hunks; secret-scanned; staged diff reviewed — marathon docs + version bumps only, no updater code/doc modification). The release content was gate-verified at clean checkout `f730021`; the tagged commit differs only by this report's release-metadata fill-in.
 - **Tag:** `v2.4.0`.
 - **GitHub release:** published via `gh` (authenticated as `conan-8`, matching the established v2.3.0 flow).
-- **Signed Android release-APK asset (`0.7.0 (6)`):** **PENDING** maintainer build/publication (the signing keystore credentials are the maintainer's; not built here). Does not block the tag. The README/install flow references the latest published APK until the v2.4.0 APK is published with its SHA-256.
+- **Signed Android release-APK asset (`0.7.0 (6)`):** **PUBLISHED 2026-11-17** by the maintainer from the tagged source. SHA-256 `863fb04cd028f02cd574e68cd8e8c82a0c7af8a273796892d9f5776edb2f9592`; `apksigner verify` accepted its v2 signature with the existing release certificate. The README/install flow and GitHub release reference this exact APK.
 
 ## Activation — PENDING FOR USER (manual)
 
@@ -59,7 +59,6 @@ The maintainer's auto-updater (`companion/updater.mjs`, `extension/self-update.j
 Per lead ruling, recorded in AGENTS.md / STATUS.md / RELEASE-NOTES.md / M4-report: the v1 judge (low-effort #3, text-only #4, cadence-sampled) catches sustained obvious stalls + every hard signal with **zero false alerts on healthy runs** (0/53 replay fine; live 15/15), but intermittent varied-activity wander can read as progressing/unknown. Gate = stuck **WINDOWS** 6/9 (67%) vs ≥80% target (distinct-run 6/7 = 86% nuance). Label correction: `m0Stall-r4` is a STUCK true positive (lead's earlier "zero alerts on honest runs" framing was over-strict, acknowledged). Temp-0 judge non-determinism (earlier 0-fine partly luck); 3/53≈0.057 caveat. **Top v2 follow-up:** the continuation-plan-snapshot product gap (provider emits no plan activity for the M2 seed → ledger has no plan until the first `browser_plan` call → open-flat can't fire on continuation wander); fix = surface the seed plan to the ledger at turn start. Plus the single-turn wander/redo fidelity flag (eval mode-rate analysis).
 
 ## Pending after M6
-- Signed v2.4.0 release-APK build/publication (maintainer).
 - Activation (extension reload + companion restart) — manual user step.
 - Live docked-panel marathon visual acceptance; on-device phone marathon screens; WATCH push delivery via `conan-evo-x3`; real-companion phone verification.
 - v2 follow-ups: continuation-plan-snapshot gap (top), single-turn wander/redo, M4 stuck-window improvement.

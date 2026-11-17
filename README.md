@@ -92,7 +92,7 @@ There are **34 standing model-facing tools**: 25 general browser tools, 8 guarde
 - **Marathon mode (`/marathon`):** a sticky, companion-owned switch (unlisted legacy alias `/plan`) that plans and executes multi-step work with a live `browser_plan` checklist on every turn while it is on. The plan carries over between turns: stop a long task and "continue" resumes from the first open item without redoing completed work; an unrelated question after a stopped marathon is answered without plan nudges. The sidebar shows a marathon chip and a collapsible checklist; the phone gets a marathon chip, watch card, and checklist.
 - **A watcher that only reports:** a deterministic ledger alerts on hard stalls (silence, a hung tool, a lost executor) without the model, and an optional low-effort model judge corroborates suspected semantic stalls under a two-strike rule. The watcher never steers, stops, or changes the turn — a verdict is a diagnostic, not verification. The panel shows a watch alert row (Stop / Steer… / It's fine) that collapses on recovery, and the phone gets a WATCH push. Watcher cost is reported separately from agent usage. The v1 judge ships under a recorded FALLBACK-A deviation (it catches sustained stalls and all hard signals with zero false alerts on healthy runs, but intermittent varied-activity wander can read as progressing); see `docs/STATUS.md`.
 - **Automatic updates (maintainer feature, `cdcd9d1`):** standard supervised installations keep themselves current from this release on — see [Automatic updates](#automatic-updates) below. This feature was landed and verified by the maintainer (its own tests + a real scratch-clone update), not independently accepted by the marathon team.
-- **Android 0.7.0 (6):** marathon chip / watch card / checklist + WATCH push. **The signed v2.4.0 release APK is pending maintainer publication** (the install flow below currently references the latest published APK); the marathon phone features require the v2.4.0 APK once available.
+- **Android 0.7.0 (6):** marathon chip / watch card / checklist + WATCH push, plus the sidebar-aligned visual redesign and bundled Geist typeface. The signed v2.4.0 release APK is published; its SHA-256 is below.
 
 Marathon M1–M5 real-model acceptance is green on the isolated harness (see `docs/marathon/`); live docked-panel and on-device phone marathon acceptance, plus WATCH push delivery, remain pending. See the complete [v2.4.0 patch notes](RELEASE-NOTES.md).
 
@@ -113,7 +113,7 @@ See the complete [v2.3.0 patch notes](RELEASE-NOTES.md). Live docked-panel and p
 
 Use the optional Android app with an existing crazyAgent desktop installation. Basic chat, screenshots, help, and reconnects do **not** require Firebase; metadata-only push notifications are a separate optional setup.
 
-> **v2.4.0 phone APK pending:** v2.4.0 adds marathon phone features (chip, watch card, checklist, WATCH push) in Android `0.7.0 (6)`. The signed v2.4.0 release APK is **pending maintainer publication**; the setup below references the latest published APK (v2.3.0, `0.6.0 (5)`). The marathon phone features require the v2.4.0 APK once it is published with its SHA-256 on the release page.
+> **v2.4.0 phone APK:** v2.4.0 adds marathon phone features (chip, watch card, checklist, WATCH push) in Android `0.7.0 (6)`. The signed release APK is published below with its SHA-256; these phone features require the v2.4.0 APK.
 
 **Requirements:**
 
@@ -133,17 +133,17 @@ First verify the existing installation is v2.4.0 and http://127.0.0.1:17871/heal
 Verify that Tailscale is running, identify this host's Tailscale DNS name, and confirm MagicDNS and HTTPS certificates are enabled. Inspect any existing Tailscale Serve configuration without overwriting unrelated routes.
 Enable the scoped remote API on the existing crazyAgent companion with --remote and --remote-public-host <this-host>.<tailnet>.ts.net. Preserve my existing model/settings and use the existing startup/service method rather than starting a conflicting second companion. The remote listener must remain on 127.0.0.1:17873; never expose port 17871.
 Publish only the remote listener with tailscale serve --bg http://127.0.0.1:17873. Do not enable Funnel or public port forwarding. Verify that the Serve route is tailnet-only, unauthenticated /remote/v1/state returns 401, and /bridge through that route returns 404.
-Download the official APK from https://github.com/conan-8/crazyAgent/releases/download/v2.3.0/app-release.apk into a new empty temporary directory and require SHA-256 3149a0f2c5654f30f420c9bfa4c32cec160bf91dc2bbdf6477bb96295aed9784 before installing it (this is the latest published APK; the v2.4.0 signed APK with marathon phone features is pending maintainer publication — use it and its release-page SHA-256 once available). Do not use a different APK or build unless I explicitly ask for a source build.
+Download the official APK from https://github.com/conan-8/crazyAgent/releases/download/v2.4.0/app-release.apk into a new empty temporary directory and require SHA-256 863fb04cd028f02cd574e68cd8e8c82a0c7af8a273796892d9f5776edb2f9592 before installing it. Do not use a different APK or build unless I explicitly ask for a source build.
 If adb is available and authorized, install that verified APK with adb install -r. If no usable adb device exists, give me short manual instructions to download and open the same APK on my Android phone. If Android rejects an update because the existing app has a different signature, stop and explain that uninstalling deletes the old pairing; do not uninstall or erase app data automatically.
 Do not print, read, copy, log, commit, or transmit the remote token yourself. Give me the exact npm run dev -- --pair-remote command to run in my own terminal, then tell me to paste the printed server URL and token directly into the crazyAgent Remote app. Finish with the server address, APK hash, health status, and the remaining manual pairing steps. Keep Edge and the side panel open, and do not send a test prompt until I confirm pairing is complete.
 ```
 
 ### Finish on the phone
 
-1. **Install the app:** if the agent did not install through `adb`, download the official [crazyAgent Remote APK](https://github.com/conan-8/crazyAgent/releases/download/v2.3.0/app-release.apk) onto the phone and open it. Android may ask permission to install apps from the browser or file manager.
+1. **Install the app:** if the agent did not install through `adb`, download the official [crazyAgent Remote APK](https://github.com/conan-8/crazyAgent/releases/download/v2.4.0/app-release.apk) onto the phone and open it. Android may ask permission to install apps from the browser or file manager.
 2. **Verify the download:** on Linux, run:
    ```sh
-   echo '3149a0f2c5654f30f420c9bfa4c32cec160bf91dc2bbdf6477bb96295aed9784  app-release.apk' | sha256sum -c -
+   echo '863fb04cd028f02cd574e68cd8e8c82a0c7af8a273796892d9f5776edb2f9592  app-release.apk' | sha256sum -c -
    ```
    On macOS, use `shasum -a 256 app-release.apk`; on Windows, use `Get-FileHash .\app-release.apk -Algorithm SHA256` in PowerShell. Compare the result with the hash above before installing.
 3. **Create the phone credential:** from the crazyAgent checkout on the host, run:
