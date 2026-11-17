@@ -51,6 +51,7 @@ async function setup(t, options = {}) {
     push: options.push,
     heartbeatMs: options.heartbeatMs ?? 60_000,
     limits: options.limits,
+    now: options.now,
   })
   await server.start()
   t.after(() => server.stop())
@@ -1379,4 +1380,91 @@ test('V1: a new turn closes an open ended-incomplete before its first frame (/st
   assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.marathon.watch.open, null, 'no stale notice into the new turn')
   ctx.runner.current.resolve('done')
   await sleep(10)
+})
+
+// --- V7: POST /push/test — the one-tap delivery check -----------------------
+
+const FCM_A = `fcm-token-A:${'a'.repeat(120)}`
+const testPushProvider = sends => ({ name: 'fake', send: async (token, data, options) => { sends.push({ token, data, options }); return { ok: true } } })
+
+test('V7: the test push route requires auth and a valid client command id', async t => {
+  const ctx = await setup(t)
+  assert.equal((await http(ctx.port, { method: 'POST', path: '/remote/v1/push/test', body: { clientCommandId: 'cmd-test-0001' } })).status, 401)
+  const bad = await ctx.call({ method: 'POST', path: '/remote/v1/push/test', body: { clientCommandId: 'short' } })
+  assert.equal(bad.status, 422)
+  assert.equal(bad.body.error.code, 'INVALID_CLIENT_ID')
+  assert.equal((await ctx.call({ method: 'GET', path: '/remote/v1/push/test' })).status, 405)
+})
+
+test('V7: a missing FCM key or zero devices is an explicit answer, not an error', async t => {
+  // No PushService at all (the fake companion's shape).
+  const none = await setup(t)
+  const a = await none.call({ method: 'POST', path: '/remote/v1/push/test', body: { clientCommandId: 'cmd-test-0001' } })
+  assert.equal(a.status, 200)
+  assert.deepEqual(a.body, { clientCommandId: 'cmd-test-0001', sent: 0, failed: 0, pruned: 0, skipped: 'not-configured' })
+  // A configured service with zero registered devices.
+  const push = new PushService({ registry: new PushRegistry(), provider: testPushProvider([]) })
+  const empty = await setup(t, { push })
+  const b = await empty.call({ method: 'POST', path: '/remote/v1/push/test', body: { clientCommandId: 'cmd-test-0001' } })
+  assert.equal(b.status, 200)
+  assert.deepEqual(b.body, { clientCommandId: 'cmd-test-0001', sent: 0, failed: 0, pruned: 0, skipped: 'no-devices' })
+})
+
+test('V7: a test push sends exactly the metadata payload at normal priority with a fresh test turnId', async t => {
+  const sends = []
+  const push = new PushService({ registry: new PushRegistry(), provider: testPushProvider(sends) })
+  const ctx = await setup(t, { push })
+  await ctx.call({ method: 'PUT', path: '/remote/v1/push/devices/phone-1', body: { fcmToken: FCM_A, platform: 'android' } })
+  const first = await ctx.call({ method: 'POST', path: '/remote/v1/push/test', body: { clientCommandId: 'cmd-test-0001' } })
+  assert.equal(first.status, 200)
+  assert.deepEqual(first.body, { clientCommandId: 'cmd-test-0001', sent: 1, failed: 0, pruned: 0 })
+  assert.equal(sends.length, 1)
+  assert.deepEqual(Object.keys(sends[0].data).sort(), ['instanceId', 'sequence', 'turnId', 'type'])
+  assert.equal(sends[0].data.type, 'test')
+  assert.match(sends[0].data.turnId, /^test-[0-9a-f-]{36}$/u)
+  assert.equal(sends[0].data.instanceId, 'inst-test')
+  for (const value of Object.values(sends[0].data)) assert.equal(typeof value, 'string')
+  assert.equal(sends[0].options.priority, 'normal')
+  // The audit trail never holds a registration token.
+  assert.ok(!JSON.stringify(ctx.audits).includes('fcm-token'))
+  assert.ok(ctx.audits.some(entry => entry.event === 'push.test' && entry.sent === 1))
+})
+
+test('V7: idempotent per command id and rate-limited to one test per minute', async t => {
+  const sends = []
+  let clock = 1_000_000
+  const push = new PushService({ registry: new PushRegistry(), provider: testPushProvider(sends) })
+  const ctx = await setup(t, { push, now: () => clock })
+  await ctx.call({ method: 'PUT', path: '/remote/v1/push/devices/phone-1', body: { fcmToken: FCM_A, platform: 'android' } })
+  const first = await ctx.call({ method: 'POST', path: '/remote/v1/push/test', body: { clientCommandId: 'cmd-test-0001' } })
+  assert.equal(first.body.sent, 1)
+  // A replay returns the cached answer: no resend, no rate-limit consumption.
+  const replay = await ctx.call({ method: 'POST', path: '/remote/v1/push/test', body: { clientCommandId: 'cmd-test-0001' } })
+  assert.equal(replay.status, 200)
+  assert.equal(replay.body.replayed, true)
+  assert.equal(replay.body.sent, 1)
+  assert.equal(sends.length, 1)
+  // A second distinct command within the minute is refused.
+  const second = await ctx.call({ method: 'POST', path: '/remote/v1/push/test', body: { clientCommandId: 'cmd-test-0002' } })
+  assert.equal(second.status, 429)
+  assert.equal(second.body.error.code, 'RATE_LIMITED')
+  assert.equal(sends.length, 1)
+  // After the window a new command sends again — with a FRESH turnId.
+  clock += 60_001
+  const third = await ctx.call({ method: 'POST', path: '/remote/v1/push/test', body: { clientCommandId: 'cmd-test-0003' } })
+  assert.equal(third.status, 200)
+  assert.equal(third.body.sent, 1)
+  assert.equal(sends.length, 2)
+  assert.notEqual(sends[1].data.turnId, sends[0].data.turnId)
+  assert.match(sends[1].data.turnId, /^test-/u)
+})
+
+test('V7: failed and pruned counts are reported honestly', async t => {
+  const push = new PushService({ registry: new PushRegistry(), provider: { name: 'fake', send: async () => ({ ok: false, kind: 'invalid-token' }) } })
+  const ctx = await setup(t, { push })
+  await ctx.call({ method: 'PUT', path: '/remote/v1/push/devices/phone-1', body: { fcmToken: FCM_A, platform: 'android' } })
+  const res = await ctx.call({ method: 'POST', path: '/remote/v1/push/test', body: { clientCommandId: 'cmd-test-0001' } })
+  assert.equal(res.status, 200)
+  assert.deepEqual(res.body, { clientCommandId: 'cmd-test-0001', sent: 0, failed: 1, pruned: 1 })
+  assert.equal(push.registry.size, 0, 'the dead token was pruned')
 })

@@ -128,6 +128,15 @@ class RemoteApi(private val client: OkHttpClient, private val config: ServerConf
     suspend fun ackWatch(id: String, clientCommandId: String): ApiResult =
         post("marathon/watch/ack", JsonObject(mapOf("id" to JsonPrimitive(id), "clientCommandId" to JsonPrimitive(clientCommandId))))
 
+    /**
+     * V7: the one-tap delivery check. The companion answers with exactly what
+     * happened — {sent, failed, pruned, skipped} — including an explicit
+     * not-configured / no-devices answer. A send means FCM accepted the
+     * message, not that Android displayed it.
+     */
+    suspend fun sendTestPush(clientCommandId: String): ApiResult =
+        post("push/test", JsonObject(mapOf("clientCommandId" to JsonPrimitive(clientCommandId))))
+
     /** Register (or replace) this phone's FCM token for metadata-only pushes. */
     suspend fun registerPush(deviceId: String, fcmToken: String, appVersion: String): ApiResult = execute(
         request("push/devices/$deviceId").put(

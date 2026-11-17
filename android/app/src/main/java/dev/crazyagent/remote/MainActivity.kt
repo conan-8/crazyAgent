@@ -164,6 +164,7 @@ class MainActivity : ComponentActivity() {
                 onConfirm = controller::sendConfirm,
                 onWatchSteer = controller::steerFromWatch,
                 onWatchAck = controller::ackWatch,
+                onSendTestPush = controller::sendTestNotification,
                 onEnableNotifications = {
                     if (android.os.Build.VERSION.SDK_INT >= 33 && canAskForNotifications()) {
                         askedForNotifications = true

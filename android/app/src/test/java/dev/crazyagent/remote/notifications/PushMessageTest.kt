@@ -17,6 +17,8 @@ class PushMessageTest {
         assertEquals(PushMessage.Type.CONFIRM, PushMessage.parse(good + ("type" to "confirm"))!!.type)
         // M5: the watch type is additive; an old APK drops it, this one accepts it.
         assertEquals(PushMessage.Type.WATCH, PushMessage.parse(good + ("type" to "watch"))!!.type)
+        // V7: the test type is additive the same way.
+        assertEquals(PushMessage.Type.TEST, PushMessage.parse(good + ("type" to "test"))!!.type)
     }
 
     @Test fun anythingElseIsDropped() {
@@ -45,6 +47,7 @@ class PushMessageTest {
         val confirm = PushMessage.parse(good + ("type" to "confirm"))!!
         val error = PushMessage.parse(good + ("type" to "error"))!!
         val watch = PushMessage.parse(good + ("type" to "watch"))!!
+        val test = PushMessage.parse(good + ("type" to "test"))!!
         assertEquals("crazyAgent needs you", help.title)
         assertEquals("crazyAgent finished", done.title)
         assertEquals("crazyAgent needs your approval", confirm.title)
@@ -54,12 +57,16 @@ class PushMessageTest {
         // M5: generic watch wording only — the reason is fetched after the tap.
         assertEquals("crazyAgent may be stuck", watch.title)
         assertEquals("Open to see what it is doing.", watch.text)
+        // V7: the test notification says only that push reaches this phone.
+        assertEquals("crazyAgent test notification", test.title)
+        assertEquals("Push notifications reach this phone.", test.text)
         // A later push for the same turn replaces the earlier notification.
         assertEquals(help.notificationId, done.notificationId)
         assertEquals(help.notificationId, confirm.notificationId)
         assertEquals(help.notificationId, error.notificationId)
         assertEquals(help.notificationId, watch.notificationId)
-        for (message in listOf(help, done, confirm, error, watch)) {
+        assertEquals(help.notificationId, test.notificationId)
+        for (message in listOf(help, done, confirm, error, watch, test)) {
             for (text in listOf(message.title, message.text)) {
                 assertFalse(text.contains(message.turnId))
                 assertFalse(text.contains(message.instanceId))

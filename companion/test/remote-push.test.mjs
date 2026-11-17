@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   FcmHttpV1Provider,
+  PUSH_TYPES,
   PushRegistry,
   PushService,
   classifyFcmFailure,
@@ -275,4 +276,16 @@ test('M5: an ended-incomplete marathon turn is announced as watch, never as plai
   assert.equal(pushTypeForTurn({ outcome: 'done', label: 'partial' }), 'done')
   assert.equal(pushTypeForTurn({ outcome: 'done', marathon: false, label: 'blocked' }), 'done')
   assert.equal(pushTypeForTurn({ outcome: 'error', marathon: false, error: 'x' }), 'error')
+})
+
+test('V7: the test type is accepted at normal priority with the exact metadata payload', async () => {
+  assert.ok(PUSH_TYPES.includes('test'))
+  const registry = new PushRegistry()
+  registry.put('phone-1', reg(TOKEN_A))
+  const service = new PushService({ registry, provider: fakeProvider() })
+  const result = await service.notify({ type: 'test', turnId: 'test-11111111-2222-3333-4444-555555555555', instanceId: 'inst-1', sequence: 7 })
+  assert.deepEqual(result, { sent: 1, failed: 0, pruned: 0 })
+  // A fresh test turnId per send means a second test is never deduped away.
+  const again = await service.notify({ type: 'test', turnId: 'test-66666666-7777-8888-9999-000000000000', instanceId: 'inst-1', sequence: 8 })
+  assert.deepEqual(again, { sent: 1, failed: 0, pruned: 0 })
 })

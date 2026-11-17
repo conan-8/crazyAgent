@@ -1,0 +1,93 @@
+{
+  "steps": {
+    "unauth": {
+      "status": 401,
+      "body": {
+        "error": {
+          "code": "UNAUTHORIZED",
+          "message": "Missing or invalid remote token.",
+          "retryable": false
+        }
+      }
+    },
+    "badId": {
+      "status": 422,
+      "body": {
+        "error": {
+          "code": "INVALID_CLIENT_ID",
+          "message": "clientCommandId must be 8-128 characters of [A-Za-z0-9_-] (a UUID works).",
+          "retryable": false
+        }
+      }
+    },
+    "first": {
+      "status": 200,
+      "body": {
+        "clientCommandId": "cmd-test-0001",
+        "sent": 0,
+        "failed": 0,
+        "pruned": 0,
+        "skipped": "not-configured"
+      }
+    },
+    "replay": {
+      "status": 200,
+      "body": {
+        "clientCommandId": "cmd-test-0001",
+        "sent": 0,
+        "failed": 0,
+        "pruned": 0,
+        "skipped": "not-configured",
+        "replayed": true
+      }
+    },
+    "second": {
+      "status": 429,
+      "body": {
+        "error": {
+          "code": "RATE_LIMITED",
+          "message": "Too many test notifications. Wait a minute.",
+          "retryable": true
+        }
+      }
+    },
+    "wrongMethod": {}
+  },
+  "results": [
+    {
+      "name": "unauthenticated refused",
+      "pass": true,
+      "detail": "status 401"
+    },
+    {
+      "name": "bad client id refused",
+      "pass": true,
+      "detail": "status 422"
+    },
+    {
+      "name": "no FCM key -> explicit not-configured 200",
+      "pass": true,
+      "detail": "{\"clientCommandId\":\"cmd-test-0001\",\"sent\":0,\"failed\":0,\"pruned\":0,\"skipped\":\"not-configured\"}"
+    },
+    {
+      "name": "answer shape {sent,failed,pruned,skipped}",
+      "pass": true,
+      "detail": "{\"clientCommandId\":\"cmd-test-0001\",\"sent\":0,\"failed\":0,\"pruned\":0,\"skipped\":\"not-configured\"}"
+    },
+    {
+      "name": "idempotent replay cached",
+      "pass": true,
+      "detail": "{\"clientCommandId\":\"cmd-test-0001\",\"sent\":0,\"failed\":0,\"pruned\":0,\"skipped\":\"not-configured\",\"replayed\":true}"
+    },
+    {
+      "name": "second distinct id within the minute -> 429",
+      "pass": true,
+      "detail": "status 429"
+    },
+    {
+      "name": "GET refused",
+      "pass": true,
+      "detail": "status 405"
+    }
+  ]
+}
