@@ -27,7 +27,7 @@
  * Flags: --scenario <name> (repeatable), --repeat <n>, --self-test, --list,
  *        --max-turn-seconds <n>, --max-total-tokens <n>, --json <path>,
  *        --label <name>, --headed, --keep, --dsh-home <path>, --reset-dsh-home,
- *        --model <id>, --effort <level>, --plan, --verbose, --help
+ *        --model <id>, --effort <level>, --plan, --marathon, --verbose, --help
  *
  * Scenario contract (e2e/scenarios/<name>.mjs):
  *   export const name; export const fixture; export const prompt;
@@ -186,6 +186,7 @@ function parseCli(argv) {
     effort: DEFAULT_EFFORT,
     confirmIrreversible: false,
     plan: false,
+    marathon: false,
     verbose: false,
     help: false,
   }
@@ -212,6 +213,7 @@ function parseCli(argv) {
     else if (token === '--effort') options.effort = value()
     else if (token === '--confirm-irreversible') options.confirmIrreversible = true
     else if (token === '--plan') options.plan = true
+    else if (token === '--marathon') options.marathon = true
     else if (token === '--verbose') options.verbose = true
     else if (token === '--help' || token === '-h') options.help = true
     else if (token.startsWith('--')) throw new Error(`unknown flag ${token}`)
@@ -219,6 +221,7 @@ function parseCli(argv) {
   if (!Number.isInteger(options.repeat) || options.repeat < 1) throw new Error('--repeat must be a positive integer')
   if (!Number.isFinite(options.maxTurnSeconds) || options.maxTurnSeconds < 5) throw new Error('--max-turn-seconds must be >= 5')
   if (!Number.isFinite(options.maxTotalTokens) || options.maxTotalTokens < 0) throw new Error('--max-total-tokens must be >= 0')
+  if (options.plan && options.marathon) throw new Error('--plan and --marathon are mutually exclusive: one arming path per batch')
   return options
 }
 
@@ -247,6 +250,11 @@ function printHelp() {
                           companion (required by the submit-gate scenarios)
   --plan                  send every prompt with planMode:true (today's /plan,
                           armed for one turn); recorded in the batch JSON
+  --marathon              M1+ arming: verify the fresh chat has the marathon
+                          switch OFF, POST /marathon {enabled:true}, verify ON,
+                          then send a bare prompt; fails loudly on pre-M1 pins
+                          (no route/projection), never falls back. Recorded in
+                          the batch JSON with the per-run initial-state checks
   --verbose               print companion/Edge diagnostics
   --help
 
@@ -806,6 +814,7 @@ export function makeRemote({ remoteUrl, token }) {
     newChat: () => request('POST', '/new', { clientCommandId: randomUUID() }),
     send: (text, extra = {}) => request('POST', '/messages', { clientMessageId: randomUUID(), text, ...extra }),
     stop: () => request('POST', '/stop', { clientCommandId: randomUUID() }),
+    setMarathon: enabled => request('POST', '/marathon', { enabled, clientCommandId: randomUUID() }),
   }
 }
 
@@ -1331,6 +1340,10 @@ async function runModelBatch(options, scenarios) {
     effort: options.effort,
     confirmIrreversible: options.confirmIrreversible === true,
     planMode: options.plan === true,
+    marathonMode: options.marathon === true,
+    armingPath: options.marathon
+      ? 'POST /marathon {enabled:true} then bare prompt'
+      : options.plan ? 'planMode:true per message (/plan)' : 'bare prompt',
     node: process.version,
     dshHome,
     repeat: options.repeat,
@@ -1352,6 +1365,7 @@ async function runModelBatch(options, scenarios) {
         collateral: run.collateral,
         turn: run.turn,
         answer: run.answer ?? null,
+        marathonArm: run.marathonArm ?? null,
         skipped: run.skipped ?? false,
       })),
     })),
@@ -1419,7 +1433,7 @@ async function runModelBatch(options, scenarios) {
     page = new PageController({ edge, fixtureBaseUrl: fixtureServer.baseUrl })
     await page.ensure()
     const eventsPath = resolveRunEvents(logsRoot, null)
-    process.stdout.write(`model-eval: ${options.model} @ ${options.effort}${options.plan ? ' · /plan' : ''} · ${scenarios.length} scenario(s) × ${options.repeat}\n`)
+    process.stdout.write(`model-eval: ${options.model} @ ${options.effort}${options.plan ? ' · /plan' : ''}${options.marathon ? ' · /marathon' : ''} · ${scenarios.length} scenario(s) × ${options.repeat}\n`)
     process.stdout.write(`isolated home: ${dshHome}\nscratch: ${runRoot}\n\n`)
 
     for (const scenario of scenarios) {
@@ -1451,6 +1465,35 @@ async function runModelBatch(options, scenarios) {
         await page.reset(scenario.fixture)
         if (typeof scenario.setup === 'function') await scenario.setup(makeCtx({ fixtureServer, page, turn: EMPTY_TURN, edge, downloadsDir }))
         fixtureServer.reset()
+
+        // /marathon arming (M1+): every run starts from a known initial state —
+        // the fresh chat must have the companion-owned switch OFF — then the
+        // harness enables it explicitly, verifies ON, and sends a bare prompt.
+        // Fails loudly on pre-M1 pins (no /state.marathon projection, no
+        // POST /marathon route); never falls back to another arming path.
+        let marathonArm = null
+        if (options.marathon) {
+          const preState = await remote.state()
+          if (preState?.marathon?.enabled !== false) {
+            throw new Error(`--marathon needs the M1+ marathon switch: expected /state.marathon.enabled === false after /new, got ${JSON.stringify(preState?.marathon ?? null)} (pre-M1 pin or unknown initial state) — refusing to run`)
+          }
+          let enableResponse
+          try {
+            enableResponse = await remote.setMarathon(true)
+          } catch (error) {
+            throw new Error(`--marathon: POST /marathon failed (${error.message}) — the pinned commit must include the M1 marathon route; no fallback`)
+          }
+          const postState = await remote.state()
+          if (enableResponse?.enabled !== true || postState?.marathon?.enabled !== true) {
+            throw new Error(`--marathon: the switch did not enable (response ${JSON.stringify(enableResponse ?? null)}, state ${JSON.stringify(postState?.marathon ?? null)})`)
+          }
+          marathonArm = {
+            path: 'POST /marathon {enabled:true} then bare prompt',
+            initialOffVerified: true,
+            enabledVerified: true,
+            sequence: enableResponse.sequence ?? null,
+          }
+        }
 
         const maxTurnSeconds = Number(scenario.maxTurnSeconds ?? options.maxTurnSeconds)
         let accepted
@@ -1614,6 +1657,7 @@ async function runModelBatch(options, scenarios) {
           collateral,
           turn,
           answer,
+          marathonArm,
           finishedAt: nowIso(),
         })
         printTable([[

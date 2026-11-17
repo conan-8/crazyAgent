@@ -1,0 +1,128 @@
+{
+  "startedAt": "2026-11-17T01:31:31.194Z",
+  "finishedAt": "2026-11-17T01:31:39.900Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": true,
+  "armingPath": "POST /marathon {enabled:true} then bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-m1-eval/dsh-home",
+  "repeat": 1,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 90226,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "click-once",
+      "fixture": "click.html",
+      "prompt": "Click the Increment button on this page exactly once, then tell me what the count is.",
+      "file": "click-once.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwk0o3g6-565c",
+          "status": "pass",
+          "reasons": [
+            "count is exactly 1 and no other counter changed"
+          ],
+          "evidence": {
+            "count": "1",
+            "roleCount": "0",
+            "semanticCount": "0",
+            "checkState": "unchecked"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 7102,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_click": 1
+            },
+            "inputTokens": 3379,
+            "outputTokens": 319,
+            "cacheReadTokens": 86528,
+            "totalTokens": 90226,
+            "usage": {
+              "inputTokens": 3379,
+              "outputTokens": 319,
+              "totalTokens": 90226,
+              "cacheReadTokens": 86528
+            },
+            "finalText": "DONE\n- Clicked \"Increment\" once (one click; \"Does nothing\" untouched).\n- Verified: the page now shows **count: 1**.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk0o3g6-565c",
+              "origin": "remote",
+              "clientMessageId": "44dc9b17-fe26-4f62-86db-ee98696e819d",
+              "startedAt": "2026-11-17T01:31:32.598Z",
+              "endedAt": "2026-11-17T01:31:39.700Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3379,
+                "outputTokens": 319,
+                "totalTokens": 90226,
+                "cacheReadTokens": 86528
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 8
+          },
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planOutcome": "reported-complete",
+            "planRevision": 2,
+            "browserPlanCalls": 2,
+            "planModeEndedOutcome": "reported-complete"
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T01-31-31-289Z-b1e4b2/events.jsonl"
+        }
+      ],
+      "effectiveMaxTurnSeconds": 90
+    }
+  ],
+  "logArchiveRoot": ".dsh-home/browser-agent/logs/m0-archive",
+  "logArchiveRunDir": "run-2026-11-17T01-31-31-289Z-b1e4b2",
+  "commitUnderTest": "d878cc8e61861ddea43b1e3a34a96a4f65396d36",
+  "worktree": "/tmp/crazyagent-m1-accept",
+  "provenance": "git worktree pinned at commitUnderTest; only harness/scenario/fixture files overlaid; live working tree not used"
+}

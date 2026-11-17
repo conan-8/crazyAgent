@@ -80,3 +80,50 @@ The c1 batch JSONs also exist under `e2e/baselines/` (the harness writes there);
 
 - eval task-8: `marathon-long` ×5 in `/marathon` vs the M0 baseline (held by eval; M2 real-model acceptance waits on it).
 - M2 (task-3): plan carry-over + marathon limits per §3.2 — started after task-2 completion per lead's conditional go.
+
+---
+
+## task-8 acceptance (eval, 2026-11-16): marathon-long ×5 in /marathon vs clean M0 — **GREEN**
+
+**Verdict: the M1 "done when" regression gate passes.** Completion and reliability are identical to the clean M0 baseline; the model-facing surface is byte-identical between the two pins; cost-metric differences are sampling variance with two honestly-recorded heavy-tail runs (analysis below). M2 real-model acceptance is unblocked.
+
+### Setup and provenance (standing rule)
+
+- Worktree `/tmp/crazyagent-m1-accept` pinned at **`d878cc8e61861ddea43b1e3a34a96a4f65396d36`** (this M1 commit); only harness/scenario/fixture files overlaid (`scripts/model-eval.mjs` with the approved additive `--marathon` flag, `e2e/scenarios/{marathon-long,stall-loop}.mjs` + README, `e2e/fixtures/marathon-*` + `stall-loop.html`); `node_modules` symlinked; fresh isolated home `/tmp/crazyagent-m1-eval/dsh-home`; never the live tree/companion/profile. `commitUnderTest` recorded in every batch JSON.
+- Arming path (lead-preferred NEW switch path): per run, assert `/state.marathon.enabled === false` after `POST /new` (known initial state), `POST /marathon {enabled:true}`, assert response + projection enabled, then send a **bare prompt** (no `planMode`). Per-run `marathonArm {initialOffVerified, enabledVerified, sequence}` and batch `armingPath` recorded. `--plan`/`--marathon` mutually exclusive.
+- Model/effort fixed: `deepseek/deepseek-v4.1-flash-1017` @ medium (same as clean M0).
+- Controls: **negative** — `--marathon` against the pre-M1 worktree (`c2966018`) aborts exit 1 before any model send ("expected /state.marathon.enabled === false after /new, got null … refusing to run"), zero tokens spent, no silent fallback. **positive** — smoke `click-once` ×1 `--marathon` PASS (7.1 s): `marathon.set {enabled:true, origin:remote}` → `plan.mode.started` → `browser_plan`×2 → `turn.end.planOutcome=reported-complete` rev 2; batch `planMode:false, marathonMode:true`. **batch** — 5 `marathon.set` enables for 5 runs (archive-enforced); all runs `plan.mode.started`, `browser_plan` ×2–3, `planOutcome=reported-complete`. `npm test` on the M1 worktree: 1085/1085.
+
+### Results (×5, independent checker)
+
+| metric | M0 /plan (clean, c2966018) | M1 /marathon (d878cc8) |
+|---|---|---|
+| pass/partial/fail | 5/0/0 | **5/0/0** |
+| valid steps per run | 12×5 | **12×5** |
+| redos (duplicate step records) | 0 | **0** |
+| dead turns / retries | 0 / 0 | **0 / 0** |
+| wall s min–max (med) | 57.5–65.5 (61.9) | 40.2–113.8 (79.7) |
+| model steps min–max (med) | 41–55 (51) | 27–75 (38) |
+| tool calls min–max (med) | 40–54 (50) | 26–74 (37) |
+| failed calls Σ | 5 | 12 |
+| wrong-target incidents Σ | 3 | 11 |
+| non-cached input Σ | 135,398 | 913,209 |
+| output Σ | 22,391 | 21,650 (−3.3%) |
+| cacheRead Σ | 8,819,584 | 7,061,760 (−19.9%) |
+
+Per run: r1 98.3 s/68 steps/67 calls/10 failed · r2 52.2 s/38/37/1 · r3 79.7 s/75/74/1 · r4 40.2 s/27/26/0 · r5 113.8 s/29/28/0. All five: exactly-once 12/12 server-side step records, completion view genuine, `marathonArm` verified.
+
+### Why GREEN despite the cost deltas
+
+1. **Hard gates identical:** 5/5 pass, 12/12 exactly-once, 0 redos, 0 dead, 0 retries — the behaviors M1 must preserve are preserved.
+2. **Model-facing surface byte-identical:** the M1 diff touches no prompt construction (`companion/prompt.mjs`), no provider/guard/executor code (`packages/dsh-browser-extension/lib/*`, `extension/sidepanel/browser.js`/`labels.js`/`views.js`/capture etc.), no `plan.js`/`plan-runtime.js` (limits and per-turn empty plan unchanged — core's report §Provider confirms). The eval path uses the background executor + remote API; the changed panel UI is not even opened. The distribution the model sees cannot have shifted systematically; observed deltas are sampling.
+3. **The tails are known pre-M1 modes, both directions:** r1 hit the same `UNKNOWN_LABEL` stale-label trap M0 hit (M0: 3 incidents across 2 runs; r1: 10 before recovering — click-heavy strategy, 21 clicks + 21 batches). r5's 541k non-cached input is a **cache-miss pattern** (cacheRead only 300k, inverted from the usual cache-dominated mix) with normal output (5.6k) and few calls (28) — provider-side cache dynamics, not extra model work; the contaminated M0 pass already showed input up to 233k and steps up to 74. M1's r2/r4 were *faster* than every M0 run (52.2 s, 40.2 s) — the spread widened both ways. Output Σ is flat (−3.3%). One new-to-this-batch code, `LABEL_FAILED` (r2, frame race), is executor-side and recovered; executor code is unchanged by M1.
+4. **Honest caveat:** the M1 median wall (79.7 s) sits outside the clean M0's narrow 57.5–65.5 s band; at n=5 the clean M0 band was a tight sample, not a tolerance limit. The heavy-tail runs are recorded per-run above and in the batch JSON; future milestones should keep comparing distributions and the fresh/cache token split, not medians alone. No threshold was weakened and no scenario was altered to obtain this result.
+
+### Evidence
+
+- M1 batch: `e2e/baselines/2026-11-17T01-32-38-512Z-m1-marathon-long-marathon.json` (commitUnderTest, armingPath, per-run marathonArm + planEvidence + logArchive)
+- M1 smoke: `e2e/baselines/2026-11-17T01-31-31-194Z-m1-marathon-arm-smoke.json`
+- Clean M0 reference: `e2e/baselines/2026-11-17T01-07-40-464Z-m0-marathon-long-plan-clean.json` + `docs/marathon/M0-baseline.md`
+- Archived logs (gitignored, prune-safe): `.dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T01-32-38-591Z-f80ac2/events.jsonl` (M1 batch, 4.3 MiB), `run-2026-11-17T01-31-31-289Z-b1e4b2/events.jsonl` (smoke)
+- Harness: `scripts/model-eval.mjs` `--marathon` flag (additive; default behavior unchanged; loud pre-M1 failure; initial-state verification per run)
