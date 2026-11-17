@@ -520,8 +520,133 @@ function marathonWatch() {
   return { ...fixture, checkpoints: { afterAlert, afterJudge, afterBlocked, afterEnded } }
 }
 
+/**
+ * V1 (task-15): the alert lifecycle — every open notice gets an explicit
+ * close. A mid-turn alert is closed at a turn end that fires ended-incomplete
+ * (superseded in the same step); the ended-incomplete is closed at the next
+ * turn start BEFORE its first frame; a second ended-incomplete is dismissed
+ * through the ack path; a new chat resets everything. Recorded from the real
+ * RemoteHub with core's V1 lifecycle code merged (c0d89d5); the hub's
+ * production handling of closed==dismissed is unchanged since M3.
+ */
+function marathonWatchLifecycle() {
+  const s = scenario('companion-fixture-h')
+  s.connect()
+  const since = '2026-11-17T12:00:01.000Z'
+  const marathonState = watcher => ({
+    type: 'marathon.state',
+    enabled: true,
+    sessionId: 'session-1',
+    since,
+    origin: 'remote',
+    plan: null,
+    watcher,
+  })
+  const watch = (id, kind, state, extra = {}) => ({
+    type: 'chat.watch',
+    id,
+    turnId: 'turn-15',
+    kind,
+    state,
+    blocker: null,
+    reason: '',
+    signals: [],
+    source: 'heuristic',
+    at: '2026-11-17T12:04:00.000Z',
+    ...extra,
+  })
+  const closed = (id, reason, turnId) => watch(id, 'info', 'closed', { reason, turnId, at: '2026-11-17T12:05:00.000Z' })
+  s.hub.ingest(marathonState({ active: false, checks: 0, lastCheckAt: null, lastVerdict: null }))
+  startTurn(s, 'turn-15', 'Place the order and verify it', { marathon: true })
+  s.modelStart()
+  s.text('Working through the checkout.')
+  s.hub.ingest(marathonState({ active: true, checks: 3, lastCheckAt: '2026-11-17T12:03:00.000Z', lastVerdict: null }))
+  // A hard alert opens mid-turn.
+  s.hub.ingest(watch('watch-life-1', 'TOOL_HANG', 'open', {
+    blocker: 'TOOL_HANG',
+    reason: 'A browser call has not returned for several minutes.',
+    signals: [{ kind: 'TOOL_HANG', level: 'hard', detail: 'browser_wait_for unanswered for 250s' }],
+  }))
+  const afterAlert = s.hub.projection()
+  // Turn end fires ended-incomplete: the alert is closed under its own id in
+  // the SAME step, and ended-incomplete becomes the one open notice.
+  s.hub.ingest(closed('watch-life-1', 'Turn ended.', 'turn-15'))
+  s.hub.ingest(watch('watch-life-2', 'ended-incomplete', 'open', {
+    blocker: 'ended-incomplete',
+    reason: 'The turn ended with work still open or blocked.',
+    at: '2026-11-17T12:05:01.000Z',
+  }))
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'PARTIAL — the order was not placed.',
+    label: 'partial',
+    model: 'fixture/model',
+    planMode: true,
+    marathon: true,
+    planOutcome: 'unfinished',
+    watch: { checks: 6, alerts: 1, usage: 0 },
+    timings: { totalMs: 300_000, toolCalls: 12, failedCalls: 1 },
+    usage: { inputTokens: 30_000, outputTokens: 700, totalTokens: 30_700 },
+  })
+  s.hub.turnEnded({
+    turnId: 'turn-15',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: 'partial',
+    usage: { inputTokens: 30_000, outputTokens: 700, totalTokens: 30_700 },
+    timings: { totalMs: 300_000, toolCalls: 12, failedCalls: 1 },
+  })
+  const afterSupersede = s.hub.projection()
+  // The next turn start closes the ended-incomplete BEFORE the first frame.
+  s.hub.ingest(closed('watch-life-2', 'A new turn started.', 'turn-16'))
+  startTurn(s, 'turn-16', 'continue', { marathon: true })
+  const afterNextTurnStart = s.hub.projection()
+  s.modelStart()
+  s.text('Trying the order again.')
+  // The second turn also ends incomplete; this time the user acks it.
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'PARTIAL — still blocked on the confirmation page.',
+    label: 'partial',
+    model: 'fixture/model',
+    planMode: true,
+    marathon: true,
+    planOutcome: 'unfinished',
+    watch: { checks: 2, alerts: 0, usage: 0 },
+    timings: { totalMs: 40_000, toolCalls: 3, failedCalls: 0 },
+    usage: { inputTokens: 8_000, outputTokens: 200, totalTokens: 8_200 },
+  })
+  s.hub.ingest(watch('watch-life-3', 'ended-incomplete', 'open', {
+    blocker: 'ended-incomplete',
+    reason: 'The turn ended with work still open or blocked.',
+    turnId: 'turn-16',
+    at: '2026-11-17T12:06:01.000Z',
+  }))
+  s.hub.turnEnded({
+    turnId: 'turn-16',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: 'partial',
+    usage: { inputTokens: 8_000, outputTokens: 200, totalTokens: 8_200 },
+    timings: { totalMs: 40_000, toolCalls: 3, failedCalls: 0 },
+  })
+  const afterSecondEnded = s.hub.projection()
+  // "It's fine": the V1 ack path closes it with a dismissed frame (200, no snooze).
+  s.hub.ingest(watch('watch-life-3', 'info', 'dismissed', {
+    turnId: 'turn-16',
+    reason: 'Dismissed.',
+    at: '2026-11-17T12:07:00.000Z',
+  }))
+  // A new chat resets the switch and every watch state.
+  s.hub.setSession('session-2')
+  const fixture = s.done('marathon-watch-lifecycle')
+  return { ...fixture, checkpoints: { afterAlert, afterSupersede, afterNextTurnStart, afterSecondEnded } }
+}
+
 export function buildFixtures() {
-  return [turnStream(), midTurnResync(), lifecycle(), helpRequest(), confirmRequest(), deadTurn(), marathonWatch()]
+  return [turnStream(), midTurnResync(), lifecycle(), helpRequest(), confirmRequest(), deadTurn(), marathonWatch(), marathonWatchLifecycle()]
 }
 
 export function fixtureFiles() {

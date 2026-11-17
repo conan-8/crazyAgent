@@ -353,8 +353,76 @@ class ReducerFixtureTest {
         assertTrue(end.items.isEmpty())
     }
 
+    /**
+     * V1 (task-15): the alert lifecycle recorded from the real RemoteHub with
+     * core's V1 lifecycle code — a mid-turn alert closed at turn end,
+     * ended-incomplete superseding it as the one open notice, the
+     * ended-incomplete closed BEFORE the next turn's first frame, a second
+     * ended-incomplete dismissed through the ack path, and the new-chat reset.
+     */
+    @Test fun marathonWatchLifecycleMatchesHubProjection() {
+        assertMatchesProjection("marathon-watch-lifecycle")
+        val f = fixture("marathon-watch-lifecycle")
+        val all = frames(f)
+        val checkpoints = f["checkpoints"]!!.jsonObject
+        fun checkpoint(name: String) = ChatReducer.fromProjection(checkpoints[name]!!.jsonObject)!!
+        fun type(frame: JsonObject) = frame["type"].toString().trim('"')
+        fun body(frame: JsonObject) = frame["body"]!!.jsonObject
+        fun field(frame: JsonObject, key: String) = body(frame)[key].toString().trim('"')
+        fun upTo(predicate: (JsonObject) -> Boolean) = replay(all.take(all.indexOfFirst(predicate) + 1))
+
+        // The mid-turn alert opens the card.
+        val alert = upTo { type(it) == "remote.watch" && field(it, "kind") == "TOOL_HANG" }
+        assertEquals(checkpoint("afterAlert"), alert)
+        assertTrue(alert.watchNotice!!.actionable)
+
+        // Turn end closes it under its OWN id; ended-incomplete supersedes it.
+        val closedAlert = upTo { type(it) == "remote.watch" && field(it, "state") == "closed" }
+        assertEquals("watch-life-1", closedAlert.watchNotice!!.id)
+        assertEquals("Turn ended.", closedAlert.watchNotice!!.reason)
+        assertNull(closedAlert.marathon.watch.open)
+        assertFalse(closedAlert.watchNotice!!.actionable)
+        val superseded = upTo { type(it) == "chat.turn" && field(it, "turnId") == "turn-15" }
+        assertEquals(checkpoint("afterSupersede"), superseded)
+        assertEquals("watch-life-2", superseded.marathon.watch.open?.id)
+        assertEquals("ended-incomplete", superseded.watchNotice!!.kind)
+        assertTrue(superseded.watchNotice!!.actionable)
+
+        // The next turn start closes the ended-incomplete BEFORE chat.user:
+        // the amber chip never carries into a new turn.
+        val closedIdx = all.indexOfFirst { type(it) == "remote.watch" && field(it, "reason") == "A new turn started." }
+        val userIdx = all.indexOfFirst { type(it) == "chat.user" && field(it, "clientMessageId") == "client-turn-16" }
+        assertTrue("close frame must precede the new turn's first frame", closedIdx in 0 until userIdx)
+        // startTurn emits chat.user then chat.status thinking; the hub
+        // checkpoint sits after both.
+        assertEquals("chat.status", type(all[userIdx + 1]))
+        val nextStart = replay(all.take(userIdx + 2))
+        assertEquals(checkpoint("afterNextTurnStart"), nextStart)
+        assertNull(nextStart.marathon.watch.open)
+        assertNull(nextStart.watchNotice)
+        assertTrue(nextStart.turn.isActive)
+
+        // The second turn's ended-incomplete stays actionable until the ack.
+        val secondEnded = upTo { type(it) == "chat.turn" && field(it, "turnId") == "turn-16" }
+        assertEquals(checkpoint("afterSecondEnded"), secondEnded)
+        assertEquals("watch-life-3", secondEnded.marathon.watch.open?.id)
+        assertTrue(secondEnded.watchNotice!!.actionable)
+        val dismissed = upTo { type(it) == "remote.watch" && field(it, "state") == "dismissed" }
+        assertEquals("watch-life-3", dismissed.watchNotice!!.id)
+        assertEquals("Dismissed.", dismissed.watchNotice!!.reason)
+        assertNull(dismissed.marathon.watch.open)
+        assertFalse(dismissed.watchNotice!!.actionable)
+
+        // A new chat resets the switch and every watch state.
+        val end = replay(all)
+        assertEquals("session-2", end.sessionId)
+        assertEquals(MarathonState(), end.marathon)
+        assertNull(end.watchNotice)
+        assertTrue(end.items.isEmpty())
+    }
+
     @Test fun resyncFramesAreOnlyEverFirst() {
-        for (name in listOf("turn-stream", "mid-turn-resync", "lifecycle", "help-request", "confirm-request", "dead-turn", "marathon-watch")) {
+        for (name in listOf("turn-stream", "mid-turn-resync", "lifecycle", "help-request", "confirm-request", "dead-turn", "marathon-watch", "marathon-watch-lifecycle")) {
             val all = (fixture(name)["frames"] as JsonArray).map { it.jsonObject["type"].toString() }
             assertEquals("\"remote.resync\"", all.first())
             assertTrue(all.drop(1).none { it == "\"remote.resync\"" })

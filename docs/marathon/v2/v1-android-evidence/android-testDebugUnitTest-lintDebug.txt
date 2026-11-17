@@ -1,0 +1,58 @@
+Reusing configuration cache.
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:extractProguardFiles UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
+> Task :app:compressDebugJavaRes UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :app:generateDebugAndroidTestLintModel UP-TO-DATE
+> Task :app:generateDebugLintReportModel UP-TO-DATE
+> Task :app:lintAnalyzeDebugAndroidTest UP-TO-DATE
+> Task :app:lintAnalyzeDebug UP-TO-DATE
+> Task :app:generateDebugUnitTestLintModel
+
+> Task :app:compileDebugUnitTestKotlin
+w: file:///tmp/crazyagent-v2-v1-android/android/app/src/test/java/dev/crazyagent/remote/state/ReducerFixtureTest.kt:141:32 Unnecessary non-null assertion (!!) on a non-null receiver of type 'HelpRequest'.
+w: file:///tmp/crazyagent-v2-v1-android/android/app/src/test/java/dev/crazyagent/remote/state/ReducerFixtureTest.kt:191:35 Unnecessary non-null assertion (!!) on a non-null receiver of type 'ConfirmRequest'.
+w: file:///tmp/crazyagent-v2-v1-android/android/app/src/test/java/dev/crazyagent/remote/state/ReducerFixtureTest.kt:382:60 Unnecessary non-null assertion (!!) on a non-null receiver of type 'WatchNotice'.
+w: file:///tmp/crazyagent-v2-v1-android/android/app/src/test/java/dev/crazyagent/remote/state/ReducerFixtureTest.kt:384:44 Unnecessary non-null assertion (!!) on a non-null receiver of type 'WatchNotice'.
+w: file:///tmp/crazyagent-v2-v1-android/android/app/src/test/java/dev/crazyagent/remote/state/ReducerFixtureTest.kt:389:42 Unnecessary non-null assertion (!!) on a non-null receiver of type 'WatchNotice'.
+w: file:///tmp/crazyagent-v2-v1-android/android/app/src/test/java/dev/crazyagent/remote/state/ReducerFixtureTest.kt:412:57 Unnecessary non-null assertion (!!) on a non-null receiver of type 'WatchNotice'.
+w: file:///tmp/crazyagent-v2-v1-android/android/app/src/test/java/dev/crazyagent/remote/state/ReducerFixtureTest.kt:414:42 Unnecessary non-null assertion (!!) on a non-null receiver of type 'WatchNotice'.
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:compressDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:extractDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:lintAnalyzeDebugUnitTest
+> Task :app:lintReportDebug UP-TO-DATE
+> Task :app:lintDebug
+> Task :app:testDebugUnitTest
+
+[Incubating] Problems report is available at: file:///tmp/crazyagent-v2-v1-android/android/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 7s
+36 actionable tasks: 5 executed, 31 up-to-date
+Configuration cache entry reused.
+gradle exit: 0

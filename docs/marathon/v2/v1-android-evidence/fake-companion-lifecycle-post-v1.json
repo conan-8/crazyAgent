@@ -1,0 +1,4358 @@
+{
+  "expectV1": true,
+  "steps": {
+    "sendA": {
+      "status": 202,
+      "body": {
+        "accepted": true,
+        "clientMessageId": "demo-msg-a",
+        "turnId": "turn-mwkclcr2-77dd",
+        "instanceId": "companion-mwkclcq8-0499ee59952e",
+        "sessionId": "fake-session-1",
+        "sequence": 7
+      }
+    },
+    "alertA": {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 23,
+      "type": "remote.watch",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:25.051Z",
+      "body": {
+        "id": "65838421-1052-41c8-9ebd-1414c81cd9e4",
+        "turnId": "turn-mwkclcr2-77dd",
+        "kind": "TOOL_HANG",
+        "state": "open",
+        "blocker": "TOOL_HANG",
+        "reason": "A browser call has not returned for several minutes.",
+        "signals": [
+          {
+            "kind": "TOOL_HANG",
+            "level": "hard",
+            "detail": "browser_wait_for unanswered for 243s"
+          }
+        ],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:25.050Z"
+      }
+    },
+    "stateAtAlertA": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "sessionId": "fake-session-1",
+      "latestSequence": 23,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "running",
+        "turnId": "turn-mwkclcr2-77dd",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-a",
+        "startedAt": "2026-11-17T07:05:20.078Z",
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null
+      },
+      "phase": {
+        "status": "tool",
+        "tool": "browser_wait_for"
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwkclcr2-77dd",
+          "occurredAt": "2026-11-17T07:05:20.078Z",
+          "body": {
+            "text": "marathon-stuck lifecycle A",
+            "origin": "remote",
+            "clientMessageId": "demo-msg-a",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 19,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwkclcr2-77dd",
+          "occurredAt": "2026-11-17T07:05:20.993Z",
+          "body": {
+            "text": "Fake companion turn 1. You said: \"marathon-stuck lifecycle A\"",
+            "replacesStreamId": "turn-mwkclcr2-77dd:s1"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 21,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwkclcr2-77dd",
+          "occurredAt": "2026-11-17T07:05:20.993Z",
+          "body": {
+            "callId": "fake-hang-1",
+            "name": "browser_wait_for",
+            "args": "{\"selector\":\"#order-confirm\"}",
+            "replacesStreamId": "turn-mwkclcr2-77dd:s2"
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T07:05:20.073Z",
+        "plan": null,
+        "watch": {
+          "open": {
+            "id": "65838421-1052-41c8-9ebd-1414c81cd9e4",
+            "kind": "TOOL_HANG",
+            "at": "2026-11-17T07:05:25.050Z",
+            "reason": "A browser call has not returned for several minutes."
+          },
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    "stopA": {
+      "status": 202,
+      "body": {
+        "clientCommandId": "demo-stop-a1",
+        "state": "stopping",
+        "turnId": "turn-mwkclcr2-77dd",
+        "instanceId": "companion-mwkclcq8-0499ee59952e"
+      }
+    },
+    "stateAfterStopA": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "sessionId": "fake-session-1",
+      "latestSequence": 29,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-mwkclcr2-77dd",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-a",
+        "startedAt": "2026-11-17T07:05:20.078Z",
+        "endedAt": "2026-11-17T07:05:25.110Z",
+        "outcome": "stopped",
+        "error": null,
+        "label": null,
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwkclcr2-77dd",
+          "occurredAt": "2026-11-17T07:05:20.078Z",
+          "body": {
+            "text": "marathon-stuck lifecycle A",
+            "origin": "remote",
+            "clientMessageId": "demo-msg-a",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 19,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwkclcr2-77dd",
+          "occurredAt": "2026-11-17T07:05:20.993Z",
+          "body": {
+            "text": "Fake companion turn 1. You said: \"marathon-stuck lifecycle A\"",
+            "replacesStreamId": "turn-mwkclcr2-77dd:s1"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 21,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwkclcr2-77dd",
+          "occurredAt": "2026-11-17T07:05:20.993Z",
+          "body": {
+            "callId": "fake-hang-1",
+            "name": "browser_wait_for",
+            "args": "{\"selector\":\"#order-confirm\"}",
+            "replacesStreamId": "turn-mwkclcr2-77dd:s2"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 26,
+          "type": "chat.stopped",
+          "sessionId": "fake-session-1",
+          "turnId": "turn-mwkclcr2-77dd",
+          "occurredAt": "2026-11-17T07:05:25.109Z",
+          "body": {
+            "reason": "user",
+            "message": "Stopped by user.",
+            "timings": {
+              "totalMs": 5030,
+              "autoCaptureMs": 0,
+              "firstEventMs": 9,
+              "toolCalls": 1,
+              "failedCalls": 0,
+              "promptTextBytes": 1668,
+              "imageBytes": 0
+            },
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "watch": {
+              "checks": 20,
+              "alerts": 1,
+              "usage": 0
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T07:05:20.073Z",
+        "plan": {
+          "revision": 1,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "in_progress"
+            },
+            {
+              "content": "Place the order",
+              "status": "pending"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T07:05:20.993Z",
+          "turnId": "turn-mwkclcr2-77dd"
+        },
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-17T07:05:25.110Z",
+          "checks": 20
+        }
+      }
+    },
+    "sendB": {
+      "status": 202,
+      "body": {
+        "accepted": true,
+        "clientMessageId": "demo-msg-b",
+        "turnId": "turn-mwkclh6k-4bb0",
+        "instanceId": "companion-mwkclcq8-0499ee59952e",
+        "sessionId": "fake-session-2",
+        "sequence": 35
+      }
+    },
+    "endedB": {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 71,
+      "type": "remote.watch",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.144Z",
+      "body": {
+        "id": "ff5b031c-841c-4323-97ea-99465f9e0ca3",
+        "turnId": "turn-mwkclh6k-4bb0",
+        "kind": "ended-incomplete",
+        "state": "open",
+        "blocker": "ended-incomplete",
+        "reason": "The turn ended with work still open or blocked.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:34.144Z"
+      }
+    },
+    "stateAtEndedB": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "sessionId": "fake-session-2",
+      "latestSequence": 74,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-mwkclh6k-4bb0",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-b",
+        "startedAt": "2026-11-17T07:05:25.820Z",
+        "endedAt": "2026-11-17T07:05:34.144Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 33,
+          "type": "chat.user",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:25.820Z",
+          "body": {
+            "text": "marathon-stuck lifecycle B",
+            "origin": "remote",
+            "clientMessageId": "demo-msg-b",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 47,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:26.723Z",
+          "body": {
+            "text": "Fake companion turn 2. You said: \"marathon-stuck lifecycle B\"",
+            "replacesStreamId": "turn-mwkclh6k-4bb0:s4"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 49,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:26.724Z",
+          "body": {
+            "callId": "fake-hang-2",
+            "name": "browser_wait_for",
+            "args": "{\"selector\":\"#order-confirm\"}",
+            "replacesStreamId": "turn-mwkclh6k-4bb0:s5"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 52,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.224Z",
+          "body": {
+            "callId": "fake-hang-2",
+            "ok": true,
+            "text": "Fake page text: the confirmation section appeared."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 55,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.241Z",
+          "body": {
+            "callId": "fake-recover-2-0",
+            "name": "browser_read_text",
+            "args": "{\"max_chars\":500}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 57,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.542Z",
+          "body": {
+            "callId": "fake-recover-2-0",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 59,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.542Z",
+          "body": {
+            "callId": "fake-recover-2-1",
+            "name": "browser_click",
+            "args": "{\"label\":\"Place order\"}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 61,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.842Z",
+          "body": {
+            "callId": "fake-recover-2-1",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 63,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.843Z",
+          "body": {
+            "callId": "fake-recover-2-2",
+            "name": "browser_click",
+            "args": "{\"label\":\"Confirm\"}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 66,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:34.143Z",
+          "body": {
+            "callId": "fake-recover-2-2",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 69,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:34.144Z",
+          "body": {
+            "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+            "replacesStreamId": "turn-mwkclh6k-4bb0:s6"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 72,
+          "type": "chat.done",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:34.144Z",
+          "body": {
+            "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+            "timings": {
+              "totalMs": 8324,
+              "autoCaptureMs": 0,
+              "firstEventMs": 0,
+              "toolCalls": 4,
+              "failedCalls": 0,
+              "promptTextBytes": 1668,
+              "imageBytes": 0,
+              "images": 0
+            },
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "label": "partial",
+            "model": "fake/scripted",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": true,
+            "marathon": true,
+            "planOutcome": "unfinished",
+            "planRevision": 2,
+            "watch": {
+              "checks": 33,
+              "alerts": 1,
+              "usage": 0
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-9e40a4ff5618bee4033dd3b1",
+      "latestScreenshot": {
+        "screenshotId": "shot-9e40a4ff5618bee4033dd3b1",
+        "callId": null,
+        "capturedAt": "2026-11-17T07:05:33.241Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14259,
+        "source": "tool"
+      },
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T07:05:25.818Z",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T07:05:34.143Z",
+          "turnId": "turn-mwkclh6k-4bb0"
+        },
+        "watch": {
+          "open": {
+            "id": "ff5b031c-841c-4323-97ea-99465f9e0ca3",
+            "kind": "ended-incomplete",
+            "at": "2026-11-17T07:05:34.144Z",
+            "reason": "The turn ended with work still open or blocked."
+          },
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-17T07:05:34.144Z",
+          "checks": 33
+        }
+      }
+    },
+    "sendC": {
+      "status": 202,
+      "body": {
+        "accepted": true,
+        "clientMessageId": "demo-msg-c",
+        "turnId": "turn-mwkclnlw-f8c2",
+        "instanceId": "companion-mwkclcq8-0499ee59952e",
+        "sessionId": "fake-session-2",
+        "sequence": 78
+      }
+    },
+    "userC": {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 76,
+      "type": "chat.user",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.148Z",
+      "body": {
+        "text": "continue the work",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-c",
+        "imageCount": 0,
+        "marathon": true
+      }
+    },
+    "stateDuringC": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "sessionId": "fake-session-2",
+      "latestSequence": 85,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "running",
+        "turnId": "turn-mwkclnlw-f8c2",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-c",
+        "startedAt": "2026-11-17T07:05:34.148Z",
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null
+      },
+      "phase": {
+        "status": "thinking",
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 33,
+          "type": "chat.user",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:25.820Z",
+          "body": {
+            "text": "marathon-stuck lifecycle B",
+            "origin": "remote",
+            "clientMessageId": "demo-msg-b",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 47,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:26.723Z",
+          "body": {
+            "text": "Fake companion turn 2. You said: \"marathon-stuck lifecycle B\"",
+            "replacesStreamId": "turn-mwkclh6k-4bb0:s4"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 49,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:26.724Z",
+          "body": {
+            "callId": "fake-hang-2",
+            "name": "browser_wait_for",
+            "args": "{\"selector\":\"#order-confirm\"}",
+            "replacesStreamId": "turn-mwkclh6k-4bb0:s5"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 52,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.224Z",
+          "body": {
+            "callId": "fake-hang-2",
+            "ok": true,
+            "text": "Fake page text: the confirmation section appeared."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 55,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.241Z",
+          "body": {
+            "callId": "fake-recover-2-0",
+            "name": "browser_read_text",
+            "args": "{\"max_chars\":500}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 57,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.542Z",
+          "body": {
+            "callId": "fake-recover-2-0",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 59,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.542Z",
+          "body": {
+            "callId": "fake-recover-2-1",
+            "name": "browser_click",
+            "args": "{\"label\":\"Place order\"}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 61,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.842Z",
+          "body": {
+            "callId": "fake-recover-2-1",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 63,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:33.843Z",
+          "body": {
+            "callId": "fake-recover-2-2",
+            "name": "browser_click",
+            "args": "{\"label\":\"Confirm\"}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 66,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:34.143Z",
+          "body": {
+            "callId": "fake-recover-2-2",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 69,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:34.144Z",
+          "body": {
+            "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+            "replacesStreamId": "turn-mwkclh6k-4bb0:s6"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 72,
+          "type": "chat.done",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclh6k-4bb0",
+          "occurredAt": "2026-11-17T07:05:34.144Z",
+          "body": {
+            "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+            "timings": {
+              "totalMs": 8324,
+              "autoCaptureMs": 0,
+              "firstEventMs": 0,
+              "toolCalls": 4,
+              "failedCalls": 0,
+              "promptTextBytes": 1668,
+              "imageBytes": 0,
+              "images": 0
+            },
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "label": "partial",
+            "model": "fake/scripted",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": true,
+            "marathon": true,
+            "planOutcome": "unfinished",
+            "planRevision": 2,
+            "watch": {
+              "checks": 33,
+              "alerts": 1,
+              "usage": 0
+            }
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 76,
+          "type": "chat.user",
+          "sessionId": "fake-session-2",
+          "turnId": "turn-mwkclnlw-f8c2",
+          "occurredAt": "2026-11-17T07:05:34.148Z",
+          "body": {
+            "text": "continue the work",
+            "origin": "remote",
+            "clientMessageId": "demo-msg-c",
+            "imageCount": 0,
+            "marathon": true
+          }
+        }
+      ],
+      "draft": {
+        "turnId": "turn-mwkclnlw-f8c2",
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "text": "Fake companion turn 3. You said: \"continue ",
+        "reasoning": "Planning a fake reply.",
+        "tools": []
+      },
+      "latestScreenshotId": "shot-9e40a4ff5618bee4033dd3b1",
+      "latestScreenshot": {
+        "screenshotId": "shot-9e40a4ff5618bee4033dd3b1",
+        "callId": null,
+        "capturedAt": "2026-11-17T07:05:33.241Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14259,
+        "source": "tool"
+      },
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T07:05:25.818Z",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T07:05:34.143Z",
+          "turnId": "turn-mwkclh6k-4bb0"
+        },
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-17T07:05:34.144Z",
+          "checks": 33
+        }
+      }
+    },
+    "sendD": {
+      "status": 202,
+      "body": {
+        "accepted": true,
+        "clientMessageId": "demo-msg-d",
+        "turnId": "turn-mwkclpys-bed3",
+        "instanceId": "companion-mwkclcq8-0499ee59952e",
+        "sessionId": "fake-session-3",
+        "sequence": 115
+      }
+    },
+    "endedD": {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 151,
+      "type": "remote.watch",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.523Z",
+      "body": {
+        "id": "8403518a-c1d4-4a3b-b818-9e3688723709",
+        "turnId": "turn-mwkclpys-bed3",
+        "kind": "ended-incomplete",
+        "state": "open",
+        "blocker": "ended-incomplete",
+        "reason": "The turn ended with work still open or blocked.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:45.523Z"
+      }
+    },
+    "stateAtEndedD": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "sessionId": "fake-session-3",
+      "latestSequence": 154,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-mwkclpys-bed3",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-d",
+        "startedAt": "2026-11-17T07:05:37.205Z",
+        "endedAt": "2026-11-17T07:05:45.523Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 113,
+          "type": "chat.user",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:37.205Z",
+          "body": {
+            "text": "marathon-stuck lifecycle C",
+            "origin": "remote",
+            "clientMessageId": "demo-msg-d",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 127,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:38.108Z",
+          "body": {
+            "text": "Fake companion turn 4. You said: \"marathon-stuck lifecycle C\"",
+            "replacesStreamId": "turn-mwkclpys-bed3:s12"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 129,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:38.108Z",
+          "body": {
+            "callId": "fake-hang-4",
+            "name": "browser_wait_for",
+            "args": "{\"selector\":\"#order-confirm\"}",
+            "replacesStreamId": "turn-mwkclpys-bed3:s13"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 132,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:44.609Z",
+          "body": {
+            "callId": "fake-hang-4",
+            "ok": true,
+            "text": "Fake page text: the confirmation section appeared."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 135,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:44.621Z",
+          "body": {
+            "callId": "fake-recover-4-0",
+            "name": "browser_read_text",
+            "args": "{\"max_chars\":500}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 137,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:44.921Z",
+          "body": {
+            "callId": "fake-recover-4-0",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 139,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:44.922Z",
+          "body": {
+            "callId": "fake-recover-4-1",
+            "name": "browser_click",
+            "args": "{\"label\":\"Place order\"}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 141,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:45.222Z",
+          "body": {
+            "callId": "fake-recover-4-1",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 143,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:45.222Z",
+          "body": {
+            "callId": "fake-recover-4-2",
+            "name": "browser_click",
+            "args": "{\"label\":\"Confirm\"}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 146,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:45.522Z",
+          "body": {
+            "callId": "fake-recover-4-2",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 149,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:45.523Z",
+          "body": {
+            "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+            "replacesStreamId": "turn-mwkclpys-bed3:s14"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 152,
+          "type": "chat.done",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:45.523Z",
+          "body": {
+            "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+            "timings": {
+              "totalMs": 8318,
+              "autoCaptureMs": 0,
+              "firstEventMs": 0,
+              "toolCalls": 4,
+              "failedCalls": 0,
+              "promptTextBytes": 1668,
+              "imageBytes": 0,
+              "images": 0
+            },
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "label": "partial",
+            "model": "fake/scripted",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": true,
+            "marathon": true,
+            "planOutcome": "unfinished",
+            "planRevision": 2,
+            "watch": {
+              "checks": 33,
+              "alerts": 1,
+              "usage": 0
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-a26d33ff4a84cc063dc5d7c9",
+      "latestScreenshot": {
+        "screenshotId": "shot-a26d33ff4a84cc063dc5d7c9",
+        "callId": null,
+        "capturedAt": "2026-11-17T07:05:44.621Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14198,
+        "source": "tool"
+      },
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T07:05:37.202Z",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T07:05:45.522Z",
+          "turnId": "turn-mwkclpys-bed3"
+        },
+        "watch": {
+          "open": {
+            "id": "8403518a-c1d4-4a3b-b818-9e3688723709",
+            "kind": "ended-incomplete",
+            "at": "2026-11-17T07:05:45.523Z",
+            "reason": "The turn ended with work still open or blocked."
+          },
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-17T07:05:45.523Z",
+          "checks": 33
+        }
+      }
+    },
+    "ackC": {
+      "status": 200,
+      "body": {
+        "clientCommandId": "demo-ack-c1",
+        "acknowledged": true,
+        "id": "8403518a-c1d4-4a3b-b818-9e3688723709",
+        "instanceId": "companion-mwkclcq8-0499ee59952e"
+      }
+    },
+    "stateAfterAckC": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fake-companion"
+      },
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "sessionId": "fake-session-3",
+      "latestSequence": 155,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-mwkclpys-bed3",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-d",
+        "startedAt": "2026-11-17T07:05:37.205Z",
+        "endedAt": "2026-11-17T07:05:45.523Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "fake",
+        "model": "fake/scripted",
+        "autoCapture": false,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 113,
+          "type": "chat.user",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:37.205Z",
+          "body": {
+            "text": "marathon-stuck lifecycle C",
+            "origin": "remote",
+            "clientMessageId": "demo-msg-d",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 127,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:38.108Z",
+          "body": {
+            "text": "Fake companion turn 4. You said: \"marathon-stuck lifecycle C\"",
+            "replacesStreamId": "turn-mwkclpys-bed3:s12"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 129,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:38.108Z",
+          "body": {
+            "callId": "fake-hang-4",
+            "name": "browser_wait_for",
+            "args": "{\"selector\":\"#order-confirm\"}",
+            "replacesStreamId": "turn-mwkclpys-bed3:s13"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 132,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:44.609Z",
+          "body": {
+            "callId": "fake-hang-4",
+            "ok": true,
+            "text": "Fake page text: the confirmation section appeared."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 135,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:44.621Z",
+          "body": {
+            "callId": "fake-recover-4-0",
+            "name": "browser_read_text",
+            "args": "{\"max_chars\":500}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 137,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:44.921Z",
+          "body": {
+            "callId": "fake-recover-4-0",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 139,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:44.922Z",
+          "body": {
+            "callId": "fake-recover-4-1",
+            "name": "browser_click",
+            "args": "{\"label\":\"Place order\"}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 141,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:45.222Z",
+          "body": {
+            "callId": "fake-recover-4-1",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 143,
+          "type": "chat.tool_call",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:45.222Z",
+          "body": {
+            "callId": "fake-recover-4-2",
+            "name": "browser_click",
+            "args": "{\"label\":\"Confirm\"}"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 146,
+          "type": "chat.tool_result",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:45.522Z",
+          "body": {
+            "callId": "fake-recover-4-2",
+            "ok": true,
+            "text": "Fake page text: ok."
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 149,
+          "type": "chat.assistant",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:45.523Z",
+          "body": {
+            "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+            "replacesStreamId": "turn-mwkclpys-bed3:s14"
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "seq": 152,
+          "type": "chat.done",
+          "sessionId": "fake-session-3",
+          "turnId": "turn-mwkclpys-bed3",
+          "occurredAt": "2026-11-17T07:05:45.523Z",
+          "body": {
+            "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+            "timings": {
+              "totalMs": 8318,
+              "autoCaptureMs": 0,
+              "firstEventMs": 0,
+              "toolCalls": 4,
+              "failedCalls": 0,
+              "promptTextBytes": 1668,
+              "imageBytes": 0,
+              "images": 0
+            },
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "label": "partial",
+            "model": "fake/scripted",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": true,
+            "marathon": true,
+            "planOutcome": "unfinished",
+            "planRevision": 2,
+            "watch": {
+              "checks": 33,
+              "alerts": 1,
+              "usage": 0
+            }
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": "shot-a26d33ff4a84cc063dc5d7c9",
+      "latestScreenshot": {
+        "screenshotId": "shot-a26d33ff4a84cc063dc5d7c9",
+        "callId": null,
+        "capturedAt": "2026-11-17T07:05:44.621Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14198,
+        "source": "tool"
+      },
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T07:05:37.202Z",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T07:05:45.522Z",
+          "turnId": "turn-mwkclpys-bed3"
+        },
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-17T07:05:45.523Z",
+          "checks": 33
+        }
+      }
+    },
+    "watchFrames": [
+      {
+        "seq": 23,
+        "id": "65838421-1052-41c8-9ebd-1414c81cd9e4",
+        "kind": "TOOL_HANG",
+        "state": "open",
+        "reason": "A browser call has not returned for several minutes."
+      },
+      {
+        "seq": 25,
+        "id": "65838421-1052-41c8-9ebd-1414c81cd9e4",
+        "kind": "info",
+        "state": "closed",
+        "reason": "Turn ended."
+      },
+      {
+        "seq": 51,
+        "id": "9dba2956-03f1-46b0-8f53-aecd5b9f8944",
+        "kind": "TOOL_HANG",
+        "state": "open",
+        "reason": "A browser call has not returned for several minutes."
+      },
+      {
+        "seq": 65,
+        "id": "9dba2956-03f1-46b0-8f53-aecd5b9f8944",
+        "kind": "recovered",
+        "state": "recovered",
+        "reason": "The agent is making progress again."
+      },
+      {
+        "seq": 71,
+        "id": "ff5b031c-841c-4323-97ea-99465f9e0ca3",
+        "kind": "ended-incomplete",
+        "state": "open",
+        "reason": "The turn ended with work still open or blocked."
+      },
+      {
+        "seq": 75,
+        "id": "ff5b031c-841c-4323-97ea-99465f9e0ca3",
+        "kind": "info",
+        "state": "closed",
+        "reason": "A new turn started."
+      },
+      {
+        "seq": 131,
+        "id": "5f3487b9-3c7f-44c3-b113-315503a8f755",
+        "kind": "TOOL_HANG",
+        "state": "open",
+        "reason": "A browser call has not returned for several minutes."
+      },
+      {
+        "seq": 145,
+        "id": "5f3487b9-3c7f-44c3-b113-315503a8f755",
+        "kind": "recovered",
+        "state": "recovered",
+        "reason": "The agent is making progress again."
+      },
+      {
+        "seq": 151,
+        "id": "8403518a-c1d4-4a3b-b818-9e3688723709",
+        "kind": "ended-incomplete",
+        "state": "open",
+        "reason": "The turn ended with work still open or blocked."
+      },
+      {
+        "seq": 155,
+        "id": "8403518a-c1d4-4a3b-b818-9e3688723709",
+        "kind": "info",
+        "state": "dismissed",
+        "reason": "Dismissed."
+      }
+    ],
+    "watchPushes": [
+      {
+        "type": "watch",
+        "turnId": "turn-mwkclcr2-77dd",
+        "kind": "TOOL_HANG",
+        "at": "2026-11-17T07:05:25.051Z"
+      },
+      {
+        "type": "watch",
+        "turnId": "turn-mwkclh6k-4bb0",
+        "kind": "TOOL_HANG",
+        "at": "2026-11-17T07:05:30.804Z"
+      },
+      {
+        "type": "watch",
+        "turnId": "turn-mwkclpys-bed3",
+        "kind": "TOOL_HANG",
+        "at": "2026-11-17T07:05:42.311Z"
+      }
+    ]
+  },
+  "results": [
+    {
+      "name": "A: close frame for the open alert at turn end",
+      "pass": true,
+      "detail": "{\"id\":\"65838421-1052-41c8-9ebd-1414c81cd9e4\",\"turnId\":\"turn-mwkclcr2-77dd\",\"kind\":\"info\",\"state\":\"closed\",\"blocker\":null,\"reason\":\"Turn ended.\",\"signals\":[],\"source\":\"heuristic\",\"at\":\"2026-11-17T07:05:25.109Z\"}"
+    },
+    {
+      "name": "A: /state open alert cleared after stop",
+      "pass": true,
+      "detail": "null"
+    },
+    {
+      "name": "B: ended-incomplete closed at next turn start",
+      "pass": true,
+      "detail": "{\"id\":\"ff5b031c-841c-4323-97ea-99465f9e0ca3\",\"turnId\":\"turn-mwkclh6k-4bb0\",\"kind\":\"info\",\"state\":\"closed\",\"blocker\":null,\"reason\":\"A new turn started.\",\"signals\":[],\"source\":\"heuristic\",\"at\":\"2026-11-17T07:05:34.148Z\"}"
+    },
+    {
+      "name": "B: close frame precedes the new turn first frame",
+      "pass": true,
+      "detail": "closed seq 75 vs user seq 76"
+    },
+    {
+      "name": "B: no open alert during the new turn (amber never carries)",
+      "pass": true,
+      "detail": "null"
+    },
+    {
+      "name": "C: ack on ended-incomplete returns 200",
+      "pass": true,
+      "detail": "status 200"
+    },
+    {
+      "name": "C: dismissed frame arrives on the stream",
+      "pass": true,
+      "detail": "{\"id\":\"8403518a-c1d4-4a3b-b818-9e3688723709\",\"turnId\":\"turn-mwkclpys-bed3\",\"kind\":\"info\",\"state\":\"dismissed\",\"blocker\":null,\"reason\":\"Dismissed.\",\"signals\":[],\"source\":\"heuristic\",\"at\":\"2026-11-17T07:05:45.529Z\"}"
+    },
+    {
+      "name": "C: /state open cleared after ack",
+      "pass": true,
+      "detail": "null"
+    }
+  ],
+  "frames": [
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 3,
+      "type": "remote.resync",
+      "sessionId": "fake-session-1",
+      "occurredAt": "2026-11-17T07:05:20.062Z",
+      "body": {
+        "reason": "no-instance",
+        "state": {
+          "protocol": 1,
+          "server": {
+            "name": "crazyagent-companion",
+            "version": "fake-companion"
+          },
+          "instanceId": "companion-mwkclcq8-0499ee59952e",
+          "sessionId": "fake-session-1",
+          "latestSequence": 3,
+          "oldestSequence": 1,
+          "turn": {
+            "status": "idle",
+            "turnId": null,
+            "origin": null,
+            "clientMessageId": null,
+            "startedAt": null,
+            "endedAt": null,
+            "outcome": null,
+            "error": null,
+            "label": null,
+            "usage": null,
+            "failedCalls": null
+          },
+          "phase": {
+            "status": null,
+            "tool": null
+          },
+          "health": {
+            "uiConnected": true,
+            "toolsConnected": true,
+            "dsh": "ready",
+            "dshMessage": null,
+            "provider": "fake",
+            "model": "fake/scripted",
+            "autoCapture": false,
+            "contextWindow": null,
+            "contextTokens": null
+          },
+          "messages": [],
+          "draft": null,
+          "latestScreenshotId": null,
+          "latestScreenshot": null,
+          "help": null,
+          "confirm": null,
+          "marathon": {
+            "enabled": false,
+            "since": null,
+            "plan": null,
+            "watch": {
+              "open": null,
+              "lastVerdict": null,
+              "lastCheckAt": null,
+              "checks": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 4,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-1",
+      "occurredAt": "2026-11-17T07:05:20.073Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "fake-session-1",
+        "since": "2026-11-17T07:05:20.073Z",
+        "origin": "remote",
+        "plan": null,
+        "watcher": {
+          "active": false,
+          "checks": 0,
+          "lastCheckAt": null,
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 5,
+      "type": "chat.user",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.078Z",
+      "body": {
+        "text": "marathon-stuck lifecycle A",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-a",
+        "imageCount": 0,
+        "marathon": true
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 6,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.079Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 7,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.088Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "reasoning",
+        "offset": 0,
+        "delta": "Planning a fake reply."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 8,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.188Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "text",
+        "offset": 0,
+        "delta": "Fake "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 9,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.289Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "text",
+        "offset": 5,
+        "delta": "companion "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 10,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.389Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "text",
+        "offset": 15,
+        "delta": "turn "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 11,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.490Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "text",
+        "offset": 20,
+        "delta": "1. "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 12,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.591Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "text",
+        "offset": 23,
+        "delta": "You "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 13,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.691Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "text",
+        "offset": 27,
+        "delta": "said: "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 14,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.791Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "text",
+        "offset": 33,
+        "delta": "\"marathon-stuck "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 15,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.892Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "text",
+        "offset": 49,
+        "delta": "lifecycle "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 16,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.992Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "text",
+        "offset": 59,
+        "delta": "A\""
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 17,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.993Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "tool",
+        "toolCallId": "fake-call-1",
+        "name": "browser_read_text",
+        "offset": 0,
+        "delta": "{\"max_chars\":"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 18,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.993Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s1",
+        "channel": "tool",
+        "toolCallId": "fake-call-1",
+        "name": "browser_read_text",
+        "offset": 13,
+        "delta": "2000}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 19,
+      "type": "chat.assistant",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.993Z",
+      "body": {
+        "text": "Fake companion turn 1. You said: \"marathon-stuck lifecycle A\"",
+        "replacesStreamId": "turn-mwkclcr2-77dd:s1"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 20,
+      "type": "chat.draft",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.993Z",
+      "body": {
+        "streamId": "turn-mwkclcr2-77dd:s2",
+        "channel": "tool",
+        "toolCallId": "fake-hang-1",
+        "name": "browser_wait_for",
+        "offset": 0,
+        "delta": "{\"selector\":\"#order-confirm\"}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 21,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.993Z",
+      "body": {
+        "callId": "fake-hang-1",
+        "name": "browser_wait_for",
+        "args": "{\"selector\":\"#order-confirm\"}",
+        "replacesStreamId": "turn-mwkclcr2-77dd:s2"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 22,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:20.993Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_wait_for",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 23,
+      "type": "remote.watch",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:25.051Z",
+      "body": {
+        "id": "65838421-1052-41c8-9ebd-1414c81cd9e4",
+        "turnId": "turn-mwkclcr2-77dd",
+        "kind": "TOOL_HANG",
+        "state": "open",
+        "blocker": "TOOL_HANG",
+        "reason": "A browser call has not returned for several minutes.",
+        "signals": [
+          {
+            "kind": "TOOL_HANG",
+            "level": "hard",
+            "detail": "browser_wait_for unanswered for 243s"
+          }
+        ],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:25.050Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 24,
+      "type": "chat.stopping",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:25.109Z",
+      "body": {
+        "message": "Stopping…"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 25,
+      "type": "remote.watch",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:25.109Z",
+      "body": {
+        "id": "65838421-1052-41c8-9ebd-1414c81cd9e4",
+        "turnId": "turn-mwkclcr2-77dd",
+        "kind": "info",
+        "state": "closed",
+        "blocker": null,
+        "reason": "Turn ended.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:25.109Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 26,
+      "type": "chat.stopped",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:25.109Z",
+      "body": {
+        "reason": "user",
+        "message": "Stopped by user.",
+        "timings": {
+          "totalMs": 5030,
+          "autoCaptureMs": 0,
+          "firstEventMs": 9,
+          "toolCalls": 1,
+          "failedCalls": 0,
+          "promptTextBytes": 1668,
+          "imageBytes": 0
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "watch": {
+          "checks": 20,
+          "alerts": 1,
+          "usage": 0
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 27,
+      "type": "chat.status",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:25.109Z",
+      "body": {
+        "status": "idle",
+        "tool": null,
+        "turnStatus": "stopping"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 28,
+      "type": "chat.turn",
+      "sessionId": "fake-session-1",
+      "turnId": "turn-mwkclcr2-77dd",
+      "occurredAt": "2026-11-17T07:05:25.110Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-mwkclcr2-77dd",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-a",
+        "startedAt": "2026-11-17T07:05:20.078Z",
+        "endedAt": "2026-11-17T07:05:25.110Z",
+        "outcome": "stopped",
+        "error": null,
+        "label": null,
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 29,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-1",
+      "occurredAt": "2026-11-17T07:05:25.110Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "fake-session-1",
+        "since": "2026-11-17T07:05:20.073Z",
+        "origin": "remote",
+        "plan": {
+          "revision": 1,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "in_progress"
+            },
+            {
+              "content": "Place the order",
+              "status": "pending"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T07:05:20.993Z",
+          "turnId": "turn-mwkclcr2-77dd"
+        },
+        "watcher": {
+          "active": false,
+          "checks": 20,
+          "lastCheckAt": "2026-11-17T07:05:25.110Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 30,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-1",
+      "occurredAt": "2026-11-17T07:05:25.815Z",
+      "body": {
+        "enabled": false,
+        "sessionId": null,
+        "since": null,
+        "origin": null,
+        "plan": null,
+        "watcher": {
+          "active": false,
+          "checks": 20,
+          "lastCheckAt": "2026-11-17T07:05:25.815Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 31,
+      "type": "chat.session",
+      "sessionId": "fake-session-2",
+      "occurredAt": "2026-11-17T07:05:25.815Z",
+      "body": {
+        "sessionId": "fake-session-2"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 32,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-2",
+      "occurredAt": "2026-11-17T07:05:25.818Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "fake-session-2",
+        "since": "2026-11-17T07:05:25.818Z",
+        "origin": "remote",
+        "plan": null,
+        "watcher": {
+          "active": false,
+          "checks": 20,
+          "lastCheckAt": "2026-11-17T07:05:25.818Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 33,
+      "type": "chat.user",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:25.820Z",
+      "body": {
+        "text": "marathon-stuck lifecycle B",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-b",
+        "imageCount": 0,
+        "marathon": true
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 34,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:25.820Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 35,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:25.821Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "reasoning",
+        "offset": 0,
+        "delta": "Planning a fake reply."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 36,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:25.920Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "text",
+        "offset": 0,
+        "delta": "Fake "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 37,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.020Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "text",
+        "offset": 5,
+        "delta": "companion "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 38,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.120Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "text",
+        "offset": 15,
+        "delta": "turn "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 39,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.221Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "text",
+        "offset": 20,
+        "delta": "2. "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 40,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.322Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "text",
+        "offset": 23,
+        "delta": "You "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 41,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.422Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "text",
+        "offset": 27,
+        "delta": "said: "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 42,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.523Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "text",
+        "offset": 33,
+        "delta": "\"marathon-stuck "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 43,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.624Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "text",
+        "offset": 49,
+        "delta": "lifecycle "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 44,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.723Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "text",
+        "offset": 59,
+        "delta": "B\""
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 45,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.723Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "tool",
+        "toolCallId": "fake-call-2",
+        "name": "browser_read_text",
+        "offset": 0,
+        "delta": "{\"max_chars\":"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 46,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.723Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s4",
+        "channel": "tool",
+        "toolCallId": "fake-call-2",
+        "name": "browser_read_text",
+        "offset": 13,
+        "delta": "2000}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 47,
+      "type": "chat.assistant",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.723Z",
+      "body": {
+        "text": "Fake companion turn 2. You said: \"marathon-stuck lifecycle B\"",
+        "replacesStreamId": "turn-mwkclh6k-4bb0:s4"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 48,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.723Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s5",
+        "channel": "tool",
+        "toolCallId": "fake-hang-2",
+        "name": "browser_wait_for",
+        "offset": 0,
+        "delta": "{\"selector\":\"#order-confirm\"}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 49,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.724Z",
+      "body": {
+        "callId": "fake-hang-2",
+        "name": "browser_wait_for",
+        "args": "{\"selector\":\"#order-confirm\"}",
+        "replacesStreamId": "turn-mwkclh6k-4bb0:s5"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 50,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:26.724Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_wait_for",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 51,
+      "type": "remote.watch",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:30.804Z",
+      "body": {
+        "id": "9dba2956-03f1-46b0-8f53-aecd5b9f8944",
+        "turnId": "turn-mwkclh6k-4bb0",
+        "kind": "TOOL_HANG",
+        "state": "open",
+        "blocker": "TOOL_HANG",
+        "reason": "A browser call has not returned for several minutes.",
+        "signals": [
+          {
+            "kind": "TOOL_HANG",
+            "level": "hard",
+            "detail": "browser_wait_for unanswered for 245s"
+          }
+        ],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:30.804Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 52,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.224Z",
+      "body": {
+        "callId": "fake-hang-2",
+        "ok": true,
+        "text": "Fake page text: the confirmation section appeared."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 53,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.224Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 54,
+      "type": "remote.screenshot",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.241Z",
+      "body": {
+        "screenshotId": "shot-9e40a4ff5618bee4033dd3b1",
+        "callId": null,
+        "capturedAt": "2026-11-17T07:05:33.241Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14259,
+        "source": "tool"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 55,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.241Z",
+      "body": {
+        "callId": "fake-recover-2-0",
+        "name": "browser_read_text",
+        "args": "{\"max_chars\":500}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 56,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.241Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_read_text",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 57,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.542Z",
+      "body": {
+        "callId": "fake-recover-2-0",
+        "ok": true,
+        "text": "Fake page text: ok."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 58,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.542Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 59,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.542Z",
+      "body": {
+        "callId": "fake-recover-2-1",
+        "name": "browser_click",
+        "args": "{\"label\":\"Place order\"}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 60,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.542Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_click",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 61,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.842Z",
+      "body": {
+        "callId": "fake-recover-2-1",
+        "ok": true,
+        "text": "Fake page text: ok."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 62,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.843Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 63,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.843Z",
+      "body": {
+        "callId": "fake-recover-2-2",
+        "name": "browser_click",
+        "args": "{\"label\":\"Confirm\"}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 64,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:33.843Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_click",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 65,
+      "type": "remote.watch",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.056Z",
+      "body": {
+        "id": "9dba2956-03f1-46b0-8f53-aecd5b9f8944",
+        "turnId": "turn-mwkclh6k-4bb0",
+        "kind": "recovered",
+        "state": "recovered",
+        "blocker": null,
+        "reason": "The agent is making progress again.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:34.056Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 66,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.143Z",
+      "body": {
+        "callId": "fake-recover-2-2",
+        "ok": true,
+        "text": "Fake page text: ok."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 67,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.143Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 68,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.143Z",
+      "body": {
+        "streamId": "turn-mwkclh6k-4bb0:s6",
+        "channel": "text",
+        "offset": 0,
+        "delta": "PARTIAL — the fake marathon task still has open items (the order was not placed)."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 69,
+      "type": "chat.assistant",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.144Z",
+      "body": {
+        "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+        "replacesStreamId": "turn-mwkclh6k-4bb0:s6"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 70,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.144Z",
+      "body": {
+        "status": "idle",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 71,
+      "type": "remote.watch",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.144Z",
+      "body": {
+        "id": "ff5b031c-841c-4323-97ea-99465f9e0ca3",
+        "turnId": "turn-mwkclh6k-4bb0",
+        "kind": "ended-incomplete",
+        "state": "open",
+        "blocker": "ended-incomplete",
+        "reason": "The turn ended with work still open or blocked.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:34.144Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 72,
+      "type": "chat.done",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.144Z",
+      "body": {
+        "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+        "timings": {
+          "totalMs": 8324,
+          "autoCaptureMs": 0,
+          "firstEventMs": 0,
+          "toolCalls": 4,
+          "failedCalls": 0,
+          "promptTextBytes": 1668,
+          "imageBytes": 0,
+          "images": 0
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "label": "partial",
+        "model": "fake/scripted",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": true,
+        "marathon": true,
+        "planOutcome": "unfinished",
+        "planRevision": 2,
+        "watch": {
+          "checks": 33,
+          "alerts": 1,
+          "usage": 0
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 73,
+      "type": "chat.turn",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.144Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-mwkclh6k-4bb0",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-b",
+        "startedAt": "2026-11-17T07:05:25.820Z",
+        "endedAt": "2026-11-17T07:05:34.144Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 74,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-2",
+      "occurredAt": "2026-11-17T07:05:34.144Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "fake-session-2",
+        "since": "2026-11-17T07:05:25.818Z",
+        "origin": "remote",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T07:05:34.143Z",
+          "turnId": "turn-mwkclh6k-4bb0"
+        },
+        "watcher": {
+          "active": false,
+          "checks": 33,
+          "lastCheckAt": "2026-11-17T07:05:34.144Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 75,
+      "type": "remote.watch",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclh6k-4bb0",
+      "occurredAt": "2026-11-17T07:05:34.148Z",
+      "body": {
+        "id": "ff5b031c-841c-4323-97ea-99465f9e0ca3",
+        "turnId": "turn-mwkclh6k-4bb0",
+        "kind": "info",
+        "state": "closed",
+        "blocker": null,
+        "reason": "A new turn started.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:34.148Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 76,
+      "type": "chat.user",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.148Z",
+      "body": {
+        "text": "continue the work",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-c",
+        "imageCount": 0,
+        "marathon": true
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 77,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.148Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 78,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.148Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "reasoning",
+        "offset": 0,
+        "delta": "Planning a fake reply."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 79,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.248Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "text",
+        "offset": 0,
+        "delta": "Fake "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 80,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.348Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "text",
+        "offset": 5,
+        "delta": "companion "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 81,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.449Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "text",
+        "offset": 15,
+        "delta": "turn "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 82,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.549Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "text",
+        "offset": 20,
+        "delta": "3. "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 83,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.649Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "text",
+        "offset": 23,
+        "delta": "You "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 84,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.750Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "text",
+        "offset": 27,
+        "delta": "said: "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 85,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.852Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "text",
+        "offset": 33,
+        "delta": "\"continue "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 86,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:34.951Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "text",
+        "offset": 43,
+        "delta": "the "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 87,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.051Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "text",
+        "offset": 47,
+        "delta": "work\""
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 88,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.051Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "tool",
+        "toolCallId": "fake-call-3",
+        "name": "browser_read_text",
+        "offset": 0,
+        "delta": "{\"max_chars\":"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 89,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.051Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s8",
+        "channel": "tool",
+        "toolCallId": "fake-call-3",
+        "name": "browser_read_text",
+        "offset": 13,
+        "delta": "2000}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 90,
+      "type": "chat.assistant",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.051Z",
+      "body": {
+        "text": "Fake companion turn 3. You said: \"continue the work\"",
+        "replacesStreamId": "turn-mwkclnlw-f8c2:s8"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 91,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.051Z",
+      "body": {
+        "callId": "fake-call-3",
+        "name": "browser_read_text",
+        "args": "{\"max_chars\":2000}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 92,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.051Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_read_text",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 93,
+      "type": "remote.screenshot",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.362Z",
+      "body": {
+        "screenshotId": "shot-5f6dc4a3fd5049e18960947f",
+        "callId": "fake-call-3",
+        "capturedAt": "2026-11-17T07:05:35.361Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14575,
+        "source": "tool"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 94,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.362Z",
+      "body": {
+        "callId": "fake-call-3",
+        "ok": true,
+        "text": "Fake page text: three products, one cart."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 95,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.362Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 96,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.663Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s10",
+        "channel": "text",
+        "offset": 0,
+        "delta": "Step 1 of 6.\n"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 97,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.964Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s10",
+        "channel": "text",
+        "offset": 13,
+        "delta": "Step 2 of 6.\n"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 98,
+      "type": "remote.screenshot",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:35.974Z",
+      "body": {
+        "screenshotId": "shot-524ecbbb50beef207a330e49",
+        "callId": null,
+        "capturedAt": "2026-11-17T07:05:35.974Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14504,
+        "source": "tool"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 99,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:36.274Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s10",
+        "channel": "text",
+        "offset": 26,
+        "delta": "Step 3 of 6.\n"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 100,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:36.575Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s10",
+        "channel": "text",
+        "offset": 39,
+        "delta": "Step 4 of 6.\n"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 101,
+      "type": "remote.screenshot",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:36.588Z",
+      "body": {
+        "screenshotId": "shot-c1ef40b275ab0222b4f567c1",
+        "callId": null,
+        "capturedAt": "2026-11-17T07:05:36.588Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14104,
+        "source": "tool"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 102,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:36.888Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s10",
+        "channel": "text",
+        "offset": 52,
+        "delta": "Step 5 of 6.\n"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 103,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:37.189Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s10",
+        "channel": "text",
+        "offset": 65,
+        "delta": "Step 6 of 6.\n"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 104,
+      "type": "remote.screenshot",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:37.198Z",
+      "body": {
+        "screenshotId": "shot-940deb9514664a66edfe546b",
+        "callId": null,
+        "capturedAt": "2026-11-17T07:05:37.198Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14286,
+        "source": "tool"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 105,
+      "type": "chat.draft",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:37.198Z",
+      "body": {
+        "streamId": "turn-mwkclnlw-f8c2:s10",
+        "channel": "text",
+        "offset": 78,
+        "delta": "Done (fake companion; no browser was used)."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 106,
+      "type": "chat.assistant",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:37.198Z",
+      "body": {
+        "text": "Step 1 of 6.\nStep 2 of 6.\nStep 3 of 6.\nStep 4 of 6.\nStep 5 of 6.\nStep 6 of 6.\nDone (fake companion; no browser was used).",
+        "replacesStreamId": "turn-mwkclnlw-f8c2:s10"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 107,
+      "type": "chat.status",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:37.198Z",
+      "body": {
+        "status": "idle",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 108,
+      "type": "chat.done",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:37.198Z",
+      "body": {
+        "text": "Step 1 of 6.\nStep 2 of 6.\nStep 3 of 6.\nStep 4 of 6.\nStep 5 of 6.\nStep 6 of 6.\nDone (fake companion; no browser was used).",
+        "timings": {
+          "totalMs": 3050,
+          "autoCaptureMs": 0,
+          "firstEventMs": 0,
+          "toolCalls": 1,
+          "failedCalls": 0,
+          "promptTextBytes": 2157,
+          "imageBytes": 0,
+          "images": 0
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "label": null,
+        "model": "fake/scripted",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": true,
+        "marathon": true,
+        "planOutcome": null,
+        "planRevision": null,
+        "watch": {
+          "checks": 12,
+          "alerts": 0,
+          "usage": 0
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 109,
+      "type": "chat.turn",
+      "sessionId": "fake-session-2",
+      "turnId": "turn-mwkclnlw-f8c2",
+      "occurredAt": "2026-11-17T07:05:37.198Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-mwkclnlw-f8c2",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-c",
+        "startedAt": "2026-11-17T07:05:34.148Z",
+        "endedAt": "2026-11-17T07:05:37.198Z",
+        "outcome": "done",
+        "error": null,
+        "label": null,
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 110,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-2",
+      "occurredAt": "2026-11-17T07:05:37.201Z",
+      "body": {
+        "enabled": false,
+        "sessionId": null,
+        "since": null,
+        "origin": null,
+        "plan": null,
+        "watcher": {
+          "active": false,
+          "checks": 12,
+          "lastCheckAt": "2026-11-17T07:05:37.201Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 111,
+      "type": "chat.session",
+      "sessionId": "fake-session-3",
+      "occurredAt": "2026-11-17T07:05:37.201Z",
+      "body": {
+        "sessionId": "fake-session-3"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 112,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-3",
+      "occurredAt": "2026-11-17T07:05:37.202Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "fake-session-3",
+        "since": "2026-11-17T07:05:37.202Z",
+        "origin": "remote",
+        "plan": null,
+        "watcher": {
+          "active": false,
+          "checks": 12,
+          "lastCheckAt": "2026-11-17T07:05:37.202Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 113,
+      "type": "chat.user",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:37.205Z",
+      "body": {
+        "text": "marathon-stuck lifecycle C",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-d",
+        "imageCount": 0,
+        "marathon": true
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 114,
+      "type": "chat.status",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:37.205Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 115,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:37.205Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "reasoning",
+        "offset": 0,
+        "delta": "Planning a fake reply."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 116,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:37.305Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "text",
+        "offset": 0,
+        "delta": "Fake "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 117,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:37.405Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "text",
+        "offset": 5,
+        "delta": "companion "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 118,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:37.506Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "text",
+        "offset": 15,
+        "delta": "turn "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 119,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:37.606Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "text",
+        "offset": 20,
+        "delta": "4. "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 120,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:37.706Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "text",
+        "offset": 23,
+        "delta": "You "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 121,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:37.807Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "text",
+        "offset": 27,
+        "delta": "said: "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 122,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:37.906Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "text",
+        "offset": 33,
+        "delta": "\"marathon-stuck "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 123,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:38.007Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "text",
+        "offset": 49,
+        "delta": "lifecycle "
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 124,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:38.108Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "text",
+        "offset": 59,
+        "delta": "C\""
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 125,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:38.108Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "tool",
+        "toolCallId": "fake-call-4",
+        "name": "browser_read_text",
+        "offset": 0,
+        "delta": "{\"max_chars\":"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 126,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:38.108Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s12",
+        "channel": "tool",
+        "toolCallId": "fake-call-4",
+        "name": "browser_read_text",
+        "offset": 13,
+        "delta": "2000}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 127,
+      "type": "chat.assistant",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:38.108Z",
+      "body": {
+        "text": "Fake companion turn 4. You said: \"marathon-stuck lifecycle C\"",
+        "replacesStreamId": "turn-mwkclpys-bed3:s12"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 128,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:38.108Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s13",
+        "channel": "tool",
+        "toolCallId": "fake-hang-4",
+        "name": "browser_wait_for",
+        "offset": 0,
+        "delta": "{\"selector\":\"#order-confirm\"}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 129,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:38.108Z",
+      "body": {
+        "callId": "fake-hang-4",
+        "name": "browser_wait_for",
+        "args": "{\"selector\":\"#order-confirm\"}",
+        "replacesStreamId": "turn-mwkclpys-bed3:s13"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 130,
+      "type": "chat.status",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:38.108Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_wait_for",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 131,
+      "type": "remote.watch",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:42.311Z",
+      "body": {
+        "id": "5f3487b9-3c7f-44c3-b113-315503a8f755",
+        "turnId": "turn-mwkclpys-bed3",
+        "kind": "TOOL_HANG",
+        "state": "open",
+        "blocker": "TOOL_HANG",
+        "reason": "A browser call has not returned for several minutes.",
+        "signals": [
+          {
+            "kind": "TOOL_HANG",
+            "level": "hard",
+            "detail": "browser_wait_for unanswered for 252s"
+          }
+        ],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:42.311Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 132,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:44.609Z",
+      "body": {
+        "callId": "fake-hang-4",
+        "ok": true,
+        "text": "Fake page text: the confirmation section appeared."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 133,
+      "type": "chat.status",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:44.610Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 134,
+      "type": "remote.screenshot",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:44.621Z",
+      "body": {
+        "screenshotId": "shot-a26d33ff4a84cc063dc5d7c9",
+        "callId": null,
+        "capturedAt": "2026-11-17T07:05:44.621Z",
+        "width": 1280,
+        "height": 800,
+        "mimeType": "image/png",
+        "bytes": 14198,
+        "source": "tool"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 135,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:44.621Z",
+      "body": {
+        "callId": "fake-recover-4-0",
+        "name": "browser_read_text",
+        "args": "{\"max_chars\":500}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 136,
+      "type": "chat.status",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:44.621Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_read_text",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 137,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:44.921Z",
+      "body": {
+        "callId": "fake-recover-4-0",
+        "ok": true,
+        "text": "Fake page text: ok."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 138,
+      "type": "chat.status",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:44.922Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 139,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:44.922Z",
+      "body": {
+        "callId": "fake-recover-4-1",
+        "name": "browser_click",
+        "args": "{\"label\":\"Place order\"}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 140,
+      "type": "chat.status",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:44.922Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_click",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 141,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.222Z",
+      "body": {
+        "callId": "fake-recover-4-1",
+        "ok": true,
+        "text": "Fake page text: ok."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 142,
+      "type": "chat.status",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.222Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 143,
+      "type": "chat.tool_call",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.222Z",
+      "body": {
+        "callId": "fake-recover-4-2",
+        "name": "browser_click",
+        "args": "{\"label\":\"Confirm\"}"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 144,
+      "type": "chat.status",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.222Z",
+      "body": {
+        "status": "tool",
+        "tool": "browser_click",
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 145,
+      "type": "remote.watch",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.311Z",
+      "body": {
+        "id": "5f3487b9-3c7f-44c3-b113-315503a8f755",
+        "turnId": "turn-mwkclpys-bed3",
+        "kind": "recovered",
+        "state": "recovered",
+        "blocker": null,
+        "reason": "The agent is making progress again.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:45.311Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 146,
+      "type": "chat.tool_result",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.522Z",
+      "body": {
+        "callId": "fake-recover-4-2",
+        "ok": true,
+        "text": "Fake page text: ok."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 147,
+      "type": "chat.status",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.522Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 148,
+      "type": "chat.draft",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.522Z",
+      "body": {
+        "streamId": "turn-mwkclpys-bed3:s14",
+        "channel": "text",
+        "offset": 0,
+        "delta": "PARTIAL — the fake marathon task still has open items (the order was not placed)."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 149,
+      "type": "chat.assistant",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.523Z",
+      "body": {
+        "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+        "replacesStreamId": "turn-mwkclpys-bed3:s14"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 150,
+      "type": "chat.status",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.523Z",
+      "body": {
+        "status": "idle",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 151,
+      "type": "remote.watch",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.523Z",
+      "body": {
+        "id": "8403518a-c1d4-4a3b-b818-9e3688723709",
+        "turnId": "turn-mwkclpys-bed3",
+        "kind": "ended-incomplete",
+        "state": "open",
+        "blocker": "ended-incomplete",
+        "reason": "The turn ended with work still open or blocked.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:45.523Z"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 152,
+      "type": "chat.done",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.523Z",
+      "body": {
+        "text": "PARTIAL — the fake marathon task still has open items (the order was not placed).",
+        "timings": {
+          "totalMs": 8318,
+          "autoCaptureMs": 0,
+          "firstEventMs": 0,
+          "toolCalls": 4,
+          "failedCalls": 0,
+          "promptTextBytes": 1668,
+          "imageBytes": 0,
+          "images": 0
+        },
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "label": "partial",
+        "model": "fake/scripted",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": true,
+        "marathon": true,
+        "planOutcome": "unfinished",
+        "planRevision": 2,
+        "watch": {
+          "checks": 33,
+          "alerts": 1,
+          "usage": 0
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 153,
+      "type": "chat.turn",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.523Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-mwkclpys-bed3",
+        "origin": "remote",
+        "clientMessageId": "demo-msg-d",
+        "startedAt": "2026-11-17T07:05:37.205Z",
+        "endedAt": "2026-11-17T07:05:45.523Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0,
+          "cacheReadTokens": 0
+        },
+        "failedCalls": 0
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 154,
+      "type": "remote.marathon",
+      "sessionId": "fake-session-3",
+      "occurredAt": "2026-11-17T07:05:45.523Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "fake-session-3",
+        "since": "2026-11-17T07:05:37.202Z",
+        "origin": "remote",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T07:05:45.522Z",
+          "turnId": "turn-mwkclpys-bed3"
+        },
+        "watcher": {
+          "active": false,
+          "checks": 33,
+          "lastCheckAt": "2026-11-17T07:05:45.523Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-mwkclcq8-0499ee59952e",
+      "seq": 155,
+      "type": "remote.watch",
+      "sessionId": "fake-session-3",
+      "turnId": "turn-mwkclpys-bed3",
+      "occurredAt": "2026-11-17T07:05:45.529Z",
+      "body": {
+        "id": "8403518a-c1d4-4a3b-b818-9e3688723709",
+        "turnId": "turn-mwkclpys-bed3",
+        "kind": "info",
+        "state": "dismissed",
+        "blocker": null,
+        "reason": "Dismissed.",
+        "signals": [],
+        "source": "heuristic",
+        "at": "2026-11-17T07:05:45.529Z"
+      }
+    }
+  ]
+}
