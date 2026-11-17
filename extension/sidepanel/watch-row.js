@@ -13,12 +13,15 @@ export const WATCH_KIND_LABELS = Object.freeze({
   TOOL_HANG: 'Call not returning',
   EXECUTOR_DOWN: 'Executor disconnected',
   'ended-incomplete': 'Ended incomplete',
+  // M4 judge verdicts (source 'watcher'/'both'); rendered with the same actions.
+  stuck: 'May be stuck',
+  blocked: 'Blocked',
   recovered: 'Recovered',
   info: 'Watch',
 })
 
 const OPEN_STATES = new Set(['open'])
-const ACTIONABLE_KINDS = new Set(['SILENT_STALL', 'TOOL_HANG', 'EXECUTOR_DOWN', 'ended-incomplete'])
+const ACTIONABLE_KINDS = new Set(['SILENT_STALL', 'TOOL_HANG', 'EXECUTOR_DOWN', 'ended-incomplete', 'stuck', 'blocked'])
 
 /**
  * Normalize a companion chat.watch frame, or null when malformed.

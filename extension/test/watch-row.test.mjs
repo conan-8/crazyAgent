@@ -137,3 +137,19 @@ test('re-rendering the same root replaces the row (open then dismissed)', () => 
   assert.equal(allByClass(root, 'watch-row-stop').length, 0)
   assert.equal(root.classList.contains('collapsed'), true)
 })
+
+test('M4 judge kinds stuck/blocked render actionable with their labels and source', () => {
+  for (const [kind, label] of [['stuck', 'May be stuck'], ['blocked', 'Blocked']]) {
+    const notice = watchNotice({ ...alertFrame, kind, state: 'open', blocker: 'loop', reason: 'The agent appears to be repeating the same action.', source: 'watcher', signals: [] })
+    assert.equal(notice.source, 'watcher')
+    assert.equal(watchIsActionable(notice), true, `${kind} is actionable`)
+    const document = new FakeDocument()
+    const root = document.createElement('div')
+    renderWatchRow(root, notice, {})
+    assert.equal(byClass(root, 'watch-row-badge').textContent, label)
+    assert.deepEqual(byClass(root, 'watch-row-actions').children.map(button => button.textContent), ['Stop', 'Steer…', "It's fine"])
+    assert.equal(root.classList.contains('alert'), true)
+  }
+  // A 'both' source (deterministic + judge) passes through too.
+  assert.equal(watchNotice({ ...alertFrame, kind: 'stuck', source: 'both' }).source, 'both')
+})

@@ -82,9 +82,11 @@ export class SessionController {
      */
     this.marathon = new MarathonState()
     /**
-     * M3: the deterministic watcher (no judge until M4). It only reports via
-     * chat.watch; it never steers/stops/mutates. Timers are injected for tests
-     * and .unref()'d in production. Disabled watchers still keep the ledger.
+     * M3: the deterministic watcher; M4 wires the optional model judge. It only
+     * reports via chat.watch; it never steers/stops/mutates. Timers are injected
+     * for tests and .unref()'d in production. Disabled watchers still keep the
+     * ledger. With judge===null (the default until index.mjs wires it) behavior
+     * is exactly the deterministic M3 watcher.
      * @type {Watcher}
      */
     this.watcher = new Watcher({
@@ -98,6 +100,8 @@ export class SessionController {
       tickMs: options.watch?.tickMs,
       push: options.watch?.push,
       limits: options.watch?.limits,
+      judge: options.watch?.judge ?? null,
+      judgeLimits: options.watch?.judgeLimits,
       log: (type, data, severity) => this.logStore.record('companion', type, data, { severity: severity ?? 'info', turnId: this.turnId }),
     })
     this.watchEnabled = options.watch?.enabled !== false
