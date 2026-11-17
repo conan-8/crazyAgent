@@ -114,7 +114,7 @@ export class RemoteHub {
     this.messages = []
     /** @type {string | null} */
     this.sessionId = null
-    /** @type {{status: string, turnId: string | null, origin: string | null, clientMessageId: string | null, startedAt: string | null, endedAt: string | null, outcome: string | null, error: string | null, label: 'done' | 'partial' | 'blocked' | null, usage: Record<string, number> | null, failedCalls: number | null}} */
+    /** @type {{status: string, turnId: string | null, origin: string | null, clientMessageId: string | null, startedAt: string | null, endedAt: string | null, outcome: string | null, error: string | null, label: 'done' | 'partial' | 'blocked' | null, usage: Record<string, number> | null, failedCalls: number | null, plan: null | {turnId: string, revision: number, items: Array<{content: string, status: string}>, awaitingUser: boolean}}} */
     this.turn = {
       status: 'starting',
       turnId: null,
@@ -127,6 +127,8 @@ export class RemoteHub {
       label: null,
       usage: null,
       failedCalls: null,
+      // V6: the live plan while the turn runs; null at every boundary.
+      plan: null,
     }
     /** Activity phase from chat.status (capturing/thinking/tool/...). */
     this.phase = { status: null, tool: null }
@@ -370,6 +372,8 @@ export class RemoteHub {
     // The marathon switch belongs to the chat that was just left. The
     // controller publishes the authoritative off state; no extra envelope.
     this.marathon = defaultMarathonProjection()
+    // V6: the live plan belonged to the turn/chat that was just left.
+    this.turn = { ...this.turn, plan: null }
     // A help request belonged to the chat that was just left.
     if (this.turn.status === 'waiting_for_user') this.turn = { ...this.turn, status: 'idle' }
   }
@@ -448,6 +452,8 @@ export class RemoteHub {
       label: null,
       usage: null,
       failedCalls: null,
+      // V6: the live plan starts empty; plan activities fill it mid-turn.
+      plan: null,
     }
     this.phase = { status: null, tool: null }
     this.draft = null
@@ -525,6 +531,9 @@ export class RemoteHub {
       label: reportedLabel(info.label),
       usage: usageOf(info.usage),
       failedCalls: Number.isFinite(failedCalls) && failedCalls >= 0 ? failedCalls : null,
+      // V6: the live plan ends with the turn; remote.marathon carries the
+      // stored list (or none) from here, exactly as before.
+      plan: null,
     }
     this.phase = { status: null, tool: null }
     this.publish('chat.turn', { ...this.turnProjection() }, { turnId: info.turnId })
@@ -544,7 +553,10 @@ export class RemoteHub {
   }
 
   turnProjection() {
-    return { ...this.turn }
+    // The live plan is copied like the carried plan: a projected item mutated
+    // by a client must never touch the hub mirror.
+    const plan = this.turn.plan === null ? null : { ...this.turn.plan, items: this.turn.plan.items.map(item => ({ ...item })) }
+    return { ...this.turn, plan }
   }
 
   draftProjection() {
@@ -813,6 +825,24 @@ export class RemoteHub {
       if (used === this.contextTokens) return
       this.contextTokens = used
       this.updateHealth()
+      return
+    }
+    if (kind === 'plan') {
+      // V6: the live checklist for the running turn. Validation reuses the
+      // carried-plan rules by construction (normalizeMarathonPlan); the marker
+      // fields are placeholders we discard — the activity carries only
+      // revision/items. Malformed frames are dropped, never a partial plan.
+      const normalized = normalizeMarathonPlan({ revision: frame.revision, items: frame.items, updatedAt: '', turnId: '' })
+      if (normalized === null) return
+      const awaitingUser = frame.awaitingUser === true
+      const previous = this.turn.plan
+      // An identical consecutive plan is a no-op (the panel treats a
+      // same-revision update the same way; a V4 seed re-emit changes nothing).
+      if (previous !== null && previous.revision === normalized.revision && previous.awaitingUser === awaitingUser &&
+        JSON.stringify(previous.items) === JSON.stringify(normalized.items)) return
+      const plan = { turnId, revision: normalized.revision, items: normalized.items.map(item => ({ ...item })), awaitingUser }
+      this.turn = { ...this.turn, plan }
+      this.publish('remote.plan', { turnId, revision: plan.revision, items: plan.items.map(item => ({ ...item })), awaitingUser }, { turnId })
       return
     }
     if (kind !== 'text' && kind !== 'reasoning' && kind !== 'tool-call-delta') return

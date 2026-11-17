@@ -77,11 +77,26 @@ data class TurnInfo(
     val clientMessageId: String? = null,
     val outcome: String? = null,
     val error: String? = null,
+    /** V6: the live plan while the turn runs; null at every turn boundary. */
+    val plan: TurnPlan? = null,
 ) {
     val isActive: Boolean get() = status == "running" || status == "stopping"
 
     /** The agent asked for the user; the next message continues the same chat. */
     val isWaiting: Boolean get() = status == "waiting_for_user"
+}
+
+/**
+ * The running turn's live checklist (V6), mirrored from `remote.plan` and the
+ * `/state.turn.plan` projection. At turn end the carried plan
+ * ([MarathonState.plan]) takes over, exactly as before.
+ */
+data class TurnPlan(
+    val revision: Int,
+    val items: List<MarathonPlanItem>,
+    val awaitingUser: Boolean = false,
+) {
+    val openCount: Int get() = items.count { it.status == "pending" || it.status == "in_progress" }
 }
 
 data class Phase(val status: String? = null, val tool: String? = null)

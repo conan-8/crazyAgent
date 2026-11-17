@@ -31,7 +31,8 @@
             "error": null,
             "label": null,
             "usage": null,
-            "failedCalls": null
+            "failedCalls": null,
+            "plan": null
           },
           "phase": {
             "status": "thinking",
@@ -191,7 +192,8 @@
           "outputTokens": 8,
           "totalTokens": 28
         },
-        "failedCalls": 0
+        "failedCalls": 0,
+        "plan": null
       }
     }
   ],
@@ -220,7 +222,8 @@
         "outputTokens": 8,
         "totalTokens": 28
       },
-      "failedCalls": 0
+      "failedCalls": 0,
+      "plan": null
     },
     "phase": {
       "status": null,

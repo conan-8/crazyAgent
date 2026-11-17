@@ -161,4 +161,54 @@ class LiveFakeCompanionTest {
             scope.cancel()
         }
     }
+
+    /**
+     * V6 gate: the checklist updates MID-TURN through the real phone client
+     * against the real Node fake API. The marathon-stuck turn emits plan
+     * revision 1 before its hung call and revision 2 after recovery; the phone
+     * must show both live (turn.plan), then hand off to the carried plan
+     * (marathon.plan) at turn end with turn.plan cleared.
+     */
+    @Test fun marathonLiveChecklistUpdatesMidTurn() {
+        val url = System.getenv("CRAZYAGENT_FAKE_URL")
+        val tokenFile = System.getenv("CRAZYAGENT_FAKE_TOKEN_FILE")
+        assumeTrue("set CRAZYAGENT_FAKE_URL and CRAZYAGENT_FAKE_TOKEN_FILE", !url.isNullOrBlank() && !tokenFile.isNullOrBlank())
+        val token = java.io.File(tokenFile!!).readText().trim()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val c = RemoteController(ServerConfig(url!!.toHttpUrl(), token), OkHttpClient(), MemoryPendingStore(), scope)
+            scope.launch { c.run() }
+            fun await(ms: Long = 30_000, p: (UiState) -> Boolean) = runBlocking { withTimeout(ms) { c.state.first(p) } }
+
+            await { it.link.status == LinkStatus.LIVE && it.chat.synced }
+            c.toggleMarathon()
+            await { it.chat.marathon.enabled && !it.marathonInFlight }
+            c.updateComposer("marathon-stuck live plan")
+            c.send()
+            await { it.chat.turn.isActive && it.pending == null }
+
+            // Revision 1 renders LIVE while the turn runs (before the hang ends).
+            val live1 = await { it.chat.turn.isActive && it.chat.turn.plan?.revision == 1 }
+            assertEquals(3, live1.chat.turn.plan!!.items.size)
+            assertEquals(3, live1.chat.turn.plan!!.openCount)
+            assertEquals("in_progress", live1.chat.turn.plan!!.items[0].status)
+            assertNull("the carried plan is not published mid-turn", live1.chat.marathon.plan)
+
+            // Revision 2 advances the live list (or has already handed off).
+            await { it.chat.turn.plan?.revision == 2 || it.chat.marathon.plan?.revision == 2 }
+
+            // Turn end: the live plan clears; the carried list takes over.
+            val ended = await { !it.chat.turn.isActive && it.chat.marathon.plan != null }
+            assertNull(ended.chat.turn.plan)
+            assertEquals(2, ended.chat.marathon.plan!!.revision)
+            assertEquals(listOf("completed", "in_progress", "pending"), ended.chat.marathon.plan!!.items.map { it.status })
+
+            // Leave a clean state (marathon off) for the other live tests.
+            val session = ended.chat.sessionId
+            c.newChat()
+            await { it.chat.sessionId != session && !it.chat.marathon.enabled }
+        } finally {
+            scope.cancel()
+        }
+    }
 }

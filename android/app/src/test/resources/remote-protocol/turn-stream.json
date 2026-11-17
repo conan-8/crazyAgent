@@ -31,7 +31,8 @@
             "error": null,
             "label": null,
             "usage": null,
-            "failedCalls": null
+            "failedCalls": null,
+            "plan": null
           },
           "phase": {
             "status": null,
@@ -322,7 +323,8 @@
           "totalTokens": 150,
           "cacheReadTokens": 40
         },
-        "failedCalls": 0
+        "failedCalls": 0,
+        "plan": null
       }
     }
   ],
@@ -352,7 +354,8 @@
         "totalTokens": 150,
         "cacheReadTokens": 40
       },
-      "failedCalls": 0
+      "failedCalls": 0,
+      "plan": null
     },
     "phase": {
       "status": null,

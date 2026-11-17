@@ -645,8 +645,89 @@ function marathonWatchLifecycle() {
   return { ...fixture, checkpoints: { afterAlert, afterSupersede, afterNextTurnStart, afterSecondEnded } }
 }
 
+/**
+ * V6 (task-20): the LIVE checklist. Plan activities during the running turn
+ * become journaled remote.plan envelopes and project on /state.turn.plan; a
+ * malformed activity is dropped (no envelope); awaitingUser rides along; at
+ * turn end the live plan clears and remote.marathon carries the stored list;
+ * a new chat resets everything. Recorded from the real RemoteHub.
+ */
+function marathonLivePlan() {
+  const s = scenario('companion-fixture-i')
+  s.connect()
+  const since = '2026-11-17T13:00:01.000Z'
+  const marathonState = (plan, watcher) => ({
+    type: 'marathon.state',
+    enabled: true,
+    sessionId: 'session-1',
+    since,
+    origin: 'remote',
+    plan,
+    watcher,
+  })
+  const planActivity = (revision, items, extra = {}) => ({ type: 'chat.activity', kind: 'plan', revision, items, ...extra })
+  const items1 = [
+    { content: 'Fill the shipping form', status: 'in_progress' },
+    { content: 'Place the order', status: 'pending' },
+    { content: 'Verify the confirmation page', status: 'pending' },
+  ]
+  const items2 = [
+    { content: 'Fill the shipping form', status: 'completed' },
+    { content: 'Place the order', status: 'in_progress' },
+    { content: 'Verify the confirmation page', status: 'pending' },
+  ]
+  s.hub.ingest(marathonState(null, { active: false, checks: 0, lastCheckAt: null, lastVerdict: null }))
+  startTurn(s, 'turn-17', 'Place the order and verify it', { marathon: true })
+  s.modelStart()
+  s.text('Working through the checkout.')
+  // The first live plan arrives mid-turn.
+  s.hub.ingest(planActivity(1, items1))
+  const livePlan1 = s.hub.projection()
+  // A malformed activity is dropped fail-closed: no envelope, plan unchanged.
+  s.hub.ingest(planActivity(2, [{ content: 'Fill the shipping form', status: 'done' }]))
+  // An accepted revision replaces the list.
+  s.hub.ingest(planActivity(2, items2))
+  const livePlan2 = s.hub.projection()
+  // The plan waits for the user without a revision change.
+  s.hub.ingest(planActivity(2, items2, { awaitingUser: true }))
+  const awaiting = s.hub.projection()
+  // Turn end: chat.done, then chat.turn with plan:null, then the carried list
+  // via marathon.state — the same order the controller emits.
+  s.hub.ingest({
+    type: 'chat.done',
+    sessionId: 'session-1',
+    text: 'PARTIAL — the order was placed but not verified.',
+    label: 'partial',
+    model: 'fixture/model',
+    planMode: true,
+    marathon: true,
+    planOutcome: 'unfinished',
+    planRevision: 2,
+    watch: { checks: 4, alerts: 0, usage: 0 },
+    timings: { totalMs: 200_000, toolCalls: 10, failedCalls: 0 },
+    usage: { inputTokens: 25_000, outputTokens: 600, totalTokens: 25_600 },
+  })
+  s.hub.turnEnded({
+    turnId: 'turn-17',
+    outcome: 'done',
+    sessionId: 'session-1',
+    label: 'partial',
+    usage: { inputTokens: 25_000, outputTokens: 600, totalTokens: 25_600 },
+    timings: { totalMs: 200_000, toolCalls: 10, failedCalls: 0 },
+  })
+  s.hub.ingest(marathonState(
+    { revision: 2, items: items2, updatedAt: '2026-11-17T13:05:00.000Z', turnId: 'turn-17' },
+    { active: false, checks: 4, lastCheckAt: '2026-11-17T13:04:40.000Z', lastVerdict: null },
+  ))
+  const afterTurnEnd = s.hub.projection()
+  // A new chat resets the switch, the carried plan, and the live plan.
+  s.hub.setSession('session-2')
+  const fixture = s.done('marathon-live-plan')
+  return { ...fixture, checkpoints: { livePlan1, livePlan2, awaiting, afterTurnEnd } }
+}
+
 export function buildFixtures() {
-  return [turnStream(), midTurnResync(), lifecycle(), helpRequest(), confirmRequest(), deadTurn(), marathonWatch(), marathonWatchLifecycle()]
+  return [turnStream(), midTurnResync(), lifecycle(), helpRequest(), confirmRequest(), deadTurn(), marathonWatch(), marathonWatchLifecycle(), marathonLivePlan()]
 }
 
 export function fixtureFiles() {
