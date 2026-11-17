@@ -305,6 +305,8 @@ export class SessionController {
     if (!result.ok) return result
     if (result.changed) {
       this.logStore.record('companion', 'marathon.set', { enabled: result.state.enabled, origin: result.state.origin, sessionId: result.state.sessionId }, { severity: 'info' })
+      // V1: marathon off clears any open watch notice (the off frame tells clients).
+      if (!result.state.enabled) this.watcher.clearNotices()
       this.#publishMarathon()
     }
     return { ok: true, enabled: result.state.enabled, sessionId: result.state.sessionId, changed: result.changed }
@@ -340,6 +342,8 @@ export class SessionController {
     const { changed } = this.marathon.reset()
     if (changed) {
       this.logStore.record('companion', 'marathon.reset', {}, { severity: 'info' })
+      // V1: a new chat / chat switch clears any open watch notice.
+      this.watcher.clearNotices()
       this.#publishMarathon()
     }
   }
@@ -489,6 +493,9 @@ export class SessionController {
     const confirmMode = this.getConfirmIrreversible() === true
     // Executor backstop: on unless this turn starts from the user's approval.
     const confirmGuard = confirmMode && confirmApproved !== true
+    // V1: close any open ended-incomplete notice from the previous turn BEFORE
+    // the new turn's first frame, so the amber state never carries into a turn.
+    this.watcher.closeEndedIncomplete('A new turn started.')
     // M3: the ledger records every turn; the watcher only alerts on marathon
     // turns. Starting them here means a mid-turn toggle already has history.
     this.ledger.startTurn({ turnId, prompt: shownText, marathon: planMode })
