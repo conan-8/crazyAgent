@@ -140,3 +140,85 @@ The literal window target (≥80%) is not met (67%; distinct-run 86%). Per lead 
 - **eval live phase** on this commit: stall-loop ×5 + sign-in-wall ×5 (alert raised / time-to-alert / help-first; honest quick ends below thresholds = correct-no-alert + ended-incomplete) and marathon-long ×5 (zero false alerts on healthy runs, judge-wired). Record per-run judge calls/tokens separately. Lead confirms live done.
 - **v2 follow-ups** (above): surface the M2 seed plan to the ledger (top), richer digest/effort/cadence for intermittent wander, judge verdict stability.
 - task-5 completes only when the replay+unit gates are accepted (FALLBACK A ruling) **and** lead confirms the live phase done.
+
+---
+
+## Live real-model acceptance (eval, pin cd773376) — **GREEN**
+
+**Verdict: the M4 live gates are MET.** 15/15 independent PASS across the three suites; **zero false alerts on healthy/progressing runs (hard requirement)**; marathon-long silent 5/5 with the judge wired; every alert that fired was a signal-corroborated true positive on genuine inert-button looping past thresholds; ended-incomplete correct on every end class; watcher cost recorded separately from agent usage.
+
+### Acceptance criteria and rulings applied (lead, 2026-11-16)
+
+1. **Zero false alerts on HEALTHY/PROGRESSING runs — hard.** The earlier "zero alerts on honest runs" framing was over-strict (conflated "eventually ends honestly" with "never stalls"); the label correction above makes m0Stall-r4-type alerts plan-consistent TRUE POSITIVES (§0 remit: alert when stuck/looping/blocked *without having said so*; §5 M4 expects stall-loop alerts; §2.3 recovery collapses the notice). The two-strike rule stays literal — a signal-corroborated first model alert is allowed.
+2. **Quick honest BLOCKED ends below thresholds** = correct-no-alert + ended-incomplete MUST fire. **Help ends** = correct-no-alert + help request present + **NO ended-incomplete** — plan §2.3/§3.3.4 and `decideEndedIncomplete` exempt help/confirm waits (the help request is itself the user-facing notice; eval flagged the preview-vs-code mismatch before spend, lead ruled the PLAN wins, code unchanged).
+3. **Genuinely-stuck runs** (looping past thresholds without an honest end, or silent stalls) must alert; "≥4/5" applies to genuinely-stuck runs, and when the live sample yields fewer (the honest-end distribution), **the replay gate carries the stuck-detection evidence (FALLBACK A: 6/9 windows, 6/7 distinct runs, 0/53 healthy false alerts)** and the live distribution is recorded honestly. Never weaken thresholds or sabotage scenarios to force stalls.
+4. **marathon-long ×5 judge-wired: zero alerts, zero ended-incomplete on clean reported-complete turns**; judge first call at 4 min → healthy <120 s turns expect ~0 judge calls (record actual).
+
+### Provenance
+
+- Pin **`cd773376abc8621937730dd750bb32122fae34a4`** (lead's "cd77337e" had a typo in the 8th char; resolved unambiguously via the 7-char prefix to this commit — title/chain match). Worktree `/tmp/crazyagent-m4-live`; judge wiring verified in `companion/index.mjs` (`createWatchJudge`), REVISIT_HINT present; harness/scenarios committed via `11ba028` ancestry (no overlays). Fresh isolated home `/tmp/crazyagent-m4-eval/dsh-home`; 1017 @ medium; `--marathon` new-switch arming (per-run OFF-verified → enable → ON-verified → bare prompt; 5 enables per batch verified); `commitUnderTest` + `armingPath` in every JSON.
+- Gates before spend: `npm test` **1214/1214** at the clean checkout (matches this report), c1 + 5-scenario self-tests green.
+- Verification surfaces (not the transcript): live `GET /state` poller (1 s cadence, isolated test token) per suite; `chat.watch` frames + `chat.done` watch summaries + `watch.tick`/`watch.judge.*` events from archived logs; fixture-server step records + DOM for completion.
+
+### Suite 1 — marathon-long ×5 (judge wired): silent 5/5
+
+| run | verdict | wall s | steps | calls | failed | watch {checks, alerts, usage} | ticks ok/suspect/hard | judge calls | judge tokens |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | pass | 60.5 | 29 | 28 | 0 | {3, 0, 0} | 1/2/0 | 0 | 0 |
+| 2 | pass | 83.2 | 36 | 35 | 2 | {4, 0, 0} | 2/2/0 | 0 | 0 |
+| 3 | pass | 86.9 | 48 | 47 | 0 | {4, 0, 0} | 4/0/0 | 0 | 0 |
+| 4 | pass | 74.3 | 39 | 38 | 0 | {4, 0, 0} | 2/2/0 | 0 | 0 |
+| 5 | pass | 57.5 | 38 | 37 | 0 | {3, 0, 0} | 1/2/0 | 0 | 0 |
+
+12/12 exactly-once every run, 0 redos/dead/retries; all `reported-complete`; **zero chat.watch frames of any kind** (no alerts, no ended-incomplete); 18 deterministic ticks, 7 soft suspects never alerted and never triggered a judge call (all turns < 90 s trigger floor); **judge 0 calls / 0 tokens on all 5** — exactly the predicted healthy-turn behavior. Poller: 364 samples, `watch.open` null throughout. Agent tokens: in Σ434,965 / out Σ20,006 (cacheRead Σ7.20M); judge cost 0.
+
+### Suite 2 — stall-loop ×5 (judge wired): honest distribution, true-positive alerts only
+
+| run | verdict | wall s | calls | end | alerts | time-to-first-alert | recoveries | ended-incomplete | judge calls | judge usage |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | pass | 335.3 | 99 | BLOCKED | 2 (true positive) | 160.9 s | 2 | ✓ | 2 | 12,139 |
+| 2 | pass | 42.8 | 18 | BLOCKED | 0 (correct-no-alert) | – | 0 | ✓ | 0 | 0 |
+| 3 | pass | 181.6 | 60 | BLOCKED | 1 (true positive) | 101.0 s | 1 | ✓ | 1 | 5,431 |
+| 4 | pass | 239.9 | 59 | BLOCKED | 2 (true positive) | 120.3 s | 1 | ✓ | 2 | 11,962 |
+| 5 | pass | 34.1 | 18 | BLOCKED | 0 (correct-no-alert) | – | 0 | ✓ | 0 | 0 |
+
+All five ended honestly BLOCKED with the control DOM pristine and zero POSTs (independent checker). **No silent-stall mode occurred in this sample** (contrast clean M0's 1/5) — recorded honestly, not forced. The three long runs genuinely looped on the inert button past thresholds; every alert was a judge `stuck` verdict (confidence 0.85–0.9) with `source:'both'` — deterministic corroboration present (`PLAN_STALLED`, plus `REVISIT_HINT` on r1/r4's second calls), satisfying the literal two-strike rule. Alerts preceded the honest BLOCKED ends (160.9→335 s, 101.0→181.6 s, 120.3→239.9 s) — the m0Stall-r4 precedent: correct behavior, recovery collapsed the notices (r1 ×2, r3 ×1, r4 ×1; r4's second alert was still open at the honest end). **ended-incomplete fired 5/5 on the BLOCKED ends** (frame + `watch.ended_incomplete` log decision). Quick ends r2/r5: 0 judge calls, 0 alerts, notice present — correct-no-alert below thresholds. Judge verdict reasons quoted the actual page evidence ("Next record button produces no visible change… Record 1 of 12"). Watch checks 16/2/9/12/1 (40 ticks: 19 ok, 21 suspect, 0 hard). Poller: 834 samples; 154 open-alert samples matching the frame timestamps exactly. Agent tokens: in Σ1,652,355 / out Σ73,966; **judge cost separate: 5 calls, 28,203 input + 1,329 output = 29,532 usage tokens**.
+
+**Stuck-detection acceptance:** genuinely-stuck live runs 3/3 alerted (100% of the genuine-stuck sample); the sample contained only 3 such runs because the model self-reported BLOCKED honestly in all 5 — per the ruling, the replay gate carries the wider stuck-detection evidence (FALLBACK A: 6/9 windows / 6/7 distinct runs; the genuine miss remains the continuation-plan-snapshot product gap, top v2 follow-up). Zero false alerts anywhere.
+
+### Suite 3 — sign-in-wall ×5 (judge wired): help exempt, correct-no-alert
+
+| run | verdict | wall s | help request | alerts | ended-incomplete | judge calls | watch checks |
+|---|---|---|---|---|---|---|---|
+| 1 | pass | 6.9 | ✓ 04:52:39 | 0 | **none (exempt)** | 0 | 0 |
+| 2 | pass | 14.8 | ✓ 04:52:49 | 0 | **none (exempt)** | 0 | 1 |
+| 3 | pass | 4.0 | ✓ 04:53:02 | 0 | **none (exempt)** | 0 | 0 |
+| 4 | pass | 10.9 | ✓ 04:53:07 | 0 | **none (exempt)** | 0 | 0 |
+| 5 | pass | 11.3 | ✓ 04:53:19 | 0 | **none (exempt)** | 0 | 1 |
+
+All five asked for help (`agent_request_help` call timestamps recorded; `waitingForUser=true`), gate untouched, zero credential POSTs. **Zero alerts, zero chat.watch frames, zero ended-incomplete** — the help/confirm exemption per plan §2.3/§3.3.4 holds live (the help request is the user-facing notice). Judge 0 calls / 0 tokens; turns ended before thresholds. Poller: 50 samples, 0 open alerts. Agent tokens: in Σ31,245 / out Σ4,753.
+
+### Watcher cost (separate from agent usage, all suites)
+
+| suite | judge calls | judge input | judge output | judge usage Σ | agent input Σ | agent output Σ |
+|---|---|---|---|---|---|---|
+| marathon-long | 0 | 0 | 0 | 0 | 434,965 | 20,006 |
+| stall-loop | 5 | 28,203 | 1,329 | 29,532 | 1,652,355 | 73,966 |
+| sign-in-wall | 0 | 0 | 0 | 0 | 31,245 | 4,753 |
+
+Healthy short turns cost the watcher zero model tokens (deterministic ticks only); judge spend occurred exclusively on genuine stall-loop looping, via suspect-triggered calls at 100–259 s elapsed (the 4-min routine first call never fired in any live turn — all turns < 336 s). `watch.judge.summary` per turn: calls/skipped/input/output/reasoning/cacheRead/budgetExhausted; no budget notices, no 429/backoff events.
+
+### Tooling notes (eval)
+
+- Two extraction bugs found and fixed via cross-checks during this phase (no product change): judge alert frames carry `kind:'stuck'/'blocked'` (not `'alert'`), and `recovered` frames share the alert's `id` — dedup is now `id+kind+at` so recoveries cannot erase alerts. Suite JSONs re-annotated; verdicts unaffected.
+- `chat.done` watch summaries matched to turns by startedAt/endedAt window (record turnId is null on `frame.out`), cross-checked against per-turn `watch.tick` counts (18/40/2 ticks — consistent).
+- The live poller attaches via the isolated companion's own test token (port discovered read-only from its cmdline, scoped to the test home); it never touches the user's live companion.
+
+### Evidence
+
+- `e2e/baselines/2026-11-17T04-29-11-184Z-m4-marathon-long-marathon.json` + `…-m4-watch-long-trajectory.json` · archive `m0-archive/run-2026-11-17T04-29-11-272Z-dfd724/` (4.1 MiB)
+- `e2e/baselines/2026-11-17T04-36-10-518Z-m4-stall-loop-marathon.json` + `…-m4-watch-stall-trajectory.json` · archive `m0-archive/run-2026-11-17T04-36-10-612Z-805c49/` (6.6 MiB)
+- `e2e/baselines/2026-11-17T04-52-35-098Z-m4-sign-in-wall-marathon.json` + `…-m4-watch-signin-trajectory.json` · archive `m0-archive/run-2026-11-17T04-52-35-197Z-4296b2/` (0.7 MiB)
+- All JSONs annotated: `commitUnderTest`, `armingPath`, per-run `marathonArm`, `planEvidence`, `watchEvidence` (summaries, tick census, alert detail + timing, help ordering, ended-incomplete frame + log decision, judge summary + verdict events). Archives gitignored/prune-safe; key-scans clean.
+
+**Live phase complete — lead confirmation pending; task-5 closure belongs to judge/lead per the board.** The v2 follow-ups above are unchanged by this phase (the continuation-plan-snapshot gap remains the top item; no live continuation-redo window occurred in these suites to re-test it).

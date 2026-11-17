@@ -1,0 +1,1288 @@
+{
+  "startedAt": "2026-11-17T04:29:11.183Z",
+  "finishedAt": "2026-11-17T04:35:16.467Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": true,
+  "armingPath": "POST /marathon {enabled:true} then bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-m4-eval/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 7654715,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "marathon-long",
+      "fixture": "marathon-01.html",
+      "prompt": "Work through the expedition permit workflow on the site I have open, from station 1 to station 12. Each station page shows its dispatch word and seal. At every station, enter the dispatch word shown on that page plus the receipt from the previous station (station 1 shows a start receipt), submit the station form, and carry the new receipt to the next station via the link. Complete all 12 stations in order without re-submitting a station that was already accepted, finish on the completion page, and tell me the permit ID.",
+      "file": "marathon-long.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwk70kl7-4556",
+          "status": "pass",
+          "reasons": [
+            "all 12 stations recorded exactly once, in order, with the requested values; the permit completion view is the final state"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:39463/marathon-12.html",
+            "totalSteps": 12,
+            "validCount": 12,
+            "perStep": [
+              {
+                "step": 1,
+                "posts": 1,
+                "ok": true,
+                "word": "basecamp",
+                "receipt": "START-7Q4"
+              },
+              {
+                "step": 2,
+                "posts": 1,
+                "ok": true,
+                "word": "rope-team",
+                "receipt": "R1-K2F"
+              },
+              {
+                "step": 3,
+                "posts": 1,
+                "ok": true,
+                "word": "weather-log",
+                "receipt": "R2-M9X"
+              },
+              {
+                "step": 4,
+                "posts": 1,
+                "ok": true,
+                "word": "supply-cache",
+                "receipt": "R3-T4B"
+              },
+              {
+                "step": 5,
+                "posts": 1,
+                "ok": true,
+                "word": "route-finding",
+                "receipt": "R4-Q7D"
+              },
+              {
+                "step": 6,
+                "posts": 1,
+                "ok": true,
+                "word": "river-crossing",
+                "receipt": "R5-H3N"
+              },
+              {
+                "step": 7,
+                "posts": 1,
+                "ok": true,
+                "word": "altitude-check",
+                "receipt": "R6-W8S"
+              },
+              {
+                "step": 8,
+                "posts": 1,
+                "ok": true,
+                "word": "camp-two",
+                "receipt": "R7-Z5R"
+              },
+              {
+                "step": 9,
+                "posts": 1,
+                "ok": true,
+                "word": "summit-window",
+                "receipt": "R8-L6P"
+              },
+              {
+                "step": 10,
+                "posts": 1,
+                "ok": true,
+                "word": "descent-plan",
+                "receipt": "R9-D2V"
+              },
+              {
+                "step": 11,
+                "posts": 1,
+                "ok": true,
+                "word": "gear-return",
+                "receipt": "R10-G9J"
+              },
+              {
+                "step": 12,
+                "posts": 1,
+                "ok": true,
+                "word": "permit-office",
+                "receipt": "R11-B4K"
+              }
+            ],
+            "duplicates": [],
+            "orderOk": true,
+            "stepPostCount": 12,
+            "otherPostPaths": [],
+            "completion": {
+              "station": 12,
+              "formHidden": true,
+              "acceptedVisible": true,
+              "permitId": "EXP-917Q",
+              "receiptCode": "R12-Y7C",
+              "status": "Station 12 accepted."
+            },
+            "completionOk": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 60470,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 29,
+            "toolCalls": 28,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 4,
+              "browser_batch": 12,
+              "browser_click": 11,
+              "browser_read_text": 1
+            },
+            "inputTokens": 72409,
+            "outputTokens": 2884,
+            "cacheReadTokens": 837120,
+            "totalTokens": 912413,
+            "usage": {
+              "inputTokens": 72409,
+              "outputTokens": 2884,
+              "totalTokens": 912413,
+              "cacheReadTokens": 837120
+            },
+            "finalText": "DONE\n\n- All 12 stations submitted in order (station 1 with START-7Q4), each accepted, ending on the completion page.\n- Verified on page: \"Station 12 accepted... All 12 stations accepted. The workflow is complete.\"\n- **Permit ID: EXP-917Q**",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": "reported-complete",
+            "planRevision": 4,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 3,
+            "planFinalReason": "reported-complete",
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk70kl7-4556",
+              "origin": "remote",
+              "clientMessageId": "dadb04bc-cb01-4a6c-abf7-1f8c2b99111c",
+              "startedAt": "2026-11-17T04:29:12.379Z",
+              "endedAt": "2026-11-17T04:30:12.849Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 72409,
+                "outputTokens": 2884,
+                "totalTokens": 912413,
+                "cacheReadTokens": 837120
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 8
+          },
+          "followUp": null,
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": "reported-complete",
+            "planRevision": 4,
+            "browserPlanCalls": 4,
+            "planModeEndedOutcome": "reported-complete",
+            "planNudges": 0,
+            "planStaleReminders": 3,
+            "planFinalReason": "reported-complete",
+            "seedRejected": false
+          },
+          "watchEvidence": {
+            "chatWatchKinds": [],
+            "alertFrames": 0,
+            "alertDetail": [],
+            "recoveredFrames": 0,
+            "endedIncomplete": false,
+            "endedIncompleteLog": false,
+            "firstAlertAt": null,
+            "timeToAlertMs": null,
+            "helpCallAt": null,
+            "helpBeforeAlert": null,
+            "watchSummary": {
+              "checks": 3,
+              "alerts": 0,
+              "usage": 0
+            },
+            "chatDoneLabel": "done",
+            "chatDonePlanOutcome": "reported-complete",
+            "watchTicks": 3,
+            "tickLevels": {
+              "ok": 1,
+              "suspect": 2,
+              "hard": 0
+            },
+            "judgeSummary": {
+              "turnId": "turn-mwk70kl7-4556",
+              "calls": 0,
+              "skipped": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "reasoningTokens": 0,
+              "cacheReadTokens": 0,
+              "budgetExhausted": false
+            },
+            "watchEventCounts": {
+              "watch.tick": 3,
+              "watch.judge.summary": 1
+            },
+            "judgeEvents": []
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T04-29-11-272Z-dfd724/events.jsonl"
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwk71vi0-43a0",
+          "status": "pass",
+          "reasons": [
+            "all 12 stations recorded exactly once, in order, with the requested values; the permit completion view is the final state"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:39463/marathon-12.html",
+            "totalSteps": 12,
+            "validCount": 12,
+            "perStep": [
+              {
+                "step": 1,
+                "posts": 1,
+                "ok": true,
+                "word": "basecamp",
+                "receipt": "START-7Q4"
+              },
+              {
+                "step": 2,
+                "posts": 1,
+                "ok": true,
+                "word": "rope-team",
+                "receipt": "R1-K2F"
+              },
+              {
+                "step": 3,
+                "posts": 1,
+                "ok": true,
+                "word": "weather-log",
+                "receipt": "R2-M9X"
+              },
+              {
+                "step": 4,
+                "posts": 1,
+                "ok": true,
+                "word": "supply-cache",
+                "receipt": "R3-T4B"
+              },
+              {
+                "step": 5,
+                "posts": 1,
+                "ok": true,
+                "word": "route-finding",
+                "receipt": "R4-Q7D"
+              },
+              {
+                "step": 6,
+                "posts": 1,
+                "ok": true,
+                "word": "river-crossing",
+                "receipt": "R5-H3N"
+              },
+              {
+                "step": 7,
+                "posts": 1,
+                "ok": true,
+                "word": "altitude-check",
+                "receipt": "R6-W8S"
+              },
+              {
+                "step": 8,
+                "posts": 1,
+                "ok": true,
+                "word": "camp-two",
+                "receipt": "R7-Z5R"
+              },
+              {
+                "step": 9,
+                "posts": 1,
+                "ok": true,
+                "word": "summit-window",
+                "receipt": "R8-L6P"
+              },
+              {
+                "step": 10,
+                "posts": 1,
+                "ok": true,
+                "word": "descent-plan",
+                "receipt": "R9-D2V"
+              },
+              {
+                "step": 11,
+                "posts": 1,
+                "ok": true,
+                "word": "gear-return",
+                "receipt": "R10-G9J"
+              },
+              {
+                "step": 12,
+                "posts": 1,
+                "ok": true,
+                "word": "permit-office",
+                "receipt": "R11-B4K"
+              }
+            ],
+            "duplicates": [],
+            "orderOk": true,
+            "stepPostCount": 12,
+            "otherPostPaths": [],
+            "completion": {
+              "station": 12,
+              "formHidden": true,
+              "acceptedVisible": true,
+              "permitId": "EXP-917Q",
+              "receiptCode": "R12-Y7C",
+              "status": "Station 12 accepted."
+            },
+            "completionOk": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 83185,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 36,
+            "toolCalls": 35,
+            "failedCalls": 2,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_plan",
+                "message": "Error: PLAN_OPEN_REMOVAL_REQUIRES_ACK: the rewrite removes or rewrites 2 open item(s): Submit station 1 with start receipt START-7Q4 and word basecamp; Work through stations 2-11, carrying each new receipt forward. Preserve them, move them to completed/blocked as honestly applicable, or set acknowl…"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_plan",
+                "message": "Error: PLAN_OPEN_REMOVAL_REQUIRES_ACK: the rewrite removes or rewrites 1 open item(s): Submit station 12 and reach completion page. Preserve them, move them to completed/blocked as honestly applicable, or set acknowledge_open_removal:true with a specific reason"
+              }
+            ],
+            "toolCounts": {
+              "browser_plan": 6,
+              "browser_batch": 13,
+              "browser_click": 11,
+              "browser_read_text": 2,
+              "browser_navigate": 2,
+              "browser_find": 1
+            },
+            "inputTokens": 90267,
+            "outputTokens": 5107,
+            "cacheReadTokens": 1062912,
+            "totalTokens": 1158286,
+            "usage": {
+              "inputTokens": 90267,
+              "outputTokens": 5107,
+              "totalTokens": 1158286,
+              "cacheReadTokens": 1062912
+            },
+            "finalText": "DONE\n\n- All 12 stations submitted in order with the page's dispatch word and the carried receipt (START-7Q4 → R1-K2F → … → R11-B4K); each was accepted, none repeated.\n- Final state on station 12: \"All 12 stations accepted. The workflow is complete.\"\n- Permit ID: **EXP-917Q** (station 12 receipt R12-Y7C). No separate completion URL exists — the accepted station 12 page is the terminal page.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 2,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": "reported-complete",
+            "planRevision": 4,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 4,
+            "planFinalReason": "reported-complete",
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk71vi0-43a0",
+              "origin": "remote",
+              "clientMessageId": "3b5a5e25-a9d8-453d-b694-f74557bf506f",
+              "startedAt": "2026-11-17T04:30:13.176Z",
+              "endedAt": "2026-11-17T04:31:36.361Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 90267,
+                "outputTokens": 5107,
+                "totalTokens": 1158286,
+                "cacheReadTokens": 1062912
+              },
+              "failedCalls": 2
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 439
+          },
+          "followUp": null,
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": "reported-complete",
+            "planRevision": 4,
+            "browserPlanCalls": 6,
+            "planModeEndedOutcome": "reported-complete",
+            "planNudges": 0,
+            "planStaleReminders": 4,
+            "planFinalReason": "reported-complete",
+            "seedRejected": false
+          },
+          "watchEvidence": {
+            "chatWatchKinds": [],
+            "alertFrames": 0,
+            "alertDetail": [],
+            "recoveredFrames": 0,
+            "endedIncomplete": false,
+            "endedIncompleteLog": false,
+            "firstAlertAt": null,
+            "timeToAlertMs": null,
+            "helpCallAt": null,
+            "helpBeforeAlert": null,
+            "watchSummary": {
+              "checks": 4,
+              "alerts": 0,
+              "usage": 0
+            },
+            "chatDoneLabel": "done",
+            "chatDonePlanOutcome": "reported-complete",
+            "watchTicks": 4,
+            "tickLevels": {
+              "ok": 2,
+              "suspect": 2,
+              "hard": 0
+            },
+            "judgeSummary": {
+              "turnId": "turn-mwk71vi0-43a0",
+              "calls": 0,
+              "skipped": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "reasoningTokens": 0,
+              "cacheReadTokens": 0,
+              "budgetExhausted": false
+            },
+            "watchEventCounts": {
+              "watch.tick": 4,
+              "watch.judge.summary": 1
+            },
+            "judgeEvents": []
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T04-29-11-272Z-dfd724/events.jsonl"
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwk73nyl-a25a",
+          "status": "pass",
+          "reasons": [
+            "all 12 stations recorded exactly once, in order, with the requested values; the permit completion view is the final state"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:39463/marathon-12.html",
+            "totalSteps": 12,
+            "validCount": 12,
+            "perStep": [
+              {
+                "step": 1,
+                "posts": 1,
+                "ok": true,
+                "word": "basecamp",
+                "receipt": "START-7Q4"
+              },
+              {
+                "step": 2,
+                "posts": 1,
+                "ok": true,
+                "word": "rope-team",
+                "receipt": "R1-K2F"
+              },
+              {
+                "step": 3,
+                "posts": 1,
+                "ok": true,
+                "word": "weather-log",
+                "receipt": "R2-M9X"
+              },
+              {
+                "step": 4,
+                "posts": 1,
+                "ok": true,
+                "word": "supply-cache",
+                "receipt": "R3-T4B"
+              },
+              {
+                "step": 5,
+                "posts": 1,
+                "ok": true,
+                "word": "route-finding",
+                "receipt": "R4-Q7D"
+              },
+              {
+                "step": 6,
+                "posts": 1,
+                "ok": true,
+                "word": "river-crossing",
+                "receipt": "R5-H3N"
+              },
+              {
+                "step": 7,
+                "posts": 1,
+                "ok": true,
+                "word": "altitude-check",
+                "receipt": "R6-W8S"
+              },
+              {
+                "step": 8,
+                "posts": 1,
+                "ok": true,
+                "word": "camp-two",
+                "receipt": "R7-Z5R"
+              },
+              {
+                "step": 9,
+                "posts": 1,
+                "ok": true,
+                "word": "summit-window",
+                "receipt": "R8-L6P"
+              },
+              {
+                "step": 10,
+                "posts": 1,
+                "ok": true,
+                "word": "descent-plan",
+                "receipt": "R9-D2V"
+              },
+              {
+                "step": 11,
+                "posts": 1,
+                "ok": true,
+                "word": "gear-return",
+                "receipt": "R10-G9J"
+              },
+              {
+                "step": 12,
+                "posts": 1,
+                "ok": true,
+                "word": "permit-office",
+                "receipt": "R11-B4K"
+              }
+            ],
+            "duplicates": [],
+            "orderOk": true,
+            "stepPostCount": 12,
+            "otherPostPaths": [],
+            "completion": {
+              "station": 12,
+              "formHidden": true,
+              "acceptedVisible": true,
+              "permitId": "EXP-917Q",
+              "receiptCode": "R12-Y7C",
+              "status": "Station 12 accepted."
+            },
+            "completionOk": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 86906,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 48,
+            "toolCalls": 47,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 3,
+              "browser_batch": 22,
+              "browser_click": 11,
+              "browser_read_text": 11
+            },
+            "inputTokens": 194166,
+            "outputTokens": 4631,
+            "cacheReadTokens": 2087040,
+            "totalTokens": 2285837,
+            "usage": {
+              "inputTokens": 194166,
+              "outputTokens": 4631,
+              "totalTokens": 2285837,
+              "cacheReadTokens": 2087040
+            },
+            "finalText": "DONE\n\n- Submitted all 12 stations in order (basecamp → rope-team → weather-log → supply-cache → route-finding → river-crossing → altitude-check → camp-two → summit-window → descent-plan → gear-return → permit-office), each with the prior station's receipt; no station resubmitted (forms disappear once accepted, replaced only by the Continue link).\n- Verified on the station 12 page: \"Station 12 accepted\", receipt R12-Y7C, \"Permit issued. Permit ID: EXP-917Q\", \"All 12 stations accepted. The workflow is complete.\"\n- Nothing left outstanding; final page is the completion state with no further links.\n- Permit ID: **EXP-917Q**",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": "reported-complete",
+            "planRevision": 3,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 4,
+            "planFinalReason": "reported-complete",
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk73nyl-a25a",
+              "origin": "remote",
+              "clientMessageId": "7977c2d4-185e-441e-b581-9d96d036fb49",
+              "startedAt": "2026-11-17T04:31:36.718Z",
+              "endedAt": "2026-11-17T04:33:03.624Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 194166,
+                "outputTokens": 4631,
+                "totalTokens": 2285837,
+                "cacheReadTokens": 2087040
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 1556
+          },
+          "followUp": null,
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": "reported-complete",
+            "planRevision": 3,
+            "browserPlanCalls": 3,
+            "planModeEndedOutcome": "reported-complete",
+            "planNudges": 0,
+            "planStaleReminders": 4,
+            "planFinalReason": "reported-complete",
+            "seedRejected": false
+          },
+          "watchEvidence": {
+            "chatWatchKinds": [],
+            "alertFrames": 0,
+            "alertDetail": [],
+            "recoveredFrames": 0,
+            "endedIncomplete": false,
+            "endedIncompleteLog": false,
+            "firstAlertAt": null,
+            "timeToAlertMs": null,
+            "helpCallAt": null,
+            "helpBeforeAlert": null,
+            "watchSummary": {
+              "checks": 4,
+              "alerts": 0,
+              "usage": 0
+            },
+            "chatDoneLabel": "done",
+            "chatDonePlanOutcome": "reported-complete",
+            "watchTicks": 4,
+            "tickLevels": {
+              "ok": 4,
+              "suspect": 0,
+              "hard": 0
+            },
+            "judgeSummary": {
+              "turnId": "turn-mwk73nyl-a25a",
+              "calls": 0,
+              "skipped": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "reasoningTokens": 0,
+              "cacheReadTokens": 0,
+              "budgetExhausted": false
+            },
+            "watchEventCounts": {
+              "watch.tick": 4,
+              "watch.judge.summary": 1
+            },
+            "judgeEvents": []
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T04-29-11-272Z-dfd724/events.jsonl"
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwk75jc8-5787",
+          "status": "pass",
+          "reasons": [
+            "all 12 stations recorded exactly once, in order, with the requested values; the permit completion view is the final state"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:39463/marathon-12.html",
+            "totalSteps": 12,
+            "validCount": 12,
+            "perStep": [
+              {
+                "step": 1,
+                "posts": 1,
+                "ok": true,
+                "word": "basecamp",
+                "receipt": "START-7Q4"
+              },
+              {
+                "step": 2,
+                "posts": 1,
+                "ok": true,
+                "word": "rope-team",
+                "receipt": "R1-K2F"
+              },
+              {
+                "step": 3,
+                "posts": 1,
+                "ok": true,
+                "word": "weather-log",
+                "receipt": "R2-M9X"
+              },
+              {
+                "step": 4,
+                "posts": 1,
+                "ok": true,
+                "word": "supply-cache",
+                "receipt": "R3-T4B"
+              },
+              {
+                "step": 5,
+                "posts": 1,
+                "ok": true,
+                "word": "route-finding",
+                "receipt": "R4-Q7D"
+              },
+              {
+                "step": 6,
+                "posts": 1,
+                "ok": true,
+                "word": "river-crossing",
+                "receipt": "R5-H3N"
+              },
+              {
+                "step": 7,
+                "posts": 1,
+                "ok": true,
+                "word": "altitude-check",
+                "receipt": "R6-W8S"
+              },
+              {
+                "step": 8,
+                "posts": 1,
+                "ok": true,
+                "word": "camp-two",
+                "receipt": "R7-Z5R"
+              },
+              {
+                "step": 9,
+                "posts": 1,
+                "ok": true,
+                "word": "summit-window",
+                "receipt": "R8-L6P"
+              },
+              {
+                "step": 10,
+                "posts": 1,
+                "ok": true,
+                "word": "descent-plan",
+                "receipt": "R9-D2V"
+              },
+              {
+                "step": 11,
+                "posts": 1,
+                "ok": true,
+                "word": "gear-return",
+                "receipt": "R10-G9J"
+              },
+              {
+                "step": 12,
+                "posts": 1,
+                "ok": true,
+                "word": "permit-office",
+                "receipt": "R11-B4K"
+              }
+            ],
+            "duplicates": [],
+            "orderOk": true,
+            "stepPostCount": 12,
+            "otherPostPaths": [],
+            "completion": {
+              "station": 12,
+              "formHidden": true,
+              "acceptedVisible": true,
+              "permitId": "EXP-917Q",
+              "receiptCode": "R12-Y7C",
+              "status": "Station 12 accepted."
+            },
+            "completionOk": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 74322,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 39,
+            "toolCalls": 38,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 3,
+              "browser_batch": 12,
+              "browser_click": 1,
+              "browser_read_text": 12,
+              "browser_click_role": 10
+            },
+            "inputTokens": 50590,
+            "outputTokens": 3904,
+            "cacheReadTokens": 1423744,
+            "totalTokens": 1478238,
+            "usage": {
+              "inputTokens": 50590,
+              "outputTokens": 3904,
+              "totalTokens": 1478238,
+              "cacheReadTokens": 1423744
+            },
+            "finalText": "DONE\n\n- All 12 stations submitted in order, each with its own dispatch word plus the prior station's receipt (station 1 used START-7Q4); every station showed its acceptance receipt and no station was re-submitted.\n- Final page confirms: \"All 12 stations accepted. The workflow is complete.\"\n- **Permit ID: EXP-917Q** (station 12 receipt R12-Y7C).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": "reported-complete",
+            "planRevision": 3,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 4,
+            "planFinalReason": "reported-complete",
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk75jc8-5787",
+              "origin": "remote",
+              "clientMessageId": "fd8212cf-282c-4e10-8c01-090c1e64f052",
+              "startedAt": "2026-11-17T04:33:04.040Z",
+              "endedAt": "2026-11-17T04:34:18.362Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 50590,
+                "outputTokens": 3904,
+                "totalTokens": 1478238,
+                "cacheReadTokens": 1423744
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 2389
+          },
+          "followUp": null,
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": "reported-complete",
+            "planRevision": 3,
+            "browserPlanCalls": 3,
+            "planModeEndedOutcome": "reported-complete",
+            "planNudges": 0,
+            "planStaleReminders": 4,
+            "planFinalReason": "reported-complete",
+            "seedRejected": false
+          },
+          "watchEvidence": {
+            "chatWatchKinds": [],
+            "alertFrames": 0,
+            "alertDetail": [],
+            "recoveredFrames": 0,
+            "endedIncomplete": false,
+            "endedIncompleteLog": false,
+            "firstAlertAt": null,
+            "timeToAlertMs": null,
+            "helpCallAt": null,
+            "helpBeforeAlert": null,
+            "watchSummary": {
+              "checks": 4,
+              "alerts": 0,
+              "usage": 0
+            },
+            "chatDoneLabel": "done",
+            "chatDonePlanOutcome": "reported-complete",
+            "watchTicks": 4,
+            "tickLevels": {
+              "ok": 2,
+              "suspect": 2,
+              "hard": 0
+            },
+            "judgeSummary": {
+              "turnId": "turn-mwk75jc8-5787",
+              "calls": 0,
+              "skipped": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "reasoningTokens": 0,
+              "cacheReadTokens": 0,
+              "budgetExhausted": false
+            },
+            "watchEventCounts": {
+              "watch.tick": 4,
+              "watch.judge.summary": 1
+            },
+            "judgeEvents": []
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T04-29-11-272Z-dfd724/events.jsonl"
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwk774zl-d88e",
+          "status": "pass",
+          "reasons": [
+            "all 12 stations recorded exactly once, in order, with the requested values; the permit completion view is the final state"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:39463/marathon-12.html",
+            "totalSteps": 12,
+            "validCount": 12,
+            "perStep": [
+              {
+                "step": 1,
+                "posts": 1,
+                "ok": true,
+                "word": "basecamp",
+                "receipt": "START-7Q4"
+              },
+              {
+                "step": 2,
+                "posts": 1,
+                "ok": true,
+                "word": "rope-team",
+                "receipt": "R1-K2F"
+              },
+              {
+                "step": 3,
+                "posts": 1,
+                "ok": true,
+                "word": "weather-log",
+                "receipt": "R2-M9X"
+              },
+              {
+                "step": 4,
+                "posts": 1,
+                "ok": true,
+                "word": "supply-cache",
+                "receipt": "R3-T4B"
+              },
+              {
+                "step": 5,
+                "posts": 1,
+                "ok": true,
+                "word": "route-finding",
+                "receipt": "R4-Q7D"
+              },
+              {
+                "step": 6,
+                "posts": 1,
+                "ok": true,
+                "word": "river-crossing",
+                "receipt": "R5-H3N"
+              },
+              {
+                "step": 7,
+                "posts": 1,
+                "ok": true,
+                "word": "altitude-check",
+                "receipt": "R6-W8S"
+              },
+              {
+                "step": 8,
+                "posts": 1,
+                "ok": true,
+                "word": "camp-two",
+                "receipt": "R7-Z5R"
+              },
+              {
+                "step": 9,
+                "posts": 1,
+                "ok": true,
+                "word": "summit-window",
+                "receipt": "R8-L6P"
+              },
+              {
+                "step": 10,
+                "posts": 1,
+                "ok": true,
+                "word": "descent-plan",
+                "receipt": "R9-D2V"
+              },
+              {
+                "step": 11,
+                "posts": 1,
+                "ok": true,
+                "word": "gear-return",
+                "receipt": "R10-G9J"
+              },
+              {
+                "step": 12,
+                "posts": 1,
+                "ok": true,
+                "word": "permit-office",
+                "receipt": "R11-B4K"
+              }
+            ],
+            "duplicates": [],
+            "orderOk": true,
+            "stepPostCount": 12,
+            "otherPostPaths": [],
+            "completion": {
+              "station": 12,
+              "formHidden": true,
+              "acceptedVisible": true,
+              "permitId": "EXP-917Q",
+              "receiptCode": "R12-Y7C",
+              "status": "Station 12 accepted."
+            },
+            "completionOk": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 57541,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 38,
+            "toolCalls": 37,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_batch": 12,
+              "browser_click": 1,
+              "browser_read_text": 12,
+              "browser_click_role": 10
+            },
+            "inputTokens": 27533,
+            "outputTokens": 3480,
+            "cacheReadTokens": 1788928,
+            "totalTokens": 1819941,
+            "usage": {
+              "inputTokens": 27533,
+              "outputTokens": 3480,
+              "totalTokens": 1819941,
+              "cacheReadTokens": 1788928
+            },
+            "finalText": "DONE\n\n- All 12 stations submitted once, in order, each with that page's dispatch word and the previous receipt (START-7Q4 → R1-K2F → R2-M9X … → R11-B4K), advancing via each \"Continue to station N →\" link.\n- Verified on the final page: \"Station 12 accepted… All 12 stations accepted. The workflow is complete.\"\n- **Permit ID: EXP-917Q**",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": "reported-complete",
+            "planRevision": 2,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 2,
+            "planFinalReason": "reported-complete",
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwk774zl-d88e",
+              "origin": "remote",
+              "clientMessageId": "4c227949-48f4-40ba-8142-a4ee390a9d09",
+              "startedAt": "2026-11-17T04:34:18.754Z",
+              "endedAt": "2026-11-17T04:35:16.295Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 27533,
+                "outputTokens": 3480,
+                "totalTokens": 1819941,
+                "cacheReadTokens": 1788928
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 2942
+          },
+          "followUp": null,
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": "reported-complete",
+            "planRevision": 2,
+            "browserPlanCalls": 2,
+            "planModeEndedOutcome": "reported-complete",
+            "planNudges": 0,
+            "planStaleReminders": 2,
+            "planFinalReason": "reported-complete",
+            "seedRejected": false
+          },
+          "watchEvidence": {
+            "chatWatchKinds": [],
+            "alertFrames": 0,
+            "alertDetail": [],
+            "recoveredFrames": 0,
+            "endedIncomplete": false,
+            "endedIncompleteLog": false,
+            "firstAlertAt": null,
+            "timeToAlertMs": null,
+            "helpCallAt": null,
+            "helpBeforeAlert": null,
+            "watchSummary": {
+              "checks": 3,
+              "alerts": 0,
+              "usage": 0
+            },
+            "chatDoneLabel": "done",
+            "chatDonePlanOutcome": "reported-complete",
+            "watchTicks": 3,
+            "tickLevels": {
+              "ok": 1,
+              "suspect": 2,
+              "hard": 0
+            },
+            "judgeSummary": {
+              "turnId": "turn-mwk774zl-d88e",
+              "calls": 0,
+              "skipped": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "reasoningTokens": 0,
+              "cacheReadTokens": 0,
+              "budgetExhausted": false
+            },
+            "watchEventCounts": {
+              "watch.tick": 3,
+              "watch.judge.summary": 1
+            },
+            "judgeEvents": []
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T04-29-11-272Z-dfd724/events.jsonl"
+        }
+      ],
+      "effectiveMaxTurnSeconds": 1200
+    }
+  ],
+  "logArchiveRoot": ".dsh-home/browser-agent/logs/m0-archive",
+  "logArchiveRunDir": "run-2026-11-17T04-29-11-272Z-dfd724",
+  "commitUnderTest": "cd773376abc8621937730dd750bb32122fae34a4",
+  "worktree": "/tmp/crazyagent-m4-live",
+  "provenance": "git worktree pinned at commitUnderTest; only harness/scenario/fixture files overlaid; live working tree not used"
+}
