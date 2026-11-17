@@ -67,6 +67,22 @@ export const SCENARIO_CLASS = Object.freeze({
   'unrelated-question': 'other',
 })
 
+/** Infer the scenario from the harness prompt for archives without a baseline
+ * (e.g. the contaminated M1-code diagnostics). Fixture prompts only. */
+export function scenarioFromPrompt(prompt) {
+  const p = String(prompt ?? '')
+  if (/records viewer|record 12|access code/iu.test(p)) return 'stall-loop'
+  if (/expedition permit|station/iu.test(p)) return 'marathon-long'
+  if (/newest subject|inbox|mail app/iu.test(p)) return 'sign-in-wall'
+  if (/verify you are human|captcha/iu.test(p)) return 'captcha-wall'
+  if (/never finish loading|spinner/iu.test(p)) return 'spinner-forever'
+  if (/something went wrong|bounce/iu.test(p)) return 'bounce-form'
+  if (/17 \* 3|just the number/iu.test(p)) return 'unrelated-question'
+  if (/Increment button/iu.test(p)) return 'click-once'
+  if (/^continue$/iu.test(p.trim())) return 'stop-then-continue'
+  return 'unknown'
+}
+
 /** Holdout split: by RUN, deterministic, fixed before scoring (~1/3 holdout).
  * Runs are ranked by a seeded hash and the bottom third assigned to holdout, so
  * the fraction is exact for any run count and no run appears on both sides. */
@@ -325,7 +341,7 @@ function build(args) {
       const turn = turns[i]
       // match batch run by turnId (or index)
       const batchRun = meta.runs.find(r => r.turnId === turn.turnId) ?? meta.runs[i] ?? null
-      const scenario = meta.scenario
+      const scenario = meta.scenario !== 'unknown' ? meta.scenario : scenarioFromPrompt(turn.prompt)
       const lab = labelTurn(turn, scenario, batchRun, legacy.get(`${dir}#${i}`) ?? null)
       const trace = writeTrace(turn, dir, i)
       traceBytes += trace.bytes
