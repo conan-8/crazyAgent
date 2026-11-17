@@ -651,6 +651,9 @@ function marathonWatchLifecycle() {
  * malformed activity is dropped (no envelope); awaitingUser rides along; at
  * turn end the live plan clears and remote.marathon carries the stored list;
  * a new chat resets everything. Recorded from the real RemoteHub.
+ * V8 (task-22 android slice): rev2 carries a BLOCKED item with its optional
+ * single-line reason, live and through the carry-over; a reason on a
+ * non-blocked item is dropped fail-closed like any other malformed activity.
  */
 function marathonLivePlan() {
   const s = scenario('companion-fixture-i')
@@ -674,7 +677,7 @@ function marathonLivePlan() {
   const items2 = [
     { content: 'Fill the shipping form', status: 'completed' },
     { content: 'Place the order', status: 'in_progress' },
-    { content: 'Verify the confirmation page', status: 'pending' },
+    { content: 'Verify the confirmation page', status: 'blocked', reason: 'The confirmation page never loads.' },
   ]
   s.hub.ingest(marathonState(null, { active: false, checks: 0, lastCheckAt: null, lastVerdict: null }))
   startTurn(s, 'turn-17', 'Place the order and verify it', { marathon: true })
@@ -685,7 +688,9 @@ function marathonLivePlan() {
   const livePlan1 = s.hub.projection()
   // A malformed activity is dropped fail-closed: no envelope, plan unchanged.
   s.hub.ingest(planActivity(2, [{ content: 'Fill the shipping form', status: 'done' }]))
-  // An accepted revision replaces the list.
+  // V8: a reason on a NON-blocked item rejects the whole plan — dropped too.
+  s.hub.ingest(planActivity(3, [{ content: 'Fill the shipping form', status: 'pending', reason: 'not allowed here' }]))
+  // An accepted revision replaces the list (blocked item carries its reason).
   s.hub.ingest(planActivity(2, items2))
   const livePlan2 = s.hub.projection()
   // The plan waits for the user without a revision change.

@@ -185,7 +185,8 @@
           },
           {
             "content": "Verify the confirmation page",
-            "status": "pending"
+            "status": "blocked",
+            "reason": "The confirmation page never loads."
           }
         ],
         "awaitingUser": false
@@ -213,7 +214,8 @@
           },
           {
             "content": "Verify the confirmation page",
-            "status": "pending"
+            "status": "blocked",
+            "reason": "The confirmation page never loads."
           }
         ],
         "awaitingUser": true
@@ -307,7 +309,8 @@
             },
             {
               "content": "Verify the confirmation page",
-              "status": "pending"
+              "status": "blocked",
+              "reason": "The confirmation page never loads."
             }
           ],
           "updatedAt": "2026-11-17T13:05:00.000Z",
@@ -529,7 +532,8 @@
             },
             {
               "content": "Verify the confirmation page",
-              "status": "pending"
+              "status": "blocked",
+              "reason": "The confirmation page never loads."
             }
           ],
           "awaitingUser": false
@@ -627,7 +631,8 @@
             },
             {
               "content": "Verify the confirmation page",
-              "status": "pending"
+              "status": "blocked",
+              "reason": "The confirmation page never loads."
             }
           ],
           "awaitingUser": true
@@ -807,7 +812,8 @@
             },
             {
               "content": "Verify the confirmation page",
-              "status": "pending"
+              "status": "blocked",
+              "reason": "The confirmation page never loads."
             }
           ],
           "updatedAt": "2026-11-17T13:05:00.000Z",

@@ -80,6 +80,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -740,14 +741,27 @@ private fun PlanChecklistCard(revision: Int, items: List<MarathonPlanItem>, awai
                         "blocked" -> AgentDanger to AgentDanger
                         else -> AgentDim to AgentLabel
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(Modifier.size(6.dp).background(dot, CircleShape))
-                        Text(
-                            item.content,
-                            style = AgentType.Note,
-                            color = text,
-                            modifier = Modifier.weight(1f),
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.size(6.dp).background(dot, CircleShape))
+                            Text(
+                                item.content,
+                                style = AgentType.Note,
+                                color = text,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        // V8 (§3.9): the blocked-item reason under the content,
+                        // mirroring the panel's .plan-panel-item-reason (muted
+                        // italic 11px, line-height 1.4, content column).
+                        if (item.status == "blocked" && item.reason != null) {
+                            Text(
+                                item.reason,
+                                style = AgentType.Note.copy(fontSize = 11.sp, lineHeight = 15.4.sp, fontStyle = FontStyle.Italic),
+                                color = AgentMuted,
+                                modifier = Modifier.padding(start = 14.dp),
+                            )
+                        }
                     }
                 }
                 if (awaitingUser) {

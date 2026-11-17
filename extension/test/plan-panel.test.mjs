@@ -449,3 +449,34 @@ test('each rendered root has a stable unique details target', () => {
   renderPlanPanel(first, state)
   assert.equal(byClass(first, 'plan-panel-toggle').getAttribute('aria-controls'), firstTarget)
 })
+
+test('V8: a blocked item reason is kept and rendered under the item', () => {
+  const document = new FakeDocument()
+  const root = document.createElement('div')
+  const plan = [
+    item('Inspect the current page', 'completed'),
+    item('Edit the selected text', 'in_progress'),
+    { content: 'Resolve the blocked login', status: 'blocked', reason: 'sign-in wall blocks the form' },
+  ]
+  const result = createPlanPanelModel().update(plan)
+  assert.equal(result.accepted, true)
+  assert.equal(result.state.items[2].reason, 'sign-in wall blocks the form')
+  renderPlanPanel(root, result.state)
+  const rows = renderedItems(root)
+  const blockedRow = rows.find(row => row.dataset.status === 'blocked')
+  const reason = byClass(blockedRow, 'plan-panel-item-reason')
+  assert.equal(reason.textContent, 'sign-in wall blocks the form')
+  // a non-blocked item never renders a reason span.
+  const progressRow = rows.find(row => row.dataset.status === 'in_progress')
+  assert.equal(elements(progressRow, node => node.classList.contains('plan-panel-item-reason')).length, 0)
+})
+
+test('V8: reason on a non-blocked item is dropped by the panel (blocked-only display)', () => {
+  const result = createPlanPanelModel().update([
+    { content: 'Edit the selected text', status: 'in_progress', reason: 'should be dropped' },
+    { content: 'Resolve the blocked login', status: 'blocked', reason: 'kept' },
+  ])
+  assert.equal(result.accepted, true)
+  assert.equal(result.state.items[0].reason, undefined)
+  assert.equal(result.state.items[1].reason, 'kept')
+})

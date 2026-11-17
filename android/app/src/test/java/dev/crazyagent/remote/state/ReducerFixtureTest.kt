@@ -436,8 +436,9 @@ class ReducerFixtureTest {
         fun body(frame: JsonObject) = frame["body"]!!.jsonObject
         fun upTo(predicate: (JsonObject) -> Boolean) = replay(all.take(all.indexOfFirst(predicate) + 1))
 
-        // The first live plan arrives mid-turn; the malformed activity after it
-        // published nothing (three remote.plan envelopes for four activities).
+        // The first live plan arrives mid-turn; the two malformed activities
+        // after it (bad status; V8 reason on a non-blocked item) published
+        // nothing — three remote.plan envelopes for five activities.
         assertEquals(3, all.count { type(it) == "remote.plan" })
         val first = upTo { type(it) == "remote.plan" }
         assertEquals(checkpoint("livePlan1"), first)
@@ -446,28 +447,36 @@ class ReducerFixtureTest {
         assertTrue(first.turn.isActive)
         assertNull(first.marathon.plan)
 
-        // An accepted revision replaces the list live.
+        // An accepted revision replaces the list live; the V8 blocked item
+        // carries its single-line reason.
         val plans = all.filter { type(it) == "remote.plan" }
         val second = replay(all.take(all.indexOf(plans[1]) + 1))
         assertEquals(checkpoint("livePlan2"), second)
         assertEquals(2, second.turn.plan!!.revision)
         assertEquals("completed", second.turn.plan!!.items[0].status)
-        assertEquals(2, second.turn.plan!!.openCount)
+        assertEquals(1, second.turn.plan!!.openCount)
+        assertEquals("blocked", second.turn.plan!!.items[2].status)
+        assertEquals("The confirmation page never loads.", second.turn.plan!!.items[2].reason)
+        assertNull(second.turn.plan!!.items[0].reason)
 
         // awaitingUser rides along without a revision change.
         val awaiting = replay(all.take(all.indexOf(plans[2]) + 1))
         assertEquals(checkpoint("awaiting"), awaiting)
         assertTrue(awaiting.turn.plan!!.awaitingUser)
         assertEquals(2, awaiting.turn.plan!!.revision)
+        assertEquals("The confirmation page never loads.", awaiting.turn.plan!!.items[2].reason)
 
-        // Turn end: the live plan clears and remote.marathon carries the list.
+        // Turn end: the live plan clears and remote.marathon carries the list —
+        // the reason survives the carry-over.
         val ended = upTo { type(it) == "remote.marathon" && body(it)["plan"] is JsonObject }
         assertEquals(checkpoint("afterTurnEnd"), ended)
         assertNull(ended.turn.plan)
         assertEquals("idle", ended.turn.status)
         assertEquals(2, ended.marathon.plan!!.revision)
-        assertEquals(2, ended.marathon.plan!!.openCount)
+        assertEquals(1, ended.marathon.plan!!.openCount)
         assertEquals("turn-17", ended.marathon.plan!!.turnId)
+        assertEquals("blocked", ended.marathon.plan!!.items[2].status)
+        assertEquals("The confirmation page never loads.", ended.marathon.plan!!.items[2].reason)
 
         // A new chat resets everything.
         val end = replay(all)

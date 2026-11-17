@@ -3000,6 +3000,17 @@ input::placeholder {
   color: #e58b85;
 }
 
+/* V8 (§3.9): the blocked-item reason renders under the content column. */
+.plan-panel-item-reason {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .plan-panel-overflow {
   padding: 8px 12px;
   color: var(--muted);

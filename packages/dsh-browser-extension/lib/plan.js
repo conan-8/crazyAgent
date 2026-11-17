@@ -17,7 +17,7 @@ export const PLAN_LIMITS = deepFreeze({
 export const BROWSER_PLAN_TOOL = deepFreeze({
   name: 'browser_plan',
   rawName: 'browser_plan',
-  description: 'Replace the complete live plan for a multi-step task. This changes only plan state, never the page, and is not evidence that browser work succeeded. Send every item each time with expected_revision (initially 0, then the latest returned revision). Status is pending | in_progress | completed | blocked. Keep exactly one item in_progress while pending work remains; at most one is allowed otherwise. completed is a model report, not independent verification. blocked is an explicit terminal state after genuine attempts and permits an honest blocked stop; its content should say why. If user input is needed, send the unchanged complete list with user_input_needed:true, then stop and ask rather than marking actionable work complete or blocked just to finish. Open items may be removed or have their content rewritten only with acknowledge_open_removal:true and a specific reason; otherwise preserve them in the complete replacement. Do not send an unchanged list except with user_input_needed:true, and do not use this tool for trivial single-step tasks.',
+  description: 'Replace the complete live plan for a multi-step task. This changes only plan state, never the page, and is not evidence that browser work succeeded. Send every item each time with expected_revision (initially 0, then the latest returned revision). Status is pending | in_progress | completed | blocked. Keep exactly one item in_progress while pending work remains; at most one is allowed otherwise. completed is a model report, not independent verification. blocked is an explicit terminal state after genuine attempts and permits an honest blocked stop. For blocked items, put why in reason and keep content unchanged. If user input is needed, send the unchanged complete list with user_input_needed:true, then stop and ask rather than marking actionable work complete or blocked just to finish. Open items may be removed or have their content rewritten only with acknowledge_open_removal:true and a specific reason; otherwise preserve them in the complete replacement. Do not send an unchanged list except with user_input_needed:true, and do not use this tool for trivial single-step tasks.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -32,8 +32,9 @@ export const BROWSER_PLAN_TOOL = deepFreeze({
           additionalProperties: false,
           required: ['content', 'status'],
           properties: {
-            content: { type: 'string', minLength: 1, maxLength: PLAN_LIMITS.maxContentChars, description: 'A short, single-line imperative task. For blocked items, include the concise reason.' },
+            content: { type: 'string', minLength: 1, maxLength: PLAN_LIMITS.maxContentChars, description: 'A short, single-line imperative task. For blocked items, keep content unchanged and put why in reason.' },
             status: { type: 'string', enum: PLAN_STATUSES },
+            reason: { type: 'string', minLength: 1, maxLength: PLAN_LIMITS.maxReasonChars, description: 'Optional single-line reason (≤240 chars), allowed ONLY on blocked items: why this item is blocked.' },
           },
         },
       },
@@ -113,8 +114,8 @@ function normalizeItems(raw) {
     if (!isRecord(entry)) {
       return validationError('PLAN_ITEM_INVALID', `items[${index}] must be an object`)
     }
-    if (!hasOnlyKeys(entry, ['content', 'status']) || !hasOwn(entry, 'content') || !hasOwn(entry, 'status')) {
-      return validationError('PLAN_ITEM_FIELDS_INVALID', `items[${index}] requires exactly content and status; unknown or missing fields are refused`)
+    if (!hasOnlyKeys(entry, ['content', 'status', 'reason']) || !hasOwn(entry, 'content') || !hasOwn(entry, 'status')) {
+      return validationError('PLAN_ITEM_FIELDS_INVALID', `items[${index}] requires content and status (optional reason on blocked items); unknown or missing fields are refused`)
     }
     const content = normalizeText(entry.content, `items[${index}].content`, PLAN_LIMITS.maxContentChars)
     if (content.error) return content
@@ -125,20 +126,31 @@ function normalizeItems(raw) {
     if (typeof entry.status !== 'string' || !PLAN_STATUSES.includes(entry.status)) {
       return validationError('PLAN_STATUS_INVALID', `items[${index}].status must be one of: ${PLAN_STATUSES.join(', ')}`)
     }
-    items.push({ content: content.text, status: entry.status })
+    // V8 (§3.9): an optional single-line reason (≤240 chars) is allowed ONLY on
+    // blocked items; any other status is refused. Kept through the carry chain.
+    let reason
+    if (hasOwn(entry, 'reason')) {
+      if (entry.status !== 'blocked') {
+        return validationError('PLAN_REASON_STATUS', `items[${index}].reason is allowed only on blocked items; keep content unchanged and put why in reason`)
+      }
+      const checked = normalizeText(entry.reason, `items[${index}].reason`, PLAN_LIMITS.maxReasonChars)
+      if (checked.error) return checked
+      reason = checked.text
+    }
+    items.push({ content: content.text, status: entry.status, ...(reason !== undefined ? { reason } : {}) })
   }
   const active = items.filter(item => item.status === 'in_progress').length
   if (active > 1) {
     return validationError('PLAN_MULTIPLE_IN_PROGRESS', 'at most one item may be in_progress')
   }
   if (active === 0 && items.some(item => item.status === 'pending')) {
-    return validationError('PLAN_IN_PROGRESS_REQUIRED', 'one item must be in_progress while pending work remains')
+    return validationError('PLAN_IN_PROGRESS_REQUIRED', 'one item must be in_progress while pending work remains. If the remaining items cannot proceed because of a blocked item, mark them blocked too, or ask the user with user_input_needed: true.')
   }
   return { items }
 }
 
 function cloneItems(items) {
-  return items.map(item => ({ content: item.content, status: item.status }))
+  return items.map(item => ({ content: item.content, status: item.status, ...(item.reason !== undefined ? { reason: item.reason } : {}) }))
 }
 
 function assertPlanState(state) {
@@ -180,7 +192,7 @@ function openItems(items) {
 
 function sameItems(left, right) {
   return left.length === right.length && left.every((item, index) =>
-    item.content === right[index].content && item.status === right[index].status)
+    item.content === right[index].content && item.status === right[index].status && (item.reason ?? undefined) === (right[index].reason ?? undefined))
 }
 
 function failedReplacement(state, code, message) {
@@ -313,7 +325,14 @@ export function replacePlan(state, args) {
     return failedReplacement(state, 'PLAN_UNCHANGED', 'the replacement is unchanged; do real work or change the plan before calling browser_plan again')
   }
   const nextContents = new Set(normalized.items.map(item => item.content))
-  const removedOpenItems = openItems(state.items).filter(item => !nextContents.has(item.content))
+  // V8 (§3.9): an open item moving to blocked may also change its content WITHOUT
+  // acknowledgement if the new content STARTS WITH the old content (covers the
+  // observed " — blocked: …" suffix). Anything else is still a rewrite needing ack.
+  const nextBlockedContents = normalized.items.filter(item => item.status === 'blocked').map(item => item.content)
+  const removedOpenItems = openItems(state.items).filter(item => {
+    if (nextContents.has(item.content)) return false
+    return !nextBlockedContents.some(content => content.startsWith(item.content))
+  })
   if (removedOpenItems.length > 0 && !acknowledgeOpenRemoval) {
     const names = removedOpenItems.slice(0, PLAN_LIMITS.openSummaryItems).map(item => item.content).join('; ')
     return failedReplacement(state, 'PLAN_OPEN_REMOVAL_REQUIRES_ACK', `the rewrite removes or rewrites ${removedOpenItems.length} open item(s): ${names}. Preserve them, move them to completed/blocked as honestly applicable, or set acknowledge_open_removal:true with a specific reason`)

@@ -158,4 +158,90 @@ class MarathonLivePlanTest {
         val carried = MarathonPlan(4, listOf(MarathonPlanItem("a", "pending"), MarathonPlanItem("b", "blocked")), "u", "t1")
         assertEquals(planSummary(carried.revision, carried.items), planSummary(carried))
     }
+
+    // --- V8 (§3.9): the blocked-item reason ---------------------------------
+
+    private val blockedItems = """[{"content":"Fill the form","status":"completed"},{"content":"Place the order","status":"blocked","reason":"The confirmation page never loads."}]"""
+
+    @Test fun theBlockedItemReasonIsKeptLiveAndCarried() {
+        var state = running()
+        state = apply(state, 7, "remote.plan", """{"turnId":"t1","revision":2,"items":$blockedItems,"awaitingUser":false}""")
+        assertEquals("The confirmation page never loads.", state.turn.plan!!.items[1].reason)
+        assertNull("only the blocked item carries a reason", state.turn.plan!!.items[0].reason)
+        // The carry-over keeps it too (remote.marathon at turn end).
+        state = apply(state, 8, "chat.turn", """{"status":"idle","turnId":"t1","outcome":"done","plan":null}""")
+        state = apply(
+            state, 9, "remote.marathon",
+            """{"enabled":true,"sessionId":"s1","since":"2026-11-17T12:00:00.000Z","origin":"remote",
+                "plan":{"revision":2,"items":$blockedItems,"updatedAt":"2026-11-17T12:05:00.000Z","turnId":"t1"},
+                "watcher":{"active":false,"checks":0,"lastCheckAt":null,"lastVerdict":null}}""",
+            turnId = null,
+        )
+        assertNull(state.turn.plan)
+        assertEquals("The confirmation page never loads.", state.marathon.plan!!.items[1].reason)
+    }
+
+    @Test fun theReasonIsTrimmedAndBoundedLikeTheHubValidator() {
+        var state = running()
+        state = apply(state, 7, "remote.plan", """{"turnId":"t1","revision":1,"items":[{"content":"x","status":"blocked","reason":"  sign-in wall  "}],"awaitingUser":false}""")
+        assertEquals("sign-in wall", state.turn.plan!!.items[0].reason)
+        // Exactly 240 characters is accepted.
+        val max = "a".repeat(240)
+        state = apply(state, 8, "remote.plan", """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"blocked","reason":"$max"}],"awaitingUser":false}""")
+        assertEquals(max, state.turn.plan!!.items[0].reason)
+    }
+
+    @Test fun anInvalidReasonRejectsTheWholePlanFailClosed() {
+        var state = running()
+        state = apply(state, 7, "remote.plan", """{"turnId":"t1","revision":1,"items":$items1,"awaitingUser":false}""")
+        val good = state.turn.plan
+        val long = "a".repeat(241)
+        val bad = listOf(
+            // reason on a non-blocked item (upstream refuses PLAN_REASON_STATUS)
+            """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"pending","reason":"why"}]}""",
+            """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"in_progress","reason":"why"}]}""",
+            """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"completed","reason":"why"}]}""",
+            // present but not a usable single-line string
+            """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"blocked","reason":null}]}""",
+            """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"blocked","reason":7}]}""",
+            """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"blocked","reason":"   "}]}""",
+            """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"blocked","reason":"$long"}]}""",
+            """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"blocked","reason":"line one\nline two"}]}""",
+            """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"blocked","reason":"tab\there"}]}""",
+            """{"turnId":"t1","revision":2,"items":[{"content":"x","status":"blocked","reason":"control\u0001char"}]}""",
+        )
+        var seq = 8L
+        for (body in bad) {
+            state = apply(state, seq++, "remote.plan", body)
+            assertEquals("invalid reason must keep the last good plan: $body", good, state.turn.plan)
+        }
+        // On chat.turn / the projection the same rules fail closed to null.
+        val badTurn = apply(synced, 6, "chat.turn", """{"status":"running","turnId":"t1","plan":{"revision":1,"items":[{"content":"x","status":"pending","reason":"why"}]}}""")
+        assertNull(badTurn.turn.plan)
+        // A carried plan with an invalid reason is null, switch state intact.
+        val badCarried = apply(
+            synced, 6, "remote.marathon",
+            """{"enabled":true,"sessionId":"s1","since":"2026-11-17T12:00:00.000Z","origin":"remote",
+                "plan":{"revision":1,"items":[{"content":"x","status":"blocked","reason":"bad\nline"}],"updatedAt":"u","turnId":"t1"},
+                "watcher":{"active":false,"checks":0,"lastCheckAt":null,"lastVerdict":null}}""",
+            turnId = null,
+        )
+        assertNull(badCarried.marathon.plan)
+        assertTrue(badCarried.marathon.enabled)
+    }
+
+    @Test fun aResyncProjectionRestoresTheReason() {
+        var streamed = running()
+        streamed = apply(streamed, 7, "remote.plan", """{"turnId":"t1","revision":2,"items":$blockedItems,"awaitingUser":false}""")
+        val projection = frame(
+            """
+            {"instanceId":"i1","latestSequence":7,"sessionId":"s1","messages":[],
+             "turn":{"status":"running","turnId":"t1","origin":"remote","clientMessageId":"c1",
+              "plan":{"turnId":"t1","revision":2,"items":$blockedItems,"awaitingUser":false}}}
+            """,
+        )
+        val resynced = ChatReducer.fromProjection(projection)!!
+        assertEquals(streamed.turn.plan, resynced.turn.plan)
+        assertEquals("The confirmation page never loads.", resynced.turn.plan!!.items[1].reason)
+    }
 }

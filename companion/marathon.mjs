@@ -37,7 +37,14 @@ export function normalizeMarathonPlan(value) {
     if (typeof item.status !== 'string' || !PLAN_STATUSES.includes(item.status)) return null
     if (contents.has(item.content)) return null
     contents.add(item.content)
-    items.push({ content: item.content, status: item.status })
+    // V8 (§3.9): accept and keep the optional blocked-item reason (single line
+    // ≤240 chars, blocked only) so a carried seed with reason is not rejected.
+    const next = { content: item.content, status: item.status }
+    if (item.reason !== undefined) {
+      if (item.status !== 'blocked' || typeof item.reason !== 'string' || item.reason.trim().length === 0 || item.reason.length > PLAN_LIMITS.maxReasonChars || /[\u0000-\u001f\u007f]/u.test(item.reason)) return null
+      next.reason = item.reason.trim()
+    }
+    items.push(next)
   }
   return { revision: value.revision, items, updatedAt: value.updatedAt, turnId: value.turnId }
 }
