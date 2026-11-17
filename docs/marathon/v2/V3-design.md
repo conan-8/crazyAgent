@@ -49,7 +49,10 @@
 - Digest: mutationRevisits carry pageKey path ≤60 + controlName; bounded.
 - Replay gate (after implement): V3 vs V2 baseline on tune k=3 (suspect ticks on multi-page healthy work should DROP; caught mean ≥V2; gated-fine FA worst 0); holdout once at milestone end.
 
-## Open questions for lead (at implement go)
-- Grouping URL: full URL (query-distinct) vs path-only? Design uses full URL for grouping, path for digest. Confirm.
-- REVISIT_HINT threshold 2 (page-scoped) vs keeping 3: §3.4 says "two or more"; design uses 2. Confirm.
-- Whether to also page-scope REPEAT_LOOP (the last-8 fingerprint loop) or leave it whole-window (V3 scope is REVISIT_HINT per §3.4; REPEAT_LOOP page-scoping may be V3+). Design leaves REPEAT_LOOP unchanged unless lead wants it.
+## Lead rulings (2026-11-17, design approved)
+- (a) **FULL URL grouping** (query-distinct) + path-only digest ≤60: CONFIRMED. Query-distinct pages are different pages (epic stations differ by URL); path-only grouping would create false revisits across query-pages.
+- (b) **REVISIT threshold 2 page-scoped**: CONFIRMED per §3.4 "Two or more feed REVISIT_HINT" (v1 whole-window was 3).
+- (c) **REPEAT_LOOP: LEAVE whole-window UNCHANGED in V3.** V3 scope is REVISIT_HINT page-scoping only (one main change). **Known residual:** epic healthy REPEAT_LOOP suspects (station-form fingerprint, same args different pages) REMAIN after V3 — record in V3-report as a known residual + follow-up candidate (page-scoping REPEAT_LOOP); the suspect-tick cumulative re-eval after V4 accounts for it. Do NOT expand V3 scope to REPEAT_LOOP.
+
+## V3 done-when (lead)
+REVISIT_HINT fires on **NO healthy run** + fires on **every labelled redo** (informational) + **FA 0 worst** + **caught mean ≥V2**. Implement AFTER V2 merges (branch `v2/v3-pagekey` from merged main); replay vs V2 baseline tune k=3 + holdout once.
