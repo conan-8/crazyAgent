@@ -38,14 +38,20 @@ function normalizeItems(value) {
     if (!valueItem || typeof valueItem !== 'object' || !STATUSES.has(valueItem.status)) return null
     const content = normalizeText(valueItem.content)
     if (content === null) return null
-    items.push({ content, status: valueItem.status })
+    // V8 (§3.9): keep the optional blocked-item reason for display under the item.
+    const next = { content, status: valueItem.status }
+    if (valueItem.status === 'blocked' && valueItem.reason !== undefined) {
+      const reason = normalizeText(valueItem.reason)
+      if (reason !== null) next.reason = reason
+    }
+    items.push(next)
   }
   return items
 }
 
 function sameItems(left, right) {
   return left.length === right.length && left.every((item, index) => (
-    item.content === right[index].content && item.status === right[index].status
+    item.content === right[index].content && item.status === right[index].status && (item.reason ?? undefined) === (right[index].reason ?? undefined)
   ))
 }
 
@@ -183,6 +189,10 @@ export function renderPlanPanel(root, state, { onToggle } = {}) {
     const status = element(document, 'span', 'plan-panel-item-status', STATUS_LABELS[item.status])
     const content = element(document, 'span', 'plan-panel-item-content', item.content)
     row.append(status, content)
+    // V8 (§3.9): show the reason under a blocked item.
+    if (item.status === 'blocked' && item.reason) {
+      row.appendChild(element(document, 'span', 'plan-panel-item-reason', item.reason))
+    }
     list.appendChild(row)
   }
 
