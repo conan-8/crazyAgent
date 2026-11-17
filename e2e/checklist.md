@@ -270,7 +270,7 @@ How to run: start the dedicated profile headless with `--remote-debugging-port=9
 
 ## 6. Marathon mode
 
-Marathon M1–M5 real-model acceptance is **GREEN** on the isolated harness (see `docs/STATUS.md` + `docs/marathon/M1-report.md` … `M5-report.md`). The items below are the live/docked-panel/phone variants that remain the user's to run, plus the independent surfaces already verified.
+Marathon M1–M5 **and v2 V1–V8** real-model acceptance is **GREEN** on the isolated harness (see `docs/STATUS.md` + `docs/marathon/M1-report.md` … `M5-report.md` + `docs/marathon/v2/V0-baseline.md` … `V8-report.md`). The items below are the live/docked-panel/phone variants that remain the user's to run, plus the independent surfaces already verified.
 
 ### M-A. Switch and chip (isolated check DONE; docked panel WAITING ON USER)
 
@@ -286,9 +286,15 @@ Marathon M1–M5 real-model acceptance is **GREEN** on the isolated harness (see
 
 - **Done (`scripts/watch-fixtures-e2e.mjs`, no model, real panel + remote API):** TOOL_HANG (never-returning call) and EXECUTOR_DOWN (panel socket dropped mid-turn) alert via `GET /state marathon.watch.open`; the real panel renders the watch row (Stop / Steer… / It's fine), recovery collapses it, "It's fine" dismisses + snoozes; the watcher never stops the running turn. M3 real-model marathon-long ×5 produced ZERO alerts on healthy runs; M4 live 15/15 zero healthy false alerts with 5 true-positive alerts on genuine looping.
 - **WAITING ON USER:** observe a live watch alert row + amber chip on a genuinely stuck marathon turn; use Stop / Steer… / It's fine; confirm recovery collapses the row. Independent surface: `GET /state marathon.watch.open` (not the transcript).
-- **Known limitation (FALLBACK A):** the v1 judge catches sustained stalls + all hard signals but intermittent varied-activity wander can read as progressing (stuck-window 6/9 = 67%); a verdict is a diagnostic, not verification. See `docs/STATUS.md` Known limitations.
+- **v1 FALLBACK A CLOSED by V5:** the v1 judge's intermittent-wander misses (stuck-window 6/9 = 67%) were temp-0 provider-routing instability; V5 pinned `morph/fp8` + `seed:42` made verdicts deterministic — gated stuck caught **1.000 / stability 1.000 on both tune and holdout (k=5)**, FA 0 worst. A verdict is still a diagnostic, not verification. See `docs/STATUS.md` Known limitations + `docs/marathon/v2/V5-report.md`.
 
 ### M-D. Phone marathon (code + JVM + fake companion DONE; on-device WAITING ON USER)
 
 - **Done (M5):** android `/marathon` slash + marathon chip (visible+tappable while busy) + watch card (Stop/Steer/It's fine) + collapsible plan checklist + `WATCH` push type; reducer fixture `marathon-watch.json` recorded from the real RemoteHub (staleness gate green); `testDebugUnitTest lintDebug` green; fake-companion `marathon-stuck` run.
 - **WAITING ON USER:** the phone marathon chip / watch card / checklist against the **real** companion (on-device look), and WATCH push delivery via `conan-evo-x3` (see C4). The phone now sends `/marathon` (legacy `planMode:true` alias kept). Do not re-pair the phone to this computer.
+
+### M-E. Marathon v2 (V1–V8; isolated + real-model DONE; on-phone/docked WAITING)
+
+- **Done (v2 replay + live, `docs/marathon/v2/`):** V1 explicit close-frames (stale alerts 0 on `/state`/panel/phone reducer); V2 progress accounting (live all-4: falseRec 0, FA 0 healthy, caught 1/1 past-patience, healthy epic suspect 86.0% ≤ V0 90.4%); V3 page-scoped REVISIT (live FA 0 ×10 + mutation-revisit fires 0 on healthy; holdout caught 0.920); V4 seed-visible + carry-chain (live stop-then-continue ×5 redo 0/5 + healthy silent + seeded 5/5); **V5 pinned morph/fp8 + seed:42 → caught 1.000/stability 1.000 both splits, FA 0, cost ~1×**; V6 hub live-plan forwarding (`remote.plan`, real-hub fixture); V7 `POST /push/test` + `test` type; V8 blocked-item reason + prefix identity (npm 1315, c1 self-test; live `PLAN_*` ≤2 gate vs M4's 11).
+- **WAITING ON USER (on-phone v2 appearance):** the **V6 live checklist** updating mid-turn, the **V7 push-test Settings button** + a `test` notification, and the **V8 blocked-item reason** under a checklist item — against the real companion on the device. Plus the live docked-panel visual (extension reload needed) and the V8 real-model `PLAN_*` friction gate outcome.
+- **Recorded v2 follow-ups (not blockers):** V3 tune caught trade-off (multi-page stuck corroboration; restored by V5); model-variance seeded-untouched ~60% + c1 steer-plan row brittleness; epic-120 completion-view reload-reset tolerance; `REPEAT_LOOP` multi-page residual; V9 restart persistence DEFERRED (decision #10).
