@@ -28,6 +28,20 @@
  */
 
 export const JUDGE_MAX_TOKENS = 400
+// V4 judge effort (low). Exposed as a constant so the replay metadata reports the
+// actual configured effort (V5 candidate 2 raised this; candidate 3 keeps low).
+export const JUDGE_REASONING_EFFORT = 'low'
+// V5 candidate 3 (§3.6): pin provider routing + a fixed seed to remove the
+// temp-0 verdict instability caused by OpenRouter load-balancing across ~50
+// endpoints/quantizations per request. require_parameters:true guarantees the
+// chosen provider supports every parameter we send (seed + reasoning);
+// allow_fallbacks:false pins routing to the ordered list. morph/fp8 supports
+// seed (PrimeIntellect does NOT — avoided). Effective determinism is verified by
+// per-window stability across k repeats in the V5 report.
+export const JUDGE_PROVIDER_ORDER = Object.freeze(['morph'])
+export const JUDGE_PROVIDER_ALLOW_FALLBACKS = false
+export const JUDGE_PROVIDER_REQUIRE_PARAMETERS = true
+export const JUDGE_SEED = 42
 export const JUDGE_TIMEOUT_MS = 45_000
 export const JUDGE_REASON_CHARS = 240
 export const JUDGE_EVIDENCE_MAX = 40
@@ -292,9 +306,18 @@ export function createWatchJudge(options) {
       temperature: 0,
       response_format: { type: 'json_object' },
       stream: false,
-      // Low reasoning effort only when the configured model reasons; the
-      // model's default effort is high, so this must be explicit.
-      ...(model.reasoning === true ? { reasoning: { effort: 'low' } } : {}),
+      // V5 candidate 3: pinned provider routing + fixed seed for verdict
+      // stability (see JUDGE_PROVIDER_ORDER note). require_parameters guarantees
+      // the provider supports seed + reasoning; allow_fallbacks pins the list.
+      provider: {
+        order: [...JUDGE_PROVIDER_ORDER],
+        allow_fallbacks: JUDGE_PROVIDER_ALLOW_FALLBACKS,
+        require_parameters: JUDGE_PROVIDER_REQUIRE_PARAMETERS,
+      },
+      seed: JUDGE_SEED,
+      // Judge effort only when the configured model reasons; the model's default
+      // effort is high, so this must be explicit.
+      ...(model.reasoning === true ? { reasoning: { effort: JUDGE_REASONING_EFFORT } } : {}),
     }
     const digestChars = body.messages[1].content.length
 
