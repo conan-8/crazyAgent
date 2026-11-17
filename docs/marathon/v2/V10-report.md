@@ -1,7 +1,7 @@
 # V10 report — documents and v2.5.0 release (DRAFT)
 
 **Date:** 2026-11-17 · **Task:** task-24 (core) · **Plan:** `MARATHON-V2-PLAN.md` §5 V10 + §6
-**Branch:** `v2/v10-release` from merged main `8b67061` (V5 `f29eadb` + V8 `8b67061` merged). **Status:** DRAFT — finalize after V5 live + V8 live green (lead confirms), then lead reviews + merges + tags `v2.5.0` + publishes.
+**Branch:** `v2/v10-release` rebased onto final merged main `5bc4f6a` (V0–V8 + V5-live/V8-live evidence; npm 1315). **Status:** FINAL — V5 live + V8 live done-when MET (lead FINAL GO); lead reviews + merges + tags `v2.5.0` + publishes. Activation stays the user's.
 **Acceptance is marathon-scoped.** The maintainer's auto-updater (`cdcd9d1`) is preserved verbatim — NOT marathon-accepted. Activation stays the user's: reload the unpacked extension first, then restart the companion.
 
 ## Versions (explicit hunks, never sweep the updater)
@@ -43,9 +43,13 @@
 - **Still unrun:** WATCH/test push delivery via `conan-evo-x3` (key + restart, user action); on-phone V6/V7/V8 appearance; live docked-panel visual; V8 real-model PLAN_* gate outcome; 1017 full reliability batches; signed 0.8.0(7) APK install.
 - **Follow-ups:** V3 tune caught trade-off (multi-page stuck corroboration; restored by V5); model-variance seeded-untouched ~60% + c1 steer-plan row brittleness; epic-120 completion-view reload-reset tolerance; REPEAT_LOOP multi-page residual; **V9 restart persistence DEFERRED (decision #10)**; **V5.1 judge token budget (task-25, judge post-release)** — V5-live bounded risk: long-turn ~20–24k-char digests consume v1 `max_tokens:400` by low-effort reasoning → `finish_reason:LENGTH` defensive `unknown`s (c3 stabilizes routing not token budget; hard stalls alert unconditionally, so only large-digest varied-activity wander can evade judge corroboration); fix = `max_tokens` 400→1200 keeping low effort + c3 routing/seed, isolated from c2's effort raise; monitor schema-deviation `unknown` rate.
 
-## Finalize checklist (after lead confirms V5+V8 live green)
-1. Rebase onto the final merged main (V5+V8 live evidence commits).
-2. Re-verify full npm test + prompt ceiling at a clean checkout; record the final test count.
-3. Confirm V8 live PLAN_* ≤2 + no pass-rate/end-distribution change; V5 live green.
-4. Record the signed 0.8.0(7) APK SHA-256 (built from the tagged source) in RELEASE-NOTES/STATUS/HANDOFF-QUICK.
-5. Lead reviews + merges + tags `v2.5.0` + publishes the GitHub release (gh authenticated, established v2.4.0 flow). Activation stays the user's.
+## Finalize checklist (V5+V8 live green — lead FINAL GO)
+1. ✅ Rebased `v2/v10-release` onto final merged main `5bc4f6a` (V0–V8 + V5-live/V8-live evidence; npm 1315).
+2. ✅ Re-verified full npm test **1315/1315** + prompt ceiling at a clean checkout (non-Docs **12,402** / Docs turn **18,092**; core+docs 17,096 ≤ 17,100).
+3. ✅ V8 live PLAN_* **2 ≤ 2** + pass-rates/end-distributions unchanged vs M4 (9 OPEN_REMOVAL_ACK eliminated); V5 live caught **4/4 = 100%**, FA0 worst healthy, falseRec 0, 4 true-positive alerts server-verified (epic r3/r5 wander loops), 12 length-cutoff unknowns documented (V5.1).
+4. ✅ Versions **2.5.0** (package.json/lock root+workspace, manifest version+version_name, companion/index.mjs VERSION by content) + Android **0.8.0 (7)**. Build/unsigned release APK SHA-256 recorded below; the **signed** APK is a user-keystore action (still-unrun, as v2.4.0 artifact `8c74976`) — not claimed signed.
+5. ✅ Updater `cdcd9d1` preserved verbatim (comment + test fixtures); marathon-scoped acceptance only.
+6. ⏳ Lead reviews diff (versions/docs accuracy/updater isolation/secrets scan) + npm test clean + merges + tags `v2.5.0` + publishes the GitHub release (gh authenticated, `--latest`). Activation stays the user's (reload extension then restart companion).
+
+## Build artifact
+- Unsigned release APK (`assembleRelease`, no `keystore.properties`, BUILD SUCCESSFUL): `app/build/outputs/apk/release/app-release-unsigned.apk`, SHA-256 **`1de9dfea10800bada737d64336a8307dadaade917927ad9d61682896871e9200`**. Signing with the maintainer keystore + publishing the signed `0.8.0 (7)` APK is the user's action (still-unrun, as the v2.4.0 artifact `8c74976`); the unsigned APK is not installable.

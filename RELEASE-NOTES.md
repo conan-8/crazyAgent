@@ -2,7 +2,7 @@
 
 Changes since **v2.4.0**. This release ships **marathon v2 (V1–V8)** — watcher reliability and plan-friction improvements on top of the v2.4.0 marathon mode. The acceptance evidence below is **marathon-scoped** (isolated harness, `deepseek/deepseek-v4.1-flash-1017` @ medium, independent checkers). The maintainer's **automatic-updater** feature (`cdcd9d1`) is **preserved verbatim** from v2.4.0 (see below) — it was landed and verified by the maintainer, **not** independently accepted by the marathon team.
 
-The extension uses numeric update version `2.5.0`. The Android app is version `0.8.0` with version code `7`. The **signed** `0.8.0 (7)` release APK is a **user action** (the maintainer signing keystore is user-side, as for the v2.4.0 artifact): the build/unsigned APK SHA-256 is recorded at the release build, and signing + publishing the signed APK with the existing release certificate remains still-unrun until the user signs it. **Activation stays the user's:** reload the unpacked extension first, then restart the companion.
+The extension uses numeric update version `2.5.0`. The Android app is version `0.8.0` with version code `7`. The **signed** `0.8.0 (7)` release APK is a **user action** (the maintainer signing keystore is user-side, as for the v2.4.0 artifact `8c74976`). The unsigned release APK (`assembleRelease`, BUILD SUCCESSFUL) has SHA-256 `1de9dfea10800bada737d64336a8307dadaade917927ad9d61682896871e9200` (not installable); signing + publishing the signed APK with the existing release certificate remains still-unrun until the user signs it. **Activation stays the user's:** reload the unpacked extension first, then restart the companion.
 
 ## Marathon v2 (V1–V8)
 
