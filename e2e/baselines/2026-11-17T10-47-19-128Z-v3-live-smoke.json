@@ -1,0 +1,29 @@
+{
+  "startedAt": "2026-11-17T10:47:19.128Z",
+  "finishedAt": "2026-11-17T10:53:17.257Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": true,
+  "armingPath": "POST /marathon {enabled:true} then bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-v3-live-eval/dsh-home",
+  "repeat": 1,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 0,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "marathon-epic",
+      "fixture": "epic-01.html",
+      "prompt": "Work through the expedition permit workflow on the site I have open, from station 1 to station 120. Each station page shows its dispatch word and seal. At every station, enter the dispatch word shown on that page plus the receipt from the previous station (station 1 shows a start receipt), submit the station form, and carry the new receipt to the next station via the link. Complete all 120 stations in order without re-submitting a station that was already accepted, finish on the completion page, and tell me the permit ID.",
+      "file": "marathon-epic.mjs",
+      "runs": []
+    }
+  ],
+  "void": true,
+  "voidReason": "LEAD HOLD 2026-11-17: pin 9c1359d pageIdentity.distinctPages leaked into judge digest (bias bug); void for acceptance, diagnostic only. Epic smoke killed mid-run (0 completed runs); marathon-long smoke never started. Interrupted turn archived as VOID diagnostic in m0-archive.",
+  "commitUnderTest": "9c1359d6c5cc0aed8058010900bc91df832f2d36"
+}
