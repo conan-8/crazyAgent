@@ -62,7 +62,20 @@ The 36-station epic smoke PASSED (36/36 exactly-once, 84 steps, 4 failed calls r
 
 ## Collection batches (×5 each)
 
-(filled per batch: path, run ids, verdicts, wall distribution, server-record counts, watch evidence headline, judge cost)
+### Batch 1 — marathon-epic (120 stations): 5/5 PASS, zero alerts, judge exercised
+
+- **JSON:** `e2e/baselines/2026-11-17T07-43-49-654Z-v2c-marathon-epic.json` (commit `95b9e7a`) · **archive:** `m0-archive/run-2026-11-17T07-43-49-743Z-2e7bc0/` (26.2 MiB) · commitUnderTest `de5f69c868d7…`
+- turnIds: `turn-mwkdyvqp-da8d`, `turn-mwke5cwh-1c3b`, `turn-mwkefzyp-1804`, `turn-mwkesz5o-b70e`, `turn-mwkf3ewz-a277`
+
+| run | wall s | steps | calls | failed | valid | watch {checks, alerts, usage} | ticks ok/sus/hard | judge calls | judge in/out | verdicts |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 301.7 | 255 | 254 | 1 | 120/120 | {15, 0, 24868} | 1/14/0 | 3 | 24,561/307 | progressing×3 |
+| 2 | 496.0 | 365 | 365 | 4 | 120/120 | {24, 0, 29107} | 2/22/0 | 4 | 28,569/538 | progressing×4 |
+| 3 | 605.0 | 366 | 365 | 3 | 120/120 | {31, 0, 43419} | 3/28/0 | 6 | 42,472/947 | progressing×5 + unknown×1 |
+| 4 | 486.4 | 252 | 251 | 6 | 120/120 | {24, 0, 32118} | 2/22/0 | 4 | 31,571/547 | progressing×4 |
+| 5 | 388.4 | 255 | 255 | 2 | 120/120 | {20, 0, 24134} | 3/17/0 | 3 | 23,755/379 | progressing×3 |
+
+All walls > 4 min (5.0–10.1 min); 0 redos/dead/retries; serverRecords 120/run. **Judge total: 20 calls, 150,928 input + 2,718 output tokens (separate from agent usage); zero alerts; zero ended-incomplete.** One `unknown` verdict (r3 call 2) — judge-variance data point for V5. **V0 suspect-tick baseline: 114 ticks = 11 ok / 103 suspect / 0 hard = 90.4% on healthy progressing work** (V2 gate reference; smoke 90.5% consistent). fine>4min: +5 runs (one window per turn) — ≥15 target still short per ruling, recorded honestly.
 
 ## Targets and rulings
 
