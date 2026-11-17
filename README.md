@@ -123,11 +123,11 @@ See the complete [v2.3.0 patch notes](RELEASE-NOTES.md). Live docked-panel and p
 
 Use the optional Android app with an existing crazyAgent desktop installation. Basic chat, screenshots, help, and reconnects do **not** require Firebase; metadata-only push notifications are a separate optional setup.
 
-> **v2.4.0 phone APK:** v2.4.0 adds marathon phone features (chip, watch card, checklist, WATCH push) in Android `0.7.0 (6)`. The signed release APK is published below with its SHA-256; these phone features require the v2.4.0 APK.
+> **v2.5.0 phone APK:** v2.5.0 adds the live marathon checklist, blocked-item reasons, and a push-test button on top of the existing marathon phone features in Android `0.8.0 (7)`. The signed release APK is published below with its SHA-256.
 
 **Requirements:**
 
-- A working crazyAgent **v2.4.0** installation on the host computer.
+- A working crazyAgent **v2.5.0** installation on the host computer.
 - Chrome/Edge running. Keep the side panel open for system-clipboard/Docs rich-paste actions or when using a build without the background executor.
 - An Android **8.0/API 26+** phone.
 - Tailscale installed and signed into the same tailnet on the host and phone, with MagicDNS and HTTPS certificates enabled.
@@ -138,22 +138,22 @@ Use the optional Android app with an existing crazyAgent desktop installation. B
 **Paste this prompt into a coding agent on the host computer after completing the desktop installation:**
 
 ```text
-Set up crazyAgent Remote v2.4.0 on this computer and my Android phone. I already installed crazyAgent on this host.
-First verify the existing installation is v2.4.0 and http://127.0.0.1:17871/health responds successfully. Do not use sudo, replace my runtimes, kill existing processes, or run model-spending tests. If the installation is missing or unhealthy, stop and tell me.
+Set up crazyAgent Remote v2.5.0 on this computer and my Android phone. I already installed crazyAgent on this host.
+First verify the existing installation is v2.5.0 and http://127.0.0.1:17871/health responds successfully. Do not use sudo, replace my runtimes, kill existing processes, or run model-spending tests. If the installation is missing or unhealthy, stop and tell me.
 Verify that Tailscale is running, identify this host's Tailscale DNS name, and confirm MagicDNS and HTTPS certificates are enabled. Inspect any existing Tailscale Serve configuration without overwriting unrelated routes.
 Enable the scoped remote API on the existing crazyAgent companion with --remote and --remote-public-host <this-host>.<tailnet>.ts.net. Preserve my existing model/settings and use the existing startup/service method rather than starting a conflicting second companion. The remote listener must remain on 127.0.0.1:17873; never expose port 17871.
 Publish only the remote listener with tailscale serve --bg http://127.0.0.1:17873. Do not enable Funnel or public port forwarding. Verify that the Serve route is tailnet-only, unauthenticated /remote/v1/state returns 401, and /bridge through that route returns 404.
-Download the official APK from https://github.com/conan-8/crazyAgent/releases/download/v2.4.0/app-release.apk into a new empty temporary directory and require SHA-256 863fb04cd028f02cd574e68cd8e8c82a0c7af8a273796892d9f5776edb2f9592 before installing it. Do not use a different APK or build unless I explicitly ask for a source build.
+Download the official APK from https://github.com/conan-8/crazyAgent/releases/download/v2.5.0/app-release.apk into a new empty temporary directory and require SHA-256 57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d before installing it. Do not use a different APK or build unless I explicitly ask for a source build.
 If adb is available and authorized, install that verified APK with adb install -r. If no usable adb device exists, give me short manual instructions to download and open the same APK on my Android phone. If Android rejects an update because the existing app has a different signature, stop and explain that uninstalling deletes the old pairing; do not uninstall or erase app data automatically.
 Do not print, read, copy, log, commit, or transmit the remote token yourself. Give me the exact npm run dev -- --pair-remote command to run in my own terminal, then tell me to paste the printed server URL and token directly into the crazyAgent Remote app. Finish with the server address, APK hash, health status, and the remaining manual pairing steps. Keep Edge and the side panel open, and do not send a test prompt until I confirm pairing is complete.
 ```
 
 ### Finish on the phone
 
-1. **Install the app:** if the agent did not install through `adb`, download the official [crazyAgent Remote APK](https://github.com/conan-8/crazyAgent/releases/download/v2.4.0/app-release.apk) onto the phone and open it. Android may ask permission to install apps from the browser or file manager.
+1. **Install the app:** if the agent did not install through `adb`, download the official [crazyAgent Remote APK](https://github.com/conan-8/crazyAgent/releases/download/v2.5.0/app-release.apk) onto the phone and open it. Android may ask permission to install apps from the browser or file manager.
 2. **Verify the download:** on Linux, run:
    ```sh
-   echo '863fb04cd028f02cd574e68cd8e8c82a0c7af8a273796892d9f5776edb2f9592  app-release.apk' | sha256sum -c -
+   echo '57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d  app-release.apk' | sha256sum -c -
    ```
    On macOS, use `shasum -a 256 app-release.apk`; on Windows, use `Get-FileHash .\app-release.apk -Algorithm SHA256` in PowerShell. Compare the result with the hash above before installing.
 3. **Create the phone credential:** from the crazyAgent checkout on the host, run:

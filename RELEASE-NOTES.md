@@ -1,15 +1,19 @@
-# Unreleased (post-v2.5.0)
-
-- **The watcher's judge works with any model again.** v2.5.0 pinned every judge call to one OpenRouter provider (Morph). Morph serves only part of OpenRouter's catalog, so with most other models every judge call failed and the watcher quietly ran on its deterministic signals alone. The pin, and the fixed seed sent with it, now apply only to the configuration they were measured on: `deepseek/deepseek-v4.1-flash-1017` on OpenRouter. Other models and base URLs send the unpinned request, as v2.4.0 did. The judge log now records which routing a call used.
-- **The "judge budget spent" notice no longer hides an open alert.** When the judge's per-turn budget ran out while an alert was open, the notice replaced the alert: the panel chip went off, the phone card changed, and `/state` showed no open alert. The notice now waits until no alert is open, and the turn's judge summary reports when the budget ran out.
-
-Unit-tested (`npm test` 1320/1320); no real-model or phone run yet.
-
 # crazyAgent v2.5.0
 
 Changes since **v2.4.0**. This release ships **marathon v2 (V1–V8)** — watcher reliability and plan-friction improvements on top of the v2.4.0 marathon mode. The acceptance evidence below is **marathon-scoped** (isolated harness, `deepseek/deepseek-v4.1-flash-1017` @ medium, independent checkers). The maintainer's **automatic-updater** feature (`cdcd9d1`) is **preserved verbatim** from v2.4.0 (see below) — it was landed and verified by the maintainer, **not** independently accepted by the marathon team.
 
-The extension uses numeric update version `2.5.0`. The Android app is version `0.8.0` with version code `7`. The **signed** `0.8.0 (7)` release APK is a **user action** (the maintainer signing keystore is user-side, as for the v2.4.0 artifact `8c74976`). The unsigned release APK (`assembleRelease`, BUILD SUCCESSFUL) has SHA-256 `1de9dfea10800bada737d64336a8307dadaade917927ad9d61682896871e9200` (not installable); signing + publishing the signed APK with the existing release certificate remains still-unrun until the user signs it. **Activation stays the user's:** reload the unpacked extension first, then restart the companion.
+The extension uses numeric update version `2.5.0`. The Android app is version `0.8.0` with version code `7`. The signed [`app-release.apk`](https://github.com/conan-8/crazyAgent/releases/download/v2.5.0/app-release.apk) has SHA-256 `57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d`; `apksigner verify` accepted it with the existing release certificate. **Activation stays the user's:** reload the unpacked extension first, then restart the companion; install the Android APK separately.
+
+## Final watcher fixes
+
+- **The judge works with any model again.** The initial v2.5.0 tag pinned every judge call to one OpenRouter provider (Morph), which serves only part of the catalog. The provider pin and fixed seed now apply only to their measured configuration: `deepseek/deepseek-v4.1-flash-1017` on OpenRouter. Other models and base URLs use the unpinned v2.4.0 request shape, and the judge log records the routing used.
+- **The "judge budget spent" notice no longer hides an open alert.** The informational notice waits until no alert is open instead of replacing it in the panel, phone, and `/state`; the turn summary records budget exhaustion even when the notice never appeared.
+
+Both fixes are unit-tested (`npm test` **1320/1320**); no separate real-model or phone run was performed for these final fixes.
+
+## Security audit note
+
+`npm audit` reports 42 high-severity entries, all cascading from `picomatch@4.0.7` through DSH HMR ([GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), single-branch repeated-extglob ReDoS). The advisory has no patched version and npm's latest picomatch is still 4.0.7, so there is no compatible clean-audit override available. DSH remains pinned and no breaking force-upgrade was taken.
 
 ## Marathon v2 (V1–V8)
 
