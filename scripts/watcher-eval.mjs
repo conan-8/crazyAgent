@@ -444,7 +444,10 @@ async function main() {
     outputTokens: totals.outputTokens / (watchedSeconds / 3600),
   } : { judgeCalls: 0, inputTokens: 0, outputTokens: 0 }
 
-  const gatePass = groups.gatedAll.fineZeroAlertsWorstPass && groups.gatedAll.stuckCaughtWorstPass
+  // Gate per plan §5 V5 (lead ruling): fine zero-false-alerts WORST-case = 0
+  // (HARD); stuck caught MEAN >=80% (V5) / >=V0 (V2-V4 done-when). Worst-case
+  // caught + stability are DIAGNOSTICS, reported alongside, NOT in the pass/fail.
+  const gatePass = groups.gatedAll.fineZeroAlertsWorstPass && groups.gatedAll.stuckCaughtMeanPass
   const summary = {
     dryRun: args.dryRun, split: args.split ?? 'all', repeat: args.repeat,
     manifestCreatedAt: manifest.createdAt, manifestWindows: manifest.windows.length,
@@ -481,7 +484,8 @@ async function main() {
   mkdirSync(dirname(out), { recursive: true })
   writeFileSync(out, JSON.stringify(summary, null, 2) + '\n')
   console.log(`\nresults written: ${out}`)
-  console.log(`\nGATE (gatedAll worst-case): ${gatePass ? 'PASS' : 'FAIL'}`)
+  console.log(`\nGATE (fine zero-false-alerts worst-case + stuck caught MEAN ≥80%, §5 V5): ${gatePass ? 'PASS' : 'FAIL'}`)
+  console.log(`diagnostics (not the gate): stuck caught worst-case ${(groups.gatedAll.stuckCaughtWorstRate * 100).toFixed(0)}% · stability ${(groups.gatedAll.stability * 100).toFixed(0)}%`)
   process.exit(gatePass ? 0 : 2)
 }
 
