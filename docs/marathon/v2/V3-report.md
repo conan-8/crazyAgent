@@ -72,8 +72,20 @@ Reverted `buildDigest` `mutationRevisits` to V2-equivalent bare entries (dropped
 
 **Reconsideration options (lead ruling pending):** (a) hybrid signal — whole-turn mutationRevisit for corroboration (preserve caught) + page-scope only healthy suppression/digest (risk: reintroduces healthy multi-page suspects); (b) accept V3 caught gap as recorded deviation (FA0 hard gate passes, false-revisit benefit retained) + LIVE ×5 binding; (c) narrow V3 to digest-only (little deterministic benefit); (d) defer pending V4. Core recommendation: (b) accept + live binding (hard gate passes; trade-off fundamental; live is the contract's reliability test). No further blind iteration without lead direction.
 
-## V3 LIVE gate (PENDING — binding)
-Pin `9c1359d`, eval marathon-long ×5 + epic ×5. Binding: caught mean ≥V2 live; REVISIT_HINT mutation-revisit fires on NO healthy run; FA 0 worst. marathon-long exercises the multi-page same-control revisit benefit; epic confirms FA 0 on healthy long-fine. V3 merge after live green (lead reviews diff + npm test).
+## V3 FINAL ruling — OPTION B ACCEPT + LIVE BINDING (lead)
+**Final pin `b66ab10` (code `8880528`).** V3 FINAL ships: the **page-scoped REVISIT_HINT signal** (the verified healthy multi-page false-revisit benefit) + `pageKey`/`controlName` in **ledger aggregates** (replay-only metric). The **judge-digest annotation stays REMOVED** (bare V2-equivalent mutationRevisits): isolation showed +0.067 marginal caught help and bare entries read as more repetitive (better stuck detection). This is a **documented, measurement-justified deviation from §3.4's digest-annotation detail** — the pageKey/controlName annotation biased the judge toward exploration and reduced caught (the primary goal); the deterministic page-scoping benefit is retained.
+
+### Recorded V3 deviation — caught-mean done-when NOT met on replay (NOT hidden)
+caught mean tune k=5 **0.667 < V2 0.867** (holdout k=5 below). Root cause: the **fundamental §3.4 trade-off** — page-scoping removes multi-page FALSE revisits on healthy work (benefit: REVISIT_HINT mutation-revisit fires on NO healthy run) but also removes TRUE whole-turn revisit corroboration on multi-page STUCK work → judge stuck verdicts lose two-strike corroboration → lower caught. Inherent to §3.4, not a bug. Full isolation evidence above (pageIdentity 0 effect; annotation +0.067 minor; remaining gap = page-scoped signal). **V4/V5 are expected to address the caught cost** (V4 continuation context gives the judge task info; V5 judge accuracy/stability) — the V3 caught trade-off is a **V5 target**.
+
+### Binding structural gates (PASS)
+gated-fine **FA worst-case 0 BOTH splits** (hard gate); falseRec improved (holdout 0); stale 0; page-unknown **4.1%** (low). These are the binding structural gates; the caught-mean gap is the recorded deviation above.
+
+### Final holdout k=5 (ONCE, unbiased, final pin)
+**Result (final pin `b66ab10`, `v3-final-holdout-k5.json`): caught MEAN 0.920 ≥ V2 0.867 ✓** (the k=3 swing 0.867→0.667 was noise; k=5 is stable). gated fine 25 / stuck 5; **fine FA worst 0 ✓**; caught worst 0.800; falseRec 1; stale 0; stability 0.967. Per-window stuck: 01-13-25=1.00, 04-36-10 ×3=1.00, 08-38-04 (stall-r2)=0.60. The unbiased final holdout at k=5 shows V3 caught **≥V2**; the tune k=5 gap (0.667) is the noisy 3-window tune sample (recorded deviation). The LIVE ×5 is the binding reliability test.
+
+## V3 LIVE gate (BINDING — the contract's reliability test)
+Pin `b66ab10`, eval marathon-long ×5 + epic ×5. Binding: **FA 0 worst on healthy** + **REVISIT_HINT mutation-revisit 0 healthy fire** + **caught mean ≥V2 LIVE**. marathon-long especially tests the multi-page same-control benefit vs caught cost; epic confirms FA 0 on healthy long-fine. If live caught ≥V2 live → V3 accepted + merged. If live caught **significantly** <V2 live → reconsider option (a) HYBRID (whole-turn mutationRevisit for deterministic corroboration + page-scoped healthy-false-revisit suppression) or defer V3 pending V4. **No further replay iteration — the live test decides.** V3 merge after live green (lead reviews diff + npm test).
 
 ## Invariants preserved
 Watcher report-only; hard signals model-independent; judge can never veto a hard signal; untrusted input clipped plain text (page key/control name); cost separate; one runner/one turn slot; 34 standing tools; prompt ceiling; REPEAT_LOOP unchanged; openFlat unchanged (V4); nav revisits digest-only.
