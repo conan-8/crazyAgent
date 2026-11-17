@@ -421,8 +421,63 @@ class ReducerFixtureTest {
         assertTrue(end.items.isEmpty())
     }
 
+    /**
+     * V6 (task-20): the live checklist recorded from the real RemoteHub —
+     * remote.plan mid-turn, a malformed activity dropped (no envelope),
+     * awaitingUser, the turn-end handoff to the carried plan, and the reset.
+     */
+    @Test fun marathonLivePlanMatchesHubProjection() {
+        assertMatchesProjection("marathon-live-plan")
+        val f = fixture("marathon-live-plan")
+        val all = frames(f)
+        val checkpoints = f["checkpoints"]!!.jsonObject
+        fun checkpoint(name: String) = ChatReducer.fromProjection(checkpoints[name]!!.jsonObject)!!
+        fun type(frame: JsonObject) = frame["type"].toString().trim('"')
+        fun body(frame: JsonObject) = frame["body"]!!.jsonObject
+        fun upTo(predicate: (JsonObject) -> Boolean) = replay(all.take(all.indexOfFirst(predicate) + 1))
+
+        // The first live plan arrives mid-turn; the malformed activity after it
+        // published nothing (three remote.plan envelopes for four activities).
+        assertEquals(3, all.count { type(it) == "remote.plan" })
+        val first = upTo { type(it) == "remote.plan" }
+        assertEquals(checkpoint("livePlan1"), first)
+        assertEquals(1, first.turn.plan!!.revision)
+        assertEquals(3, first.turn.plan!!.openCount)
+        assertTrue(first.turn.isActive)
+        assertNull(first.marathon.plan)
+
+        // An accepted revision replaces the list live.
+        val plans = all.filter { type(it) == "remote.plan" }
+        val second = replay(all.take(all.indexOf(plans[1]) + 1))
+        assertEquals(checkpoint("livePlan2"), second)
+        assertEquals(2, second.turn.plan!!.revision)
+        assertEquals("completed", second.turn.plan!!.items[0].status)
+        assertEquals(2, second.turn.plan!!.openCount)
+
+        // awaitingUser rides along without a revision change.
+        val awaiting = replay(all.take(all.indexOf(plans[2]) + 1))
+        assertEquals(checkpoint("awaiting"), awaiting)
+        assertTrue(awaiting.turn.plan!!.awaitingUser)
+        assertEquals(2, awaiting.turn.plan!!.revision)
+
+        // Turn end: the live plan clears and remote.marathon carries the list.
+        val ended = upTo { type(it) == "remote.marathon" && body(it)["plan"] is JsonObject }
+        assertEquals(checkpoint("afterTurnEnd"), ended)
+        assertNull(ended.turn.plan)
+        assertEquals("idle", ended.turn.status)
+        assertEquals(2, ended.marathon.plan!!.revision)
+        assertEquals(2, ended.marathon.plan!!.openCount)
+        assertEquals("turn-17", ended.marathon.plan!!.turnId)
+
+        // A new chat resets everything.
+        val end = replay(all)
+        assertEquals("session-2", end.sessionId)
+        assertNull(end.turn.plan)
+        assertEquals(MarathonState(), end.marathon)
+    }
+
     @Test fun resyncFramesAreOnlyEverFirst() {
-        for (name in listOf("turn-stream", "mid-turn-resync", "lifecycle", "help-request", "confirm-request", "dead-turn", "marathon-watch", "marathon-watch-lifecycle")) {
+        for (name in listOf("turn-stream", "mid-turn-resync", "lifecycle", "help-request", "confirm-request", "dead-turn", "marathon-watch", "marathon-watch-lifecycle", "marathon-live-plan")) {
             val all = (fixture(name)["frames"] as JsonArray).map { it.jsonObject["type"].toString() }
             assertEquals("\"remote.resync\"", all.first())
             assertTrue(all.drop(1).none { it == "\"remote.resync\"" })

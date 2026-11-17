@@ -149,12 +149,14 @@ private fun parseIsoUtc(value: String): Long? = try {
     null
 }
 
-/** One-line summary of a carried plan for the checklist card's header. */
-fun planSummary(plan: MarathonPlan): String {
-    val open = plan.openCount
+/** One-line summary of a plan for the checklist card's header (V6: live or carried). */
+fun planSummary(revision: Int, items: List<MarathonPlanItem>): String {
+    val open = items.count { it.status == "pending" || it.status == "in_progress" }
     val openText = if (open == 1) "1 open" else "$open open"
-    return "Revision ${plan.revision} · $openText of ${plan.items.size}"
+    return "Revision $revision · $openText of ${items.size}"
 }
+
+fun planSummary(plan: MarathonPlan): String = planSummary(plan.revision, plan.items)
 
 /** One-line description of what the running turn is doing. */
 fun activityLine(turn: TurnInfo, phase: Phase): String? = when {

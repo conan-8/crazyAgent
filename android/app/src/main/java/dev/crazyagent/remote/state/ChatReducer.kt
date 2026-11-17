@@ -190,7 +190,8 @@ object ChatReducer {
                 // publishes the authoritative off state separately).
                 marathon = MarathonState(),
                 watchNotice = null,
-                turn = if (state.turn.isWaiting) state.turn.copy(status = "idle") else state.turn,
+                // V6: the live plan belonged to the chat just left (hub parity).
+                turn = state.turn.copy(status = if (state.turn.isWaiting) "idle" else state.turn.status, plan = null),
             )
             "remote.help" -> state.copy(help = helpOf(body) ?: state.help)
             "remote.confirm" -> state.copy(confirm = confirmOf(body) ?: state.confirm)
@@ -210,6 +211,12 @@ object ChatReducer {
                     } else null
                     state.copy(watchNotice = notice, marathon = state.marathon.copy(watch = state.marathon.watch.copy(open = open)))
                 }
+            }
+            "remote.plan" -> {
+                // V6: the live checklist for the running turn. A malformed
+                // envelope keeps the last good plan (fail-closed, no partial).
+                val plan = turnPlanOf(body)
+                if (plan == null) state else state.copy(turn = state.turn.copy(plan = plan))
             }
             "remote.screenshot" -> state.copy(screenshot = screenshotOf(body) ?: state.screenshot)
             "remote.health" -> state.copy(health = healthOf(body))
@@ -287,6 +294,7 @@ object ChatReducer {
         clientMessageId = body.string("clientMessageId"),
         outcome = body.string("outcome"),
         error = body.string("error"),
+        plan = body.obj("plan")?.let(::turnPlanOf),
     )
 
     private fun healthOf(body: JsonObject) = Health(
@@ -357,16 +365,33 @@ object ChatReducer {
         val revision = body.long("revision")?.takeIf { it >= 0 && it <= Int.MAX_VALUE } ?: return null
         val updatedAt = body.string("updatedAt") ?: return null
         val turnId = body.string("turnId") ?: return null
+        val items = planItemsOf(body) ?: return null
+        return MarathonPlan(revision.toInt(), items, updatedAt, turnId)
+    }
+
+    /**
+     * V6: the running turn's live plan (`remote.plan` / `/state.turn.plan`).
+     * Same fail-closed item rules as the carried plan; the activity carries no
+     * updatedAt/turnId markers. Malformed is null — the caller keeps the last
+     * good plan rather than showing a partial one.
+     */
+    private fun turnPlanOf(body: JsonObject): TurnPlan? {
+        val revision = body.long("revision")?.takeIf { it >= 0 && it <= Int.MAX_VALUE } ?: return null
+        val items = planItemsOf(body) ?: return null
+        return TurnPlan(revision.toInt(), items, body.bool("awaitingUser") == true)
+    }
+
+    /** The shared item-list rules: 1–40 items, non-blank unique content, known status. */
+    private fun planItemsOf(body: JsonObject): List<MarathonPlanItem>? {
         val items = body.array("items")?.takeIf { it.isNotEmpty() && it.size <= 40 } ?: return null
         val contents = HashSet<String>()
-        val parsed = items.map { element ->
+        return items.map { element ->
             val item = element as? JsonObject ?: return null
             val content = item.string("content")?.takeIf { it.isNotBlank() } ?: return null
             val status = item.string("status")?.takeIf { it in PLAN_STATUSES } ?: return null
             if (!contents.add(content)) return null
             MarathonPlanItem(content, status)
         }
-        return MarathonPlan(revision.toInt(), parsed, updatedAt, turnId)
     }
 
     private fun watchChecks(body: JsonObject?): Int =

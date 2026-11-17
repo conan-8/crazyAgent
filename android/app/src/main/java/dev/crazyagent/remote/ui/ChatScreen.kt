@@ -95,7 +95,7 @@ import dev.crazyagent.remote.notifications.PushState
 import dev.crazyagent.remote.state.DisplayRow
 import dev.crazyagent.remote.state.Draft
 import dev.crazyagent.remote.state.Health
-import dev.crazyagent.remote.state.MarathonPlan
+import dev.crazyagent.remote.state.MarathonPlanItem
 import dev.crazyagent.remote.state.NoteKind
 import dev.crazyagent.remote.state.WatchNotice
 import dev.crazyagent.remote.state.activityLine
@@ -136,6 +136,9 @@ class ChatActions(
 )
 
 private enum class UtilityPanel { SETTINGS, DIAGNOSTICS, HISTORY }
+
+/** What the checklist card renders: the live plan during a turn, the carried plan between turns. */
+private data class ChecklistView(val revision: Int, val items: List<MarathonPlanItem>, val awaitingUser: Boolean)
 private enum class Level { OK, WARN, BAD, UNKNOWN }
 private enum class LiveSlot { NONE, OPEN, COLLAPSED, EMPTY }
 
@@ -277,9 +280,12 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
                 onAck = actions.onWatchAck,
             )
         }
-        // M5: the carried marathon plan — the phone's first checklist.
-        SmoothPresence(state.chat.marathon.plan) { plan ->
-            PlanChecklistCard(plan, collapsed = planCollapsed, onToggle = { planCollapsed = !planCollapsed })
+        // V6: the checklist renders the LIVE plan during the turn and the
+        // carried plan between turns (the hub clears turn.plan at the end).
+        val checklist = state.chat.turn.plan?.let { ChecklistView(it.revision, it.items, it.awaitingUser) }
+            ?: state.chat.marathon.plan?.let { ChecklistView(it.revision, it.items, false) }
+        SmoothPresence(checklist) { view ->
+            PlanChecklistCard(view.revision, view.items, view.awaitingUser, collapsed = planCollapsed, onToggle = { planCollapsed = !planCollapsed })
         }
         Composer(
             state = state,
@@ -677,12 +683,13 @@ private fun WatchCard(
 }
 
 /**
- * M5: the carried marathon plan as a collapsible checklist card. Items arrive
- * with `remote.marathon` at the turn end (and on resync); statuses mirror the
- * provider's plan: pending, in_progress, completed, blocked.
+ * The marathon checklist as a collapsible card. V6: during a turn it renders
+ * the LIVE plan (`remote.plan`); between turns, the carried plan
+ * (`remote.marathon`). Statuses mirror the provider's plan: pending,
+ * in_progress, completed, blocked.
  */
 @Composable
-private fun PlanChecklistCard(plan: MarathonPlan, collapsed: Boolean, onToggle: () -> Unit) {
+private fun PlanChecklistCard(revision: Int, items: List<MarathonPlanItem>, awaitingUser: Boolean, collapsed: Boolean, onToggle: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     val chevronAngle by animateFloatAsState(if (collapsed) -90f else 0f, Motion.base(), label = "plan-chevron")
     Column(
@@ -698,13 +705,13 @@ private fun PlanChecklistCard(plan: MarathonPlan, collapsed: Boolean, onToggle: 
                 .clip(RoundedCornerShape(12.dp))
                 .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onToggle)
                 .padding(horizontal = 12.dp, vertical = 9.dp)
-                .semantics { contentDescription = "Marathon plan, ${planSummary(plan)}. Tap to ${if (collapsed) "expand" else "collapse"}." },
+                .semantics { contentDescription = "Marathon plan, ${planSummary(revision, items)}. Tap to ${if (collapsed) "expand" else "collapse"}." },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Text("Marathon plan", style = AgentType.Step, color = AgentStepTitle)
             Text(
-                planSummary(plan),
+                planSummary(revision, items),
                 style = AgentType.Meta,
                 color = AgentMuted,
                 maxLines = 1,
@@ -723,7 +730,7 @@ private fun PlanChecklistCard(plan: MarathonPlan, collapsed: Boolean, onToggle: 
                     .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                for (item in plan.items) {
+                for (item in items) {
                     val (dot, text) = when (item.status) {
                         "completed" -> AgentGreen to AgentMuted
                         "in_progress" -> AgentYellow to AgentText
@@ -739,6 +746,9 @@ private fun PlanChecklistCard(plan: MarathonPlan, collapsed: Boolean, onToggle: 
                             modifier = Modifier.weight(1f),
                         )
                     }
+                }
+                if (awaitingUser) {
+                    Text("Waiting for your reply", style = AgentType.Tiny, color = AgentYellow)
                 }
             }
         }

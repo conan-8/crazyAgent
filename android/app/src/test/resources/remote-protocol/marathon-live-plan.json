@@ -1,0 +1,825 @@
+{
+  "name": "marathon-live-plan",
+  "frames": [
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 3,
+      "type": "remote.resync",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:04.000Z",
+      "body": {
+        "reason": "no-instance",
+        "state": {
+          "protocol": 1,
+          "server": {
+            "name": "crazyagent-companion",
+            "version": "fixture"
+          },
+          "instanceId": "companion-fixture-i",
+          "sessionId": "session-1",
+          "latestSequence": 3,
+          "oldestSequence": 1,
+          "turn": {
+            "status": "idle",
+            "turnId": null,
+            "origin": null,
+            "clientMessageId": null,
+            "startedAt": null,
+            "endedAt": null,
+            "outcome": null,
+            "error": null,
+            "label": null,
+            "usage": null,
+            "failedCalls": null,
+            "plan": null
+          },
+          "phase": {
+            "status": null,
+            "tool": null
+          },
+          "health": {
+            "uiConnected": true,
+            "toolsConnected": true,
+            "dsh": "ready",
+            "dshMessage": null,
+            "provider": "openrouter",
+            "model": "fixture/model",
+            "autoCapture": true,
+            "contextWindow": null,
+            "contextTokens": null
+          },
+          "messages": [],
+          "draft": null,
+          "latestScreenshotId": null,
+          "latestScreenshot": null,
+          "help": null,
+          "confirm": null,
+          "marathon": {
+            "enabled": false,
+            "since": null,
+            "plan": null,
+            "watch": {
+              "open": null,
+              "lastVerdict": null,
+              "lastCheckAt": null,
+              "checks": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 4,
+      "type": "remote.marathon",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:05.000Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "session-1",
+        "since": "2026-11-17T13:00:01.000Z",
+        "origin": "remote",
+        "plan": null,
+        "watcher": {
+          "active": false,
+          "checks": 0,
+          "lastCheckAt": null,
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 5,
+      "type": "chat.user",
+      "sessionId": "session-1",
+      "turnId": "turn-17",
+      "occurredAt": "2026-11-06T12:00:07.000Z",
+      "body": {
+        "text": "Place the order and verify it",
+        "origin": "remote",
+        "clientMessageId": "client-turn-17",
+        "imageCount": 0,
+        "marathon": true
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 6,
+      "type": "chat.status",
+      "sessionId": "session-1",
+      "turnId": "turn-17",
+      "occurredAt": "2026-11-06T12:00:08.000Z",
+      "body": {
+        "status": "thinking",
+        "tool": null,
+        "turnStatus": "running"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 7,
+      "type": "chat.draft",
+      "sessionId": "session-1",
+      "turnId": "turn-17",
+      "occurredAt": "2026-11-06T12:00:09.000Z",
+      "body": {
+        "streamId": "turn-17:s1",
+        "channel": "text",
+        "offset": 0,
+        "delta": "Working through the checkout."
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 8,
+      "type": "remote.plan",
+      "sessionId": "session-1",
+      "turnId": "turn-17",
+      "occurredAt": "2026-11-06T12:00:10.000Z",
+      "body": {
+        "turnId": "turn-17",
+        "revision": 1,
+        "items": [
+          {
+            "content": "Fill the shipping form",
+            "status": "in_progress"
+          },
+          {
+            "content": "Place the order",
+            "status": "pending"
+          },
+          {
+            "content": "Verify the confirmation page",
+            "status": "pending"
+          }
+        ],
+        "awaitingUser": false
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 9,
+      "type": "remote.plan",
+      "sessionId": "session-1",
+      "turnId": "turn-17",
+      "occurredAt": "2026-11-06T12:00:11.000Z",
+      "body": {
+        "turnId": "turn-17",
+        "revision": 2,
+        "items": [
+          {
+            "content": "Fill the shipping form",
+            "status": "completed"
+          },
+          {
+            "content": "Place the order",
+            "status": "in_progress"
+          },
+          {
+            "content": "Verify the confirmation page",
+            "status": "pending"
+          }
+        ],
+        "awaitingUser": false
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 10,
+      "type": "remote.plan",
+      "sessionId": "session-1",
+      "turnId": "turn-17",
+      "occurredAt": "2026-11-06T12:00:12.000Z",
+      "body": {
+        "turnId": "turn-17",
+        "revision": 2,
+        "items": [
+          {
+            "content": "Fill the shipping form",
+            "status": "completed"
+          },
+          {
+            "content": "Place the order",
+            "status": "in_progress"
+          },
+          {
+            "content": "Verify the confirmation page",
+            "status": "pending"
+          }
+        ],
+        "awaitingUser": true
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 11,
+      "type": "chat.done",
+      "sessionId": "session-1",
+      "turnId": "turn-17",
+      "occurredAt": "2026-11-06T12:00:13.000Z",
+      "body": {
+        "text": "PARTIAL — the order was placed but not verified.",
+        "timings": {
+          "totalMs": 200000,
+          "toolCalls": 10,
+          "failedCalls": 0
+        },
+        "usage": {
+          "inputTokens": 25000,
+          "outputTokens": 600,
+          "totalTokens": 25600
+        },
+        "label": "partial",
+        "model": "fixture/model",
+        "docsVerification": null,
+        "docsVerificationReason": null,
+        "planMode": true,
+        "marathon": true,
+        "planOutcome": "unfinished",
+        "planRevision": 2,
+        "watch": {
+          "checks": 4,
+          "alerts": 0,
+          "usage": 0
+        },
+        "replacesStreamId": "turn-17:s1"
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 12,
+      "type": "chat.turn",
+      "sessionId": "session-1",
+      "turnId": "turn-17",
+      "occurredAt": "2026-11-06T12:00:15.000Z",
+      "body": {
+        "status": "idle",
+        "turnId": "turn-17",
+        "origin": "remote",
+        "clientMessageId": "client-turn-17",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": "2026-11-06T12:00:14.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 25000,
+          "outputTokens": 600,
+          "totalTokens": 25600
+        },
+        "failedCalls": 0,
+        "plan": null
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 13,
+      "type": "remote.marathon",
+      "sessionId": "session-1",
+      "occurredAt": "2026-11-06T12:00:16.000Z",
+      "body": {
+        "enabled": true,
+        "sessionId": "session-1",
+        "since": "2026-11-17T13:00:01.000Z",
+        "origin": "remote",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T13:05:00.000Z",
+          "turnId": "turn-17"
+        },
+        "watcher": {
+          "active": false,
+          "checks": 4,
+          "lastCheckAt": "2026-11-17T13:04:40.000Z",
+          "lastVerdict": null
+        }
+      }
+    },
+    {
+      "v": 1,
+      "instanceId": "companion-fixture-i",
+      "seq": 14,
+      "type": "chat.session",
+      "sessionId": "session-2",
+      "occurredAt": "2026-11-06T12:00:17.000Z",
+      "body": {
+        "sessionId": "session-2"
+      }
+    }
+  ],
+  "final": {
+    "protocol": 1,
+    "server": {
+      "name": "crazyagent-companion",
+      "version": "fixture"
+    },
+    "instanceId": "companion-fixture-i",
+    "sessionId": "session-2",
+    "latestSequence": 14,
+    "oldestSequence": 1,
+    "turn": {
+      "status": "idle",
+      "turnId": "turn-17",
+      "origin": "remote",
+      "clientMessageId": "client-turn-17",
+      "startedAt": "2026-11-06T12:00:06.000Z",
+      "endedAt": "2026-11-06T12:00:14.000Z",
+      "outcome": "done",
+      "error": null,
+      "label": "partial",
+      "usage": {
+        "inputTokens": 25000,
+        "outputTokens": 600,
+        "totalTokens": 25600
+      },
+      "failedCalls": 0,
+      "plan": null
+    },
+    "phase": {
+      "status": null,
+      "tool": null
+    },
+    "health": {
+      "uiConnected": true,
+      "toolsConnected": true,
+      "dsh": "ready",
+      "dshMessage": null,
+      "provider": "openrouter",
+      "model": "fixture/model",
+      "autoCapture": true,
+      "contextWindow": null,
+      "contextTokens": null
+    },
+    "messages": [],
+    "draft": null,
+    "latestScreenshotId": null,
+    "latestScreenshot": null,
+    "help": null,
+    "confirm": null,
+    "marathon": {
+      "enabled": false,
+      "since": null,
+      "plan": null,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      }
+    }
+  },
+  "checkpoints": {
+    "livePlan1": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-i",
+      "sessionId": "session-1",
+      "latestSequence": 8,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "running",
+        "turnId": "turn-17",
+        "origin": "remote",
+        "clientMessageId": "client-turn-17",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null,
+        "plan": {
+          "turnId": "turn-17",
+          "revision": 1,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "in_progress"
+            },
+            {
+              "content": "Place the order",
+              "status": "pending"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "awaitingUser": false
+        }
+      },
+      "phase": {
+        "status": "thinking",
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-i",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-17",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Place the order and verify it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-17",
+            "imageCount": 0,
+            "marathon": true
+          }
+        }
+      ],
+      "draft": {
+        "turnId": "turn-17",
+        "streamId": "turn-17:s1",
+        "text": "Working through the checkout.",
+        "reasoning": "",
+        "tools": []
+      },
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T13:00:01.000Z",
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    "livePlan2": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-i",
+      "sessionId": "session-1",
+      "latestSequence": 9,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "running",
+        "turnId": "turn-17",
+        "origin": "remote",
+        "clientMessageId": "client-turn-17",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null,
+        "plan": {
+          "turnId": "turn-17",
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "awaitingUser": false
+        }
+      },
+      "phase": {
+        "status": "thinking",
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-i",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-17",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Place the order and verify it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-17",
+            "imageCount": 0,
+            "marathon": true
+          }
+        }
+      ],
+      "draft": {
+        "turnId": "turn-17",
+        "streamId": "turn-17:s1",
+        "text": "Working through the checkout.",
+        "reasoning": "",
+        "tools": []
+      },
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T13:00:01.000Z",
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    "awaiting": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-i",
+      "sessionId": "session-1",
+      "latestSequence": 10,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "running",
+        "turnId": "turn-17",
+        "origin": "remote",
+        "clientMessageId": "client-turn-17",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": null,
+        "outcome": null,
+        "error": null,
+        "label": null,
+        "usage": null,
+        "failedCalls": null,
+        "plan": {
+          "turnId": "turn-17",
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "awaitingUser": true
+        }
+      },
+      "phase": {
+        "status": "thinking",
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-i",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-17",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Place the order and verify it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-17",
+            "imageCount": 0,
+            "marathon": true
+          }
+        }
+      ],
+      "draft": {
+        "turnId": "turn-17",
+        "streamId": "turn-17:s1",
+        "text": "Working through the checkout.",
+        "reasoning": "",
+        "tools": []
+      },
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T13:00:01.000Z",
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
+    },
+    "afterTurnEnd": {
+      "protocol": 1,
+      "server": {
+        "name": "crazyagent-companion",
+        "version": "fixture"
+      },
+      "instanceId": "companion-fixture-i",
+      "sessionId": "session-1",
+      "latestSequence": 13,
+      "oldestSequence": 1,
+      "turn": {
+        "status": "idle",
+        "turnId": "turn-17",
+        "origin": "remote",
+        "clientMessageId": "client-turn-17",
+        "startedAt": "2026-11-06T12:00:06.000Z",
+        "endedAt": "2026-11-06T12:00:14.000Z",
+        "outcome": "done",
+        "error": null,
+        "label": "partial",
+        "usage": {
+          "inputTokens": 25000,
+          "outputTokens": 600,
+          "totalTokens": 25600
+        },
+        "failedCalls": 0,
+        "plan": null
+      },
+      "phase": {
+        "status": null,
+        "tool": null
+      },
+      "health": {
+        "uiConnected": true,
+        "toolsConnected": true,
+        "dsh": "ready",
+        "dshMessage": null,
+        "provider": "openrouter",
+        "model": "fixture/model",
+        "autoCapture": true,
+        "contextWindow": null,
+        "contextTokens": null
+      },
+      "messages": [
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-i",
+          "seq": 5,
+          "type": "chat.user",
+          "sessionId": "session-1",
+          "turnId": "turn-17",
+          "occurredAt": "2026-11-06T12:00:07.000Z",
+          "body": {
+            "text": "Place the order and verify it",
+            "origin": "remote",
+            "clientMessageId": "client-turn-17",
+            "imageCount": 0,
+            "marathon": true
+          }
+        },
+        {
+          "v": 1,
+          "instanceId": "companion-fixture-i",
+          "seq": 11,
+          "type": "chat.done",
+          "sessionId": "session-1",
+          "turnId": "turn-17",
+          "occurredAt": "2026-11-06T12:00:13.000Z",
+          "body": {
+            "text": "PARTIAL — the order was placed but not verified.",
+            "timings": {
+              "totalMs": 200000,
+              "toolCalls": 10,
+              "failedCalls": 0
+            },
+            "usage": {
+              "inputTokens": 25000,
+              "outputTokens": 600,
+              "totalTokens": 25600
+            },
+            "label": "partial",
+            "model": "fixture/model",
+            "docsVerification": null,
+            "docsVerificationReason": null,
+            "planMode": true,
+            "marathon": true,
+            "planOutcome": "unfinished",
+            "planRevision": 2,
+            "watch": {
+              "checks": 4,
+              "alerts": 0,
+              "usage": 0
+            },
+            "replacesStreamId": "turn-17:s1"
+          }
+        }
+      ],
+      "draft": null,
+      "latestScreenshotId": null,
+      "latestScreenshot": null,
+      "help": null,
+      "confirm": null,
+      "marathon": {
+        "enabled": true,
+        "since": "2026-11-17T13:00:01.000Z",
+        "plan": {
+          "revision": 2,
+          "items": [
+            {
+              "content": "Fill the shipping form",
+              "status": "completed"
+            },
+            {
+              "content": "Place the order",
+              "status": "in_progress"
+            },
+            {
+              "content": "Verify the confirmation page",
+              "status": "pending"
+            }
+          ],
+          "updatedAt": "2026-11-17T13:05:00.000Z",
+          "turnId": "turn-17"
+        },
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": "2026-11-17T13:04:40.000Z",
+          "checks": 4
+        }
+      }
+    }
+  }
+}
