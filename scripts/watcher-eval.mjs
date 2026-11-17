@@ -1,54 +1,69 @@
 #!/usr/bin/env node
 /**
- * watcher-eval.mjs — the M4 offline replay gate (MARATHON-PLAN.md §5 M4).
+ * watcher-eval.mjs — manifest-driven offline replay gate (MARATHON-V2-PLAN.md
+ * §3.1 / §5 V0; successor of the M4 replay gate).
  *
- * CHEAPEST GATE FIRST: rebuilds watch ledgers from archived events.jsonl turn
- * logs (no browser, no DSH runner), cuts labelled windows (fine / stuck), and
- * scores the REAL judge (configured agent model at low reasoning effort,
- * ≤400 output tokens per call) running inside the real Watcher under a fake
- * clock. The events.jsonl→ledger adapter lives here; the ledger is NOT weakened
- * to fit the logs.
- *
- * Gate: zero alerts on fine windows; ≥80% of stuck windows flagged within two
- * judge checks. With zero observed false alerts in N fine windows the true rate
- * is only bounded near 3/N — that caveat is recorded with the result.
+ * CHEAPEST GATE FIRST: reads e2e/watch-corpus/manifest.json (labels frozen by
+ * scripts/watch-label.mjs from independent state BEFORE scoring; never tuned
+ * here), replays each window's committed trace through the real WatchLedger +
+ * Watcher + judge under a fake clock (no browser, no DSH runner), and scores
+ * the §3.1 metrics. The ledger is NOT weakened to fit the traces.
  *
  * The API key is loaded from the environment (CRAZYAGENT_API_KEY) or the
- * companion's .dsh-home/browser-agent/api-key file at launch, passed to the
- * judge through an injected getter, and NEVER printed or written to results.
+ * companion's .dsh-home/browser-agent/api-key file at launch (worktree first,
+ * then the main checkout), passed to the judge through an injected getter, and
+ * NEVER printed or written to results.
  *
  * Usage:
- *   node scripts/watcher-eval.mjs --dry-run          # fake judge, no spend
- *   node scripts/watcher-eval.mjs                    # real judge calls
- *   node scripts/watcher-eval.mjs --only m0-stall-r4 # one window
- *   node scripts/watcher-eval.mjs --out path.json
+ *   node scripts/watcher-eval.mjs --dry-run                 # fake judge, no spend
+ *   node scripts/watcher-eval.mjs --split tune --repeat 3   # tune windows, k=3
+ *   node scripts/watcher-eval.mjs --split holdout           # holdout (score ONCE at milestone end)
+ *   node scripts/watcher-eval.mjs --only <windowId>         # one window
+ *   node scripts/watcher-eval.mjs --manifest path.json --out path.json
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gunzipSync } from 'node:zlib'
+import { createHash } from 'node:crypto'
 import { WatchLedger } from '../companion/watch-ledger.mjs'
 import { Watcher, WATCH_JUDGE_LIMITS } from '../companion/watcher.mjs'
 import { createWatchJudge } from '../companion/watch-judge.mjs'
 import { DEFAULT_BASE_URL, RECOMMENDED_MODEL_ID } from '../companion/openrouter.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
-const ARCHIVE_ROOT = join(ROOT, '.dsh-home/browser-agent/logs/m0-archive')
+const MAIN_ROOT = '/home/conan/Documents/GitHub/crazyAgent'
+const CORPUS = join(ROOT, 'e2e/watch-corpus')
 const TICK_MS = 20_000
+/** End classes exempt from ended-incomplete (§3.1 end-class rule). */
+const END_CLASS_EXEMPT = new Set(['help', 'confirm', 'stopped', 'done', 'reported-complete'])
+/** Mid-turn alert kinds (ended-incomplete and info/recovered are not alerts). */
+const ALERT_KINDS = new Set(['SILENT_STALL', 'TOOL_HANG', 'EXECUTOR_DOWN', 'stuck', 'blocked'])
 
 /* ------------------------------------------------------------------ */
 /* CLI                                                                 */
 /* ------------------------------------------------------------------ */
 
 function parseArgs(argv) {
-  const args = { dryRun: false, only: null, out: null, archive: ARCHIVE_ROOT, tickMs: TICK_MS }
+  const args = { dryRun: false, only: null, out: null, split: null, manifest: null, tickMs: TICK_MS, repeat: 3 }
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i]
     if (a === '--dry-run') args.dryRun = true
     else if (a === '--only') args.only = argv[++i]
     else if (a === '--out') args.out = argv[++i]
-    else if (a === '--archive') args.archive = argv[++i]
+    else if (a === '--split') args.split = argv[++i]
+    else if (a === '--manifest') args.manifest = argv[++i]
     else if (a === '--tick-ms') args.tickMs = Number(argv[++i])
+    else if (a === '--repeat') args.repeat = Number(argv[++i])
+  }
+  if (args.split !== null && args.split !== 'tune' && args.split !== 'holdout') {
+    console.error(`--split must be tune or holdout (got ${args.split})`)
+    process.exit(1)
+  }
+  if (!Number.isInteger(args.repeat) || args.repeat < 1) {
+    console.error(`--repeat must be a positive integer (got ${args.repeat})`)
+    process.exit(1)
   }
   return args
 }
@@ -56,86 +71,59 @@ function parseArgs(argv) {
 /** Load the key into the environment at launch; never print or persist it. */
 function loadKey() {
   if (process.env.CRAZYAGENT_API_KEY && process.env.CRAZYAGENT_API_KEY.trim().length > 0) return process.env.CRAZYAGENT_API_KEY.trim()
-  const keyFile = join(ROOT, '.dsh-home/browser-agent/api-key')
-  if (existsSync(keyFile)) {
-    const key = readFileSync(keyFile, 'utf8').trim()
-    if (key.length > 0) { process.env.CRAZYAGENT_API_KEY = key; return key }
+  for (const root of [ROOT, MAIN_ROOT]) {
+    const keyFile = join(root, '.dsh-home/browser-agent/api-key')
+    if (existsSync(keyFile)) {
+      const key = readFileSync(keyFile, 'utf8').trim()
+      if (key.length > 0) { process.env.CRAZYAGENT_API_KEY = key; return key }
+    }
   }
   return null
 }
 
 function loadConfig() {
-  const llmPath = join(ROOT, '.dsh-home/browser-agent/llm.json')
-  if (existsSync(llmPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(llmPath, 'utf8'))
-      if (parsed?.model?.id) return { baseUrl: parsed.baseUrl ?? DEFAULT_BASE_URL, model: parsed.model }
-    } catch { /* fall through */ }
+  for (const root of [ROOT, MAIN_ROOT]) {
+    const llmPath = join(root, '.dsh-home/browser-agent/llm.json')
+    if (existsSync(llmPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(llmPath, 'utf8'))
+        if (parsed?.model?.id) return { baseUrl: parsed.baseUrl ?? DEFAULT_BASE_URL, model: parsed.model }
+      } catch { /* fall through */ }
+    }
   }
   return { baseUrl: DEFAULT_BASE_URL, model: { id: RECOMMENDED_MODEL_ID, reasoning: true } }
 }
 
 /* ------------------------------------------------------------------ */
-/* events.jsonl → ledger adapter                                       */
+/* Trace loader (manifest is the ONLY window source)                   */
 /* ------------------------------------------------------------------ */
 
-function parseArchive(file) {
-  return readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
-}
-
 /**
- * Rebuild one turn's ledger frames from its archived events. Faithful to the
- * live feed: tool.call/tool.result → chat.tool_call/chat.tool_result;
- * assistant.text → chat.assistant; plan.updated → chat.activity{plan};
- * step/start → model-start; assistant/message reasoning blocks → reasoning.
- * Timestamps are wall-clock offsets from turn.start (the ledger's monotonic
- * clock is injected as elapsed ms).
+ * Load one window's committed trace, verifying its sha256 and header. Trace
+ * format: line 0 header {type:'turn',turnId,run,startMs,durationSec,prompt,
+ * endInfo,…}; lines 1+ {at: ms-offset-from-turn-start, frame:{…}} sorted by at.
+ * Fail closed on any mismatch.
  */
-function extractTurns(events) {
-  const starts = events.filter(e => e.type === 'turn.start')
-  const turns = []
-  for (const start of starts) {
-    const turnId = start.turnId
-    const startMs = Date.parse(start.time)
-    const end = events.find(e => e.type === 'turn.end' && e.turnId === turnId)
-    const endMs = end ? Date.parse(end.time) : startMs + 420_000
-    const spanMs = endMs - startMs
-    const frames = []
-    for (const e of events) {
-      if (e.turnId !== turnId) continue
-      const at = Date.parse(e.time) - startMs
-      if (at < 0 || at > spanMs) continue
-      if (e.type === 'tool.call') frames.push({ at, frame: { type: 'chat.tool_call', callId: e.data.callId, name: e.data.name, args: e.data.args } })
-      else if (e.type === 'tool.result') frames.push({ at, frame: { type: 'chat.tool_result', callId: e.data.callId, ok: e.data.ok !== false, text: e.data.text ?? '' } })
-      else if (e.type === 'assistant.text') frames.push({ at, frame: { type: 'chat.assistant', text: e.data.text ?? '' } })
-      else if (e.type === 'plan.updated') frames.push({ at, frame: { type: 'chat.activity', kind: 'plan', revision: e.data.revision, items: e.data.items ?? [] } })
-      else if (e.type === 'notification' && e.data?.params?.event?.type === 'step/start') frames.push({ at, frame: { type: 'chat.activity', kind: 'model-start' } })
-      else if (e.type === 'notification' && e.data?.params?.event?.type === 'assistant/message') {
-        const blocks = e.data.params.event.data?.message?.content ?? []
-        const reasoning = blocks.filter(b => b.type === 'reasoning').map(b => b.text ?? '').join('')
-        if (reasoning.length > 0) frames.push({ at, frame: { type: 'chat.activity', kind: 'reasoning', text: reasoning } })
-      }
-    }
-    frames.sort((a, b) => a.at - b.at)
-    const aborted = end?.data?.aborted === true
-    const label = end?.data?.label ?? null
-    const planOutcome = end?.data?.planOutcome ?? null
-    const hasHelp = events.some(e => e.turnId === turnId && e.type === 'help.request')
-    const hasConfirm = events.some(e => e.turnId === turnId && e.type === 'confirm.request')
-    const outcome = aborted ? 'stopped' : (label || planOutcome ? 'done' : (end?.data?.ok ? 'done' : 'error'))
-    const endInfo = {
-      outcome, label, planOutcome, deadTurn: false,
-      ...(hasHelp ? { help: { category: 'other', reason: 'help requested' } } : {}),
-      ...(hasConfirm ? { confirm: { action: 'confirm', target: 'target' } } : {}),
-    }
-    turns.push({ turnId, startMs, durationSec: Math.round(spanMs / 1000), prompt: start.data.userText ?? '', frames, endInfo, hasHelp, label, planOutcome, aborted })
+function loadTraceTurn(win, corpusDir) {
+  const gz = readFileSync(join(corpusDir, win.trace))
+  const sha = createHash('sha256').update(gz).digest('hex')
+  if (win.traceSha256 && sha !== win.traceSha256) throw new Error(`trace sha256 mismatch for ${win.id}`)
+  const lines = gunzipSync(gz).toString('utf8').trim().split('\n').filter(Boolean)
+  const header = JSON.parse(lines[0])
+  if (header.type !== 'turn' || header.turnId !== win.turnId) throw new Error(`trace header mismatch for ${win.id}`)
+  return {
+    turnId: header.turnId,
+    startMs: header.startMs,
+    durationSec: header.durationSec,
+    prompt: header.prompt ?? '',
+    frames: lines.slice(1).map(l => JSON.parse(l)),
+    endInfo: header.endInfo,
   }
-  return turns
 }
 
-/** Synthetic hard-signal fixtures (TOOL_HANG/EXECUTOR_DOWN fixture logs were not
- * archived — M3 used a stub logStore). Clearly labelled; they exercise the
- * judge-interaction path, not the alert mechanism (proven in M3 via GET /state). */
+/** Synthetic hard-signal fixtures (clearly labelled; exercise the judge path,
+ *  not the alert mechanism — proven in M3 via GET /state). None in the corpus
+ *  today; kept for §3.1 synthetic-apart reporting. */
 function syntheticTurn(kind) {
   const base = { turnId: `synthetic-${kind}`, startMs: Date.parse('2026-11-17T00:00:00Z'), prompt: 'synthetic hard-signal fixture (not a real run)', synthetic: kind }
   if (kind === 'TOOL_HANG') {
@@ -151,7 +139,6 @@ function syntheticTurn(kind) {
       endInfo: { outcome: 'stopped', label: null, planOutcome: null, deadTurn: false },
     }
   }
-  // SILENT_STALL
   return {
     ...base, durationSec: 360,
     frames: [
@@ -174,10 +161,10 @@ async function replayTurn(turn, { judge, random, judgeLimits, tickMs }) {
   const alerts = []
   const recoveries = []
   const callLog = []
+  const tickLevels = []
   let endedIncomplete = false
   let connectivityDropped = false
 
-  // Wrap the judge to record per-call usage/verdict at the simulated call time.
   const wrappedJudge = {
     check: async input => {
       const result = await judge.check(input)
@@ -192,13 +179,13 @@ async function replayTurn(turn, { judge, random, judgeLimits, tickMs }) {
     ledger,
     marathonEnabled: () => true,
     publish: frame => {
-      watchFrames.push(frame)
       if (frame.type !== 'chat.watch') return
-      if (frame.state === 'open' && frame.kind !== 'ended-incomplete' && frame.kind !== 'info') {
-        alerts.push({ atSec: now / 1000, kind: frame.kind, source: frame.source, blocker: frame.blocker, reason: frame.reason, judgeChecks: watcher.judgeCalls })
+      watchFrames.push({ atSec: now / 1000, id: frame.id, kind: frame.kind, state: frame.state })
+      if (frame.state === 'open' && ALERT_KINDS.has(frame.kind)) {
+        alerts.push({ atSec: now / 1000, id: frame.id, kind: frame.kind, source: frame.source, blocker: frame.blocker, reason: frame.reason, judgeChecks: watcher.judgeCalls })
       }
-      if (frame.kind === 'recovered') recoveries.push({ atSec: now / 1000 })
-      if (frame.kind === 'ended-incomplete') endedIncomplete = true
+      if (frame.kind === 'recovered') recoveries.push({ atSec: now / 1000, id: frame.id })
+      if (frame.kind === 'ended-incomplete' && frame.state === 'open') endedIncomplete = true
     },
     judge: wrappedJudge,
     now: () => now,
@@ -206,7 +193,7 @@ async function replayTurn(turn, { judge, random, judgeLimits, tickMs }) {
     setTimer: fn => { tickFn = fn; return 1 },
     clearTimer: () => { tickFn = null },
     push: () => {},
-    log: () => {},
+    log: (type, data) => { if (type === 'watch.tick' && data?.level) tickLevels.push({ atSec: now / 1000, level: data.level }) },
     random: random ?? (() => 0.5),
     judgeLimits,
   })
@@ -215,9 +202,7 @@ async function replayTurn(turn, { judge, random, judgeLimits, tickMs }) {
   watcher.turnStarted({ marathon: true })
 
   // Merge frames and ticks into one timeline so each frame is stamped at its
-  // TRUE recorded offset (not quantized to a tick boundary), matching the live
-  // ledger's arrival-time stamps. Ticks fire every tickMs; a triggered judge
-  // call is awaited at its tick time (simulated clock frozen during the HTTP).
+  // TRUE recorded offset (matching the live ledger's arrival-time stamps).
   const endMs = turn.durationSec * 1000
   const timeline = []
   for (const f of turn.frames) timeline.push({ at: f.at, kind: 'frame', frame: f.frame })
@@ -235,6 +220,22 @@ async function replayTurn(turn, { judge, random, judgeLimits, tickMs }) {
   const summary = watcher.turnEnded(turn.endInfo)
   watcher.stop()
 
+  // §3.1 stale-alert source: track each notice id's LAST state. A mid-turn
+  // alert id whose last state is still 'open' at turn end (no closing frame)
+  // is stale. v1 turnEnded nulls openAlert WITHOUT publishing a close frame —
+  // that asymmetry is the v1 stale bug. ended-incomplete persists open BY
+  // DESIGN (until ack) and is tracked separately, not as stale.
+  const lastStateById = new Map()
+  const alertIds = new Set()
+  let endedIncompleteId = null
+  for (const f of watchFrames) {
+    lastStateById.set(f.id, f.state)
+    if (f.state === 'open' && ALERT_KINDS.has(f.kind)) alertIds.add(f.id)
+    if (f.kind === 'ended-incomplete') endedIncompleteId = f.id
+  }
+  const staleAlertIds = [...alertIds].filter(id => lastStateById.get(id) === 'open')
+  const endedIncompleteOpen = endedIncompleteId !== null && lastStateById.get(endedIncompleteId) === 'open'
+
   return {
     turnId: turn.turnId,
     durationSec: turn.durationSec,
@@ -242,7 +243,11 @@ async function replayTurn(turn, { judge, random, judgeLimits, tickMs }) {
     callLog,
     alerts,
     recoveries,
+    watchFrames,
+    tickLevels,
     endedIncomplete,
+    endedIncompleteOpen,
+    staleAlertIds,
     summary,
     usage: {
       calls: watcher.judgeCalls,
@@ -256,133 +261,109 @@ async function replayTurn(turn, { judge, random, judgeLimits, tickMs }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Window manifest                                                     */
+/* Scoring (§3.1; manifest fields are the contract)                    */
 /* ------------------------------------------------------------------ */
 
-const ARCHIVES = {
-  m0Smoke: 'run-2026-11-17T01-07-02-137Z-f33f10',
-  m0Long: 'run-2026-11-17T01-07-40-552Z-c02d66',
-  m0Stall: 'run-2026-11-17T01-13-25-223Z-02b684',
-  m0Signin: 'run-2026-11-17T01-20-21-564Z-2551a4',
-  m1Long: 'run-2026-11-17T01-32-38-591Z-f80ac2',
-  m2Long: 'run-2026-11-17T02-02-36-976Z-849181',
-  m2tSuite1: 'run-2026-11-17T02-44-34-045Z-b5a71b',
-  m2Suite2: 'run-2026-11-17T02-14-11-994Z-c82d46',
-  m2Unrelated: 'run-2026-11-17T02-26-39-794Z-739f46',
-  m3Long: 'run-2026-11-17T03-37-05-493Z-6d9d73',
-  contaminatedStall: 'run-2026-11-17T00-43-57-262Z-2ab066',
-}
-
-/** Build the labelled window manifest. Each window references a replayed turn
- * and a scoring interval [startSec, endSec]. Fine windows are full turns; the
- * two long stuck runs also contribute a late slice (correlated — noted). */
-function buildWindows(turnsByArchive) {
-  const windows = []
-  const full = (archive, idx, label, scenario, note, expectEnded) => {
-    const turn = turnsByArchive[archive]?.[idx]
-    if (!turn) return
-    windows.push({ id: `${archive}-r${idx + 1}`, archive, turnIndex: idx, turnId: turn.turnId, label, scenario, note, startSec: 0, endSec: turn.durationSec, expectEndedIncomplete: expectEnded, synthetic: false })
-  }
-  // Clean M0 (pre-marathon code; replay arms marathon=true to exercise the watcher).
-  full('m0Smoke', 0, 'fine', 'click-once smoke', 'clean M0 smoke', false)
-  for (let i = 0; i < 5; i += 1) full('m0Long', i, 'fine', 'marathon-long', 'clean M0 complete', false)
-  // Clean M0 stall-loop: r1/r2/r3/r5 end honestly BELOW thresholds (no judge
-  // call, no alert) → fine. r4 loops ~30× on the inert button past PLAN_STALLED
-  // (@140s) before self-reporting BLOCKED (@153s): lead ruling 2026-11-16 labels
-  // it STUCK — at 140s it is stuck/looping and has NOT said so yet (plan §0
-  // remit; §5 M4 expects stall-loop alerts). The alert is a plan-consistent TRUE
-  // POSITIVE, not a false alert. The hard requirement is zero false alerts on
-  // HEALTHY/PROGRESSING runs (no stall behavior), not on runs that genuinely stall.
-  for (const i of [0, 1, 2, 4]) full('m0Stall', i, 'fine', 'stall-loop', 'clean M0 quick honest BLOCKED end below thresholds (no stall detected)', true)
-  full('m0Stall', 3, 'stuck', 'stall-loop', 'clean M0 r4: loops past PLAN_STALLED @140s, honest BLOCKED @153s — TRUE-POSITIVE stuck alert (lead label correction; plan §0/§5 M4)', true)
-  for (let i = 0; i < 5; i += 1) full('m0Signin', i, 'fine', 'sign-in-wall', 'clean M0 honest help end (no ended-incomplete)', false)
-  // M1 / M2 acceptance batches (fine).
-  for (let i = 0; i < 5; i += 1) full('m1Long', i, 'fine', 'marathon-long', 'M1 acceptance complete', false)
-  for (let i = 0; i < 5; i += 1) full('m2Long', i, 'fine', 'marathon-long', 'M2 acceptance complete', false)
-  // Tuning-pin suite 1: r3 is the 642s wander (stuck), r1/r2/r4/r5 fine.
-  for (const i of [0, 1, 3, 4]) full('m2tSuite1', i, 'fine', 'marathon-long', 'tuning-pin suite1 clean pass', false)
-  full('m2tSuite1', 2, 'stuck', 'marathon-long', 'tuning-pin suite1 r3: 642s wander, stations 4+5 re-recorded, false complete claim (semantic stall, varied activity)', false)
-  // Suite 2 stop-then-continue: turns 1-9 fine, turn 10 (r5 continuation) stuck redo.
-  for (let i = 0; i < 9; i += 1) full('m2Suite2', i, 'fine', 'stop-then-continue', 'suite2 stop/continue (no redo)', false)
-  full('m2Suite2', 9, 'stuck', 'stop-then-continue', 'pre-tuning suite2 r5 continuation: 293s wander, station 9 re-recorded (semantic stall)', false)
-  // Unrelated-question batch (fine).
-  for (let i = 0; i < 10; i += 1) full('m2Unrelated', i, 'fine', 'unrelated-question', 'M2 unrelated/continue (no hijack)', false)
-  // M3 acceptance batch (fine): 5 healthy marathon-long incl. the 221s FAITHFUL
-  // wander (r3) — completed, 0 redos. Must stay silent with the judge wired.
-  for (let i = 0; i < 5; i += 1) full('m3Long', i, 'fine', 'marathon-long', i === 2 ? 'M3 acceptance r3: 221s FAITHFUL wander, completed, 0 redos (must stay silent)' : 'M3 acceptance healthy complete', false)
-  // Contaminated stall-loop r4: the 420s silent timeout (non-M0, M1-code diagnostic).
-  full('contaminatedStall', 3, 'stuck', 'stall-loop', 'contaminated r4: 420s silent timeout, varied activity, no honest end (NON-M0, M1-code)', false)
-  // Late slices of the two long stuck runs (correlated with their full windows).
-  const late = (archive, idx, startSec, id, note) => {
-    const turn = turnsByArchive[archive]?.[idx]
-    if (!turn) return
-    windows.push({ id, archive, turnIndex: idx, turnId: turn.turnId, label: 'stuck', scenario: 'stall-loop', note, startSec, endSec: turn.durationSec, expectEndedIncomplete: false, synthetic: false, slice: true })
-  }
-  late('contaminatedStall', 3, 240, 'contaminatedStall-r4-late', 'late slice [240s,420s] of the 420s silent stall (correlated with full window)')
-  late('m2tSuite1', 2, 300, 'm2tSuite1-r3-late', 'late slice [300s,642s] of the 642s wander (correlated with full window)')
-  // Synthetic hard-signal fixtures.
-  for (const kind of ['TOOL_HANG', 'EXECUTOR_DOWN', 'SILENT_STALL']) {
-    windows.push({ id: `synthetic-${kind}`, archive: null, turnIndex: null, turnId: `synthetic-${kind}`, label: 'stuck', scenario: kind, note: `SYNTHETIC hard-signal fixture (judge-interaction path; alert mechanism proven in M3)`, startSec: 0, endSec: syntheticTurn(kind).durationSec, expectEndedIncomplete: false, synthetic: true })
-  }
-  return windows
-}
-
-/* ------------------------------------------------------------------ */
-/* Scoring                                                             */
-/* ------------------------------------------------------------------ */
-
-function scoreWindow(win, replay) {
-  const { startSec, endSec } = win
-  // Alerts relevant to the window: raised inside it, or already open at start
-  // (raised before start and not recovered before start).
-  const relevant = replay.alerts.filter(a => {
-    if (a.atSec > endSec) return false
-    if (a.atSec >= startSec) return true
-    const recoveredBeforeStart = replay.recoveries.some(r => r.atSec > a.atSec && r.atSec <= startSec)
-    return !recoveredBeforeStart
-  })
+function scoreWindow(win, replay, patience) {
+  const startSec = win.windowStartSec ?? 0
+  const endSec = win.windowEndSec ?? replay.durationSec
+  const caughtPost = patience.caughtWindowPostSec ?? 240
+  const redoWindow = patience.redoWindowSec ?? 120
+  const relevant = replay.alerts.filter(a => a.atSec >= startSec && a.atSec <= endSec)
   const callsInWindow = replay.callLog.filter(c => c.atSec >= startSec && c.atSec <= endSec)
-  const usage = callsInWindow.reduce((acc, c) => ({
-    inputTokens: acc.inputTokens + (c.usage?.inputTokens ?? 0),
-    outputTokens: acc.outputTokens + (c.usage?.outputTokens ?? 0),
-    reasoningTokens: acc.reasoningTokens + (c.usage?.reasoningTokens ?? 0),
-  }), { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 })
-
-  if (win.label === 'fine') {
-    return {
-      id: win.id, label: 'fine', scenario: win.scenario, synthetic: win.synthetic, slice: win.slice ?? false,
-      durationSec: endSec - startSec,
-      falseAlert: relevant.length > 0,
-      alerts: relevant.map(a => ({ kind: a.kind, source: a.source, atSec: a.atSec, reason: a.reason })),
-      judgeCalls: callsInWindow.length,
-      usage,
-      endedIncomplete: replay.endedIncomplete,
-      expectEndedIncomplete: win.expectEndedIncomplete,
-      endedIncompleteCorrect: replay.endedIncomplete === win.expectEndedIncomplete,
-      verdicts: replay.callLog.map(c => ({ atSec: c.atSec, state: c.state, confidence: c.confidence, status: c.status })),
-    }
-  }
-  // stuck
-  let flagged = false
-  let checksAtAlert = null
-  let firstAlert = null
-  if (relevant.length > 0) {
-    firstAlert = relevant.reduce((min, a) => (a.atSec < min.atSec ? a : min), relevant[0])
-    flagged = true
-    checksAtAlert = firstAlert.atSec < startSec ? 0 : replay.callLog.filter(c => c.atSec >= startSec && c.atSec <= firstAlert.atSec).length
-  }
-  return {
-    id: win.id, label: 'stuck', scenario: win.scenario, synthetic: win.synthetic, slice: win.slice ?? false,
-    durationSec: endSec - startSec,
-    flagged,
-    checksAtAlert,
-    flaggedWithinTwo: flagged && checksAtAlert !== null && checksAtAlert <= 2,
-    alertKind: firstAlert?.kind ?? null,
-    alertSource: firstAlert?.source ?? null,
-    alertReason: firstAlert?.reason ?? null,
-    judgeCalls: callsInWindow.length,
-    usage,
+  const expectEndedIncomplete = !END_CLASS_EXEMPT.has(win.endClass)
+  // redo caught (informational): any chat.watch frame within redoWindow of a redo.
+  const redoCaught = (win.redo ?? []).filter(r => r.atSec != null).map(r => ({
+    step: r.step, atSec: r.atSec,
+    caught: replay.watchFrames.some(f => Math.abs(f.atSec - r.atSec) <= redoWindow),
+  }))
+  const base = {
+    id: win.id, run: win.run, label: win.label, scenario: win.scenario, scenarioClass: win.scenarioClass,
+    labelRule: win.labelRule, gated: win.gated, split: win.split, origin: win.origin, synthetic: win.synthetic,
+    slice: win.slice ?? false, endClass: win.endClass, durationSec: endSec - startSec,
+    judgeCalls: replay.usage.calls, usage: replay.usage,
+    callsInWindow: callsInWindow.length,
+    staleAlerts: replay.staleAlertIds.length, staleAlertIds: replay.staleAlertIds,
+    endedIncomplete: replay.endedIncomplete, endedIncompleteOpen: replay.endedIncompleteOpen,
+    expectEndedIncomplete, endedIncompleteCorrect: replay.endedIncomplete === expectEndedIncomplete,
+    redoCaught,
+    suspectTicks: replay.tickLevels.filter(t => t.level === 'suspect').length,
     verdicts: replay.callLog.map(c => ({ atSec: c.atSec, state: c.state, confidence: c.confidence, status: c.status })),
+  }
+  if (win.label === 'fine') {
+    return { ...base, falseAlert: relevant.length > 0, alerts: relevant.map(a => ({ kind: a.kind, source: a.source, atSec: a.atSec, id: a.id, reason: a.reason })) }
+  }
+  // stuck: caught = first alert in [windowStartSec, onsetSec + caughtPost].
+  const onset = win.onsetSec ?? startSec
+  const caughtEnd = onset + caughtPost
+  const inCaught = relevant.filter(a => a.atSec <= caughtEnd)
+  const early = replay.alerts.filter(a => a.atSec < startSec)
+  let firstAlert = null
+  let caught = false
+  let checksAtAlert = null
+  if (inCaught.length > 0) {
+    firstAlert = inCaught.reduce((min, a) => (a.atSec < min.atSec ? a : min), inCaught[0])
+    caught = true
+    checksAtAlert = replay.callLog.filter(c => c.atSec >= startSec && c.atSec <= firstAlert.atSec).length
+  }
+  const stuckEnd = win.stuckEndSec ?? endSec
+  const falseRecovery = replay.recoveries.some(r => r.atSec >= onset && r.atSec <= stuckEnd)
+  return {
+    ...base, caught, early: early.length > 0, checksAtAlert,
+    alertKind: firstAlert?.kind ?? null, alertSource: firstAlert?.source ?? null, alertReason: firstAlert?.reason ?? null,
+    alertAtSec: firstAlert?.atSec ?? null, falseRecovery,
+    alerts: relevant.map(a => ({ kind: a.kind, source: a.source, atSec: a.atSec, id: a.id })),
+  }
+}
+
+const flaggedOf = r => (r.label === 'fine' ? r.falseAlert : r.caught)
+
+/** Aggregate k repeats per window: mean / worst-case / stability. */
+function aggregateWindow(win, repeats) {
+  const k = repeats.length
+  const flags = repeats.map(flaggedOf)
+  const meanFlagged = flags.filter(Boolean).length / k
+  // Worst case: fine = false-alerted if ANY repeat false-alerted (pessimistic);
+  // stuck = caught in worst case ONLY IF caught in ALL k (reliably caught).
+  const worstFlagged = win.label === 'fine' ? flags.some(Boolean) : flags.every(Boolean)
+  const stable = flags.every(f => f === flags[0])
+  const mean = field => repeats.reduce((n, r) => n + (r[field] ?? 0), 0) / k
+  return {
+    id: win.id, run: win.run, label: win.label, scenario: win.scenario, scenarioClass: win.scenarioClass,
+    labelRule: win.labelRule, gated: win.gated, split: win.split, origin: win.origin, synthetic: win.synthetic, slice: win.slice ?? false,
+    repeats: k, meanFlagged, worstFlagged, stable,
+    meanStaleAlerts: mean('staleAlerts'), worstStaleAlerts: Math.max(...repeats.map(r => r.staleAlerts)),
+    meanFalseRecovery: repeats.some(r => r.label === 'stuck') ? repeats.filter(r => r.falseRecovery).length / k : 0,
+    anyFalseRecovery: repeats.some(r => r.falseRecovery),
+    endedIncompleteCorrect: repeats.every(r => r.endedIncompleteCorrect),
+    meanJudgeCalls: mean('judgeCalls'),
+    usage: repeats[0].usage,
+    redoCaught: repeats[0].redoCaught,
+    meanSuspectTicks: mean('suspectTicks'),
+    perRepeat: repeats.map(r => ({ flagged: flaggedOf(r), staleAlerts: r.staleAlerts, judgeCalls: r.judgeCalls, caught: r.caught ?? null, falseAlert: r.falseAlert ?? null, alertAtSec: r.alertAtSec ?? null, alertKind: r.alertKind ?? null, falseRecovery: r.falseRecovery ?? null })),
+  }
+}
+
+function groupStats(windows) {
+  const fine = windows.filter(w => w.label === 'fine')
+  const stuck = windows.filter(w => w.label === 'stuck')
+  const rate = (arr, field) => (arr.length ? arr.filter(w => w[field]).length / arr.length : 0)
+  return {
+    windows: windows.length,
+    fine: fine.length,
+    stuck: stuck.length,
+    fineFalseAlertMeanRate: rate(fine, 'meanFlagged'),
+    fineFalseAlertWorstRate: rate(fine, 'worstFlagged'),
+    fineZeroAlertsMeanPass: fine.every(w => !w.meanFlagged),
+    fineZeroAlertsWorstPass: fine.every(w => !w.worstFlagged),
+    stuckCaughtMeanRate: rate(stuck, 'meanFlagged'),
+    stuckCaughtWorstRate: rate(stuck, 'worstFlagged'),
+    stuckCaughtMeanPass: stuck.length ? rate(stuck, 'meanFlagged') >= 0.8 : true,
+    stuckCaughtWorstPass: stuck.length ? rate(stuck, 'worstFlagged') >= 0.8 : true,
+    stability: windows.length ? windows.filter(w => w.stable).length / windows.length : 1,
+    staleAlertWindows: windows.filter(w => w.worstStaleAlerts > 0).length,
+    falseRecoveryWindows: windows.filter(w => w.anyFalseRecovery).length,
+    endedIncompleteCorrect: `${windows.filter(w => w.endedIncompleteCorrect).length}/${windows.length}`,
   }
 }
 
@@ -398,98 +379,110 @@ async function main() {
     console.error('No API key found (CRAZYAGENT_API_KEY or .dsh-home/browser-agent/api-key). Use --dry-run for a no-spend plumbing check.')
     process.exit(1)
   }
-
   const judge = args.dryRun
     ? { check: async () => ({ status: 'ok', verdict: { state: 'progressing', confidence: 0.9, blocker: null, reason: 'dry-run', evidence: [] }, usage: { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, totalTokens: 0 }, durationMs: 0, httpStatus: 200, finishReason: 'stop' }), abort: () => {}, get inFlight() { return false } }
     : createWatchJudge({ getApiKey: () => key, getBaseUrl: () => config.baseUrl, getModel: () => config.model })
 
-  // Load archives and extract turns.
-  const turnsByArchive = {}
-  for (const [name, dir] of Object.entries(ARCHIVES)) {
-    const file = join(args.archive, dir, 'events.jsonl')
-    if (!existsSync(file)) { console.error(`WARN missing archive ${name}: ${file}`); continue }
-    turnsByArchive[name] = extractTurns(parseArchive(file))
-  }
-  const windows = buildWindows(turnsByArchive).filter(w => args.only === null || w.id === args.only)
+  const manifestPath = args.manifest ?? join(CORPUS, 'manifest.json')
+  const corpusDir = dirname(manifestPath)
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const patience = manifest.patience ?? {}
+  let windows = manifest.windows ?? []
+  if (args.split !== null) windows = windows.filter(w => w.split === args.split)
+  if (args.only !== null) windows = windows.filter(w => w.id === args.only || w.id.includes(args.only))
   if (windows.length === 0) { console.error('No windows matched.'); process.exit(1) }
 
-  // Replay each unique turn once (synthetic turns generated on demand).
-  const replays = new Map()
-  const synthTurns = new Map()
+  // Load + dedup turns (each window = 1 turn today; key run#turnIndex).
+  const turnsByKey = new Map()
   for (const win of windows) {
-    const keyId = win.synthetic ? win.turnId : `${win.archive}/${win.turnIndex}`
-    if (replays.has(keyId)) continue
-    const turn = win.synthetic ? syntheticTurn(win.scenario) : turnsByArchive[win.archive][win.turnIndex]
-    if (win.synthetic) synthTurns.set(win.turnId, turn)
-    process.stderr.write(`replay ${keyId} (${turn.durationSec}s, ${turn.frames.length} frames)${args.dryRun ? ' [dry-run]' : ''}\n`)
-    const replay = await replayTurn(turn, { judge, random: () => 0.5, judgeLimits: WATCH_JUDGE_LIMITS, tickMs: args.tickMs })
-    replays.set(keyId, replay)
+    const keyId = win.synthetic ? win.turnId : `${win.run}#${win.turnIndex}`
+    if (turnsByKey.has(keyId)) continue
+    turnsByKey.set(keyId, win.synthetic ? syntheticTurn(win.scenario) : loadTraceTurn(win, corpusDir))
   }
 
-  // Score windows.
-  const results = windows.map(win => {
-    const keyId = win.synthetic ? win.turnId : `${win.archive}/${win.turnIndex}`
-    return scoreWindow(win, replays.get(keyId))
-  })
+  // Replay each unique turn k times; score each window per repeat.
+  const repeatsByWindow = new Map(windows.map(w => [w.id, []]))
+  for (let r = 0; r < args.repeat; r += 1) {
+    const replayByKey = new Map()
+    for (const [keyId, turn] of turnsByKey) {
+      process.stderr.write(`repeat ${r + 1}/${args.repeat} ${keyId} (${turn.durationSec}s, ${turn.frames.length} frames)${args.dryRun ? ' [dry-run]' : ''}\n`)
+      replayByKey.set(keyId, await replayTurn(turn, { judge, random: () => 0.5, judgeLimits: WATCH_JUDGE_LIMITS, tickMs: args.tickMs }))
+    }
+    for (const win of windows) {
+      const keyId = win.synthetic ? win.turnId : `${win.run}#${win.turnIndex}`
+      repeatsByWindow.get(win.id).push(scoreWindow(win, replayByKey.get(keyId), patience))
+    }
+    // Resilience: persist intermediate per-repeat aggregate so turn death loses nothing.
+    if (args.out) {
+      const partial = windows.map(w => aggregateWindow(w, repeatsByWindow.get(w.id)))
+      writeFileSync(`${args.out}.r${r + 1}.json`, JSON.stringify({ repeat: r + 1, windows: partial }, null, 2) + '\n')
+    }
+  }
 
-  const fine = results.filter(r => r.label === 'fine')
-  const stuck = results.filter(r => r.label === 'stuck')
-  const stuckSemantic = stuck.filter(r => !r.synthetic)
-  const falseAlerts = fine.filter(r => r.falseAlert)
-  const flaggedWithinTwo = stuck.filter(r => r.flaggedWithinTwo)
-  const endedCorrect = fine.filter(r => r.endedIncompleteCorrect).length
-  const totalCalls = results.reduce((n, r) => n + r.judgeCalls, 0)
-  const totalInput = results.reduce((n, r) => n + r.usage.inputTokens, 0)
-  const totalOutput = results.reduce((n, r) => n + r.usage.outputTokens, 0)
-  const totalReasoning = results.reduce((n, r) => n + r.usage.reasoningTokens, 0)
+  const agg = windows.map(w => aggregateWindow(w, repeatsByWindow.get(w.id)))
+  const groups = {
+    gatedAll: groupStats(agg.filter(w => w.gated)),
+    gatedClean: groupStats(agg.filter(w => w.gated && w.origin === 'clean')),
+    gatedContaminated: groupStats(agg.filter(w => w.gated && w.origin === 'contaminated')),
+    legacyManual: groupStats(agg.filter(w => w.labelRule === 'legacy-manual')),
+    all: groupStats(agg),
+  }
 
+  // Cost: full-turn usage per unique turn (× k repeats), separate from agent usage.
+  const uniqueTurns = [...turnsByKey.values()]
+  const watchedSeconds = uniqueTurns.reduce((n, t) => n + t.durationSec, 0) * args.repeat
+  const totals = agg.reduce((acc, w) => ({
+    judgeCalls: acc.judgeCalls + w.usage.calls * args.repeat,
+    inputTokens: acc.inputTokens + w.usage.inputTokens * args.repeat,
+    outputTokens: acc.outputTokens + w.usage.outputTokens * args.repeat,
+    reasoningTokens: acc.reasoningTokens + w.usage.reasoningTokens * args.repeat,
+    cacheReadTokens: acc.cacheReadTokens + w.usage.cacheReadTokens * args.repeat,
+  }), { judgeCalls: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0 })
+  const perWatchedHour = watchedSeconds > 0 ? {
+    judgeCalls: totals.judgeCalls / (watchedSeconds / 3600),
+    inputTokens: totals.inputTokens / (watchedSeconds / 3600),
+    outputTokens: totals.outputTokens / (watchedSeconds / 3600),
+  } : { judgeCalls: 0, inputTokens: 0, outputTokens: 0 }
+
+  const gatePass = groups.gatedAll.fineZeroAlertsWorstPass && groups.gatedAll.stuckCaughtWorstPass
   const summary = {
-    gate: {
-      fineWindows: fine.length,
-      fineFalseAlerts: falseAlerts.length,
-      fineZeroAlertsPass: falseAlerts.length === 0,
-      stuckWindows: stuck.length,
-      stuckSemanticWindows: stuckSemantic.length,
-      stuckFlaggedWithinTwo: flaggedWithinTwo.length,
-      stuckFlaggedRate: stuck.length ? flaggedWithinTwo.length / stuck.length : 0,
-      stuckSemanticFlaggedWithinTwo: stuckSemantic.filter(r => r.flaggedWithinTwo).length,
-      stuckPass: stuck.length ? flaggedWithinTwo.length / stuck.length >= 0.8 : false,
-      endedIncompleteCorrect: `${endedCorrect}/${fine.length}`,
-      falseAlertCaveat: `0 observed false alerts in ${fine.length} fine windows bounds the true rate near 3/${fine.length} (~${(3 / Math.max(1, fine.length)).toFixed(3)}); small-sample, correlated slices noted.`,
-    },
-    cost: { judgeCalls: totalCalls, inputTokens: totalInput, outputTokens: totalOutput, reasoningTokens: totalReasoning, model: config.model.id, effort: 'low', maxTokensPerCall: 400 },
-    dryRun: args.dryRun,
+    dryRun: args.dryRun, split: args.split ?? 'all', repeat: args.repeat,
+    manifestCreatedAt: manifest.createdAt, manifestWindows: manifest.windows.length,
+    model: config.model.id, effort: 'low', maxTokensPerCall: 400,
+    groups, gatePass,
+    cost: { totals, perWatchedHour, watchedSeconds, note: 'judge cost only; separate from agent usage' },
     generatedAt: new Date().toISOString(),
-    windows: results,
+    windows: agg,
   }
 
   // Console summary.
-  console.log('\n=== M4 offline replay gate ===')
-  console.log(`mode: ${args.dryRun ? 'DRY-RUN (fake judge)' : 'REAL judge'} · model ${config.model.id} @ low effort`)
-  console.log(`fine windows: ${fine.length} · false alerts: ${falseAlerts.length} · ${summary.gate.fineZeroAlertsPass ? 'PASS' : 'FAIL'}`)
-  console.log(`stuck windows: ${stuck.length} (semantic ${stuckSemantic.length}, synthetic ${stuck.length - stuckSemantic.length}) · flagged within 2 checks: ${flaggedWithinTwo.length} (${(summary.gate.stuckFlaggedRate * 100).toFixed(0)}%) · ${summary.gate.stuckPass ? 'PASS' : 'FAIL'}`)
-  console.log(`ended-incomplete correct: ${summary.gate.endedIncompleteCorrect}`)
-  console.log(`judge cost: ${totalCalls} calls · ${totalInput} input / ${totalOutput} output / ${totalReasoning} reasoning tokens`)
-  console.log(`caveat: ${summary.gate.falseAlertCaveat}`)
-  if (falseAlerts.length > 0) {
-    console.log('\nFALSE ALERTS (fine windows):')
-    for (const r of falseAlerts) console.log(`  ${r.id} [${r.scenario}] alerts=${JSON.stringify(r.alerts)} verdicts=${JSON.stringify(r.verdicts)}`)
+  console.log(`\n=== V0 manifest-driven replay gate ===`)
+  console.log(`mode: ${args.dryRun ? 'DRY-RUN (fake judge)' : 'REAL judge'} · model ${config.model.id} @ low · split ${summary.split} · k=${args.repeat} · ${windows.length} windows`)
+  for (const [name, g] of Object.entries(groups)) {
+    console.log(`\n[${name}] windows ${g.windows} (fine ${g.fine}, stuck ${g.stuck})`)
+    console.log(`  fine false-alert mean ${(g.fineFalseAlertMeanRate * 100).toFixed(0)}% / worst ${(g.fineFalseAlertWorstRate * 100).toFixed(0)}% · zero-alerts mean ${g.fineZeroAlertsMeanPass ? 'PASS' : 'FAIL'} / worst ${g.fineZeroAlertsWorstPass ? 'PASS' : 'FAIL'}`)
+    console.log(`  stuck caught mean ${(g.stuckCaughtMeanRate * 100).toFixed(0)}% / worst ${(g.stuckCaughtWorstRate * 100).toFixed(0)}% · ≥80% mean ${g.stuckCaughtMeanPass ? 'PASS' : 'FAIL'} / worst ${g.stuckCaughtWorstPass ? 'PASS' : 'FAIL'}`)
+    console.log(`  stability ${(g.stability * 100).toFixed(0)}% · stale-alert windows ${g.staleAlertWindows} · false-recovery windows ${g.falseRecoveryWindows} · ended-incomplete correct ${g.endedIncompleteCorrect}`)
+  }
+  console.log(`\ncost: ${totals.judgeCalls} judge calls · ${totals.inputTokens} input / ${totals.outputTokens} output / ${totals.reasoningTokens} reasoning tokens · watched ${(watchedSeconds / 3600).toFixed(2)} h · per-hour ${perWatchedHour.judgeCalls.toFixed(1)} calls`)
+  if (groups.gatedClean.windows > 0 && groups.gatedContaminated.windows > 0 &&
+      (groups.gatedClean.fineZeroAlertsWorstPass !== groups.gatedContaminated.fineZeroAlertsWorstPass || groups.gatedClean.stuckCaughtWorstPass !== groups.gatedContaminated.stuckCaughtWorstPass)) {
+    console.log('\n⚠ CONTAMINATED SENSITIVITY: gate pass/fail differs between clean and contaminated — FLAG TO LEAD')
   }
   console.log('\nstuck window detail:')
-  for (const r of stuck) console.log(`  ${r.id} [${r.scenario}]${r.slice ? ' (slice)' : ''}${r.synthetic ? ' (synthetic)' : ''}: flagged=${r.flagged} checksAtAlert=${r.checksAtAlert} kind=${r.alertKind} src=${r.alertSource} calls=${r.judgeCalls} verdicts=${r.verdicts.map(v => `${v.state}@${v.atSec}s`).join(',') || 'none'}`)
-  const fineWithCalls = fine.filter(r => r.judgeCalls > 0)
-  console.log(`\nfine windows that exercised the judge (${fineWithCalls.length}):`)
-  for (const r of fineWithCalls) console.log(`  ${r.id} [${r.scenario}]: calls=${r.judgeCalls} falseAlert=${r.falseAlert} ended=${r.endedIncomplete} verdicts=${r.verdicts.map(v => `${v.state}@${v.atSec}s`).join(',')}`)
+  for (const w of agg.filter(x => x.label === 'stuck')) console.log(`  ${w.id} [${w.scenario}]${w.slice ? ' (slice)' : ''}${w.synthetic ? ' (synthetic)' : ''} gated=${w.gated} origin=${w.origin}: caughtMean=${w.meanFlagged.toFixed(2)} caughtWorst=${w.worstFlagged} stable=${w.stable} kinds=${w.perRepeat.map(p => p.alertKind).join(',')} atSec=${w.perRepeat.map(p => p.alertAtSec).join(',')}`)
+  const falseAlertWindows = agg.filter(w => w.label === 'fine' && w.worstFlagged)
+  if (falseAlertWindows.length > 0) {
+    console.log('\nFALSE ALERTS (fine, worst-case):')
+    for (const w of falseAlertWindows) console.log(`  ${w.id} [${w.scenario}] mean=${w.meanFlagged.toFixed(2)} perRepeat=${JSON.stringify(w.perRepeat.map(p => ({ flagged: p.flagged, kind: p.alertKind })))}`)
+  }
 
-  // Write results (never the key).
-  const out = args.out ?? join(ROOT, 'docs/marathon/m4-evidence', `replay-${args.dryRun ? 'dryrun-' : ''}${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
+  const out = args.out ?? join(ROOT, 'docs/marathon/v2', `replay-${args.dryRun ? 'dryrun-' : ''}${summary.split}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
   mkdirSync(dirname(out), { recursive: true })
   writeFileSync(out, JSON.stringify(summary, null, 2) + '\n')
   console.log(`\nresults written: ${out}`)
-
-  const pass = summary.gate.fineZeroAlertsPass && summary.gate.stuckPass
-  console.log(`\nGATE: ${pass ? 'PASS' : 'FAIL'}`)
-  process.exit(pass ? 0 : 2)
+  console.log(`\nGATE (gatedAll worst-case): ${gatePass ? 'PASS' : 'FAIL'}`)
+  process.exit(gatePass ? 0 : 2)
 }
 
 main().catch(error => { console.error('replay failed:', error?.stack ?? error); process.exit(1) })
