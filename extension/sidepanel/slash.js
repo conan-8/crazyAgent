@@ -16,8 +16,15 @@
 export const SLASH_COMMANDS = Object.freeze([
   Object.freeze({ id: 'new', usage: '/new', description: 'Start a new chat' }),
   Object.freeze({ id: 'model', usage: '/model', description: 'Choose the model for your next turn' }),
-  Object.freeze({ id: 'plan', usage: '/plan', description: 'Plan the next turn with a live checklist' }),
+  Object.freeze({ id: 'marathon', usage: '/marathon', description: 'Plan every turn with a live checklist' }),
 ])
+
+/**
+ * Unlisted aliases kept for one release (MARATHON-PLAN.md §3.5): an exact
+ * `/plan` still runs the marathon command, but the palette never lists it.
+ * @type {Readonly<Record<string, string>>}
+ */
+export const SLASH_ALIASES = Object.freeze({ '/plan': 'marathon' })
 
 /** Longest command prefix that still counts as a slash draft (chars after `/`). */
 export const SLASH_QUERY_MAX_CHARS = 24
@@ -52,14 +59,18 @@ export function matchSlashCommands(query) {
 /**
  * Exact command for a draft, used when the user sends instead of choosing from
  * the menu (Send button or Enter with the menu already dismissed). Trailing
- * whitespace means prose, so `/new ` is not executed by accident.
+ * whitespace means prose, so `/new ` is not executed by accident. Unlisted
+ * aliases (`/plan`) resolve to their listed command.
  * @param {unknown} value
  * @returns {{id: string, usage: string, description: string} | null}
  */
 export function resolveSlashCommand(value) {
   if (typeof value !== 'string') return null
   const normalized = value.toLowerCase()
-  return SLASH_COMMANDS.find(command => command.usage === normalized) ?? null
+  const listed = SLASH_COMMANDS.find(command => command.usage === normalized)
+  if (listed !== undefined) return listed
+  const aliasId = SLASH_ALIASES[normalized]
+  return aliasId === undefined ? null : SLASH_COMMANDS.find(command => command.id === aliasId) ?? null
 }
 
 /**

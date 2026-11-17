@@ -1,0 +1,2 @@
+[ui-preview] wrote /tmp/m1-ui-slash/slash-commands.png
+[ui-preview] wrote /tmp/m1-ui-slash/slash-commands-narrow.png

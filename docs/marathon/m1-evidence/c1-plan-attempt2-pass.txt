@@ -1,0 +1,12 @@
+c1-acceptance: deepseek/deepseek-v4.1-flash-1017 @ medium · checks: plan
+isolated home: /tmp/crazyagent-c1/dsh-home
+scratch: /tmp/ca-c1-XxEv0u
+
+CHECK plan
+PASS plan: clean · 14.1s · steps 8 · calls 7 · failed 0 · retries 0 · tokens 188994
+
+== C1 acceptance summary ==
+plan         PASS     
+
+total tokens: 188994
+batch JSON: /home/conan/Documents/GitHub/crazyAgent/e2e/baselines/2026-11-17T01-01-29-267Z-c1-acceptance.json

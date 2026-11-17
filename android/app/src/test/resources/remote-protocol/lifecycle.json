@@ -53,7 +53,18 @@
           "latestScreenshotId": null,
           "latestScreenshot": null,
           "help": null,
-          "confirm": null
+          "confirm": null,
+          "marathon": {
+            "enabled": false,
+            "since": null,
+            "plan": null,
+            "watch": {
+              "open": null,
+              "lastVerdict": null,
+              "lastCheckAt": null,
+              "checks": 0
+            }
+          }
         }
       }
     },
@@ -346,7 +357,18 @@
     "latestScreenshotId": null,
     "latestScreenshot": null,
     "help": null,
-    "confirm": null
+    "confirm": null,
+    "marathon": {
+      "enabled": false,
+      "since": null,
+      "plan": null,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      }
+    }
   },
   "checkpoints": {
     "afterError": {
@@ -472,7 +494,18 @@
         "source": "auto"
       },
       "help": null,
-      "confirm": null
+      "confirm": null,
+      "marathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
     }
   }
 }

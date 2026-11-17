@@ -1,0 +1,66 @@
+{
+  "startedAt": "2026-11-17T00:58:03.145Z",
+  "finishedAt": "2026-11-17T00:58:07.670Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "dshHome": "/tmp/crazyagent-c1/dsh-home",
+  "maxTotalTokens": 6000000,
+  "totalTokens": 21882,
+  "stopReason": null,
+  "checks": [
+    {
+      "name": "plan",
+      "status": "fail",
+      "reasons": [
+        "page state wrong: result=\"result: (none)\" submits=0 collateral={\"editor\":\"\",\"rich\":\"\",\"comment\":\"\",\"selectable\":\"SELECT-ME-ALPHA BETA GAMMA\"}",
+        "no chat.done frame for the turn"
+      ],
+      "evidence": {
+        "page": {
+          "name": "",
+          "notes": "",
+          "result": "result: (none)",
+          "submitEvents": 0,
+          "editor": "",
+          "rich": "",
+          "comment": "",
+          "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+          "requested": {
+            "name": "Grace Hopper",
+            "notes": "Compiler pioneer",
+            "pass": "cobol-demo"
+          },
+          "expectedResult": "result: name=Grace Hopper notes=Compiler pioneer pass=10chars"
+        },
+        "chatDone": null,
+        "turnEnd": {
+          "ok": false,
+          "aborted": false,
+          "planOutcome": null,
+          "planRevision": null
+        }
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwjzh1rp-1f8e",
+          "wallMs": 3314,
+          "steps": 2,
+          "toolCalls": 1,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 21882,
+          "finalText": null,
+          "reportedLabel": null,
+          "toolCounts": {
+            "browser_plan": 1
+          }
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 3580,
+      "finishedAt": "2026-11-17T00:58:07.670Z"
+    }
+  ]
+}

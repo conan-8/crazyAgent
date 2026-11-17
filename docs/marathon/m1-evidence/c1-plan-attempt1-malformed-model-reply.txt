@@ -1,0 +1,12 @@
+c1-acceptance: deepseek/deepseek-v4.1-flash-1017 @ medium · checks: plan
+isolated home: /tmp/crazyagent-c1/dsh-home
+scratch: /tmp/ca-c1-7PuLil
+
+CHECK plan
+FAIL plan: page state wrong: result="result: (none)" submits=0 collateral={"editor":"","rich":"","comment":"","selectable":"SELECT-ME-ALPHA BETA GAMMA"}; no chat.done frame for the turn · 3.6s · steps 2 · calls 1 · failed 0 · retries 0 · tokens 21882
+
+== C1 acceptance summary ==
+plan         FAIL     page state wrong: result="result: (none)" submits=0 collateral={"editor":"","rich":"","comment":"","selectable
+
+total tokens: 21882
+batch JSON: /home/conan/Documents/GitHub/crazyAgent/e2e/baselines/2026-11-17T00-58-03-146Z-c1-acceptance.json

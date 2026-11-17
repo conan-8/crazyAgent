@@ -21,7 +21,8 @@
  *   node scripts/ui-preview.mjs --scenario recent     # new-chat recents + running session indicator
  *   node scripts/ui-preview.mjs --scenario composer   # image paste + model search + dictation dots
  *   node scripts/ui-preview.mjs --scenario slash      # slash-command palette: filter, keys, execution
- *   node scripts/ui-preview.mjs --scenario plan       # /plan arm, live checklist, queue/race preservation
+ *   node scripts/ui-preview.mjs --scenario plan       # marathon arm, live checklist, queue/race preservation
+ *   node scripts/ui-preview.mjs --scenario marathon   # shared chip: remote-origin toggle, mid-turn off, carried-plan placeholder
  *   node scripts/ui-preview.mjs --scenario remote     # phone-started turns: render, queue, lost-race requeue
  *   node scripts/ui-preview.mjs --scenario confirm    # approval card: approve/deny, abandonment, settings toggle
  *   node scripts/ui-preview.mjs --scenario stopped    # stop, reload, restore, and continue a saved chat
@@ -803,9 +804,27 @@ async function playConfirmScenario(page, capture) {
 async function playPlanScenario(page, capture) {
   const { recv, batch } = makePage(page)
   const sends = () => page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send')`)
-  const arm = () => sendPrompt(page, '/plan')
-  const armed = () => page.evaluate(`(() => ({
-    visible: !document.getElementById('plan-mode').classList.contains('hidden'),
+  const marathonSets = () => page.evaluate(`window.__frames.filter(frame => frame.type === 'marathon.set')`)
+  /** The companion's authoritative answer; the chip never flips before it. */
+  const marathonState = (enabled, origin = 'ui') => recv({
+    v: 1,
+    type: 'marathon.state',
+    enabled,
+    sessionId: enabled ? 'session-preview0001' : null,
+    since: enabled ? '2026-11-16T19:00:00.000Z' : null,
+    origin: enabled ? origin : null,
+    plan: null,
+    watcher: { active: false, checks: 0, lastCheckAt: null, lastVerdict: null },
+  })
+  const arm = async () => {
+    await sendPrompt(page, '/marathon')
+    assert.equal((await marathonSets()).at(-1).enabled, true, '/marathon asks the companion to turn the switch on')
+    assert.equal((await chip()).visible, false, 'no optimistic flip before marathon.state')
+    await marathonState(true)
+  }
+  const chip = () => page.evaluate(`(() => ({
+    visible: !document.getElementById('marathon-mode').classList.contains('hidden'),
+    badge: document.querySelector('.marathon-mode-badge')?.textContent,
     placeholder: document.getElementById('input').placeholder,
     input: document.getElementById('input').value,
   }))()`)
@@ -813,7 +832,8 @@ async function playPlanScenario(page, capture) {
     const turn = [...document.querySelectorAll('.agent-turn')].at(-1);
     const root = document.querySelector('#plan-dock .plan-panel');
     return {
-      badge: [...document.querySelectorAll('.activity-turn')].at(-1)?.querySelector('.plan-turn-badge')?.textContent,
+      badge: [...document.querySelectorAll('.activity-turn')].at(-1)?.querySelector('.marathon-turn-badge')?.textContent,
+      heading: root?.querySelector('.plan-panel-heading')?.textContent,
       present: Boolean(root),
       visible: Boolean(root && !root.hidden && root.getClientRects().length > 0),
       expanded: root?.querySelector('.plan-panel-toggle')?.getAttribute('aria-expanded'),
@@ -829,19 +849,24 @@ async function playPlanScenario(page, capture) {
   await sleep(300)
 
   await arm()
-  assert.deepEqual(await armed(), {
+  assert.deepEqual(await chip(), {
     visible: true,
+    badge: 'Marathon',
     placeholder: 'Describe a long task to plan and complete…',
     input: '',
   })
-  assert.equal((await sends()).length, 0, '/plan is a command, never a prompt')
-  await page.evaluate(`document.getElementById('plan-mode-cancel').click()`)
-  assert.equal((await armed()).visible, false)
+  assert.equal((await sends()).length, 0, '/marathon is a command, never a prompt')
+  // The × asks the companion to turn it off; the chip waits for the answer.
+  await page.evaluate(`document.getElementById('marathon-mode-cancel').click()`)
+  assert.equal((await marathonSets()).at(-1).enabled, false)
+  assert.equal((await chip()).visible, true, 'the × does not flip the chip optimistically either')
+  await marathonState(false)
+  assert.equal((await chip()).visible, false)
 
   await arm()
   await sendPrompt(page, 'Research the options, apply the best one, and verify it.')
-  assert.equal((await armed()).visible, false, 'sending consumes the one-shot arm')
-  assert.equal((await sends()).at(-1).planMode, true)
+  assert.equal((await chip()).visible, true, 'the switch is sticky: sending does not consume it')
+  assert.equal('planMode' in (await sends()).at(-1), false, 'the panel no longer sends a per-message plan flag')
   assert.equal((await panel()).present, true)
   assert.equal((await panel()).visible, false, 'the checklist opens on its first update')
   await recv({
@@ -858,7 +883,8 @@ async function playPlanScenario(page, capture) {
   })
   await sleep(150)
   assert.deepEqual(await panel(), {
-    badge: 'Plan',
+    badge: 'Marathon',
+    heading: 'Marathon plan',
     present: true,
     visible: true,
     expanded: 'true',
@@ -933,6 +959,7 @@ async function playPlanScenario(page, capture) {
     text: 'Two items still need attention.',
     timings: { totalMs: 1 },
     planMode: true,
+    marathon: true,
     planOutcome: 'unfinished',
     planRevision: 2,
   })
@@ -945,46 +972,44 @@ async function playPlanScenario(page, capture) {
   assert.match(await page.evaluate(`document.querySelector('.agent-turn:last-of-type .activity-answer').textContent`), /Two items still need attention/)
   await capture('unfinished')
 
-  // A lost race requeues the same planned message, then dispatches it once the
-  // phone-originated turn releases the single turn slot.
-  await arm()
-  await sendPrompt(page, 'Planned desktop follow-up')
-  await recv({ v: 1, type: 'chat.user', turnId: 'turn-phone-plan', origin: 'remote', text: 'Phone wins this race', imageCount: 0 })
+  // A lost race requeues the same message, then dispatches it once the
+  // phone-originated turn releases the single turn slot. The queue carries no
+  // per-item plan flag anymore: the shared switch arms every dispatch.
+  await sendPrompt(page, 'Marathon desktop follow-up')
+  await recv({ v: 1, type: 'chat.user', turnId: 'turn-phone-plan', origin: 'remote', text: 'Phone wins this race', imageCount: 0, marathon: true })
   await recv({ v: 1, type: 'chat.error', code: 'TURN_BUSY', message: 'A turn is already running. Wait for it to finish.', recoverable: true })
   await sleep(200)
-  assert.equal(await page.evaluate(`document.querySelector('.queued-message-plan').textContent`), 'Plan')
+  assert.equal(await page.evaluate(`document.querySelectorAll('.queued-message').length`), 1)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.queued-message-plan').length`), 0, 'the per-item Plan badge is gone')
   const raceSendCount = (await sends()).length
   await finishPrompt(page, 'session-preview0001', 'Phone task complete')
   await sleep(250)
   assert.equal((await sends()).length, raceSendCount + 1)
-  assert.equal((await sends()).at(-1).text, 'Planned desktop follow-up')
-  assert.equal((await sends()).at(-1).planMode, true)
-  await finishPrompt(page, 'session-preview0001', 'Planned follow-up complete')
-
-  // Restoring a queued planned draft also restores its one-shot composer mode.
-  await sendPrompt(page, 'Ordinary busy turn')
+  assert.equal((await sends()).at(-1).text, 'Marathon desktop follow-up')
   assert.equal('planMode' in (await sends()).at(-1), false)
-  await arm()
-  await sendPrompt(page, 'Restore this planned draft')
-  assert.equal(await page.evaluate(`document.querySelector('.queued-message-plan').textContent`), 'Plan')
+  await finishPrompt(page, 'session-preview0001', 'Marathon follow-up complete')
+
+  // Restoring a queued draft keeps the shared switch untouched.
+  await sendPrompt(page, 'Ordinary busy turn')
+  await sendPrompt(page, 'Restore this draft')
+  assert.equal(await page.evaluate(`document.querySelectorAll('.queued-message').length`), 1)
   await page.evaluate(`document.querySelector('.queued-message-cancel').click()`)
-  assert.deepEqual(await armed(), {
+  assert.deepEqual(await chip(), {
     visible: true,
+    badge: 'Marathon',
     placeholder: 'Describe a long task to plan and complete…',
-    input: 'Restore this planned draft',
+    input: 'Restore this draft',
   })
   await page.evaluate(`document.getElementById('composer').requestSubmit()`)
   await finishPrompt(page, 'session-preview0001', 'Ordinary turn complete')
   await sleep(250)
-  assert.equal((await sends()).at(-1).text, 'Restore this planned draft')
-  assert.equal((await sends()).at(-1).planMode, true)
-  await finishPrompt(page, 'session-preview0001', 'Planned draft complete')
+  assert.equal((await sends()).at(-1).text, 'Restore this draft')
+  await finishPrompt(page, 'session-preview0001', 'Restored draft complete')
 
   await page.send('Emulation.setDeviceMetricsOverride', { width: 280, height: 940, deviceScaleFactor: 2, mobile: false })
   await sleep(200)
-  await arm()
   const narrow = await page.evaluate(`(() => {
-    const mode = document.getElementById('plan-mode');
+    const mode = document.getElementById('marathon-mode');
     const rect = mode.getBoundingClientRect();
     return {
       left: rect.left,
@@ -1008,10 +1033,140 @@ async function playPlanScenario(page, capture) {
   assert.equal((await panel()).visible, true)
   await page.evaluate(`document.getElementById('new-chat').click()`)
   await finishPrompt(page, 'session-preview0001', 'Cleanup complete')
+  // The companion resets the switch on /new; the chip clears only on that frame.
+  assert.equal((await chip()).visible, true, 'no optimistic chip clear on /new')
+  await marathonState(false)
+  assert.equal((await chip()).visible, false)
   assert.deepEqual(await page.evaluate(`(() => ({
     hidden: document.getElementById('plan-dock').hidden,
     children: document.getElementById('plan-dock').children.length,
   }))()`), { hidden: true, children: 0 })
+}
+
+/**
+ * M1 marathon scenario: the shared chip, a toggle from a simulated remote
+ * origin, mid-turn semantics, and the carried-plan rendering placeholder
+ * (the plan itself renders from marathon.state.plan in M2).
+ */
+async function playMarathonScenario(page, capture) {
+  const { recv, batch } = makePage(page)
+  const marathonSets = () => page.evaluate(`window.__frames.filter(frame => frame.type === 'marathon.set')`)
+  const chip = () => page.evaluate(`(() => ({
+    visible: !document.getElementById('marathon-mode').classList.contains('hidden'),
+    badge: document.querySelector('.marathon-mode-badge')?.textContent,
+    copy: document.querySelector('.marathon-mode-copy')?.textContent,
+  }))()`)
+  const stateFrame = (enabled, extra = {}) => ({
+    v: 1,
+    type: 'marathon.state',
+    enabled,
+    sessionId: enabled ? 'session-preview0001' : null,
+    since: enabled ? '2026-11-16T19:00:00.000Z' : null,
+    origin: enabled ? 'ui' : null,
+    plan: null,
+    watcher: { active: false, checks: 0, lastCheckAt: null, lastVerdict: null },
+    ...extra,
+  })
+  await batch(HELLO_FRAMES)
+  await sleep(300)
+  assert.deepEqual(await chip(), { visible: false, badge: 'Marathon', copy: 'Every turn uses a live checklist' })
+
+  // 1. A remote client (the phone) turns marathon on: the chip lights with no
+  // local action and no marathon.set from this panel.
+  await recv(stateFrame(true, { origin: 'remote' }))
+  await sleep(150)
+  assert.deepEqual(await chip(), { visible: true, badge: 'Marathon', copy: 'Every turn uses a live checklist' })
+  assert.equal((await marathonSets()).length, 0, 'a remote-origin toggle sends nothing from the panel')
+  await capture('remote-on')
+
+  // 2. The panel toggles off through /marathon: the request goes out, the chip
+  // waits for the companion's answer (no optimistic flip).
+  await sendPrompt(page, '/marathon')
+  assert.deepEqual((await marathonSets()).at(-1), { v: 1, type: 'marathon.set', enabled: false })
+  assert.equal((await chip()).visible, true, 'the chip must not flip before marathon.state')
+  await capture('toggle-pending')
+  await recv(stateFrame(false))
+  await sleep(150)
+  assert.equal((await chip()).visible, false)
+
+  // 3. Back on, then the × turns it off the same way.
+  await sendPrompt(page, '/marathon')
+  assert.equal((await marathonSets()).at(-1).enabled, true)
+  await recv(stateFrame(true))
+  await sleep(150)
+  assert.equal((await chip()).visible, true)
+  await page.evaluate(`document.getElementById('marathon-mode-cancel').click()`)
+  assert.equal((await marathonSets()).at(-1).enabled, false)
+  await recv(stateFrame(false))
+  await sleep(150)
+  assert.equal((await chip()).visible, false)
+
+  // 4. Carried-plan rendering placeholder (M2): a plan-bearing marathon.state
+  // is accepted and mirrored; the dock stays empty until M2 renders the
+  // carried list at turn start. The chip is unaffected.
+  await recv(stateFrame(true, {
+    origin: 'remote',
+    plan: {
+      revision: 4,
+      items: [
+        { content: 'Fill the shipping form', status: 'in_progress' },
+        { content: 'Verify the confirmation page', status: 'pending' },
+      ],
+      updatedAt: '2026-11-16T19:05:00.000Z',
+      turnId: 'turn-carried',
+    },
+  }))
+  await sleep(150)
+  assert.equal((await chip()).visible, true)
+  assert.deepEqual(await page.evaluate(`(() => ({
+    hidden: document.getElementById('plan-dock').hidden,
+    children: document.getElementById('plan-dock').children.length,
+  }))()`), { hidden: true, children: 0 }, 'M1 stores the carried plan; rendering lands in M2')
+  await capture('carried-plan-placeholder')
+
+  // 5. Mid-turn off (§2.4): the chip clears while the turn keeps running; the
+  // running turn keeps its checklist, the next turn starts unarmed.
+  await sendPrompt(page, 'A long marathon task')
+  assert.equal((await chip()).visible, true)
+  await recv({
+    v: 1,
+    type: 'chat.activity',
+    kind: 'plan',
+    revision: 1,
+    items: [{ content: 'Keep working while the switch flips', status: 'in_progress' }],
+  })
+  await sleep(150)
+  assert.equal(await page.evaluate(`Boolean(document.querySelector('#plan-dock .plan-panel'))`), true)
+  await recv(stateFrame(false))
+  await sleep(150)
+  assert.equal((await chip()).visible, false, 'off mid-turn clears the chip at once')
+  assert.equal(await page.evaluate(`Boolean(document.querySelector('#plan-dock .plan-panel'))`), true, 'the running turn keeps its checklist')
+  await capture('mid-turn-off')
+  await finishPrompt(page, 'session-preview0001', 'Done with the long task.')
+  // The finished turn's checklist stays pinned (existing behavior). Mark it,
+  // then start an unarmed follow-up: no new plan panel may replace it.
+  await page.evaluate(`document.querySelector('#plan-dock .plan-panel').dataset.m1Marker = 'kept'`)
+  await sendPrompt(page, 'A quick follow-up question')
+  assert.equal(await page.evaluate(`document.querySelectorAll('.activity-turn:last-of-type .marathon-turn-badge').length`), 0, 'the follow-up turn is unarmed')
+  assert.equal(await page.evaluate(`document.querySelector('#plan-dock .plan-panel')?.dataset.m1Marker`), 'kept', 'the unarmed turn creates no plan panel of its own')
+  await finishPrompt(page, 'session-preview0001', '42')
+
+  // 6. chat.hello resyncs the chip after a reconnect.
+  await recv({ ...HELLO_FRAMES.find(frame => frame.type === 'chat.hello'), marathon: stateFrame(true, { origin: 'remote' }) })
+  await sleep(150)
+  assert.equal((await chip()).visible, true)
+
+  // 7. The chip fits the narrowest panel.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 280, height: 940, deviceScaleFactor: 2, mobile: false })
+  await sleep(250)
+  const narrow = await page.evaluate(`(() => {
+    const mode = document.getElementById('marathon-mode');
+    const rect = mode.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, viewport: innerWidth, overflow: mode.scrollWidth > mode.clientWidth + 1 };
+  })()`)
+  assert.ok(narrow.left >= 0 && narrow.right <= narrow.viewport)
+  assert.equal(narrow.overflow, false)
+  await capture('narrow')
 }
 
 async function playComposerScenario(page, capture) {
@@ -1261,8 +1416,8 @@ async function playSlashScenario(page, capture) {
   assert.equal(open.visible, true)
   assert.equal(open.expanded, 'true')
   assert.equal(open.activeDescendant, 'slash-command-new')
-  assert.deepEqual(open.items.map(item => item.name), ['/new', '/model', '/plan'])
-  assert.deepEqual(open.items.map(item => item.description), ['Start a new chat', 'Choose the model for your next turn', 'Plan the next turn with a live checklist'])
+  assert.deepEqual(open.items.map(item => item.name), ['/new', '/model', '/marathon'])
+  assert.deepEqual(open.items.map(item => item.description), ['Start a new chat', 'Choose the model for your next turn', 'Plan every turn with a live checklist'])
   assert.deepEqual(open.items.map(item => item.selected), [true, false, false])
   assert.deepEqual(open.items.map(item => item.role), ['option', 'option', 'option'])
   assert.match(open.hint, /↑↓ navigate · Enter run · Esc dismiss/)
@@ -1303,14 +1458,28 @@ async function playSlashScenario(page, capture) {
   assert.deepEqual((await menuState()).items.map(item => item.selected), [true, false, false])
   await press('#input', 'ArrowUp')
   assert.deepEqual((await menuState()).items.map(item => item.selected), [false, false, true])
-  assert.equal((await menuState()).activeDescendant, 'slash-command-plan')
+  assert.equal((await menuState()).activeDescendant, 'slash-command-marathon')
 
   // Filtering narrows the list and resets the selection.
   await type('/m')
-  assert.deepEqual((await menuState()).items.map(item => item.name), ['/model'])
-  assert.deepEqual((await menuState()).items.map(item => item.selected), [true])
+  assert.deepEqual((await menuState()).items.map(item => item.name), ['/model', '/marathon'])
+  assert.deepEqual((await menuState()).items.map(item => item.selected), [true, false])
+  await type('/ma')
+  assert.deepEqual((await menuState()).items.map(item => item.name), ['/marathon'])
+  // The legacy /plan alias is never listed, even as a prefix.
+  await type('/plan')
+  assert.equal((await menuState()).visible, false)
+  // But an exact /plan send still runs the marathon command (one release).
+  const sendsBeforeAlias = await frameCount('chat.send')
+  await focusComposer()
+  await trustedKey('Enter')
+  const aliasSets = await page.evaluate(`window.__frames.filter(frame => frame.type === 'marathon.set')`)
+  assert.equal(aliasSets.at(-1)?.enabled, true, 'exact /plan toggles marathon on')
+  assert.equal(await frameCount('chat.send'), sendsBeforeAlias, 'the alias is a command, never a prompt')
+  assert.equal(await inputValue(), '')
 
   // Escape dismisses the palette without rewriting the draft.
+  await type('/m')
   await press('#input', 'Escape')
   const dismissed = await menuState()
   assert.equal(dismissed.visible, false)
@@ -2623,6 +2792,8 @@ async function main() {
     await playSlashScenario(page, shot)
   } else if (SCENARIO === 'plan') {
     await playPlanScenario(page, shot)
+  } else if (SCENARIO === 'marathon') {
+    await playMarathonScenario(page, shot)
   } else if (SCENARIO === 'remote') {
     await playRemoteScenario(page, shot)
   } else if (SCENARIO === 'confirm') {

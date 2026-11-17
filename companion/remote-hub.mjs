@@ -34,6 +34,7 @@ const INGESTED_TYPES = new Set([
   'chat.stopped',
   'chat.error',
   'chat.session',
+  'marathon.state',
 ])
 
 /** Committed events kept in the resync projection. */
@@ -164,6 +165,14 @@ export class RemoteHub {
     this.confirm = null
     /** @type {null | {turnId: string | null, screenshotId: string}} the capture made for a confirmation request */
     this.confirmShot = null
+    /**
+     * The shared marathon switch projection (§3.4). The controller owns the
+     * state; the hub mirrors its marathon.state frames, journals them as
+     * remote.marathon, and resets to off on a session change. Watch fields
+     * stay null/empty until M3.
+     * @type {{enabled: boolean, sessionId: string | null, since: string | null, origin: string | null, plan: null | Record<string, any>, watcher: {active: boolean, checks: number, lastCheckAt: string | null, lastVerdict: string | null}}}
+     */
+    this.marathon = defaultMarathonProjection()
   }
 
   get activeTurnId() {
@@ -263,6 +272,9 @@ export class RemoteHub {
           docsVerification: stringOrNull(frame.docsVerification),
           docsVerificationReason: stringOrNull(frame.docsVerificationReason),
           planMode: frame.planMode === true,
+          // Both names ride chat.done for one release (§3.4); they describe
+          // the same armed turn.
+          marathon: frame.marathon === true,
           planOutcome: stringOrNull(frame.planOutcome),
           planRevision: Number.isSafeInteger(frame.planRevision) ? frame.planRevision : null,
           ...(isRecord(frame.help) && typeof frame.help.reason === 'string' && typeof frame.help.category === 'string'
@@ -305,6 +317,9 @@ export class RemoteHub {
         if (frame.resumed === true) this.restoreSession(frame.sessionId)
         else this.setSession(frame.sessionId)
         return
+      case 'marathon.state':
+        this.#onMarathonState(frame)
+        return
       default:
     }
   }
@@ -345,6 +360,9 @@ export class RemoteHub {
     this.helpShot = null
     this.confirm = null
     this.confirmShot = null
+    // The marathon switch belongs to the chat that was just left. The
+    // controller publishes the authoritative off state; no extra envelope.
+    this.marathon = defaultMarathonProjection()
     // A help request belonged to the chat that was just left.
     if (this.turn.status === 'waiting_for_user') this.turn = { ...this.turn, status: 'idle' }
   }
@@ -437,6 +455,7 @@ export class RemoteHub {
       origin: info.origin,
       clientMessageId: info.clientMessageId ?? null,
       imageCount: Number.isInteger(info.imageCount) ? info.imageCount : 0,
+      ...(info.marathon === true || info.planMode === true ? { marathon: true } : {}),
     }, { turnId: info.turnId })
   }
 
@@ -567,7 +586,56 @@ export class RemoteHub {
       latestScreenshot: this.latestScreenshot === null ? null : { ...this.latestScreenshot },
       help: this.help === null ? null : { ...this.help },
       confirm: this.confirm === null ? null : { ...this.confirm },
+      marathon: this.marathonProjection(),
     }
+  }
+
+  /** The /state marathon shape (§3.4): watch fields stay null/empty until M3. */
+  marathonProjection() {
+    const { enabled, since, plan, watcher } = this.marathon
+    return {
+      enabled,
+      since,
+      plan: plan === null ? null : { ...plan },
+      watch: {
+        open: null,
+        lastVerdict: watcher.lastVerdict,
+        lastCheckAt: watcher.lastCheckAt,
+        checks: watcher.checks,
+      },
+    }
+  }
+
+  /**
+   * Mirror the controller's authoritative marathon.state. Journaled and
+   * replayed like remote.help; an identical state is not re-published.
+   * @param {Record<string, any>} frame
+   */
+  #onMarathonState(frame) {
+    const next = {
+      enabled: frame.enabled === true,
+      sessionId: stringOrNull(frame.sessionId),
+      since: stringOrNull(frame.since),
+      origin: frame.origin === 'ui' || frame.origin === 'remote' ? frame.origin : null,
+      // M1 carries no plan; anything else fails closed to null until M2.
+      plan: null,
+      watcher: normalizeWatcher(frame.watcher),
+    }
+    if (!next.enabled) {
+      next.sessionId = null
+      next.since = null
+      next.origin = null
+    }
+    if (JSON.stringify(next) === JSON.stringify(this.marathon)) return
+    this.marathon = next
+    this.publish('remote.marathon', {
+      enabled: next.enabled,
+      sessionId: next.sessionId,
+      since: next.since,
+      origin: next.origin,
+      plan: next.plan,
+      watcher: { ...next.watcher },
+    }, { turnId: null })
   }
 
   /**
@@ -847,4 +915,28 @@ function imageSize(data, mimeType) {
 /** @param {unknown} value @param {number} fallback */
 function positive(value, fallback) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+/** The off-by-default marathon mirror (fail-safe on construct/session reset). */
+function defaultMarathonProjection() {
+  return {
+    enabled: false,
+    sessionId: null,
+    since: null,
+    origin: null,
+    plan: null,
+    watcher: { active: false, checks: 0, lastCheckAt: null, lastVerdict: null },
+  }
+}
+
+/** Keep only the watcher shape; unknown values fall back to idle, never guess. */
+function normalizeWatcher(value) {
+  const source = isRecord(value) ? value : {}
+  const checks = Number(source.checks)
+  return {
+    active: source.active === true,
+    checks: Number.isSafeInteger(checks) && checks >= 0 ? checks : 0,
+    lastCheckAt: stringOrNull(source.lastCheckAt),
+    lastVerdict: stringOrNull(source.lastVerdict),
+  }
 }

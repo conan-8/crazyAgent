@@ -81,7 +81,18 @@
           "latestScreenshotId": null,
           "latestScreenshot": null,
           "help": null,
-          "confirm": null
+          "confirm": null,
+          "marathon": {
+            "enabled": false,
+            "since": null,
+            "plan": null,
+            "watch": {
+              "open": null,
+              "lastVerdict": null,
+              "lastCheckAt": null,
+              "checks": 0
+            }
+          }
         }
       }
     },
@@ -151,6 +162,7 @@
         "docsVerification": null,
         "docsVerificationReason": null,
         "planMode": false,
+        "marathon": false,
         "planOutcome": null,
         "planRevision": null
       }
@@ -274,6 +286,7 @@
           "docsVerification": null,
           "docsVerificationReason": null,
           "planMode": false,
+          "marathon": false,
           "planOutcome": null,
           "planRevision": null
         }
@@ -283,6 +296,17 @@
     "latestScreenshotId": null,
     "latestScreenshot": null,
     "help": null,
-    "confirm": null
+    "confirm": null,
+    "marathon": {
+      "enabled": false,
+      "since": null,
+      "plan": null,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      }
+    }
   }
 }

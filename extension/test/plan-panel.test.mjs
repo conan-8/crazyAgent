@@ -358,6 +358,14 @@ test('a zero blocked count does not render a warning badge', () => {
   assert.equal(byClass(root, 'plan-panel-blocked').hidden, true)
 })
 
+test('the checklist heading reads "Marathon plan" (M1 rename; model unchanged)', () => {
+  const document = new FakeDocument()
+  const root = document.createElement('div')
+  const state = createPlanPanelModel().update(fixturePlan()).state
+  renderPlanPanel(root, state)
+  assert.equal(byClass(root, 'plan-panel-heading').textContent, 'Marathon plan')
+})
+
 test('collapsed rendering hides only details and retains the current summary', () => {
   const document = new FakeDocument()
   const root = document.createElement('div')

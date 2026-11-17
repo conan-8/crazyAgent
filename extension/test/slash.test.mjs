@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  SLASH_ALIASES,
   SLASH_COMMANDS,
   SLASH_QUERY_MAX_CHARS,
   matchSlashCommands,
@@ -47,14 +48,18 @@ test('ordinary prose and token-like text never open the menu', () => {
 /* ---------------------------------------------------------------- */
 
 test('commands filter by name prefix in display order', () => {
-  assert.deepEqual(matchSlashCommands('').map(command => command.id), ['new', 'model', 'plan'])
+  assert.deepEqual(matchSlashCommands('').map(command => command.id), ['new', 'model', 'marathon'])
   assert.deepEqual(matchSlashCommands('n').map(command => command.id), ['new'])
-  assert.deepEqual(matchSlashCommands('M').map(command => command.id), ['model'])
+  assert.deepEqual(matchSlashCommands('M').map(command => command.id), ['model', 'marathon'])
   assert.deepEqual(matchSlashCommands('mo').map(command => command.id), ['model'])
-  assert.deepEqual(matchSlashCommands('p').map(command => command.id), ['plan'])
-  assert.deepEqual(matchSlashCommands('PL').map(command => command.id), ['plan'])
+  assert.deepEqual(matchSlashCommands('ma').map(command => command.id), ['marathon'])
+  assert.deepEqual(matchSlashCommands('MARATHON').map(command => command.id), ['marathon'])
+  // The legacy /plan alias is unlisted: no prefix filter ever shows it.
+  assert.deepEqual(matchSlashCommands('p'), [])
+  assert.deepEqual(matchSlashCommands('pl'), [])
+  assert.deepEqual(matchSlashCommands('plan'), [])
   assert.deepEqual(matchSlashCommands('x'), [])
-  assert.deepEqual(matchSlashCommands().map(command => command.id), ['new', 'model', 'plan'])
+  assert.deepEqual(matchSlashCommands().map(command => command.id), ['new', 'model', 'marathon'])
 })
 
 test('command definitions are unique, display-ready slash tokens', () => {
@@ -79,12 +84,26 @@ test('only an exact slash token resolves to a command on send', () => {
   assert.equal(resolveSlashCommand('/new')?.id, 'new')
   assert.equal(resolveSlashCommand('/NEW')?.id, 'new')
   assert.equal(resolveSlashCommand('/model')?.id, 'model')
-  assert.equal(resolveSlashCommand('/plan')?.id, 'plan')
-  assert.equal(resolveSlashCommand('/PLAN')?.id, 'plan')
-  for (const value of ['', '/', '/n', '/new ', ' /new', '/new chat', '/model\n', 'new', '/models', '/plan ', ' /plan', '/plan task', '/plan\n', 'plan', '/plans']) {
+  assert.equal(resolveSlashCommand('/marathon')?.id, 'marathon')
+  assert.equal(resolveSlashCommand('/MARATHON')?.id, 'marathon')
+  for (const value of ['', '/', '/n', '/new ', ' /new', '/new chat', '/model\n', 'new', '/models', '/marathon ', ' /marathon', '/marathon task', '/marathon\n', 'marathon', '/marathons']) {
     assert.equal(resolveSlashCommand(value), null, JSON.stringify(value))
   }
   assert.equal(resolveSlashCommand(undefined), null)
+})
+
+test('the legacy /plan alias resolves to marathon without being listed', () => {
+  const marathon = SLASH_COMMANDS.find(command => command.id === 'marathon')
+  assert.deepEqual(SLASH_ALIASES, { '/plan': 'marathon' })
+  assert.equal(resolveSlashCommand('/plan'), marathon)
+  assert.equal(resolveSlashCommand('/PLAN'), marathon)
+  // Still exact-token only: prose and near-misses never run the alias.
+  for (const value of ['/plan ', ' /plan', '/plan task', '/plan\n', 'plan', '/plans', '/pl']) {
+    assert.equal(resolveSlashCommand(value), null, JSON.stringify(value))
+  }
+  // The alias never appears in the palette.
+  assert.ok(!SLASH_COMMANDS.some(command => command.usage === '/plan'))
+  assert.ok(!matchSlashCommands('').some(command => command.usage === '/plan'))
 })
 
 /* ---------------------------------------------------------------- */

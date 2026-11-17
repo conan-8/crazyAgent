@@ -215,6 +215,143 @@ test('POST /messages carries explicit plan mode with validation and idempotency'
   await sleep(10)
 })
 
+/* ------------------------------------------------------------------ */
+/* M1: POST /marathon — the shared switch (§3.4)                       */
+/* ------------------------------------------------------------------ */
+
+test('POST /marathon toggles the shared switch both directions and the projection agrees', async t => {
+  const ctx = await setup(t)
+  const events = openEvents(ctx.port, { token: TOKEN })
+  await events.opened
+  t.after(() => events.close())
+
+  const on = await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body: { clientCommandId: 'marathon-on-0001', enabled: true } })
+  assert.equal(on.status, 200)
+  assert.equal(on.body.enabled, true)
+  assert.equal(on.body.clientCommandId, 'marathon-on-0001')
+  assert.equal(on.body.instanceId, 'inst-test')
+  assert.equal(on.body.sessionId, ctx.hub.sessionId)
+  assert.equal(typeof on.body.sequence, 'number')
+
+  const envelope = await events.next(frame => frame.type === 'remote.marathon')
+  assert.equal(envelope.body.enabled, true)
+  assert.equal(envelope.body.origin, 'remote')
+  assert.equal(typeof envelope.body.since, 'string')
+  assert.equal(envelope.body.plan, null)
+  assert.deepEqual(envelope.body.watcher, { active: false, checks: 0, lastCheckAt: null, lastVerdict: null })
+
+  let state = (await ctx.call({ path: '/remote/v1/state' })).body
+  assert.deepEqual(state.marathon, {
+    enabled: true,
+    since: envelope.body.since,
+    plan: null,
+    watch: { open: null, lastVerdict: null, lastCheckAt: null, checks: 0 },
+  })
+  assert.equal(state.latestSequence, on.body.sequence)
+
+  const off = await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body: { clientCommandId: 'marathon-off-0001', enabled: false } })
+  assert.equal(off.status, 200)
+  assert.equal(off.body.enabled, false)
+  const offEnvelope = await events.next(frame => frame.type === 'remote.marathon' && frame.body.enabled === false)
+  assert.equal(offEnvelope.body.since, null)
+  assert.equal(offEnvelope.body.origin, null)
+  state = (await ctx.call({ path: '/remote/v1/state' })).body
+  assert.equal(state.marathon.enabled, false)
+  assert.equal(state.marathon.since, null)
+})
+
+test('POST /marathon is idempotent per clientCommandId and conflicts on a changed payload', async t => {
+  const ctx = await setup(t)
+  const body = { clientCommandId: 'marathon-idem-0001', enabled: true }
+  const first = await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body })
+  assert.equal(first.status, 200)
+  const seqAfterFirst = ctx.hub.seq
+  const retry = await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body })
+  assert.equal(retry.status, 200)
+  assert.equal(retry.body.replayed, true)
+  assert.equal(retry.body.sequence, first.body.sequence)
+  assert.equal(ctx.hub.seq, seqAfterFirst, 'a replay publishes nothing new')
+  const conflict = await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body: { ...body, enabled: false } })
+  assert.equal(conflict.status, 409)
+  assert.equal(conflict.body.error.code, 'IDEMPOTENCY_CONFLICT')
+  assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.marathon.enabled, true)
+})
+
+test('POST /marathon validates, authenticates, and accepts a toggle mid-turn', async t => {
+  const ctx = await setup(t)
+  assert.equal((await http(ctx.port, { method: 'POST', path: '/remote/v1/marathon', body: { clientCommandId: 'marathon-auth-0001', enabled: true } })).status, 401)
+  assert.equal((await ctx.call({ path: '/remote/v1/marathon' })).status, 405)
+  for (const body of [
+    { clientCommandId: 'marathon-bad-0001' },
+    { clientCommandId: 'marathon-bad-0002', enabled: 'true' },
+    { clientCommandId: 'marathon-bad-0003', enabled: 1 },
+    { clientCommandId: 'short', enabled: true },
+  ]) {
+    const res = await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body })
+    assert.equal(res.status, 422, JSON.stringify(body))
+  }
+  assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.marathon.enabled, false)
+
+  // Accepted while a turn runs; the running turn keeps its modes.
+  const turn = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-mid-0001', text: 'long task' } })
+  assert.equal(turn.status, 202)
+  const mid = await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body: { clientCommandId: 'marathon-mid-0001', enabled: true } })
+  assert.equal(mid.status, 200)
+  assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.turn.status, 'running')
+  ctx.runner.current.resolve('done')
+  await sleep(10)
+})
+
+test('POST /marathon/watch/ack fails closed with 404 WATCH_NOT_FOUND until the watcher exists', async t => {
+  const ctx = await setup(t)
+  const res = await ctx.call({ method: 'POST', path: '/remote/v1/marathon/watch/ack', body: { clientCommandId: 'watch-ack-0001', id: 'watch-1' } })
+  assert.equal(res.status, 404)
+  assert.equal(res.body.error.code, 'WATCH_NOT_FOUND')
+  assert.equal(res.body.error.retryable, false)
+  const badId = await ctx.call({ method: 'POST', path: '/remote/v1/marathon/watch/ack', body: { clientCommandId: 'watch-ack-0002', id: 5 } })
+  assert.equal(badId.status, 422)
+  assert.equal(badId.body.error.code, 'INVALID_WATCH_ID')
+  const badClient = await ctx.call({ method: 'POST', path: '/remote/v1/marathon/watch/ack', body: { clientCommandId: 'x', id: 'watch-1' } })
+  assert.equal(badClient.status, 422)
+  assert.equal(badClient.body.error.code, 'INVALID_CLIENT_ID')
+})
+
+test('marathon toggles are chat-level state: not message-limited, and /new resets the switch', async t => {
+  const ctx = await setup(t, { limits: { messagesPerMinute: 2 } })
+  // More toggles than the prompt budget: the switch is not a prompt.
+  for (let i = 0; i < 5; i += 1) {
+    const res = await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body: { clientCommandId: `marathon-limit-${String(i).padStart(4, '0')}`, enabled: i % 2 === 0 } })
+    assert.equal(res.status, 200, `toggle ${i}`)
+  }
+  assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.marathon.enabled, true, 'the last toggle (i=4) turned it on')
+  await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body: { clientCommandId: 'marathon-before-new', enabled: true } })
+  const fresh = await ctx.call({ method: 'POST', path: '/remote/v1/new', body: { clientCommandId: 'new-after-marathon' } })
+  assert.equal(fresh.status, 200)
+  assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.marathon.enabled, false)
+})
+
+test('a legacy planMode:true remote message turns marathon on and arms the plan turn', async t => {
+  const ctx = await setup(t)
+  const accepted = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-legacy-0001', text: 'old APK task', planMode: true } })
+  assert.equal(accepted.status, 202)
+  assert.match(ctx.runner.runs[0][0].text, /<plan_mode>/u)
+  const state = (await ctx.call({ path: '/remote/v1/state' })).body
+  assert.equal(state.marathon.enabled, true)
+  const user = state.messages.find(message => message.type === 'chat.user')
+  assert.equal(user.body.marathon, true)
+  ctx.runner.current.resolve('DONE: old task')
+  await sleep(10)
+  const done = (await ctx.call({ path: '/remote/v1/state' })).body.messages.find(message => message.type === 'chat.done')
+  assert.equal(done.body.planMode, true)
+  assert.equal(done.body.marathon, true)
+  // Sticky: the next ordinary remote message is a marathon turn too.
+  const next = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'client-legacy-0002', text: 'follow-up' } })
+  assert.equal(next.status, 202)
+  assert.match(ctx.runner.runs[1][0].text, /<plan_mode>/u)
+  ctx.runner.current.resolve('done')
+  await sleep(10)
+})
+
 test('simultaneous submissions from different clients start exactly one turn', async t => {
   const ctx = await setup(t)
   const results = await Promise.all(Array.from({ length: 6 }, (_, i) => ctx.call({

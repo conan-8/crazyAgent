@@ -22,6 +22,7 @@ import { Bridge } from './bridge.mjs'
 import { DshRunner } from './dsh.mjs'
 import { LogStore } from './log-store.mjs'
 import { SessionController, uiRejectionFrame } from './session-controller.mjs'
+import { marathonFrameBody } from './marathon.mjs'
 import { RemoteHub } from './remote-hub.mjs'
 import { DEFAULT_REMOTE_PORT, RemoteServer } from './remote-server.mjs'
 import { createRemoteTokenSource, resolveRemoteToken } from './remote-token.mjs'
@@ -360,6 +361,7 @@ function sendCompanionHello(_ui) {
     llm: llmInfo(),
     credentials: credentialsInfo(),
     settings: { confirmIrreversible: confirmIrreversiblePolicy() },
+    marathon: marathonFrameBody(controller.marathonState()),
     log: { runId, path: logStore.path },
   })
 }
@@ -611,6 +613,17 @@ async function handleResumeChat(sessionId, _ui) {
   if (!result.ok) bridge.sendToUi(uiRejectionFrame(result))
 }
 
+/**
+ * Side-panel transport for marathon.set. The shared controller owns the
+ * switch; its marathon.state publication is the answer to every client (the
+ * panel never flips its chip optimistically).
+ * @param {Record<string, unknown>} message @param {import('ws').WebSocket} _ui
+ */
+async function handleMarathonSet(message, _ui) {
+  const result = controller.setMarathon({ enabled: message.enabled, origin: 'ui' })
+  if (!result.ok) bridge.sendToUi(uiRejectionFrame(result))
+}
+
 /** @param {Record<string, any>} message */
 async function handleControl(message) {
   try {
@@ -718,6 +731,7 @@ const bridge = new Bridge({
   onNewChat: handleNewChat,
   onResumeChat: handleResumeChat,
   onStop: handleStop,
+  onMarathonSet: handleMarathonSet,
   onLog: entry => logStore.recordBridge(entry),
   onControl: handleControl,
   onActivity: frame => {

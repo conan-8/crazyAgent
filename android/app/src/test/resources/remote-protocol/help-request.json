@@ -53,7 +53,18 @@
           "latestScreenshotId": null,
           "latestScreenshot": null,
           "help": null,
-          "confirm": null
+          "confirm": null,
+          "marathon": {
+            "enabled": false,
+            "since": null,
+            "plan": null,
+            "watch": {
+              "open": null,
+              "lastVerdict": null,
+              "lastCheckAt": null,
+              "checks": 0
+            }
+          }
         }
       }
     },
@@ -138,6 +149,7 @@
         "docsVerification": null,
         "docsVerificationReason": null,
         "planMode": false,
+        "marathon": false,
         "planOutcome": null,
         "planRevision": null,
         "help": {
@@ -269,6 +281,7 @@
         "docsVerification": null,
         "docsVerificationReason": null,
         "planMode": false,
+        "marathon": false,
         "planOutcome": null,
         "planRevision": null
       }
@@ -349,6 +362,7 @@
         "docsVerification": null,
         "docsVerificationReason": null,
         "planMode": false,
+        "marathon": false,
         "planOutcome": null,
         "planRevision": null,
         "help": {
@@ -459,7 +473,18 @@
     "latestScreenshotId": null,
     "latestScreenshot": null,
     "help": null,
-    "confirm": null
+    "confirm": null,
+    "marathon": {
+      "enabled": false,
+      "since": null,
+      "plan": null,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      }
+    }
   },
   "checkpoints": {
     "waiting": {
@@ -553,6 +578,7 @@
             "docsVerification": null,
             "docsVerificationReason": null,
             "planMode": false,
+            "marathon": false,
             "planOutcome": null,
             "planRevision": null,
             "help": {
@@ -582,7 +608,18 @@
         "captureError": null,
         "requestedAt": "2026-11-06T12:00:12.000Z"
       },
-      "confirm": null
+      "confirm": null,
+      "marathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
     },
     "waitingAfterCapture": {
       "protocol": 1,
@@ -675,6 +712,7 @@
             "docsVerification": null,
             "docsVerificationReason": null,
             "planMode": false,
+            "marathon": false,
             "planOutcome": null,
             "planRevision": null,
             "help": {
@@ -704,7 +742,18 @@
         "captureError": null,
         "requestedAt": "2026-11-06T12:00:12.000Z"
       },
-      "confirm": null
+      "confirm": null,
+      "marathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
     },
     "afterReply": {
       "protocol": 1,
@@ -797,6 +846,7 @@
             "docsVerification": null,
             "docsVerificationReason": null,
             "planMode": false,
+            "marathon": false,
             "planOutcome": null,
             "planRevision": null,
             "help": {
@@ -853,6 +903,7 @@
             "docsVerification": null,
             "docsVerificationReason": null,
             "planMode": false,
+            "marathon": false,
             "planOutcome": null,
             "planRevision": null
           }
@@ -871,7 +922,18 @@
         "source": "manual"
       },
       "help": null,
-      "confirm": null
+      "confirm": null,
+      "marathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
     },
     "waitingNoCapture": {
       "protocol": 1,
@@ -964,6 +1026,7 @@
             "docsVerification": null,
             "docsVerificationReason": null,
             "planMode": false,
+            "marathon": false,
             "planOutcome": null,
             "planRevision": null,
             "help": {
@@ -1020,6 +1083,7 @@
             "docsVerification": null,
             "docsVerificationReason": null,
             "planMode": false,
+            "marathon": false,
             "planOutcome": null,
             "planRevision": null
           }
@@ -1060,6 +1124,7 @@
             "docsVerification": null,
             "docsVerificationReason": null,
             "planMode": false,
+            "marathon": false,
             "planOutcome": null,
             "planRevision": null,
             "help": {
@@ -1089,7 +1154,18 @@
         "captureError": "The browser side panel is not connected, so the screen cannot be captured.",
         "requestedAt": "2026-11-06T12:00:29.000Z"
       },
-      "confirm": null
+      "confirm": null,
+      "marathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
     }
   }
 }

@@ -37,8 +37,14 @@ let newChatDraft = false
 let historySaveTimer = null
 let conversationStopped = false
 let attachedImages = []
-let planModeArmed = false
-/** @type {Array<{id: string, text: string, planMode?: boolean, images: Array<{name: string, size: number, mimeType: string, data: string}>}>} */
+/**
+ * The companion-owned marathon switch, mirrored from marathon.state /
+ * chat.hello. The chip renders ONLY from this state — never an optimistic
+ * local flip (MARATHON-PLAN.md §3.5).
+ * @type {{enabled: boolean, sessionId: string | null, since: string | null, origin: string | null, plan: Record<string, any> | null, watcher: {active: boolean, checks: number, lastCheckAt: string | null, lastVerdict: string | null}}}
+ */
+let marathonState = { enabled: false, sessionId: null, since: null, origin: null, plan: null, watcher: { active: false, checks: 0, lastCheckAt: null, lastVerdict: null } }
+/** @type {Array<{id: string, text: string, images: Array<{name: string, size: number, mimeType: string, data: string}>}>} */
 let queuedMessages = []
 let dictation = null
 let queuedMessageSequence = 0
@@ -214,8 +220,8 @@ const els = {
   dictationIndicator: $('dictation-indicator'),
   imageChips: $('image-chips'),
   messageQueue: $('message-queue'),
-  planMode: $('plan-mode'),
-  planModeCancel: $('plan-mode-cancel'),
+  marathonMode: $('marathon-mode'),
+  marathonModeCancel: $('marathon-mode-cancel'),
   promptRail: $('prompt-rail'),
   promptRailList: $('prompt-rail-list'),
   promptRailPopup: $('prompt-rail-popup'),
@@ -503,15 +509,49 @@ function clearSlashDraft() {
   resizeInput()
 }
 
-function setPlanModeArmed(value) {
-  planModeArmed = value === true
-  els.planMode.classList.toggle('hidden', !planModeArmed)
-  els.input.placeholder = planModeArmed ? 'Describe a long task to plan and complete…' : 'Ask or tell me what to do…'
+/** Render the marathon chip strictly from the companion's state. */
+function renderMarathonChip() {
+  els.marathonMode.classList.toggle('hidden', !marathonState.enabled)
+  els.input.placeholder = marathonState.enabled ? 'Describe a long task to plan and complete…' : 'Ask or tell me what to do…'
 }
 
-function togglePlanMode() {
-  setPlanModeArmed(!planModeArmed)
-  toast(planModeArmed ? 'Plan mode armed for the next turn' : 'Plan mode canceled')
+/**
+ * Mirror one authoritative marathon.state (or the chat.hello copy). Malformed
+ * frames fail closed to off rather than guessing a state.
+ * @param {unknown} value
+ */
+function applyMarathonState(value) {
+  const frame = value && typeof value === 'object' ? value : {}
+  const watcher = frame.watcher && typeof frame.watcher === 'object' ? frame.watcher : {}
+  marathonState = {
+    enabled: frame.enabled === true,
+    sessionId: typeof frame.sessionId === 'string' ? frame.sessionId : null,
+    since: typeof frame.since === 'string' ? frame.since : null,
+    origin: typeof frame.origin === 'string' ? frame.origin : null,
+    plan: frame.plan && typeof frame.plan === 'object' ? frame.plan : null,
+    watcher: {
+      active: watcher.active === true,
+      checks: Number.isSafeInteger(watcher.checks) && watcher.checks >= 0 ? watcher.checks : 0,
+      lastCheckAt: typeof watcher.lastCheckAt === 'string' ? watcher.lastCheckAt : null,
+      lastVerdict: typeof watcher.lastVerdict === 'string' ? watcher.lastVerdict : null,
+    },
+  }
+  renderMarathonChip()
+}
+
+/**
+ * Toggle the shared switch through the companion. No optimistic flip: the
+ * chip changes only when marathon.state arrives. Accepted mid-turn too — the
+ * running turn keeps its modes; the next turn picks the new state up.
+ */
+function toggleMarathon() {
+  if (!connected) {
+    toast('Not connected to the companion')
+    return
+  }
+  const enabled = !marathonState.enabled
+  if (!sendFrame({ v: PROTOCOL_VERSION, type: 'marathon.set', enabled })) return
+  logger.log('ui.marathon.toggle', { enabled }, 'info')
 }
 
 function executeSlashCommand(command) {
@@ -531,7 +571,7 @@ function executeSlashCommand(command) {
     openModelMenu()
     return
   }
-  if (command.id === 'plan') togglePlanMode()
+  if (command.id === 'marathon') toggleMarathon()
 }
 
 function formatFileSize(bytes) {
@@ -1284,7 +1324,6 @@ function sendConfirmation(decision) {
     confirm: decision,
     confirmAction: action,
     images: [],
-    planMode: false,
   }
   if (!dispatchMessage(item)) return
   logger.log('confirm.answer', { decision, actionChars: action.length }, 'info')
@@ -1955,12 +1994,12 @@ function startTurn(text, attachments = [], options = {}) {
   prompt.className = 'turn-prompt'
   prompt.textContent = text || 'Attached images'
   prompt.title = String(text ?? '')
-  if (options.planMode === true) {
-    divider.dataset.planMode = 'true'
-    const planBadge = document.createElement('span')
-    planBadge.className = 'user-origin plan-turn-badge'
-    planBadge.textContent = 'Plan'
-    bubble.append(planBadge)
+  if (options.marathon === true) {
+    divider.dataset.marathon = 'true'
+    const marathonBadge = document.createElement('span')
+    marathonBadge.className = 'user-origin marathon-turn-badge'
+    marathonBadge.textContent = 'Marathon'
+    bubble.append(marathonBadge)
   }
   if (typeof options.originLabel === 'string') {
     divider.dataset.origin = options.origin ?? 'remote'
@@ -1996,8 +2035,8 @@ function startTurn(text, attachments = [], options = {}) {
   })
   const steps = document.createElement('div')
   steps.className = 'agent-turn-steps'
-  const planModel = options.planMode === true ? createPlanPanelModel() : null
-  const planRoot = options.planMode === true ? document.createElement('div') : null
+  const planModel = options.marathon === true ? createPlanPanelModel() : null
+  const planRoot = options.marathon === true ? document.createElement('div') : null
   if (planRoot) {
     els.planDock.replaceChildren(planRoot)
     els.planDock.hidden = true
@@ -2625,6 +2664,8 @@ function handleFrame(frame) {
         companionSettings = { confirmIrreversible: frame.settings.confirmIrreversible === true }
         if (!els.settingsModal.classList.contains('hidden')) els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
       }
+      // The hello carries the authoritative switch state (reconnect resync).
+      applyMarathonState(frame.marathon)
       if (llmState.model?.id) {
         settings.modelId = llmState.model.id
         els.sessionInfo.dataset.model = llmState.model.id
@@ -2710,6 +2751,10 @@ function handleFrame(frame) {
         sessionId = frame.sessionId
         updateFooter()
       }
+      return
+    case 'marathon.state':
+      applyMarathonState(frame)
+      logger.log('marathon.state', { enabled: marathonState.enabled, origin: marathonState.origin }, 'info')
       return
     case 'browser.command':
       void handleBrowserCommand(frame)
@@ -3072,7 +3117,7 @@ function startForeignTurn(prompt) {
   clearTimeout(queueDispatchTimer)
   queueDispatchTimer = null
   void beginDebuggerRun().catch(() => {})
-  beginUserTurn(prompt.text, prompt.attachments, { originLabel: prompt.label, origin: prompt.origin })
+  beginUserTurn(prompt.text, prompt.attachments, { originLabel: prompt.label, origin: prompt.origin, marathon: prompt.marathon ?? marathonState.enabled })
   setActivityPhase('Working…', 'busy')
   setBusy(true)
   setStatus('busy', 'Working…')
@@ -3642,7 +3687,7 @@ function queueIcon(symbol) {
 }
 
 function renderQueuedMessages() {
-  const renderKey = JSON.stringify([queuedMessages.map(item => [item.id, item.planMode === true]), busy, stopAvailable, stopping, connected])
+  const renderKey = JSON.stringify([queuedMessages.map(item => item.id), busy, stopAvailable, stopping, connected])
   if (renderKey === renderedQueueKey) return
   renderedQueueKey = renderKey
   els.messageQueue.replaceChildren()
@@ -3664,7 +3709,7 @@ function renderQueuedMessages() {
 
     const body = document.createElement('div')
     body.className = 'queued-message-body'
-    body.title = item.planMode === true ? `Plan mode · ${preview}` : preview
+    body.title = preview
     const grip = document.createElement('span')
     grip.className = 'queued-message-grip'
     grip.setAttribute('aria-hidden', 'true')
@@ -3679,14 +3724,7 @@ function renderQueuedMessages() {
     cancel.appendChild(queueIcon('icon-close'))
     cancel.addEventListener('click', () => restoreQueuedMessage(item.id))
 
-    body.append(grip)
-    if (item.planMode === true) {
-      const plan = document.createElement('span')
-      plan.className = 'queued-message-plan'
-      plan.textContent = 'Plan'
-      body.append(plan)
-    }
-    body.append(text, cancel)
+    body.append(grip, text, cancel)
     row.append(steer, body)
     els.messageQueue.appendChild(row)
   }
@@ -3714,7 +3752,6 @@ function restoreQueuedMessage(id) {
   const existing = els.input.value
   els.input.value = item.text && existing.trim() ? `${item.text}\n\n${existing}` : item.text || existing
   attachedImages = images
-  setPlanModeArmed(item.planMode === true)
   renderImageChips()
   renderQueuedMessages()
   resizeInput()
@@ -3746,7 +3783,6 @@ function dispatchMessage(item) {
     type: 'chat.send',
     text: prompt,
     autoCapture: settings.autoCapture !== false,
-    ...item.planMode === true ? { planMode: true } : {},
     ...isConfirm ? { confirm: item.confirm } : {},
     ...images.length > 0 ? { images } : {},
   }
@@ -3758,16 +3794,16 @@ function dispatchMessage(item) {
   logger.log('chat.send', {
     textLength: prompt.length,
     autoCapture: settings.autoCapture !== false,
-    planMode: item.planMode === true,
+    marathon: marathonState.enabled,
     ...(isConfirm ? { confirm: item.confirm } : {}),
     images: item.images.map(image => ({ name: image.name, size: image.size, mimeType: image.mimeType })),
     preview: truncate(item.text, 300),
   }, 'info')
-  lastDispatchedItem = { text: item.text, images: item.images, planMode: item.planMode === true, ...(isConfirm ? { confirm: item.confirm, confirmAction: item.confirmAction } : {}) }
+  lastDispatchedItem = { text: item.text, images: item.images, ...(isConfirm ? { confirm: item.confirm, confirmAction: item.confirmAction } : {}) }
   const echoText = isConfirm
     ? `${item.confirm === 'approve' ? 'Approved' : 'Denied'}: ${item.confirmAction ?? ''}`
     : item.text
-  beginUserTurn(echoText, item.images, { planMode: item.planMode === true })
+  beginUserTurn(echoText, item.images, { marathon: marathonState.enabled })
   // Any prompt answers or abandons an open confirmation.
   hideConfirmCard()
   setBusy(true)
@@ -3828,7 +3864,6 @@ function sendMessage() {
   }
   const text = els.input.value.trim()
   const images = attachedImages
-  const planMode = planModeArmed
   if (text.length === 0 && images.length === 0) {
     // Enter (or Send) on a blank composer sends the first queued message:
     // immediately when idle, or as a steer while a turn is running — the same
@@ -3858,24 +3893,21 @@ function sendMessage() {
       id: `queue-${Date.now().toString(36)}-${++queuedMessageSequence}`,
       text,
       images: attachedImages,
-      planMode,
     }
     queuedMessages.push(item)
     clearComposerDraft()
-    setPlanModeArmed(false)
     renderQueuedMessages()
     logger.log('chat.queue.add', {
       queueId: item.id,
       textLength: text.length,
-      planMode,
+      marathon: marathonState.enabled,
       images: item.images.map(image => ({ name: image.name, size: image.size, mimeType: image.mimeType })),
       queued: queuedMessages.length,
     }, 'info')
     return
   }
-  if (dispatchMessage({ id: '', text, images, planMode })) {
+  if (dispatchMessage({ id: '', text, images })) {
     clearComposerDraft()
-    setPlanModeArmed(false)
   }
 }
 
@@ -3940,7 +3972,8 @@ function newChat() {
 function clearChat() {
   newChatDraft = false
   conversationStopped = false
-  setPlanModeArmed(false)
+  // The marathon chip is companion-owned: it clears when marathon.state off
+  // arrives after chat.new, never optimistically here.
   els.app.classList.remove('new-chat-draft')
   clearTimeout(queueDispatchTimer)
   queueDispatchTimer = null
@@ -4369,10 +4402,16 @@ els.modelSearch.addEventListener('keydown', event => {
   }
 })
 els.mic.addEventListener('click', toggleDictation)
-els.planModeCancel.addEventListener('click', () => {
-  setPlanModeArmed(false)
+els.marathonModeCancel.addEventListener('click', () => {
+  if (!marathonState.enabled) return
+  if (!connected) {
+    toast('Not connected to the companion')
+    return
+  }
+  if (sendFrame({ v: PROTOCOL_VERSION, type: 'marathon.set', enabled: false })) {
+    logger.log('ui.marathon.cancel', {}, 'info')
+  }
   els.input.focus({ preventScroll: true })
-  logger.log('ui.plan.cancel', {}, 'info')
 })
 els.input.addEventListener('paste', event => {
   const files = [...(event.clipboardData?.items ?? [])]

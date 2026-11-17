@@ -472,6 +472,41 @@ test('survives a failing onStop handler and keeps the bridge alive', async t => 
   assert.equal(pong.type, 'pong')
 })
 
+test('routes marathon.set to its own handler, never as a prompt; the tools role cannot send it', async t => {
+  const sets = []
+  const { url, chats } = await setup(t, {
+    onMarathonSet: (message, ws) => { sets.push({ message, ws }) },
+  })
+  const ui = await connect(url, 'ui')
+  const tools = await connect(url, 'tools')
+  t.after(() => { ui.ws.close(); tools.ws.close() })
+
+  ui.ws.send(JSON.stringify({ v: 1, type: 'marathon.set', enabled: true }))
+  await sleep(50)
+  assert.equal(sets.length, 1)
+  assert.equal(sets[0].message.enabled, true)
+  assert.ok(sets[0].ws !== undefined)
+  assert.equal(chats.length, 0, 'marathon.set is chat-level state, not a prompt')
+
+  // The provider role has no marathon path: the frame is logged and dropped.
+  tools.ws.send(JSON.stringify({ v: 1, type: 'marathon.set', enabled: false }))
+  await sleep(50)
+  assert.equal(sets.length, 1)
+})
+
+test('survives a failing marathon.set handler and keeps the bridge alive', async t => {
+  const { url } = await setup(t, {
+    onMarathonSet: () => { throw new Error('marathon handler exploded') },
+  })
+  const ui = await connect(url, 'ui')
+  t.after(() => ui.ws.close())
+
+  ui.ws.send(JSON.stringify({ v: 1, type: 'marathon.set', enabled: true }))
+  ui.ws.send(JSON.stringify({ v: 1, type: 'ping' }))
+  const pong = await ui.messages.next(message => message.type === 'pong')
+  assert.equal(pong.type, 'pong')
+})
+
 test('plan mode follows the current turn and synchronizes on provider connect', async t => {
   const { bridge, url } = await setup(t)
   bridge.setTurnId('turn-planned', { planMode: true })

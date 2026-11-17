@@ -154,7 +154,7 @@ export function renderPlanPanel(root, state, { onToggle } = {}) {
   toggle.setAttribute('aria-expanded', String(state.expanded))
   toggle.setAttribute('aria-controls', detailsId)
 
-  const heading = element(document, 'span', 'plan-panel-heading', 'Plan')
+  const heading = element(document, 'span', 'plan-panel-heading', 'Marathon plan')
   const count = element(document, 'span', 'plan-panel-count', `${state.done}/${state.total} done`)
   const blocked = element(document, 'span', 'plan-panel-blocked', `${state.blocked} blocked`)
   blocked.hidden = state.blocked === 0

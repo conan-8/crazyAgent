@@ -1,0 +1,16 @@
+[m1-check] stack {"bridgePort":39105,"remotePort":42215,"profileDir":"/tmp/crazyagent-m1-check-AWf26D/edge-profile"}
+[m1-check] initial {"stateMarathon":{"enabled":false,"since":null,"plan":null,"watch":{"open":null,"lastVerdict":null,"lastCheckAt":null,"checks":0}},"chip":{"visible":false,"badge":"Marathon","placeholder":"Ask or tell me what to do…"}}
+[m1-check] wrote /home/conan/Documents/GitHub/crazyAgent/docs/marathon/m1-evidence/independent-check/00-initial-off.png
+[m1-check] A-remote-to-panel {"post":{"clientCommandId":"m1-check-on-0001","enabled":true,"sessionId":"fake-session-2","sequence":6,"instanceId":"companion-mwjzlg07-c16600e254f9"},"chip":{"visible":true,"badge":"Marathon","placeholder":"Describe a long task to plan and complete…"},"stateMarathon":{"enabled":true,"since":"2026-11-17T01:01:32.555Z","plan":null,"watch":{"open":null,"lastVerdict":null,"lastCheckAt":null,"checks":0}}}
+[m1-check] wrote /home/conan/Documents/GitHub/crazyAgent/docs/marathon/m1-evidence/independent-check/01-remote-on.png
+[m1-check] B-panel-to-remote {"stateMarathon":{"enabled":false,"since":null,"plan":null,"watch":{"open":null,"lastVerdict":null,"lastCheckAt":null,"checks":0}},"chipHidden":true}
+[m1-check] wrote /home/conan/Documents/GitHub/crazyAgent/docs/marathon/m1-evidence/independent-check/02-panel-off.png
+[m1-check] C-slash-both-ways {"onMarathon":{"enabled":true,"since":"2026-11-17T01:01:33.503Z","plan":null,"watch":{"open":null,"lastVerdict":null,"lastCheckAt":null,"checks":0}},"offAgain":true}
+[m1-check] D-legacy-plan-turn {"accepted":{"accepted":true,"clientMessageId":"m1-check-legacy-0001","turnId":"turn-mwjzlj9k-da6e","instanceId":"companion-mwjzlg07-c16600e254f9","sessionId":"fake-session-2","sequence":13},"done":{"planMode":true,"marathon":true},"promptHasPlanMode":true,"domBadge":"Marathon","stateMarathon":{"enabled":true,"since":"2026-11-17T01:01:33.512Z","plan":null,"watch":{"open":null,"lastVerdict":null,"lastCheckAt":null,"checks":0}}}
+[m1-check] wrote /home/conan/Documents/GitHub/crazyAgent/docs/marathon/m1-evidence/independent-check/03-legacy-plan-turn.png
+[m1-check] E-sticky-and-new-reset {"stickyPromptHasPlanMode":true,"newSession":"fake-session-3","stateMarathon":{"enabled":false,"since":null,"plan":null,"watch":{"open":null,"lastVerdict":null,"lastCheckAt":null,"checks":0}}}
+[m1-check] wrote /home/conan/Documents/GitHub/crazyAgent/docs/marathon/m1-evidence/independent-check/04-after-new-off.png
+[m1-check] wrote /home/conan/Documents/GitHub/crazyAgent/docs/marathon/m1-evidence/independent-check/05-mid-turn-off.png
+[m1-check] F-mid-turn-off {"midOff":{"clientCommandId":"m1-check-off-0002","enabled":false,"sessionId":"fake-session-3","sequence":114,"instanceId":"companion-mwjzlg07-c16600e254f9"},"runningKeptPlan":true,"nextTurnUnarmed":true}
+[m1-check] journal {"remoteMarathonEnvelopes":[{"seq":6,"enabled":true,"origin":"remote"},{"seq":7,"enabled":false,"origin":null},{"seq":8,"enabled":true,"origin":"ui"},{"seq":9,"enabled":false,"origin":null},{"seq":10,"enabled":true,"origin":"remote"},{"seq":89,"enabled":false,"origin":null},{"seq":91,"enabled":true,"origin":"remote"},{"seq":114,"enabled":false,"origin":null}]}
+[m1-check] PASS: both directions agree; legacy planMode produces a plan turn; mid-turn semantics hold

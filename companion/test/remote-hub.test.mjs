@@ -445,3 +445,111 @@ test('a resumed session restores its saved transcript into the projection', () =
   assert.equal(h.transcript('session-1').messages.length, 3)
   assert.equal(h.sessionSummaries().find(summary => summary.sessionId === 'session-1').current, true)
 })
+
+/* ------------------------------------------------------------------ */
+/* M1: the marathon projection and remote.marathon envelope (§3.4)     */
+/* ------------------------------------------------------------------ */
+
+const MARATHON_ON_FRAME = Object.freeze({
+  type: 'marathon.state',
+  enabled: true,
+  sessionId: 'session-1',
+  since: '2026-11-16T19:00:00.000Z',
+  origin: 'remote',
+  plan: null,
+  watcher: { active: false, checks: 0, lastCheckAt: null, lastVerdict: null },
+})
+
+test('the default marathon projection is off with empty watch fields', () => {
+  const h = hub()
+  assert.deepEqual(h.projection().marathon, {
+    enabled: false,
+    since: null,
+    plan: null,
+    watch: { open: null, lastVerdict: null, lastCheckAt: null, checks: 0 },
+  })
+})
+
+test('marathon.state is journaled as remote.marathon, replayed after a reconnect, and projected', () => {
+  const h = hub()
+  h.setSession('session-1')
+  h.ingest(MARATHON_ON_FRAME)
+  const envelope = h.journal.at(-1)
+  assert.equal(envelope.type, 'remote.marathon')
+  assert.equal(envelope.turnId, undefined)
+  assert.deepEqual(envelope.body, {
+    enabled: true,
+    sessionId: 'session-1',
+    since: '2026-11-16T19:00:00.000Z',
+    origin: 'remote',
+    plan: null,
+    watcher: { active: false, checks: 0, lastCheckAt: null, lastVerdict: null },
+  })
+  assert.deepEqual(h.projection().marathon, {
+    enabled: true,
+    since: '2026-11-16T19:00:00.000Z',
+    plan: null,
+    watch: { open: null, lastVerdict: null, lastCheckAt: null, checks: 0 },
+  })
+  // A reconnecting phone replays the envelope like remote.help.
+  const replay = h.catchUp({ instance: 'inst-a', after: envelope.seq - 1 })
+  assert.equal(replay.mode, 'replay')
+  assert.deepEqual(replay.events.map(event => event.type), ['remote.marathon'])
+  // The full resync projection carries the same state.
+  assert.deepEqual(h.resyncFrame('no-instance').body.state.marathon, h.projection().marathon)
+
+  // Off clears the markers in both the envelope and the projection.
+  h.ingest({ ...MARATHON_ON_FRAME, enabled: false, sessionId: null, since: null, origin: null })
+  assert.equal(h.journal.at(-1).body.enabled, false)
+  assert.equal(h.projection().marathon.enabled, false)
+  assert.equal(h.projection().marathon.since, null)
+})
+
+test('an identical marathon.state is not re-published; malformed values fail closed', () => {
+  const h = hub()
+  h.ingest(MARATHON_ON_FRAME)
+  const seq = h.seq
+  h.ingest(MARATHON_ON_FRAME)
+  assert.equal(h.seq, seq, 'identical state publishes nothing')
+
+  // Non-boolean enabled, unknown origin, and a non-null plan (M2) fail closed.
+  h.ingest({ type: 'marathon.state', enabled: 'yes', origin: 'telegram', plan: { revision: 9, items: [] }, watcher: { checks: -3, lastVerdict: 5 } })
+  const projection = h.projection().marathon
+  assert.equal(projection.enabled, false)
+  assert.equal(projection.plan, null)
+  assert.deepEqual(projection.watch, { open: null, lastVerdict: null, lastCheckAt: null, checks: 0 })
+  assert.equal(h.journal.at(-1).body.origin, null)
+})
+
+test('a session change resets the marathon mirror to off', () => {
+  const h = hub()
+  h.setSession('session-1')
+  h.ingest(MARATHON_ON_FRAME)
+  assert.equal(h.projection().marathon.enabled, true)
+  h.setSession('session-2')
+  assert.equal(h.projection().marathon.enabled, false)
+  h.ingest(MARATHON_ON_FRAME)
+  h.ingest({ type: 'chat.session', sessionId: 'session-1', resumed: true })
+  assert.equal(h.projection().marathon.enabled, false, 'a resumed chat never inherits the switch')
+})
+
+test('chat.done carries marathon beside planMode and chat.user marks armed foreign turns', () => {
+  const h = hub()
+  h.turnStarted({ turnId: 'turn-1', origin: 'remote', clientMessageId: 'client-0001', text: 'planned', imageCount: 0, sessionId: 'session-1', planMode: true, marathon: true })
+  assert.equal(h.journal.at(-1).body.marathon, true)
+  h.ingest({ type: 'chat.done', sessionId: 'session-1', text: 'DONE', planMode: true, marathon: true, planOutcome: 'reported-complete', planRevision: 2 })
+  const done = h.journal.at(-1)
+  assert.equal(done.body.planMode, true)
+  assert.equal(done.body.marathon, true)
+  assert.equal(done.body.planOutcome, 'reported-complete')
+  assert.equal(done.body.planRevision, 2)
+  h.turnEnded({ turnId: 'turn-1', outcome: 'done', sessionId: 'session-1' })
+
+  // An ordinary turn carries neither flag.
+  h.turnStarted({ turnId: 'turn-2', origin: 'remote', clientMessageId: 'client-0002', text: 'plain', imageCount: 0, sessionId: 'session-1' })
+  assert.equal(h.journal.at(-1).body.marathon, undefined)
+  h.ingest({ type: 'chat.done', sessionId: 'session-1', text: 'ok' })
+  assert.equal(h.journal.at(-1).body.planMode, false)
+  assert.equal(h.journal.at(-1).body.marathon, false)
+  h.turnEnded({ turnId: 'turn-2', outcome: 'done', sessionId: 'session-1' })
+})

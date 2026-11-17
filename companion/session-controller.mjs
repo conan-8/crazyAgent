@@ -12,6 +12,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
+import { MarathonState, marathonFrameBody } from './marathon.mjs'
 import { buildPromptBlocks, isDocsDocumentUrl, normalizeImageAttachments, promptStats } from './prompt.mjs'
 import { PROTOCOL_VERSION, errorMessage, isRecord } from './protocol.mjs'
 
@@ -22,7 +23,7 @@ export const NOT_READY_MESSAGE = 'OpenRouter is not ready. Open Settings, enter 
 
 /**
  * @typedef {{
- *   turnStarted?: (info: {turnId: string, origin: string, clientMessageId?: string | null, text: string, imageCount: number, planMode: boolean, sessionId?: string | null}) => void,
+ *   turnStarted?: (info: {turnId: string, origin: string, clientMessageId?: string | null, text: string, imageCount: number, planMode: boolean, marathon?: boolean, sessionId?: string | null}) => void,
  *   turnEnded?: (info: {turnId: string, outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}, confirm?: {action: string, target: string, captureError: string | null}, label?: 'done' | 'partial' | 'blocked' | null, usage?: Record<string, number>, timings?: Record<string, number | null>}) => void,
  * }} TurnObserver
  */
@@ -59,6 +60,13 @@ export class SessionController {
     this.running = false
     this.stopRequested = false
     this.sessionChanging = false
+    /**
+     * The one companion-owned marathon switch (MARATHON-PLAN.md §3.1). Both
+     * transports change it only through setMarathon(); a fresh controller
+     * (companion restart) starts off — the fail-safe default.
+     * @type {MarathonState}
+     */
+    this.marathon = new MarathonState()
     /** @type {string | undefined} */
     this.turnId = undefined
     /** @type {{status: string, reason?: string} | undefined} */
@@ -219,6 +227,43 @@ export class SessionController {
   }
 
   /**
+   * The shared marathon switch, accepted in any turn state (idle, running,
+   * stopping, switching). The running turn keeps the modes it started with;
+   * the new state applies from the next turn. Publishing `marathon.state` is
+   * the only way clients learn the switch — they never flip it optimistically.
+   * @param {{enabled: unknown, origin?: 'ui' | 'remote'}} input
+   * @returns {{ok: true, enabled: boolean, sessionId: string | null, changed: boolean} | {ok: false, code: string, message: string, retryable: boolean}}
+   */
+  setMarathon({ enabled, origin = 'ui' }) {
+    const result = this.marathon.set({ enabled, origin, sessionId: this.getRunner()?.sessionId ?? null })
+    if (!result.ok) return result
+    if (result.changed) {
+      this.logStore.record('companion', 'marathon.set', { enabled: result.state.enabled, origin: result.state.origin, sessionId: result.state.sessionId }, { severity: 'info' })
+      this.#publishMarathon()
+    }
+    return { ok: true, enabled: result.state.enabled, sessionId: result.state.sessionId, changed: result.changed }
+  }
+
+  /** The current switch state as a plain snapshot (chat.hello, diagnostics). */
+  marathonState() {
+    return this.marathon.snapshot()
+  }
+
+  /** Publish the authoritative state to the panel and the remote hub. */
+  #publishMarathon() {
+    this.publish({ v: PROTOCOL_VERSION, type: 'marathon.state', ...marathonFrameBody(this.marathon.snapshot()) })
+  }
+
+  /** New chat / real chat switch / restart: the switch resets to off. */
+  #resetMarathon() {
+    const { changed } = this.marathon.reset()
+    if (changed) {
+      this.logStore.record('companion', 'marathon.reset', {}, { severity: 'info' })
+      this.#publishMarathon()
+    }
+  }
+
+  /**
    * Reserve the single turn slot and start the turn. Returns synchronously with
    * either an accepted turn (plus a `done` promise) or a rejection the caller
    * reports only to its own client.
@@ -314,7 +359,13 @@ export class SessionController {
     this.pendingConfirmation = undefined
     this.turnId = turnId
     const origin = input.origin ?? 'ui'
-    const planMode = input.planMode === true
+    // Legacy one-shot arming (old APK /plan, queued panel items): the explicit
+    // planMode flag first turns the shared switch on with the sender's origin,
+    // then the turn arms from the switch like any marathon turn (§3.1).
+    if (input.planMode === true && !this.marathon.state.enabled) {
+      this.setMarathon({ enabled: true, origin })
+    }
+    const planMode = this.marathon.state.enabled || input.planMode === true
     const confirmMode = this.getConfirmIrreversible() === true
     // Executor backstop: on unless this turn starts from the user's approval.
     const confirmGuard = confirmMode && confirmApproved !== true
@@ -325,6 +376,7 @@ export class SessionController {
       text: shownText,
       imageCount: images.length,
       planMode,
+      marathon: planMode,
       sessionId: runner.sessionId ?? null,
     })
     if (typeof runner.sessionId === 'string') {
@@ -334,7 +386,7 @@ export class SessionController {
       // The panel renders its own prompts locally; it only needs prompts that
       // another client (the phone) started, so it can show the turn and queue
       // desktop input instead of colliding with it.
-      this.publish({ v: PROTOCOL_VERSION, type: 'chat.user', turnId, origin, text: shownText, imageCount: images.length })
+      this.publish({ v: PROTOCOL_VERSION, type: 'chat.user', turnId, origin, text: shownText, imageCount: images.length, ...(planMode ? { marathon: true } : {}) })
     }
     const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode, confirmGuard })
     return { turnId, done }
@@ -418,6 +470,8 @@ export class SessionController {
       const sessionId = await runner.newSession()
       this.logStore.sessionStart(sessionId)
       this.pendingConfirmation = undefined
+      // A new chat never inherits the previous chat's marathon switch.
+      this.#resetMarathon()
       this.publish({ v: PROTOCOL_VERSION, type: 'chat.session', sessionId })
       this.sendStatus('idle')
       return { ok: true, sessionId }
@@ -460,6 +514,9 @@ export class SessionController {
       }
       this.logStore.sessionStart(resumed)
       this.pendingConfirmation = undefined
+      // Continuing a different saved chat resets the switch (the `already`
+      // path above never reaches here: the session did not change).
+      this.#resetMarathon()
       this.publish({ v: PROTOCOL_VERSION, type: 'chat.session', sessionId: resumed, resumed: true })
       this.sendStatus('idle')
       return { ok: true, sessionId: resumed }
@@ -667,6 +724,9 @@ export class SessionController {
         docsVerification: verification?.status,
         docsVerificationReason: verification?.reason,
         planMode,
+        // M1 emits both names for one release: they describe the same armed
+        // turn. planOutcome/planRevision keep their names (§3.4).
+        marathon: planMode,
         planOutcome: plan?.outcome,
         planRevision: plan?.revision,
         ...(help === undefined ? {} : { help: { category: help.category, reason: help.reason } }),

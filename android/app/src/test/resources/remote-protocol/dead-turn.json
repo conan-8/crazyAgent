@@ -53,7 +53,18 @@
           "latestScreenshotId": null,
           "latestScreenshot": null,
           "help": null,
-          "confirm": null
+          "confirm": null,
+          "marathon": {
+            "enabled": false,
+            "since": null,
+            "plan": null,
+            "watch": {
+              "open": null,
+              "lastVerdict": null,
+              "lastCheckAt": null,
+              "checks": 0
+            }
+          }
         }
       }
     },
@@ -318,6 +329,7 @@
         "docsVerification": null,
         "docsVerificationReason": null,
         "planMode": false,
+        "marathon": false,
         "planOutcome": null,
         "planRevision": null,
         "replacesStreamId": "turn-12:s9"
@@ -412,6 +424,7 @@
         "docsVerification": null,
         "docsVerificationReason": null,
         "planMode": false,
+        "marathon": false,
         "planOutcome": null,
         "planRevision": null
       }
@@ -556,6 +569,7 @@
           "docsVerification": null,
           "docsVerificationReason": null,
           "planMode": false,
+          "marathon": false,
           "planOutcome": null,
           "planRevision": null,
           "replacesStreamId": "turn-12:s9"
@@ -609,6 +623,7 @@
           "docsVerification": null,
           "docsVerificationReason": null,
           "planMode": false,
+          "marathon": false,
           "planOutcome": null,
           "planRevision": null
         }
@@ -618,7 +633,18 @@
     "latestScreenshotId": null,
     "latestScreenshot": null,
     "help": null,
-    "confirm": null
+    "confirm": null,
+    "marathon": {
+      "enabled": false,
+      "since": null,
+      "plan": null,
+      "watch": {
+        "open": null,
+        "lastVerdict": null,
+        "lastCheckAt": null,
+        "checks": 0
+      }
+    }
   },
   "checkpoints": {
     "afterError": {
@@ -698,7 +724,18 @@
       "latestScreenshotId": null,
       "latestScreenshot": null,
       "help": null,
-      "confirm": null
+      "confirm": null,
+      "marathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
     },
     "afterBlocked": {
       "protocol": 1,
@@ -814,6 +851,7 @@
             "docsVerification": null,
             "docsVerificationReason": null,
             "planMode": false,
+            "marathon": false,
             "planOutcome": null,
             "planRevision": null,
             "replacesStreamId": "turn-12:s9"
@@ -824,7 +862,18 @@
       "latestScreenshotId": null,
       "latestScreenshot": null,
       "help": null,
-      "confirm": null
+      "confirm": null,
+      "marathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
     },
     "afterRecovery": {
       "protocol": 1,
@@ -939,6 +988,7 @@
             "docsVerification": null,
             "docsVerificationReason": null,
             "planMode": false,
+            "marathon": false,
             "planOutcome": null,
             "planRevision": null,
             "replacesStreamId": "turn-12:s9"
@@ -992,6 +1042,7 @@
             "docsVerification": null,
             "docsVerificationReason": null,
             "planMode": false,
+            "marathon": false,
             "planOutcome": null,
             "planRevision": null
           }
@@ -1001,7 +1052,18 @@
       "latestScreenshotId": null,
       "latestScreenshot": null,
       "help": null,
-      "confirm": null
+      "confirm": null,
+      "marathon": {
+        "enabled": false,
+        "since": null,
+        "plan": null,
+        "watch": {
+          "open": null,
+          "lastVerdict": null,
+          "lastCheckAt": null,
+          "checks": 0
+        }
+      }
     }
   }
 }

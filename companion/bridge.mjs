@@ -51,6 +51,7 @@ export class Bridge {
    *   onNewChat: (ui: import('ws').WebSocket) => void | Promise<void>,
    *   onResumeChat?: (sessionId: string, ui: import('ws').WebSocket) => void | Promise<void>,
    *   onStop?: (ui: import('ws').WebSocket, message: Record<string, unknown>) => void | Promise<void>,
+   *   onMarathonSet?: (message: Record<string, unknown>, ui: import('ws').WebSocket) => void | Promise<void>,
    *   onConnectionChange?: () => void,
    *   onLog?: (entry: {direction: 'in'|'out'|'event', role?: string, frame: Record<string, any>}) => void,
    *   onControl?: (message: Record<string, any>, ui: import('ws').WebSocket) => void | Promise<void>,
@@ -68,6 +69,7 @@ export class Bridge {
     this.onNewChat = options.onNewChat
     this.onResumeChat = options.onResumeChat
     this.onStop = options.onStop
+    this.onMarathonSet = options.onMarathonSet
     this.onConnectionChange = options.onConnectionChange
     this.onLog = options.onLog
     this.onControl = options.onControl
@@ -494,6 +496,16 @@ export class Bridge {
           .then(() => this.onStop?.(ws, message))
           .catch(error => {
             this.log(`bridge: chat.stop handler failed: ${errorMessage(error)}`)
+          })
+        return
+      }
+      if (message.type === 'marathon.set') {
+        // Chat-level state, not a prompt: the shared controller owns the
+        // switch and answers with marathon.state (no optimistic client flip).
+        Promise.resolve()
+          .then(() => this.onMarathonSet?.(message, ws))
+          .catch(error => {
+            this.log(`bridge: marathon.set handler failed: ${errorMessage(error)}`)
           })
         return
       }

@@ -16,7 +16,7 @@ const MAX_IMAGES = 4
  * Normalize a companion `chat.user` frame into what the panel renders, or
  * null when the frame is not a foreign prompt (malformed or panel-originated).
  * @param {unknown} frame
- * @returns {null | {turnId: string | null, origin: string, label: string, text: string, attachments: Array<{name: string}>}}
+ * @returns {null | {turnId: string | null, origin: string, label: string, text: string, attachments: Array<{name: string}>, marathon: boolean | null}}
  */
 export function foreignPrompt(frame) {
   if (frame === null || typeof frame !== 'object' || Array.isArray(frame)) return null
@@ -32,6 +32,9 @@ export function foreignPrompt(frame) {
     origin,
     label,
     text,
+    // Whether the companion armed this turn as a marathon turn; null when the
+    // frame does not say (the panel then falls back to its mirrored switch).
+    marathon: typeof record.marathon === 'boolean' ? record.marathon : null,
     // Only names are rendered; the image bytes stay with the companion.
     attachments: Array.from({ length: count }, (_, index) => ({ name: `${label.replace(/^From /u, '')} image ${index + 1}` })),
   }

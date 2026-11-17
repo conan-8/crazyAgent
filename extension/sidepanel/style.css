@@ -2664,7 +2664,7 @@ input::placeholder {
   display: none;
 }
 
-.plan-mode {
+.marathon-mode {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2674,8 +2674,7 @@ input::placeholder {
   font-size: 11px;
 }
 
-.plan-mode-badge,
-.queued-message-plan {
+.marathon-mode-badge {
   flex: 0 0 auto;
   padding: 2px 7px;
   border: 1px solid rgba(255, 195, 0, 0.35);
@@ -2688,12 +2687,12 @@ input::placeholder {
   text-transform: uppercase;
 }
 
-.plan-mode-copy {
+.marathon-mode-copy {
   min-width: 0;
   flex: 1;
 }
 
-.plan-mode-cancel {
+.marathon-mode-cancel {
   display: grid;
   place-items: center;
   width: 22px;
@@ -2707,16 +2706,12 @@ input::placeholder {
   line-height: 1;
 }
 
-.plan-mode-cancel:hover {
+.marathon-mode-cancel:hover {
   background: var(--panel-hover);
   color: var(--text);
 }
 
-.queued-message-plan {
-  font-size: 9px;
-}
-
-.plan-turn-badge {
+.marathon-turn-badge {
   border-color: rgba(255, 195, 0, 0.35);
   background: var(--accent-soft);
   color: var(--accent);
@@ -3534,7 +3529,7 @@ input::placeholder {
    the exit, so a closing surface must also stop taking clicks. */
 :is(
   .activity-empty, .recent-sessions, .prompt-rail, .back-home, .banner, .message-queue,
-  .plan-mode, .slash-menu, .model-menu, .model-options, .modal, .toast, .history-current,
+  .marathon-mode, .slash-menu, .model-menu, .model-options, .modal, .toast, .history-current,
   .activity-timer, .stop
 ) {
   transition:
@@ -3544,7 +3539,7 @@ input::placeholder {
 
 :is(
   .activity-empty, .recent-sessions, .prompt-rail, .back-home, .banner, .message-queue,
-  .plan-mode, .slash-menu, .model-menu, .model-options, .modal, .toast, .history-current,
+  .marathon-mode, .slash-menu, .model-menu, .model-options, .modal, .toast, .history-current,
   .activity-timer, .stop
 ).hidden {
   opacity: 0;
@@ -3563,7 +3558,7 @@ input::placeholder {
 @starting-style {
   :is(
     .activity-empty, .recent-sessions, .prompt-rail, .back-home, .banner, .message-queue,
-    .plan-mode, .slash-menu, .model-menu, .model-options, .modal, .toast, .history-current,
+    .marathon-mode, .slash-menu, .model-menu, .model-options, .modal, .toast, .history-current,
     .activity-timer, .stop
   ):not(.hidden) {
     opacity: 0;

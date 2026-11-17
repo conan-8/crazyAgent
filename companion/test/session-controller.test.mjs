@@ -742,3 +742,193 @@ test('the executor backstop is on for denied and ordinary turns of the setting, 
   off.runner.current.resolve('done')
   await plain.done
 })
+
+/* ------------------------------------------------------------------ */
+/* M1: the shared companion-owned marathon switch (§3.1)               */
+/* ------------------------------------------------------------------ */
+
+test('setMarathon toggles both directions, publishes marathon.state, and is accepted in any turn state', async () => {
+  const { controller, runner, frames } = setup()
+  assert.deepEqual(controller.marathonState(), { enabled: false, sessionId: null, since: null, origin: null, plan: null })
+
+  const on = controller.setMarathon({ enabled: true, origin: 'remote' })
+  assert.equal(on.ok, true)
+  assert.equal(on.enabled, true)
+  assert.equal(on.sessionId, 'session-1')
+  const stateFrame = frames.find(frame => frame.type === 'marathon.state')
+  assert.equal(stateFrame.v, 1)
+  assert.equal(stateFrame.enabled, true)
+  assert.equal(stateFrame.origin, 'remote')
+  assert.equal(stateFrame.sessionId, 'session-1')
+  assert.equal(typeof stateFrame.since, 'string')
+  assert.equal(stateFrame.plan, null)
+  assert.deepEqual(stateFrame.watcher, { active: false, checks: 0, lastCheckAt: null, lastVerdict: null })
+
+  // Accepted while a turn runs: the switch flips, the running turn is untouched.
+  const turn = controller.submit({ text: 'long task' })
+  await runner.started()
+  const midTurn = controller.setMarathon({ enabled: false, origin: 'ui' })
+  assert.equal(midTurn.ok, true)
+  assert.equal(controller.running, true)
+  assert.deepEqual(controller.marathonState(), { enabled: false, sessionId: null, since: null, origin: null, plan: null })
+  // And while stopping.
+  controller.stop()
+  assert.equal(controller.setMarathon({ enabled: true, origin: 'ui' }).ok, true)
+  await turn.done
+
+  // Idempotent re-set publishes nothing new.
+  const count = frames.filter(frame => frame.type === 'marathon.state').length
+  assert.equal(controller.setMarathon({ enabled: true, origin: 'remote' }).changed, false)
+  assert.equal(frames.filter(frame => frame.type === 'marathon.state').length, count)
+
+  // Non-boolean fails closed without a publication.
+  const bad = controller.setMarathon({ enabled: 'yes' })
+  assert.equal(bad.ok, false)
+  assert.equal(bad.code, 'INVALID_MARATHON')
+  assert.equal(frames.filter(frame => frame.type === 'marathon.state').length, count)
+})
+
+test('with marathon on, every turn arms without planMode and chat.done carries both flags', async () => {
+  const { controller, runner, bridge, frames, observed } = setup()
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const first = controller.submit({ text: 'step one' })
+  assert.deepEqual(bridge.turnModes[0], { id: first.turnId, planMode: true })
+  assert.equal(observed[0][1].planMode, true)
+  assert.equal(observed[0][1].marathon, true)
+  assert.match(runner.runs[0][0].text, /<plan_mode>/)
+  runner.current.resolve('DONE: one')
+  await first.done
+  const firstDone = frames.find(frame => frame.type === 'chat.done')
+  assert.equal(firstDone.planMode, true)
+  assert.equal(firstDone.marathon, true)
+
+  // Sticky: the next turn arms too, with no per-message flag anywhere.
+  const second = controller.submit({ text: 'step two' })
+  assert.deepEqual(bridge.turnModes.at(-1), { id: second.turnId, planMode: true })
+  assert.match(runner.runs[1][0].text, /<plan_mode>/)
+  runner.current.resolve('DONE: two')
+  await second.done
+
+  // Off: ordinary turns again.
+  controller.setMarathon({ enabled: false, origin: 'ui' })
+  const third = controller.submit({ text: 'quick question' })
+  assert.deepEqual(bridge.turnModes.at(-1), { id: third.turnId, planMode: false })
+  assert.doesNotMatch(runner.runs[2][0].text, /<plan_mode>/)
+  runner.current.resolve('42')
+  await third.done
+  const thirdDone = frames.filter(frame => frame.type === 'chat.done').at(-1)
+  assert.equal(thirdDone.planMode, false)
+  assert.equal(thirdDone.marathon, false)
+})
+
+test('legacy planMode:true first turns marathon on with the sender origin, then submits', async () => {
+  for (const origin of ['ui', 'remote']) {
+    const { controller, runner, bridge, frames } = setup()
+    const turn = controller.submit({ text: 'old client task', origin, planMode: true })
+    assert.equal(turn.ok, true)
+    assert.equal(controller.marathonState().enabled, true)
+    assert.equal(controller.marathonState().origin, origin)
+    assert.deepEqual(bridge.turnModes[0], { id: turn.turnId, planMode: true })
+    assert.match(runner.runs[0][0].text, /<plan_mode>/)
+    if (origin === 'remote') {
+      const user = frames.find(frame => frame.type === 'chat.user')
+      assert.equal(user.marathon, true)
+      const types = frames.map(frame => frame.type)
+      assert.ok(types.indexOf('marathon.state') < types.indexOf('chat.user'))
+    }
+    runner.current.resolve('done')
+    await turn.done
+    const done = frames.find(frame => frame.type === 'chat.done')
+    assert.equal(done.planMode, true)
+    assert.equal(done.marathon, true)
+    const types = frames.map(frame => frame.type)
+    assert.ok(types.indexOf('marathon.state') < types.indexOf('chat.done'), 'the switch lights before the turn ends')
+    // The switch stays on for the next turn (sticky, not one-shot).
+    const next = controller.submit({ text: 'follow-up', origin })
+    assert.deepEqual(bridge.turnModes.at(-1), { id: next.turnId, planMode: true })
+    runner.current.resolve('done again')
+    await next.done
+  }
+})
+
+test('a legacy planMode steer arms the shared switch when the steered turn begins', async () => {
+  const { controller, runner } = setup()
+  const first = controller.submit({ text: 'long task', origin: 'ui' })
+  await runner.started()
+  const steer = controller.submit({ text: 'plan the rest', origin: 'remote', planMode: true, steer: true })
+  assert.equal(steer.steered, true)
+  // The running turn was unarmed and stays unarmed; the queued legacy flag
+  // flips the switch when the steered turn actually begins (§3.1).
+  assert.equal(controller.marathonState().enabled, false)
+  await first.done
+  assert.equal(controller.marathonState().enabled, true)
+  assert.equal(controller.marathonState().origin, 'remote')
+  await runner.started()
+  assert.match(runner.runs[1][0].text, /<plan_mode>/)
+  runner.current.resolve('done')
+  await steer.done
+})
+
+test('mid-turn toggles never re-arm the running turn; the next turn picks the new state up', async () => {
+  const { controller, runner, bridge } = setup()
+  // On while running: the running turn stays unarmed, the next one arms.
+  const plain = controller.submit({ text: 'ordinary task' })
+  await runner.started()
+  assert.deepEqual(bridge.turnModes[0], { id: plain.turnId, planMode: false })
+  controller.setMarathon({ enabled: true, origin: 'remote' })
+  assert.deepEqual(bridge.turnModes.at(-1), { id: plain.turnId, planMode: false }, 'no plan.mode re-sync mid-turn')
+  assert.doesNotMatch(runner.runs[0][0].text, /<plan_mode>/)
+  runner.current.resolve('done')
+  await plain.done
+  const armed = controller.submit({ text: 'next task' })
+  assert.deepEqual(bridge.turnModes.at(-1), { id: armed.turnId, planMode: true })
+  runner.current.resolve('done')
+  await armed.done
+
+  // Off while running: the running turn keeps browser_plan until it ends.
+  const planned = controller.submit({ text: 'planned task' })
+  await runner.started()
+  assert.deepEqual(bridge.turnModes.at(-1), { id: planned.turnId, planMode: true })
+  controller.setMarathon({ enabled: false, origin: 'ui' })
+  assert.deepEqual(bridge.turnModes.at(-1), { id: planned.turnId, planMode: true }, 'the running turn keeps its modes')
+  runner.current.resolve('done')
+  await planned.done
+  const after = controller.submit({ text: 'after off' })
+  assert.deepEqual(bridge.turnModes.at(-1), { id: after.turnId, planMode: false })
+  runner.current.resolve('done')
+  await after.done
+})
+
+test('new chat and a real chat switch reset marathon to off; resume-to-same-session keeps it', async () => {
+  const { controller, runner, frames } = setup()
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  await controller.newChat()
+  assert.equal(controller.marathonState().enabled, false)
+  const offFrame = frames.filter(frame => frame.type === 'marathon.state').at(-1)
+  assert.equal(offFrame.enabled, false)
+  assert.ok(frames.indexOf(offFrame) < frames.findIndex(frame => frame.type === 'chat.session' && frame.sessionId === 'session-2'))
+
+  // Resume to the SAME session is not a chat switch: the state survives.
+  controller.setMarathon({ enabled: true, origin: 'remote' })
+  assert.deepEqual(await controller.resumeChat('session-2'), { ok: true, sessionId: 'session-2', already: true })
+  assert.equal(controller.marathonState().enabled, true)
+
+  // A real switch to another saved chat resets off.
+  await controller.resumeChat('session-old')
+  assert.equal(controller.marathonState().enabled, false)
+  assert.equal(frames.filter(frame => frame.type === 'marathon.state').at(-1).enabled, false)
+
+  // A failed resume keeps the current session and the switch.
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  runner.unresumable = new Set(['session-gone'])
+  assert.equal((await controller.resumeChat('session-gone')).ok, false)
+  assert.equal(controller.marathonState().enabled, true)
+})
+
+test('a fresh controller (companion restart) starts with marathon off — fail-safe', () => {
+  const first = setup()
+  first.controller.setMarathon({ enabled: true, origin: 'ui' })
+  const restarted = setup()
+  assert.equal(restarted.controller.marathonState().enabled, false)
+  assert.deepEqual(restarted.controller.marathonState(), { enabled: false, sessionId: null, since: null, origin: null, plan: null })
+})

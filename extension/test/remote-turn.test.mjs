@@ -8,8 +8,16 @@ test('a phone prompt becomes a labelled turn with name-only image placeholders',
     origin: 'remote',
     label: 'From phone',
     text: 'check the cart',
+    marathon: null,
     attachments: [{ name: 'phone image 1' }, { name: 'phone image 2' }],
   })
+})
+
+test('the marathon arming flag passes through only as an explicit boolean', () => {
+  assert.equal(foreignPrompt({ type: 'chat.user', origin: 'remote', text: 'x', marathon: true }).marathon, true)
+  assert.equal(foreignPrompt({ type: 'chat.user', origin: 'remote', text: 'x', marathon: false }).marathon, false)
+  assert.equal(foreignPrompt({ type: 'chat.user', origin: 'remote', text: 'x', marathon: 'yes' }).marathon, null)
+  assert.equal(foreignPrompt({ type: 'chat.user', origin: 'remote', text: 'x' }).marathon, null)
 })
 
 test('panel-originated, malformed, and non-user frames are not foreign prompts', () => {

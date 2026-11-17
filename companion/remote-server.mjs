@@ -5,7 +5,7 @@
  * published only through tailnet-only Tailscale Serve. It never touches the
  * privileged 17871 bridge roles: it cannot claim `ui`/`tools`, send
  * `browser.command`, configure the LLM, or read logs/files. It only calls the
- * shared session controller (submit/stop/new) and reads the RemoteHub,
+ * shared session controller (submit/stop/new/marathon) and reads the RemoteHub,
  * including the screenshots the agent already captured (by opaque ID).
  *
  * Native clients authenticate with `Authorization: Bearer <remote token>`;
@@ -92,6 +92,7 @@ export class RemoteServer {
    *     stop: () => {state: string, turnId?: string, done: Promise<void>},
    *     newChat: () => Promise<{ok: true, sessionId: string} | {ok: false, code: string, message: string, retryable: boolean}>,
    *     resumeChat: (sessionId: string) => Promise<{ok: true, sessionId: string} | {ok: false, code: string, message: string, retryable: boolean}>,
+   *     setMarathon: (input: {enabled: unknown, origin?: string}) => {ok: true, enabled: boolean, sessionId: string | null, changed: boolean} | {ok: false, code: string, message: string, retryable: boolean},
    *     captureSnapshot?: () => Promise<{ok: true} | {ok: false, code: string, message: string, retryable: boolean}>,
    *   },
    *   log?: (message: string) => void,
@@ -310,6 +311,14 @@ export class RemoteServer {
       allow(method, ['POST'])
       return this.#postNew(await readJson(req, MAX_COMMAND_BODY_BYTES))
     }
+    if (path === '/marathon') {
+      allow(method, ['POST'])
+      return this.#postMarathon(await readJson(req, MAX_COMMAND_BODY_BYTES))
+    }
+    if (path === '/marathon/watch/ack') {
+      allow(method, ['POST'])
+      return this.#postWatchAck(await readJson(req, MAX_COMMAND_BODY_BYTES))
+    }
     if (path === '/events') {
       throw new HttpError(426, 'UPGRADE_REQUIRED', 'Open /events as a WebSocket.', false, { upgrade: 'websocket' })
     }
@@ -429,6 +438,48 @@ export class RemoteServer {
       this.hub.rememberCommand('new', clientCommandId, '', outcome)
       return outcome
     }
+  }
+
+  /**
+   * The shared marathon switch (MARATHON-PLAN.md §3.4). Chat-level state only,
+   * like /stop and /new: it cannot claim ui/tools, send browser commands,
+   * configure the LLM, or read files. Idempotent per clientCommandId.
+   * @param {Record<string, any>} body
+   */
+  #postMarathon(body) {
+    const clientCommandId = requireClientId(body.clientCommandId, 'clientCommandId')
+    if (typeof body.enabled !== 'boolean') throw new HttpError(422, 'INVALID_MARATHON', 'enabled must be a boolean.')
+    const print = fingerprint({ enabled: body.enabled })
+    const cached = this.#cached('marathon', clientCommandId, print)
+    if (cached !== undefined) return cached
+    const result = this.controller.setMarathon({ enabled: body.enabled, origin: 'remote' })
+    const outcome = result.ok
+      ? {
+        status: 200,
+        body: {
+          clientCommandId,
+          enabled: result.enabled,
+          sessionId: this.hub.sessionId,
+          sequence: this.hub.seq,
+          instanceId: this.hub.instanceId,
+        },
+      }
+      : rejection(result, { clientCommandId, instanceId: this.hub.instanceId })
+    this.hub.rememberCommand('marathon', clientCommandId, print, outcome)
+    return outcome
+  }
+
+  /**
+   * Acknowledge one watch alert. The watcher arrives in M3; until then no
+   * alert can be open, so every well-formed ack fails closed with 404.
+   * @param {Record<string, any>} body
+   */
+  #postWatchAck(body) {
+    requireClientId(body.clientCommandId, 'clientCommandId')
+    if (typeof body.id !== 'string' || body.id.length === 0 || body.id.length > 128) {
+      throw new HttpError(422, 'INVALID_WATCH_ID', 'id must be a non-empty string of at most 128 characters.')
+    }
+    throw new HttpError(404, 'WATCH_NOT_FOUND', 'No watch alert is open on this companion.')
   }
 
   /**

@@ -1,0 +1,5 @@
+[ui-preview] wrote /tmp/m1-ui-marathon/marathon-remote-on.png
+[ui-preview] wrote /tmp/m1-ui-marathon/marathon-toggle-pending.png
+[ui-preview] wrote /tmp/m1-ui-marathon/marathon-carried-plan-placeholder.png
+[ui-preview] wrote /tmp/m1-ui-marathon/marathon-mid-turn-off.png
+[ui-preview] wrote /tmp/m1-ui-marathon/marathon-narrow.png
