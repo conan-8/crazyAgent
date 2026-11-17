@@ -619,3 +619,98 @@ test('JSON snapshots integrate without sharing mutable item or audit references'
   assert.equal(result.state.items[0].content, 'Inspect current state')
   assert.equal(result.audit.items[0].content, 'Inspect current state')
 })
+
+/* ------------------------------------------------------------------ */
+/* V8 (§3.9): blocked-item reason + prefix identity rule               */
+/* ------------------------------------------------------------------ */
+
+test('V8: a blocked item accepts and keeps a single-line reason', () => {
+  const state = openPlan()
+  const items = [
+    task('Inspect current state', 'in_progress'),
+    { content: 'Apply the requested change', status: 'blocked', reason: 'sign-in wall blocks the form' },
+    task('Check the resulting state'),
+  ]
+  const result = accepted(state, items)
+  assert.equal(result.state.items[1].reason, 'sign-in wall blocks the form')
+  assert.equal(result.state.items[1].status, 'blocked')
+})
+
+test('V8: reason on a non-blocked item is refused PLAN_REASON_STATUS', () => {
+  const state = openPlan()
+  for (const status of ['pending', 'in_progress', 'completed']) {
+    const items = openItems().map(item => ({ ...item }))
+    items[0] = { content: 'Inspect current state', status, reason: 'why' }
+    if (status !== 'in_progress') items[1] = { ...items[1], status: 'in_progress' }
+    const result = replacePlan(state, { items, expected_revision: state.revision })
+    assert.equal(result.ok, false, status)
+    assert.equal(result.error.code, 'PLAN_REASON_STATUS', status)
+  }
+})
+
+test('V8: reason must be single line and at most 240 chars', () => {
+  const state = openPlan()
+  const base = [task('Inspect current state', 'in_progress'), task('Check the resulting state')]
+  const tooLong = replacePlan(state, { items: [...base, { content: 'Apply the requested change', status: 'blocked', reason: 'x'.repeat(241) }], expected_revision: state.revision })
+  assert.equal(tooLong.error.code, 'PLAN_TEXT_TOO_LONG')
+  const multiline = replacePlan(state, { items: [...base, { content: 'Apply the requested change', status: 'blocked', reason: 'line one\nline two' }], expected_revision: state.revision })
+  assert.equal(multiline.error.code, 'PLAN_TEXT_SINGLE_LINE')
+})
+
+test('V8: open->blocked may change content WITHOUT ack when new content starts with old (prefix suffix)', () => {
+  const state = openPlan()
+  const items = [
+    task('Inspect current state', 'in_progress'),
+    { content: 'Apply the requested change — blocked: captcha wall', status: 'blocked', reason: 'captcha' },
+    task('Check the resulting state'),
+  ]
+  const result = replacePlan(state, { items, expected_revision: state.revision })
+  assert.equal(result.ok, true, result.error?.message)
+  assert.equal(result.audit.removedOpenItems.length, 0, 'prefix-block is not a removal')
+})
+
+test('V8: open->blocked with a NON-prefix content change still requires ack', () => {
+  const state = openPlan()
+  const items = [
+    task('Inspect current state', 'in_progress'),
+    { content: 'Totally different wording — blocked', status: 'blocked', reason: 'captcha' },
+    task('Check the resulting state'),
+  ]
+  const result = replacePlan(state, { items, expected_revision: state.revision })
+  assert.equal(result.ok, false)
+  assert.equal(result.error.code, 'PLAN_OPEN_REMOVAL_REQUIRES_ACK')
+})
+
+test('V8: PLAN_IN_PROGRESS_REQUIRED message gains the blocked/user-input sentence', () => {
+  const state = openPlan()
+  const items = [task('Inspect current state', 'blocked'), task('Apply the requested change'), task('Check the resulting state')]
+  const result = replacePlan(state, { items, expected_revision: state.revision })
+  assert.equal(result.error.code, 'PLAN_IN_PROGRESS_REQUIRED')
+  assert.match(result.error.message, /mark them blocked too, or ask the user with user_input_needed: true/)
+})
+
+test('V8: adding a reason to a blocked item is a real change (not PLAN_UNCHANGED)', () => {
+  let state = accepted(createPlanState(), [task('Inspect current state', 'in_progress'), { content: 'Apply the requested change', status: 'blocked' }, task('Check the resulting state')]).state
+  const items = state.items.map(item => item.status === 'blocked' ? { ...item, reason: 'now with a reason' } : { ...item })
+  const result = accepted(state, items)
+  assert.equal(result.state.items[1].reason, 'now with a reason')
+})
+
+test('V8 end-to-end: a blocked item with reason survives seedPlanState into a second turn', () => {
+  // Turn 1 ends with a blocked item carrying a reason.
+  const turn1 = accepted(createPlanState(), [
+    task('Inspect current state', 'completed'),
+    { content: 'Apply the requested change', status: 'blocked', reason: 'sign-in wall blocks the form' },
+    task('Check the resulting state', 'in_progress'),
+  ]).state
+  // The companion carries the snapshot; turn 2 seeds from it (seedPlanState).
+  const seed = { revision: turn1.revision, items: turn1.items.map(item => ({ ...item })) }
+  const turn2 = seedPlanState(seed)
+  assert.ok(turn2, 'seed with reason is accepted (not silently empty)')
+  assert.equal(turn2.revision, turn1.revision)
+  assert.equal(turn2.items[1].reason, 'sign-in wall blocks the form')
+  assert.equal(turn2.items[1].status, 'blocked')
+  // Turn 2 continues from the carried revision (completes the last item) and keeps the reason.
+  const continued = accepted(turn2, turn2.items.map(item => item.content === 'Check the resulting state' ? { ...item, status: 'completed' } : { ...item }))
+  assert.equal(continued.state.items[1].reason, 'sign-in wall blocks the form')
+})

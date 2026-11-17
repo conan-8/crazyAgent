@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CONFIRM_MODE_GUIDANCE, MARATHON_MODE_GUIDANCE, buildPromptBlocks, formatViewText, isDocsDocumentUrl, normalizeImageAttachments, promptStats } from '../prompt.mjs'
+import { CONFIRM_MODE_GUIDANCE, MARATHON_MODE_GUIDANCE, buildPromptBlocks, formatViewText, isDocsDocumentUrl, normalizeImageAttachments, normalizePlanSeed, promptStats } from '../prompt.mjs'
 import { CORE_GUIDANCE, DOCS_MODE_GUIDANCE } from '../../packages/dsh-browser-extension/lib/guidance.js'
 
 function view(overrides = {}) {
@@ -276,4 +276,26 @@ test('normalizeImageAttachments rejects malformed types, base64, and counts', ()
 test('normalizeImageAttachments enforces decoded byte limits', () => {
   const data = Buffer.alloc(5_000_001, 1).toString('base64')
   assert.throws(() => normalizeImageAttachments([{ mimeType: 'image/png', data }]), /exceeds the 5000000-byte limit/)
+})
+
+test('V8: normalizePlanSeed keeps a blocked-item reason; buildPromptBlocks accepts the carried seed', () => {
+  const seed = {
+    revision: 4,
+    items: [
+      { content: 'Fill the shipping form', status: 'in_progress' },
+      { content: 'Blocked on login', status: 'blocked', reason: 'sign-in wall blocks the form' },
+    ],
+  }
+  const normalized = normalizePlanSeed(seed)
+  assert.ok(normalized, 'seed with reason accepted (not silently empty)')
+  assert.equal(normalized.items[1].reason, 'sign-in wall blocks the form')
+  // reason on a non-blocked item fails closed.
+  assert.equal(normalizePlanSeed({ revision: 4, items: [{ content: 'x', status: 'in_progress', reason: 'no' }] }), null)
+  // prompt composition: the carried plan is formatted (open items listed); the
+  // blocked item's reason is preserved in the seed but blocked items are not listed.
+  const now = new Date('2026-11-16T12:00:00.000Z')
+  const text = buildPromptBlocks(view(), 'continue', now, [], { planMode: true, marathon: { seed } })[0].text
+  assert.match(text, /Carried plan, revision 4 \(1 open\)/)
+  assert.match(text, /- \[in_progress\] Fill the shipping form/)
+  assert.ok(!text.includes('- [blocked]'), 'blocked items are not listed in the carried prompt')
 })
