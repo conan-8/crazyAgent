@@ -121,6 +121,54 @@ function loadTraceTurn(win, corpusDir) {
   }
 }
 
+/**
+ * V4 SIMULATION (§3.5, lead-authorized): the final plan snapshot of a turn — the
+ * last chat.activity {kind:'plan'} with open items (pending/in_progress). This is
+ * the plan the companion carries into the next turn (M2). null when the turn
+ * ended with no open plan (terminal/untouched). Used to inject the V4 seeded
+ * activity at the next turn's start on pre-V4 traces (which lack it).
+ */
+function finalPlanOf(turn) {
+  let last = null
+  for (const { frame } of turn.frames) {
+    if (frame.type === 'chat.activity' && frame.kind === 'plan' && Array.isArray(frame.items)) last = frame
+  }
+  if (last === null) return null
+  const open = last.items.some(i => i.status === 'pending' || i.status === 'in_progress')
+  return open ? { revision: last.revision, items: last.items.map(i => ({ content: i.content, status: i.status })) } : null
+}
+
+const clipCarry = text => String(text ?? '').replace(/[\u0000-\u001f\u007f]/gu, ' ').slice(0, 500)
+
+/**
+ * V4 SIMULATION: compute the seed + carry context for a continuation turn from
+ * its predecessors in the same run (the companion carry-over, M2). seedPlan =
+ * the previous turn's final open plan; carry = ancestor prompts (≤3, clip500,
+ * oldest first) + the carried revision, only when seeded. turnIndex 0 / synthetic
+ * → no seed. Previous turns are loaded from the FULL manifest (even if filtered
+ * out of this split) and cached.
+ */
+function v4ContextFor(win, allByKey, corpusDir, cache) {
+  if (win.synthetic || !(win.turnIndex > 0)) return { seedPlan: null, carry: null }
+  const loadPrev = idx => {
+    const k = `${win.run}#${idx}`
+    if (cache.has(k)) return cache.get(k)
+    const w = allByKey.get(k)
+    const t = w ? loadTraceTurn(w, corpusDir) : null
+    cache.set(k, t)
+    return t
+  }
+  const prev = loadPrev(win.turnIndex - 1)
+  const seedPlan = prev ? finalPlanOf(prev) : null
+  if (seedPlan === null) return { seedPlan: null, carry: { seeded: false, seededRevision: null, carriedFrom: [] } }
+  const carriedFrom = []
+  for (let idx = Math.max(0, win.turnIndex - 3); idx < win.turnIndex; idx += 1) {
+    const t = loadPrev(idx)
+    if (t) carriedFrom.push({ prompt: clipCarry(t.prompt), turnId: t.turnId })
+  }
+  return { seedPlan, carry: { seeded: true, seededRevision: seedPlan.revision, carriedFrom } }
+}
+
 /** Synthetic hard-signal fixtures (clearly labelled; exercise the judge path,
  *  not the alert mechanism — proven in M3 via GET /state). None in the corpus
  *  today; kept for §3.1 synthetic-apart reporting. */
@@ -153,7 +201,7 @@ function syntheticTurn(kind) {
 /* Replay one turn under a fake clock with the real judge              */
 /* ------------------------------------------------------------------ */
 
-async function replayTurn(turn, { judge, random, judgeLimits, tickMs }) {
+async function replayTurn(turn, { judge, random, judgeLimits, tickMs, seedPlan = null, carry = null }) {
   let now = 0
   let tickFn = null
   const ledger = new WatchLedger({ now: () => now })
@@ -199,7 +247,16 @@ async function replayTurn(turn, { judge, random, judgeLimits, tickMs }) {
   })
   watcher.start()
   ledger.startTurn({ turnId: turn.turnId, prompt: turn.prompt, marathon: true })
-  watcher.turnStarted({ marathon: true })
+  watcher.turnStarted({ marathon: true, carry })
+  // V4 SIMULATION: inject the carried plan as the seeded activity the provider
+  // emits at turn start (pre-V4 traces lack it). Recorded at now=0 so the ledger
+  // has the plan snapshot before the first tick — open-flat can fire on
+  // continuation wander (G1). carry (ancestor prompts + seededRevision) feeds the
+  // judge digest carriedFrom (G2). This SIMULATES V4 on pre-V4 traces; live is
+  // ground truth.
+  if (seedPlan !== null) {
+    ledger.noteFrame({ type: 'chat.activity', kind: 'plan', revision: seedPlan.revision, items: seedPlan.items, awaitingUser: false, seeded: true })
+  }
 
   // Merge frames and ticks into one timeline so each frame is stamped at its
   // TRUE recorded offset (matching the live ledger's arrival-time stamps).
@@ -397,11 +454,18 @@ async function main() {
 
   // Load + dedup turns (each window = 1 turn today; key run#turnIndex).
   const turnsByKey = new Map()
+  const windowByKey = new Map()
   for (const win of windows) {
     const keyId = win.synthetic ? win.turnId : `${win.run}#${win.turnIndex}`
     if (turnsByKey.has(keyId)) continue
     turnsByKey.set(keyId, win.synthetic ? syntheticTurn(win.scenario) : loadTraceTurn(win, corpusDir))
+    windowByKey.set(keyId, win)
   }
+  // V4 SIMULATION: full-manifest lookup + cache for predecessor turns (carry-over).
+  const allByKey = new Map((manifest.windows ?? []).filter(w => !w.synthetic).map(w => [`${w.run}#${w.turnIndex}`, w]))
+  const prevCache = new Map()
+  const v4ByKey = new Map()
+  for (const [keyId, win] of windowByKey) v4ByKey.set(keyId, v4ContextFor(win, allByKey, corpusDir, prevCache))
 
   // Replay each unique turn k times; score each window per repeat.
   const repeatsByWindow = new Map(windows.map(w => [w.id, []]))
@@ -409,7 +473,8 @@ async function main() {
     const replayByKey = new Map()
     for (const [keyId, turn] of turnsByKey) {
       process.stderr.write(`repeat ${r + 1}/${args.repeat} ${keyId} (${turn.durationSec}s, ${turn.frames.length} frames)${args.dryRun ? ' [dry-run]' : ''}\n`)
-      replayByKey.set(keyId, await replayTurn(turn, { judge, random: () => 0.5, judgeLimits: WATCH_JUDGE_LIMITS, tickMs: args.tickMs }))
+      const { seedPlan, carry } = v4ByKey.get(keyId) ?? { seedPlan: null, carry: null }
+      replayByKey.set(keyId, await replayTurn(turn, { judge, random: () => 0.5, judgeLimits: WATCH_JUDGE_LIMITS, tickMs: args.tickMs, seedPlan, carry }))
     }
     for (const win of windows) {
       const keyId = win.synthetic ? win.turnId : `${win.run}#${win.turnIndex}`
