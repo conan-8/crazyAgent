@@ -2,7 +2,7 @@
 
 **Control Chrome or Edge from a local side panel with guarded browser actions, file transfer, and semantic Google Docs editing.** Built on **DSH 0.2.2-rc.1**.
 
-**Optimised for DeepSeek V4.1 Flash 1017** on OpenRouter (`deepseek/deepseek-v4.1-flash-1017`). Other image-capable, tool-capable models remain available. [Download v2.4.0](https://github.com/conan-8/crazyAgent/releases/tag/v2.4.0) · [Patch notes](RELEASE-NOTES.md).
+**Optimised for DeepSeek V4.1 Flash 1017** on OpenRouter (`deepseek/deepseek-v4.1-flash-1017`). Other image-capable, tool-capable models remain available. [Download v2.5.0](https://github.com/conan-8/crazyAgent/releases/tag/v2.5.0) · [Patch notes](RELEASE-NOTES.md).
 
 ## Install with an agent
 
@@ -17,10 +17,10 @@
 **Paste this prompt into a coding agent on the computer where Chrome or Edge is installed:**
 
 ```text
-Install crazyAgent v2.4.0 on this computer from https://github.com/conan-8/crazyAgent. Own the setup end to end: when you need my input or a manual browser step, give me exact instructions, wait for me, and then continue with verification instead of ending the installation early.
+Install crazyAgent v2.5.0 on this computer from https://github.com/conan-8/crazyAgent. Own the setup end to end: when you need my input or a manual browser step, give me exact instructions, wait for me, and then continue with verification instead of ending the installation early.
 
 1. Verify Git, Node.js 24.9 or newer, npm, and Chrome/Chromium/Edge 116 or newer. If anything required is missing or outdated, explain what you propose to install or update and ask for my permission. Once I approve, make the changes and continue; do not hand me a prerequisite installation guide unless I decline or no safe installation method is available. Ask separately before using sudo or replacing an existing runtime. If you install a user-level runtime, use its bin directory in PATH consistently for npm ci, npm run setup, the companion process, and the restart command you give me.
-2. Clone the v2.4.0 tag into a new crazyAgent directory. If that directory already exists, do not overwrite or delete it; ask me for another location. Run npm ci and npm run setup in the checkout.
+2. Clone the v2.5.0 tag into a new crazyAgent directory. If that directory already exists, do not overwrite or delete it; ask me for another location. Run npm ci and npm run setup in the checkout.
 3. Check whether port 17871 is occupied before starting anything. If it is occupied, stop and report it instead of killing an existing process. Otherwise, start npm run dev -- --model deepseek/deepseek-v4.1-flash-1017 --reasoning-effort medium as a persistent background process. Verify that http://127.0.0.1:17871/health returns HTTP 200 with ok:true, but do not mistake that alone for a completed installation.
 4. Give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions, pin crazyAgent, and open its side panel. In Settings, have me confirm the bridge URL is ws://127.0.0.1:17871/bridge. Proactively copy the pairing token from .dsh-home/browser-agent/token to my clipboard with an OS-appropriate command that does not display it; if you cannot access my clipboard, give me the exact command to run myself. Tell me to paste it into the pairing-token field. I will enter my own OpenRouter API key directly in Settings.
 5. Before my first Save, tell me to type deepseek/deepseek-v4.1-flash-1017 manually into the Model field even if the model list is empty. Do not tell me to click Refresh models before this first Save: Refresh requires a companion connection, while Save accepts the manually entered model ID and establishes that connection. Have me save and wait for the real side panel to show Connected.
@@ -50,13 +50,13 @@ Page content, screenshots, prompts, and explicit tool results can be sent to the
 
 ## Update with an agent
 
-Use this prompt to update an existing crazyAgent checkout to **v2.4.0** without replacing its configuration or local data:
+Use this prompt to update an existing crazyAgent checkout to **v2.5.0** without replacing its configuration or local data:
 
 ```text
-Update my existing crazyAgent installation to v2.4.0 from https://github.com/conan-8/crazyAgent. Own the update end to end. Preserve my configuration, API key, pairing token, sessions, downloaded files, and unrelated local changes; this is an in-place update, not a fresh installation.
+Update my existing crazyAgent installation to v2.5.0 from https://github.com/conan-8/crazyAgent. Own the update end to end. Preserve my configuration, API key, pairing token, sessions, downloaded files, and unrelated local changes; this is an in-place update, not a fresh installation.
 
 1. Locate my existing crazyAgent checkout and ask me for its path only if you cannot find it. Verify that it is the expected Git repository, inspect its current version and startup method, and identify the Node runtime used by its companion. Verify Git, Node.js 24.9 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Reuse an existing compatible user-level Node runtime when available. If a prerequisite is missing or outdated, explain what you propose to install or update and ask for my permission; once I approve, make the changes and continue. Ask separately before using sudo or replacing an existing runtime.
-2. Inspect git status before changing the checkout. Never use git reset --hard, git clean, npm run clean, or any other command that discards local changes or deletes .dsh-home. Do not delete or replace the checkout with a fresh clone. If local changes could be overwritten, explain them and ask me how to proceed. Fetch the repository's tags, check out v2.4.0 without forcing, and verify that HEAD exactly matches that tag. If the checkout is already on the target tag, say so and continue with verification rather than claiming you changed the version.
+2. Inspect git status before changing the checkout. Never use git reset --hard, git clean, npm run clean, or any other command that discards local changes or deletes .dsh-home. Do not delete or replace the checkout with a fresh clone. If local changes could be overwritten, explain them and ask me how to proceed. Fetch the repository's tags, check out v2.5.0 without forcing, and verify that HEAD exactly matches that tag. If the checkout is already on the target tag, say so and continue with verification rather than claiming you changed the version.
 3. Using the compatible Node runtime and any required PATH override, run npm ci, npm run setup, and npm test in the existing checkout. Do not run live-model, website, or other model-spending tests.
 4. Restart the companion using its existing startup method, whether that is a background process or a user service. Identify and stop only the companion process belonging to this checkout; never kill an unknown process merely because it uses port 17871, and do not start a second conflicting companion. Preserve the existing model, base URL, reasoning effort, API key, and pairing token instead of overriding them with defaults. Include any required PATH override in the restart command.
 5. Give me exact instructions to reload the existing unpacked extension in chrome://extensions or edge://extensions and reopen its side panel. Do not remove or reinstall the extension, because that can discard its saved settings. Ask me to confirm that the real side panel shows Connected, then independently poll http://127.0.0.1:17871/health for a bounded period. Do not create a synthetic WebSocket, ui, or tools client as a substitute for the extension. Do not declare the update complete until the real side panel shows Connected and /health reports ok:true, ui:true, and tools:true. If anything remains disconnected, inspect the relevant logs and settings flow without exposing credentials and continue troubleshooting with exact corrective steps.
@@ -86,6 +86,16 @@ v2.3.0 and older do not contain the updater: move those to a newer release once 
 - Keep receiving views while the browser is unfocused or minimised, with slash commands in the composer.
 
 There are **34 standing model-facing tools**: 25 general browser tools, 8 guarded Docs tools, and `agent_request_help`, plus two conditional tools: `browser_plan`, exposed on every turn that starts while the companion-owned `/marathon` switch is on (unlisted legacy alias `/plan`), and `agent_request_confirmation`, exposed only while the opt-in "ask before irreversible actions" setting is on. The detailed reference is below.
+
+## New in v2.5.0
+
+- **Marathon v2 — a reliable watcher:** the v1 judge's verdicts were non-deterministic because OpenRouter load-balances each request across many endpoints; **V5** pins provider routing (`morph/fp8`) + a fixed seed, making verdicts deterministic — gated stuck detection **1.000 / stability 1.000 on both tune and holdout**, zero false alerts, ~1× cost. The v1 FALLBACK-A stuck-window gap is closed. **V2** adds progress accounting (control tools aren't page actions; a "no visible change" act is no-effect; recovery needs evidence). **V3** scopes repeated-work detection to the same page + control (no more false revisits on healthy multi-page work). **V1** closes every watch notice with an explicit frame so the amber state never leaks into a new turn.
+- **Continuation context (V4):** a carried plan seed is visible to the watcher at turn start, and the judge learns the originating task behind a "continue" prompt via an internal carry chain (never shown to clients, never in the agent prompt).
+- **Less plan friction when blocked (V8):** `browser_plan` items can carry a blocked-only `reason` (shown under the item on the panel and phone); marking an item blocked with a " — blocked: …" suffix no longer needs a rewrite acknowledgement.
+- **Live phone checklist (V6) + one-tap push test (V7):** the phone checklist updates mid-turn from the hub's live plan; a Settings button (`POST /push/test`) proves the push route in one tap (delivery still needs the designated sender's service-account key + a companion restart).
+- **Android 0.8.0 (7):** live checklist + blocked-item reason + push-test button on top of the v2.4.0 marathon phone features.
+
+Marathon v2 (V1–V8) real-model acceptance is green on the isolated harness (see `docs/marathon/v2/`); live docked-panel and on-device phone v2 appearance, plus push delivery, remain pending. The maintainer's automatic-updater feature (`cdcd9d1`) is preserved verbatim — not marathon-accepted. See the complete [v2.5.0 patch notes](RELEASE-NOTES.md).
 
 ## New in v2.4.0
 
