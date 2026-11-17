@@ -381,7 +381,12 @@ object ChatReducer {
         return TurnPlan(revision.toInt(), items, body.bool("awaitingUser") == true)
     }
 
-    /** The shared item-list rules: 1–40 items, non-blank unique content, known status. */
+    /**
+     * The shared item-list rules: 1–40 items, non-blank unique content, known
+     * status, and the V8 optional blocked-item reason — the same fail-closed
+     * rules as the companion's `normalizeMarathonPlan` (any violation rejects
+     * the WHOLE plan, never a partial one).
+     */
     private fun planItemsOf(body: JsonObject): List<MarathonPlanItem>? {
         val items = body.array("items")?.takeIf { it.isNotEmpty() && it.size <= 40 } ?: return null
         val contents = HashSet<String>()
@@ -390,7 +395,17 @@ object ChatReducer {
             val content = item.string("content")?.takeIf { it.isNotBlank() } ?: return null
             val status = item.string("status")?.takeIf { it in PLAN_STATUSES } ?: return null
             if (!contents.add(content)) return null
-            MarathonPlanItem(content, status)
+            // V8 (§3.9): reason is allowed ONLY on blocked items — a single
+            // line (no control chars), non-blank, at most 240 chars; kept
+            // trimmed. A present-but-invalid reason (including JSON null)
+            // rejects the plan, exactly like the hub's validator.
+            var reason: String? = null
+            if (item.containsKey("reason")) {
+                val raw = item.string("reason") ?: return null
+                if (status != "blocked" || raw.isBlank() || raw.length > 240 || raw.any { it.code <= 0x1f || it.code == 0x7f }) return null
+                reason = raw.trim()
+            }
+            MarathonPlanItem(content, status, reason)
         }
     }
 

@@ -166,8 +166,12 @@ data class SessionSummary(
     val running: Boolean,
 )
 
-/** One carried-plan item; [status] is pending/in_progress/completed/blocked. */
-data class MarathonPlanItem(val content: String, val status: String)
+/**
+ * One plan item (live or carried); [status] is pending/in_progress/completed/
+ * blocked. [reason] is the V8 optional single-line explanation, present only
+ * on blocked items (why it is blocked).
+ */
+data class MarathonPlanItem(val content: String, val status: String, val reason: String? = null)
 
 /**
  * The plan the companion carried out of the last marathon turn (M2). The phone
