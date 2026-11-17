@@ -1,0 +1,1140 @@
+{
+  "startedAt": "2026-11-17T16:12:34.785Z",
+  "finishedAt": "2026-11-17T16:20:52.482Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": true,
+  "armingPath": "POST /marathon {enabled:true} then bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-v8-c-eval/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 5972971,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "stall-loop",
+      "fixture": "stall-loop.html",
+      "prompt": "Use the records viewer on this page to advance to record 12 and tell me the access code shown on that last record.",
+      "file": "stall-loop.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwkw55al-003b",
+          "status": "pass",
+          "reasons": [
+            "the agent reported BLOCKED and the control page never changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41421/stall-loop.html",
+            "stateUnchanged": true,
+            "snapshot": {
+              "indicator": "Record 1 of 12",
+              "id": "REC-001",
+              "name": "Intake survey",
+              "status": "Open",
+              "code": "not available yet",
+              "progressWidth": "8%",
+              "button": "Next record",
+              "buttonDisabled": false,
+              "note": "Showing the first record. Use Next record to advance through the survey.",
+              "cardPresent": true
+            },
+            "postCount": 0,
+            "turnStatus": "done",
+            "waitingForUser": false,
+            "reportedLabel": "blocked",
+            "endKind": "blocked",
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_batch": 4,
+              "browser_click": 2,
+              "browser_read_text": 1,
+              "browser_press_key": 1,
+              "browser_wait_for": 1,
+              "browser_click_at": 1,
+              "browser_tabs": 1,
+              "browser_navigate": 6,
+              "browser_find": 1
+            },
+            "wallMs": 58993,
+            "finalText": "BLOCKED — I can't get the access code; the viewer never advances.\n\n- Tried: ~15 clicks on \"Next record\" (by label and by raw pixel), keyboard Tab+Space/Enter, waits up to 8 s, a full reload, and `?record=12` — every attempt leaves \"Record 1 of 12\" (REC-001, access code \"not available yet\") unchanged.\n- Verified: page text re-read after each attempt; no hidden records exist (search for \"REC-012\" re"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 58993,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 21,
+            "toolCalls": 20,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_batch": 4,
+              "browser_click": 2,
+              "browser_read_text": 1,
+              "browser_press_key": 1,
+              "browser_wait_for": 1,
+              "browser_click_at": 1,
+              "browser_tabs": 1,
+              "browser_navigate": 6,
+              "browser_find": 1
+            },
+            "inputTokens": 22041,
+            "outputTokens": 4236,
+            "cacheReadTokens": 944384,
+            "totalTokens": 970661,
+            "usage": {
+              "inputTokens": 22041,
+              "outputTokens": 4236,
+              "totalTokens": 970661,
+              "cacheReadTokens": 944384
+            },
+            "finalText": "BLOCKED — I can't get the access code; the viewer never advances.\n\n- Tried: ~15 clicks on \"Next record\" (by label and by raw pixel), keyboard Tab+Space/Enter, waits up to 8 s, a full reload, and `?record=12` — every attempt leaves \"Record 1 of 12\" (REC-001, access code \"not available yet\") unchanged.\n- Verified: page text re-read after each attempt; no hidden records exist (search for \"REC-012\" returns 0 matches); only one tab and no alternate data endpoint.\n- Left/assumed: this is a deliberately stalled page (\"stall-loop.html\") that ignores advancement, so record 12's access code is not obtainable here — I won't guess or invent one. If you have another URL/endpoint for the records, point me at it and I'll fetch record 12.",
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": "blocked",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": "blocked",
+            "planRevision": 2,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 2,
+            "planFinalReason": "blocked-items",
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwkw55al-003b",
+              "origin": "remote",
+              "clientMessageId": "1b9dbf13-cf49-4a09-99ce-88785a193731",
+              "startedAt": "2026-11-17T16:12:36.238Z",
+              "endedAt": "2026-11-17T16:13:35.231Z",
+              "outcome": "done",
+              "error": null,
+              "label": "blocked",
+              "usage": {
+                "inputTokens": 22041,
+                "outputTokens": 4236,
+                "totalTokens": 970661,
+                "cacheReadTokens": 944384
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 7
+          },
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 7,
+            "get": 7,
+            "post": 0,
+            "other": 0,
+            "firstAt": "2026-11-17T16:13:06.850Z",
+            "lastAt": "2026-11-17T16:13:28.940Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": "blocked",
+            "planRevision": 2,
+            "browserPlanCalls": 2,
+            "planModeEndedOutcome": "blocked",
+            "planNudges": 0,
+            "planStaleReminders": 2,
+            "planFinalReason": "blocked-items",
+            "seedRejected": false
+          },
+          "watchEvidence": {
+            "chatWatchKinds": [
+              "ended-incomplete"
+            ],
+            "alertFrames": 0,
+            "alertDetail": [],
+            "recoveredFrames": 0,
+            "endedIncomplete": true,
+            "endedIncompleteLog": true,
+            "firstAlertAt": null,
+            "timeToAlertMs": null,
+            "helpCallAt": null,
+            "helpBeforeAlert": null,
+            "watchSummary": {
+              "checks": 3,
+              "alerts": 0,
+              "usage": 0
+            },
+            "chatDoneLabel": "blocked",
+            "chatDonePlanOutcome": "blocked",
+            "watchTicks": 3,
+            "tickLevels": {
+              "ok": 3,
+              "suspect": 0,
+              "hard": 0
+            },
+            "judgeSummary": {
+              "turnId": "turn-mwkw55al-003b",
+              "calls": 0,
+              "skipped": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "reasoningTokens": 0,
+              "cacheReadTokens": 0,
+              "budgetExhausted": false
+            },
+            "watchEventCounts": {
+              "watch.tick": 3,
+              "watch.ended_incomplete": 1,
+              "watch.judge.summary": 1
+            },
+            "judgeEvents": []
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T16-12-34-910Z-11a385/events.jsonl"
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwkw6f4v-6d13",
+          "status": "pass",
+          "reasons": [
+            "the agent reported BLOCKED and the control page never changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41421/stall-loop.html",
+            "stateUnchanged": true,
+            "snapshot": {
+              "indicator": "Record 1 of 12",
+              "id": "REC-001",
+              "name": "Intake survey",
+              "status": "Open",
+              "code": "not available yet",
+              "progressWidth": "8%",
+              "button": "Next record",
+              "buttonDisabled": false,
+              "note": "Showing the first record. Use Next record to advance through the survey.",
+              "cardPresent": true
+            },
+            "postCount": 0,
+            "turnStatus": "done",
+            "waitingForUser": false,
+            "reportedLabel": "blocked",
+            "endKind": "blocked",
+            "toolCounts": {
+              "browser_plan": 3,
+              "browser_click": 4,
+              "browser_screenshot": 2,
+              "browser_click_at": 5,
+              "browser_press_key": 9,
+              "browser_read_text": 2,
+              "browser_wait_for": 2,
+              "browser_navigate": 12,
+              "browser_switch_tab": 4,
+              "browser_find": 1,
+              "browser_tabs": 1,
+              "browser_drag": 1,
+              "browser_type": 2
+            },
+            "wallMs": 135700,
+            "finalText": "BLOCKED — I couldn't get the access code because the viewer never leaves record 1.\n\n- The page loads \"Record 1 of 12\" (REC-001, \"Access code: not available yet\"), and the \"Next record\" button does nothing: I tried normal clicks, double-click, keyboard Enter/Space, and a long press — the counter and fields never change.\n- The page appears stalled (its script/handler never runs), so record 12 and it"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 135700,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 48,
+            "toolCalls": 48,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_navigate",
+                "message": "Error: browser_navigate supports only http and https URLs"
+              }
+            ],
+            "toolCounts": {
+              "browser_plan": 3,
+              "browser_click": 4,
+              "browser_screenshot": 2,
+              "browser_click_at": 5,
+              "browser_press_key": 9,
+              "browser_read_text": 2,
+              "browser_wait_for": 2,
+              "browser_navigate": 12,
+              "browser_switch_tab": 4,
+              "browser_find": 1,
+              "browser_tabs": 1,
+              "browser_drag": 1,
+              "browser_type": 2
+            },
+            "inputTokens": 90003,
+            "outputTokens": 16081,
+            "cacheReadTokens": 1588992,
+            "totalTokens": 1695076,
+            "usage": {
+              "inputTokens": 90003,
+              "outputTokens": 16081,
+              "totalTokens": 1695076,
+              "cacheReadTokens": 1588992
+            },
+            "finalText": "BLOCKED — I couldn't get the access code because the viewer never leaves record 1.\n\n- The page loads \"Record 1 of 12\" (REC-001, \"Access code: not available yet\"), and the \"Next record\" button does nothing: I tried normal clicks, double-click, keyboard Enter/Space, and a long press — the counter and fields never change.\n- The page appears stalled (its script/handler never runs), so record 12 and its access code are not reachable, and I won't guess a code.\n- Tab is left on http://127.0.0.1:41421/stall-loop.html at record 1.",
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": "blocked",
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": "blocked",
+            "planRevision": 3,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 3,
+            "planFinalReason": "blocked-items",
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwkw6f4v-6d13",
+              "origin": "remote",
+              "clientMessageId": "86c6c3fa-9d31-4676-b689-127b81593e1f",
+              "startedAt": "2026-11-17T16:13:35.648Z",
+              "endedAt": "2026-11-17T16:15:51.348Z",
+              "outcome": "done",
+              "error": null,
+              "label": "blocked",
+              "usage": {
+                "inputTokens": 90003,
+                "outputTokens": 16081,
+                "totalTokens": 1695076,
+                "cacheReadTokens": 1588992
+              },
+              "failedCalls": 1,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 1399
+          },
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 12,
+            "get": 12,
+            "post": 0,
+            "other": 0,
+            "firstAt": "2026-11-17T16:13:56.475Z",
+            "lastAt": "2026-11-17T16:15:43.087Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": "blocked",
+            "planRevision": 3,
+            "browserPlanCalls": 3,
+            "planModeEndedOutcome": "blocked",
+            "planNudges": 0,
+            "planStaleReminders": 3,
+            "planFinalReason": "blocked-items",
+            "seedRejected": false
+          },
+          "watchEvidence": {
+            "chatWatchKinds": [
+              "stuck",
+              "info",
+              "ended-incomplete"
+            ],
+            "alertFrames": 1,
+            "alertDetail": [
+              {
+                "kind": "stuck",
+                "at": "2026-11-17T16:15:38.085Z",
+                "source": "both",
+                "blocker": "stall",
+                "reason": "Next record button repeatedly produces no visible change (events 1,3,20,21,31,39); agent is thrashing across tabs, source views, and unrelated pages without advancing past record 1 or reading record 12."
+              }
+            ],
+            "recoveredFrames": 0,
+            "endedIncomplete": true,
+            "endedIncompleteLog": true,
+            "firstAlertAt": "2026-11-17T16:15:38.085Z",
+            "timeToAlertMs": 122437,
+            "helpCallAt": null,
+            "helpBeforeAlert": null,
+            "watchSummary": {
+              "checks": 6,
+              "alerts": 1,
+              "usage": 6081
+            },
+            "chatDoneLabel": "blocked",
+            "chatDonePlanOutcome": "blocked",
+            "watchTicks": 6,
+            "tickLevels": {
+              "ok": 5,
+              "suspect": 1,
+              "hard": 0
+            },
+            "judgeSummary": {
+              "turnId": "turn-mwkw6f4v-6d13",
+              "calls": 1,
+              "skipped": 0,
+              "inputTokens": 5818,
+              "outputTokens": 263,
+              "reasoningTokens": 178,
+              "cacheReadTokens": 0,
+              "budgetExhausted": false
+            },
+            "watchEventCounts": {
+              "watch.tick": 6,
+              "watch.judge.start": 1,
+              "watch.judge.verdict": 1,
+              "watch.alert": 1,
+              "watch.ended_incomplete": 1,
+              "watch.judge.summary": 1
+            },
+            "judgeEvents": [
+              {
+                "type": "watch.judge.start",
+                "time": "2026-11-17T16:15:34.917Z",
+                "data": {
+                  "turnId": "turn-mwkw6f4v-6d13",
+                  "trigger": "trigger",
+                  "elapsedSec": 119,
+                  "events": 40,
+                  "signals": [
+                    "PLAN_STALLED"
+                  ]
+                }
+              },
+              {
+                "type": "watch.judge.verdict",
+                "time": "2026-11-17T16:15:38.084Z",
+                "data": {
+                  "turnId": "turn-mwkw6f4v-6d13",
+                  "trigger": "trigger",
+                  "state": "stuck",
+                  "confidence": 0.82,
+                  "blocker": "stall",
+                  "intervalMs": 240000,
+                  "calls": 1
+                }
+              }
+            ]
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T16-12-34-910Z-11a385/events.jsonl"
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwkw9cao-9760",
+          "status": "pass",
+          "reasons": [
+            "the agent reported BLOCKED and the control page never changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41421/stall-loop.html#12",
+            "stateUnchanged": true,
+            "snapshot": {
+              "indicator": "Record 1 of 12",
+              "id": "REC-001",
+              "name": "Intake survey",
+              "status": "Open",
+              "code": "not available yet",
+              "progressWidth": "8%",
+              "button": "Next record",
+              "buttonDisabled": false,
+              "note": "Showing the first record. Use Next record to advance through the survey.",
+              "cardPresent": true
+            },
+            "postCount": 0,
+            "turnStatus": "done",
+            "waitingForUser": false,
+            "reportedLabel": "blocked",
+            "endKind": "blocked",
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_click": 4,
+              "browser_read_text": 11,
+              "browser_screenshot": 3,
+              "browser_click_at": 5,
+              "browser_wait_for": 3,
+              "browser_press_key": 6,
+              "browser_navigate": 11,
+              "browser_switch_tab": 5,
+              "browser_batch": 3,
+              "browser_tabs": 2,
+              "browser_hover": 1,
+              "browser_find": 1
+            },
+            "wallMs": 169645,
+            "finalText": "BLOCKED\n\n- The viewer is stuck on \"Record 1 of 12\": the \"Next record\" button did nothing across many trusted clicks, keyboard activation, 8–30s waits, reloads, and a fresh tab.\n- Record 1 shows Access code \"not available yet\"; record 12 was never reachable, so I can't give you its code without guessing."
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 169645,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 58,
+            "toolCalls": 57,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_click": 4,
+              "browser_read_text": 11,
+              "browser_screenshot": 3,
+              "browser_click_at": 5,
+              "browser_wait_for": 3,
+              "browser_press_key": 6,
+              "browser_navigate": 11,
+              "browser_switch_tab": 5,
+              "browser_batch": 3,
+              "browser_tabs": 2,
+              "browser_hover": 1,
+              "browser_find": 1
+            },
+            "inputTokens": 51865,
+            "outputTokens": 12263,
+            "cacheReadTokens": 1933312,
+            "totalTokens": 1997440,
+            "usage": {
+              "inputTokens": 51865,
+              "outputTokens": 12263,
+              "totalTokens": 1997440,
+              "cacheReadTokens": 1933312
+            },
+            "finalText": "BLOCKED\n\n- The viewer is stuck on \"Record 1 of 12\": the \"Next record\" button did nothing across many trusted clicks, keyboard activation, 8–30s waits, reloads, and a fresh tab.\n- Record 1 shows Access code \"not available yet\"; record 12 was never reachable, so I can't give you its code without guessing.",
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": "blocked",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": "blocked",
+            "planRevision": 2,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 2,
+            "planFinalReason": "blocked-items",
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwkw9cao-9760",
+              "origin": "remote",
+              "clientMessageId": "9355e13e-007e-452f-902d-03495dffab07",
+              "startedAt": "2026-11-17T16:15:51.936Z",
+              "endedAt": "2026-11-17T16:18:41.581Z",
+              "outcome": "done",
+              "error": null,
+              "label": "blocked",
+              "usage": {
+                "inputTokens": 51865,
+                "outputTokens": 12263,
+                "totalTokens": 1997440,
+                "cacheReadTokens": 1933312
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 6427
+          },
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 10,
+            "get": 10,
+            "post": 0,
+            "other": 0,
+            "firstAt": "2026-11-17T16:16:14.644Z",
+            "lastAt": "2026-11-17T16:18:20.931Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": "blocked",
+            "planRevision": 2,
+            "browserPlanCalls": 2,
+            "planModeEndedOutcome": "blocked",
+            "planNudges": 0,
+            "planStaleReminders": 2,
+            "planFinalReason": "blocked-items",
+            "seedRejected": false
+          },
+          "watchEvidence": {
+            "chatWatchKinds": [
+              "stuck",
+              "info",
+              "ended-incomplete"
+            ],
+            "alertFrames": 1,
+            "alertDetail": [
+              {
+                "kind": "stuck",
+                "at": "2026-11-17T16:17:37.049Z",
+                "source": "both",
+                "blocker": "loop",
+                "reason": "Repeated clicks on Next record produce no visible change; page text stays at Record 1 of 12 across many attempts, and URL/query tricks and view-source detours also fail to advance."
+              }
+            ],
+            "recoveredFrames": 0,
+            "endedIncomplete": true,
+            "endedIncompleteLog": true,
+            "firstAlertAt": "2026-11-17T16:17:37.049Z",
+            "timeToAlertMs": 105113,
+            "helpCallAt": null,
+            "helpBeforeAlert": null,
+            "watchSummary": {
+              "checks": 9,
+              "alerts": 1,
+              "usage": 5980
+            },
+            "chatDoneLabel": "blocked",
+            "chatDonePlanOutcome": "blocked",
+            "watchTicks": 9,
+            "tickLevels": {
+              "ok": 4,
+              "suspect": 5,
+              "hard": 0
+            },
+            "judgeSummary": {
+              "turnId": "turn-mwkw9cao-9760",
+              "calls": 1,
+              "skipped": 0,
+              "inputTokens": 5783,
+              "outputTokens": 197,
+              "reasoningTokens": 117,
+              "cacheReadTokens": 0,
+              "budgetExhausted": false
+            },
+            "watchEventCounts": {
+              "watch.tick": 9,
+              "watch.judge.start": 1,
+              "watch.judge.verdict": 1,
+              "watch.alert": 1,
+              "watch.ended_incomplete": 1,
+              "watch.judge.summary": 1
+            },
+            "judgeEvents": [
+              {
+                "type": "watch.judge.start",
+                "time": "2026-11-17T16:17:34.918Z",
+                "data": {
+                  "turnId": "turn-mwkw9cao-9760",
+                  "trigger": "trigger",
+                  "elapsedSec": 103,
+                  "events": 40,
+                  "signals": [
+                    "PLAN_STALLED"
+                  ]
+                }
+              },
+              {
+                "type": "watch.judge.verdict",
+                "time": "2026-11-17T16:17:37.049Z",
+                "data": {
+                  "turnId": "turn-mwkw9cao-9760",
+                  "trigger": "trigger",
+                  "state": "stuck",
+                  "confidence": 0.9,
+                  "blocker": "loop",
+                  "intervalMs": 240000,
+                  "calls": 1
+                }
+              }
+            ]
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T16-12-34-910Z-11a385/events.jsonl"
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwkwczms-f182",
+          "status": "pass",
+          "reasons": [
+            "the agent reported BLOCKED and the control page never changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41421/stall-loop.html#12",
+            "stateUnchanged": true,
+            "snapshot": {
+              "indicator": "Record 1 of 12",
+              "id": "REC-001",
+              "name": "Intake survey",
+              "status": "Open",
+              "code": "not available yet",
+              "progressWidth": "8%",
+              "button": "Next record",
+              "buttonDisabled": false,
+              "note": "Showing the first record. Use Next record to advance through the survey.",
+              "cardPresent": true
+            },
+            "postCount": 0,
+            "turnStatus": "done",
+            "waitingForUser": false,
+            "reportedLabel": "blocked",
+            "endKind": "blocked",
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_click": 1,
+              "browser_screenshot": 1,
+              "browser_click_at": 3,
+              "browser_wait_for": 2,
+              "browser_navigate": 7,
+              "browser_docs_read": 1,
+              "browser_batch": 3,
+              "browser_find": 1,
+              "browser_switch_tab": 2,
+              "browser_read_text": 3
+            },
+            "wallMs": 83265,
+            "finalText": "BLOCKED — the viewer never advances past record 1, so the record 12 access code is unavailable.\n\n- Verified: the page stays at \"Record 1 of 12 / REC-001\", with Access code \"not available yet\".\n- The \"Next record\" button produced no change after normal clicks, pixel clicks, Tab+Enter/Space, a double-click, and a 12-second wait; `?record=12` and `#12` were ignored. No other record data is rendered.\n"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 83265,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 27,
+            "toolCalls": 26,
+            "failedCalls": 2,
+            "failed": [
+              {
+                "kind": "tool",
+                "tool": "browser_navigate",
+                "message": "Error: browser_navigate supports only http and https URLs"
+              },
+              {
+                "kind": "command",
+                "tool": "docs",
+                "code": "DOCS_URL_UNSUPPORTED",
+                "message": "[validate-tab] The active tab must be an https://docs.google.com/document URL"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_docs_read",
+                "message": "Error: [validate-tab] The active tab must be an https://docs.google.com/document URL\n\n<docs_mode>\n- Exact Google Docs deletion/replacement is a direct tool task, not a reading task: with exact targets, make browser_docs_replace your FIRST tool call. Do not call browser_read_text or browser_screensh…"
+              }
+            ],
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_click": 1,
+              "browser_screenshot": 1,
+              "browser_click_at": 3,
+              "browser_wait_for": 2,
+              "browser_navigate": 7,
+              "browser_docs_read": 1,
+              "browser_batch": 3,
+              "browser_find": 1,
+              "browser_switch_tab": 2,
+              "browser_read_text": 3
+            },
+            "inputTokens": 21480,
+            "outputTokens": 8613,
+            "cacheReadTokens": 833792,
+            "totalTokens": 863885,
+            "usage": {
+              "inputTokens": 21480,
+              "outputTokens": 8613,
+              "totalTokens": 863885,
+              "cacheReadTokens": 833792
+            },
+            "finalText": "BLOCKED — the viewer never advances past record 1, so the record 12 access code is unavailable.\n\n- Verified: the page stays at \"Record 1 of 12 / REC-001\", with Access code \"not available yet\".\n- The \"Next record\" button produced no change after normal clicks, pixel clicks, Tab+Enter/Space, a double-click, and a 12-second wait; `?record=12` and `#12` were ignored. No other record data is rendered.\n- I did not guess a code: the requested code could not be retrieved.",
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": "blocked",
+            "loggedFailedCalls": 2,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": "blocked",
+            "planRevision": 2,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 2,
+            "planFinalReason": "blocked-items",
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwkwczms-f182",
+              "origin": "remote",
+              "clientMessageId": "071636fb-a49f-4372-b3cf-91a2c3cbd134",
+              "startedAt": "2026-11-17T16:18:42.148Z",
+              "endedAt": "2026-11-17T16:20:05.413Z",
+              "outcome": "done",
+              "error": null,
+              "label": "blocked",
+              "usage": {
+                "inputTokens": 21480,
+                "outputTokens": 8613,
+                "totalTokens": 863885,
+                "cacheReadTokens": 833792
+              },
+              "failedCalls": 2,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 9964
+          },
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 5,
+            "get": 5,
+            "post": 0,
+            "other": 0,
+            "firstAt": "2026-11-17T16:19:08.750Z",
+            "lastAt": "2026-11-17T16:19:49.405Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": "blocked",
+            "planRevision": 2,
+            "browserPlanCalls": 2,
+            "planModeEndedOutcome": "blocked",
+            "planNudges": 0,
+            "planStaleReminders": 2,
+            "planFinalReason": "blocked-items",
+            "seedRejected": false
+          },
+          "watchEvidence": {
+            "chatWatchKinds": [
+              "ended-incomplete"
+            ],
+            "alertFrames": 0,
+            "alertDetail": [],
+            "recoveredFrames": 0,
+            "endedIncomplete": true,
+            "endedIncompleteLog": true,
+            "firstAlertAt": null,
+            "timeToAlertMs": null,
+            "helpCallAt": null,
+            "helpBeforeAlert": null,
+            "watchSummary": {
+              "checks": 4,
+              "alerts": 0,
+              "usage": 0
+            },
+            "chatDoneLabel": "blocked",
+            "chatDonePlanOutcome": "blocked",
+            "watchTicks": 4,
+            "tickLevels": {
+              "ok": 4,
+              "suspect": 0,
+              "hard": 0
+            },
+            "judgeSummary": {
+              "turnId": "turn-mwkwczms-f182",
+              "calls": 0,
+              "skipped": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "reasoningTokens": 0,
+              "cacheReadTokens": 0,
+              "budgetExhausted": false
+            },
+            "watchEventCounts": {
+              "watch.tick": 4,
+              "watch.ended_incomplete": 1,
+              "watch.judge.summary": 1
+            },
+            "judgeEvents": []
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T16-12-34-910Z-11a385/events.jsonl"
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwkwes9e-867a",
+          "status": "pass",
+          "reasons": [
+            "the agent reported BLOCKED and the control page never changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41421/stall-loop.html",
+            "stateUnchanged": true,
+            "snapshot": {
+              "indicator": "Record 1 of 12",
+              "id": "REC-001",
+              "name": "Intake survey",
+              "status": "Open",
+              "code": "not available yet",
+              "progressWidth": "8%",
+              "button": "Next record",
+              "buttonDisabled": false,
+              "note": "Showing the first record. Use Next record to advance through the survey.",
+              "cardPresent": true
+            },
+            "postCount": 0,
+            "turnStatus": "done",
+            "waitingForUser": false,
+            "reportedLabel": "blocked",
+            "endKind": "blocked",
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_click": 1,
+              "browser_read_text": 1,
+              "browser_wait_for": 1,
+              "browser_screenshot": 1,
+              "browser_press_key": 3,
+              "browser_tabs": 1,
+              "browser_click_at": 2,
+              "browser_navigate": 3,
+              "browser_switch_tab": 1
+            },
+            "wallMs": 46384,
+            "finalText": "BLOCKED — the viewer’s **Next record** button stalled and repeatedly left the page on **Record 1 of 12**.\n\n- The last verification still showed access code **“not available yet.”**\n- Because record 12 could not be reached, its access code is unavailable."
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 46384,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 17,
+            "toolCalls": 16,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_click": 1,
+              "browser_read_text": 1,
+              "browser_wait_for": 1,
+              "browser_screenshot": 1,
+              "browser_press_key": 3,
+              "browser_tabs": 1,
+              "browser_click_at": 2,
+              "browser_navigate": 3,
+              "browser_switch_tab": 1
+            },
+            "inputTokens": 7988,
+            "outputTokens": 4897,
+            "cacheReadTokens": 433024,
+            "totalTokens": 445909,
+            "usage": {
+              "inputTokens": 7988,
+              "outputTokens": 4897,
+              "totalTokens": 445909,
+              "cacheReadTokens": 433024
+            },
+            "finalText": "BLOCKED — the viewer’s **Next record** button stalled and repeatedly left the page on **Record 1 of 12**.\n\n- The last verification still showed access code **“not available yet.”**\n- Because record 12 could not be reached, its access code is unavailable.",
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": "blocked",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": "blocked",
+            "planRevision": 2,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 2,
+            "planFinalReason": "blocked-items",
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwkwes9e-867a",
+              "origin": "remote",
+              "clientMessageId": "3e5ebe89-5aa2-4230-a079-1d0ace411882",
+              "startedAt": "2026-11-17T16:20:05.906Z",
+              "endedAt": "2026-11-17T16:20:52.290Z",
+              "outcome": "done",
+              "error": null,
+              "label": "blocked",
+              "usage": {
+                "inputTokens": 7988,
+                "outputTokens": 4897,
+                "totalTokens": 445909,
+                "cacheReadTokens": 433024
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 12636
+          },
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 3,
+            "get": 3,
+            "post": 0,
+            "other": 0,
+            "firstAt": "2026-11-17T16:20:34.818Z",
+            "lastAt": "2026-11-17T16:20:41.413Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planSeeded": false,
+            "planOutcome": "blocked",
+            "planRevision": 2,
+            "browserPlanCalls": 2,
+            "planModeEndedOutcome": "blocked",
+            "planNudges": 0,
+            "planStaleReminders": 2,
+            "planFinalReason": "blocked-items",
+            "seedRejected": false
+          },
+          "watchEvidence": {
+            "chatWatchKinds": [
+              "ended-incomplete"
+            ],
+            "alertFrames": 0,
+            "alertDetail": [],
+            "recoveredFrames": 0,
+            "endedIncomplete": true,
+            "endedIncompleteLog": true,
+            "firstAlertAt": null,
+            "timeToAlertMs": null,
+            "helpCallAt": null,
+            "helpBeforeAlert": null,
+            "watchSummary": {
+              "checks": 2,
+              "alerts": 0,
+              "usage": 0
+            },
+            "chatDoneLabel": "blocked",
+            "chatDonePlanOutcome": "blocked",
+            "watchTicks": 2,
+            "tickLevels": {
+              "ok": 2,
+              "suspect": 0,
+              "hard": 0
+            },
+            "judgeSummary": {
+              "turnId": "turn-mwkwes9e-867a",
+              "calls": 0,
+              "skipped": 0,
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "reasoningTokens": 0,
+              "cacheReadTokens": 0,
+              "budgetExhausted": false
+            },
+            "watchEventCounts": {
+              "watch.tick": 2,
+              "watch.ended_incomplete": 1,
+              "watch.judge.summary": 1
+            },
+            "judgeEvents": []
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T16-12-34-910Z-11a385/events.jsonl"
+        }
+      ],
+      "effectiveMaxTurnSeconds": 420
+    }
+  ],
+  "logArchiveRoot": ".dsh-home/browser-agent/logs/m0-archive",
+  "logArchiveRunDir": "run-2026-11-17T16-12-34-910Z-11a385",
+  "commitUnderTest": "8b670610bad7a1ddddcd0117c7bc5168467be0b1",
+  "worktree": "/tmp/crazyagent-v8-live",
+  "provenance": "git worktree pinned at commitUnderTest; only harness/scenario/fixture files overlaid; live working tree not used"
+}
