@@ -169,6 +169,12 @@ function digestAggregates(aggregates, now) {
       current: open.current,
       secSinceDecrease: open.current !== null && open.current > 0 ? sec(now - open.lastDecreaseAt) : 0,
       trajectory: open.samples.map(sample => ({ ageSec: sec(now - sample.at), open: sample.open })),
+      // V5 candidate 1 (§3.6): completed-count history alongside the open-count
+      // trajectory so the judge sees stalls AND reversals (a complete count that
+      // drops or stays flat while the agent keeps acting). Pure digest evidence.
+      completedFirst: open.completedFirst ?? null,
+      completedCurrent: open.completedCurrent ?? null,
+      completedTrajectory: (open.completedSamples ?? []).map(sample => ({ ageSec: sec(now - sample.at), completed: sample.completed })),
     },
   }
 }

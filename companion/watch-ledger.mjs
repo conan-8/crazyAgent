@@ -193,6 +193,13 @@ function emptyLedgerState() {
     okMutationsSinceOpenDecrease: 0,
     /** @type {Array<{at: number, open: number}>} */
     planOpenSamples: [],
+    // V5 candidate 1 (§3.6): completed-count history alongside the open-count
+    // trajectory, so the judge digest can see stalls AND reversals (a completed
+    // count dropping = reopened/redo work). Pure digest evidence — no signal.
+    firstPlanCompleted: null,
+    currentPlanCompleted: null,
+    /** @type {Array<{at: number, completed: number}>} */
+    planCompletedSamples: [],
     // V3 (§3.4): best-effort page identity for repeated work. currentPageKey is
     // the most recent URL named by a result (null = unknown); pageActStats groups
     // effectful acts by (pageKey|fingerprint|controlName) for page-scoped revisits.
@@ -211,9 +218,11 @@ export const WATCH_AGGREGATE_LIMITS = Object.freeze({
   navTargetKeys: 200,
   navTargetChars: 120,
   planOpenSamples: 40,
+  planCompletedSamples: 40,
   digestRevisits: 5,
   digestNavRevisits: 3,
   digestOpenSamples: 8,
+  digestCompletedSamples: 8,
   digestArgsChars: 60,
   revisitCount: 3,
   // V3 (§3.4): page-scoped revisit grouping (full URL identity, path digest).
@@ -460,6 +469,13 @@ export class WatchLedger {
         this.state.currentPlanOpen = open
         this.state.planOpenSamples.push({ at, open })
         if (this.state.planOpenSamples.length > WATCH_AGGREGATE_LIMITS.planOpenSamples) this.state.planOpenSamples.shift()
+        // V5 candidate 1: sample the completed count on every plan activity so the
+        // digest carries a completed-count trajectory (stalls + reversals).
+        const completed = this.state.planCompletedCount
+        if (this.state.firstPlanCompleted === null) this.state.firstPlanCompleted = completed
+        this.state.currentPlanCompleted = completed
+        this.state.planCompletedSamples.push({ at, completed })
+        if (this.state.planCompletedSamples.length > WATCH_AGGREGATE_LIMITS.planCompletedSamples) this.state.planCompletedSamples.shift()
       }
     }
   }
@@ -538,6 +554,10 @@ export class WatchLedger {
         lastDecreaseAt: s.openLastDecreasedAt,
         okMutationsSinceDecrease: s.okMutationsSinceOpenDecrease,
         samples: s.planOpenSamples.slice(-lim.digestOpenSamples).map(sample => ({ ...sample })),
+        // V5 candidate 1: completed-count history (stalls + reversals).
+        completedFirst: s.firstPlanCompleted,
+        completedCurrent: s.currentPlanCompleted,
+        completedSamples: s.planCompletedSamples.slice(-lim.digestCompletedSamples).map(sample => ({ ...sample })),
       },
     }
   }
