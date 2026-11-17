@@ -145,3 +145,85 @@ The three required clauses are present verbatim: completed items final / never r
 - Independent check G (carried plan through the real panel + remote API): PASS — `Carried plan, revision 2 (2 open)` and `use expected_revision:2` still in the prompt; DOM renders the carried checklist (`m2-evidence/tuning/independent-check.txt`, `independent-06-carried-plan.png`).
 
 **Held:** eval re-runs ALL M2 suites (marathon-long ×5, stop-then-continue ×5, unrelated-question ×5, steer-plan) on the tuning pin for final M2 acceptance. The 2 stale reminders per continuation turn remain diagnostic only — no counter change this iteration (one change at a time). M3 was paused for this tuning and resumes after the commit.
+
+---
+
+## Real-model acceptance — FINAL (eval, task-9; suites on tuning pin a31f7f9, steer-plan rerun + acceptance pin 2abb065)
+
+**Verdict: the M2 gates are GREEN — task-9 complete.** Continuation (the core gate): **5/5 PASS, ZERO redos, ZERO voids**, with the tuning clause provably delivered in every continuation prompt. Seeded-untouched: **5/5** (10/10 across both M2 pins). marathon-long: 4/5 PASS + 1 partial — **accepted by lead as within-noise** with the proof below (the changed line cannot reach unseeded prompts). steer-plan: first live run exposed a row evidence-logic bug (diagnosis below); core fixed the row + self-test fixtures (`9b856df`); **rerun on acceptance pin `2abb065e9f923bba35b2f4d67ae83acceb71d55f`: PASS**. Acceptance-pin continuity: `companion/prompt.mjs`, `plan.js`, `plan-runtime.js` are byte-identical between `a31f7f9` and `2abb065` (empty diff), so the suites 1–3 verdicts carry to the acceptance pin; gates there: npm test **1201/1201**, c1 + scenario self-tests green.
+
+### Provenance and gates
+
+- Worktree `/tmp/crazyagent-m2t-accept` pinned at **`a31f7f93bea4b8861959631762bee47e058898a0`** (descends from eval's `11ba028`, so the multi-turn harness + scenarios are committed at the pin — no overlays needed). Fresh isolated home `/tmp/crazyagent-m2t-eval/dsh-home`; 1017 @ medium; `--marathon` new-switch arming (per-run OFF-verified → enable → ON-verified → bare prompt); `commitUnderTest` + `armingPath` in every JSON; same stop-after-step-4 mechanics and void+retry rules as pre-tuning.
+- Gates before spend: `npm test` **1105/1105** measured on the pin (the tuning commit message's 1152 was the working tree with uncommitted M3 tests — lead-confirmed, both 0 fail); `c1-acceptance --self-test` green; scenario `--self-test` green for all five.
+- Smokes ×1: click-once PASS 4.6 s; stop-then-continue PASS — a **311.8 s / 188-step continuation with ZERO redos** (the tuned fidelity held through a long wander, 4 stale reminders across refilled stretches, 0 completion nudges); unrelated-question PASS 2.7 s. Batch: `e2e/baselines/2026-11-17T02-38-11-136Z-m2t-smokes.json`.
+
+### Suite 1 — marathon-long ×5: three-way comparison
+
+| metric | clean M0 /plan (c2966018) | pre-tuning M2 (1a248fa) | tuned M2 (a31f7f9) |
+|---|---|---|---|
+| pass/partial/fail | 5/0/0 | 5/0/0 | 4/1/0 |
+| redo stations | 0 | 0 | 2 (both in r3) |
+| wall s min–max (med) | 57.5–65.5 (61.9) | 66.0–297.1 (83.9) | 42.1–641.8 (56.6) |
+| steps min–max (med) | 41–55 (51) | 42–65 (46) | 27–80 (43) |
+| calls min–max (med) | 40–54 (50) | 41–64 (45) | 28–79 (42) |
+| failed Σ / retries / dead | 5 / 0 / 0 | 2 / 0 / 0 | 5 / 0 / 0 |
+| non-cached input Σ | 135,398 | 193,356 | 273,753 |
+| output Σ | 22,391 | 52,469 | 97,818 |
+| cacheRead Σ | 8,819,584 | 7,450,069 | 8,018,915 |
+
+**The r3 partial (641.8 s, 80 steps, 84.5k output):** stations 4 and 5 each recorded twice within the single turn (23 navigations — a wandering turn), finalText falsely claiming "All 12 stations submitted in order". **Proof it is not a tuning effect:** r3 `planSeeded=false`; its `prompt.build` contains NO carried-plan header and NO tuning clause (verified from archived events; true of every suite-1 run — unseeded turns receive only the fixed guidance, unchanged at 1233 chars). The one changed line cannot reach these prompts; the model-facing surface is byte-identical to pre-tuning M2. Lead ruling 2026-11-16: **accepted as within-noise**, r3 recorded as a sample of the pre-existing single-turn wander/redo mode (cross-pin rates below), no fishing rerun. The token Σ increases are dominated by r3's wander (84.5k output) — excluding r3, output Σ is 13.4k vs M0's 22.4k.
+
+### Suite 2 — stop-then-continue ×5 (core M2 gate): 5/5, ZERO redos
+
+| metric | pre-tuning (1a248fa) | tuned (a31f7f9) |
+|---|---|---|
+| pass/partial/fail | 4/0/1 | **5/0/0** |
+| redo stations Σ | 1 (r5 station 9 ×2) | **0** |
+| voided attempts Σ | 0 | 0 |
+| t1 wall s (stop after step 4) | 11.0–107.4 (med 19.0) | 12.3–33.6 (med 19.1) |
+| t2 wall s | 28.1–293.1 (med 47.4) | 35.5–87.3 (med 43.5) |
+| t2 steps / calls (med) | 21 / 20 | 21 / 20 |
+| t2 failed Σ (all recovered) | 3 | 8 |
+| t2 non-cached input Σ | 198,432 | 665,455 (r4 cache-miss pattern 536k; ex-r4 129k) |
+| t2 output Σ | 47,092 | **11,211** |
+| t2 stale reminders per run | 2,2,2,2,2 | 1,2,2,1,3 |
+| t2 completion nudges Σ | 0 | 0 |
+
+Every run: stop landed right after the server recorded step 4 (`stepsAtStop=4`), between-turn `/state` verified (stopped + marathon on + carried plan with open items, rev 1–2), turn 2 `continue` seeded (`planSeeded=true`, no `plan.seed.rejected`), 12/12 exactly-once, genuine completion view, `planOutcome=reported-complete`. **Change-delivery control: all five turn-2 `prompt.build` events contain the carried header AND the three tuning clauses** (verified from archived events). The pre-tuning 293 s wander tail is gone; t2 output dropped 76%; fidelity held through r4's cache-miss input pattern and r5's six recovered failed calls. Stale reminders 1–3 with 0 completion nudges — the per-stretch refill works as designed (diagnostic, no counter change).
+
+### Suite 3 — unrelated-question ×5 (seeded-untouched): 5/5
+
+Every run: clean stop setup (0 voids), turn 2 answered **"51"** in 1.2–2.0 s with 1 model step, **0 tool calls, 0 browser_plan calls**, `planOutcome=not-assessed` (reason `seeded-untouched`), **0 nudges / 0 stale**, carried plan (rev 1–2) still in `/state` afterwards. Combined with pre-tuning: **10/10** — the carried plan never hijacked an unrelated question.
+
+### Suite 4 — c1 steer-plan row: behavior verified, row-evidence bug pending fix
+
+Live run (dedicated home `/tmp/crazyagent-m2t-c1`): turn 1 created plan rev 1 (`browser_plan`×1, `plan.updated` rev 1), clicked to count 5, steer landed mid-turn (`turn1Aborted=true`). Turn 2: armed, **prompt carried revision 1** (`turn2CarriedRevision=1`), plan still in `/state` after (`carriedPlanRevisionAfter=1`), `turn2Ok=true`, answered "Current count: 5" with zero tool calls, counter frozen at 5 (no duplicate action), `planOutcome=not-assessed`. **Every behavioral requirement of "steer mid-marathon keeps the plan" is independently demonstrated.**
+
+The row nonetheless reported FAIL "no plan created before the steer (revision=null)": `checkSteerPlanEvidence` required `turn.end.planRevision ≥ 1`, but a steer-aborted turn's `turn.end` structurally lacks plan annotation (`{ok:false, aborted:true, planOutcome:null, planRevision:null}` — the runtime is interrupted before `endTurn` annotates; the same gap appears on all stopped turn-1s in suite 2, where carry-over works via `plan.updated` activities → companion snapshot). The row's mutation self-test fixture set `turn1PlanRevision` to a value live steered turns never produce, so the self-test could not catch it; the first live run exposed it.
+
+**Fix and rerun (core `9b856df`, acceptance pin `2abb065`):** the row now accepts `revisionAtSteer` / `turn2CarriedRevision` as authoritative for aborted turns (annotated `turn.end` stays authoritative when present), and the self-test fixtures use the real aborted `turn.end` shape. Rerun on `2abb065` (fresh home `/tmp/crazyagent-accept-c1`): **PASS, clean** — turn 1 `browser_plan`×1 + 3 single clicks (count 3 at steer, `revisionAtSteer=1`, aborted); turn 2 armed, **prompt carried revision 1**, `/state` plan rev 1 after, `turn2Ok=true`, zero tool calls, counter frozen at 3, `planOutcome=not-assessed`. 7.3 s, 0 failed calls. Evidence: `e2e/baselines/2026-11-17T03-34-07-789Z-m2-final-steer-plan.json`, archive `m0-archive/run-2026-11-17T03-34-07-881Z-2f6fb2/`. The pending-fix diagnostic run is retained: `e2e/baselines/2026-11-17T03-09-45-387Z-m2t-c1-steer-plan.json`, archive `m0-archive/run-2026-11-17T03-09-45-475Z-a9444a/`.
+
+### Cross-pin mode rates (lead-requested; M6 follow-up candidate)
+
+Population: 25 single-turn marathon-long runs across 5 pins (M0-contaminated diagnostic, M0-clean, M1, M2-pre, M2-tuned) + 12 continuation turn-2s (pre/tuned suites + smokes). Wander = wall > 200 s OR ≥15 navigations OR ≥70 steps; redo = duplicate server step records.
+
+- **Single-turn:** wander **4/25 (16%)** (one per pin except M0-clean), redo **1/25 (4%)** (tuned suite-1 r3), false-completion-claim-with-redo **1/1**.
+- **Continuation:** redo **1/12** — the single redo is pre-tuning (pre 1/6 incl. smoke → tuned **0/6** incl. the 312 s/188-step smoke wander that stayed faithful); wander 2/12.
+- **M6 follow-up flag for `docs/STATUS.md`:** "single-turn wander/redo with false completion claim" — a base-agent reliability mode present across pins (the model revisits accepted work and denies re-submitting it; only the independent server record exposes it). Outside M2's scope; the M2 tuning specifically eliminated continuation redos. Candidate levers: general post-action verification guidance or server-state awareness — not addressed here (one change at a time).
+
+### Tuning effect, isolated
+
+One line changed (carried-plan header); unseeded surface byte-identical (proved via `prompt.build`). Continuation redo rate 1/6 → 0/6; the 293 s wander tail eliminated; t2 output Σ −76%; seeded-untouched unchanged 10/10; completion nudges 0 throughout; stale-reminder refill diagnostic unchanged in kind. The suite-1 r3 partial is a sample of the pre-existing single-turn mode, not a tuning effect (lead-accepted within-noise).
+
+### Evidence (final acceptance)
+
+- `e2e/baselines/2026-11-17T02-38-11-136Z-m2t-smokes.json` · archive `m0-archive/run-2026-11-17T02-38-11-221Z-458428/`
+- `e2e/baselines/2026-11-17T02-44-33-961Z-m2t-marathon-long-marathon.json` · archive `m0-archive/run-2026-11-17T02-44-34-045Z-b5a71b/` (6.4 MiB)
+- `e2e/baselines/2026-11-17T03-00-02-687Z-m2t-stop-then-continue.json` · archive `m0-archive/run-2026-11-17T03-00-02-778Z-c3dddb/` (3.7 MiB)
+- `e2e/baselines/2026-11-17T03-07-12-434Z-m2t-unrelated-question.json` · archive `m0-archive/run-2026-11-17T03-07-12-520Z-2c78d2/` (1.9 MiB)
+- `e2e/baselines/2026-11-17T03-09-45-387Z-m2t-c1-steer-plan.json` · archive `m0-archive/run-2026-11-17T03-09-45-475Z-a9444a/` (pending-fix diagnostic)
+- `e2e/baselines/2026-11-17T03-34-07-789Z-m2-final-steer-plan.json` · archive `m0-archive/run-2026-11-17T03-34-07-881Z-2f6fb2/` (**PASS** on acceptance pin 2abb065)
+- Pre-tuning reference: the `m2-*` JSONs + section above (commit `11ba028`); clean M0: `docs/marathon/M0-baseline.md`.
+- All archives under `.dsh-home/browser-agent/logs/m0-archive/` (gitignored, prune-safe); every JSON carries `commitUnderTest`, `armingPath`, per-run `marathonArm`, per-turn `planEvidence`, seed chain, void records.
+

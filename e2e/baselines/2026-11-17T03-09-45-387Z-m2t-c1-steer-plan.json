@@ -1,0 +1,75 @@
+{
+  "startedAt": "2026-11-17T03:09:45.387Z",
+  "finishedAt": "2026-11-17T03:09:53.585Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "dshHome": "/tmp/crazyagent-m2t-c1/dsh-home",
+  "maxTotalTokens": 6000000,
+  "totalTokens": 67250,
+  "stopReason": null,
+  "checks": [
+    {
+      "name": "steer-plan",
+      "status": "fail",
+      "reasons": [
+        "no plan created before the steer (revision=null)"
+      ],
+      "evidence": {
+        "steered": true,
+        "firstTurnId": "turn-mwk46f6d-6853",
+        "secondTurnId": "turn-mwk46j9h-9c28",
+        "turn1Aborted": true,
+        "turn2Ok": true,
+        "turn1PlanRevision": null,
+        "revisionAtSteer": 1,
+        "turn2Armed": true,
+        "turn2CarriedRevision": 1,
+        "carriedPlanRevisionAfter": 1,
+        "turn2PlanRevision": 1,
+        "turn2PlanOutcome": "not-assessed",
+        "countAtSteer": 5,
+        "finalCount": 5
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwk46f6d-6853",
+          "wallMs": 5314,
+          "steps": 2,
+          "toolCalls": 2,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 44149,
+          "finalText": null,
+          "reportedLabel": null,
+          "toolCounts": {
+            "browser_plan": 1,
+            "browser_batch": 1
+          }
+        },
+        {
+          "turnId": "turn-mwk46j9h-9c28",
+          "wallMs": 1706,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 23101,
+          "finalText": "**Current count: 5** (shown as \"Increment count: 5\"). I've stopped clicking — no further clicks.",
+          "reportedLabel": null,
+          "toolCounts": {}
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 7244,
+      "finishedAt": "2026-11-17T03:09:53.584Z"
+    }
+  ],
+  "commitUnderTest": "a31f7f93bea4b8861959631762bee47e058898a0",
+  "worktree": "/tmp/crazyagent-m2t-accept",
+  "logArchiveRoot": ".dsh-home/browser-agent/logs/m0-archive",
+  "logArchiveRunDir": "run-2026-11-17T03-09-45-475Z-a9444a"
+}

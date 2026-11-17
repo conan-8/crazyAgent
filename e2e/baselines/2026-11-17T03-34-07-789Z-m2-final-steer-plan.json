@@ -1,0 +1,73 @@
+{
+  "startedAt": "2026-11-17T03:34:07.788Z",
+  "finishedAt": "2026-11-17T03:34:15.999Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "dshHome": "/tmp/crazyagent-accept-c1/dsh-home",
+  "maxTotalTokens": 6000000,
+  "totalTokens": 198476,
+  "stopReason": null,
+  "checks": [
+    {
+      "name": "steer-plan",
+      "status": "pass",
+      "reasons": [],
+      "evidence": {
+        "steered": true,
+        "firstTurnId": "turn-mwk51rkt-606f",
+        "secondTurnId": "turn-mwk51vz9-df8e",
+        "turn1Aborted": true,
+        "turn2Ok": true,
+        "turn1PlanRevision": null,
+        "revisionAtSteer": 1,
+        "turn2Armed": true,
+        "turn2CarriedRevision": 1,
+        "carriedPlanRevisionAfter": 1,
+        "turn2PlanRevision": 1,
+        "turn2PlanOutcome": "not-assessed",
+        "countAtSteer": 3,
+        "finalCount": 3
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwk51rkt-606f",
+          "wallMs": 5735,
+          "steps": 5,
+          "toolCalls": 4,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 157974,
+          "finalText": null,
+          "reportedLabel": null,
+          "toolCounts": {
+            "browser_plan": 1,
+            "browser_click": 3
+          }
+        },
+        {
+          "turnId": "turn-mwk51vz9-df8e",
+          "wallMs": 1198,
+          "steps": 1,
+          "toolCalls": 0,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 40502,
+          "finalText": "Current count is **3** (I stopped clicking as instructed).",
+          "reportedLabel": null,
+          "toolCounts": {}
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 7252,
+      "finishedAt": "2026-11-17T03:34:15.999Z"
+    }
+  ],
+  "commitUnderTest": "2abb065e9f923bba35b2f4d67ae83acceb71d55f",
+  "worktree": "/tmp/crazyagent-accept-2abb065",
+  "logArchiveRoot": ".dsh-home/browser-agent/logs/m0-archive",
+  "logArchiveRunDir": "run-2026-11-17T03-34-07-881Z-2f6fb2"
+}
