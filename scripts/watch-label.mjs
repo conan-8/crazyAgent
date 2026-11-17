@@ -301,11 +301,16 @@ export function labelTurn(turn, scenario, batchRun, legacyLabel = null) {
       // 240 s since last server-accepted station (or turn start), >=3 calls, running.
       const progressRel = progress.map(p => Math.round((p.atMs - turn.startMs) / 1000)).filter(s => s >= 0 && s <= dur)
       let onset = null
-      // candidate onset points: turn start (0) and each progress event
+      // candidate onset points: turn start (0) and each progress event. t0 = a+240
+      // is a stall onset ONLY IF no station was accepted in (a, t0] (a real 240s
+      // gap with no server progress), >=3 calls in the span, and the turn still
+      // runs. Continuous progress (a station every few seconds) never stalls.
       const anchors = [0, ...progressRel]
       for (const a of anchors) {
         const t0 = a + PATIENCE.progressableSec
         if (t0 > dur) continue // turn ended before patience elapsed
+        const nextProgress = progressRel.find(s => s > a)
+        if (nextProgress !== undefined && nextProgress <= t0) continue // progress within the span: not a stall
         const callsInSpan = turn.toolCallTimes.filter(at => at >= a * 1000 && at <= t0 * 1000).length
         const helpBefore = turn.helpTimes.some(at => at < t0 * 1000)
         const confirmBefore = turn.confirmTimes.some(at => at < t0 * 1000)
