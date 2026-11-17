@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { WatchLedger, assess, WATCH_THRESHOLDS, READ_ONLY_TOOLS, CONTROL_TOOLS, toolClass, toolFingerprint, resultCode } from '../watch-ledger.mjs'
+import { WatchLedger, assess, WATCH_THRESHOLDS, READ_ONLY_TOOLS, CONTROL_TOOLS, toolClass, toolFingerprint, resultCode, parsePageKey, parseControlName, pageKeyPath } from '../watch-ledger.mjs'
 
 /** A fake monotonic clock the test advances by hand. */
 function clock() {
@@ -387,4 +387,60 @@ test('V2: planCompletedCount rises only on completion, not revision or blocked',
   // Completing A: completed rises.
   l.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 4, items: [{ content: 'A', status: 'completed' }, { content: 'B', status: 'pending' }] })
   assert.equal(l.snapshot().planCompletedCount, 1)
+})
+
+/* ------------------------------------------------------------------ */
+/* V3 page identity (§3.4): parsing, page key tracking, digest         */
+/* ------------------------------------------------------------------ */
+
+test('V3 parsePageKey: tab line, navigate variants, unknown', () => {
+  assert.equal(parsePageKey('tab 1 "Form" https://x.test/form?a=1'), 'https://x.test/form?a=1')
+  assert.equal(parsePageKey('tab 7 "Station" https://x.test/s?n=3\nsome text'), 'https://x.test/s?n=3')
+  assert.equal(parsePageKey('navigated to https://x.test/next · loaded in 50ms'), 'https://x.test/next')
+  assert.equal(parsePageKey('navigated back to https://x.test/prev'), 'https://x.test/prev')
+  assert.equal(parsePageKey('navigated forward to https://x.test/fwd'), 'https://x.test/fwd')
+  assert.equal(parsePageKey('reloaded https://x.test/r'), 'https://x.test/r')
+  assert.equal(parsePageKey('clicked label 1: button "Go"'), null)
+  assert.equal(parsePageKey(''), null)
+  assert.equal(parsePageKey(null), null)
+})
+
+test('V3 parseControlName: clicked quoted name, typed field, none', () => {
+  assert.equal(parseControlName('clicked label 3: button "Submit order"'), 'Submit order')
+  assert.equal(parseControlName('clicked label 1: link "Continue"'), 'Continue')
+  assert.equal(parseControlName('typed into [5] email field'), 'field 5')
+  assert.equal(parseControlName('submitted ok'), null)
+  assert.equal(parseControlName(''), null)
+})
+
+test('V3 pageKeyPath: URL path only, <=60 chars, fail-safe', () => {
+  assert.equal(pageKeyPath('https://x.test/form?a=1#h'), '/form')
+  assert.equal(pageKeyPath('https://x.test/' + 'a'.repeat(80)).length, 60)
+  assert.equal(pageKeyPath('not a url'), 'not a url')
+  assert.equal(pageKeyPath(null), null)
+})
+
+test('V3 page key tracking: most recent URL wins; clicks keep the previous key', () => {
+  const t = clock(); const l = ledger(t)
+  call(l, 'n1', 'browser_navigate', { url: 'https://x.test/a' }); result(l, 'n1', { text: 'navigated to https://x.test/a' })
+  call(l, 'c1', 'browser_click', { label: 1 }); result(l, 'c1', { text: 'clicked label 1: button "Go"' })
+  // The click result names no URL -> page key stays https://x.test/a.
+  call(l, 'r1', 'browser_read_text', {}); result(l, 'r1', { text: 'tab 1 "B" https://x.test/b\npage text' })
+  call(l, 'c2', 'browser_click', { label: 2 }); result(l, 'c2', { text: 'clicked label 2: button "Go"' })
+  const events = l.snapshot().events
+  assert.equal(events.find(e => e.name === 'browser_click' && e.argsDigest.includes('1')).pageKey, 'https://x.test/a')
+  assert.equal(events.find(e => e.name === 'browser_click' && e.argsDigest.includes('2')).pageKey, 'https://x.test/b')
+})
+
+test('V3 digest: mutationRevisits carry pageKey path + controlName; pageIdentity reported', () => {
+  const t = clock(); const l = ledger(t)
+  const page = 'tab 1 "Form" https://x.test/form?session=9'
+  const head = 'clicked label 1: button "Submit"'
+  for (let i = 0; i < 3; i += 1) { call(l, `a${i}`, 'browser_click', { label: 'Submit' }); result(l, `a${i}`, { text: `${page}\n${head}` }) }
+  const ag = l.snapshot().aggregates
+  assert.equal(ag.mutationRevisit, true)
+  assert.equal(ag.mutationRevisits[0].pageKey, '/form', 'digest page key is the URL path')
+  assert.equal(ag.mutationRevisits[0].controlName, 'Submit')
+  assert.equal(ag.pageIdentity.unknownPage, 0)
+  assert.equal(ag.pageIdentity.distinctPages, 1)
 })

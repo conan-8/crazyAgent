@@ -145,6 +145,9 @@ function digestAggregates(aggregates, now) {
     okMutations: aggregates.okMutations,
     mutationRevisits: aggregates.mutationRevisits,
     navRevisits: aggregates.navRevisits,
+    // V3 (§3.4): page identity — mutationRevisits entries carry pageKey (URL path)
+    // + controlName; pageIdentity reports how often the page was unknown.
+    pageIdentity: aggregates.pageIdentity ?? null,
     openItems: {
       first: open.first,
       current: open.current,
