@@ -202,6 +202,11 @@ class LiveFakeCompanionTest {
             assertNull(ended.chat.turn.plan)
             assertEquals(2, ended.chat.marathon.plan!!.revision)
             assertEquals(listOf("completed", "in_progress", "pending"), ended.chat.marathon.plan!!.items.map { it.status })
+
+            // Leave a clean state (marathon off) for the other live tests.
+            val session = ended.chat.sessionId
+            c.newChat()
+            await { it.chat.sessionId != session && !it.chat.marathon.enabled }
         } finally {
             scope.cancel()
         }

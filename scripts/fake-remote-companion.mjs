@@ -314,7 +314,13 @@ export async function startFakeCompanion(options = {}) {
     addScreenshot: input => hub.addScreenshot(input),
     requestHelp: request => controller.noteActivity({ type: 'chat.activity', kind: 'help-request', turnId: controller.turnId, ...request }),
     requestConfirm: request => controller.noteActivity({ type: 'chat.activity', kind: 'confirm-request', turnId: controller.turnId, ...request }),
-    requestPlan: plan => controller.noteActivity({ type: 'chat.activity', kind: 'plan', turnId: controller.turnId, ...plan }),
+    // V6: like the real companion's onActivity, a plan activity feeds BOTH the
+    // controller (carry-over snapshot) and the hub (live remote.plan checklist).
+    requestPlan: plan => {
+      const frame = { type: 'chat.activity', kind: 'plan', turnId: controller.turnId, ...plan }
+      controller.noteActivity(frame)
+      hub.ingest(frame)
+    },
     requestOutcome: outcome => controller.noteActivity({ type: 'chat.activity', kind: 'turn-outcome', turnId: controller.turnId, turn: 1, ...outcome }),
     stepMs: options.stepMs,
     hangMs: options.hangMs,
