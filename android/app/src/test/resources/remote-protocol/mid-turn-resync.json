@@ -164,7 +164,8 @@
         "planMode": false,
         "marathon": false,
         "planOutcome": null,
-        "planRevision": null
+        "planRevision": null,
+        "watch": null
       }
     },
     {
@@ -288,7 +289,8 @@
           "planMode": false,
           "marathon": false,
           "planOutcome": null,
-          "planRevision": null
+          "planRevision": null,
+          "watch": null
         }
       }
     ],

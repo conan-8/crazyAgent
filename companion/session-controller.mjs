@@ -13,6 +13,8 @@
 
 import { randomBytes } from 'node:crypto'
 import { MarathonState, marathonFrameBody } from './marathon.mjs'
+import { WatchLedger } from './watch-ledger.mjs'
+import { Watcher } from './watcher.mjs'
 import { buildPromptBlocks, isDocsDocumentUrl, normalizeImageAttachments, normalizePlanSeed, promptStats } from './prompt.mjs'
 import { PROTOCOL_VERSION, errorMessage, isRecord } from './protocol.mjs'
 
@@ -42,6 +44,7 @@ export class SessionController {
    *   getConfirmIrreversible?: () => boolean,
    *   publish: (frame: Record<string, any>) => void,
    *   observers?: TurnObserver[],
+   *   watch?: {now?: () => number, wallNow?: () => number, setTimer?: Function, clearTimer?: Function, tickMs?: number, push?: Function, limits?: Record<string, number>, enabled?: boolean},
    * }} options
    */
   constructor(options) {
@@ -54,7 +57,18 @@ export class SessionController {
     this.provider = options.provider
     this.getModelId = options.getModelId
     this.getConfirmIrreversible = options.getConfirmIrreversible ?? (() => false)
-    this.publish = options.publish
+    /**
+     * M3: the watch ledger runs for EVERY turn (marathon or not) so a mid-turn
+     * toggle already has history. It is fed from every published frame; the
+     * watcher reads it on its deterministic tick. Both are pure of I/O.
+     * @type {WatchLedger}
+     */
+    this.ledger = new WatchLedger({ now: options.watch?.now })
+    const basePublish = options.publish
+    this.publish = frame => {
+      this.ledger.noteFrame(frame)
+      basePublish(frame)
+    }
     /** @type {TurnObserver[]} */
     this.observers = options.observers ?? []
     this.running = false
@@ -67,6 +81,29 @@ export class SessionController {
      * @type {MarathonState}
      */
     this.marathon = new MarathonState()
+    /**
+     * M3: the deterministic watcher (no judge until M4). It only reports via
+     * chat.watch; it never steers/stops/mutates. Timers are injected for tests
+     * and .unref()'d in production. Disabled watchers still keep the ledger.
+     * @type {Watcher}
+     */
+    this.watcher = new Watcher({
+      ledger: this.ledger,
+      marathonEnabled: () => this.marathon.state.enabled,
+      publish: frame => this.publish(frame),
+      now: options.watch?.now,
+      wallNow: options.watch?.wallNow,
+      setTimer: options.watch?.setTimer,
+      clearTimer: options.watch?.clearTimer,
+      tickMs: options.watch?.tickMs,
+      push: options.watch?.push,
+      limits: options.watch?.limits,
+      log: (type, data, severity) => this.logStore.record('companion', type, data, { severity: severity ?? 'info', turnId: this.turnId }),
+    })
+    this.watchEnabled = options.watch?.enabled !== false
+    if (this.watchEnabled) this.watcher.start()
+    /** @type {{checks: number, alerts: number, usage: number} | undefined} */
+    this.watchTurnSummary = undefined
     /** @type {string | undefined} */
     this.turnId = undefined
     /** @type {{status: string, reason?: string} | undefined} */
@@ -267,7 +304,22 @@ export class SessionController {
 
   /** Publish the authoritative state to the panel and the remote hub. */
   #publishMarathon() {
-    this.publish({ v: PROTOCOL_VERSION, type: 'marathon.state', ...marathonFrameBody(this.marathon.snapshot()) })
+    this.publish({ v: PROTOCOL_VERSION, type: 'marathon.state', ...marathonFrameBody(this.marathon.snapshot()), watcher: this.watcherPanelState() })
+  }
+
+  /**
+   * M3: the panel-facing watcher projection (§3.4 marathon.state.watcher).
+   * `active` means a marathon turn is being watched right now.
+   * @returns {{active: boolean, checks: number, lastCheckAt: string | null, lastVerdict: string | null}}
+   */
+  watcherPanelState() {
+    const projection = this.watcher.watchProjection()
+    return {
+      active: this.marathon.state.enabled && this.running,
+      checks: projection.checks,
+      lastCheckAt: projection.lastCheckAt,
+      lastVerdict: projection.lastVerdict,
+    }
   }
 
   /** New chat / real chat switch / restart: the switch resets to off. */
@@ -277,6 +329,38 @@ export class SessionController {
       this.logStore.record('companion', 'marathon.reset', {}, { severity: 'info' })
       this.#publishMarathon()
     }
+  }
+
+  /** M3: executor connectivity from the bridge (onConnectionChange). */
+  setConnectivity(info) {
+    this.ledger.setConnectivity(info)
+  }
+
+  /** M3: "It's fine" — dismiss the open watch alert and snooze its kind. */
+  watchAck(id) {
+    return this.watcher.ack(id)
+  }
+
+  /** M3: the open-alert projection for chat.hello and the remote /state. */
+  watchState() {
+    return this.watcher.watchProjection()
+  }
+
+  /**
+   * M3: finish the watch for a terminal frame. Emits any ended-incomplete
+   * notice (via chat.watch) and returns the additive per-turn summary. Never
+   * changes the turn's outcome. Called once per turn, before the terminal frame.
+   * @param {{outcome: string, label?: string | null, planOutcome?: string | null, help?: unknown, confirm?: unknown, deadTurn?: boolean}} info
+   */
+  #finishWatch(info) {
+    if (this.watchTurnSummary !== undefined) return this.watchTurnSummary
+    this.watchTurnSummary = this.watcher.turnEnded(info)
+    return this.watchTurnSummary
+  }
+
+  /** Stop the watcher timer (companion shutdown / test teardown). */
+  dispose() {
+    this.watcher.stop()
   }
 
   /**
@@ -371,6 +455,7 @@ export class SessionController {
     this.planTurnSnapshot = undefined
     this.helpTurnRequest = undefined
     this.confirmTurnRequest = undefined
+    this.watchTurnSummary = undefined
     // Any prompt answers an open confirmation; an approve/deny answer already
     // consumed it in submit(). The same session continues either way.
     this.pendingConfirmation = undefined
@@ -386,6 +471,10 @@ export class SessionController {
     const confirmMode = this.getConfirmIrreversible() === true
     // Executor backstop: on unless this turn starts from the user's approval.
     const confirmGuard = confirmMode && confirmApproved !== true
+    // M3: the ledger records every turn; the watcher only alerts on marathon
+    // turns. Starting them here means a mid-turn toggle already has history.
+    this.ledger.startTurn({ turnId, prompt: shownText, marathon: planMode })
+    this.watcher.turnStarted({ marathon: planMode })
     this.#notify('turnStarted', {
       turnId,
       origin,
@@ -740,6 +829,9 @@ export class SessionController {
         : unverified
         ? `Docs verification incomplete (${verification.reason ?? 'one-nudge-only'})`
         : planIncomplete ? `Plan ${plan.outcome} (revision ${plan.revision ?? 0})` : undefined
+      // M3: the additive watch summary (and any ended-incomplete notice) before
+      // the terminal frame. Never changes ok/label/plan/docsVerification.
+      const watch = this.#finishWatch({ outcome: 'done', label, planOutcome: plan?.outcome, help, confirm, deadTurn })
       logStore.turnEnd(turnId, {
         ok: !deadTurn && !unverified && !planIncomplete,
         finalText,
@@ -748,6 +840,7 @@ export class SessionController {
         label,
         planOutcome: plan?.outcome,
         planRevision: plan?.revision,
+        watch,
         ...(confirm === undefined ? {} : { confirmRequested: true }),
         ...completionError ? { error: completionError } : {},
       })
@@ -769,6 +862,7 @@ export class SessionController {
         marathon: planMode,
         planOutcome: plan?.outcome,
         planRevision: plan?.revision,
+        watch,
         ...(help === undefined ? {} : { help: { category: help.category, reason: help.reason } }),
         ...(confirm === undefined ? {} : { confirm: { action: confirm.action, target: confirm.target } }),
       })
@@ -803,7 +897,8 @@ export class SessionController {
           elapsedMs: Math.round(performance.now() - turnStart),
         }, { turnId, severity: 'info' })
         // log-store.turnEnd() records the TURN_STOPPED signal for aborted turns.
-        logStore.turnEnd(turnId, { ok: false, aborted: true, reason: 'user', timings, usage, label })
+        const watch = this.#finishWatch({ outcome: 'stopped', label })
+        logStore.turnEnd(turnId, { ok: false, aborted: true, reason: 'user', timings, usage, label, watch })
         const sessionId = current?.sessionId ?? current?.resumeSessionId
         this.publish({
           v: PROTOCOL_VERSION,
@@ -814,13 +909,15 @@ export class SessionController {
           message: 'Stopped by user.',
           timings,
           usage,
+          watch,
         })
         this.sendStatus('idle')
         ending = { outcome: 'stopped', sessionId: sessionId ?? null, label, usage, timings }
       } else {
         logStore.error(message, { turnId, code: 'TURN_ERROR' })
-        logStore.turnEnd(turnId, { ok: false, error: message, timings, usage, label })
-        this.publish({ v: PROTOCOL_VERSION, type: 'chat.error', message, recoverable: true })
+        const watch = this.#finishWatch({ outcome: 'error', label })
+        logStore.turnEnd(turnId, { ok: false, error: message, timings, usage, label, watch })
+        this.publish({ v: PROTOCOL_VERSION, type: 'chat.error', message, recoverable: true, watch })
         this.sendStatus('error')
         ending = { outcome: 'error', error: message, label, usage, timings }
       }

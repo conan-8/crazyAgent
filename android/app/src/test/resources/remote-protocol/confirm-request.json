@@ -172,6 +172,7 @@
         "marathon": false,
         "planOutcome": null,
         "planRevision": null,
+        "watch": null,
         "confirm": {
           "action": "Submit the assignment for grading",
           "target": "Submit for Grading button"
@@ -303,7 +304,8 @@
         "planMode": false,
         "marathon": false,
         "planOutcome": null,
-        "planRevision": null
+        "planRevision": null,
+        "watch": null
       }
     },
     {
@@ -385,6 +387,7 @@
         "marathon": false,
         "planOutcome": null,
         "planRevision": null,
+        "watch": null,
         "confirm": {
           "action": "Delete the draft",
           "target": "Delete button"
@@ -603,6 +606,7 @@
             "marathon": false,
             "planOutcome": null,
             "planRevision": null,
+            "watch": null,
             "confirm": {
               "action": "Submit the assignment for grading",
               "target": "Submit for Grading button"
@@ -738,6 +742,7 @@
             "marathon": false,
             "planOutcome": null,
             "planRevision": null,
+            "watch": null,
             "confirm": {
               "action": "Submit the assignment for grading",
               "target": "Submit for Grading button"
@@ -873,6 +878,7 @@
             "marathon": false,
             "planOutcome": null,
             "planRevision": null,
+            "watch": null,
             "confirm": {
               "action": "Submit the assignment for grading",
               "target": "Submit for Grading button"
@@ -929,7 +935,8 @@
             "planMode": false,
             "marathon": false,
             "planOutcome": null,
-            "planRevision": null
+            "planRevision": null,
+            "watch": null
           }
         }
       ],
@@ -1054,6 +1061,7 @@
             "marathon": false,
             "planOutcome": null,
             "planRevision": null,
+            "watch": null,
             "confirm": {
               "action": "Submit the assignment for grading",
               "target": "Submit for Grading button"
@@ -1110,7 +1118,8 @@
             "planMode": false,
             "marathon": false,
             "planOutcome": null,
-            "planRevision": null
+            "planRevision": null,
+            "watch": null
           }
         },
         {
@@ -1152,6 +1161,7 @@
             "marathon": false,
             "planOutcome": null,
             "planRevision": null,
+            "watch": null,
             "confirm": {
               "action": "Delete the draft",
               "target": "Delete button"

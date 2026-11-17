@@ -294,6 +294,7 @@
         "marathon": false,
         "planOutcome": null,
         "planRevision": null,
+        "watch": null,
         "replacesStreamId": "turn-1:s3"
       }
     },
@@ -454,6 +455,7 @@
           "marathon": false,
           "planOutcome": null,
           "planRevision": null,
+          "watch": null,
           "replacesStreamId": "turn-1:s3"
         }
       }

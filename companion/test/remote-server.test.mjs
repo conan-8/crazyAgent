@@ -37,6 +37,7 @@ async function setup(t, options = {}) {
       hub.ingest(frame)
     },
     observers: [{ turnStarted: info => hub.turnStarted(info), turnEnded: info => hub.turnEnded(info) }],
+    watch: options.watch,
   })
   hub.updateHealth()
   const audits = []
@@ -302,7 +303,7 @@ test('POST /marathon validates, authenticates, and accepts a toggle mid-turn', a
   await sleep(10)
 })
 
-test('POST /marathon/watch/ack fails closed with 404 WATCH_NOT_FOUND until the watcher exists', async t => {
+test('POST /marathon/watch/ack returns 404 WATCH_NOT_FOUND when no alert is open, and validates', async t => {
   const ctx = await setup(t)
   const res = await ctx.call({ method: 'POST', path: '/remote/v1/marathon/watch/ack', body: { clientCommandId: 'watch-ack-0001', id: 'watch-1' } })
   assert.equal(res.status, 404)
@@ -314,6 +315,41 @@ test('POST /marathon/watch/ack fails closed with 404 WATCH_NOT_FOUND until the w
   const badClient = await ctx.call({ method: 'POST', path: '/remote/v1/marathon/watch/ack', body: { clientCommandId: 'x', id: 'watch-1' } })
   assert.equal(badClient.status, 422)
   assert.equal(badClient.body.error.code, 'INVALID_CLIENT_ID')
+})
+
+test('POST /marathon/watch/ack dismisses an open alert (200), idempotently', async t => {
+  let now = 0
+  const ctx = await setup(t, { watch: { now: () => now, wallNow: () => 1_700_000_000_000 + now, setTimer: () => 0, clearTimer: () => {} } })
+  await ctx.call({ method: 'POST', path: '/remote/v1/marathon', body: { clientCommandId: 'watch-on-0001', enabled: true } })
+  const accepted = await ctx.call({ method: 'POST', path: '/remote/v1/messages', body: { clientMessageId: 'watch-msg-0001', text: 'long task' } })
+  assert.equal(accepted.status, 202)
+  // A hanging tool call, then advance past the hard threshold and tick.
+  ctx.runner.event('tool/call', { callId: 'hang-1', name: 'browser_wait_for', arguments: '{}' })
+  now += 240_000
+  ctx.controller.watcher.tick()
+  const open = (await ctx.call({ path: '/remote/v1/state' })).body.marathon.watch.open
+  assert.equal(open?.kind, 'TOOL_HANG')
+  const id = open.id
+
+  const ack = await ctx.call({ method: 'POST', path: '/remote/v1/marathon/watch/ack', body: { clientCommandId: 'watch-ack-ok-0001', id } })
+  assert.equal(ack.status, 200)
+  assert.equal(ack.body.acknowledged, true)
+  assert.equal(ack.body.id, id)
+  assert.equal((await ctx.call({ path: '/remote/v1/state' })).body.marathon.watch.open, null)
+  // Idempotent replay returns the original 200 without re-dismissing.
+  const replay = await ctx.call({ method: 'POST', path: '/remote/v1/marathon/watch/ack', body: { clientCommandId: 'watch-ack-ok-0001', id } })
+  assert.equal(replay.status, 200)
+  assert.equal(replay.body.replayed, true)
+  // A different payload under the same ID conflicts.
+  const conflict = await ctx.call({ method: 'POST', path: '/remote/v1/marathon/watch/ack', body: { clientCommandId: 'watch-ack-ok-0001', id: 'other' } })
+  assert.equal(conflict.status, 409)
+  assert.equal(conflict.body.error.code, 'IDEMPOTENCY_CONFLICT')
+  // The dismissed id is now closed: a fresh command ID gets 404.
+  const closed = await ctx.call({ method: 'POST', path: '/remote/v1/marathon/watch/ack', body: { clientCommandId: 'watch-ack-ok-0002', id } })
+  assert.equal(closed.status, 404)
+  ctx.runner.toolResult({ callId: 'hang-1' })
+  ctx.runner.current.resolve('done')
+  await sleep(10)
 })
 
 test('marathon toggles are chat-level state: not message-limited, and /new resets the switch', async t => {

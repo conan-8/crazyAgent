@@ -1,0 +1,5 @@
+[ui-preview] wrote /tmp/m3-ui-watch/watch-alert.png
+[ui-preview] wrote /tmp/m3-ui-watch/watch-dismissed.png
+[ui-preview] wrote /tmp/m3-ui-watch/watch-recovered.png
+[ui-preview] wrote /tmp/m3-ui-watch/watch-ended-incomplete.png
+[ui-preview] wrote /tmp/m3-ui-watch/watch-narrow.png

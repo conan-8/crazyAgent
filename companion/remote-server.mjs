@@ -93,6 +93,7 @@ export class RemoteServer {
    *     newChat: () => Promise<{ok: true, sessionId: string} | {ok: false, code: string, message: string, retryable: boolean}>,
    *     resumeChat: (sessionId: string) => Promise<{ok: true, sessionId: string} | {ok: false, code: string, message: string, retryable: boolean}>,
    *     setMarathon: (input: {enabled: unknown, origin?: string}) => {ok: true, enabled: boolean, sessionId: string | null, changed: boolean} | {ok: false, code: string, message: string, retryable: boolean},
+   *     watchAck: (id: string) => {ok: true} | {ok: false, code: string, message: string, retryable: boolean},
    *     captureSnapshot?: () => Promise<{ok: true} | {ok: false, code: string, message: string, retryable: boolean}>,
    *   },
    *   log?: (message: string) => void,
@@ -470,16 +471,25 @@ export class RemoteServer {
   }
 
   /**
-   * Acknowledge one watch alert. The watcher arrives in M3; until then no
-   * alert can be open, so every well-formed ack fails closed with 404.
+   * Acknowledge one watch alert ("It's fine"). The watcher dismisses the open
+   * alert and snoozes its kind; an unknown/closed id returns 404
+   * WATCH_NOT_FOUND. Idempotent per clientCommandId.
    * @param {Record<string, any>} body
    */
   #postWatchAck(body) {
-    requireClientId(body.clientCommandId, 'clientCommandId')
+    const clientCommandId = requireClientId(body.clientCommandId, 'clientCommandId')
     if (typeof body.id !== 'string' || body.id.length === 0 || body.id.length > 128) {
       throw new HttpError(422, 'INVALID_WATCH_ID', 'id must be a non-empty string of at most 128 characters.')
     }
-    throw new HttpError(404, 'WATCH_NOT_FOUND', 'No watch alert is open on this companion.')
+    const print = fingerprint({ id: body.id })
+    const cached = this.#cached('watch-ack', clientCommandId, print)
+    if (cached !== undefined) return cached
+    const result = this.controller.watchAck(body.id)
+    const outcome = result.ok
+      ? { status: 200, body: { clientCommandId, acknowledged: true, id: body.id, instanceId: this.hub.instanceId } }
+      : { status: 404, body: { error: { code: 'WATCH_NOT_FOUND', message: result.message, retryable: false }, clientCommandId, instanceId: this.hub.instanceId } }
+    this.hub.rememberCommand('watch-ack', clientCommandId, print, outcome)
+    return outcome
   }
 
   /**

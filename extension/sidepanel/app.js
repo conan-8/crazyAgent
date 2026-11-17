@@ -12,6 +12,7 @@ import { textStreamDeltaAction, hasLeakedReplyRow, removeLeakedReplyRows } from 
 import { ClientLogger } from './logger.js'
 import { renderMarkdown } from './markdown.js'
 import { createPlanPanelModel, renderPlanPanel } from './plan-panel.js'
+import { watchNotice, renderWatchRow, watchIsActionable } from './watch-row.js'
 import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protocol.js'
 import { matchSlashCommands, nextSlashIndex, resolveSlashCommand, slashQuery } from './slash.js'
 
@@ -44,6 +45,8 @@ let attachedImages = []
  * @type {{enabled: boolean, sessionId: string | null, since: string | null, origin: string | null, plan: Record<string, any> | null, watcher: {active: boolean, checks: number, lastCheckAt: string | null, lastVerdict: string | null}}}
  */
 let marathonState = { enabled: false, sessionId: null, since: null, origin: null, plan: null, watcher: { active: false, checks: 0, lastCheckAt: null, lastVerdict: null } }
+/** The open watch alert mirrored from chat.watch (null when none); amber chip. */
+let watchAlert = null
 /** @type {Array<{id: string, text: string, images: Array<{name: string, size: number, mimeType: string, data: string}>}>} */
 let queuedMessages = []
 let dictation = null
@@ -509,10 +512,36 @@ function clearSlashDraft() {
   resizeInput()
 }
 
-/** Render the marathon chip strictly from the companion's state. */
+/** Render the marathon chip strictly from the companion's state (§3.5). */
 function renderMarathonChip() {
   els.marathonMode.classList.toggle('hidden', !marathonState.enabled)
+  els.marathonMode.classList.toggle('alert', watchAlert !== null)
   els.input.placeholder = marathonState.enabled ? 'Describe a long task to plan and complete…' : 'Ask or tell me what to do…'
+  const copy = els.marathonMode.querySelector('.marathon-mode-copy')
+  if (!copy) return
+  if (!marathonState.enabled) {
+    copy.textContent = 'Every turn uses a live checklist'
+    return
+  }
+  if (watchAlert !== null) {
+    copy.textContent = 'May be stuck — review the alert'
+    return
+  }
+  const watcher = marathonState.watcher
+  if (watcher.active) copy.textContent = 'Watching this turn'
+  else if (watcher.checks > 0 && watcher.lastCheckAt) copy.textContent = `Checked ${watchCheckedAgo(watcher.lastCheckAt)}`
+  else copy.textContent = 'Every turn uses a live checklist'
+}
+
+/** "3m ago" style relative label for the last deterministic watch check. */
+function watchCheckedAgo(iso) {
+  const at = Date.parse(iso)
+  if (!Number.isFinite(at)) return 'recently'
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  return `${Math.round(minutes / 60)}h ago`
 }
 
 /**
@@ -552,6 +581,48 @@ function toggleMarathon() {
   const enabled = !marathonState.enabled
   if (!sendFrame({ v: PROTOCOL_VERSION, type: 'marathon.set', enabled })) return
   logger.log('ui.marathon.toggle', { enabled }, 'info')
+}
+
+/**
+ * A marathon watch notice (§3.5). Render/update a transcript row keyed by id;
+ * open actionable alerts show Stop / Steer… / It's fine and amber the chip;
+ * recovered/dismissed notices collapse the row and clear the chip alert. The
+ * row is ordinary transcript DOM, so history saves it like any other row.
+ * @param {Record<string, any>} frame
+ */
+function handleWatch(frame) {
+  const notice = watchNotice(frame)
+  if (notice === null) return
+  logger.log('chat.watch', { id: notice.id, kind: notice.kind, state: notice.state, source: notice.source }, notice.state === 'open' ? 'warn' : 'info')
+  let root = els.activityLog.querySelector(`.watch-row[data-watch-id="${CSS.escape(notice.id)}"]`)
+  if (!root) {
+    root = document.createElement('div')
+    activityContainer().appendChild(root)
+    enterRow(root)
+  }
+  renderWatchRow(root, notice, {
+    onStop: () => stopTurn(),
+    onSteer: () => {
+      els.input.focus({ preventScroll: true })
+      toast(busy ? 'Type a steer message and send — it replaces the running turn' : 'Type a message and send')
+    },
+    onDismiss: () => {
+      if (!connected) {
+        toast('Not connected to the companion')
+        return
+      }
+      if (sendFrame({ v: PROTOCOL_VERSION, type: 'marathon.watch.ack', id: notice.id })) {
+        logger.log('ui.watch.ack', { id: notice.id, kind: notice.kind }, 'info')
+      }
+    },
+  })
+  watchAlert = watchIsActionable(notice) ? notice : null
+  renderMarathonChip()
+  if (notice.state === 'open' && notice.kind !== 'info') {
+    els.activityLatest.textContent = activityPreview(`Watch: ${notice.reason}`)
+    scrollActivity()
+  }
+  trimActivity()
 }
 
 function executeSlashCommand(command) {
@@ -2761,6 +2832,9 @@ function handleFrame(frame) {
       applyMarathonState(frame)
       logger.log('marathon.state', { enabled: marathonState.enabled, origin: marathonState.origin }, 'info')
       return
+    case 'chat.watch':
+      handleWatch(frame)
+      return
     case 'browser.command':
       void handleBrowserCommand(frame)
       return
@@ -3978,7 +4052,9 @@ function clearChat() {
   newChatDraft = false
   conversationStopped = false
   // The marathon chip is companion-owned: it clears when marathon.state off
-  // arrives after chat.new, never optimistically here.
+  // arrives after chat.new, never optimistically here. The local watch-alert
+  // mirror clears with the transcript (the rows are removed by clearActivity).
+  watchAlert = null
   els.app.classList.remove('new-chat-draft')
   clearTimeout(queueDispatchTimer)
   queueDispatchTimer = null

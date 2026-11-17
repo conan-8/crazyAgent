@@ -36,6 +36,7 @@ const INGESTED_TYPES = new Set([
   'chat.error',
   'chat.session',
   'marathon.state',
+  'chat.watch',
 ])
 
 /** Committed events kept in the resync projection. */
@@ -278,6 +279,7 @@ export class RemoteHub {
           marathon: frame.marathon === true,
           planOutcome: stringOrNull(frame.planOutcome),
           planRevision: Number.isSafeInteger(frame.planRevision) ? frame.planRevision : null,
+          watch: watchSummaryOf(frame.watch),
           ...(isRecord(frame.help) && typeof frame.help.reason === 'string' && typeof frame.help.category === 'string'
             ? { help: { category: frame.help.category, reason: clip(frame.help.reason, 500) } }
             : {}),
@@ -302,6 +304,7 @@ export class RemoteHub {
           message: stringOrNull(frame.message),
           timings: isRecord(frame.timings) ? frame.timings : null,
           usage: usageOf(frame.usage),
+          watch: watchSummaryOf(frame.watch),
         })
         return
       case 'chat.error': {
@@ -320,6 +323,9 @@ export class RemoteHub {
         return
       case 'marathon.state':
         this.#onMarathonState(frame)
+        return
+      case 'chat.watch':
+        this.#onWatch(frame)
         return
       default:
     }
@@ -591,15 +597,15 @@ export class RemoteHub {
     }
   }
 
-  /** The /state marathon shape (§3.4): watch fields stay null/empty until M3. */
+  /** The /state marathon shape (§3.4). M3: watch.open is the open alert. */
   marathonProjection() {
-    const { enabled, since, plan, watcher } = this.marathon
+    const { enabled, since, plan, watcher, watchOpen } = this.marathon
     return {
       enabled,
       since,
       plan: plan === null ? null : { ...plan, items: plan.items.map(item => ({ ...item })) },
       watch: {
-        open: null,
+        open: watchOpen === null ? null : { ...watchOpen },
         lastVerdict: watcher.lastVerdict,
         lastCheckAt: watcher.lastCheckAt,
         checks: watcher.checks,
@@ -609,7 +615,8 @@ export class RemoteHub {
 
   /**
    * Mirror the controller's authoritative marathon.state. Journaled and
-   * replayed like remote.help; an identical state is not re-published.
+   * replayed like remote.help; an identical state is not re-published. The
+   * open watch alert is tracked separately from chat.watch frames.
    * @param {Record<string, any>} frame
    */
   #onMarathonState(frame) {
@@ -621,12 +628,14 @@ export class RemoteHub {
       // M2: the carried plan snapshot, validated fail-closed (null until set).
       plan: normalizeMarathonPlan(frame.plan),
       watcher: normalizeWatcher(frame.watcher),
+      watchOpen: this.marathon.watchOpen,
     }
     if (!next.enabled) {
       next.sessionId = null
       next.since = null
       next.origin = null
       next.plan = null
+      next.watchOpen = null
     }
     if (JSON.stringify(next) === JSON.stringify(this.marathon)) return
     this.marathon = next
@@ -638,6 +647,37 @@ export class RemoteHub {
       plan: next.plan === null ? null : { ...next.plan, items: next.plan.items.map(item => ({ ...item })) },
       watcher: { ...next.watcher },
     }, { turnId: null })
+  }
+
+  /**
+   * M3: a watch notice (alert/recovered/ended-incomplete/info). Journaled and
+   * replayed as remote.watch; the open alert is mirrored into marathon.watch.
+   * @param {Record<string, any>} frame
+   */
+  #onWatch(frame) {
+    const id = stringOrNull(frame.id)
+    if (id === null) return
+    const kind = stringOrNull(frame.kind) ?? 'info'
+    const state = stringOrNull(frame.state) ?? 'open'
+    const notice = {
+      id,
+      turnId: stringOrNull(frame.turnId),
+      kind,
+      state,
+      blocker: stringOrNull(frame.blocker),
+      reason: clip(stringOrNull(frame.reason) ?? '', 500),
+      signals: Array.isArray(frame.signals) ? frame.signals.slice(0, 12).map(signal => ({
+        kind: stringOrNull(signal?.kind) ?? '',
+        level: stringOrNull(signal?.level) ?? '',
+        detail: clip(stringOrNull(signal?.detail) ?? '', 200),
+      })) : [],
+      source: frame.source === 'watcher' || frame.source === 'both' ? frame.source : 'heuristic',
+      at: stringOrNull(frame.at) ?? new Date(this.now()).toISOString(),
+    }
+    this.marathon.watchOpen = (state === 'open' && (kind !== 'info' && kind !== 'recovered'))
+      ? { id: notice.id, kind: notice.kind, at: notice.at, reason: notice.reason }
+      : null
+    this.publish('remote.watch', notice, { turnId: notice.turnId ?? this.turn.turnId })
   }
 
   /**
@@ -852,6 +892,16 @@ function stringOrNull(value) {
   return typeof value === 'string' ? value : null
 }
 
+/** M3: the additive per-turn watch summary {checks, alerts, usage}; null if absent. */
+function watchSummaryOf(value) {
+  if (!isRecord(value)) return null
+  const count = key => {
+    const number = Number(value[key])
+    return Number.isSafeInteger(number) && number >= 0 ? number : 0
+  }
+  return { checks: count('checks'), alerts: count('alerts'), usage: count('usage') }
+}
+
 /** @param {unknown} value */
 function safeJson(value) {
   try {
@@ -928,6 +978,7 @@ function defaultMarathonProjection() {
     origin: null,
     plan: null,
     watcher: { active: false, checks: 0, lastCheckAt: null, lastVerdict: null },
+    watchOpen: null,
   }
 }
 

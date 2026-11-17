@@ -1,0 +1,53 @@
+{
+  "checks": [
+    {
+      "step": "stack",
+      "at": "2026-11-17T02:43:24.426Z",
+      "bridgePort": 39547,
+      "remotePort": 36519,
+      "profileDir": "/tmp/crazyagent-watch-fixtures-psx9Ed/edge-profile"
+    },
+    {
+      "step": "TOOL_HANG",
+      "at": "2026-11-17T02:43:28.291Z",
+      "watchOpen": {
+        "id": "a5fbb47b-d058-43b9-9d55-bfedf53f2bf7",
+        "kind": "TOOL_HANG",
+        "at": "2023-11-14T22:17:20.000Z",
+        "reason": "A browser call has not returned for several minutes."
+      },
+      "panelRow": {
+        "state": "open",
+        "buttons": [
+          "Stop",
+          "Steer…",
+          "It's fine"
+        ]
+      },
+      "thresholdMs": 240000
+    },
+    {
+      "step": "EXECUTOR_DOWN",
+      "at": "2026-11-17T02:43:29.006Z",
+      "watchOpen": {
+        "id": "432290d5-094f-4aa2-ae90-f73154ac8752",
+        "kind": "EXECUTOR_DOWN",
+        "at": "2023-11-14T22:19:20.000Z",
+        "reason": "The browser executor disconnected while the turn was running."
+      },
+      "uiConnected": false,
+      "thresholdMs": 120000
+    }
+  ],
+  "finalWatch": {
+    "open": {
+      "id": "432290d5-094f-4aa2-ae90-f73154ac8752",
+      "kind": "EXECUTOR_DOWN",
+      "at": "2023-11-14T22:19:20.000Z",
+      "reason": "The browser executor disconnected while the turn was running."
+    },
+    "lastVerdict": null,
+    "lastCheckAt": null,
+    "checks": 0
+  }
+}

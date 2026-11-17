@@ -152,6 +152,7 @@
         "marathon": false,
         "planOutcome": null,
         "planRevision": null,
+        "watch": null,
         "help": {
           "category": "login",
           "reason": "Sign in to the mail site, then tell me to continue."
@@ -283,7 +284,8 @@
         "planMode": false,
         "marathon": false,
         "planOutcome": null,
-        "planRevision": null
+        "planRevision": null,
+        "watch": null
       }
     },
     {
@@ -365,6 +367,7 @@
         "marathon": false,
         "planOutcome": null,
         "planRevision": null,
+        "watch": null,
         "help": {
           "category": "captcha",
           "reason": "Solve the CAPTCHA on the download page."
@@ -581,6 +584,7 @@
             "marathon": false,
             "planOutcome": null,
             "planRevision": null,
+            "watch": null,
             "help": {
               "category": "login",
               "reason": "Sign in to the mail site, then tell me to continue."
@@ -715,6 +719,7 @@
             "marathon": false,
             "planOutcome": null,
             "planRevision": null,
+            "watch": null,
             "help": {
               "category": "login",
               "reason": "Sign in to the mail site, then tell me to continue."
@@ -849,6 +854,7 @@
             "marathon": false,
             "planOutcome": null,
             "planRevision": null,
+            "watch": null,
             "help": {
               "category": "login",
               "reason": "Sign in to the mail site, then tell me to continue."
@@ -905,7 +911,8 @@
             "planMode": false,
             "marathon": false,
             "planOutcome": null,
-            "planRevision": null
+            "planRevision": null,
+            "watch": null
           }
         }
       ],
@@ -1029,6 +1036,7 @@
             "marathon": false,
             "planOutcome": null,
             "planRevision": null,
+            "watch": null,
             "help": {
               "category": "login",
               "reason": "Sign in to the mail site, then tell me to continue."
@@ -1085,7 +1093,8 @@
             "planMode": false,
             "marathon": false,
             "planOutcome": null,
-            "planRevision": null
+            "planRevision": null,
+            "watch": null
           }
         },
         {
@@ -1127,6 +1136,7 @@
             "marathon": false,
             "planOutcome": null,
             "planRevision": null,
+            "watch": null,
             "help": {
               "category": "captcha",
               "reason": "Solve the CAPTCHA on the download page."

@@ -2711,6 +2711,94 @@ input::placeholder {
   color: var(--text);
 }
 
+.marathon-mode.alert .marathon-mode-badge {
+  border-color: rgba(255, 195, 0, 0.85);
+  background: var(--accent);
+  color: #1a1a1a;
+}
+
+.marathon-mode.alert .marathon-mode-copy {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.watch-row {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 195, 0, 0.45);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.watch-row.collapsed {
+  border-color: var(--border);
+  background: var(--panel);
+  opacity: 0.85;
+}
+
+.watch-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.watch-row-badge {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 195, 0, 0.5);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.watch-row.collapsed .watch-row-badge {
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.watch-row-reason {
+  min-width: 0;
+  flex: 1;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.watch-row-signals {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.watch-row-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.watch-row-actions button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.watch-row-actions button:hover {
+  background: var(--panel-hover);
+}
+
+.watch-row-stop {
+  border-color: rgba(255, 99, 99, 0.5);
+  color: #ff8a8a;
+}
+
 .marathon-turn-badge {
   border-color: rgba(255, 195, 0, 0.35);
   background: var(--accent-soft);

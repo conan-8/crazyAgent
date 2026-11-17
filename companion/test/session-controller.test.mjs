@@ -20,6 +20,7 @@ function setup(options = {}) {
     getConfirmIrreversible: () => options.confirmIrreversible === true,
     publish: frame => frames.push(frame),
     observers: [{ turnStarted: info => observed.push(['start', info]), turnEnded: info => observed.push(['end', info]) }],
+    watch: options.watch,
   })
   return { controller, runner, bridge, frames, observed, logStore }
 }
@@ -1057,4 +1058,114 @@ test('a new chat drops the carried plan with the switch', async () => {
   assert.equal(controller.marathonState().plan, null)
   assert.equal(controller.marathonState().enabled, false)
   assert.equal(frames.filter(frame => frame.type === 'marathon.state').at(-1).plan, null)
+})
+
+/* ------------------------------------------------------------------ */
+/* M3: the deterministic watcher wired into the controller             */
+/* ------------------------------------------------------------------ */
+
+function watchClock() {
+  let now = 0
+  return {
+    advance: ms => { now += ms },
+    options: { now: () => now, wallNow: () => 1_700_000_000_000 + now, setTimer: () => 0, clearTimer: () => {} },
+  }
+}
+
+test('a hanging tool call on a marathon turn alerts TOOL_HANG and rides the watch summary', async () => {
+  const clock = watchClock()
+  const { controller, runner, frames } = setup({ watch: clock.options })
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn = controller.submit({ text: 'long task' })
+  await runner.started()
+  // A tool call that never returns (the provider emitted the call, no result).
+  runner.event('tool/call', { callId: 'hang-1', name: 'browser_wait_for', arguments: '{}' })
+  clock.advance(240_000)
+  controller.watcher.tick()
+  const alert = frames.find(frame => frame.type === 'chat.watch' && frame.state === 'open')
+  assert.ok(alert, 'a TOOL_HANG alert was published')
+  assert.equal(alert.kind, 'TOOL_HANG')
+  assert.equal(alert.source, 'heuristic')
+  assert.equal(controller.watchState().open.kind, 'TOOL_HANG')
+  // The turn finishes; the summary is additive on chat.done and never changes ok.
+  runner.toolResult({ callId: 'hang-1', text: 'waited' })
+  runner.current.resolve('DONE — finished')
+  await turn.done
+  const done = frames.find(frame => frame.type === 'chat.done')
+  assert.deepEqual(done.watch, { checks: 1, alerts: 1, usage: 0 })
+  assert.equal(done.label, 'done')
+  assert.equal(controller.watchState().open, null)
+})
+
+test('EXECUTOR_DOWN alerts when the panel socket drops mid-marathon-turn', async () => {
+  const clock = watchClock()
+  const { controller, runner, frames } = setup({ watch: clock.options })
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn = controller.submit({ text: 'long task' })
+  await runner.started()
+  controller.setConnectivity({ uiConnected: false, toolsConnected: true })
+  clock.advance(120_000)
+  controller.watcher.tick()
+  const alert = frames.find(frame => frame.type === 'chat.watch' && frame.state === 'open')
+  assert.equal(alert?.kind, 'EXECUTOR_DOWN')
+  controller.setConnectivity({ uiConnected: true, toolsConnected: true })
+  runner.current.resolve('done')
+  await turn.done
+})
+
+test('a non-marathon turn never alerts, even with a hanging call', async () => {
+  const clock = watchClock()
+  const { controller, runner, frames } = setup({ watch: clock.options })
+  const turn = controller.submit({ text: 'quick task' })
+  await runner.started()
+  runner.event('tool/call', { callId: 'hang-1', name: 'browser_wait_for', arguments: '{}' })
+  clock.advance(400_000)
+  assert.equal(controller.watcher.tick(), null)
+  assert.equal(frames.filter(frame => frame.type === 'chat.watch').length, 0)
+  runner.toolResult({ callId: 'hang-1' })
+  runner.current.resolve('done')
+  await turn.done
+  assert.deepEqual(frames.find(frame => frame.type === 'chat.done').watch, { checks: 0, alerts: 0, usage: 0 })
+})
+
+test('a marathon turn ending unfinished emits ended-incomplete; a clean one does not', async () => {
+  const clock = watchClock()
+  const { controller, runner, frames } = setup({ watch: clock.options })
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn = controller.submit({ text: 'long task' })
+  await runner.started()
+  controller.noteActivity({ kind: 'turn-outcome', turn: 1, planOutcome: 'unfinished', planRevision: 2 })
+  runner.current.resolve('PARTIAL — items remain')
+  await turn.done
+  const ended = frames.filter(frame => frame.type === 'chat.watch' && frame.kind === 'ended-incomplete')
+  assert.equal(ended.length, 1)
+  assert.equal(ended[0].state, 'open')
+
+  const clean = setup({ watch: watchClock().options })
+  clean.controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn2 = clean.controller.submit({ text: 'task' })
+  await clean.runner.started()
+  clean.controller.noteActivity({ kind: 'turn-outcome', turn: 1, planOutcome: 'reported-complete', planRevision: 1 })
+  clean.runner.current.resolve('DONE — all complete')
+  await turn2.done
+  assert.equal(clean.frames.filter(frame => frame.type === 'chat.watch' && frame.kind === 'ended-incomplete').length, 0)
+})
+
+test('watchAck dismisses the open alert through the controller', async () => {
+  const clock = watchClock()
+  const { controller, runner, frames } = setup({ watch: clock.options })
+  controller.setMarathon({ enabled: true, origin: 'ui' })
+  const turn = controller.submit({ text: 'long task' })
+  await runner.started()
+  runner.event('tool/call', { callId: 'hang-1', name: 'browser_wait_for', arguments: '{}' })
+  clock.advance(240_000)
+  controller.watcher.tick()
+  const id = controller.watchState().open.id
+  assert.deepEqual(controller.watchAck(id), { ok: true })
+  assert.equal(controller.watchState().open, null)
+  assert.ok(frames.some(frame => frame.type === 'chat.watch' && frame.state === 'dismissed'))
+  assert.equal(controller.watchAck('nope').code, 'WATCH_NOT_FOUND')
+  runner.toolResult({ callId: 'hang-1' })
+  runner.current.resolve('done')
+  await turn.done
 })

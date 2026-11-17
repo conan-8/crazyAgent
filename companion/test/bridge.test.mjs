@@ -494,6 +494,26 @@ test('routes marathon.set to its own handler, never as a prompt; the tools role 
   assert.equal(sets.length, 1)
 })
 
+test('routes marathon.watch.ack to its own handler; the tools role cannot send it', async t => {
+  const acks = []
+  const { url, chats } = await setup(t, {
+    onMarathonWatchAck: (message, ws) => { acks.push({ message, ws }) },
+  })
+  const ui = await connect(url, 'ui')
+  const tools = await connect(url, 'tools')
+  t.after(() => { ui.ws.close(); tools.ws.close() })
+
+  ui.ws.send(JSON.stringify({ v: 1, type: 'marathon.watch.ack', id: 'watch-1' }))
+  await sleep(50)
+  assert.equal(acks.length, 1)
+  assert.equal(acks[0].message.id, 'watch-1')
+  assert.equal(chats.length, 0, 'a watch ack is not a prompt')
+
+  tools.ws.send(JSON.stringify({ v: 1, type: 'marathon.watch.ack', id: 'watch-2' }))
+  await sleep(50)
+  assert.equal(acks.length, 1)
+})
+
 test('survives a failing marathon.set handler and keeps the bridge alive', async t => {
   const { url } = await setup(t, {
     onMarathonSet: () => { throw new Error('marathon handler exploded') },

@@ -580,3 +580,84 @@ test('chat.done carries marathon beside planMode and chat.user marks armed forei
   assert.equal(h.journal.at(-1).body.marathon, false)
   h.turnEnded({ turnId: 'turn-2', outcome: 'done', sessionId: 'session-1' })
 })
+
+/* ------------------------------------------------------------------ */
+/* M3: remote.watch journal/replay and the marathon.watch projection   */
+/* ------------------------------------------------------------------ */
+
+const WATCH_ALERT = Object.freeze({
+  type: 'chat.watch',
+  id: 'watch-1',
+  turnId: 'turn-1',
+  kind: 'TOOL_HANG',
+  state: 'open',
+  blocker: 'TOOL_HANG',
+  reason: 'A browser call has not returned for several minutes.',
+  signals: [{ kind: 'TOOL_HANG', level: 'hard', detail: 'browser_wait_for unanswered for 240s' }],
+  source: 'heuristic',
+  at: '2026-11-16T19:00:00.000Z',
+})
+
+test('chat.watch is journaled as remote.watch, replayed, and projected as marathon.watch.open', () => {
+  const h = hub()
+  h.setSession('session-1')
+  startTurn(h)
+  h.ingest(WATCH_ALERT)
+  const envelope = h.journal.at(-1)
+  assert.equal(envelope.type, 'remote.watch')
+  assert.equal(envelope.body.id, 'watch-1')
+  assert.equal(envelope.body.kind, 'TOOL_HANG')
+  assert.equal(envelope.body.state, 'open')
+  assert.equal(envelope.body.source, 'heuristic')
+  assert.deepEqual(h.projection().marathon.watch.open, {
+    id: 'watch-1', kind: 'TOOL_HANG', at: '2026-11-16T19:00:00.000Z', reason: WATCH_ALERT.reason,
+  })
+  const replay = h.catchUp({ instance: 'inst-a', after: envelope.seq - 1 })
+  assert.deepEqual(replay.events.map(event => event.type), ['remote.watch'])
+  // A recovered notice clears the open alert.
+  h.ingest({ ...WATCH_ALERT, id: 'watch-1', kind: 'recovered', state: 'recovered', reason: 'Progress again.', signals: [] })
+  assert.equal(h.projection().marathon.watch.open, null)
+  assert.equal(h.journal.at(-1).body.state, 'recovered')
+})
+
+test('marathon.watch carries checks/lastCheckAt from marathon.state and resets off', () => {
+  const h = hub()
+  h.setSession('session-1')
+  h.ingest({ ...MARATHON_ON_FRAME, watcher: { active: true, checks: 3, lastCheckAt: '2026-11-16T19:01:00.000Z', lastVerdict: null } })
+  h.ingest(WATCH_ALERT)
+  const watch = h.projection().marathon.watch
+  assert.equal(watch.checks, 3)
+  assert.equal(watch.lastCheckAt, '2026-11-16T19:01:00.000Z')
+  assert.equal(watch.open.kind, 'TOOL_HANG')
+  // Turning the switch off clears the open alert.
+  h.ingest({ ...MARATHON_ON_FRAME, enabled: false, sessionId: null, since: null, origin: null })
+  assert.equal(h.projection().marathon.watch.open, null)
+  // A session change also clears it.
+  h.ingest({ ...MARATHON_ON_FRAME })
+  h.ingest(WATCH_ALERT)
+  h.setSession('session-2')
+  assert.equal(h.projection().marathon.watch.open, null)
+})
+
+test('chat.done and chat.stopped carry the additive watch summary', () => {
+  const h = hub()
+  startTurn(h)
+  h.ingest({ type: 'chat.done', sessionId: 'session-1', text: 'DONE', planMode: true, marathon: true, watch: { checks: 4, alerts: 1, usage: 0 } })
+  assert.deepEqual(h.journal.at(-1).body.watch, { checks: 4, alerts: 1, usage: 0 })
+  h.turnEnded({ turnId: 'turn-1', outcome: 'done', sessionId: 'session-1' })
+  startTurn(h, 'turn-2')
+  h.ingest({ type: 'chat.stopped', reason: 'user', message: 'Stopped by user.', watch: { checks: 2, alerts: 0, usage: 0 } })
+  assert.deepEqual(h.journal.at(-1).body.watch, { checks: 2, alerts: 0, usage: 0 })
+  // Absent watch normalizes to null, never invented.
+  h.turnEnded({ turnId: 'turn-2', outcome: 'stopped', sessionId: 'session-1' })
+  startTurn(h, 'turn-3')
+  h.ingest({ type: 'chat.done', sessionId: 'session-1', text: 'ok' })
+  assert.equal(h.journal.at(-1).body.watch, null)
+})
+
+test('a malformed chat.watch is ignored fail-closed', () => {
+  const h = hub()
+  h.ingest({ type: 'chat.watch', kind: 'TOOL_HANG', state: 'open' })
+  assert.equal(h.journal.length, 0)
+  assert.equal(h.projection().marathon.watch.open, null)
+})

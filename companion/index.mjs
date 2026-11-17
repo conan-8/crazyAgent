@@ -361,7 +361,7 @@ function sendCompanionHello(_ui) {
     llm: llmInfo(),
     credentials: credentialsInfo(),
     settings: { confirmIrreversible: confirmIrreversiblePolicy() },
-    marathon: marathonFrameBody(controller.marathonState()),
+    marathon: { ...marathonFrameBody(controller.marathonState()), watcher: controller.watcherPanelState() },
     log: { runId, path: logStore.path },
   })
 }
@@ -624,6 +624,16 @@ async function handleMarathonSet(message, _ui) {
   if (!result.ok) bridge.sendToUi(uiRejectionFrame(result))
 }
 
+/**
+ * Side-panel transport for marathon.watch.ack ("It's fine"). The watcher
+ * dismisses the open alert and snoozes its kind; an unknown id is a refusal.
+ * @param {Record<string, unknown>} message @param {import('ws').WebSocket} _ui
+ */
+async function handleMarathonWatchAck(message, _ui) {
+  const result = controller.watchAck(message.id)
+  if (!result.ok) bridge.sendToUi(uiRejectionFrame(result))
+}
+
 /** @param {Record<string, any>} message */
 async function handleControl(message) {
   try {
@@ -732,6 +742,7 @@ const bridge = new Bridge({
   onResumeChat: handleResumeChat,
   onStop: handleStop,
   onMarathonSet: handleMarathonSet,
+  onMarathonWatchAck: handleMarathonWatchAck,
   onLog: entry => logStore.recordBridge(entry),
   onControl: handleControl,
   onActivity: frame => {
@@ -742,6 +753,7 @@ const bridge = new Bridge({
     remoteHub?.addScreenshot({ data: image.data, mimeType: image.mimeType, width: image.width, height: image.height, turnId, callId, source })
   },
   onConnectionChange: () => {
+    controller.setConnectivity({ uiConnected: bridge.hasUi(), toolsConnected: bridge.hasTools() })
     remoteHub?.updateHealth()
     if (bridge.hasUi()) {
       sendCompanionHello(bridge.ui)
@@ -899,6 +911,7 @@ async function shutdown(signal) {
   logStore.record('companion', 'shutdown', { signal }, { severity: 'info' })
   await remoteServer?.stop().catch(() => {})
   remoteHub?.close()
+  controller.dispose()
   await bridge.stop().catch(() => {})
   await runner?.close().catch(() => {})
   await logStore.close().catch(() => {})

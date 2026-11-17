@@ -52,6 +52,7 @@ export class Bridge {
    *   onResumeChat?: (sessionId: string, ui: import('ws').WebSocket) => void | Promise<void>,
    *   onStop?: (ui: import('ws').WebSocket, message: Record<string, unknown>) => void | Promise<void>,
    *   onMarathonSet?: (message: Record<string, unknown>, ui: import('ws').WebSocket) => void | Promise<void>,
+   *   onMarathonWatchAck?: (message: Record<string, unknown>, ui: import('ws').WebSocket) => void | Promise<void>,
    *   onConnectionChange?: () => void,
    *   onLog?: (entry: {direction: 'in'|'out'|'event', role?: string, frame: Record<string, any>}) => void,
    *   onControl?: (message: Record<string, any>, ui: import('ws').WebSocket) => void | Promise<void>,
@@ -70,6 +71,7 @@ export class Bridge {
     this.onResumeChat = options.onResumeChat
     this.onStop = options.onStop
     this.onMarathonSet = options.onMarathonSet
+    this.onMarathonWatchAck = options.onMarathonWatchAck
     this.onConnectionChange = options.onConnectionChange
     this.onLog = options.onLog
     this.onControl = options.onControl
@@ -510,6 +512,16 @@ export class Bridge {
           .then(() => this.onMarathonSet?.(message, ws))
           .catch(error => {
             this.log(`bridge: marathon.set handler failed: ${errorMessage(error)}`)
+          })
+        return
+      }
+      if (message.type === 'marathon.watch.ack') {
+        // "It's fine": dismiss the open watch alert. The watcher answers with
+        // chat.watch (state dismissed) or a refusal for an unknown id.
+        Promise.resolve()
+          .then(() => this.onMarathonWatchAck?.(message, ws))
+          .catch(error => {
+            this.log(`bridge: marathon.watch.ack handler failed: ${errorMessage(error)}`)
           })
         return
       }

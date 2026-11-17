@@ -163,7 +163,8 @@
           "inputTokens": 15,
           "outputTokens": 3,
           "totalTokens": 18
-        }
+        },
+        "watch": null
       }
     },
     {
@@ -449,7 +450,8 @@
               "inputTokens": 15,
               "outputTokens": 3,
               "totalTokens": 18
-            }
+            },
+            "watch": null
           }
         },
         {

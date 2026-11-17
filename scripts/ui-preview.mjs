@@ -23,6 +23,7 @@
  *   node scripts/ui-preview.mjs --scenario slash      # slash-command palette: filter, keys, execution
  *   node scripts/ui-preview.mjs --scenario plan       # marathon arm, live checklist, queue/race preservation
  *   node scripts/ui-preview.mjs --scenario marathon   # shared chip: remote-origin toggle, mid-turn off, carried-plan rendering
+ *   node scripts/ui-preview.mjs --scenario watch      # watch alert row: Stop/Steer/It's fine, recovery, ended-incomplete, dismiss
  *   node scripts/ui-preview.mjs --scenario remote     # phone-started turns: render, queue, lost-race requeue
  *   node scripts/ui-preview.mjs --scenario confirm    # approval card: approve/deny, abandonment, settings toggle
  *   node scripts/ui-preview.mjs --scenario stopped    # stop, reload, restore, and continue a saved chat
@@ -1041,6 +1042,112 @@ async function playPlanScenario(page, capture) {
     hidden: document.getElementById('plan-dock').hidden,
     children: document.getElementById('plan-dock').children.length,
   }))()`), { hidden: true, children: 0 })
+}
+
+/**
+ * M3 watch scenario: an alert row with Stop / Steer… / It's fine, dismissal,
+ * recovery collapse, and the ended-incomplete notice. The chip goes amber while
+ * an alert is open. All frames are mocked; the panel renders the real watch-row
+ * module against them.
+ */
+async function playWatchScenario(page, capture) {
+  const { recv, batch } = makePage(page)
+  const watchFrames = () => page.evaluate(`window.__frames.filter(frame => frame.type === 'marathon.watch.ack')`)
+  const chip = () => page.evaluate(`(() => ({
+    visible: !document.getElementById('marathon-mode').classList.contains('hidden'),
+    alert: document.getElementById('marathon-mode').classList.contains('alert'),
+    copy: document.querySelector('.marathon-mode-copy')?.textContent,
+  }))()`)
+  const row = () => page.evaluate(`(() => {
+    const root = [...document.querySelectorAll('.watch-row')].at(-1);
+    if (!root) return { present: false };
+    return {
+      present: true,
+      kind: root.dataset.watchKind,
+      state: root.dataset.watchState,
+      collapsed: root.classList.contains('collapsed'),
+      alert: root.classList.contains('alert'),
+      reason: root.querySelector('.watch-row-reason')?.textContent,
+      buttons: [...root.querySelectorAll('.watch-row-actions button')].map(button => button.textContent),
+      signals: [...root.querySelectorAll('.watch-row-signal')].map(item => item.textContent),
+    };
+  })()`)
+  const stateFrame = (enabled, watcher) => ({
+    v: 1, type: 'marathon.state', enabled,
+    sessionId: enabled ? 'session-preview0001' : null,
+    since: enabled ? '2026-11-16T19:00:00.000Z' : null,
+    origin: enabled ? 'ui' : null, plan: null,
+    watcher: watcher ?? { active: false, checks: 0, lastCheckAt: null, lastVerdict: null },
+  })
+  const alertFrame = (id, kind, reason) => ({
+    v: 1, type: 'chat.watch', id, turnId: 'turn-watch', kind, state: 'open', blocker: kind,
+    reason, signals: [{ kind, level: 'hard', detail: `${kind} detail` }], source: 'heuristic', at: '2026-11-16T19:05:00.000Z',
+  })
+  await batch(HELLO_FRAMES)
+  await sleep(300)
+
+  // Marathon on, watching; start a turn.
+  await recv(stateFrame(true, { active: true, checks: 2, lastCheckAt: '2026-11-16T19:04:00.000Z', lastVerdict: null }))
+  await sleep(150)
+  assert.deepEqual(await chip(), { visible: true, alert: false, copy: 'Watching this turn' })
+  await sendPrompt(page, 'A long marathon task that may hang')
+  await sleep(200)
+
+  // 1. A TOOL_HANG alert: the row appears with three buttons; the chip ambers.
+  await recv(alertFrame('watch-hang', 'TOOL_HANG', 'A browser call has not returned for several minutes.'))
+  await sleep(200)
+  assert.deepEqual(await row(), {
+    present: true, kind: 'TOOL_HANG', state: 'open', collapsed: false, alert: true,
+    reason: 'A browser call has not returned for several minutes.',
+    buttons: ['Stop', 'Steer…', "It's fine"],
+    signals: ['TOOL_HANG — TOOL_HANG detail'],
+  })
+  assert.deepEqual(await chip(), { visible: true, alert: true, copy: 'May be stuck — review the alert' })
+  await capture('alert')
+
+  // 2. "It's fine" sends marathon.watch.ack; the companion answers dismissed.
+  await page.evaluate(`document.querySelector('.watch-row-dismiss').click()`)
+  await sleep(150)
+  assert.equal((await watchFrames()).at(-1).id, 'watch-hang')
+  assert.equal((await row()).state, 'open', 'no optimistic collapse before the companion answers')
+  await recv({ v: 1, type: 'chat.watch', id: 'watch-hang', turnId: 'turn-watch', kind: 'info', state: 'dismissed', blocker: null, reason: 'Dismissed; this alert kind is snoozed for 15 minutes.', signals: [], source: 'heuristic', at: '2026-11-16T19:06:00.000Z' })
+  await sleep(200)
+  assert.equal((await row()).collapsed, true)
+  assert.equal((await row()).buttons.length, 0)
+  assert.deepEqual(await chip(), { visible: true, alert: false, copy: 'Watching this turn' })
+  await capture('dismissed')
+
+  // 3. A new EXECUTOR_DOWN alert, then recovery collapses the row.
+  await recv(alertFrame('watch-down', 'EXECUTOR_DOWN', 'The browser executor disconnected while the turn was running.'))
+  await sleep(200)
+  assert.equal((await row()).kind, 'EXECUTOR_DOWN')
+  assert.equal((await chip()).alert, true)
+  await recv({ v: 1, type: 'chat.watch', id: 'watch-down', turnId: 'turn-watch', kind: 'recovered', state: 'recovered', blocker: null, reason: 'The agent is making progress again.', signals: [], source: 'heuristic', at: '2026-11-16T19:08:00.000Z' })
+  await sleep(200)
+  assert.equal((await row()).collapsed, true)
+  assert.equal((await chip()).alert, false)
+  await capture('recovered')
+
+  // 4. The turn ends unfinished: an ended-incomplete notice with actions.
+  await recv({ v: 1, type: 'chat.done', sessionId: 'session-preview0001', text: 'PARTIAL — items remain', timings: { totalMs: 1 }, planMode: true, marathon: true, planOutcome: 'unfinished', planRevision: 2, watch: { checks: 6, alerts: 2, usage: 0 } })
+  await recv({ v: 1, type: 'chat.status', status: 'idle' })
+  await recv(alertFrame('watch-ended', 'ended-incomplete', 'The turn ended with work still open or blocked.'))
+  await sleep(250)
+  assert.equal((await row()).kind, 'ended-incomplete')
+  assert.deepEqual((await row()).buttons, ['Stop', 'Steer…', "It's fine"])
+  await capture('ended-incomplete')
+
+  // 5. The alert row fits the narrowest panel.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 280, height: 940, deviceScaleFactor: 2, mobile: false })
+  await sleep(250)
+  const narrow = await page.evaluate(`(() => {
+    const root = document.querySelector('.watch-row');
+    const rect = root.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, viewport: innerWidth, overflow: root.scrollWidth > root.clientWidth + 1 };
+  })()`)
+  assert.ok(narrow.left >= 0 && narrow.right <= narrow.viewport)
+  assert.equal(narrow.overflow, false)
+  await capture('narrow')
 }
 
 /**
@@ -2829,6 +2936,8 @@ async function main() {
     await playPlanScenario(page, shot)
   } else if (SCENARIO === 'marathon') {
     await playMarathonScenario(page, shot)
+  } else if (SCENARIO === 'watch') {
+    await playWatchScenario(page, shot)
   } else if (SCENARIO === 'remote') {
     await playRemoteScenario(page, shot)
   } else if (SCENARIO === 'confirm') {

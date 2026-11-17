@@ -1,0 +1,5 @@
+[watch-fixtures] stack {"bridgePort":39547,"remotePort":36519,"profileDir":"/tmp/crazyagent-watch-fixtures-psx9Ed/edge-profile"}
+[watch-fixtures] wrote /home/conan/Documents/GitHub/crazyAgent/docs/marathon/m3-evidence/fixtures/tool-hang.png
+[watch-fixtures] TOOL_HANG {"watchOpen":{"id":"a5fbb47b-d058-43b9-9d55-bfedf53f2bf7","kind":"TOOL_HANG","at":"2023-11-14T22:17:20.000Z","reason":"A browser call has not returned for several minutes."},"panelRow":{"state":"open","buttons":["Stop","Steer…","It's fine"]},"thresholdMs":240000}
+[watch-fixtures] EXECUTOR_DOWN {"watchOpen":{"id":"432290d5-094f-4aa2-ae90-f73154ac8752","kind":"EXECUTOR_DOWN","at":"2023-11-14T22:19:20.000Z","reason":"The browser executor disconnected while the turn was running."},"uiConnected":false,"thresholdMs":120000}
+[watch-fixtures] PASS: TOOL_HANG and EXECUTOR_DOWN alert via GET /state marathon.watch.open; the watcher never stopped the turn
