@@ -68,17 +68,59 @@ export function initialMarathonState() {
   return { enabled: false, sessionId: null, since: null, origin: null, plan: null }
 }
 
+/**
+ * V4 (§3.5, G2): the internal carry chain — prompts of up to the last 3 turns in
+ * the current carried-plan chain, each clipped to 500 chars, oldest first. It is
+ * INTERNAL (never published to clients via marathon.state) and feeds the judge
+ * digest's carriedFrom so a continuation ("continue") carries its ancestor task.
+ */
+export const CARRY_CHAIN_LIMITS = Object.freeze({ maxTurns: 3, promptChars: 500 })
+
+const CARRY_CONTROL_CHARS = /[\u0000-\u001f\u007f]/gu
+function clipCarryPrompt(text) {
+  const value = String(text ?? '').replace(CARRY_CONTROL_CHARS, ' ')
+  return value.length > CARRY_CHAIN_LIMITS.promptChars ? value.slice(0, CARRY_CHAIN_LIMITS.promptChars) : value
+}
+
 export class MarathonState {
   /** @param {{now?: () => Date}} [options] `now` is injected for tests. */
   constructor(options = {}) {
     this.now = options.now ?? (() => new Date())
     /** @type {MarathonSnapshot} */
     this.state = initialMarathonState()
+    /** @type {Array<{prompt: string, turnId: string}>} V4 internal carry chain (not published). */
+    this.carryChain = []
   }
 
   /** A plain copy; callers may never mutate the holder through it. */
   snapshot() {
     return { ...this.state, plan: this.state.plan === null ? null : { ...this.state.plan, items: this.state.plan.items.map(item => ({ ...item })) } }
+  }
+
+  /**
+   * V4: the internal carry chain for the judge digest (ancestors, oldest first).
+   * NOT part of snapshot() — never published to clients.
+   * @returns {Array<{prompt: string, turnId: string}>}
+   */
+  carryChainForDigest() {
+    return this.carryChain.map(entry => ({ ...entry }))
+  }
+
+  /**
+   * V4: push the current turn's prompt into the carry chain (called after a turn
+   * ends with the carried plan persisting, so it becomes an ancestor for the next
+   * turn). Clipped to 500 chars; trimmed to the last 3, oldest first.
+   * @param {string} prompt @param {string} turnId
+   */
+  pushCarryPrompt(prompt, turnId) {
+    if (!this.state.enabled) return
+    this.carryChain.push({ prompt: clipCarryPrompt(prompt), turnId: typeof turnId === 'string' ? turnId : '' })
+    if (this.carryChain.length > CARRY_CHAIN_LIMITS.maxTurns) this.carryChain = this.carryChain.slice(-CARRY_CHAIN_LIMITS.maxTurns)
+  }
+
+  /** V4: clear the carry chain (carried plan dropped / marathon off / chat change). */
+  clearCarryChain() {
+    this.carryChain = []
   }
 
   /**
@@ -109,6 +151,7 @@ export class MarathonState {
       if (!before.enabled && before.plan === null) return { ok: true, changed: false, state: this.snapshot() }
       // Off clears the carried plan (M2) and every enable-time marker.
       this.state = initialMarathonState()
+      this.carryChain = [] // V4: marathon off resets the carry chain
     }
     return { ok: true, changed: true, state: this.snapshot() }
   }
@@ -120,6 +163,7 @@ export class MarathonState {
   reset() {
     const changed = this.state.enabled || this.state.plan !== null
     this.state = initialMarathonState()
+    this.carryChain = [] // V4: new chat / real chat switch / restart resets the chain
     return { changed, state: this.snapshot() }
   }
 
@@ -136,6 +180,7 @@ export class MarathonState {
     const next = open ? normalized : null
     const changed = JSON.stringify(next) !== JSON.stringify(this.state.plan)
     this.state = { ...this.state, plan: next }
+    if (next === null) this.carryChain = [] // V4: carried plan dropped resets the chain
     return { changed, state: this.snapshot() }
   }
 }
