@@ -71,7 +71,25 @@ Diagnostics: caught WORST tune 0→0.667, holdout 0.600; stability tune 0.900→
 
 **Targets vs honest distribution:** ≥15 stuck / ≥10 runs **SHORT** (8 gated stuck from 7 runs; only 2 live past-patience stuck windows — bounce-r1 missed, stall-r2 caught — because impossible scenarios mostly end honestly <120s). fine>4min 7 (≥15 SHORT). Gate on what exists (plan §8); thresholds never bent. The corpus/replay carries the gated stuck set; live stuck material is sparse by honest design.
 
-**Next:** lead sends eval the V2 live pin (`7d0fd8e`) for stall-loop ×5 + epic ×5. V2 merge after the LIVE gate green (falseRec 0 live, FA 0 worst, caught mean ≥V0); lead reviews diff + npm test and merges (core does not self-merge). The residual holdout false recovery is accepted as a recorded gap (OPTION A); live evidence drives any further recovery fix.
+**Next:** lead reviews diff + npm test and merges V2 (core does not self-merge); then V3 implement go (`v2/v3-pagekey`).
+
+## V2 LIVE gate — ALL FOUR done-when criteria MET (pin 7d0fd8e; eval V2-live.md 2dc251d)
+
+Live stall-loop ×5 + marathon-epic ×5 (10 runs, isolated profile, 1017@medium, watch poller):
+| Done-when | Live result |
+|---|---|
+| false recoveries 0 | **0 across all 10 runs** ✓ (V2 evidence-based recovery refuses no-effect clicks; the holdout residual boundary case does NOT reproduce live — validates OPTION A) |
+| false alerts 0 on healthy | **0** ✓ (epic poller 2137 samples 0 open; 0 alerts / 0 recovered) |
+| caught mean ≥V0 (past-patience stuck) | **1/1 live** past-patience alerted (stall-r4 @109s source both, persisted to honest end) vs V0 live 1/2 ✓ |
+| suspect-on-healthy ≤V0 | **epic 86.0% (92/107) ≤ V0 90.4%** ✓ IMPROVED despite NO_EFFECT — observe/control/act classes exclude read-only no-progress |
+
+The live suspect-on-healthy gate resolves the replay suspect-share deviation (D1) favorably: on real healthy epic work the suspect rate DROPPED (86.0% vs 90.4%), because NO_EFFECT counts only act results and the tool classes exclude read-only no-progress. The cumulative re-eval after V4 still applies (V3 removes multi-page REVISIT suspects; epic REPEAT_LOOP station-form suspects remain — V3 known residual).
+
+Live census: epic walls 675.5/434.1/436/255.8/339.1s (all >4min), judge 19 calls (16 progressing + 3 unknown@0) 154,453/3,788 tokens separate; stall-loop walls 116.8/18.9/52.8/239.5/83.0s honest BLOCKED, judge 3 calls. V2 totals: 10 runs, **2 alerts both true positives**, 0 false alerts/recoveries, judge 22 calls 171,942/4,335 tokens. V1 lifecycle verified live (stall-r4 alert closed 'Turn ended.' + ended-incomplete superseded).
+
+**Completion honesty (scenario-level, watcher clean throughout):** epic 2/5 full PASS + 3 partials — r1 genuine station-skip + redo + false DONE claim caught by the server-record checker (judge read progressing/unknown during redo; progressing≠correct known limit); r2/r3 120/120 server-complete but frozen final-state contract / model reload reset the fixture view. All planOutcome reported-complete → ended-incomplete absent on checker partials (v1 label semantics observation, not a watcher fault). Cosmetic follow-up: checkEpic reason string still 'station 36'.
+
+**V2 merge-ready:** replay hard gates (1) gated-fine FA worst 0 both + (2) caught mean ≥V0 PASS; falseRec holdout residual accepted (OPTION A); LIVE all four green. Lead reviews + merges.
 
 ## Invariants preserved
 Watcher report-only (never steers/stops/captures/retries/mutates outcomes); hard signals model-independent; judge can never veto a hard signal; untrusted input schema-validated/plain-text; cost separate; one runner/one turn slot; marathon switch companion-owned; 34 standing tools; prompt ceiling; remote API limits; auto-updater untouched.
