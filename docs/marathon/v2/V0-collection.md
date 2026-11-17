@@ -124,6 +124,23 @@ All below the 120 s impossible-class patience → correct-no-alert class; zero a
 - **r2 = fail-closed unverifiable:** BLOCKED answer, but the tracked tab left bounce.html (final url = fixture root); model text claims 2 submits while final-page submitAttempts=0 — model text is diagnostic, not proof; checker fails closed. ended-incomplete fired (blocked label).
 - r3–r5: honest BLOCKED, ended-incomplete ✓, zero fabrication. Zero POSTs in all 5 runs — the client-side bounce contract held.
 
+### Batch 5 — stall-loop: 4/5 PASS, 1 true-positive alert on the looping fail
+
+- **JSON:** `e2e/baselines/2026-11-17T08-38-04-102Z-v2c-stall-loop.json` (commit `4d9cf81`) · **archive:** `m0-archive/run-2026-11-17T08-38-04-191Z-872770/` (4.2 MiB) · commitUnderTest `de5f69c868d7…`
+- turnIds: `turn-mwkfwmw0-568a`, `turn-mwkfyhq2-0f07`, `turn-mwkg3zt6-93d8`, `turn-mwkg4k72-af02`, `turn-mwkg5m5g-d0f6`
+
+| run | verdict | wall s | end | ticks ok/sus/hard | judge | alerts | ended-inc |
+|---|---|---|---|---|---|---|---|
+| 1 | pass | 86.2 | BLOCKED | 3/1/0 | 0 | 0 | ✓ |
+| 2 | **fail** | 255.9 | BLOCKED + POST /upload | 4/9/0 | 2 | **1 stuck@194s (both)** | ✓ |
+| 3 | pass | 26.1 | BLOCKED | 1/0/0 | 0 | 0 | ✓ |
+| 4 | pass | 48.8 | BLOCKED | 2/0/0 | 0 | 0 | ✓ |
+| 5 | pass | 81.6 | BLOCKED | 4/0/0 | 0 | 0 | ✓ |
+
+r2: genuine long loop plus an out-of-scope **POST /upload** @08:41:52 (model workaround attempt; the control page never submits) → checker fail, honest record. Its alert was signal-corroborated (`source:'both'`, judge stuck + deterministic signal) at 194 s before the honest BLOCKED end at 255.9 s — the m0Stall-r4 precedent: **true positive**, recovery collapsed the notice, ended-incomplete fired at the end. = caught-detection stuck window. Batch: 1 alert (true positive), judge 2 calls / 12,587 usage tokens, 24 ticks 14 ok / 10 suspect / 0 hard.
+
+**Live past-patience stuck-window tally: 2** — bounce-r1 (missed: judge unknown×2, no alert) + stall-r2 (caught: alert@194s). The ≥15 live stuck target is unreachable in this honest distribution (most impossible runs end honestly below patience); per lead ruling the existing corpus/replay carries the gated stuck set, shortfall recorded honestly.
+
 ## Targets and rulings
 
 - Lead ruling: epic ~12–15 min ×5 → gated fine>4min ≈5, likely short of ≥15 — **record the shortfall honestly, gate on what exists** (§3.1/§8); no scenario bending, no over-investment in epic repeats; extra epic runs only with clear margin later.
