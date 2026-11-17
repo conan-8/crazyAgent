@@ -113,12 +113,13 @@ Already updated incrementally for M1–M3; M6 verifies completeness and adds M4/
 
 **Release flow (plan §5 M6 + v2.3.0 precedent):**
 1. Land M4/M5 acceptance; final doc pass (this draft → real edits); version bumps above.
-2. Full gates at the release head: `npm test` + `c1-acceptance --self-test` + `./gradlew testDebugUnitTest lintDebug` + ui-preview scenarios; verify at a clean checkout. **PENDING** counts.
+2. Full gates at the release head: `npm test` + `c1-acceptance --self-test` + `./gradlew testDebugUnitTest lintDebug` + ui-preview scenarios. **VERIFY AT A CLEAN CHECKOUT of the release commit (temp worktree + node_modules symlink, like the acceptance pins) — NOT the dirty main tree**, which carries the user's uncommitted auto-updater work that could affect test counts/results. The v2.4.0 release contains **marathon work ONLY**; the user's updater stays uncommitted for them to land separately. **PENDING** counts.
 3. **Reload the unpacked extension and reopen its panel FIRST, then restart the companion, in that order** (plan §5 M6). Rationale from v2.3.0: a new companion can send arguments an old extension rejects (e.g. `confirm_guard`); reloading the extension first avoids the mismatch. There is no version handshake.
 4. Verify `/health` returns ok/ui/tools:true after the real executor reconnects; verify `/state server.version` = 2.4.0.
 5. Build/sign the Android release APK (versionName/versionCode bumped); pin its SHA-256 in README; **on-device install + push delivery remain user-gated/unrun**.
 6. Tag `v2.4.0`; `gh release` **condition:** only after the final gates are green and the extension/companion are verified active (follow the v2.3.0 published-release pattern). Do NOT tag/release while M4/M5 acceptance is pending.
 7. Update HANDOFF-QUICK "Current build" Release row with the tag/release URL + APK SHA-256.
+8. **Exclusion note (required):** record explicitly in M6-report.md AND docs/STATUS.md that "the user's auto-updater work in the tree (updater.mjs/self-update.js + index/bridge/dev/service/background edits) was excluded from the v2.4.0 release and left 100% untouched (no revert/commit/stash) for the user to land separately." Standing team policy: never touch/revert/commit/stash the user's parallel updater work; exclude it from every marathon commit.
 
 ## 6. M4 carry-forward for STATUS.md (judge-confirmed, lead ruling — verbatim source)
 
