@@ -658,12 +658,12 @@
             "helpCallAt": null,
             "helpBeforeAlert": null,
             "watchSummary": {
-              "checks": 3,
+              "checks": 1,
               "alerts": 0,
               "usage": 0
             },
-            "chatDoneLabel": "done",
-            "chatDonePlanOutcome": "reported-complete",
+            "chatDoneLabel": null,
+            "chatDonePlanOutcome": null,
             "watchTicks": 1,
             "tickLevels": {
               "ok": 0,
@@ -1313,12 +1313,12 @@
             "helpCallAt": null,
             "helpBeforeAlert": null,
             "watchSummary": {
-              "checks": 2,
+              "checks": 1,
               "alerts": 0,
               "usage": 0
             },
             "chatDoneLabel": null,
-            "chatDonePlanOutcome": "reported-complete",
+            "chatDonePlanOutcome": null,
             "watchTicks": 1,
             "tickLevels": {
               "ok": 1,
@@ -1981,12 +1981,12 @@
             "helpCallAt": null,
             "helpBeforeAlert": null,
             "watchSummary": {
-              "checks": 2,
+              "checks": 1,
               "alerts": 0,
               "usage": 0
             },
-            "chatDoneLabel": "done",
-            "chatDonePlanOutcome": "reported-complete",
+            "chatDoneLabel": null,
+            "chatDonePlanOutcome": null,
             "watchTicks": 1,
             "tickLevels": {
               "ok": 1,
@@ -2746,12 +2746,12 @@
             "helpCallAt": null,
             "helpBeforeAlert": null,
             "watchSummary": {
-              "checks": 4,
+              "checks": 1,
               "alerts": 0,
               "usage": 0
             },
-            "chatDoneLabel": "done",
-            "chatDonePlanOutcome": "reported-complete",
+            "chatDoneLabel": null,
+            "chatDonePlanOutcome": null,
             "watchTicks": 1,
             "tickLevels": {
               "ok": 0,
@@ -3461,12 +3461,12 @@
             "helpCallAt": null,
             "helpBeforeAlert": null,
             "watchSummary": {
-              "checks": 3,
+              "checks": 1,
               "alerts": 0,
               "usage": 0
             },
-            "chatDoneLabel": "done",
-            "chatDonePlanOutcome": "reported-complete",
+            "chatDoneLabel": null,
+            "chatDonePlanOutcome": null,
             "watchTicks": 1,
             "tickLevels": {
               "ok": 1,
