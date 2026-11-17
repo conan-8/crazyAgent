@@ -44,7 +44,14 @@ export function normalizePlanSeed(seed) {
   for (const item of seed.items) {
     if (item === null || typeof item !== 'object' || typeof item.content !== 'string' || item.content.trim().length === 0) return null
     if (typeof item.status !== 'string' || !PLAN_ITEM_STATUSES.has(item.status)) return null
-    items.push({ content: item.content, status: item.status })
+    // V8 (§3.9): accept and keep the optional blocked-item reason through the
+    // carry chain (single line ≤240 chars, blocked only); fail closed otherwise.
+    const next = { content: item.content, status: item.status }
+    if (item.reason !== undefined) {
+      if (item.status !== 'blocked' || typeof item.reason !== 'string' || item.reason.trim().length === 0 || item.reason.length > PLAN_LIMITS.maxReasonChars || /[\u0000-\u001f\u007f]/u.test(item.reason)) return null
+      next.reason = item.reason.trim()
+    }
+    items.push(next)
   }
   return { revision: seed.revision, items }
 }
