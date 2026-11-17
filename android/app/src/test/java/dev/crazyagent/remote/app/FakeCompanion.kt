@@ -305,6 +305,20 @@ class FakeCompanion(var token: String, var instanceId: String = "fake-1") : Disp
         }, turnId)
     }
 
+    /**
+     * V1 scenario control: the explicit close frame (kind info, state closed,
+     * the notice's own id) — "Turn ended." at turn end, "A new turn started."
+     * before the next turn's first frame.
+     */
+    fun closeWatchAlert(id: String, reason: String) = synchronized(lock) {
+        watchOpen = null
+        publish("remote.watch", buildJsonObject {
+            put("id", id); put("turnId", turnId); put("kind", "info"); put("state", "closed")
+            put("blocker", null as String?); put("reason", reason)
+            put("signals", JsonArray(emptyList())); put("source", "heuristic"); put("at", "2026-11-06T12:00:00.000Z")
+        }, turnId)
+    }
+
     private fun events(request: RecordedRequest): MockResponse {
         eventRequests += request
         if (refuseUpgrades > 0) {

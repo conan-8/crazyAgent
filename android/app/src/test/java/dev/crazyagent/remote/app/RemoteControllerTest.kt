@@ -294,6 +294,73 @@ class RemoteControllerTest {
         assertTrue(recovered.chat.turn.isActive)
     }
 
+    // V1 (task-15): the explicit alert lifecycle through the real client.
+
+    @Test fun aClosedAlertCollapsesTheCardAndClearsTheAmber() {
+        val c = controller().start()
+        c.awaitLive()
+        c.toggleMarathon()
+        c.await { it.chat.marathon.enabled }
+        c.type("long task")
+        c.send()
+        c.await { it.chat.turn.isActive && it.pending == null }
+        fake.openWatchAlert("watch-1", "TOOL_HANG")
+        c.await { it.chat.marathon.watch.open?.id == "watch-1" }
+        // Turn end closes the open alert under its own id.
+        fake.closeWatchAlert("watch-1", "Turn ended.")
+        val closed = c.await { it.chat.watchNotice?.state == "closed" }
+        assertNull(closed.chat.marathon.watch.open)
+        assertFalse(closed.chat.watchNotice!!.actionable)
+        assertEquals("Turn ended.", closed.chat.watchNotice!!.reason)
+    }
+
+    @Test fun endedIncompleteIsDismissableWithAck200() {
+        val c = controller().start()
+        c.awaitLive()
+        c.toggleMarathon()
+        c.await { it.chat.marathon.enabled }
+        c.type("long task")
+        c.send()
+        c.await { it.chat.turn.isActive && it.pending == null }
+        fake.finishTurn("PARTIAL — work still open.")
+        c.await { !it.chat.turn.isActive }
+        fake.openWatchAlert("watch-2", "ended-incomplete", "The turn ended with work still open or blocked.")
+        val ended = c.await { it.chat.marathon.watch.open?.kind == "ended-incomplete" }
+        assertTrue(ended.chat.watchNotice!!.actionable)
+        assertTrue(ended.canAckWatch)
+        // V1: "It's fine" on ended-incomplete returns 200 and closes it.
+        c.ackWatch()
+        val dismissed = c.await { it.chat.marathon.watch.open == null && !it.watchAckInFlight }
+        assertEquals(1, fake.watchAckPosts.size)
+        assertEquals("watch-2", fake.watchAckPosts.single()["id"]?.jsonPrimitive?.content)
+        assertEquals("dismissed", dismissed.chat.watchNotice?.state)
+        assertFalse(dismissed.chat.watchNotice!!.actionable)
+        assertNull(dismissed.notice)
+    }
+
+    @Test fun theAmberNeverCarriesIntoANewTurn() {
+        val c = controller().start()
+        c.awaitLive()
+        c.toggleMarathon()
+        c.await { it.chat.marathon.enabled }
+        c.type("long task")
+        c.send()
+        c.await { it.chat.turn.isActive && it.pending == null }
+        fake.finishTurn("PARTIAL — work still open.")
+        c.await { !it.chat.turn.isActive }
+        fake.openWatchAlert("watch-2", "ended-incomplete", "The turn ended with work still open or blocked.")
+        c.await { it.chat.marathon.watch.open?.kind == "ended-incomplete" }
+        // #begin closes the ended-incomplete BEFORE the new turn's first frame.
+        fake.closeWatchAlert("watch-2", "A new turn started.")
+        c.await { it.chat.watchNotice?.state == "closed" }
+        c.type("continue")
+        c.send()
+        val running = c.await { it.chat.turn.isActive && it.pending == null }
+        assertNull(running.chat.marathon.watch.open)
+        assertNull(running.chat.watchNotice)
+        assertEquals("Watching this turn", dev.crazyagent.remote.state.marathonChipCopy(running.chat.marathon, busy = true, nowMs = 0))
+    }
+
     @Test fun oldStoredPlanModePendingArmsMarathonThenSendsPlainly() {
         // A pre-M5 stored pending: the old per-message plan flag maps to a
         // marathon-on call, and the message itself goes out without planMode.
