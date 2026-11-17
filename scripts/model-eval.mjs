@@ -27,7 +27,7 @@
  * Flags: --scenario <name> (repeatable), --repeat <n>, --self-test, --list,
  *        --max-turn-seconds <n>, --max-total-tokens <n>, --json <path>,
  *        --label <name>, --headed, --keep, --dsh-home <path>, --reset-dsh-home,
- *        --model <id>, --effort <level>, --verbose, --help
+ *        --model <id>, --effort <level>, --plan, --verbose, --help
  *
  * Scenario contract (e2e/scenarios/<name>.mjs):
  *   export const name; export const fixture; export const prompt;
@@ -185,6 +185,7 @@ function parseCli(argv) {
     model: DEFAULT_MODEL,
     effort: DEFAULT_EFFORT,
     confirmIrreversible: false,
+    plan: false,
     verbose: false,
     help: false,
   }
@@ -210,6 +211,7 @@ function parseCli(argv) {
     else if (token === '--model') options.model = value()
     else if (token === '--effort') options.effort = value()
     else if (token === '--confirm-irreversible') options.confirmIrreversible = true
+    else if (token === '--plan') options.plan = true
     else if (token === '--verbose') options.verbose = true
     else if (token === '--help' || token === '-h') options.help = true
     else if (token.startsWith('--')) throw new Error(`unknown flag ${token}`)
@@ -243,6 +245,8 @@ function printHelp() {
   --effort <level>        default ${DEFAULT_EFFORT} (kept fixed for comparisons)
   --confirm-irreversible  arm the opt-in confirmation setting on the isolated
                           companion (required by the submit-gate scenarios)
+  --plan                  send every prompt with planMode:true (today's /plan,
+                          armed for one turn); recorded in the batch JSON
   --verbose               print companion/Edge diagnostics
   --help
 
@@ -1326,6 +1330,7 @@ async function runModelBatch(options, scenarios) {
     model: options.model,
     effort: options.effort,
     confirmIrreversible: options.confirmIrreversible === true,
+    planMode: options.plan === true,
     node: process.version,
     dshHome,
     repeat: options.repeat,
@@ -1414,7 +1419,7 @@ async function runModelBatch(options, scenarios) {
     page = new PageController({ edge, fixtureBaseUrl: fixtureServer.baseUrl })
     await page.ensure()
     const eventsPath = resolveRunEvents(logsRoot, null)
-    process.stdout.write(`model-eval: ${options.model} @ ${options.effort} · ${scenarios.length} scenario(s) × ${options.repeat}\n`)
+    process.stdout.write(`model-eval: ${options.model} @ ${options.effort}${options.plan ? ' · /plan' : ''} · ${scenarios.length} scenario(s) × ${options.repeat}\n`)
     process.stdout.write(`isolated home: ${dshHome}\nscratch: ${runRoot}\n\n`)
 
     for (const scenario of scenarios) {
@@ -1450,11 +1455,11 @@ async function runModelBatch(options, scenarios) {
         const maxTurnSeconds = Number(scenario.maxTurnSeconds ?? options.maxTurnSeconds)
         let accepted
         try {
-          accepted = await remote.send(scenario.prompt)
+          accepted = await remote.send(scenario.prompt, options.plan ? { planMode: true } : {})
         } catch (error) {
           if (error instanceof ApiError && ['TURN_BUSY', 'TURN_STOPPING', 'SESSION_CHANGING', 'RUNTIME_NOT_READY'].some(code => String(error.body?.error?.code ?? '').includes(code))) {
             await sleep(1_000)
-            accepted = await remote.send(scenario.prompt)
+            accepted = await remote.send(scenario.prompt, options.plan ? { planMode: true } : {})
           } else {
             throw error
           }

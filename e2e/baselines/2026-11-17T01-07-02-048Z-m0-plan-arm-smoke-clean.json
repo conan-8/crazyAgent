@@ -1,0 +1,120 @@
+{
+  "startedAt": "2026-11-17T01:07:02.048Z",
+  "finishedAt": "2026-11-17T01:07:08.469Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "planMode": true,
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-m0-clean-eval/dsh-home",
+  "repeat": 1,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 89034,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "click-once",
+      "fixture": "click.html",
+      "prompt": "Click the Increment button on this page exactly once, then tell me what the count is.",
+      "file": "click-once.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwjzslnh-44ef",
+          "status": "pass",
+          "reasons": [
+            "count is exactly 1 and no other counter changed"
+          ],
+          "evidence": {
+            "count": "1",
+            "roleCount": "0",
+            "semanticCount": "0",
+            "checkState": "unchecked"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5114,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 2,
+              "browser_click": 1
+            },
+            "inputTokens": 6785,
+            "outputTokens": 329,
+            "cacheReadTokens": 81920,
+            "totalTokens": 89034,
+            "usage": {
+              "inputTokens": 6785,
+              "outputTokens": 329,
+              "totalTokens": 89034,
+              "cacheReadTokens": 81920
+            },
+            "finalText": "DONE\n- Clicked \"Increment\" once; the count went from 0 to 1 (verified in both the page text and screenshot: \"count: 1\").",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwjzslnh-44ef",
+              "origin": "remote",
+              "clientMessageId": "ec7ff3c2-5175-4b00-a5f3-2638a9ed12af",
+              "startedAt": "2026-11-17T01:07:03.197Z",
+              "endedAt": "2026-11-17T01:07:08.311Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 6785,
+                "outputTokens": 329,
+                "totalTokens": 89034,
+                "cacheReadTokens": 81920
+              },
+              "failedCalls": 0
+            }
+          },
+          "answer": null,
+          "skipped": false,
+          "planEvidence": {
+            "planModeStarted": true,
+            "planOutcome": "reported-complete",
+            "planRevision": 2,
+            "browserPlanCalls": 2,
+            "planModeEndedOutcome": "reported-complete"
+          },
+          "logArchive": ".dsh-home/browser-agent/logs/m0-archive/run-2026-11-17T01-07-02-137Z-f33f10/events.jsonl"
+        }
+      ],
+      "effectiveMaxTurnSeconds": 90
+    }
+  ],
+  "logArchiveRoot": ".dsh-home/browser-agent/logs/m0-archive",
+  "logArchiveRunDir": "run-2026-11-17T01-07-02-137Z-f33f10",
+  "commitUnderTest": "c2966018d10e761be93d9c5dbdeb60bf9865a5b8",
+  "worktree": "/tmp/crazyagent-m0-clean",
+  "provenance": "git worktree pinned at commitUnderTest; only harness/scenario/fixture files overlaid; live working tree not used"
+}
