@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   createWatchJudge, validateVerdict, unknownVerdict, buildDigest, parseCompletion,
   JUDGE_SYSTEM_PROMPT, JUDGE_MAX_TOKENS, JUDGE_REASONING_EFFORT, JUDGE_REASON_CHARS, VERDICT_STATES, VERDICT_BLOCKERS,
+  JUDGE_PROVIDER_ORDER, JUDGE_PROVIDER_ALLOW_FALLBACKS, JUDGE_PROVIDER_REQUIRE_PARAMETERS, JUDGE_SEED,
 } from '../watch-judge.mjs'
 import { WatchLedger } from '../watch-ledger.mjs'
 
@@ -236,7 +237,9 @@ test('check sends one stateless request with the verified OpenRouter shape', asy
   assert.equal(body.temperature, 0)
   assert.deepEqual(body.response_format, { type: 'json_object' })
   assert.deepEqual(body.reasoning, { effort: JUDGE_REASONING_EFFORT })
-  assert.equal(body.max_tokens, 1200, 'V5 c2: reasoning tokens count against max_tokens')
+  // V5 c3: pinned provider routing + fixed seed for verdict stability.
+  assert.deepEqual(body.provider, { order: [...JUDGE_PROVIDER_ORDER], allow_fallbacks: JUDGE_PROVIDER_ALLOW_FALLBACKS, require_parameters: JUDGE_PROVIDER_REQUIRE_PARAMETERS })
+  assert.equal(body.seed, JUDGE_SEED)
   assert.equal(body.stream, false)
   assert.equal(body.messages[0].role, 'system')
   assert.equal(body.messages[0].content, JUDGE_SYSTEM_PROMPT)

@@ -29,7 +29,7 @@ import { gunzipSync } from 'node:zlib'
 import { createHash } from 'node:crypto'
 import { WatchLedger } from '../companion/watch-ledger.mjs'
 import { Watcher, WATCH_JUDGE_LIMITS } from '../companion/watcher.mjs'
-import { createWatchJudge } from '../companion/watch-judge.mjs'
+import { createWatchJudge, JUDGE_MAX_TOKENS, JUDGE_REASONING_EFFORT } from '../companion/watch-judge.mjs'
 import { DEFAULT_BASE_URL, RECOMMENDED_MODEL_ID } from '../companion/openrouter.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -519,7 +519,7 @@ async function main() {
   const summary = {
     dryRun: args.dryRun, split: args.split ?? 'all', repeat: args.repeat,
     manifestCreatedAt: manifest.createdAt, manifestWindows: manifest.windows.length,
-    model: config.model.id, effort: 'low', maxTokensPerCall: 400,
+    model: config.model.id, effort: JUDGE_REASONING_EFFORT, maxTokensPerCall: JUDGE_MAX_TOKENS,
     groups, gatePass,
     cost: { totals, perWatchedHour, watchedSeconds, note: 'judge cost only; separate from agent usage' },
     generatedAt: new Date().toISOString(),
