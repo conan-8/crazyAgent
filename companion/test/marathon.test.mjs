@@ -195,3 +195,19 @@ test('V4: carryChainForDigest returns a copy (no mutation through it)', () => {
   assert.equal(m.carryChainForDigest()[0].prompt, 'a')
   assert.equal(m.carryChainForDigest().length, 1)
 })
+
+test('V8: normalizeMarathonPlan accepts and keeps a blocked-item reason; rejects reason on non-blocked', () => {
+  const withReason = { ...PLAN, items: [{ content: 'Fill the form', status: 'blocked', reason: 'sign-in wall' }, { content: 'Verify', status: 'pending' }] }
+  const normalized = normalizeMarathonPlan(withReason)
+  assert.ok(normalized, 'carried seed with reason is accepted (not silently empty)')
+  assert.equal(normalized.items[0].reason, 'sign-in wall')
+  // reason on a non-blocked item fails closed.
+  assert.equal(normalizeMarathonPlan({ ...PLAN, items: [{ content: 'Fill the form', status: 'in_progress', reason: 'x' }, { content: 'Verify', status: 'pending' }] }), null)
+  // over-long reason fails closed.
+  assert.equal(normalizeMarathonPlan({ ...PLAN, items: [{ content: 'Fill the form', status: 'blocked', reason: 'x'.repeat(241) }, { content: 'Verify', status: 'pending' }] }), null)
+  // the stored snapshot keeps the reason through storePlan.
+  const m = new MarathonState({ now: fixedNow })
+  m.set({ enabled: true, sessionId: 's' })
+  m.storePlan(withReason)
+  assert.equal(m.snapshot().plan.items[0].reason, 'sign-in wall')
+})
