@@ -306,6 +306,23 @@ test('an invalid seed falls back to an empty plan and logs plan.seed.rejected', 
   assert.equal(created.result.structuredContent.revision, 1)
 })
 
+test('V4: an accepted seed emits exactly ONE seeded plan activity immediately', async t => {
+  const fake = fixture(t)
+  const items = openItems()
+  activate(fake, 'turn-seed-visible', { revision: 4, items })
+  // Before any browser_plan call, the seed is visible as one activity.
+  assert.equal(fake.activities.length, 1, 'exactly one activity on accepted claim')
+  assert.deepEqual(fake.activities[0], { kind: 'plan', revision: 4, items, awaitingUser: false, seeded: true })
+})
+
+test('V4: a rejected seed emits NO plan activity (ledger and model see the same empty plan)', async t => {
+  const fake = fixture(t)
+  // Duplicate contents make seedPlanState reject the seed.
+  activate(fake, 'turn-seed-rejected', { revision: 4, items: [task('One', 'in_progress'), task('One', 'in_progress')] })
+  assert.ok(fake.logEvents.some(e => e.type === 'plan.seed.rejected'), 'seed rejected')
+  assert.equal(fake.activities.length, 0, 'no activity for a rejected seed')
+})
+
 test('a seeded but untouched turn allows the answer with not-assessed', async t => {
   const fake = fixture(t)
   activate(fake, 'turn-untouched', { revision: 4, items: openItems() })

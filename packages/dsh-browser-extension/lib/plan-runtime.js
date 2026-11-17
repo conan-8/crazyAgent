@@ -185,6 +185,18 @@ export function createPlanRuntime({ ctx, bridge }) {
       } else {
         state = seededState
         seeded = true
+        // V4 (§3.5, G1): the seed becomes visible — emit ONE plan activity so the
+        // ledger and planTurnSnapshot see the armed seed at turn start (open-flat
+        // can fire on continuation wander). A rejected seed emits nothing (above),
+        // so ledger and model see the same empty plan. awaitingUser:false; the
+        // seeded flag distinguishes it from a model browser_plan update.
+        bridge.activity({
+          kind: 'plan',
+          revision: state.revision,
+          items: state.items.map(item => ({ ...item })),
+          awaitingUser: false,
+          seeded: true,
+        })
       }
     }
     const plan = {
