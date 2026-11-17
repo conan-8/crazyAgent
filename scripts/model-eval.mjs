@@ -1431,6 +1431,53 @@ function assembleTurn(baseTurn, metrics, timedOut, state) {
   return turn
 }
 
+/**
+ * V0 measurement (MARATHON-V2-PLAN.md §3.1): the fixture SERVER's own accept
+ * timestamps for every POST of a run, so window labels can be derived from
+ * server-side progress instead of judgment. Additive; default behavior
+ * unchanged. `acceptedAt` is the server clock (same host as events.jsonl);
+ * `turnId` is attributed by the turn's startedAt/endedAt window; duplicates
+ * are preserved (a re-POSTed step is a redo, detectable downstream).
+ */
+function serverRecordsFrom(fixtureServer, windows) {
+  const records = []
+  let get = 0
+  let post = 0
+  let other = 0
+  for (const request of fixtureServer.requests) {
+    const method = String(request.method ?? '').toUpperCase()
+    if (method === 'GET') get += 1
+    else if (method === 'POST') post += 1
+    else other += 1
+    if (method !== 'POST') continue
+    let body = null
+    try { body = JSON.parse(request.body) } catch { /* non-JSON body */ }
+    const isRecordBody = body !== null && typeof body === 'object'
+    const t = Date.parse(request.at)
+    const win = windows.find(w => w.start && w.end && t >= Date.parse(w.start) && t <= Date.parse(w.end) + 5000)
+    records.push({
+      step: Number.isSafeInteger(body?.step) ? body.step : null,
+      acceptedAt: request.at,
+      method: 'POST',
+      path: request.path,
+      word: typeof body?.word === 'string' ? body.word : null,
+      receipt: typeof body?.receipt === 'string' ? body.receipt : null,
+      body: isRecordBody && JSON.stringify(body).length <= 2000 ? body : null,
+      turnId: win?.turnId ?? null,
+    })
+  }
+  const all = fixtureServer.requests
+  const summary = {
+    total: all.length,
+    get,
+    post,
+    other,
+    firstAt: all.length > 0 ? all[0].at : null,
+    lastAt: all.length > 0 ? all[all.length - 1].at : null,
+  }
+  return { records, summary }
+}
+
 async function runModelBatch(options, scenarios) {
   const apiKey = (process.env.CRAZYAGENT_API_KEY ?? '').trim()
   if (apiKey.length === 0) {
@@ -1499,6 +1546,8 @@ async function runModelBatch(options, scenarios) {
         answer: run.answer ?? null,
         marathonArm: run.marathonArm ?? null,
         followUp: run.followUp ?? null,
+        serverRecords: run.serverRecords ?? null,
+        serverRequestSummary: run.serverRequestSummary ?? null,
         voidedAttempts: run.voidedAttempts ?? null,
         skipped: run.skipped ?? false,
       })),
@@ -1812,6 +1861,13 @@ async function runModelBatch(options, scenarios) {
             collateral = { ok: false, error: error.message }
           }
         }
+        const turnWindows = [
+          { turnId: accepted.turnId, start: turn.finalTurnState?.startedAt ?? null, end: turn.finalTurnState?.endedAt ?? null },
+        ]
+        if (followUp) {
+          turnWindows.push({ turnId: followUp.turnId, start: followUp.turn.finalTurnState?.startedAt ?? null, end: followUp.turn.finalTurnState?.endedAt ?? null })
+        }
+        const serverSide = serverRecordsFrom(fixtureServer, turnWindows)
         runRecord = {
           runIndex: index,
           accepted: { turnId: accepted.turnId, clientMessageId: accepted.clientMessageId },
@@ -1821,6 +1877,8 @@ async function runModelBatch(options, scenarios) {
           answer,
           marathonArm,
           followUp,
+          serverRecords: serverSide.records,
+          serverRequestSummary: serverSide.summary,
           voidedAttempts: voidedAttempts.length > 0 ? [...voidedAttempts] : null,
           finishedAt: nowIso(),
         }
@@ -1838,6 +1896,8 @@ async function runModelBatch(options, scenarios) {
             answer: null,
             marathonArm: null,
             followUp: null,
+            serverRecords: [],
+            serverRequestSummary: null,
             voidedAttempts,
             finishedAt: nowIso(),
           }
