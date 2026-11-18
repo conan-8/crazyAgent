@@ -1,3 +1,28 @@
+# crazyAgent v2.5.1
+
+Changes since **v2.5.0**. This desktop-only patch makes the existing automatic updater frictionless and visible: eligible supervised installations continue to install newer stable releases automatically when idle and restart without user approval, while the sidebar now reports each stage and the post-restart result.
+
+The extension and companion use version `2.5.1`. Android remains `0.8.0 (7)` with no phone-code changes; the release carries the same signed APK, SHA-256 `57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d`.
+
+## Frictionless automatic updates
+
+- **No update button is needed.** The existing fail-closed rules remain: a clean official checkout exactly on the running release tag, a newer stable GitHub release, no running turn, marathon off, about ten idle minutes, and a supervisor. Exit code 75 restarts the companion through `npm run dev` or the service; installation failures still restore the previous tag.
+- **The sidebar sees the updater.** `chat.hello` includes the authoritative update state on connection/reconnect, and `update.state` frames announce changes. Pending and installing notices explicitly say installation and restart are automatic; an unsupervised installation explains why it cannot install itself.
+- **Success is announced once.** The updater persists the completed `{from,to,at}` result. After restart the panel shows one success toast and stores its announcement key, so reconnects and panel reloads do not repeat it. Failure notices are bounded plain text and remain dismissible until the error changes.
+- **No new remote privilege or data collection.** Update checks still contact only GitHub's fixed latest-release endpoint without user data. Development branches and edited checkouts remain ineligible.
+
+## Verification
+
+- **22 focused updater/notification tests** passed, including install/restart state, persisted success restoration, bounded errors, and one-time presentation.
+- Real-panel mock-bridge `scripts/ui-preview.mjs --scenario update` passed with inspected pending, installing, updated, and failure screenshots, including two panel reloads to prove duplicate-success suppression.
+- **1325/1325 Node tests** at v2.5.1, including 22 focused updater/notification tests; Android `testDebugUnitTest lintDebug` **154 JVM tests / 0 failures / 3 opt-in skips / lint clean**; prompt composition remains **12,402 non-Docs / 18,092 Docs-turn characters**.
+- Isolated extension self-update fixture **4/4**: older on-disk versions are ignored, a newer version reloads once, and no reload loop occurs.
+- Real-extension regression runner **12 suites passed / 0 failed / 7 documented exclusions**.
+
+The unpatched transitive `picomatch@4.0.7` advisory documented for v2.5.0 remains unchanged; there is still no patched picomatch release.
+
+---
+
 # crazyAgent v2.5.0
 
 Changes since **v2.4.0**. This release ships **marathon v2 (V1–V8)** — watcher reliability and plan-friction improvements on top of the v2.4.0 marathon mode. The acceptance evidence below is **marathon-scoped** (isolated harness, `deepseek/deepseek-v4.1-flash-1017` @ medium, independent checkers). The maintainer's **automatic-updater** feature (`cdcd9d1`) is **preserved verbatim** from v2.4.0 (see below) — it was landed and verified by the maintainer, **not** independently accepted by the marathon team.

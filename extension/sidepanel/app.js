@@ -15,10 +15,12 @@ import { createPlanPanelModel, renderPlanPanel } from './plan-panel.js'
 import { watchNotice, renderWatchRow, watchIsActionable } from './watch-row.js'
 import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protocol.js'
 import { matchSlashCommands, nextSlashIndex, resolveSlashCommand, slashQuery } from './slash.js'
+import { completedUpdateNotice, updateNotice } from './update-notice.js'
 
 const SETTINGS_KEY = 'crazyagent.settings'
 const EXECUTOR_CLAIM_TIMEOUT_MS = 15_000
 const DISCLAIMER_KEY = 'crazyagent.disclaimerPending'
+const UPDATE_NOTICE_PREFS_KEY = 'crazyagent.updateNoticePrefs'
 const RECONNECT_MS = 2_500
 const STOP_CONFIRM_TIMEOUT_MS = 15_000
 const DEFAULT_MODEL_BASE_URL = 'https://openrouter.ai/api/v1'
@@ -76,6 +78,7 @@ let lastAssistantText = ''
 let lastAnswerText = ''
 let sessionId = ''
 let bannerAction = () => {}
+let updateNoticePrefs = { completed: '', dismissed: '' }
 let statusKind = 'offline'
 let statusLabel = 'Connecting…'
 let toastTimer = null
@@ -153,6 +156,9 @@ const els = {
   banner: $('banner'),
   bannerText: $('banner-text'),
   bannerAction: $('banner-action'),
+  updateNotice: $('update-notice'),
+  updateNoticeText: $('update-notice-text'),
+  updateNoticeDismiss: $('update-notice-dismiss'),
   sessionInfo: $('session-info'),
   timing: $('timing'),
   newChat: $('new-chat'),
@@ -261,10 +267,17 @@ console.error = (...args) => {
 
 async function loadSettings() {
   try {
-    const stored = await chrome.storage.local.get(SETTINGS_KEY)
+    const stored = await chrome.storage.local.get([SETTINGS_KEY, UPDATE_NOTICE_PREFS_KEY])
     const value = stored?.[SETTINGS_KEY]
     if (value && typeof value === 'object') {
       settings = { ...DEFAULT_SETTINGS, ...value }
+    }
+    const prefs = stored?.[UPDATE_NOTICE_PREFS_KEY]
+    if (prefs && typeof prefs === 'object') {
+      updateNoticePrefs = {
+        completed: typeof prefs.completed === 'string' ? prefs.completed : '',
+        dismissed: typeof prefs.dismissed === 'string' ? prefs.dismissed : '',
+      }
     }
   } catch {
     settings = { ...DEFAULT_SETTINGS }
@@ -1352,6 +1365,30 @@ function showBanner(text, actionLabel = 'Reconnect', action = () => connect()) {
 
 function hideBanner() {
   els.banner.classList.add('hidden')
+}
+
+function saveUpdateNoticePrefs() {
+  void chrome.storage.local.set({ [UPDATE_NOTICE_PREFS_KEY]: updateNoticePrefs }).catch(() => {})
+}
+
+function applyUpdateStatus(status) {
+  const notice = updateNotice(status)
+  if (notice && notice.key !== updateNoticePrefs.dismissed) {
+    els.updateNoticeText.textContent = notice.text
+    els.updateNotice.dataset.tone = notice.tone
+    els.updateNotice.dataset.noticeKey = notice.key
+    els.updateNotice.classList.remove('hidden')
+  } else {
+    els.updateNotice.classList.add('hidden')
+    els.updateNotice.dataset.noticeKey = ''
+  }
+  const completed = completedUpdateNotice(status)
+  if (completed && completed.key !== updateNoticePrefs.completed) {
+    updateNoticePrefs.completed = completed.key
+    saveUpdateNoticePrefs()
+    toast(completed.text)
+    logger.log('update.completed', { from: status.last.from, to: status.last.to }, 'info')
+  }
 }
 
 /**
@@ -2742,6 +2779,7 @@ function handleFrame(frame) {
       }
       // The hello carries the authoritative switch state (reconnect resync).
       applyMarathonState(frame.marathon)
+      applyUpdateStatus(frame.update)
       if (llmState.model?.id) {
         settings.modelId = llmState.model.id
         els.sessionInfo.dataset.model = llmState.model.id
@@ -2831,6 +2869,9 @@ function handleFrame(frame) {
     case 'marathon.state':
       applyMarathonState(frame)
       logger.log('marathon.state', { enabled: marathonState.enabled, origin: marathonState.origin }, 'info')
+      return
+    case 'update.state':
+      applyUpdateStatus(frame.update)
       return
     case 'chat.watch':
       handleWatch(frame)
@@ -4541,6 +4582,14 @@ els.bannerAction.addEventListener('click', () => {
   const action = bannerAction
   hideBanner()
   action()
+})
+els.updateNoticeDismiss.addEventListener('click', () => {
+  const key = els.updateNotice.dataset.noticeKey
+  if (key) {
+    updateNoticePrefs.dismissed = key
+    saveUpdateNoticePrefs()
+  }
+  els.updateNotice.classList.add('hidden')
 })
 
 els.newChat.addEventListener('click', newChat)

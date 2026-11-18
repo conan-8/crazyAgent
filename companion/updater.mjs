@@ -234,6 +234,14 @@ export function writeUpdateState(file, state) {
   renameSync(temp, file)
 }
 
+function readLastUpdate(file) {
+  const last = readUpdateState(file).last
+  if (last === null || typeof last !== 'object' || Array.isArray(last)) return null
+  if (parseVersion(last.from) === null || parseVersion(last.to) === null) return null
+  if (typeof last.at !== 'string' || !Number.isFinite(Date.parse(last.at))) return null
+  return { from: String(last.from), to: String(last.to), at: last.at }
+}
+
 /**
  * Scheduler around the pure steps above. Every side effect is injected.
  *
@@ -288,6 +296,7 @@ export class Updater {
     this.latest = null
     /** @type {string | null} */
     this.pending = null
+    this.last = readLastUpdate(options.stateFile)
     /** @type {number | null} */
     this.lastCheckAt = null
     this.nextCheckAt = this.now() + FIRST_CHECK_DELAY_MS
@@ -323,6 +332,7 @@ export class Updater {
       reason: this.reason,
       current: this.version,
       latest: this.latest,
+      last: this.last,
       lastCheckAt: this.lastCheckAt === null ? null : new Date(this.lastCheckAt).toISOString(),
     }
   }
@@ -421,10 +431,11 @@ export class Updater {
       result = { ok: false, stage: 'install', error: error instanceof Error ? error.message : String(error), rolledBack: false }
     }
     const at = new Date(this.now()).toISOString()
+    if (result.ok) this.last = { from: this.version, to: version, at }
     const previous = readUpdateState(this.stateFile)
     try {
       writeUpdateState(this.stateFile, result.ok
-        ? { last: { from: this.version, to: version, at } }
+        ? { last: this.last }
         : { ...previous, failed: { version, at, stage: result.stage, error: result.error, rolledBack: result.rolledBack } })
     } catch {
       // The outcome is still on stderr.

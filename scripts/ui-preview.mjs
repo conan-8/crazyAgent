@@ -14,6 +14,7 @@
  *   node scripts/ui-preview.mjs --scenario motion     # frame-sampled enter/exit transitions and yellow action label
  *   node scripts/ui-preview.mjs --scenario states     # finished feed / expanded step / new chat
  *   node scripts/ui-preview.mjs --scenario rail       # prompt rail: narrow dashes, hover popup (RAIL_ASSERT=0 for baseline)
+ *   node scripts/ui-preview.mjs --scenario update     # automatic update notices + one-time post-restart success
  *   node scripts/ui-preview.mjs --scenario tools      # browser-command rows + tab-list card
  *   node scripts/ui-preview.mjs --scenario modals     # settings + debug log modals
  *   node scripts/ui-preview.mjs --scenario disclaimer # one-time full-screen notice after a reload
@@ -2947,6 +2948,78 @@ async function main() {
     assert.match(completed?.html ?? '', /Continue after reopen/)
     assert.match(completed?.html ?? '', /Continued after reopen\./)
     await shot('continued')
+  } else if (SCENARIO === 'update') {
+    const { batch, recv } = makePage(page)
+    const read = () => page.evaluate(`(() => {
+      const notice = document.getElementById('update-notice');
+      const toast = document.getElementById('toast');
+      return {
+        noticeHidden: notice.classList.contains('hidden'),
+        noticeText: document.getElementById('update-notice-text').textContent,
+        noticeTone: notice.dataset.tone,
+        toastHidden: toast.classList.contains('hidden'),
+        toastText: toast.textContent,
+      };
+    })()`)
+    await batch(HELLO_FRAMES)
+    await sleep(300)
+    await recv({ v: 1, type: 'update.state', update: { state: 'pending', current: '2.5.0', latest: '2.5.1', last: null } })
+    await sleep(150)
+    let state = await read()
+    assert.equal(state.noticeHidden, false)
+    assert.equal(state.noticeTone, 'info')
+    assert.match(state.noticeText, /v2\.5\.1/u)
+    assert.match(state.noticeText, /install automatically/u)
+    await shot('pending')
+
+    await recv({ v: 1, type: 'update.state', update: { state: 'installing', current: '2.5.0', latest: '2.5.1', last: null } })
+    await sleep(150)
+    state = await read()
+    assert.equal(state.noticeHidden, false)
+    assert.match(state.noticeText, /restart automatically/u)
+    await shot('installing')
+
+    const completed = {
+      state: 'idle', reason: null, current: '2.5.1', latest: null,
+      last: { from: '2.5.0', to: '2.5.1', at: '2026-11-17T20:00:00.000Z' }, lastCheckAt: null,
+    }
+    const restartedHello = HELLO_FRAMES.map(frame => frame.type === 'chat.hello' ? { ...frame, update: completed } : frame)
+    await page.send('Page.reload')
+    await sleep(1300)
+    await batch(restartedHello)
+    await sleep(300)
+    state = await read()
+    assert.equal(state.noticeHidden, true)
+    assert.equal(state.toastHidden, false)
+    assert.match(state.toastText, /Updated to v2\.5\.1/u)
+    assert.match(state.toastText, /restarted automatically/u)
+    await shot('updated')
+
+    await sleep(2800)
+    await page.send('Page.reload')
+    await sleep(1300)
+    await batch(restartedHello)
+    await sleep(200)
+    state = await read()
+    assert.equal(state.toastHidden, true, 'the same completed update is not announced twice')
+
+    const failure = { state: 'error', reason: 'npm ci failed; v2.5.0 was restored', current: '2.5.0', latest: '2.5.1', last: null }
+    await recv({ v: 1, type: 'update.state', update: failure })
+    await sleep(150)
+    state = await read()
+    assert.equal(state.noticeHidden, false)
+    assert.equal(state.noticeTone, 'error')
+    assert.match(state.noticeText, /v2\.5\.0 was restored/u)
+    await shot('error')
+    await page.evaluate(`document.getElementById('update-notice-dismiss').click()`)
+    assert.equal((await read()).noticeHidden, true)
+    await recv({ v: 1, type: 'update.state', update: failure })
+    assert.equal((await read()).noticeHidden, true, 'a dismissed error stays dismissed until it changes')
+
+    await recv({ v: 1, type: 'update.state', update: { state: 'pending', current: '2.5.0', latest: '2.5.2', last: null } })
+    state = await read()
+    assert.equal(state.noticeHidden, false)
+    assert.match(state.noticeText, /v2\.5\.2/u)
   } else if (SCENARIO === 'queue') {
     await playQueueScenario(page, shot)
   } else if (SCENARIO === 'composer') {

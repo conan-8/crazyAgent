@@ -889,6 +889,45 @@ textarea {
   flex: 1;
 }
 
+.update-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin: 0 12px 8px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid rgba(255, 195, 0, 0.22);
+  border-radius: 12px;
+  background: rgba(36, 32, 17, 0.96);
+  color: #d6d6d6;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.update-notice[data-tone="error"] {
+  border-color: rgba(248, 81, 73, 0.3);
+  background: #241919;
+}
+
+.update-notice > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.update-notice > button {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.update-notice > button:hover {
+  color: var(--text);
+}
+
 .link {
   flex: 0 0 auto;
   padding: 2px;

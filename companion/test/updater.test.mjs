@@ -204,7 +204,7 @@ test('applyUpdate never forces: a conflicting local edit refuses the checkout an
 function makeUpdater(t, overrides = {}) {
   const upstream = makeUpstream(t)
   const install = overrides.install ?? makeInstall(t, upstream)
-  const h = { install, upstream, now: 0, idle: true, exits: [], stopped: 0, applied: [], logs: [], latest: { tag_name: 'v2.4.0' }, fetches: 0 }
+  const h = { install, upstream, now: 0, idle: true, exits: [], stopped: 0, applied: [], logs: [], events: [], latest: { tag_name: 'v2.4.0' }, fetches: 0 }
   const run = async (command, args, options = {}) => {
     // `git fetch origin` would reach GitHub; send it to the local upstream instead.
     if (command === 'git' && args[0] === 'fetch') return withEnv(command, args.map(arg => arg === 'origin' ? upstream : arg), options)
@@ -219,6 +219,7 @@ function makeUpdater(t, overrides = {}) {
     beforeInstall: async () => { h.stopped += 1 },
     exit: code => { h.exits.push(code) },
     log: message => { h.logs.push(message) },
+    record: (event, data) => { h.events.push({ event, data }) },
     run,
     fetchImpl: async () => {
       h.fetches += 1
@@ -253,6 +254,22 @@ test('Updater: checks after the startup delay, waits for a long idle stretch, th
   assert.equal(h.stopped, 1)
   assert.deepEqual(h.exits, [UPDATE_EXIT_CODE])
   assert.equal(readUpdateState(join(h.install, 'update-state.json')).last.to, '2.4.0')
+})
+
+test('Updater publishes sidebar state and restores the completed-update result after a restart', async t => {
+  const h = makeUpdater(t)
+  await h.tickAt(FIRST_CHECK_DELAY_MS)
+  const published = h.events.find(item => item.event === 'update.state' && item.data.state === 'pending')
+  assert.equal(published.data.latest, '2.4.0')
+  assert.equal(published.data.last, null)
+  for (let i = 0; i < IDLE_TICKS_BEFORE_INSTALL; i += 1) await h.tickAt(h.now + 60_000)
+  const last = h.updater.status().last
+  assert.equal(last.from, '2.3.0')
+  assert.equal(last.to, '2.4.0')
+  assert.equal(Number.isFinite(Date.parse(last.at)), true)
+
+  const restarted = makeUpdater(t, { install: h.install, options: { version: '2.4.0' } })
+  assert.deepEqual(restarted.updater.status().last, last)
 })
 
 test('Updater: a running turn, marathon, or any turn activity restarts the idle wait', async t => {
@@ -342,5 +359,5 @@ test('Updater: disabled does nothing at all', async t => {
   h.updater.start()
   await h.tickAt(FIRST_CHECK_DELAY_MS + CHECK_INTERVAL_MS)
   assert.equal(h.fetches, 0)
-  assert.deepEqual(h.updater.status(), { state: 'disabled', reason: 'switched off', current: '2.3.0', latest: null, lastCheckAt: null })
+  assert.deepEqual(h.updater.status(), { state: 'disabled', reason: 'switched off', current: '2.3.0', latest: null, last: null, lastCheckAt: null })
 })

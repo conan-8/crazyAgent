@@ -48,7 +48,7 @@ import {
 } from './openrouter.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const VERSION = '2.5.0'
+const VERSION = '2.5.1'
 const PROVIDER = 'openrouter'
 
 const BOOLEAN_FLAGS = new Set(['no-dsh', 'no-auto-capture', 'new-token', 'help', 'remote', 'pair-remote', 'new-remote-token', 'confirm-irreversible', 'no-auto-update'])
@@ -368,6 +368,7 @@ function sendCompanionHello(_ui) {
     credentials: credentialsInfo(),
     settings: { confirmIrreversible: confirmIrreversiblePolicy() },
     marathon: { ...marathonFrameBody(controller.marathonState()), watcher: controller.watcherPanelState() },
+    update: updater?.status() ?? null,
     log: { runId, path: logStore.path },
   })
 }
@@ -843,6 +844,7 @@ updater = new Updater({
   log,
   record: (event, data) => {
     try {
+      if (event === 'update.state') bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'update.state', update: data })
       logStore.record('companion', event, data, { severity: 'info', noSignal: true })
     } catch {
       // Logging must never break the updater.
