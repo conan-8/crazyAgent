@@ -12,10 +12,15 @@ UI code.
 
 The side panel is a **single full-height activity feed**: there is no separate
 chat pane. Finished steps collapse to one line, the running step stays expanded,
-and the turn's final answer is shown as a highlighted block. The new-chat view
-shows up to three recent sessions; opening it during a turn keeps that session
-running behind the view and marks its row with a yellow spinner. An open chat
-has a round back button that returns to this new-chat view.
+and the turn's final answer is shown as a highlighted block. Tool activity uses
+plain-language progress and outcome summaries: arguments, raw result payloads,
+label/tab IDs, and execution telemetry stay in the debug log. A labelled click is
+shown as `Clicked “Control name”`, a coordinate click keeps its coordinates, and
+switching tabs names the destination tab. Reasoning rows also replace internal
+label/tab references and tool identifiers with plain language. The new-chat view shows up to three
+recent sessions; opening it during a turn keeps that session running behind the
+view and marks its row with a yellow spinner. An open chat has a round back
+button that returns to this new-chat view.
 
 After the extension is installed or reloaded, the first panel use shows a
 **one-time full-screen notice** (`<dialog>`). Its highlight is a raised, warm

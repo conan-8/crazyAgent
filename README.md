@@ -2,7 +2,7 @@
 
 **Control Chrome or Edge from a local side panel with guarded browser actions, file transfer, and semantic Google Docs editing.** Built on **DSH 0.2.2-rc.1**.
 
-**Optimised for DeepSeek V4.1 Flash 1017** on OpenRouter (`deepseek/deepseek-v4.1-flash-1017`). Other image-capable, tool-capable models remain available. [Download v2.5.1](https://github.com/conan-8/crazyAgent/releases/tag/v2.5.1) · [Patch notes](RELEASE-NOTES.md).
+**Optimised for DeepSeek V4.1 Flash 1017** on OpenRouter (`deepseek/deepseek-v4.1-flash-1017`). Other image-capable, tool-capable models remain available. [Download v2.5.2](https://github.com/conan-8/crazyAgent/releases/tag/v2.5.2) · [Patch notes](RELEASE-NOTES.md).
 
 ## Install with an agent
 
@@ -17,10 +17,10 @@
 **Paste this prompt into a coding agent on the computer where Chrome or Edge is installed:**
 
 ```text
-Install crazyAgent v2.5.1 on this computer from https://github.com/conan-8/crazyAgent. Own the setup end to end: when you need my input or a manual browser step, give me exact instructions, wait for me, and then continue with verification instead of ending the installation early.
+Install crazyAgent v2.5.2 on this computer from https://github.com/conan-8/crazyAgent. Own the setup end to end: when you need my input or a manual browser step, give me exact instructions, wait for me, and then continue with verification instead of ending the installation early.
 
 1. Verify Git, Node.js 24.9 or newer, npm, and Chrome/Chromium/Edge 116 or newer. If anything required is missing or outdated, explain what you propose to install or update and ask for my permission. Once I approve, make the changes and continue; do not hand me a prerequisite installation guide unless I decline or no safe installation method is available. Ask separately before using sudo or replacing an existing runtime. If you install a user-level runtime, use its bin directory in PATH consistently for npm ci, npm run setup, the companion process, and the restart command you give me.
-2. Clone the v2.5.1 tag into a new crazyAgent directory. If that directory already exists, do not overwrite or delete it; ask me for another location. Run npm ci and npm run setup in the checkout.
+2. Clone the v2.5.2 tag into a new crazyAgent directory. If that directory already exists, do not overwrite or delete it; ask me for another location. Run npm ci and npm run setup in the checkout.
 3. Check whether port 17871 is occupied before starting anything. If it is occupied, stop and report it instead of killing an existing process. Otherwise, start npm run dev -- --model deepseek/deepseek-v4.1-flash-1017 --reasoning-effort medium as a persistent background process. Verify that http://127.0.0.1:17871/health returns HTTP 200 with ok:true, but do not mistake that alone for a completed installation.
 4. Give me short manual instructions to load the checkout's extension directory as an unpacked extension in chrome://extensions or edge://extensions, pin crazyAgent, and open its side panel. In Settings, have me confirm the bridge URL is ws://127.0.0.1:17871/bridge. Proactively copy the pairing token from .dsh-home/browser-agent/token to my clipboard with an OS-appropriate command that does not display it; if you cannot access my clipboard, give me the exact command to run myself. Tell me to paste it into the pairing-token field. I will enter my own OpenRouter API key directly in Settings.
 5. Before my first Save, tell me to type deepseek/deepseek-v4.1-flash-1017 manually into the Model field even if the model list is empty. Do not tell me to click Refresh models before this first Save: Refresh requires a companion connection, while Save accepts the manually entered model ID and establishes that connection. Have me save and wait for the real side panel to show Connected.
@@ -50,13 +50,13 @@ Page content, screenshots, prompts, and explicit tool results can be sent to the
 
 ## Update with an agent
 
-Use this prompt to update an existing crazyAgent checkout to **v2.5.1** without replacing its configuration or local data:
+Use this prompt to update an existing crazyAgent checkout to **v2.5.2** without replacing its configuration or local data:
 
 ```text
-Update my existing crazyAgent installation to v2.5.1 from https://github.com/conan-8/crazyAgent. Own the update end to end. Preserve my configuration, API key, pairing token, sessions, downloaded files, and unrelated local changes; this is an in-place update, not a fresh installation.
+Update my existing crazyAgent installation to v2.5.2 from https://github.com/conan-8/crazyAgent. Own the update end to end. Preserve my configuration, API key, pairing token, sessions, downloaded files, and unrelated local changes; this is an in-place update, not a fresh installation.
 
 1. Locate my existing crazyAgent checkout and ask me for its path only if you cannot find it. Verify that it is the expected Git repository, inspect its current version and startup method, and identify the Node runtime used by its companion. Verify Git, Node.js 24.9 or newer, npm, and Chrome/Chromium/Edge 116 or newer. Reuse an existing compatible user-level Node runtime when available. If a prerequisite is missing or outdated, explain what you propose to install or update and ask for my permission; once I approve, make the changes and continue. Ask separately before using sudo or replacing an existing runtime.
-2. Inspect git status before changing the checkout. Never use git reset --hard, git clean, npm run clean, or any other command that discards local changes or deletes .dsh-home. Do not delete or replace the checkout with a fresh clone. If local changes could be overwritten, explain them and ask me how to proceed. Fetch the repository's tags, check out v2.5.1 without forcing, and verify that HEAD exactly matches that tag. If the checkout is already on the target tag, say so and continue with verification rather than claiming you changed the version.
+2. Inspect git status before changing the checkout. Never use git reset --hard, git clean, npm run clean, or any other command that discards local changes or deletes .dsh-home. Do not delete or replace the checkout with a fresh clone. If local changes could be overwritten, explain them and ask me how to proceed. Fetch the repository's tags, check out v2.5.2 without forcing, and verify that HEAD exactly matches that tag. If the checkout is already on the target tag, say so and continue with verification rather than claiming you changed the version.
 3. Using the compatible Node runtime and any required PATH override, run npm ci, npm run setup, and npm test in the existing checkout. Do not run live-model, website, or other model-spending tests.
 4. Restart the companion using its existing startup method, whether that is a background process or a user service. Identify and stop only the companion process belonging to this checkout; never kill an unknown process merely because it uses port 17871, and do not start a second conflicting companion. Preserve the existing model, base URL, reasoning effort, API key, and pairing token instead of overriding them with defaults. Include any required PATH override in the restart command.
 5. Give me exact instructions to reload the existing unpacked extension in chrome://extensions or edge://extensions and reopen its side panel. Do not remove or reinstall the extension, because that can discard its saved settings. Ask me to confirm that the real side panel shows Connected, then independently poll http://127.0.0.1:17871/health for a bounded period. Do not create a synthetic WebSocket, ui, or tools client as a substitute for the extension. Do not declare the update complete until the real side panel shows Connected and /health reports ok:true, ui:true, and tools:true. If anything remains disconnected, inspect the relevant logs and settings flow without exposing credentials and continue troubleshooting with exact corrective steps.
@@ -89,13 +89,14 @@ v2.3.0 and older do not contain the updater: move those to a newer release once 
 
 There are **34 standing model-facing tools**: 25 general browser tools, 8 guarded Docs tools, and `agent_request_help`, plus two conditional tools: `browser_plan`, exposed on every turn that starts while the companion-owned `/marathon` switch is on (unlisted legacy alias `/plan`), and `agent_request_confirmation`, exposed only while the opt-in "ask before irreversible actions" setting is on. The detailed reference is below.
 
-## New in v2.5.1
+## New in v2.5.2
 
-- **Automatic updates with no approval step:** eligible supervised installations still update themselves when idle and restart automatically. The sidebar now explains when an update is ready, installing, or needs a supervisor instead of requiring the user to poll `/health`.
-- **Clear restart and failure feedback:** a successful update produces one "Updated" toast after the companion restarts, even across panel reloads. Failures remain visible as plain-text notices, and dismissing a notice does not stop the automatic update.
+- **Human-readable activity:** clicks use the visible control name (`Clicked “Increment”`), tab switches use the tab title, and coordinate clicks retain only their useful coordinates.
+- **No tool internals in the conversation:** streamed JSON, raw result payloads, label/tab IDs, execution telemetry, and session IDs stay out of the activity feed. Reasoning and error messages also omit those internal references.
+- **Diagnostics stay available:** raw details remain in the debug log, while model-facing tool results, watcher inputs, and browser behavior are unchanged.
 - **Desktop-only patch:** Android remains `0.8.0 (7)` with the same signed APK and SHA-256 below.
 
-See the complete [v2.5.1 patch notes](RELEASE-NOTES.md). Automatic updates remain fail-closed for development checkouts, edited trees, forks, and unsupervised companions.
+See the complete [v2.5.2 patch notes](RELEASE-NOTES.md). Automatic updates remain fail-closed for development checkouts, edited trees, forks, and unsupervised companions.
 
 ## New in v2.5.0
 
@@ -133,11 +134,11 @@ See the complete [v2.3.0 patch notes](RELEASE-NOTES.md). Live docked-panel and p
 
 Use the optional Android app with an existing crazyAgent desktop installation. Basic chat, screenshots, help, and reconnects do **not** require Firebase; metadata-only push notifications are a separate optional setup.
 
-> **Android APK:** v2.5.1 changes only the desktop updater, so Android remains `0.8.0 (7)` with the same signed APK and SHA-256 below. The app still includes the live marathon checklist, blocked-item reasons, push-test button, and earlier marathon phone features.
+> **Android APK:** v2.5.2 changes only sidebar activity presentation, so Android remains `0.8.0 (7)` with the same signed APK and SHA-256 below. The app still includes the live marathon checklist, blocked-item reasons, push-test button, and earlier marathon phone features.
 
 **Requirements:**
 
-- A working crazyAgent **v2.5.1** installation on the host computer.
+- A working crazyAgent **v2.5.2** installation on the host computer.
 - Chrome/Edge running. Keep the side panel open for system-clipboard/Docs rich-paste actions or when using a build without the background executor.
 - An Android **8.0/API 26+** phone.
 - Tailscale installed and signed into the same tailnet on the host and phone, with MagicDNS and HTTPS certificates enabled.
@@ -148,19 +149,19 @@ Use the optional Android app with an existing crazyAgent desktop installation. B
 **Paste this prompt into a coding agent on the host computer after completing the desktop installation:**
 
 ```text
-Set up crazyAgent Remote v2.5.1 on this computer and my Android phone. I already installed crazyAgent on this host.
-First verify the existing installation is v2.5.1 and http://127.0.0.1:17871/health responds successfully. Do not use sudo, replace my runtimes, kill existing processes, or run model-spending tests. If the installation is missing or unhealthy, stop and tell me.
+Set up crazyAgent Remote v2.5.2 on this computer and my Android phone. I already installed crazyAgent on this host.
+First verify the existing installation is v2.5.2 and http://127.0.0.1:17871/health responds successfully. Do not use sudo, replace my runtimes, kill existing processes, or run model-spending tests. If the installation is missing or unhealthy, stop and tell me.
 Verify that Tailscale is running, identify this host's Tailscale DNS name, and confirm MagicDNS and HTTPS certificates are enabled. Inspect any existing Tailscale Serve configuration without overwriting unrelated routes.
 Enable the scoped remote API on the existing crazyAgent companion with --remote and --remote-public-host <this-host>.<tailnet>.ts.net. Preserve my existing model/settings and use the existing startup/service method rather than starting a conflicting second companion. The remote listener must remain on 127.0.0.1:17873; never expose port 17871.
 Publish only the remote listener with tailscale serve --bg http://127.0.0.1:17873. Do not enable Funnel or public port forwarding. Verify that the Serve route is tailnet-only, unauthenticated /remote/v1/state returns 401, and /bridge through that route returns 404.
-Download the official APK from https://github.com/conan-8/crazyAgent/releases/download/v2.5.1/app-release.apk into a new empty temporary directory and require SHA-256 57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d before installing it. Do not use a different APK or build unless I explicitly ask for a source build.
+Download the official APK from https://github.com/conan-8/crazyAgent/releases/download/v2.5.2/app-release.apk into a new empty temporary directory and require SHA-256 57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d before installing it. Do not use a different APK or build unless I explicitly ask for a source build.
 If adb is available and authorized, install that verified APK with adb install -r. If no usable adb device exists, give me short manual instructions to download and open the same APK on my Android phone. If Android rejects an update because the existing app has a different signature, stop and explain that uninstalling deletes the old pairing; do not uninstall or erase app data automatically.
 Do not print, read, copy, log, commit, or transmit the remote token yourself. Give me the exact npm run dev -- --pair-remote command to run in my own terminal, then tell me to paste the printed server URL and token directly into the crazyAgent Remote app. Finish with the server address, APK hash, health status, and the remaining manual pairing steps. Keep Edge and the side panel open, and do not send a test prompt until I confirm pairing is complete.
 ```
 
 ### Finish on the phone
 
-1. **Install the app:** if the agent did not install through `adb`, download the official [crazyAgent Remote APK](https://github.com/conan-8/crazyAgent/releases/download/v2.5.1/app-release.apk) onto the phone and open it. Android may ask permission to install apps from the browser or file manager.
+1. **Install the app:** if the agent did not install through `adb`, download the official [crazyAgent Remote APK](https://github.com/conan-8/crazyAgent/releases/download/v2.5.2/app-release.apk) onto the phone and open it. Android may ask permission to install apps from the browser or file manager.
 2. **Verify the download:** on Linux, run:
    ```sh
    echo '57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d  app-release.apk' | sha256sum -c -

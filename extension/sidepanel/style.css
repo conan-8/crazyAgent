@@ -3141,7 +3141,6 @@ input::placeholder {
 .activity-step .step-title {
   color: #c4c4c4;
   font-size: 14px;
-  text-transform: capitalize;
   transition: color var(--motion) var(--ease);
 }
 

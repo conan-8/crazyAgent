@@ -16,6 +16,7 @@ import { watchNotice, renderWatchRow, watchIsActionable } from './watch-row.js'
 import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protocol.js'
 import { matchSlashCommands, nextSlashIndex, resolveSlashCommand, slashQuery } from './slash.js'
 import { completedUpdateNotice, updateNotice } from './update-notice.js'
+import { browserErrorSummary, browserResultSummary, browserRunningText, chatErrorSummary, reasoningActivityText, toolResultSummary, toolRunningText } from './activity-presenter.js'
 
 const SETTINGS_KEY = 'crazyagent.settings'
 const EXECUTOR_CLAIM_TIMEOUT_MS = 15_000
@@ -2251,7 +2252,7 @@ function beginStep(frame) {
   caret.textContent = '▾'
   const title = document.createElement('span')
   title.className = 'step-title'
-  title.textContent = 'thinking'
+  title.textContent = 'Thinking…'
   const meta = document.createElement('span')
   meta.className = 'step-meta'
   const duration = document.createElement('span')
@@ -2327,9 +2328,8 @@ function closeStep(at = now()) {
   step.durationEl.classList.remove('live')
   step.durationEl.textContent = formatDuration(step.totalMs)
   step.durationEl.title = [
-    `step ${step.index}: ${formatDuration(step.totalMs)}`,
-    Number.isFinite(step.modelMs) ? `model ${formatDuration(step.modelMs)}` : '',
-    step.finish ? `finish ${step.finish}` : '',
+    `Step ${step.index}: ${formatDuration(step.totalMs)}`,
+    Number.isFinite(step.modelMs) ? `Thinking: ${formatDuration(step.modelMs)}` : '',
   ].filter(Boolean).join(' · ')
   lastStepDurations.push(step.totalMs)
   renderTiming({ steps: lastStepDurations })
@@ -2466,13 +2466,18 @@ function appendStreamActivity(kind, text) {
     created.kind = kind
     created.entry.classList.add('streaming')
     lastStreamEntry = created
-    if (currentStep) setStepTitle(currentStep, kind === 'reasoning' ? 'thinking' : 'responding')
+    if (currentStep) setStepTitle(currentStep, kind === 'reasoning' ? 'Thinking…' : 'Responding…')
   }
   if (kind === 'reasoning') {
     sawReasoningStream = true
     lastReasoningStreamText = truncate(lastReasoningStreamText + text, 40_000)
+    const polished = reasoningActivityText(lastReasoningStreamText)
+    if (lastStreamEntry !== null && polished !== lastStreamEntry.textEl.textContent) {
+      lastStreamEntry.textEl.textContent = polished
+    }
   }
-  els.activityLatest.textContent = activityPreview(`${kind === 'reasoning' ? 'thinking' : 'assistant'}: ${text}`)
+  const latest = kind === 'reasoning' ? reasoningActivityText(lastReasoningStreamText) : text
+  els.activityLatest.textContent = activityPreview(`${kind === 'reasoning' ? 'thinking' : 'assistant'}: ${latest}`)
   scrollActivity()
 }
 
@@ -2627,18 +2632,6 @@ function formatTokenUsage(usage) {
   return parts.join(' · ')
 }
 
-/** Compact one-line preview of a tool-call argument payload. */
-function argsPreview(raw) {
-  if (typeof raw !== 'string') return ''
-  const text = raw.trim()
-  if (text.length === 0) return ''
-  try {
-    return truncate(JSON.stringify(JSON.parse(text)), 170)
-  } catch {
-    return truncate(text, 170)
-  }
-}
-
 function handleActivity(frame) {
   switch (frame.kind) {
     case 'plan': {
@@ -2695,16 +2688,15 @@ function handleActivity(frame) {
     }
     case 'tool-call-delta': {
       const label = toolLabel(frame.name)
-      setActivityPhase(`Using ${label}…`, 'busy')
+      const running = toolRunningText(frame.name)
+      setActivityPhase(running, 'busy')
       if (currentStep) {
-        setStepTitle(currentStep, label)
+        setStepTitle(currentStep, running)
         setStepKind(currentStep, toolKind(frame.name))
       }
-      if (lastStreamEntry !== null && lastStreamEntry.kind === 'tool' && lastStreamEntry.id === frame.id) {
-        lastStreamEntry.textEl.textContent = truncate(lastStreamEntry.textEl.textContent + (frame.argumentsDelta ?? ''), 4_000)
-      } else {
+      if (lastStreamEntry === null || lastStreamEntry.kind !== 'tool' || lastStreamEntry.id !== frame.id) {
         finalizeStreamActivity()
-        const created = pushActivity('tool', label, frame.argumentsDelta ?? '')
+        const created = pushActivity('tool', label, running)
         created.kind = 'tool'
         created.id = frame.id
         lastStreamEntry = created
@@ -2723,10 +2715,7 @@ function handleActivity(frame) {
       const reason = frame.reason && typeof frame.reason === 'object'
         ? (frame.reason.kind ?? JSON.stringify(frame.reason))
         : (frame.reason ?? 'finished')
-      if (currentStep) {
-        currentStep.finish = String(reason)
-        currentStep.titleEl.title = `finish: ${reason}`
-      }
+      if (currentStep) currentStep.finish = String(reason)
       finalizeStreamActivity()
       return
     }
@@ -2737,7 +2726,7 @@ function handleActivity(frame) {
     case 'reasoning-committed':
       if (sawReasoningStream) return
       setActivityPhase('Thinking…', 'busy')
-      pushActivity('reasoning', 'thinking', frame.text)
+      pushActivity('reasoning', 'thinking', reasoningActivityText(frame.text))
       return
     default:
       return
@@ -2947,9 +2936,9 @@ function handleStatus(frame) {
     return
   }
   if (status === 'tool') {
-    const tool = typeof frame.tool === 'string' ? toolLabel(frame.tool) : 'a tool'
-    setStatus('busy', `Using ${tool}…`)
-    setActivityPhase(`Using ${tool}…`, 'busy')
+    const running = toolRunningText(frame.tool)
+    setStatus('busy', running)
+    setActivityPhase(running, 'busy')
     return
   }
   if (status === 'error') {
@@ -2990,7 +2979,7 @@ function toolLabel(name) {
     case 'browser_batch': return 'batch'
     case 'browser_clipboard': return 'clipboard'
     case 'auto': return 'current view'
-    default: return String(name ?? 'tool').replace(/^browser_/, '')
+    default: return String(name ?? 'tool').replace(/^browser_/, '').replaceAll('_', ' ')
   }
 }
 
@@ -3100,7 +3089,8 @@ function handleToolCall(frame) {
   logger.log('ui.tool_call', { callId: frame.callId, name: frame.name, args: truncate(frame.args, 500) }, 'debug')
   finalizeStreamActivity()
   const label = toolLabel(frame.name)
-  setActivityPhase(`Using ${label}…`, 'busy')
+  const running = toolRunningText(frame.name, frame.args)
+  setActivityPhase(running, 'busy')
   let streamed = takeStreamedToolEntry(frame.callId)
   let startedAtOverride
   if (streamed === null && typeof frame.callId === 'string' && browserRows.has(frame.callId)) {
@@ -3111,18 +3101,18 @@ function handleToolCall(frame) {
     streamed = browserRow.row
     startedAtOverride = browserRow.startedAt
   }
-  const row = streamed ?? pushActivity('tool', label, argsPreview(frame.args))
+  const row = streamed ?? pushActivity('tool', label, running)
   row.entry.classList.add('running')
-  row.textEl.textContent = argsPreview(frame.args) || 'running…'
+  row.textEl.textContent = running
   if (typeof frame.callId === 'string') {
-    toolRows.set(frame.callId, { row, startedAt: startedAtOverride ?? now() })
+    toolRows.set(frame.callId, { row, name: frame.name, args: parseToolArgs(frame.args) ?? frame.args, startedAt: startedAtOverride ?? now() })
   }
   if (currentStep) {
-    setStepTitle(currentStep, label)
+    setStepTitle(currentStep, running)
     setStepKind(currentStep, toolKind(frame.name))
   }
   setBusy(true)
-  setStatus('busy', `Using ${label}…`)
+  setStatus('busy', running)
   if (frame.name === 'browser_wait_for' && startWaitCountdown(frame.callId, row, frame.args)) {
     toolRows.get(frame.callId).wait = describeWait(parseToolArgs(frame.args))
   }
@@ -3135,21 +3125,28 @@ function handleToolResult(frame) {
   stopWaitCountdown(frame.callId)
   const ok = frame.ok !== false
   const at = now()
-  const summary = truncate(frame.text || (ok ? 'completed' : 'failed'), 320)
   const record = typeof frame.callId === 'string' ? toolRows.get(frame.callId) : undefined
+  const summary = truncate(toolResultSummary({
+    name: record?.name,
+    args: record?.args,
+    text: frame.text,
+    ok,
+    browserSummary: record?.uiSummary,
+  }), 320)
   if (record) {
     finishActivityEntry(record.row, {
-      text: record.uiMs === undefined ? summary : `${summary} · ui ${formatDuration(record.uiMs)}`,
+      text: summary,
       ok,
       durationMs: at - record.startedAt,
     })
-    record.row.entry.title = String(frame.text ?? '')
+    record.row.entry.title = summary
     // A wait that worked says only "Done"; a failed one shows why.
     if (!ok) revealWaitRow(record.row)
     toolRows.delete(frame.callId)
   } else {
     const created = pushActivity('tool', ok ? 'done' : 'failed', summary)
     finishActivityEntry(created, { ok })
+    created.entry.title = summary
   }
   if (currentStep !== null) {
     // The collapsed step header carries the latest outcome, so a finished step
@@ -3158,7 +3155,7 @@ function handleToolResult(frame) {
     setStepTitle(currentStep, outcome ?? activityPreview(summary, 66), { settled: true })
     currentStep.titleEl.title = summary
   }
-  setActivityPhase('Thinking…', 'busy')
+  setActivityPhase('Thinking…', 'busy', summary)
   finalizeStreamActivity()
   scrollActivity()
 }
@@ -3365,11 +3362,12 @@ function handleChatError(frame) {
     return
   }
   cleanupAfterTurn()
-  const message = typeof frame.message === 'string' ? frame.message : 'Unknown companion error'
+  const detail = typeof frame.message === 'string' ? frame.message : 'Unknown companion error'
+  const message = chatErrorSummary(detail, frame.code)
   finishTurn({})
   pushActivity('error', 'error', message)
   setActivityPhase('Error', 'error')
-  logger.log('chat.error', { message, recoverable: frame.recoverable !== false }, 'error')
+  logger.log('chat.error', { message: detail, recoverable: frame.recoverable !== false }, 'error')
   setStatus('error', 'Error')
   if (/companion|not connected|script|invalid pairing|dsh/i.test(message)) {
     showBanner(message, 'Open settings', openSettings)
@@ -3419,14 +3417,8 @@ function handleStopped(frame = {}) {
 }
 
 function updateFooter() {
-  if (sessionId) {
-    els.sessionInfo.textContent = sessionId.startsWith('session-') ? `session ${sessionId.slice(8, 16)}` : sessionId
-    els.sessionInfo.title = sessionId
-  } else {
-    const model = els.sessionInfo.dataset.model
-    els.sessionInfo.textContent = model ? `ready · ${model}` : 'ready'
-    els.sessionInfo.title = ''
-  }
+  els.sessionInfo.textContent = ''
+  els.sessionInfo.title = ''
 }
 
 /* ------------------------------------------------------------------ */
@@ -3438,29 +3430,19 @@ async function handleBrowserCommand(frame) {
   const op = String(command.op ?? '')
   const args = command.args && typeof command.args === 'object' ? command.args : {}
   const started = now()
-  setActivityPhase(
-    op === 'tabs.list' ? 'Listing tabs…'
-      : op === 'tabs.activate' ? 'Switching tabs…'
-        : op === 'places.search' ? 'Finding places…'
-          : op === 'scroll' ? 'Scrolling…'
-            : op === 'click' ? 'Clicking…'
-              : op === 'read_text' || op === 'auto_view' ? 'Reading text…'
-                : op === 'find' ? 'Finding text…'
-                  : op === 'clipboard' ? 'Clipboard…'
-                    : 'Capturing…',
-    'busy',
-  )
   // Auto-capture outcomes stay in the debug log rather than the conversation.
   const isAutoCapture = (op === 'snapshot' || op === 'auto_view') && frame.callId === 'auto'
   const toolRecord = typeof frame.callId === 'string' ? toolRows.get(frame.callId) : undefined
+  const running = toolRecord ? toolRunningText(toolRecord.name, args) : browserRunningText(op, args)
+  setActivityPhase(running, 'busy')
   const rowKey = typeof frame.callId === 'string' ? frame.callId : String(frame.id)
   const ownRow = toolRecord === undefined && !isAutoCapture
-    ? pushActivity('browser', op === 'tabs.list' ? 'tabs' : op, argsPreview(JSON.stringify(args)), { running: true })
+    ? pushActivity('browser', op === 'tabs.list' ? 'tabs' : op.replaceAll('_', ' '), running, { running: true })
     : null
   if (ownRow !== null) browserRows.set(rowKey, { row: ownRow, startedAt: started })
   const waitShown = op === 'wait_for' && startWaitCountdown(rowKey, ownRow ?? toolRecord?.row, args)
   if (toolRecord !== undefined && !waitShown) {
-    toolRecord.row.textEl.textContent = argsPreview(JSON.stringify(args)) || 'running…'
+    toolRecord.row.textEl.textContent = running
   }
   logger.log('browser.command.start', {
     commandId: frame.id,
@@ -3489,16 +3471,18 @@ async function handleBrowserCommand(frame) {
     const result = await execute(op, args, settings)
     stopWaitCountdown(rowKey)
     const uiMs = now() - started
-    const summary = browserActivitySummary(op, result)
+    const summary = browserResultSummary(op, result, args)
     if (ownRow !== null) {
       finishActivityEntry(ownRow, { text: summary, ok: true, durationMs: uiMs })
+      ownRow.entry.title = summary
       browserRows.delete(rowKey)
     } else if (toolRecord !== undefined) {
-      toolRecord.uiMs = uiMs
-      toolRecord.row.textEl.textContent = truncate(`${summary} · ui ${formatDuration(uiMs)}`, 340)
+      toolRecord.uiSummary = summary
+      toolRecord.row.textEl.textContent = summary
+      toolRecord.row.entry.title = summary
     }
     if (op === 'snapshot' && toolRecord !== undefined) showStepScreenshot(cleanImageFor(result.image) ?? result.image)
-    setActivityPhase('Thinking…', 'busy')
+    setActivityPhase('Thinking…', 'busy', summary)
     logger.log('browser.command.result', {
       commandId: frame.id,
       callId: frame.callId,
@@ -3535,12 +3519,14 @@ async function handleBrowserCommand(frame) {
     stopWaitCountdown(rowKey)
     const message = errorMessage(error)
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'BROWSER_ERROR'
+    const summary = browserErrorSummary(op, message, code)
     if (ownRow !== null) {
-      finishActivityEntry(ownRow, { text: `${op}: ${message}`, ok: false, durationMs: now() - started })
+      finishActivityEntry(ownRow, { text: summary, ok: false, durationMs: now() - started })
+      ownRow.entry.title = summary
       revealWaitRow(ownRow)
       browserRows.delete(rowKey)
     } else if (!isAutoCapture) {
-      pushActivity('error', 'browser', `${op}: ${message}`)
+      pushActivity('error', 'browser', summary)
     }
     setActivityPhase('Browser error', 'error')
     logger.log('browser.command.error', {
@@ -3560,86 +3546,6 @@ async function handleBrowserCommand(frame) {
     setActivity(false)
     if (!busy) refreshStatus()
   }
-}
-
-function browserActivitySummary(op, result) {
-  if (!result || typeof result !== 'object') return op
-  if (Array.isArray(result.places)) return `${result.places.length} places${result.query ? ` · ${truncate(result.query, 60)}` : ''}`
-  if (Array.isArray(result.tabs)) return `${result.tabs.length} tabs · ${result.tabs.filter(tab => tab.active).map(tab => tab.title).join('') || 'no active marker'}`
-  const parts = []
-  if (result.tab?.title) parts.push(truncate(result.tab.title, 60))
-  if (result.image) parts.push(`${result.image.width}×${result.image.height} · ${formatBytes(result.image.bytes)}`)
-  if (result.scroll) {
-    parts.push(`scroll ${result.scroll.container ?? 'document'} y=${Math.round(result.scroll.y ?? 0)}/${Math.round(result.scroll.maxY ?? 0)}${result.scroll.atBottom ? ' bottom' : ''}`)
-  }
-  if (result.moved) parts.push(`moved ${Math.round(result.moved.dx ?? 0)},${Math.round(result.moved.dy ?? 0)}`)
-  if (typeof result.text === 'string') {
-    parts.push(`${result.text.length} chars${result.truncated ? ` of ${result.totalChars}` : ''} · ${Math.round(result.totalMs ?? 0)}ms`)
-  }
-  if (result.roleClick) {
-    const roleClick = result.roleClick
-    const path = Array.isArray(roleClick.path) ? roleClick.path : []
-    const description = path.map(step => `${step?.role ?? step?.tag ?? 'element'} ${step?.name ?? step?.text ?? ''}`.trim()).join(' → ')
-    parts.push(`role click ${roleClick.status ?? 'result'} · ${roleClick.completed ?? path.length} step(s)${description ? ` · ${truncate(description, 80)}` : ''}`)
-    if (roleClick.failure) parts.push(`failed at ${roleClick.failure.index ?? '?'} ${roleClick.failure.code ?? 'error'}`)
-  }
-  if (result.clicked) {
-    parts.push(`click #${result.clicked.label} ${truncate(result.clicked.text || result.clicked.tag || '', 50)}`)
-    parts.push(result.changed ? 'changed' : 'no visible change')
-  }
-  if (result.typed) {
-    parts.push(`${result.typed.method} typed ${result.typed.chars} chars${result.typed.submitted ? ' · submitted' : ''}`)
-    parts.push(result.changed ? 'changed' : 'no visible change')
-  }
-  if (result.pressed) {
-    const mods = Array.isArray(result.pressed.modifiers) && result.pressed.modifiers.length > 0
-      ? `${result.pressed.modifiers.join('+')}+`
-      : ''
-    parts.push(`pressed ${mods}${result.pressed.key}${result.pressed.trusted === false ? ' · synthetic' : ''}`)
-    parts.push(result.changed ? 'changed' : 'no visible change')
-  }
-  if (result.navigated) {
-    const action = result.navigated.history ?? 'url'
-    parts.push(`${action} → ${truncate(result.navigated.toUrl || result.navigated.requestedUrl || '', 70)}`)
-    if (result.navigated.timedOut) parts.push('load timed out')
-    if (result.navigated.newTab) parts.push('new tab')
-  }
-  if (result.waited) {
-    parts.push(`${result.waited.found ? 'found' : 'timed out'} after ${Math.round(result.waited.elapsedMs ?? 0)}ms`)
-  }
-  if (result.selected) {
-    parts.push(`selected ${result.selected.chars} chars${result.selected.collapsed ? ' · collapsed' : ''}`)
-    parts.push(result.changed ? 'changed' : 'no visible change')
-  }
-  if (result.docs) {
-    parts.push(`docs ${result.docs.action ?? 'set_font'} · ${result.docs.status ?? 'unverified'}`)
-    if (result.docs.fontAdded === true) parts.push('added to font list')
-    if (result.docs.verifiedBy) parts.push(`verified by ${result.docs.verifiedBy}`)
-    if (result.docs.removedText === true) parts.push('matched text removed')
-  }
-  if (result.clipboard) {
-    const clip = result.clipboard
-    parts.push(`clipboard ${result.action ?? ''} ${clip.target ?? 'virtual'}${Number.isFinite(clip.chars) ? ` · ${clip.chars} chars` : ''}${clip.truncated ? ` of ${clip.originalChars}` : ''}`)
-    if (typeof clip.preview === 'string' && clip.preview.length > 0) parts.push(truncate(clip.preview, 60))
-  }
-  if (result.pasted) {
-    const pasted = result.pasted
-    parts.push(`pasted ${pasted.via === 'keys' ? 'system clipboard (Ctrl+V)' : `${pasted.chars ?? '?'} chars from ${pasted.via ?? 'virtual'}`}${pasted.submitted ? ' · submitted' : ''}`)
-    parts.push(result.changed ? 'changed' : 'no visible change')
-  }
-  if (result.batch) {
-    parts.push(`batch ${result.batch.executed}/${result.batch.total} · ${result.batch.succeeded ?? result.batch.executed} succeeded${result.batch.ok ? '' : ' · failed'}${result.batch.failedIndex === undefined ? '' : ` at ${result.batch.failedIndex}`}`)
-  }
-  if (result.view === 'compact') {
-    const delta = result.labelsDelta ?? {}
-    parts.push(`compact view · ${delta.count ?? 0} labels (+${delta.addedCount ?? 0}/-${delta.removedCount ?? 0})`)
-  } else if (result.view === 'none') {
-    parts.push('no screenshot')
-  }
-  if (Number.isFinite(result.labelCount)) parts.push(`${result.labelCount} labels`)
-  if (Number.isFinite(result.captureMs)) parts.push(`capture ${result.captureMs}ms`)
-  if (Number.isFinite(result.encodeMs)) parts.push(`encode ${result.encodeMs}ms`)
-  return parts.join(' · ') || op
 }
 
 function showStepScreenshot(image) {

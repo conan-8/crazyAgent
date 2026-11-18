@@ -1,3 +1,28 @@
+# crazyAgent v2.5.2
+
+Changes since **v2.5.1**. This desktop-only patch makes sidebar activity readable without exposing tool-call JSON, internal element labels, browser tab IDs, or execution telemetry in the conversation.
+
+The extension and companion use version `2.5.2`. Android remains `0.8.0 (7)` with no phone-code changes; the release carries the same signed APK, SHA-256 `57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d`.
+
+## Readable sidebar activity
+
+- **Actions use visible names.** A labelled click is shown as `Clicked “Increment”`; coordinate clicks retain only coordinates such as `Clicked at (100, 200)`. Typing names the field without showing its internal label or contents.
+- **Tabs use titles.** Switching tabs shows `Switched to “Tab title”`; tab lists report the number of open tabs and the active title without browser IDs or URLs.
+- **Raw payloads stay out of the conversation.** Streamed arguments never appear, completed tool rows do not dump page/view data, and capture/encoding/UI timing telemetry and session IDs are no longer presented as activity text.
+- **Reasoning and errors are cleaned too.** Internal label/tab references and tool identifiers in reasoning become plain language. Tool failures and malformed-response cards omit internal codes while preserving actionable guidance.
+- **Diagnostics are unchanged where they belong.** The debug log retains raw arguments, results, codes, and telemetry. Model-facing tool output, watcher inputs, execution behavior, and safety guards are untouched.
+
+## Verification
+
+- **11 focused presentation tests** cover clicks, coordinates, tabs, typing, reads, Docs, batches, errors, reasoning, and safe fallbacks for every standing browser tool.
+- **1336/1336 Node tests** pass at the v2.5.2 release head.
+- Real-panel mock-bridge previews pass for `states`, `tools`, `deadturn`, `live`, `motion`, and `wait`; screenshots were inspected. The tools scenario performs a real executor tab switch from a numeric ID and independently checks that only the destination title appears in the row and tooltip.
+- No real-model or physical-phone acceptance was performed for this presentation-only patch. Automatic-updater behavior is unchanged from v2.5.1, whose real supervised public-release update passed.
+
+The unpatched transitive `picomatch@4.0.7` advisory documented for v2.5.1 remains unchanged.
+
+---
+
 # crazyAgent v2.5.1
 
 Changes since **v2.5.0**. This desktop-only patch makes the existing automatic updater frictionless and visible: eligible supervised installations continue to install newer stable releases automatically when idle and restart without user approval, while the sidebar now reports each stage and the post-restart result.

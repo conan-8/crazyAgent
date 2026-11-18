@@ -43,6 +43,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { reasoningActivityText } from '../extension/sidepanel/activity-presenter.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const arg = (name, fallback) => {
@@ -281,7 +282,7 @@ async function playTurn(page, options = {}) {
   for (const text of ['Looking at the current view. ', 'The Increment button is labelled ', '#12. I will click it.']) {
     await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text })
     streamedReasoning += text
-    await assertVisibleReasoning(page, '.activity-step.running .activity-entry.reasoning.streaming', streamedReasoning)
+    await assertVisibleReasoning(page, '.activity-step.running .activity-entry.reasoning.streaming', reasoningActivityText(streamedReasoning))
     await sleep(200)
   }
   await recv({ v: 1, type: 'chat.activity', kind: 'tool-call-delta', id: 'call-1', name: 'browser_click', argumentsDelta: '{"label":' })
@@ -354,6 +355,25 @@ async function playTurn(page, options = {}) {
   assert.equal(await page.evaluate(`document.querySelectorAll('.answer-text ol li').length`), 2)
   assert.equal(await page.evaluate(`document.querySelectorAll('.answer-text tbody tr').length`), 2)
   assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.answer-text li'), '::marker').color`), 'rgb(255, 195, 0)')
+  const activityPresentation = await page.evaluate(`(() => ({
+    titles: [...document.querySelectorAll('.activity-step .step-title')].map(node => ({ text: node.textContent, tooltip: node.title })),
+    tools: [...document.querySelectorAll('.activity-entry.tool')].map(node => ({ text: node.querySelector('.activity-text')?.textContent, tooltip: node.title })),
+    reasoning: [...document.querySelectorAll('.activity-entry.reasoning .activity-text')].map(node => node.textContent),
+  }))()`)
+  assert.equal(activityPresentation.titles[0].text, 'Clicked “Increment”')
+  assert.equal(activityPresentation.titles[1].text, 'Clicked “Increment”')
+  assert.equal(activityPresentation.titles[2].text, 'Read the page')
+  assert.equal(activityPresentation.tools[0].text, 'Clicked “Increment”')
+  assert.equal(activityPresentation.tools[2].text, 'Read the page')
+  for (const entry of [...activityPresentation.titles, ...activityPresentation.tools]) {
+    for (const value of [entry.text, entry.tooltip]) {
+      assert.doesNotMatch(value, /["{[]label["}\]:]|clicked\s+#|clicked\s+label|\d+\s*ms|pixels-changed|trusted input|browser_/u, value)
+    }
+  }
+  assert.equal(activityPresentation.reasoning[0], 'Looking at the current view. The Increment button is visible. I will click it.')
+  for (const value of activityPresentation.reasoning) {
+    assert.doesNotMatch(value, /label(?:led|ed)?\s+#\d+|tab\s+\d+|browser_|clicked\s+label/iu, value)
+  }
 }
 
 /** Exercise real browser-command rows + tab-list cards through the executor. */
@@ -437,6 +457,24 @@ async function playToolScenario(page) {
   await recv({ v: 1, type: 'browser.command', id: 'cmd-tabs', callId: 'call-tabs', turnId: 'turn-1', command: { op: 'tabs.list', args: {} } })
   await sleep(1200)
   await recv({ v: 1, type: 'chat.tool_result', callId: 'call-tabs', ok: true, text: 'tabs listed · current window' })
+  const fixtureTabId = await page.evaluate(`window.__frames.filter(frame => frame.type === 'browser.result' && frame.id === 'cmd-tabs').at(-1)?.result?.tabs?.find(tab => tab.title === 'UI preview fixture')?.id`)
+  assert.ok(Number.isSafeInteger(fixtureTabId), 'the real tab list provides the fixture tab ID')
+  await recv({ v: 1, type: 'chat.tool_call', callId: 'call-switch', name: 'browser_switch_tab', args: JSON.stringify({ tab_id: fixtureTabId }) })
+  await recv({ v: 1, type: 'browser.command', id: 'cmd-switch', callId: 'call-switch', turnId: 'turn-1', command: { op: 'tabs.activate', args: { tab_id: fixtureTabId } } })
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (await page.evaluate(`document.querySelector('.activity-step:last-child .activity-entry.tool .activity-text')?.textContent === 'Switched to “UI preview fixture”'`)) break
+    await sleep(150)
+  }
+  await recv({ v: 1, type: 'chat.tool_result', callId: 'call-switch', ok: true, text: `tab ${fixtureTabId} "UI preview fixture" ${fixtureUrl}\nviewport 1280x720 css; image 1280x720 px` })
+  const tabPresentation = await page.evaluate(`(() => {
+    const rows = [...document.querySelectorAll('.activity-entry.tool')];
+    return rows.slice(-2).map(row => ({ text: row.querySelector('.activity-text').textContent, tooltip: row.title }));
+  })()`)
+  assert.equal(tabPresentation[1].text, 'Switched to “UI preview fixture”')
+  for (const row of tabPresentation) {
+    assert.doesNotMatch(row.text, /["{[]tab_id|"label"|\b\d{3,}\b|https?:|capture\s+\d|encode\s+\d|browser_/u, row.text)
+    assert.doesNotMatch(row.tooltip, /["{[]tab_id|"label"|\b\d{3,}\b|https?:|capture\s+\d|encode\s+\d|browser_/u, row.tooltip)
+  }
   await recv({ v: 1, type: 'chat.activity', kind: 'model-end', outcome: { kind: 'committed' } })
   await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 2, attemptId: 'a2' })
   await sleep(MOTION_SETTLE_MS)
@@ -1883,6 +1921,7 @@ async function playDeadTurnScenario(page, capture) {
   }
 
   const ERROR_TEXT = "The model's reply could not be used (MALFORMED_RESPONSE), so nothing was done. Send the request again."
+  const ERROR_DISPLAY = 'The model’s reply couldn’t be used, so nothing was done. Send the request again.'
   const BLOCKED_TEXT = 'BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again.'
   // Synthetic payloads with the exact shapes seen in real dead turns.
   const BROKEN_ARGS = '{"actions":[{"op":"click","label":7},{"op":"type","label":9,"text":"hello","mode":"replace"}]'
@@ -1932,7 +1971,8 @@ async function playDeadTurnScenario(page, capture) {
     sendLabel: document.getElementById('send').getAttribute('aria-label'),
     userPrompts: window.__frames.filter(frame => frame.type === 'chat.send').length,
   }))()`)
-  assert.deepEqual(errorState.errorRows, [ERROR_TEXT])
+  assert.deepEqual(errorState.errorRows, [ERROR_DISPLAY])
+  assert.doesNotMatch(errorState.errorRows[0], /MALFORMED_RESPONSE|browser_|[{}]/u)
   assert.equal(errorState.phase, 'Error')
   assert.equal(errorState.status, 'Error')
   assert.match(errorState.summary, /^\d+ (actions?|steps?) · /)
@@ -2071,7 +2111,8 @@ async function playDeadTurnScenario(page, capture) {
   assert.equal(saved?.sessionId, 'session-preview0001')
   assert.match(saved?.html ?? '', /Try again after the error\./)
   assert.ok((saved?.html ?? '').includes(BLOCKED_TEXT), 'history keeps the BLOCKED answer')
-  assert.ok((saved?.html ?? '').includes(ERROR_TEXT), 'history keeps the error row')
+  assert.ok((saved?.html ?? '').includes(ERROR_DISPLAY), 'history keeps the friendly error row')
+  assert.equal((saved?.html ?? '').includes(ERROR_TEXT), false, 'history does not expose the internal error code')
   assert.equal(markupIn(saved?.html), false, 'no DSML markup in saved history HTML')
 
   // Reopening the saved chat renders clean and the composer still works.
@@ -2276,7 +2317,7 @@ async function main() {
     // A label change crossfades, and the DOM has the new words at once.
     const ghosts = sample('.motion-ghost', `node => Number(getComputedStyle(node).opacity).toFixed(2)`, 200)
     await recv({ v: 1, type: 'chat.tool_call', callId: 'motion-1', name: 'browser_screenshot', args: '{}' })
-    assert.equal(await page.evaluate(`document.querySelector('.activity-step.running .step-title').textContent`), 'screenshot')
+    assert.equal(await page.evaluate(`document.querySelector('.activity-step.running .step-title').textContent`), 'Taking a screenshot…')
     const ghostOpacity = await ghosts
     assert.ok(distinct(ghostOpacity) >= 2, `old label should fade: ${ghostOpacity}`)
     await sleep(MOTION_SETTLE_MS)
