@@ -17,7 +17,7 @@ The extension and companion use version `2.5.1`. Android remains `0.8.0 (7)` wit
 - Real-panel mock-bridge `scripts/ui-preview.mjs --scenario update` passed with inspected pending, installing, updated, and failure screenshots, including two panel reloads to prove duplicate-success suppression.
 - **1325/1325 Node tests** at v2.5.1, including 22 focused updater/notification tests; Android `testDebugUnitTest lintDebug` **154 JVM tests / 0 failures / 3 opt-in skips / lint clean**; prompt composition remains **12,402 non-Docs / 18,092 Docs-turn characters**.
 - Isolated extension self-update fixture **4/4**: older on-disk versions are ignored, a newer version reloads once, and no reload loop occurs.
-- Real-extension regression runner **12 suites passed / 0 failed / 7 documented exclusions**.
+- **Real supervised public-release update into v2.5.1: PASS.** A clean detached v2.5.0 clone with isolated data and port discovered v2.5.1, entered `pending`, installed it after the normal idle delay, and restarted under `npm run dev`. Independent final checks: health `version:2.5.1` and `update.last {from:2.5.0,to:2.5.1}`, HEAD `949340727bde09ccaa6b217b7c73694d2d395b73` exactly matching `v2.5.1^{commit}`, detached HEAD, clean tracked tree, settings SHA-256 unchanged, supervisor alive, and the supervisor restart message present. No model calls, the user's service/browser untouched.
 
 The unpatched transitive `picomatch@4.0.7` advisory documented for v2.5.0 remains unchanged; there is still no patched picomatch release.
 
