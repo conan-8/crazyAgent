@@ -50,16 +50,16 @@ class PushMessageTest {
         val test = PushMessage.parse(good + ("type" to "test"))!!
         assertEquals("crazyAgent needs you", help.title)
         assertEquals("crazyAgent finished", done.title)
-        assertEquals("crazyAgent needs approval", confirm.title)
+        assertEquals("crazyAgent needs your approval", confirm.title)
         // Q10: a malformed-reply turn ends as chat.error and pushes the error type.
-        assertEquals("crazyAgent hit an error", error.title)
-        assertEquals("Tap to view the error.", error.text)
+        assertEquals("crazyAgent stopped on an error", error.title)
+        assertEquals("Open to see what went wrong.", error.text)
         // M5: generic watch wording only — the reason is fetched after the tap.
         assertEquals("crazyAgent may be stuck", watch.title)
-        assertEquals("Tap to check progress.", watch.text)
+        assertEquals("Open to see what it is doing.", watch.text)
         // V7: the test notification says only that push reaches this phone.
         assertEquals("crazyAgent test notification", test.title)
-        assertEquals("Push notifications are working.", test.text)
+        assertEquals("Push notifications reach this phone.", test.text)
         // A later push for the same turn replaces the earlier notification.
         assertEquals(help.notificationId, done.notificationId)
         assertEquals(help.notificationId, confirm.notificationId)
