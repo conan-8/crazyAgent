@@ -2778,7 +2778,7 @@ async function main() {
     assert.equal(initialAbout.updated, 'No completed update recorded')
     assert.equal(initialAbout.title, '')
     const updatedAt = '2026-11-17T20:00:00.000Z'
-    await makePage(page).recv({ v: 1, type: 'update.state', update: { state: 'current', current: '2.5.2', latest: '2.5.2', last: { from: '2.5.1', to: '2.5.2', at: updatedAt } } })
+    await makePage(page).recv({ v: 1, type: 'update.state', update: { state: 'current', current: '2.5.3', latest: '2.5.3', last: { from: '2.5.1', to: '2.5.3', at: updatedAt } } })
     const populatedAbout = await page.evaluate(`(() => {
       const updated = document.getElementById('settings-updated');
       return {
@@ -2788,7 +2788,7 @@ async function main() {
         title: updated.title,
       };
     })()`)
-    assert.equal(populatedAbout.version, '2.5.2')
+    assert.equal(populatedAbout.version, '2.5.3')
     assert.equal(populatedAbout.updated, populatedAbout.expected, 'the update time is localized for the user')
     assert.equal(populatedAbout.title, `Last successful update: ${updatedAt}`)
     await sleep(2700)
@@ -3229,10 +3229,10 @@ async function main() {
     await recv({ v: 1, type: 'update.state', update: failure })
     assert.equal((await read()).noticeHidden, true, 'a dismissed error stays dismissed until it changes')
 
-    await recv({ v: 1, type: 'update.state', update: { state: 'pending', current: '2.5.0', latest: '2.5.2', last: null } })
+    await recv({ v: 1, type: 'update.state', update: { state: 'pending', current: '2.5.0', latest: '2.5.3', last: null } })
     state = await read()
     assert.equal(state.noticeHidden, false)
-    assert.match(state.noticeText, /v2\.5\.2/u)
+    assert.match(state.noticeText, /v2\.5\.3/u)
   } else if (SCENARIO === 'queue') {
     await playQueueScenario(page, shot)
   } else if (SCENARIO === 'composer') {

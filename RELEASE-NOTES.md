@@ -1,3 +1,50 @@
+# crazyAgent v2.5.3
+
+Changes since **v2.5.2**. This release makes Auto reasoning choose an effort level from the actual task, hardens browser and Google Docs execution, recovers more interrupted turns, and adds persistent lifetime token usage to Settings.
+
+The extension and companion use version `2.5.3`. Android remains `0.8.0 (7)` with no net phone-code changes; the release carries the same signed APK, SHA-256 `57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d`.
+
+## Task-aware Auto reasoning
+
+- **Auto is the default for new configurations.** Direct actions, navigation, and reactive turns request low effort; inspection and synthesis request medium. Classification uses the raw user prompt from a reconnect-safe `turn.context` frame, not the wrapped browser/Docs/marathon prompt.
+- **Explicit choices remain authoritative.** Saved settings still apply unless a process CLI/env effort override is supplied. Acceptance comparisons continue to use fixed Medium.
+- **Measured 14.3% fewer total tokens:** in the final identical ×5 batches over `form-submit`, `download-upload`, `duplicate-text`, and `find-reveal` (20 runs per policy), Auto used **1,388,843 total tokens**, versus **1,620,755** for Medium. Auto used **62 steps / 42 calls**, versus **68 / 49** for Medium. Outcomes were Auto **17 pass / 1 partial / 2 fail**, Medium **17 / 2 / 1**; action scenarios were **10/10** for Auto and all 20 policy events matched the intended mapping. This is a measured batch, not a guarantee for every workload.
+
+## Browser and executor reliability
+
+- Visible editable roots receive bounded labels; coordinate clicks report pre-input hit identity and post-click focus as diagnostics, never proof of success or a retry trigger.
+- Synthetic image paste avoids duplicate drop insertion and reports placement uncertainty. Uploads track the assigned input by token; if the page replaces it after carrying exactly the file, the result reports `inputReplacedByPage` evidence instead of a false stale-upload verdict or a blind retry.
+- A stale debugger attachment owned by this extension is detached and retried once; a foreign debugger still fails closed. Navigation from a browser-internal page opens the destination in a new tab.
+- Batch waits are validated before bridge traffic, one-redirect waits recover explicitly, compatible no-op view requests are tolerated, stale-view recovery is clearer, and refused coordinate calls count as failures.
+- A new `chat-attach-send` scenario independently requires one message, the requested text, exactly three attachments, one upload, and zero wrong-target viewer openings.
+
+## Google Docs fidelity
+
+- Visible native table grids create and fill cells without the system clipboard; larger grids retain clipboard-preserving paste. Contiguous same-color cells in a row share one native background mutation, with every target and collateral cell export-verified.
+- Export parsing honors exact text decoration and ancestor underline/strike-through. Flattened checklist exports require live checklist controls and checked-state styling. Responsive formatting reveals hidden controls and refocuses the document.
+- Font additions accept exact added-font evidence, close the dialog on failure, and still require toolbar verification. Write verification inherits missing font/size/color from element rules and names the first differing run and attribute.
+
+## Turn recovery, privacy, and sidebar
+
+- Zero-action `TRANSPORT` and `MODEL_SWITCH_COMPACTION_FAILED` endings join malformed replies in the one-retry path. Shutdown ends an active turn as stopped with `reason:shutdown`, and reopening the panel attaches to the running turn instead of starting a conflicting chat.
+- The startup banner prints only the token's first six characters plus its file path. Runtime error logs bound and redact credential-shaped text.
+- **Lifetime agent-token usage** persists atomically in `.dsh-home/browser-agent/usage.json`, deduplicates recent turns, survives restarts/updates, and excludes watcher/judge tokens. Settings shows total tokens, uncached input, cached reads/writes, output, reasoning as an output subset, tracked turns, and tracking start. Prior pruned history is not backfilled; an explicit full clean deletes the totals.
+- Settings adds version/update details, Auto explanations, and narrow-layout usage presentation. Update notices and restored-chat messages are shorter, and longer toasts wrap within the panel.
+
+## Verification
+
+- **1382/1382 Node tests** pass at the release head.
+- Real-extension gate runner: **13/13 suites passed, 0 failed, 7 excluded** (headed click/capture, running-service tabs/log, and three signed-in Docs suites).
+- Real-panel mock-bridge `usage`, `reopen`, `modals`, and `update` scenarios pass with inspected screenshots.
+- Signed-in `edge-docs-table-e2e`: **13 executor calls, 0 failed, 11 actions, 8 export requests**, with independent export, collateral-cell, reload-persistence, final-shape, and cleanup checks. Docked-width direct-executor writes/formatting completed **10/10** steps.
+- Isolated real-model Docs runs passed independent full-export checks: plain **76 calls / 5 failed / 6.4 min**; marathon **88 calls / 12 failed / 13.2 min**, plan revisions **1→2→3**, **0 watcher alerts**. These are not docked-panel or phone acceptance.
+- Three optimization candidates (final-action view wording, compact click results, historical view elision) were measured and **not kept** because they increased work, errors, or total tokens.
+- No new real-model, live docked-panel, physical-phone, Windows-updater, or public-release auto-update acceptance was run during final release packaging.
+
+The unpatched transitive `picomatch@4.0.7` advisory documented for v2.5.2 remains unchanged.
+
+---
+
 # crazyAgent v2.5.2
 
 Changes since **v2.5.1**. This desktop-only patch makes sidebar activity readable without exposing tool-call JSON, internal element labels, browser tab IDs, or execution telemetry in the conversation.

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "crazyAgent",
-  "version": "2.5.2",
-  "version_name": "2.5.2",
+  "version": "2.5.3",
+  "version_name": "2.5.3",
   "description": "A DeepSeek-optimised browser agent for guarded Chrome/Edge actions, file transfer, and Google Docs editing.",
   "minimum_chrome_version": "116",
   "permissions": [
