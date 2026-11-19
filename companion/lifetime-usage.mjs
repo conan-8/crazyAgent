@@ -1,0 +1,126 @@
+/**
+ * Companion-owned lifetime agent-token totals. Stored beside the other durable
+ * browser-agent state so companion restarts and release updates preserve them.
+ * Watcher/judge usage remains separate and is not included.
+ */
+
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
+import { isRecord } from './protocol.mjs'
+
+const MAX_TRACKED_TURN_IDS = 256
+const MAX_COUNT = Number.MAX_SAFE_INTEGER
+
+function count(value) {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 ? Math.min(MAX_COUNT, Math.floor(number)) : 0
+}
+
+function add(left, right) {
+  return Math.min(MAX_COUNT, count(left) + count(right))
+}
+
+function timestamp(value, fallback = null) {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : fallback
+}
+
+/** Input/cache-read/cache-write/output are disjoint; reasoning is part of output. */
+export function normalizeTokenUsage(value) {
+  const usage = isRecord(value) ? value : {}
+  const normalized = {
+    inputTokens: count(usage.inputTokens),
+    outputTokens: count(usage.outputTokens),
+    cacheReadTokens: count(usage.cacheReadTokens),
+    cacheWriteTokens: count(usage.cacheWriteTokens),
+    reasoningTokens: Math.min(count(usage.reasoningTokens), count(usage.outputTokens)),
+  }
+  const componentTotal = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens']
+    .reduce((total, key) => add(total, normalized[key]), 0)
+  normalized.totalTokens = Math.max(count(usage.totalTokens), componentTotal)
+  return normalized
+}
+
+function emptyState(now) {
+  return {
+    turns: 0,
+    ...normalizeTokenUsage(),
+    startedAt: now().toISOString(),
+    updatedAt: null,
+    processedTurnIds: [],
+  }
+}
+
+function readState(file, now) {
+  let parsed
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    return emptyState(now)
+  }
+  if (!isRecord(parsed) || parsed.version !== 1) return emptyState(now)
+  const usage = normalizeTokenUsage(parsed)
+  const processedTurnIds = Array.isArray(parsed.processedTurnIds)
+    ? [...new Set(parsed.processedTurnIds.filter(value => typeof value === 'string' && value.length > 0 && value.length <= 160))].slice(-MAX_TRACKED_TURN_IDS)
+    : []
+  return {
+    turns: count(parsed.turns),
+    ...usage,
+    startedAt: timestamp(parsed.startedAt, now().toISOString()),
+    updatedAt: timestamp(parsed.updatedAt),
+    processedTurnIds,
+  }
+}
+
+export class LifetimeUsageStore {
+  constructor({ file, now = () => new Date() }) {
+    this.file = file
+    this.now = now
+    this.state = readState(file, now)
+  }
+
+  snapshot() {
+    return {
+      version: 1,
+      turns: this.state.turns,
+      inputTokens: this.state.inputTokens,
+      outputTokens: this.state.outputTokens,
+      cacheReadTokens: this.state.cacheReadTokens,
+      cacheWriteTokens: this.state.cacheWriteTokens,
+      reasoningTokens: this.state.reasoningTokens,
+      totalTokens: this.state.totalTokens,
+      startedAt: this.state.startedAt,
+      updatedAt: this.state.updatedAt,
+    }
+  }
+
+  record(turnId, value) {
+    const usage = normalizeTokenUsage(value)
+    if (typeof turnId !== 'string' || turnId.length === 0 || turnId.length > 160
+      || usage.totalTokens === 0 || this.state.processedTurnIds.includes(turnId)) {
+      return { changed: false, usage: this.snapshot() }
+    }
+    const next = {
+      turns: add(this.state.turns, 1),
+      inputTokens: add(this.state.inputTokens, usage.inputTokens),
+      outputTokens: add(this.state.outputTokens, usage.outputTokens),
+      cacheReadTokens: add(this.state.cacheReadTokens, usage.cacheReadTokens),
+      cacheWriteTokens: add(this.state.cacheWriteTokens, usage.cacheWriteTokens),
+      reasoningTokens: add(this.state.reasoningTokens, usage.reasoningTokens),
+      totalTokens: add(this.state.totalTokens, usage.totalTokens),
+      startedAt: this.state.startedAt,
+      updatedAt: this.now().toISOString(),
+      processedTurnIds: [...this.state.processedTurnIds, turnId].slice(-MAX_TRACKED_TURN_IDS),
+    }
+    mkdirSync(dirname(this.file), { recursive: true })
+    const temp = `${this.file}.tmp`
+    writeFileSync(temp, `${JSON.stringify({ version: 1, ...next }, null, 2)}\n`, { mode: 0o600 })
+    try {
+      chmodSync(temp, 0o600)
+    } catch {
+      // Best effort on filesystems without POSIX modes.
+    }
+    renameSync(temp, this.file)
+    this.state = next
+    return { changed: true, usage: this.snapshot() }
+  }
+}

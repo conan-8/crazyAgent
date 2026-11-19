@@ -77,6 +77,7 @@ Generated state is under ignored `.dsh-home/`:
 | `browser-agent/fcm-service-account.json` | Optional local FCM credential; never committed |
 | `browser-agent/api-key` | Optional remembered API key, mode `0600` |
 | `browser-agent/llm.json`, `llm.patch.yml` | Non-secret model/base-URL/reasoning configuration |
+| `browser-agent/usage.json` | Aggregate lifetime agent-token counts, tracked turn count/date, and recent turn IDs for duplicate prevention; no prompts or page content, mode `0600` |
 | `browser-agent/logs/<runId>/` | Events, screenshots, summaries, and exported debug bundles |
 | `profiles/sdk-minimal/` | Generated DSH profile and package links |
 
@@ -107,7 +108,7 @@ The side-panel export dialog can omit screenshots and the raw DSH session. Bundl
 - Disable **Attach a fresh view to every message** to turn off auto-view; explicit screenshot tools remain available.
 - Closing the side panel hands browser execution back to the extension's background worker; closing Edge stops browser execution.
 - Uninstalling the extension clears its extension storage.
-- `npm run clean -- --yes` deletes `.dsh-home`, including sessions, attachments, logs, token, and remembered key; run `npm run setup` afterward.
+- `npm run clean -- --yes` deletes `.dsh-home`, including sessions, attachments, logs, token, remembered key, and lifetime token usage; run `npm run setup` afterward.
 - Incognito and `file://` access require explicit browser permission and may still be restricted.
 
 Clicking, typing, navigation, semantic table edits, Docs operations, downloads, and uploads can change real pages, documents, your Downloads folder, and destination sites. Page text is treated as untrusted instructions, but that does not make hostile pages safe. Protected-page errors, Downloads confinement, and process isolation limit access; they do not replace careful use.

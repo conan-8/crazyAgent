@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url'
 import { Bridge } from './bridge.mjs'
 import { DshRunner } from './dsh.mjs'
 import { LogStore } from './log-store.mjs'
+import { LifetimeUsageStore } from './lifetime-usage.mjs'
 import { SessionController, uiRejectionFrame } from './session-controller.mjs'
 import { marathonFrameBody } from './marathon.mjs'
 import { createWatchJudge } from './watch-judge.mjs'
@@ -94,7 +95,7 @@ if (cli.help === true) {
                                 (default ${DEFAULT_BASE_URL})
   --model <id>                  optional initial model id; otherwise choose it in
                                 the side panel after entering your API key
-  --reasoning-effort <level>    medium (default), auto, off, low, or high
+  --reasoning-effort <level>    auto (default), off, low, medium, or high
   --max-tokens <n>              output cap (default: selected model's maximum)
   --dsh-home <path>             harness home (default .dsh-home)
   --patch <path>                base profile overlay (default config/browser.patch.yml)
@@ -164,8 +165,13 @@ const modelOverride = typeof cli.model === 'string'
 const reasoningEffort = normalizeReasoningEffort(
   typeof cli['reasoning-effort'] === 'string'
     ? cli['reasoning-effort']
-    : process.env.CRAZYAGENT_REASONING_EFFORT ?? 'medium',
+    : process.env.CRAZYAGENT_REASONING_EFFORT ?? 'auto',
 )
+// An explicit process flag/env overrides the saved UI choice for this process;
+// without either, saved settings remain authoritative.
+const reasoningEffortOverride = typeof cli['reasoning-effort'] === 'string' || typeof process.env.CRAZYAGENT_REASONING_EFFORT === 'string'
+  ? reasoningEffort
+  : undefined
 const maxTokensOption = cli['max-tokens'] ?? process.env.CRAZYAGENT_MAX_TOKENS
 const maxTokens = maxTokensOption === undefined ? undefined : Number(maxTokensOption)
 const noDsh = cli['no-dsh'] === true
@@ -301,6 +307,8 @@ try {
   log(`debug log init failed: ${errorMessage(error)}`)
 }
 
+const lifetimeUsage = new LifetimeUsageStore({ file: join(browserDir, 'usage.json') })
+
 if (!existsSync(patchFile)) {
   log(`patch: ${patchFile} not found; the DSH runtime will boot the stock sdk-minimal profile`)
 }
@@ -335,7 +343,7 @@ async function getModels(baseUrl, force = false) {
 }
 
 function effortPolicy() {
-  return llmConfig?.reasoningEffort ?? reasoningEffort
+  return reasoningEffortOverride ?? llmConfig?.reasoningEffort ?? reasoningEffort
 }
 
 function llmInfo() {
@@ -369,6 +377,9 @@ function sendCompanionHello(_ui) {
     settings: { confirmIrreversible: confirmIrreversiblePolicy() },
     marathon: { ...marathonFrameBody(controller.marathonState()), watcher: controller.watcherPanelState() },
     update: updater?.status() ?? null,
+    lifetimeUsage: lifetimeUsage.snapshot(),
+    // A panel that opens mid-turn shows the running turn instead of starting a new chat.
+    turn: controller.runningTurn(),
     log: { runId, path: logStore.path },
   })
 }
@@ -764,7 +775,8 @@ const bridge = new Bridge({
     remoteHub?.updateHealth()
     if (bridge.hasUi()) {
       sendCompanionHello(bridge.ui)
-      sendStatus(dshStatus.state === 'ready' ? 'ready' : dshStatus.state === 'error' ? 'error' : 'starting')
+      // A panel that connects mid-turn must not be told the runtime is idle.
+      sendStatus(controller.running ? 'thinking' : dshStatus.state === 'ready' ? 'ready' : dshStatus.state === 'error' ? 'error' : 'starting')
     }
   },
 })
@@ -791,6 +803,19 @@ const controller = new SessionController({
   getConfirmIrreversible: confirmIrreversiblePolicy,
   publish,
   watch: { judge: watchJudge },
+})
+
+controller.addObserver({
+  turnEnded: info => {
+    try {
+      const result = lifetimeUsage.record(info.turnId, info.usage)
+      if (!result.changed) return
+      bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'usage.updated', lifetimeUsage: result.usage })
+      logStore.record('companion', 'usage.lifetime', result.usage, { severity: 'debug', turnId: info.turnId, noSignal: true })
+    } catch (error) {
+      logStore.record('companion', 'usage.lifetime.error', { message: errorMessage(error) }, { severity: 'warn', turnId: info.turnId })
+    }
+  },
 })
 
 if (remoteEnabled) {
@@ -892,7 +917,7 @@ if (remoteHub !== undefined) {
 process.stderr.write(`
 crazyAgent companion ${VERSION}
   bridge:  ws://${host}:${bridge.port}/bridge
-  token:   ${token}
+  token:   ${token.slice(0, 6)}… (full value in ${tokenFile}; this banner is often redirected into a log file)
   provider: ${PROVIDER}
   model:   ${llmConfig?.model.id ?? 'not selected — choose one in the side panel'}
   base:    ${llmConfig?.baseUrl ?? baseUrlOption}
@@ -907,7 +932,8 @@ crazyAgent companion ${VERSION}
   run:     ${runId}
 
 Load extension/ unpacked in chrome://extensions, open the side panel, and paste
-the token into Settings. Enter your OpenRouter API key, refresh/select a model,
+the token from the file above into Settings (copy it without printing it).
+Enter your OpenRouter API key, refresh/select a model,
 and Save. After that the panel can be closed: the extension keeps running
 browser actions in the background while Edge is open.
 The side panel's Debug log button exports a detailed ZIP bundle.
@@ -954,17 +980,30 @@ if (!noDsh) {
   logStore.record('dsh', 'disabled', { reason: '--no-dsh' }, { severity: 'info' })
 }
 
-/** Stop every server and close the log; the process is still alive afterwards. @param {string} signal */
-async function stopServices(signal) {
-  log(`shutting down (${signal})`)
-  logStore.record('companion', 'shutdown', { signal }, { severity: 'info' })
-  updater?.stop()
-  await remoteServer?.stop().catch(() => {})
-  remoteHub?.close()
-  controller.dispose()
-  await bridge.stop().catch(() => {})
-  await runner?.close().catch(() => {})
-  await logStore.close().catch(() => {})
+/** @type {Promise<void> | undefined} */
+let stoppingServices
+
+/**
+ * Stop every server and close the log; the process is still alive afterwards.
+ * A second signal (the supervisor forwards the one its process group also got)
+ * joins the stop already under way instead of stopping everything twice.
+ * @param {string} signal
+ */
+function stopServices(signal) {
+  stoppingServices ??= (async () => {
+    log(`shutting down (${signal})`)
+    logStore.record('companion', 'shutdown', { signal }, { severity: 'info' })
+    updater?.stop()
+    // Before the runtime goes away, so a running turn ends as stopped by the
+    // shutdown instead of as a runtime crash.
+    controller.dispose(signal)
+    await remoteServer?.stop().catch(() => {})
+    remoteHub?.close()
+    await bridge.stop().catch(() => {})
+    await runner?.close().catch(() => {})
+    await logStore.close().catch(() => {})
+  })()
+  return stoppingServices
 }
 
 /** @param {string} signal */

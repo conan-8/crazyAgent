@@ -12,7 +12,7 @@ if (!yes) {
   process.stderr.write(`Refusing to delete ${join(ROOT, '.dsh-home')} without confirmation.
 
 This removes the generated DSH profile, sessions, screenshot attachments, bridge
-token, and debug logs. It does not touch ~/.dsh or your credentials.
+token, lifetime token usage, and debug logs. It does not touch ~/.dsh or your credentials.
 
 Run: npm run clean -- --yes
 `)
