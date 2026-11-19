@@ -1,0 +1,2571 @@
+{
+  "startedAt": "2026-11-18T05:48:54.636Z",
+  "finishedAt": "2026-11-18T05:50:41.498Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "low",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": false,
+  "armingPath": "bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 1466557,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "download-upload",
+      "fixture": "files.html",
+      "prompt": "Download the payload file linked on this page, then attach that downloaded file to the Visible attachment input and click Send attachment.",
+      "file": "download-upload.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlpayl1-8031",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5769,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 2840,
+            "outputTokens": 405,
+            "cacheReadTokens": 154496,
+            "totalTokens": 157741,
+            "usage": {
+              "inputTokens": 2840,
+              "outputTokens": 405,
+              "totalTokens": 157741,
+              "cacheReadTokens": 154496
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the page's \"Download payload\" link.\n- Attached it to the Visible attachment input (file-input readback verified) and clicked \"Send attachment\".\n- Verified result: page now shows `uploaded:payload.txt:281`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpayl1-8031",
+              "origin": "remote",
+              "clientMessageId": "57e259ba-cd97-4f9c-91d6-34741d5ad5e6",
+              "startedAt": "2026-11-18T05:48:56.342Z",
+              "endedAt": "2026-11-18T05:49:02.111Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2840,
+                "outputTokens": 405,
+                "totalTokens": 157741,
+                "cacheReadTokens": 154496
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T05:49:00.518Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlpayl1-8031"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T05:48:57.623Z",
+            "lastAt": "2026-11-18T05:49:00.518Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwlpb3mf-ee4a",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3799,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 3426,
+            "outputTokens": 295,
+            "cacheReadTokens": 81920,
+            "totalTokens": 85641,
+            "usage": {
+              "inputTokens": 3426,
+              "outputTokens": 295,
+              "totalTokens": 85641,
+              "cacheReadTokens": 81920
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) via the page's \"Download payload\" link.\n- Attached it to the \"Visible attachment\" input (verified via file-input readback).\n- Clicked \"Send attachment\"; page shows confirmation `uploaded:payload.txt:281`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpb3mf-ee4a",
+              "origin": "remote",
+              "clientMessageId": "ec475f34-2531-4d5f-995d-76ab6fa5362d",
+              "startedAt": "2026-11-18T05:49:02.871Z",
+              "endedAt": "2026-11-18T05:49:06.670Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3426,
+                "outputTokens": 295,
+                "totalTokens": 85641,
+                "cacheReadTokens": 81920
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T05:49:05.344Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlpb3mf-ee4a"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T05:49:03.512Z",
+            "lastAt": "2026-11-18T05:49:05.344Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwlpb70m-8b9e",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4475,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 2609,
+            "outputTokens": 391,
+            "cacheReadTokens": 103424,
+            "totalTokens": 106424,
+            "usage": {
+              "inputTokens": 2609,
+              "outputTokens": 391,
+              "totalTokens": 106424,
+              "cacheReadTokens": 103424
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) via the page's \"Download payload\" link.\n- Attached it to the \"Visible attachment\" input (verified filename/size by readback).\n- Clicked \"Send attachment\"; page shows `uploaded:payload.txt:281`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpb70m-8b9e",
+              "origin": "remote",
+              "clientMessageId": "26e5ab38-9088-4ccd-b05a-dcce515951a7",
+              "startedAt": "2026-11-18T05:49:07.270Z",
+              "endedAt": "2026-11-18T05:49:11.745Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2609,
+                "outputTokens": 391,
+                "totalTokens": 106424,
+                "cacheReadTokens": 103424
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T05:49:09.911Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlpb70m-8b9e"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T05:49:07.887Z",
+            "lastAt": "2026-11-18T05:49:09.911Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwlpbb1a-59a6",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3074,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 2085,
+            "outputTokens": 287,
+            "cacheReadTokens": 106368,
+            "totalTokens": 108740,
+            "usage": {
+              "inputTokens": 2085,
+              "outputTokens": 287,
+              "totalTokens": 108740,
+              "cacheReadTokens": 106368
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link.\n- Attached it to the Visible attachment input (readback verified `payload.txt`).\n- Clicked Send attachment; page now shows `uploaded:payload.txt:281`, confirming server accepted the upload.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpbb1a-59a6",
+              "origin": "remote",
+              "clientMessageId": "aa88b8c6-06bd-4ada-8569-54545d8a8c82",
+              "startedAt": "2026-11-18T05:49:12.478Z",
+              "endedAt": "2026-11-18T05:49:15.552Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2085,
+                "outputTokens": 287,
+                "totalTokens": 108740,
+                "cacheReadTokens": 106368
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T05:49:14.270Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlpbb1a-59a6"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T05:49:12.872Z",
+            "lastAt": "2026-11-18T05:49:14.270Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwlpbe0r-15ff",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3849,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1671,
+            "outputTokens": 374,
+            "cacheReadTokens": 91904,
+            "totalTokens": 93949,
+            "usage": {
+              "inputTokens": 1671,
+              "outputTokens": 374,
+              "totalTokens": 93949,
+              "cacheReadTokens": 91904
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link — verified as a saved file in Downloads.\n- Attached it to the \"Visible attachment\" file input (96 bytes, verified by input readback).\n- Clicked \"Send attachment\"; the page now shows the confirmation status `uploaded:payload.txt:281`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpbe0r-15ff",
+              "origin": "remote",
+              "clientMessageId": "acb120a3-7746-403a-8dc2-083b536473d3",
+              "startedAt": "2026-11-18T05:49:16.347Z",
+              "endedAt": "2026-11-18T05:49:20.196Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1671,
+                "outputTokens": 374,
+                "totalTokens": 93949,
+                "cacheReadTokens": 91904
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T05:49:18.465Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlpbe0r-15ff"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T05:49:17.062Z",
+            "lastAt": "2026-11-18T05:49:18.465Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "duplicate-text",
+      "fixture": "find.html",
+      "prompt": "Scroll to the paragraph that starts with \"Duplicate needle\" on this page and tell me what it says.",
+      "file": "duplicate-text.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlpbhl6-6e17",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33019/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "DONE\n\n- Scrolled to the two \"Duplicate needle\" paragraphs (already in view; page at top, no further scroll needed).\n- Text: \"Duplicate needle first\" and \"Duplicate needle second\" — there are two paragraphs matching that start, so both are reported.",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5099,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_read_text": 1,
+              "browser_find": 1
+            },
+            "inputTokens": 2832,
+            "outputTokens": 511,
+            "cacheReadTokens": 61440,
+            "totalTokens": 64783,
+            "usage": {
+              "inputTokens": 2832,
+              "outputTokens": 511,
+              "totalTokens": 64783,
+              "cacheReadTokens": 61440
+            },
+            "finalText": "DONE\n\n- Scrolled to the two \"Duplicate needle\" paragraphs (already in view; page at top, no further scroll needed).\n- Text: \"Duplicate needle first\" and \"Duplicate needle second\" — there are two paragraphs matching that start, so both are reported.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpbhl6-6e17",
+              "origin": "remote",
+              "clientMessageId": "9d565fd0-1b38-4666-8002-cb8ec07daa28",
+              "startedAt": "2026-11-18T05:49:20.971Z",
+              "endedAt": "2026-11-18T05:49:26.070Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2832,
+                "outputTokens": 511,
+                "totalTokens": 64783,
+                "cacheReadTokens": 61440
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwlpbm5z-349b",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33019/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "DONE — both paragraphs starting with \"Duplicate needle\" are on screen near the top of the page (they're duplicated, so I'm reporting both):\n\n- \"Duplicate needle first\"\n- \"Duplicate needle second\"",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4590,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_read_text": 1,
+              "browser_find": 1,
+              "browser_screenshot": 1
+            },
+            "inputTokens": 1736,
+            "outputTokens": 467,
+            "cacheReadTokens": 83584,
+            "totalTokens": 85787,
+            "usage": {
+              "inputTokens": 1736,
+              "outputTokens": 467,
+              "totalTokens": 85787,
+              "cacheReadTokens": 83584
+            },
+            "finalText": "DONE — both paragraphs starting with \"Duplicate needle\" are on screen near the top of the page (they're duplicated, so I'm reporting both):\n\n- \"Duplicate needle first\"\n- \"Duplicate needle second\"",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpbm5z-349b",
+              "origin": "remote",
+              "clientMessageId": "73682172-dc9e-4f7e-ad5c-de5f3f345023",
+              "startedAt": "2026-11-18T05:49:26.903Z",
+              "endedAt": "2026-11-18T05:49:31.493Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1736,
+                "outputTokens": 467,
+                "totalTokens": 85787,
+                "cacheReadTokens": 83584
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwlpbqa5-53b7",
+          "status": "partial",
+          "reasons": [
+            "the ambiguity was detected but the agent reported or hinted at an arbitrary occurrence"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33019/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": false,
+            "actionClaim": true,
+            "ordinalChoice": true,
+            "finalText": "DONE\n\n- Scrolled to the first \"Duplicate needle\" paragraph — it was already in view (page wasn't scrolled; reported at_top).\n- The paragraph reads: **\"Duplicate needle first\"**. A second one follows immediately: **\"Duplicate needle second\"** (the page has two matches for that phrase).",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3310,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 2181,
+            "outputTokens": 354,
+            "cacheReadTokens": 40704,
+            "totalTokens": 43239,
+            "usage": {
+              "inputTokens": 2181,
+              "outputTokens": 354,
+              "totalTokens": 43239,
+              "cacheReadTokens": 40704
+            },
+            "finalText": "DONE\n\n- Scrolled to the first \"Duplicate needle\" paragraph — it was already in view (page wasn't scrolled; reported at_top).\n- The paragraph reads: **\"Duplicate needle first\"**. A second one follows immediately: **\"Duplicate needle second\"** (the page has two matches for that phrase).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpbqa5-53b7",
+              "origin": "remote",
+              "clientMessageId": "85052801-28de-4132-9753-334aa811671d",
+              "startedAt": "2026-11-18T05:49:32.238Z",
+              "endedAt": "2026-11-18T05:49:35.548Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2181,
+                "outputTokens": 354,
+                "totalTokens": 43239,
+                "cacheReadTokens": 40704
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwlpbtgc-b643",
+          "status": "pass",
+          "reasons": [
+            "the duplicated text was reported as ambiguous and neither occurrence was revealed or altered"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33019/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": true,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "There are two paragraphs starting with \"Duplicate needle,\" and both are on screen now:\n\n- \"Duplicate needle first\"\n- \"Duplicate needle second\"\n\nTell me which one you meant if you only wanted one.",
+            "failed": "FIND_AMBIGUOUS find Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based integer … | browser_find Error: Found 2 matches for \"Duplicate needle\"; nothing was scrol"
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3164,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 1,
+            "failed": [
+              {
+                "kind": "command",
+                "tool": "find",
+                "code": "FIND_AMBIGUOUS",
+                "message": "Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based integer …"
+              },
+              {
+                "kind": "tool",
+                "tool": "browser_find",
+                "message": "Error: Found 2 matches for \"Duplicate needle\"; nothing was scrolled or changed. The user gave no ordinal: do not pick, reveal, or scroll to an occurrence, and do not claim you revealed the text. Report the ambiguity (2 matches) and stop or ask which one. occurrence:\"first\", \"last\", or a one-based i…"
+              }
+            ],
+            "toolCounts": {
+              "browser_find": 2
+            },
+            "inputTokens": 2133,
+            "outputTokens": 305,
+            "cacheReadTokens": 61952,
+            "totalTokens": 64390,
+            "usage": {
+              "inputTokens": 2133,
+              "outputTokens": 305,
+              "totalTokens": 64390,
+              "cacheReadTokens": 61952
+            },
+            "finalText": "There are two paragraphs starting with \"Duplicate needle,\" and both are on screen now:\n\n- \"Duplicate needle first\"\n- \"Duplicate needle second\"\n\nTell me which one you meant if you only wanted one.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 1,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpbtgc-b643",
+              "origin": "remote",
+              "clientMessageId": "769218b8-7ab1-4f42-82b3-88708c837a61",
+              "startedAt": "2026-11-18T05:49:36.349Z",
+              "endedAt": "2026-11-18T05:49:39.513Z",
+              "outcome": "done",
+              "error": null,
+              "label": null,
+              "usage": {
+                "inputTokens": 2133,
+                "outputTokens": 305,
+                "totalTokens": 64390,
+                "cacheReadTokens": 61952
+              },
+              "failedCalls": 1,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwlpbwgt-ffad",
+          "status": "partial",
+          "reasons": [
+            "the ambiguity was detected but the agent reported or hinted at an arbitrary occurrence"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33019/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "done",
+            "reportsAmbiguity": true,
+            "ambiguityFailure": false,
+            "actionClaim": true,
+            "ordinalChoice": true,
+            "finalText": "DONE\n\n- Located the target paragraph(s) on the page (it's already in the visible document area at the top of the scroll; page scroll y=0).\n- The page has two paragraphs starting with \"Duplicate needle\":\n  - **\"Duplicate needle first\"**\n  - **\"Duplicate needle second\"**\n- Note: there were two matches, so I revealed the first occurrence; the second sits directly below it (visible in the same view).",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4585,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 1437,
+            "outputTokens": 381,
+            "cacheReadTokens": 41472,
+            "totalTokens": 43290,
+            "usage": {
+              "inputTokens": 1437,
+              "outputTokens": 381,
+              "totalTokens": 43290,
+              "cacheReadTokens": 41472
+            },
+            "finalText": "DONE\n\n- Located the target paragraph(s) on the page (it's already in the visible document area at the top of the scroll; page scroll y=0).\n- The page has two paragraphs starting with \"Duplicate needle\":\n  - **\"Duplicate needle first\"**\n  - **\"Duplicate needle second\"**\n- Note: there were two matches, so I revealed the first occurrence; the second sits directly below it (visible in the same view).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpbwgt-ffad",
+              "origin": "remote",
+              "clientMessageId": "34ad2e76-2063-41e3-a1d6-2b6315b6f2da",
+              "startedAt": "2026-11-18T05:49:40.254Z",
+              "endedAt": "2026-11-18T05:49:44.839Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1437,
+                "outputTokens": 381,
+                "totalTokens": 43290,
+                "cacheReadTokens": 41472
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "find-reveal",
+      "fixture": "find.html",
+      "prompt": "Scroll to the text \"UNIQUE-FIND-MARKER\" on this page and bring it fully into view. Don't click or edit anything.",
+      "file": "find-reveal.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlpc0l0-4988",
+          "status": "pass",
+          "reasons": [
+            "the unique text is fully inside the viewport and no other page state changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33019/find.html",
+            "markerFound": true,
+            "markerFullyVisible": true,
+            "markerIntersectsViewport": true,
+            "scrollX": 0,
+            "scrollY": 1829,
+            "viewport": {
+              "width": 1272,
+              "height": 768
+            },
+            "markerRect": {
+              "top": 432.6875,
+              "bottom": 456.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 2917,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 2093,
+            "outputTokens": 114,
+            "cacheReadTokens": 40704,
+            "totalTokens": 42911,
+            "usage": {
+              "inputTokens": 2093,
+              "outputTokens": 114,
+              "totalTokens": 42911,
+              "cacheReadTokens": 40704
+            },
+            "finalText": "DONE — \"UNIQUE-FIND-MARKER inside the intended destination.\" is now fully in view near the bottom of the page (scroll y=1829/1829); nothing was clicked, focused, selected, or edited.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpc0l0-4988",
+              "origin": "remote",
+              "clientMessageId": "62f4a8b5-eefe-4638-94d0-2a4d66927d1a",
+              "startedAt": "2026-11-18T05:49:45.588Z",
+              "endedAt": "2026-11-18T05:49:48.505Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2093,
+                "outputTokens": 114,
+                "totalTokens": 42911,
+                "cacheReadTokens": 40704
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwlpc3g7-7324",
+          "status": "pass",
+          "reasons": [
+            "the unique text is fully inside the viewport and no other page state changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33019/find.html",
+            "markerFound": true,
+            "markerFullyVisible": true,
+            "markerIntersectsViewport": true,
+            "scrollX": 0,
+            "scrollY": 1829,
+            "viewport": {
+              "width": 1272,
+              "height": 768
+            },
+            "markerRect": {
+              "top": 432.6875,
+              "bottom": 456.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 12655,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 5589,
+            "outputTokens": 361,
+            "cacheReadTokens": 36660,
+            "totalTokens": 42610,
+            "usage": {
+              "inputTokens": 5589,
+              "outputTokens": 361,
+              "totalTokens": 42610,
+              "cacheReadTokens": 36660
+            },
+            "finalText": "DONE — Scrolled via semantic find to \"UNIQUE-FIND-MARKER inside the intended destination.\" It's fully visible in the \"Off-screen destination\" card at the bottom of the page. No clicks or edits were made.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpc3g7-7324",
+              "origin": "remote",
+              "clientMessageId": "9fdeccc7-6171-4d2a-8ddc-40bc66c2bd75",
+              "startedAt": "2026-11-18T05:49:49.303Z",
+              "endedAt": "2026-11-18T05:50:01.958Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 5589,
+                "outputTokens": 361,
+                "totalTokens": 42610,
+                "cacheReadTokens": 36660
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwlpcdsf-4a3f",
+          "status": "pass",
+          "reasons": [
+            "the unique text is fully inside the viewport and no other page state changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33019/find.html",
+            "markerFound": true,
+            "markerFullyVisible": true,
+            "markerIntersectsViewport": true,
+            "scrollX": 0,
+            "scrollY": 1829,
+            "viewport": {
+              "width": 1272,
+              "height": 768
+            },
+            "markerRect": {
+              "top": 432.6875,
+              "bottom": 456.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 2096,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 1441,
+            "outputTokens": 117,
+            "cacheReadTokens": 41344,
+            "totalTokens": 42902,
+            "usage": {
+              "inputTokens": 1441,
+              "outputTokens": 117,
+              "totalTokens": 42902,
+              "cacheReadTokens": 41344
+            },
+            "finalText": "DONE — scrolled to \"UNIQUE-FIND-MARKER inside the intended destination.\" and it is fully visible at page bottom (y=1829/1829). No clicks, selection, or edits performed.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpcdsf-4a3f",
+              "origin": "remote",
+              "clientMessageId": "439fe11c-b987-4bb9-967a-2f4d7a57c6d4",
+              "startedAt": "2026-11-18T05:50:02.703Z",
+              "endedAt": "2026-11-18T05:50:04.799Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1441,
+                "outputTokens": 117,
+                "totalTokens": 42902,
+                "cacheReadTokens": 41344
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwlpcg0j-4510",
+          "status": "pass",
+          "reasons": [
+            "the unique text is fully inside the viewport and no other page state changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33019/find.html",
+            "markerFound": true,
+            "markerFullyVisible": true,
+            "markerIntersectsViewport": true,
+            "scrollX": 0,
+            "scrollY": 1829,
+            "viewport": {
+              "width": 1272,
+              "height": 768
+            },
+            "markerRect": {
+              "top": 432.6875,
+              "bottom": 456.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 2194,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 22459,
+            "outputTokens": 135,
+            "cacheReadTokens": 20352,
+            "totalTokens": 42946,
+            "usage": {
+              "inputTokens": 22459,
+              "outputTokens": 135,
+              "totalTokens": 42946,
+              "cacheReadTokens": 20352
+            },
+            "finalText": "DONE — \"UNIQUE-FIND-MARKER inside the intended destination.\" is fully visible in the \"Off-screen destination\" card, scrolled to the page bottom. No clicks, focus, selection, or edits were made (find was scroll-only).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpcg0j-4510",
+              "origin": "remote",
+              "clientMessageId": "c33161ec-431f-4dd8-a3d5-9506e0676403",
+              "startedAt": "2026-11-18T05:50:05.587Z",
+              "endedAt": "2026-11-18T05:50:07.781Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 22459,
+                "outputTokens": 135,
+                "totalTokens": 42946,
+                "cacheReadTokens": 20352
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwlpcibf-b1ee",
+          "status": "pass",
+          "reasons": [
+            "the unique text is fully inside the viewport and no other page state changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:33019/find.html",
+            "markerFound": true,
+            "markerFullyVisible": true,
+            "markerIntersectsViewport": true,
+            "scrollX": 0,
+            "scrollY": 1829,
+            "viewport": {
+              "width": 1272,
+              "height": 768
+            },
+            "markerRect": {
+              "top": 432.6875,
+              "bottom": 456.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 2399,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 22318,
+            "outputTokens": 119,
+            "cacheReadTokens": 20480,
+            "totalTokens": 42917,
+            "usage": {
+              "inputTokens": 22318,
+              "outputTokens": 119,
+              "totalTokens": 42917,
+              "cacheReadTokens": 20480
+            },
+            "finalText": "DONE — \"UNIQUE-FIND-MARKER\" is scrolled into view in the \"Off-screen destination\" card near the page bottom (scroll y=1829/1829); only a find/reveal was performed, no clicks or edits.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpcibf-b1ee",
+              "origin": "remote",
+              "clientMessageId": "e84b6392-2646-4be8-8888-09d49695de7c",
+              "startedAt": "2026-11-18T05:50:08.571Z",
+              "endedAt": "2026-11-18T05:50:10.970Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 22318,
+                "outputTokens": 119,
+                "totalTokens": 42917,
+                "cacheReadTokens": 20480
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "form-submit",
+      "fixture": "form.html",
+      "prompt": "Fill out the form on this page: name \"Ada Lovelace\", notes \"First computer programmer\", password \"hunter2-demo\". Submit it exactly once and leave the rest of the page alone.",
+      "file": "form-submit.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlpckjx-bf4c",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:33019/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4621,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1830,
+            "outputTokens": 402,
+            "cacheReadTokens": 63488,
+            "totalTokens": 65720,
+            "usage": {
+              "inputTokens": 1830,
+              "outputTokens": 402,
+              "totalTokens": 65720,
+              "cacheReadTokens": 63488
+            },
+            "finalText": "DONE\n- Filled Name \"Ada Lovelace\", Notes \"First computer programmer\", Password \"hunter2-demo\" (page reports 12 chars, matching), leaving rich text, canvas editor, and all other content untouched.\n- Submitted once: page result shows `result: name=Ada Lovelace notes=First computer programmer pass=12chars`, `submit=1`, `input=3`.\n- The submit click's own readout was \"no visible change\", but the page's event log and result line confirm one successful submission.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpckjx-bf4c",
+              "origin": "remote",
+              "clientMessageId": "5152b6a3-4de8-4b7e-8947-67883cc109c1",
+              "startedAt": "2026-11-18T05:50:11.470Z",
+              "endedAt": "2026-11-18T05:50:16.091Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1830,
+                "outputTokens": 402,
+                "totalTokens": 65720,
+                "cacheReadTokens": 63488
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwlpcoer-36aa",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:33019/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 7543,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 2000,
+            "outputTokens": 462,
+            "cacheReadTokens": 61696,
+            "totalTokens": 64158,
+            "usage": {
+              "inputTokens": 2000,
+              "outputTokens": 462,
+              "totalTokens": 64158,
+              "cacheReadTokens": 61696
+            },
+            "finalText": "DONE\n- Entered Name \"Ada Lovelace\", Notes \"First computer programmer\", Password \"hunter2-demo\".\n- Clicked Submit once; page shows `result: name=Ada Lovelace notes=First computer programmer pass=12chars` and `submit=1`.\n- Left every other part of the page (rich text, canvas editor, comment card, links) untouched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpcoer-36aa",
+              "origin": "remote",
+              "clientMessageId": "da2bb7ad-732c-4f14-adb8-2543db55c960",
+              "startedAt": "2026-11-18T05:50:16.467Z",
+              "endedAt": "2026-11-18T05:50:24.010Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2000,
+                "outputTokens": 462,
+                "totalTokens": 64158,
+                "cacheReadTokens": 61696
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwlpcukl-1ece",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:33019/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 7457,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_scroll": 2
+            },
+            "inputTokens": 48087,
+            "outputTokens": 458,
+            "cacheReadTokens": 42496,
+            "totalTokens": 91041,
+            "usage": {
+              "inputTokens": 48087,
+              "outputTokens": 458,
+              "totalTokens": 91041,
+              "cacheReadTokens": 42496
+            },
+            "finalText": "DONE — Form submitted exactly once with the requested values.\n\n- Verified: result line reads `name=Ada Lovelace notes=First computer programmer pass=12chars`, and the event log shows `input=3`, `submit=1`.\n- Left untouched: rich text, canvas editor, comment card, and \"Go to second page\" link.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpcukl-1ece",
+              "origin": "remote",
+              "clientMessageId": "e3e1d760-f33e-4a2e-b6e7-3a4b9bd73208",
+              "startedAt": "2026-11-18T05:50:24.453Z",
+              "endedAt": "2026-11-18T05:50:31.910Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 48087,
+                "outputTokens": 458,
+                "totalTokens": 91041,
+                "cacheReadTokens": 42496
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwlpd0n5-0858",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:33019/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5296,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 2980,
+            "outputTokens": 358,
+            "cacheReadTokens": 62464,
+            "totalTokens": 65802,
+            "usage": {
+              "inputTokens": 2980,
+              "outputTokens": 358,
+              "totalTokens": 65802,
+              "cacheReadTokens": 62464
+            },
+            "finalText": "DONE\n- Filled Name = \"Ada Lovelace\", Notes = \"First computer programmer\", Password = \"hunter2-demo\" (left Rich text and the canvas editor untouched).\n- Submitted exactly once: page shows `submit=1` with `input=3` and result `name=Ada Lovelace notes=First computer programmer pass=12chars` (password value length only, as the page displays it).\n- Assumption: the password display of \"12chars\" corresponds to the 12-character password entered.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpd0n5-0858",
+              "origin": "remote",
+              "clientMessageId": "3d9f4a96-4826-454c-a569-58bad456d45e",
+              "startedAt": "2026-11-18T05:50:32.321Z",
+              "endedAt": "2026-11-18T05:50:37.617Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2980,
+                "outputTokens": 358,
+                "totalTokens": 65802,
+                "cacheReadTokens": 62464
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwlpd54a-f765",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:33019/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3195,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_screenshot": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 3075,
+            "outputTokens": 459,
+            "cacheReadTokens": 108032,
+            "totalTokens": 111566,
+            "usage": {
+              "inputTokens": 3075,
+              "outputTokens": 459,
+              "totalTokens": 111566,
+              "cacheReadTokens": 108032
+            },
+            "finalText": "DONE\n- Submitted exactly once; page reports `submit=1` with `name=Ada Lovelace notes=First computer programmer pass=12chars` (password field masked, 12 chars matches \"hunter2-demo\").\n- Only the three requested fields were touched; Rich text, canvas editor, and other elements left alone.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlpd54a-f765",
+              "origin": "remote",
+              "clientMessageId": "c4a3250e-5720-4323-b86a-257ad94ed2e9",
+              "startedAt": "2026-11-18T05:50:38.122Z",
+              "endedAt": "2026-11-18T05:50:41.317Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3075,
+                "outputTokens": 459,
+                "totalTokens": 111566,
+                "cacheReadTokens": 108032
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}

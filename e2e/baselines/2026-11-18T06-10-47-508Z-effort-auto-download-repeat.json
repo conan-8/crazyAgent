@@ -1,0 +1,740 @@
+{
+  "startedAt": "2026-11-18T06:10:47.508Z",
+  "finishedAt": "2026-11-18T06:11:32.960Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "auto",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": false,
+  "armingPath": "bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 563654,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "download-upload",
+      "fixture": "files.html",
+      "prompt": "Download the payload file linked on this page, then attach that downloaded file to the Visible attachment input and click Send attachment.",
+      "file": "download-upload.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlq33mh-1655",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6044,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 1864,
+            "outputTokens": 345,
+            "cacheReadTokens": 154368,
+            "totalTokens": 156577,
+            "usage": {
+              "inputTokens": 1864,
+              "outputTokens": 345,
+              "totalTokens": 156577,
+              "cacheReadTokens": 154368
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) via \"Download payload\" link, attached it to the Visible attachment input, and clicked Send attachment.\n- Verified: attachment readback confirmed `payload.txt`; the page then reported `uploaded:payload.txt:281`, plus earlier `attached:visible-file:payload.txt:96`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlq33mh-1655",
+              "origin": "remote",
+              "clientMessageId": "c2d28b1a-acc9-414e-8628-039033c09e1e",
+              "startedAt": "2026-11-18T06:10:49.243Z",
+              "endedAt": "2026-11-18T06:10:55.287Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1864,
+                "outputTokens": 345,
+                "totalTokens": 156577,
+                "cacheReadTokens": 154368
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T06:10:53.938Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlq33mh-1655"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T06:10:51.007Z",
+            "lastAt": "2026-11-18T06:10:53.938Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwlq38ve-e927",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4290,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 3202,
+            "outputTokens": 335,
+            "cacheReadTokens": 102912,
+            "totalTokens": 106449,
+            "usage": {
+              "inputTokens": 3202,
+              "outputTokens": 335,
+              "totalTokens": 106449,
+              "cacheReadTokens": 102912
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link.\n- Attached it to the \"Visible attachment\" input (verified by file-input readback).\n- Clicked \"Send attachment\"; page now shows `uploaded:payload.txt:281`, confirming the upload.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlq38ve-e927",
+              "origin": "remote",
+              "clientMessageId": "de6369fc-052c-4dd0-8cb1-933f5091a38f",
+              "startedAt": "2026-11-18T06:10:56.043Z",
+              "endedAt": "2026-11-18T06:11:00.333Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3202,
+                "outputTokens": 335,
+                "totalTokens": 106449,
+                "cacheReadTokens": 102912
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T06:10:58.633Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlq38ve-e927"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T06:10:56.704Z",
+            "lastAt": "2026-11-18T06:10:58.633Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwlq3cr4-bc81",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 8506,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 23912,
+            "outputTokens": 307,
+            "cacheReadTokens": 61440,
+            "totalTokens": 85659,
+            "usage": {
+              "inputTokens": 23912,
+              "outputTokens": 307,
+              "totalTokens": 85659,
+              "cacheReadTokens": 61440
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the page's \"Download payload\" link, verified in Downloads.\n- Attached it to the \"Visible attachment\" input (readback confirmed name/size) and clicked \"Send attachment\".\n- Page reported `uploaded:payload.txt:281`, confirming submission.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlq3cr4-bc81",
+              "origin": "remote",
+              "clientMessageId": "35900e57-3a91-498a-931c-4d95b8b60631",
+              "startedAt": "2026-11-18T06:11:01.072Z",
+              "endedAt": "2026-11-18T06:11:09.578Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 23912,
+                "outputTokens": 307,
+                "totalTokens": 85659,
+                "cacheReadTokens": 61440
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T06:11:05.440Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlq3cr4-bc81"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T06:11:01.878Z",
+            "lastAt": "2026-11-18T06:11:05.440Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwlq3jv2-6868",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 16107,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 7795,
+            "outputTokens": 376,
+            "cacheReadTokens": 97510,
+            "totalTokens": 105681,
+            "usage": {
+              "inputTokens": 7795,
+              "outputTokens": 376,
+              "totalTokens": 105681,
+              "cacheReadTokens": 97510
+            },
+            "finalText": "DONE\n\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link.\n- Attached it to the **Visible attachment** input (verified by file-input readback) and clicked **Send attachment**; the page now shows `uploaded:payload.txt:281`, confirming the upload was accepted.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlq3jv2-6868",
+              "origin": "remote",
+              "clientMessageId": "579333f6-0174-403b-91db-294146c0e34f",
+              "startedAt": "2026-11-18T06:11:10.286Z",
+              "endedAt": "2026-11-18T06:11:26.393Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 7795,
+                "outputTokens": 376,
+                "totalTokens": 105681,
+                "cacheReadTokens": 97510
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T06:11:21.631Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlq3jv2-6868"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T06:11:15.204Z",
+            "lastAt": "2026-11-18T06:11:21.631Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwlq3wtc-bf27",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5684,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 2166,
+            "outputTokens": 370,
+            "cacheReadTokens": 106752,
+            "totalTokens": 109288,
+            "usage": {
+              "inputTokens": 2166,
+              "outputTokens": 370,
+              "totalTokens": 109288,
+              "cacheReadTokens": 106752
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link into Downloads.\n- Attached it to the Visible attachment input (verified readback: payload.txt, 96 bytes).\n- Clicked Send attachment; page now shows `uploaded:payload.txt:281`, confirming the submission result.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlq3wtc-bf27",
+              "origin": "remote",
+              "clientMessageId": "886189d2-dd0d-494e-bdb0-72c081279ecc",
+              "startedAt": "2026-11-18T06:11:27.072Z",
+              "endedAt": "2026-11-18T06:11:32.756Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2166,
+                "outputTokens": 370,
+                "totalTokens": 109288,
+                "cacheReadTokens": 106752
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T06:11:30.612Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlq3wtc-bf27"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T06:11:27.907Z",
+            "lastAt": "2026-11-18T06:11:30.612Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}

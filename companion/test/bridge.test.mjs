@@ -553,6 +553,26 @@ test('plan mode follows the current turn and synchronizes on provider connect', 
   assert.deepEqual(cleared, { v: 1, type: 'plan.mode', turnId: null, enabled: false, seed: null })
 })
 
+test('turn context carries the raw prompt, follows reconnect, and clears with the turn', async t => {
+  const { bridge, url } = await setup(t)
+  bridge.setTurnId('turn-raw', { userPrompt: 'click the Bold button' })
+  const tools = await connect(url, 'tools')
+  t.after(() => tools.ws.close())
+  const initial = await tools.messages.next(message => message.type === 'turn.context')
+  assert.deepEqual(initial, { v: 1, type: 'turn.context', turnId: 'turn-raw', prompt: 'click the Bold button' })
+
+  tools.ws.close()
+  await sleep(50)
+  const resumed = await connect(url, 'tools')
+  t.after(() => resumed.ws.close())
+  const replayed = await resumed.messages.next(message => message.type === 'turn.context')
+  assert.deepEqual(replayed, initial)
+
+  bridge.setTurnId(undefined)
+  const cleared = await resumed.messages.next(message => message.type === 'turn.context')
+  assert.deepEqual(cleared, { v: 1, type: 'turn.context', turnId: null, prompt: '' })
+})
+
 test('plan mode carries the M2 plan seed and clears it with the turn', async t => {
   const { bridge, url } = await setup(t)
   const seed = { revision: 4, items: [{ content: 'Fill the form', status: 'in_progress' }, { content: 'Verify', status: 'pending' }] }

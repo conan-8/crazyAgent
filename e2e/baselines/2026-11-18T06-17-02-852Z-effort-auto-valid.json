@@ -1,0 +1,2539 @@
+{
+  "startedAt": "2026-11-18T06:17:02.851Z",
+  "finishedAt": "2026-11-18T06:18:07.539Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "auto",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": false,
+  "armingPath": "bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 1032876,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "download-upload",
+      "fixture": "files.html",
+      "prompt": "Download the payload file linked on this page, then attach that downloaded file to the Visible attachment input and click Send attachment.",
+      "file": "download-upload.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlqb55n-38b9",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5196,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 23136,
+            "outputTokens": 331,
+            "cacheReadTokens": 85632,
+            "totalTokens": 109099,
+            "usage": {
+              "inputTokens": 23136,
+              "outputTokens": 331,
+              "totalTokens": 109099,
+              "cacheReadTokens": 85632
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link.\n- Attached it to the Visible attachment input (verified via file-input readback) and clicked Send attachment.\n- Page status now reads `uploaded:payload.txt:281`, confirming the send.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqb55n-38b9",
+              "origin": "remote",
+              "clientMessageId": "94fd8116-f00f-408c-bcd0-1b4db4defa92",
+              "startedAt": "2026-11-18T06:17:04.477Z",
+              "endedAt": "2026-11-18T06:17:09.673Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 23136,
+                "outputTokens": 331,
+                "totalTokens": 109099,
+                "cacheReadTokens": 85632
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T06:17:08.110Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlqb55n-38b9"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T06:17:05.371Z",
+            "lastAt": "2026-11-18T06:17:08.110Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwlqb9rp-c9de",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4348,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 3388,
+            "outputTokens": 286,
+            "cacheReadTokens": 81920,
+            "totalTokens": 85594,
+            "usage": {
+              "inputTokens": 3388,
+              "outputTokens": 286,
+              "totalTokens": 85594,
+              "cacheReadTokens": 81920
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link.\n- Attached it to the Visible attachment input (file-input readback confirmed `payload.txt`).\n- Clicked \"Send attachment\"; the page now shows `uploaded:payload.txt:281`, confirming the server received it.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqb9rp-c9de",
+              "origin": "remote",
+              "clientMessageId": "5e149e68-c180-44ce-a098-1d5511c99f23",
+              "startedAt": "2026-11-18T06:17:10.453Z",
+              "endedAt": "2026-11-18T06:17:14.801Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 3388,
+                "outputTokens": 286,
+                "totalTokens": 85594,
+                "cacheReadTokens": 81920
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T06:17:13.104Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlqb9rp-c9de"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T06:17:11.172Z",
+            "lastAt": "2026-11-18T06:17:13.104Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwlqbdq3-10c3",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3528,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 897,
+            "outputTokens": 263,
+            "cacheReadTokens": 104704,
+            "totalTokens": 105864,
+            "usage": {
+              "inputTokens": 897,
+              "outputTokens": 263,
+              "totalTokens": 105864,
+              "cacheReadTokens": 104704
+            },
+            "finalText": "DONE — Downloaded `payload.txt` (96 bytes) via the page's \"Download payload\" link, attached it to the \"Visible attachment\" input (readback verified), and clicked \"Send attachment\"; the page now shows `uploaded:payload.txt:281`, confirming the server-side upload.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqbdq3-10c3",
+              "origin": "remote",
+              "clientMessageId": "55738048-f5cf-443b-a64f-139e52c66b09",
+              "startedAt": "2026-11-18T06:17:15.579Z",
+              "endedAt": "2026-11-18T06:17:19.107Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 897,
+                "outputTokens": 263,
+                "totalTokens": 105864,
+                "cacheReadTokens": 104704
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T06:17:17.519Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlqbdq3-10c3"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T06:17:16.309Z",
+            "lastAt": "2026-11-18T06:17:17.519Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwlqbh2h-7662",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4429,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1
+            },
+            "inputTokens": 2879,
+            "outputTokens": 278,
+            "cacheReadTokens": 82432,
+            "totalTokens": 85589,
+            "usage": {
+              "inputTokens": 2879,
+              "outputTokens": 278,
+              "totalTokens": 85589,
+              "cacheReadTokens": 82432
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the \"Download payload\" link.\n- Attached it to the Visible attachment input (verified by file-input readback).\n- Clicked \"Send attachment\"; page now shows `uploaded:payload.txt:281`.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqbh2h-7662",
+              "origin": "remote",
+              "clientMessageId": "9f11f909-6557-4efe-8c62-b6a6a3a515e8",
+              "startedAt": "2026-11-18T06:17:19.913Z",
+              "endedAt": "2026-11-18T06:17:24.342Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2879,
+                "outputTokens": 278,
+                "totalTokens": 85589,
+                "cacheReadTokens": 82432
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T06:17:22.728Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlqbh2h-7662"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T06:17:20.826Z",
+            "lastAt": "2026-11-18T06:17:22.728Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwlqbl1b-c9e6",
+          "status": "pass",
+          "reasons": [
+            "downloaded bytes, the Visible input, and the one upload all match the payload"
+          ],
+          "evidence": {
+            "uploads": [
+              {
+                "filename": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "downloads": [
+              {
+                "name": "payload.txt",
+                "size": 96,
+                "matchesPayload": true
+              }
+            ],
+            "payloadSize": 96,
+            "inputs": {
+              "visible": {
+                "name": "payload.txt",
+                "size": 96
+              },
+              "hidden": {
+                "name": null,
+                "size": 0
+              },
+              "other": {
+                "name": null,
+                "size": 0
+              },
+              "shadow": {
+                "name": null,
+                "size": 0
+              },
+              "state": "uploaded:payload.txt:281"
+            }
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 2956,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 5,
+            "toolCalls": 4,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_download": 1,
+              "browser_upload": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1104,
+            "outputTokens": 284,
+            "cacheReadTokens": 104832,
+            "totalTokens": 106220,
+            "usage": {
+              "inputTokens": 1104,
+              "outputTokens": 284,
+              "totalTokens": 106220,
+              "cacheReadTokens": 104832
+            },
+            "finalText": "DONE\n- Downloaded `payload.txt` (96 bytes) from the page's \"Download payload\" link.\n- Attached it to the Visible attachment input (verified by file-input readback) and clicked \"Send attachment\".\n- Page now shows `uploaded:payload.txt:281`, confirming the server processed the upload.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqbl1b-c9e6",
+              "origin": "remote",
+              "clientMessageId": "b271f189-44e3-4442-b1e4-40a4a224eab6",
+              "startedAt": "2026-11-18T06:17:25.055Z",
+              "endedAt": "2026-11-18T06:17:28.011Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1104,
+                "outputTokens": 284,
+                "totalTokens": 106220,
+                "cacheReadTokens": 104832
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [
+            {
+              "step": null,
+              "acceptedAt": "2026-11-18T06:17:26.826Z",
+              "method": "POST",
+              "path": "/upload",
+              "word": null,
+              "receipt": null,
+              "body": null,
+              "turnId": "turn-mwlqbl1b-c9e6"
+            }
+          ],
+          "serverRequestSummary": {
+            "total": 2,
+            "get": 1,
+            "post": 1,
+            "other": 0,
+            "firstAt": "2026-11-18T06:17:25.617Z",
+            "lastAt": "2026-11-18T06:17:26.826Z"
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "duplicate-text",
+      "fixture": "find.html",
+      "prompt": "Scroll to the paragraph that starts with \"Duplicate needle\" on this page and tell me what it says.",
+      "file": "duplicate-text.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlqbnwn-8231",
+          "status": "fail",
+          "reasons": [
+            "no ambiguity was reported and no correct reveal happened"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41269/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "error",
+            "reportsAmbiguity": false,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 70,
+            "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 0,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {},
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "totalTokens": 0,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlqbnwn-8231",
+              "origin": "remote",
+              "clientMessageId": "f5e3374d-52ae-4bde-a22e-a10fce61abb6",
+              "startedAt": "2026-11-18T06:17:28.775Z",
+              "endedAt": "2026-11-18T06:17:28.845Z",
+              "outcome": "error",
+              "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+              "label": null,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwlqbokc-f45c",
+          "status": "fail",
+          "reasons": [
+            "no ambiguity was reported and no correct reveal happened"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41269/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "error",
+            "reportsAmbiguity": false,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 68,
+            "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 0,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {},
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "totalTokens": 0,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlqbokc-f45c",
+              "origin": "remote",
+              "clientMessageId": "0b1614ee-2858-4e4e-8f1b-b83e465c81f0",
+              "startedAt": "2026-11-18T06:17:29.628Z",
+              "endedAt": "2026-11-18T06:17:29.696Z",
+              "outcome": "error",
+              "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+              "label": null,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwlqbp8d-f2f9",
+          "status": "fail",
+          "reasons": [
+            "no ambiguity was reported and no correct reveal happened"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41269/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "error",
+            "reportsAmbiguity": false,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 49,
+            "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 0,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {},
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "totalTokens": 0,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlqbp8d-f2f9",
+              "origin": "remote",
+              "clientMessageId": "fcb81a0c-9f15-4607-900d-12ebd5185e78",
+              "startedAt": "2026-11-18T06:17:30.493Z",
+              "endedAt": "2026-11-18T06:17:30.542Z",
+              "outcome": "error",
+              "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+              "label": null,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwlqbpvx-88b2",
+          "status": "fail",
+          "reasons": [
+            "no ambiguity was reported and no correct reveal happened"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41269/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "error",
+            "reportsAmbiguity": false,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 63,
+            "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 0,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {},
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "totalTokens": 0,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlqbpvx-88b2",
+              "origin": "remote",
+              "clientMessageId": "589e3b81-dac9-4aef-9338-1105c19b7df0",
+              "startedAt": "2026-11-18T06:17:31.342Z",
+              "endedAt": "2026-11-18T06:17:31.405Z",
+              "outcome": "error",
+              "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+              "label": null,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwlqbqjm-eb67",
+          "status": "fail",
+          "reasons": [
+            "no ambiguity was reported and no correct reveal happened"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41269/find.html",
+            "pageClean": true,
+            "scrollClean": true,
+            "scrollX": 0,
+            "scrollY": 0,
+            "duplicates": [
+              "Duplicate needle first",
+              "Duplicate needle second"
+            ],
+            "selectionText": "",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "waitingForUser": false,
+            "turnStatus": "error",
+            "reportsAmbiguity": false,
+            "ambiguityFailure": false,
+            "actionClaim": false,
+            "ordinalChoice": false,
+            "finalText": "",
+            "failed": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 67,
+            "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 0,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {},
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "totalTokens": 0,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlqbqjm-eb67",
+              "origin": "remote",
+              "clientMessageId": "418fe77c-246d-45e3-90d8-d7950f6e8105",
+              "startedAt": "2026-11-18T06:17:32.194Z",
+              "endedAt": "2026-11-18T06:17:32.261Z",
+              "outcome": "error",
+              "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+              "label": null,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "find-reveal",
+      "fixture": "find.html",
+      "prompt": "Scroll to the text \"UNIQUE-FIND-MARKER\" on this page and bring it fully into view. Don't click or edit anything.",
+      "file": "find-reveal.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlqbr7m-c3aa",
+          "status": "fail",
+          "reasons": [
+            "the page did not scroll to the unique text"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41269/find.html",
+            "markerFound": true,
+            "markerFullyVisible": false,
+            "markerIntersectsViewport": false,
+            "scrollX": 0,
+            "scrollY": 0,
+            "viewport": {
+              "width": 1272,
+              "height": 768
+            },
+            "markerRect": {
+              "top": 2261.6875,
+              "bottom": 2285.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 64,
+            "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 0,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {},
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "totalTokens": 0,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlqbr7m-c3aa",
+              "origin": "remote",
+              "clientMessageId": "622d9f1a-3cbc-47d5-a802-97cbd7ecec91",
+              "startedAt": "2026-11-18T06:17:33.058Z",
+              "endedAt": "2026-11-18T06:17:33.122Z",
+              "outcome": "error",
+              "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+              "label": null,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwlqbrv6-eebd",
+          "status": "fail",
+          "reasons": [
+            "the page did not scroll to the unique text"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41269/find.html",
+            "markerFound": true,
+            "markerFullyVisible": false,
+            "markerIntersectsViewport": false,
+            "scrollX": 0,
+            "scrollY": 0,
+            "viewport": {
+              "width": 1272,
+              "height": 768
+            },
+            "markerRect": {
+              "top": 2261.6875,
+              "bottom": 2285.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 71,
+            "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 0,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {},
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "totalTokens": 0,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlqbrv6-eebd",
+              "origin": "remote",
+              "clientMessageId": "03637570-0fff-4ae0-bc0e-d4899dfc658d",
+              "startedAt": "2026-11-18T06:17:33.906Z",
+              "endedAt": "2026-11-18T06:17:33.977Z",
+              "outcome": "error",
+              "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+              "label": null,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwlqbsik-c49e",
+          "status": "fail",
+          "reasons": [
+            "the page did not scroll to the unique text"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41269/find.html",
+            "markerFound": true,
+            "markerFullyVisible": false,
+            "markerIntersectsViewport": false,
+            "scrollX": 0,
+            "scrollY": 0,
+            "viewport": {
+              "width": 1272,
+              "height": 768
+            },
+            "markerRect": {
+              "top": 2261.6875,
+              "bottom": 2285.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 70,
+            "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 0,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {},
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "totalTokens": 0,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlqbsik-c49e",
+              "origin": "remote",
+              "clientMessageId": "17a8f1c1-467c-4cbb-8365-9810a0a3394c",
+              "startedAt": "2026-11-18T06:17:34.749Z",
+              "endedAt": "2026-11-18T06:17:34.819Z",
+              "outcome": "error",
+              "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+              "label": null,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwlqbt60-09d2",
+          "status": "fail",
+          "reasons": [
+            "the page did not scroll to the unique text"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41269/find.html",
+            "markerFound": true,
+            "markerFullyVisible": false,
+            "markerIntersectsViewport": false,
+            "scrollX": 0,
+            "scrollY": 0,
+            "viewport": {
+              "width": 1272,
+              "height": 768
+            },
+            "markerRect": {
+              "top": 2261.6875,
+              "bottom": 2285.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 72,
+            "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 0,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {},
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "totalTokens": 0,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlqbt60-09d2",
+              "origin": "remote",
+              "clientMessageId": "a5ddfc1f-fdb4-40b1-b464-ad991a6b5183",
+              "startedAt": "2026-11-18T06:17:35.592Z",
+              "endedAt": "2026-11-18T06:17:35.664Z",
+              "outcome": "error",
+              "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+              "label": null,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwlqbtu3-3872",
+          "status": "fail",
+          "reasons": [
+            "the page did not scroll to the unique text"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:41269/find.html",
+            "markerFound": true,
+            "markerFullyVisible": false,
+            "markerIntersectsViewport": false,
+            "scrollX": 0,
+            "scrollY": 0,
+            "viewport": {
+              "width": 1272,
+              "height": 768
+            },
+            "markerRect": {
+              "top": 2261.6875,
+              "bottom": 2285.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 65,
+            "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 0,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {},
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "totalTokens": 0,
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlqbtu3-3872",
+              "origin": "remote",
+              "clientMessageId": "90929a61-81b7-4ee3-851d-4210e22d9760",
+              "startedAt": "2026-11-18T06:17:36.459Z",
+              "endedAt": "2026-11-18T06:17:36.524Z",
+              "outcome": "error",
+              "error": "The model's reply could not be used (UNKNOWN), so nothing was done. Send the request again.",
+              "label": null,
+              "usage": {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "totalTokens": 0,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    },
+    {
+      "name": "form-submit",
+      "fixture": "form.html",
+      "prompt": "Fill out the form on this page: name \"Ada Lovelace\", notes \"First computer programmer\", password \"hunter2-demo\". Submit it exactly once and leave the rest of the page alone.",
+      "file": "form-submit.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlqbu99-f5d7",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:41269/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5703,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1703,
+            "outputTokens": 527,
+            "cacheReadTokens": 116352,
+            "totalTokens": 118582,
+            "usage": {
+              "inputTokens": 1703,
+              "outputTokens": 527,
+              "totalTokens": 118582,
+              "cacheReadTokens": 116352
+            },
+            "finalText": "DONE\n- Filled Name \"Ada Lovelace\", Notes \"First computer programmer\", Password \"hunter2-demo\" (shown as 12 chars).\n- Submitted exactly once; page confirms `submit=1` with name=Ada Lovelace, notes=First computer programmer, pass=12chars.\n- No other fields or page elements touched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqbu99-f5d7",
+              "origin": "remote",
+              "clientMessageId": "9a7f45b7-c547-4001-8f63-75d1d5fe2c7d",
+              "startedAt": "2026-11-18T06:17:37.005Z",
+              "endedAt": "2026-11-18T06:17:42.708Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1703,
+                "outputTokens": 527,
+                "totalTokens": 118582,
+                "cacheReadTokens": 116352
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwlqbyz2-0507",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:41269/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6817,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 6,
+            "toolCalls": 5,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_screenshot": 1,
+              "browser_click": 1,
+              "browser_read_text": 2
+            },
+            "inputTokens": 2610,
+            "outputTokens": 482,
+            "cacheReadTokens": 125952,
+            "totalTokens": 129044,
+            "usage": {
+              "inputTokens": 2610,
+              "outputTokens": 482,
+              "totalTokens": 129044,
+              "cacheReadTokens": 125952
+            },
+            "finalText": "DONE\n- Filled Name \"Ada Lovelace\", Notes \"First computer programmer\", Password \"hunter2-demo\".\n- Submitted exactly once; page confirms `submit=1` with `result: name=Ada Lovelace notes=First computer programmer pass=12chars`.\n- Rich text, canvas editor, comment card, and other page elements were left untouched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqbyz2-0507",
+              "origin": "remote",
+              "clientMessageId": "e854d274-ae16-4fb2-8377-0d9337ea2e47",
+              "startedAt": "2026-11-18T06:17:43.118Z",
+              "endedAt": "2026-11-18T06:17:49.935Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2610,
+                "outputTokens": 482,
+                "totalTokens": 129044,
+                "cacheReadTokens": 125952
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwlqc4la-b134",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:41269/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 5120,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 6,
+            "toolCalls": 5,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 3,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 23400,
+            "outputTokens": 527,
+            "cacheReadTokens": 105728,
+            "totalTokens": 129655,
+            "usage": {
+              "inputTokens": 23400,
+              "outputTokens": 527,
+              "totalTokens": 129655,
+              "cacheReadTokens": 105728
+            },
+            "finalText": "DONE — form submitted exactly once with the requested values.\n\n- Name \"Ada Lovelace\", Notes \"First computer programmer\", Password \"hunter2-demo\" filled.\n- Page's event log confirms `submit=1` and `result: name=Ada Lovelace notes=First computer programmer pass=12chars`; the earlier \"no visible change\" was just a stale render.\n- No other fields (Rich text, canvas editor, links) were touched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqc4la-b134",
+              "origin": "remote",
+              "clientMessageId": "7caf5fc6-d6c5-45c3-994f-10891ced4b03",
+              "startedAt": "2026-11-18T06:17:50.398Z",
+              "endedAt": "2026-11-18T06:17:55.518Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 23400,
+                "outputTokens": 527,
+                "totalTokens": 129655,
+                "cacheReadTokens": 105728
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwlqc8xu-eaff",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:41269/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4470,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 5,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_type": 3,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 2171,
+            "outputTokens": 403,
+            "cacheReadTokens": 83456,
+            "totalTokens": 86030,
+            "usage": {
+              "inputTokens": 2171,
+              "outputTokens": 403,
+              "totalTokens": 86030,
+              "cacheReadTokens": 83456
+            },
+            "finalText": "DONE\n\n- Filled Name \"Ada Lovelace\", Notes \"First computer programmer\", Password \"hunter2-demo\" (12 chars).\n- Submitted once — page reports `submit=1`, `events input=3 keydown=0 submit=1`, and result `name=Ada Lovelace notes=First computer programmer pass=12chars`.\n- Left rich text, canvas editor, and all other page elements untouched (they remain empty/unmodified).",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqc8xu-eaff",
+              "origin": "remote",
+              "clientMessageId": "e481323b-8124-4a98-8c3b-27bc71d0b6e6",
+              "startedAt": "2026-11-18T06:17:56.034Z",
+              "endedAt": "2026-11-18T06:18:00.504Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2171,
+                "outputTokens": 403,
+                "totalTokens": 86030,
+                "cacheReadTokens": 83456
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwlqccqv-c410",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:41269/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 6341,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 4,
+            "toolCalls": 3,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_click": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 4606,
+            "outputTokens": 401,
+            "cacheReadTokens": 72192,
+            "totalTokens": 77199,
+            "usage": {
+              "inputTokens": 4606,
+              "outputTokens": 401,
+              "totalTokens": 77199,
+              "cacheReadTokens": 72192
+            },
+            "finalText": "DONE — Form submitted exactly once.\n\n- Fill: Name \"Ada Lovelace\", Notes \"First computer programmer\", Password \"hunter2-demo\" (12 chars), verified in the fields.\n- Page confirms: `result: name=Ada Lovelace notes=First computer programmer pass=12chars`, `events ... submit=1`.\n- The first \"NO VISIBLE CHANGE\" report was only because the result line renders below the fold; no second submit was made. No other fields touched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqccqv-c410",
+              "origin": "remote",
+              "clientMessageId": "1f40aee2-24ac-4ada-a0b5-d0e720dc8e32",
+              "startedAt": "2026-11-18T06:18:00.967Z",
+              "endedAt": "2026-11-18T06:18:07.308Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 4606,
+                "outputTokens": 401,
+                "totalTokens": 77199,
+                "cacheReadTokens": 72192
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}

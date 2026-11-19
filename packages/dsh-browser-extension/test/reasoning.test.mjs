@@ -51,18 +51,22 @@ test('synthesize still wins over act for question and report prompts', () => {
   assert.equal(classifyPrompt('why should I delete it all?'), 'synthesize')
 })
 
-test('auto effort is low for every classification', () => {
-  for (const classification of ['navigate', 'inspect', 'synthesize', 'rapid', 'act']) {
+test('auto effort is low for direct work and medium for reading or synthesis', () => {
+  for (const classification of ['navigate', 'rapid', 'act']) {
     assert.equal(autoEffort(classification), 'low', classification)
     assert.equal(effortFor('auto', classification), 'low', classification)
   }
+  for (const classification of ['inspect', 'synthesize']) {
+    assert.equal(autoEffort(classification), 'medium', classification)
+    assert.equal(effortFor('auto', classification), 'medium', classification)
+  }
 })
 
-test('act classification does not slow down reading or synthesis', () => {
+test('auto keeps reading and synthesis at medium', () => {
   assert.equal(classifyPrompt('what is on this page?'), 'inspect')
-  assert.equal(autoEffort('inspect'), 'low')
+  assert.equal(autoEffort('inspect'), 'medium')
   assert.equal(classifyPrompt('go to docs and summarize'), 'synthesize')
-  assert.equal(autoEffort('synthesize'), 'low')
+  assert.equal(autoEffort('synthesize'), 'medium')
 })
 
 test('explicit policy overrides classification', () => {
@@ -224,7 +228,7 @@ test('logged reading turns stay inspect with low reasoning', () => {
   ]
   for (const text of prompts) {
     assert.equal(classifyPrompt(text), 'inspect', text)
-    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'medium', text)
   }
 })
 
@@ -248,7 +252,7 @@ test('logged navigation and game turns request low reasoning', () => {
   assert.equal(autoEffort(classifyPrompt(game)), 'low')
 })
 
-test('long-form writing is synthesize/low, short page authoring is act/low', () => {
+test('long-form writing is synthesize/medium, short page authoring is act/low', () => {
   const prompts = [
     'write a paragraph about my summer and explain the theme',
     'write a paragraph about the museum trip',
@@ -258,7 +262,7 @@ test('long-form writing is synthesize/low, short page authoring is act/low', () 
   ]
   for (const text of prompts) {
     assert.equal(classifyPrompt(text), 'synthesize', text)
-    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'medium', text)
   }
   // Short typing into a page is an edit, not content synthesis.
   for (const text of ['write a title', 'type the heading', 'write a title and subtitle']) {
@@ -284,7 +288,7 @@ test('ambiguous short continuations stay inspect (conservative)', () => {
   // classifier is stateless, so it keeps them inspectable when unsure.
   for (const text of ['more', 'wrong', 'hi', 'what else can you do']) {
     assert.equal(classifyPrompt(text), 'inspect', text)
-    assert.equal(autoEffort(classifyPrompt(text)), 'low', text)
+    assert.equal(autoEffort(classifyPrompt(text)), 'medium', text)
   }
 })
 

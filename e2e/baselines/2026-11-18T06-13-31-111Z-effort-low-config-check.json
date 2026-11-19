@@ -1,0 +1,148 @@
+{
+  "startedAt": "2026-11-18T06:13:31.110Z",
+  "finishedAt": "2026-11-18T06:13:36.728Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "low",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": false,
+  "armingPath": "bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 1,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 63854,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "form-submit",
+      "fixture": "form.html",
+      "prompt": "Fill out the form on this page: name \"Ada Lovelace\", notes \"First computer programmer\", password \"hunter2-demo\". Submit it exactly once and leave the rest of the page alone.",
+      "file": "form-submit.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlq6llh-f465",
+          "status": "pass",
+          "reasons": [
+            "submitted exactly once with the requested values and no collateral change"
+          ],
+          "evidence": {
+            "name": "Ada Lovelace",
+            "notes": "First computer programmer",
+            "pass": "hunter2-demo",
+            "result": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "eventsHeader": "events input=3 keydown=0 submit=1",
+            "inputEvents": 3,
+            "keydownEvents": 0,
+            "submitEvents": 1,
+            "submitLines": [
+              "submit name=Ada Lovelace"
+            ],
+            "editor": "",
+            "rich": "",
+            "comment": "",
+            "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+            "formPresent": true,
+            "submitButton": "Submit",
+            "url": "http://127.0.0.1:36935/form.html",
+            "expectedResult": "result: name=Ada Lovelace notes=First computer programmer pass=12chars",
+            "expectedSubmitLine": "submit name=Ada Lovelace",
+            "submittedOnce": true,
+            "recordedSubmitLines": true,
+            "fieldsMatch": true,
+            "resultMatches": true,
+            "collateralClean": true
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 4051,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 3,
+            "toolCalls": 2,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_batch": 1,
+              "browser_read_text": 1
+            },
+            "inputTokens": 1142,
+            "outputTokens": 248,
+            "cacheReadTokens": 62464,
+            "totalTokens": 63854,
+            "usage": {
+              "inputTokens": 1142,
+              "outputTokens": 248,
+              "totalTokens": 63854,
+              "cacheReadTokens": 62464
+            },
+            "finalText": "DONE\n- Filled Name, Notes, Password, and clicked Submit once.\n- Verified result line: `name=Ada Lovelace notes=First computer programmer pass=12chars`, with `submit=1`.\n- Left all other fields and the rest of the page untouched.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlq6llh-f465",
+              "origin": "remote",
+              "clientMessageId": "82c9fa1a-8bb2-4dd1-afef-0f3d5c71c6f3",
+              "startedAt": "2026-11-18T06:13:32.502Z",
+              "endedAt": "2026-11-18T06:13:36.553Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 1142,
+                "outputTokens": 248,
+                "totalTokens": 63854,
+                "cacheReadTokens": 62464
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}

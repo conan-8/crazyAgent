@@ -2,15 +2,13 @@
  * Reasoning-effort policy for browser turns.
  *
  * DSH fixes one effort per call. Auto requests `low` from the first model step
- * for every turn, including navigation, action, and reactive game prompts, so
- * thinking is available before the first tool selection. Explicit
- * off/low/medium/high policies remain authoritative. The resolved effort is
- * held for every step of the turn (no mid-turn request-header churn).
+ * for navigation, action, and reactive game prompts, and `medium` for inspection
+ * or synthesis. Explicit off/low/medium/high policies remain authoritative. The
+ * resolved effort is held for every step of the turn (no request-header churn).
  *
- * Prompt classification remains local, deterministic, and free. It describes
- * the turn in activity and logs without changing the Auto effort. Reactive
- * game bursts are classified as `rapid`, short imperative work prompts as
- * `act`, and navigation-only prompts as `navigate`.
+ * Prompt classification remains local, deterministic, and free. Reactive game
+ * bursts are classified as `rapid`, short imperative work prompts as `act`, and
+ * navigation-only prompts as `navigate`.
  *
  * What the run logs said (65 `reasoning.policy` events under
  * .dsh-home/browser-agent/logs/*\/events.jsonl): the classifier emitted
@@ -132,14 +130,13 @@ export function classifyPrompt(text) {
 }
 
 /**
- * Effort for one turn under the `auto` policy. Every classification requests
- * `low` so thinking is available from the first model step, including before
- * navigation, action, and reactive tool selection.
- * @param {TurnClass} _classification
- * @returns {'low'}
+ * Effort for one turn under the `auto` policy. Direct browser work starts low;
+ * reading and synthesis keep medium reasoning from the first model step.
+ * @param {TurnClass} classification
+ * @returns {'low'|'medium'}
  */
-export function autoEffort(_classification) {
-  return 'low'
+export function autoEffort(classification) {
+  return classification === 'navigate' || classification === 'act' || classification === 'rapid' ? 'low' : 'medium'
 }
 
 /**

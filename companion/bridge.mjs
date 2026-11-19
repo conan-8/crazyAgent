@@ -91,6 +91,7 @@ export class Bridge {
     this.currentTurnId = undefined
     this.currentPlanMode = false
     this.currentConfirmMode = false
+    this.currentTurnPrompt = ''
     /** @type {Map<string, {ws: import('ws').WebSocket, turnId?: string, callId?: string, command?: Record<string, unknown>}>} */
     this.upstream = new Map()
     /** @type {Map<string, {resolve: (v: any) => void, reject: (e: Error) => void, timer: NodeJS.Timeout, turnId?: string, callId?: string, command?: Record<string, unknown>}>} */
@@ -214,11 +215,12 @@ export class Bridge {
     })
   }
 
-  /** @param {string | undefined} turnId @param {{planMode?: boolean, confirmMode?: boolean, planSeed?: {revision: number, items: Array<{content: string, status: string}>} | null}} [options] */
+  /** @param {string | undefined} turnId @param {{planMode?: boolean, confirmMode?: boolean, confirmGuard?: boolean, userPrompt?: string, planSeed?: {revision: number, items: Array<{content: string, status: string, reason?: string}>} | null}} [options] */
   setTurnId(turnId, options = {}) {
     this.currentTurnId = turnId
     this.currentPlanMode = turnId !== undefined && options.planMode === true
     this.currentConfirmMode = turnId !== undefined && options.confirmMode === true
+    this.currentTurnPrompt = turnId !== undefined && typeof options.userPrompt === 'string' ? options.userPrompt : ''
     // Backstop for the confirmation setting: on for a turn that has the
     // setting on and did not start from the user's approval.
     this.currentConfirmGuard = turnId !== undefined && options.confirmGuard === true
@@ -227,6 +229,16 @@ export class Bridge {
     this.currentPlanSeed = turnId !== undefined && isRecord(options.planSeed) ? options.planSeed : null
     this.#syncPlanMode()
     this.#syncConfirmMode()
+    this.#syncTurnContext()
+  }
+
+  #syncTurnContext() {
+    this.sendToTools({
+      v: PROTOCOL_VERSION,
+      type: 'turn.context',
+      turnId: this.currentTurnId ?? null,
+      prompt: this.currentTurnPrompt,
+    })
   }
 
   #syncPlanMode() {
@@ -362,6 +374,7 @@ export class Bridge {
       if (role === 'tools') {
         this.#syncPlanMode()
         this.#syncConfirmMode()
+        this.#syncTurnContext()
       }
       ws.on('message', data2 => this.#onMessage(ws, role, data2))
       this.onConnectionChange?.()

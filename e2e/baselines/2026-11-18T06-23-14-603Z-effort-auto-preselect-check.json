@@ -1,0 +1,149 @@
+{
+  "startedAt": "2026-11-18T06:23:14.603Z",
+  "finishedAt": "2026-11-18T06:23:20.462Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "auto",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": false,
+  "armingPath": "bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 1,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 42927,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "find-reveal",
+      "fixture": "find.html",
+      "prompt": "Scroll to the text \"UNIQUE-FIND-MARKER\" on this page and bring it fully into view. Don't click or edit anything.",
+      "file": "find-reveal.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlqj43j-9068",
+          "status": "pass",
+          "reasons": [
+            "the unique text is fully inside the viewport and no other page state changed"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:34171/find.html",
+            "markerFound": true,
+            "markerFullyVisible": true,
+            "markerIntersectsViewport": true,
+            "scrollX": 0,
+            "scrollY": 1828,
+            "viewport": {
+              "width": 1272,
+              "height": 769
+            },
+            "markerRect": {
+              "top": 433.6875,
+              "bottom": 457.6875,
+              "left": 267.5,
+              "right": 989.5
+            },
+            "fieldsClean": true,
+            "selectionClean": true,
+            "clicksClean": true,
+            "destinationClean": true,
+            "hiddenClean": true,
+            "focusValue": "preserve this value",
+            "controlValue": "CONTROL-VALUE-NEEDLE",
+            "passwordValue": "PASSWORD-FIND-SECRET",
+            "clickCount": "clicks 0",
+            "destinationState": "destination idle",
+            "selectionText": ""
+          },
+          "collateral": null,
+          "turn": {
+            "status": "done",
+            "waitingForUser": false,
+            "wallMs": 3942,
+            "error": null,
+            "outcome": "done",
+            "confirm": null,
+            "steps": 2,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_find": 1
+            },
+            "inputTokens": 2348,
+            "outputTokens": 131,
+            "cacheReadTokens": 40448,
+            "totalTokens": 42927,
+            "usage": {
+              "inputTokens": 2348,
+              "outputTokens": 131,
+              "totalTokens": 42927,
+              "cacheReadTokens": 40448
+            },
+            "finalText": "DONE — Scrolled to \"UNIQUE-FIND-MARKER inside the intended destination.\" and it is fully visible in the viewport (scroll at bottom, y=1828/1828). No clicks, focus, selection, or edits were made.",
+            "logOk": true,
+            "logComplete": true,
+            "reportedLabel": "done",
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "idle",
+              "turnId": "turn-mwlqj43j-9068",
+              "origin": "remote",
+              "clientMessageId": "596cda7d-fb3e-4da5-8c49-39b5debf6abe",
+              "startedAt": "2026-11-18T06:23:16.352Z",
+              "endedAt": "2026-11-18T06:23:20.294Z",
+              "outcome": "done",
+              "error": null,
+              "label": "done",
+              "usage": {
+                "inputTokens": 2348,
+                "outputTokens": 131,
+                "totalTokens": 42927,
+                "cacheReadTokens": 40448
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": null,
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}
