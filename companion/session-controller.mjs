@@ -112,6 +112,11 @@ export class SessionController {
     this.watchEndedIncomplete = false
     /** @type {string | undefined} */
     this.turnId = undefined
+    /** What a client that connects mid-turn is shown (`chat.hello.turn`). */
+    /** @type {{turnId: string, origin: string, text: string, imageCount: number, marathon: boolean} | undefined} */
+    this.currentTurnInfo = undefined
+    /** Set while the companion shuts down with a turn running. @type {string | undefined} */
+    this.shutdownSignal = undefined
     /** @type {{status: string, reason?: string} | undefined} */
     this.docsTurnVerification = undefined
     /** @type {{outcome: string, revision?: number} | undefined} */
@@ -380,7 +385,13 @@ export class SessionController {
   }
 
   /** Stop the watcher timer (companion shutdown / test teardown). */
-  dispose() {
+  /**
+   * Stop the watcher. Called while the companion shuts down: a turn still
+   * running then ends as stopped by the shutdown, not as a runtime crash.
+   * @param {string} [signal] the signal that is shutting the companion down
+   */
+  dispose(signal) {
+    if (this.running && this.shutdownSignal === undefined) this.shutdownSignal = signal ?? 'shutdown'
     this.watcher.stop()
   }
 
@@ -490,6 +501,7 @@ export class SessionController {
       this.setMarathon({ enabled: true, origin })
     }
     const planMode = this.marathon.state.enabled || input.planMode === true
+    this.currentTurnInfo = { turnId, origin, text: shownText, imageCount: images.length, marathon: planMode }
     const confirmMode = this.getConfirmIrreversible() === true
     // Executor backstop: on unless this turn starts from the user's approval.
     const confirmGuard = confirmMode && confirmApproved !== true
@@ -615,6 +627,15 @@ export class SessionController {
    * Start a fresh DSH session when no turn is running or stopping.
    * @returns {Promise<{ok: true, sessionId: string} | {ok: false, code: string, message: string, retryable: boolean}>}
    */
+  /**
+   * The running turn, for a client that connects mid-turn (`chat.hello.turn`),
+   * or null when the slot is free.
+   */
+  runningTurn() {
+    if (!this.running || this.currentTurnInfo === undefined) return null
+    return { running: true, ...this.currentTurnInfo }
+  }
+
   async newChat() {
     if (this.running) {
       return { ok: false, code: this.stopRequested ? 'TURN_STOPPING' : 'TURN_BUSY', message: 'A turn is already running.', retryable: true }
@@ -706,7 +727,7 @@ export class SessionController {
     /** @type {{outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}}} */
     let ending = { outcome: 'error', error: 'turn ended unexpectedly', marathon: planMode, endedIncomplete: this.watchEndedIncomplete }
 
-    bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard, planSeed })
+    bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard, planSeed, userPrompt: prompt })
     logStore.turnStart(turnId, prompt, {
       autoCapture: wantAutoCapture,
       planMode,
@@ -777,26 +798,43 @@ export class SessionController {
         logStore.recordDshNotification(notification, turnId)
         this.forwardNotification(notification, turnId, toolCalls, toolStarts, turnStats)
       })
+      turnStats.userMessageSeen = false
       let result = await run(blocks)
-      // The model's reply could not be parsed (typically a tool call with
-      // broken JSON arguments) and the runtime ended the turn with nothing
-      // done. Run once more in the same companion turn, re-arming this turn's
-      // conditional tools, instead of ending on an empty answer.
-      if (turnStats.endError?.code === 'MALFORMED_RESPONSE' && toolCalls.size === 0 && !this.stopRequested) {
-        logStore.record('companion', 'turn.retry', { reason: 'malformed-response' }, { turnId, severity: 'warn' })
+      // The runtime ended the turn on an error before any browser action: a
+      // reply that could not be parsed (typically a tool call with broken JSON
+      // arguments), a request that still failed in transit after the
+      // provider's own retries, or a model switch whose context compaction
+      // failed. Run once more in the same companion turn, re-arming this
+      // turn's conditional tools, instead of ending on an empty answer.
+      const rerunCode = turnStats.endError?.code
+      if (ZERO_ACTION_RERUN_CODES.has(rerunCode) && toolCalls.size === 0 && !this.stopRequested && this.shutdownSignal === undefined) {
+        // DSH commits the user message only after it prepares the request, and
+        // a model-switch compaction failure happens while preparing it: then the
+        // prompt never reached the session and is sent again as it was.
+        // Otherwise the prompt is in the session and a notice continues it.
+        const resend = rerunCode === 'MODEL_SWITCH_COMPACTION_FAILED' && turnStats.userMessageSeen !== true
+        logStore.record('companion', 'turn.retry', {
+          reason: rerunCode === 'MALFORMED_RESPONSE' ? 'malformed-response' : 'request-failed',
+          code: rerunCode,
+          resend,
+          ...(turnStats.endError.message === undefined ? {} : { message: turnStats.endError.message }),
+        }, { turnId, severity: 'warn' })
         turnStats.endError = undefined
+        turnStats.userMessageSeen = false
         // M2: re-arm with the CURRENT plan snapshot, not the turn-start one.
         const currentSeed = this.#currentPlanSeed()
-        bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard, planSeed: currentSeed })
-        result = await run(buildPromptBlocks(null, MALFORMED_RETRY_NOTICE, new Date(), [], { planMode, confirmMode, docsMode, marathon: { seed: currentSeed } }))
+        bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard, planSeed: currentSeed, userPrompt: prompt })
+        const notice = rerunCode === 'MALFORMED_RESPONSE' ? MALFORMED_RETRY_NOTICE : REQUEST_RETRY_NOTICE
+        result = await run(resend ? blocks : buildPromptBlocks(null, notice, new Date(), [], { planMode, confirmMode, docsMode, marathon: { seed: currentSeed } }))
       }
       // A run that still ended in a runtime error is a failed turn, never an
       // empty successful one.
       if (turnStats.endError !== undefined && !this.stopRequested) {
         const code = turnStats.endError.code ?? 'runtime error'
-        throw new Error(toolCalls.size === 0
-          ? `The model's reply could not be used (${code}), so nothing was done. Send the request again.`
-          : `The model's reply could not be used (${code}) after ${toolCalls.size} action${toolCalls.size === 1 ? '' : 's'}. Check the page before sending the request again.`)
+        if (turnStats.endError.message !== undefined) {
+          logStore.record('companion', 'turn.runtime_error', { code, message: turnStats.endError.message }, { turnId, severity: 'warn' })
+        }
+        throw new Error(runtimeErrorText(code, toolCalls.size))
       }
 
       // The model asked for the user. Its run has finished, so one capture of
@@ -949,6 +987,14 @@ export class SessionController {
         })
         this.sendStatus('idle')
         ending = { outcome: 'stopped', sessionId: sessionId ?? null, label, usage, timings, marathon: planMode, endedIncomplete: this.watchEndedIncomplete }
+      } else if (this.shutdownSignal !== undefined) {
+        // The companion is shutting down: the runtime exit is expected.
+        const shutdownMessage = `The companion shut down (${this.shutdownSignal}) during this turn; nothing more ran. Check the page before sending the request again.`
+        logStore.record('companion', 'turn.shutdown', { turnId, signal: this.shutdownSignal, runtimeError: message.slice(0, 300) }, { turnId, severity: 'warn' })
+        const watch = this.#finishWatch({ outcome: 'stopped', label })
+        logStore.turnEnd(turnId, { ok: false, aborted: true, reason: 'shutdown', error: shutdownMessage, timings, usage, label, watch })
+        this.publish({ v: PROTOCOL_VERSION, type: 'chat.stopped', turnId, reason: 'shutdown', message: shutdownMessage, timings, usage, watch })
+        ending = { outcome: 'stopped', sessionId: current?.sessionId ?? current?.resumeSessionId ?? null, label, usage, timings, marathon: planMode, endedIncomplete: this.watchEndedIncomplete }
       } else {
         logStore.error(message, { turnId, code: 'TURN_ERROR' })
         const watch = this.#finishWatch({ outcome: 'error', label })
@@ -966,6 +1012,7 @@ export class SessionController {
       this.helpTurnRequest = undefined
       this.confirmTurnRequest = undefined
       this.turnId = undefined
+      this.currentTurnInfo = undefined
       bridge.setTurnId(undefined)
       // M2: keep the observed plan into the next turn iff open items remain
       // (a completed/blocked-only plan is dropped). A turn that never touched
@@ -1015,8 +1062,16 @@ export class SessionController {
       const reason = isRecord(data.reason) ? data.reason : {}
       const error = isRecord(reason.error) ? reason.error : {}
       turnStats.endError = reason.kind === 'error'
-        ? { code: typeof error.code === 'string' ? error.code.slice(0, 60) : undefined }
+        ? {
+          code: typeof error.code === 'string' ? error.code.slice(0, 60) : undefined,
+          ...(typeof error.message === 'string' && error.message.length > 0 ? { message: redactRuntimeErrorMessage(error.message) } : {}),
+        }
         : undefined
+      return
+    }
+    if (event.type === 'user/message') {
+      // The runtime committed this run's prompt (or its context) to the session.
+      turnStats.userMessageSeen = true
       return
     }
     if (event.type === 'assistant/message') {
@@ -1073,7 +1128,7 @@ export class SessionController {
           : isRecord(raw[0]) && typeof raw[0].toolCallId === 'string' ? raw[0].toolCallId : undefined
       const text = extractToolResultText(blocks)
       const isError = message.isError === true || (isRecord(raw[0]) && raw[0].isError === true)
-      if (isError) turnStats.failedCalls += 1
+      if (isError || /^refused [A-Z_]+:/u.test(text)) turnStats.failedCalls += 1
       const started = callId ? toolStarts.get(callId) : undefined
       const durationMs = started === undefined ? undefined : Math.round(performance.now() - started)
       if (callId) toolStarts.delete(callId)
@@ -1188,13 +1243,18 @@ export function parseReportedLabel(text) {
   return match === null ? null : /** @type {'done' | 'partial' | 'blocked'} */ (match[1].toLowerCase())
 }
 
+const USAGE_KEYS = ['inputTokens', 'outputTokens', 'totalTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens']
+
 function emptyUsageTotals() {
   return { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0 }
 }
 
 /** @param {Record<string, number>} target @param {Record<string, unknown>} usage */
 function addUsageTotals(target, usage) {
-  for (const key of Object.keys(target)) target[key] += Number(usage[key]) || 0
+  for (const key of USAGE_KEYS) {
+    const value = Number(usage[key]) || 0
+    if (key in target || value !== 0) target[key] = (target[key] ?? 0) + value
+  }
   return target
 }
 
@@ -1206,13 +1266,13 @@ function hasUsageTotals(usage) {
 
 /** @param {unknown[]} events */
 export function collectUsage(events) {
-  const totals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0 }
+  const totals = emptyUsageTotals()
   for (const event of Array.isArray(events) ? events : []) {
     if (!isRecord(event) || event.type !== 'assistant/message') continue
     const data = isRecord(event.data) ? event.data : {}
     const usage = isRecord(data.usage) ? data.usage : undefined
     if (!usage) continue
-    for (const key of Object.keys(totals)) totals[key] += Number(usage[key]) || 0
+    addUsageTotals(totals, usage)
   }
   return totals
 }
@@ -1229,6 +1289,42 @@ function extractReasoningText(data) {
 }
 
 const MALFORMED_RETRY_NOTICE = 'Automatic notice, not a new request: your previous reply could not be parsed (a tool call with malformed JSON arguments), so nothing was executed and the browser is unchanged. Continue the request above now, and send every tool call with valid JSON arguments.'
+
+const REQUEST_RETRY_NOTICE = 'Automatic notice, not a new request: the model request for the request above failed before any reply, so nothing was executed and the browser is unchanged. Continue the request above now.'
+
+/**
+ * Runtime turn errors that are rerun once when no browser action ran: an
+ * unparseable reply, a request that still failed in transit after the
+ * provider retry policy, and a model switch whose context compaction failed
+ * (the user resending the same prompt recovered it in the field).
+ */
+export const ZERO_ACTION_RERUN_CODES = new Set(['MALFORMED_RESPONSE', 'TRANSPORT', 'MODEL_SWITCH_COMPACTION_FAILED'])
+
+/** Runtime codes for a model request that failed, as opposed to a reply that could not be used. */
+const REQUEST_FAILURE_CODES = new Set([
+  'TRANSPORT', 'TIMEOUT', 'SERVER', 'RATE_LIMIT', 'EMPTY_RESPONSE', 'QUOTA', 'ACCOUNT_QUOTA',
+  'CONTEXT_WINDOW_EXCEEDED', 'MODEL_SWITCH_COMPACTION_FAILED', 'INVALID_CREDENTIAL', 'MISSING_CREDENTIAL', 'NO_ADAPTER',
+])
+
+/**
+ * The user-facing text for a turn the runtime ended on an error.
+ * @param {string} code
+ * @param {number} actions browser actions that ran before the error
+ */
+export function runtimeErrorText(code, actions) {
+  const subject = REQUEST_FAILURE_CODES.has(code) ? `The model request failed (${code})` : `The model's reply could not be used (${code})`
+  return actions === 0
+    ? `${subject}, so nothing was done. Send the request again.`
+    : `${subject} after ${actions} action${actions === 1 ? '' : 's'}. Check the page before sending the request again.`
+}
+
+/** Bound a runtime error message for the logs, masking anything shaped like a credential. */
+function redactRuntimeErrorMessage(message) {
+  return message
+    .replace(/\b(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{6,}/gu, '$1…')
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/giu, '$1…')
+    .slice(0, 400)
+}
 
 const DEAD_TURN_TEXT = 'BLOCKED: the model sent an empty or malformed reply, so nothing was done on the page. Send the request again.'
 

@@ -28,7 +28,7 @@ function setup(options = {}) {
 }
 
 test('submit reserves the single turn slot synchronously', async () => {
-  const { controller, runner, frames, observed } = setup()
+  const { controller, runner, frames, observed, bridge } = setup()
   const first = controller.submit({ text: ' hi ', origin: 'remote', clientMessageId: 'client-0001' })
   const second = controller.submit({ text: 'again', origin: 'ui' })
   assert.equal(first.ok, true)
@@ -38,11 +38,13 @@ test('submit reserves the single turn slot synchronously', async () => {
   assert.equal(observed[0][1].text, 'hi')
   assert.equal(observed[0][1].origin, 'remote')
   assert.equal(observed[0][1].clientMessageId, 'client-0001')
+  assert.deepEqual(bridge.turnPrompts[0], { id: first.turnId, prompt: 'hi' }, 'classification receives the raw prompt, not the wrapped turn text')
 
   runner.assistant('answer')
   runner.current.resolve('final')
   await first.done
   assert.equal(controller.running, false)
+  assert.deepEqual(bridge.turnPrompts.at(-1), { id: undefined, prompt: null }, 'turn context clears with the turn')
   const ended = observed.at(-1)
   assert.equal(ended[0], 'end')
   assert.equal(ended[1].turnId, first.turnId)
@@ -54,6 +56,16 @@ test('submit reserves the single turn slot synchronously', async () => {
   assert.ok(types.includes('chat.assistant'))
   assert.ok(types.includes('chat.done'))
   assert.equal(frames.find(frame => frame.type === 'chat.done').text, 'final')
+})
+
+test('the running turn is exposed for a client that connects mid-turn, and cleared at the end', async () => {
+  const { controller, runner } = setup()
+  assert.equal(controller.runningTurn(), null)
+  const turn = controller.submit({ text: ' make the doc ', origin: 'remote' })
+  assert.deepEqual(controller.runningTurn(), { running: true, turnId: turn.turnId, origin: 'remote', text: 'make the doc', imageCount: 0, marathon: false })
+  runner.current.resolve('DONE')
+  await turn.done
+  assert.equal(controller.runningTurn(), null)
 })
 
 test('empty prompts, bad attachments, and an unready runtime are rejected without a turn', () => {
@@ -148,6 +160,7 @@ test('the malformed-reply retry keeps the Docs block armed for the same turn', a
   await new Promise(resolve => setImmediate(resolve))
   await runner.started()
   assert.equal(runner.runs.length, 2)
+  assert.deepEqual(bridge.turnPrompts.filter(entry => entry.id === turn.turnId).map(entry => entry.prompt), ['edit the document', 'edit the document'], 'the same-turn retry keeps the raw prompt')
   assert.match(runner.runs[1][0].text, /Automatic notice, not a new request/u)
   assert.ok(runner.runs[1][0].text.includes('<docs_mode>'), 'the retry re-sends the turn Docs block')
   runner.event('turn/end', { turn: 2, reason: { kind: 'completed' } })
@@ -567,7 +580,9 @@ test('turn.end and chat.done report the model label, failed calls, and token usa
   runner.toolResult({ callId: 'call-1', isError: true, text: 'target moved' })
   runner.toolCall('call-2', 'browser_click', '{}')
   runner.toolResult({ callId: 'call-2', isError: false, text: 'clicked' })
-  const usage = { inputTokens: 120, outputTokens: 30, totalTokens: 150, cacheReadTokens: 40 }
+  runner.toolCall('call-3', 'browser_click_at', '{}')
+  runner.toolResult({ callId: 'call-3', isError: false, text: 'refused NO_VIEW: the previous view went stale\nno input was dispatched (attempted=false, mutationPossible=false).' })
+  const usage = { inputTokens: 120, outputTokens: 30, totalTokens: 162, cacheReadTokens: 40, cacheWriteTokens: 12, reasoningTokens: 9 }
   runner.assistant('PARTIAL — did most of it', usage)
   runner.current.resolve('PARTIAL — did most of it')
   await turn.done
@@ -575,18 +590,19 @@ test('turn.end and chat.done report the model label, failed calls, and token usa
   const done = frames.find(frame => frame.type === 'chat.done')
   assert.equal(done.label, 'partial')
   assert.deepEqual(done.usage, usage)
-  assert.equal(done.timings.failedCalls, 1)
-  assert.equal(done.timings.toolCalls, 2)
+  assert.equal(done.timings.failedCalls, 2)
+  assert.equal(done.timings.toolCalls, 3)
+  assert.equal(frames.find(frame => frame.type === 'chat.tool_result' && frame.callId === 'call-3').ok, true)
 
   const ended = observed.at(-1)[1]
   assert.equal(ended.label, 'partial')
   assert.deepEqual(ended.usage, usage)
-  assert.equal(ended.timings.failedCalls, 1)
+  assert.equal(ended.timings.failedCalls, 2)
 
   const logged = logStore.calls.filter(([name]) => name === 'turnEnd').at(-1)[2]
   assert.equal(logged.label, 'partial')
   assert.deepEqual(logged.usage, usage)
-  assert.equal(logged.timings.failedCalls, 1)
+  assert.equal(logged.timings.failedCalls, 2)
 })
 
 test('an answer without a leading completion label records null', async () => {
@@ -606,6 +622,8 @@ test('a stopped turn records elapsed time, failed calls, and partial usage witho
   await runner.started()
   runner.toolCall('call-1', 'browser_click', '{}')
   runner.toolResult({ callId: 'call-1', isError: true, text: 'failed' })
+  runner.toolCall('call-2', 'browser_click_at', '{}')
+  runner.toolResult({ callId: 'call-2', isError: false, text: 'refused STALE_VIEW: measure a fresh view' })
   const usage = { inputTokens: 60, outputTokens: 10, totalTokens: 70, cacheReadTokens: 5 }
   runner.assistant('working on it', usage)
   const stop = controller.stop()
@@ -615,20 +633,20 @@ test('a stopped turn records elapsed time, failed calls, and partial usage witho
   const stopped = frames.find(frame => frame.type === 'chat.stopped')
   assert.equal(stopped.reason, 'user')
   assert.deepEqual(stopped.usage, usage)
-  assert.equal(stopped.timings.failedCalls, 1)
+  assert.equal(stopped.timings.failedCalls, 2)
   assert.ok(Number.isFinite(stopped.timings.totalMs) && stopped.timings.totalMs >= 0)
 
   const ended = observed.at(-1)[1]
   assert.equal(ended.outcome, 'stopped')
   assert.equal(ended.label, null)
   assert.deepEqual(ended.usage, usage)
-  assert.equal(ended.timings.failedCalls, 1)
+  assert.equal(ended.timings.failedCalls, 2)
 
   const logged = logStore.calls.filter(([name]) => name === 'turnEnd').at(-1)[2]
   assert.equal(logged.aborted, true)
   assert.equal(logged.label, null)
   assert.deepEqual(logged.usage, usage)
-  assert.equal(logged.timings.failedCalls, 1)
+  assert.equal(logged.timings.failedCalls, 2)
 })
 
 test('a tool call written as DSML text is never shown, and a turn ending on one is reported as blocked', async () => {
@@ -726,6 +744,110 @@ test('a turn the runtime ended on a malformed reply is retried once, then report
   await third.done
   assert.equal(acted.runner.runs.length, 1)
   assert.match(acted.frames.find(frame => frame.type === 'chat.error').message, /after 1 action\. Check the page/)
+})
+
+test('a request that failed in transit before any action is rerun once with a continue notice', async () => {
+  const transport = { turn: 1, reason: { kind: 'error', error: { code: 'TRANSPORT', message: 'fetch failed: Bearer abcdefghijklmnop sk-or-v1-0123456789abcdef' } } }
+
+  const recovered = setup({ confirmIrreversible: true })
+  const first = recovered.controller.submit({ text: 'tell me when it is done' })
+  await recovered.runner.started()
+  // The prompt reached the session before the request failed.
+  recovered.runner.event('user/message', { content: [{ type: 'text', text: 'tell me when it is done' }] })
+  recovered.runner.event('turn/end', transport)
+  recovered.runner.current.resolve('')
+  await new Promise(resolve => setImmediate(resolve))
+  await recovered.runner.started()
+  assert.equal(recovered.runner.runs.length, 2, 'one automatic rerun')
+  assert.match(recovered.runner.runs[1][0].text, /Automatic notice, not a new request: the model request .* failed before any reply/)
+  const retry = recovered.logStore.calls.find(call => call[0] === 'record' && call[2] === 'turn.retry')
+  assert.equal(retry[3].code, 'TRANSPORT')
+  assert.equal(retry[3].resend, false)
+  assert.doesNotMatch(retry[3].message, /abcdefghijklmnop|0123456789abcdef/, 'credential-shaped text is masked in the log')
+  recovered.runner.event('turn/end', { turn: 2, reason: { kind: 'completed' } })
+  recovered.runner.current.resolve('DONE: it finished')
+  await first.done
+  assert.equal(recovered.frames.find(frame => frame.type === 'chat.done').text, 'DONE: it finished')
+  assert.equal(recovered.frames.some(frame => frame.type === 'chat.error'), false)
+
+  // Failing twice ends as a request failure, not as an unusable reply.
+  const dead = setup()
+  const second = dead.controller.submit({ text: 'tell me when it is done' })
+  await dead.runner.started()
+  dead.runner.event('turn/end', transport)
+  dead.runner.current.resolve('')
+  await new Promise(resolve => setImmediate(resolve))
+  await dead.runner.started()
+  dead.runner.event('turn/end', transport)
+  dead.runner.current.resolve('')
+  await second.done
+  assert.equal(dead.runner.runs.length, 2, 'never more than one rerun')
+  assert.equal(dead.frames.find(frame => frame.type === 'chat.error').message, 'The model request failed (TRANSPORT), so nothing was done. Send the request again.')
+
+  // After an action already ran, never rerun.
+  const acted = setup()
+  const third = acted.controller.submit({ text: 'tell me when it is done' })
+  await acted.runner.started()
+  acted.runner.toolCall('call-1')
+  acted.runner.toolResult({ callId: 'call-1' })
+  acted.runner.event('turn/end', transport)
+  acted.runner.current.resolve('')
+  await third.done
+  assert.equal(acted.runner.runs.length, 1)
+  assert.equal(acted.frames.find(frame => frame.type === 'chat.error').message, 'The model request failed (TRANSPORT) after 1 action. Check the page before sending the request again.')
+})
+
+test('a model-switch compaction failure before the prompt was committed resends the prompt itself once', async () => {
+  const switchFailed = { turn: 1, reason: { kind: 'error', error: { code: 'MODEL_SWITCH_COMPACTION_FAILED', message: 'Cannot switch to openrouter/model-y: context compaction failed' } } }
+  const { controller, runner, frames, logStore } = setup()
+  const turn = controller.submit({ text: 'yo' })
+  await runner.started()
+  // No user/message event: the runtime failed while preparing the request.
+  runner.event('turn/end', switchFailed)
+  runner.current.resolve('')
+  await new Promise(resolve => setImmediate(resolve))
+  await runner.started()
+  assert.equal(runner.runs.length, 2)
+  assert.deepEqual(runner.runs[1], runner.runs[0], 'the original prompt blocks are sent again, not a notice')
+  assert.equal(logStore.calls.find(call => call[0] === 'record' && call[2] === 'turn.retry')[3].resend, true)
+  runner.event('turn/end', switchFailed)
+  runner.current.resolve('')
+  await turn.done
+  assert.equal(runner.runs.length, 2)
+  assert.equal(frames.find(frame => frame.type === 'chat.error').message, 'The model request failed (MODEL_SWITCH_COMPACTION_FAILED), so nothing was done. Send the request again.')
+  assert.ok(logStore.calls.some(call => call[0] === 'record' && call[2] === 'turn.runtime_error' && /context compaction failed/.test(call[3].message)))
+})
+
+test('a turn interrupted by the companion shutting down ends as stopped, not as a runtime crash', async () => {
+  const { controller, runner, frames, logStore, observed } = setup()
+  const turn = controller.submit({ text: 'get started on the mcq' })
+  await runner.started()
+  controller.dispose('SIGTERM')
+  runner.current.reject(new Error('dsh profile "sdk-minimal": DeepSeek Harness runtime exited\nexit code: 0'))
+  await turn.done
+  assert.equal(frames.some(frame => frame.type === 'chat.error'), false)
+  const stopped = frames.find(frame => frame.type === 'chat.stopped')
+  assert.equal(stopped.reason, 'shutdown')
+  assert.match(stopped.message, /The companion shut down \(SIGTERM\) during this turn/)
+  const end = logStore.calls.find(call => call[0] === 'turnEnd')
+  assert.equal(end[2].aborted, true)
+  assert.equal(end[2].reason, 'shutdown')
+  assert.equal(observed.at(-1)[1].outcome, 'stopped')
+  // Disposing with no turn running changes nothing for later turns.
+  const idle = setup()
+  idle.controller.dispose('SIGINT')
+  assert.equal(idle.controller.shutdownSignal, undefined)
+})
+
+test('other runtime errors are not rerun', async () => {
+  const { controller, runner, frames } = setup()
+  const turn = controller.submit({ text: 'hi' })
+  await runner.started()
+  runner.event('turn/end', { turn: 1, reason: { kind: 'error', error: { code: 'QUOTA', message: 'out of credits' } } })
+  runner.current.resolve('')
+  await turn.done
+  assert.equal(runner.runs.length, 1)
+  assert.equal(frames.find(frame => frame.type === 'chat.error').message, 'The model request failed (QUOTA), so nothing was done. Send the request again.')
 })
 
 test('the executor backstop is on for denied and ordinary turns of the setting, and never when it is off', async () => {

@@ -47,6 +47,7 @@ test('marathon mode adds checklist instructions only when armed', () => {
   assert.match(planned, /every turn while the switch stays on/)
   assert.match(planned, /expected_revision:0/)
   assert.match(planned, /independent final-state verification/)
+  assert.match(planned, /immediately whenever an item's status changes, before starting the next item/)
   assert.match(planned, /user_input_needed:true/)
   assert.ok(planned.indexOf('<marathon_mode>') < planned.indexOf('Complete the long task'))
   assert.ok(planned.endsWith('Complete the long task'))
