@@ -59,6 +59,7 @@ object Notifier {
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(message.title)
             .setContentText(message.text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message.text))
             .setContentIntent(pending)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)

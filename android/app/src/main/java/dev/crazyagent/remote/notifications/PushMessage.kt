@@ -33,21 +33,21 @@ data class PushMessage(val type: Type, val turnId: String, val instanceId: Strin
     val title: String
         get() = when (type) {
             Type.HELP -> "crazyAgent needs you"
-            Type.CONFIRM -> "crazyAgent needs your approval"
+            Type.CONFIRM -> "crazyAgent needs approval"
             Type.DONE -> "crazyAgent finished"
-            Type.ERROR -> "crazyAgent stopped on an error"
+            Type.ERROR -> "crazyAgent hit an error"
             Type.WATCH -> "crazyAgent may be stuck"
             Type.TEST -> "crazyAgent test notification"
         }
 
     val text: String
         get() = when (type) {
-            Type.HELP -> "Open to see what is blocking it and reply."
-            Type.CONFIRM -> "Open to approve or deny the action."
-            Type.DONE -> "Open to read the result."
-            Type.ERROR -> "Open to see what went wrong."
-            Type.WATCH -> "Open to see what it is doing."
-            Type.TEST -> "Push notifications reach this phone."
+            Type.HELP -> "Tap to review and reply."
+            Type.CONFIRM -> "Tap to approve or deny."
+            Type.DONE -> "Tap to read the result."
+            Type.ERROR -> "Tap to view the error."
+            Type.WATCH -> "Tap to check progress."
+            Type.TEST -> "Push notifications are working."
         }
 
     /** One notification per turn: a later push for the same turn replaces it. */
