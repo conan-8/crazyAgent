@@ -23,8 +23,8 @@ import {
 } from './clipboard.js'
 import { checkedFullPageSize, mapScreenshotRegion, parseScreenshotArgs } from './capture.js'
 import { docsFetchExport } from './docs-export.js'
-import { planDocsFormatEdits, validateDocsFormatEdits, verifyDocsFormatEdits } from './docs-format.js'
-import { formatOutline, parseDocStructure } from './docs-structure.js'
+import { docsFormatToggleEvidence, planDocsFormatEdits, validateDocsFormatEdits, verifyDocsFormatEdits } from './docs-format.js'
+import { formatOutline, parseDocStructure, parseInheritedTextMarks } from './docs-structure.js'
 import {
   docsTableAnchor,
   docsTableCellBackgroundEdits,
@@ -38,7 +38,7 @@ import {
   planDocsTableWrite,
   publicDocsTable,
   selectDocsTable,
-  verifyDocsTableCellBackground,
+  verifyDocsTableCellBackgroundBatch,
   verifyDocsTableDelete,
   verifyDocsTableMerge,
   verifyDocsTableUnmerge,
@@ -113,7 +113,7 @@ export const DEFAULT_SETTINGS = {
   paused: false,
   modelBaseUrl: 'https://openrouter.ai/api/v1',
   modelId: '',
-  reasoningEffort: 'medium',
+  reasoningEffort: 'auto',
 }
 
 const CAPTURE_INTERVAL_MS = 0
@@ -145,6 +145,7 @@ const lastScrollByTab = new Map()
  * @type {Map<number, Array<{viewId: number, url: string, imageWidth: number, imageHeight: number, viewport: {width: number, height: number}, at: number}>>}
  */
 const imageBasesByTab = new Map()
+const imageInvalidationByTab = new Map()
 /** Recent bases per tab; enough to name the view a stale coordinate fits. */
 const MAX_IMAGE_BASES = 8
 /** Monotonic across the browser session so a viewId is unique in a transcript. */
@@ -280,6 +281,14 @@ export function computeScrollPixels(direction, pages, amountPx, viewport) {
 }
 
 /** @param {string | undefined} url */
+/**
+ * A browser-internal page (not about:), where trusted input never attaches.
+ * @param {string} url
+ */
+export function isBrowserPageUrl(url) {
+  return typeof url === 'string' && url.length > 0 && !url.toLowerCase().startsWith('about:') && isProtectedUrl(url)
+}
+
 export function isProtectedUrl(url) {
   if (typeof url !== 'string' || url.length === 0) return true
   const lower = url.toLowerCase()
@@ -515,16 +524,44 @@ async function finishDebuggerOperation(tabId) {
   throwPendingDialog(tabId)
 }
 
+const DEBUGGER_BUSY_PATTERN = /already attached|another debugger/i
+const DEBUGGER_BUSY_MESSAGE = 'Another debugger (DevTools or another extension) is attached to this tab. Close DevTools and try again.'
+
+/**
+ * Release a session this extension itself left attached: a side panel closed
+ * mid-turn, or a restarted background executor, keeps its attachment, and only
+ * one executor runs at a time, so nothing uses it. Chrome detaches a session
+ * only for the extension that attached it, so success proves it was ours;
+ * DevTools or another extension makes detach fail and stays a busy debugger.
+ * @returns {Promise<boolean>} true when a stale session of ours was released
+ */
+async function releaseOwnStaleAttachment(tabId) {
+  try {
+    await chrome.debugger.detach({ tabId })
+  } catch {
+    return false
+  }
+  dialogManager.detach(tabId)
+  return true
+}
+
 /** Attach one tab or preserve the existing external-debugger error contract. */
 async function attachDebugger(tabId) {
   try {
     await chrome.debugger.attach({ tabId }, '1.3')
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    if (/already attached|another debugger/i.test(message)) {
-      throw new BrowserError('DEBUGGER_BUSY', 'Another debugger (DevTools) is attached to this tab. Close DevTools and try again.')
+    if (!DEBUGGER_BUSY_PATTERN.test(message)) {
+      throw new BrowserError('DEBUGGER_FAILED', `Could not attach trusted input to this tab: ${message}`)
     }
-    throw new BrowserError('DEBUGGER_FAILED', `Could not attach trusted input to this tab: ${message}`)
+    if (!await releaseOwnStaleAttachment(tabId)) throw new BrowserError('DEBUGGER_BUSY', DEBUGGER_BUSY_MESSAGE)
+    try {
+      await chrome.debugger.attach({ tabId }, '1.3')
+    } catch (retryError) {
+      const retryMessage = retryError instanceof Error ? retryError.message : String(retryError)
+      if (DEBUGGER_BUSY_PATTERN.test(retryMessage)) throw new BrowserError('DEBUGGER_BUSY', DEBUGGER_BUSY_MESSAGE)
+      throw new BrowserError('DEBUGGER_FAILED', `Could not attach trusted input to this tab: ${retryMessage}`)
+    }
   }
   try {
     await dialogManager.attach(tabId)
@@ -1050,6 +1087,7 @@ function invalidateRoleClickTab(tabId) {
   lastViewByTab.delete(tabId)
   tabLabelsByTab.delete(tabId)
   imageBasesByTab.delete(tabId)
+  imageInvalidationByTab.delete(tabId)
   lastScrollByTab.delete(tabId)
 }
 
@@ -1205,7 +1243,7 @@ function pageMetrics() {
   const active = document.activeElement
   const layout = (() => {
     const items = []
-    const nodes = document.querySelectorAll('a[href],button,input,select,textarea,summary,[role],[onclick],[tabindex]:not([tabindex="-1"]),canvas,iframe')
+    const nodes = document.querySelectorAll('a[href],button,input,select,textarea,summary,[role],[contenteditable]:not([contenteditable="false"]),[onclick],[tabindex]:not([tabindex="-1"]),canvas,iframe')
     const vw = window.innerWidth
     const vh = window.innerHeight
     let reads = 0
@@ -1307,6 +1345,9 @@ async function labelPage(limit) {
     '[role="radio"]',
     '[role="option"]',
     '[role="combobox"]',
+    '[role="textbox"]',
+    '[role="searchbox"]',
+    '[contenteditable]:not([contenteditable="false"])',
     '[onclick]',
     '[tabindex]:not([tabindex="-1"])',
   ].join(',')
@@ -1325,6 +1366,7 @@ async function labelPage(limit) {
     if (tag === 'select') return 'combobox'
     if (tag === 'textarea') return 'textbox'
     if (tag === 'label') return 'label'
+    if (el.isContentEditable === true) return 'textbox'
     if (tag === 'input') {
       const type = (el.type || 'text').toLowerCase()
       if (type === 'checkbox') return 'checkbox'
@@ -1349,6 +1391,9 @@ async function labelPage(limit) {
       type === 'password' ? '' : el.value,
       el.innerText,
       el.textContent,
+      el.getAttribute?.('aria-placeholder'),
+      el.getAttribute?.('data-placeholder'),
+      el.querySelector?.('[data-placeholder]')?.getAttribute('data-placeholder'),
       el.getAttribute?.('placeholder'),
       el.getAttribute?.('name'),
     ]
@@ -1366,6 +1411,7 @@ async function labelPage(limit) {
   const vh = window.innerHeight
 
   const labels = []
+  let editableLabelCount = 0
   const cap = Math.max(1, Math.min(200, Math.floor(Number(limit) || 120)))
   // Include open shadow roots: web components keep their controls there.
   const nodes = []
@@ -1392,6 +1438,10 @@ async function labelPage(limit) {
     const style = getComputedStyle(el)
     if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue
     if (style.pointerEvents === 'none') continue
+    if (el.parentElement?.isContentEditable === true) continue
+    const editableOnly = tag !== 'input' && tag !== 'textarea'
+      && (el.isContentEditable === true || el.matches('[role="textbox"],[role="searchbox"]'))
+    if (editableOnly && (editableLabelCount >= 20 || rect.width * rect.height > vw * vh * 0.5)) continue
 
     // Only label what a real click would hit at the centre. This keeps modal
     // overlays and cookie banners from exposing targets behind them.
@@ -1418,6 +1468,7 @@ async function labelPage(limit) {
     const role = labelRole(el)
     const text = labelText(el)
     state.infoById.set(id, { tag, role, text, disabled })
+    if (editableOnly) editableLabelCount += 1
     labels.push({
       id,
       tag,
@@ -1460,7 +1511,7 @@ async function labelPage(limit) {
   // baseline every skipped-view action is compared against.
   const layout = (() => {
     const items = []
-    const nodes = document.querySelectorAll('a[href],button,input,select,textarea,summary,[role],[onclick],[tabindex]:not([tabindex="-1"]),canvas,iframe')
+    const nodes = document.querySelectorAll('a[href],button,input,select,textarea,summary,[role],[contenteditable]:not([contenteditable="false"]),[onclick],[tabindex]:not([tabindex="-1"]),canvas,iframe')
     let reads = 0
     for (const node of nodes) {
       if (reads >= 600 || items.length >= 40) break
@@ -3093,7 +3144,9 @@ function resolveScreenshotRegion(tab, metrics, request) {
     const mismatch = findCoordinateBasisMismatch(points, basis, history)
     if (request.viewId !== undefined) mismatch.ambiguous = []
     if (mismatch.stale.length > 0 || mismatch.ambiguous.length > 0) {
-      throw new BrowserError(mismatch.stale.length > 0 ? 'STALE_VIEW' : 'AMBIGUOUS_VIEW', 'The region coordinates fit a different screenshot scale. Take a fresh viewport screenshot, measure the region again, and pass its view_id.')
+      const source = mismatch.stale[0]?.from ?? mismatch.ambiguous[0]?.alternatives[0]
+      const detail = source ? ` The coordinates fit view #${source.viewId} (${source.imageWidth}x${source.imageHeight} image).` : ''
+      throw new BrowserError(mismatch.stale.length > 0 ? 'STALE_VIEW' : 'AMBIGUOUS_VIEW', `The region coordinates fit a different screenshot scale.${detail} Take a fresh viewport screenshot, measure the region again, and pass its view_id.`)
     }
   }
   const scale = request.space === 'image' ? basis.viewport.width / basis.imageWidth : 1
@@ -3537,7 +3590,7 @@ export function summarizeContentProbe(frames) {
  * landed in the document. Pure.
  * @param {ReturnType<typeof summarizeContentProbe> | undefined} before
  * @param {ReturnType<typeof summarizeContentProbe> | undefined} after
- * @returns {{changed: boolean|null, charsAdded: number|null, measured: 'field'|'none', canvasEditor: boolean, fieldChanged: boolean|null, pageChanged: boolean, targetKind: string}}
+ * @returns {{changed: boolean|null, charsAdded: number|null, measured: 'field'|'none', canvasEditor: boolean, focusEditable?: boolean, fieldChanged: boolean|null, pageChanged: boolean, targetKind: string}}
  */
 export function deriveTypeVerdict(before, after) {
   const focus = after?.focus ?? before?.focus
@@ -3573,11 +3626,14 @@ export function deriveTypeVerdict(before, after) {
       targetKind,
     }
   }
+  const knownNonEditable = focus !== undefined && focus.readable === false
+    && !['canvas', 'frame', 'iframe', 'object', 'embed', 'video'].includes(String(focus.tag ?? ''))
   return {
     changed: null,
     charsAdded: null,
     measured: 'none',
-    canvasEditor: true,
+    canvasEditor: !knownNonEditable,
+    ...(knownNonEditable ? { focusEditable: false } : {}),
     fieldChanged: null,
     pageChanged,
     targetKind,
@@ -3713,6 +3769,7 @@ function storeCompactView(tab, metrics, labels) {
   const resized = Math.abs((beforeViewport.width ?? 0) - (metrics.viewport?.width ?? 0)) > 1
     || Math.abs((beforeViewport.height ?? 0) - (metrics.viewport?.height ?? 0)) > 1
   if (scrolled || resized || layout.layoutChanged || layout.structural) {
+    recordImageInvalidation(tab, layout.layoutChanged || layout.structural ? 'layout' : scrolled ? 'scroll' : 'resize', layout)
     delete stored.image
     imageBasesByTab.delete(tab.id)
   }
@@ -3742,6 +3799,7 @@ async function buildActionView(tab, settings, requested, options = {}) {
     const actionShift = options.layoutBaseline === undefined ? shift : deriveLayoutShiftOutcome(options.layoutBaseline, metrics)
     const basisViewId = stored?.image?.data ? stored.viewId : undefined
     if (shift.layoutChanged && stored) {
+      recordImageInvalidation(tab, 'layout', shift.layoutShift)
       delete stored.image
       imageBasesByTab.delete(tab.id)
     }
@@ -3827,6 +3885,7 @@ async function buildBatchView(tab, settings, requested) {
     const shift = deriveLayoutShiftOutcome(stored, metrics)
     const basisViewId = stored?.image?.data ? stored.viewId : undefined
     if (shift.layoutChanged && stored) {
+      recordImageInvalidation(tab, 'layout', shift.layoutShift)
       delete stored.image
       imageBasesByTab.delete(tab.id)
     }
@@ -4552,12 +4611,44 @@ function parseViewId(value) {
   return id
 }
 
+export function imageInvalidationMessage(invalidation) {
+  if (!invalidation) return 'Take a screenshot first so image coordinates can be mapped to the page.'
+  const view = Number.isSafeInteger(Number(invalidation.viewId)) && Number(invalidation.viewId) > 0
+    ? `View #${Number(invalidation.viewId)}`
+    : 'The previous view'
+  let reason = 'the page changed after your last action'
+  if (invalidation.reason === 'layout') {
+    const moved = Number(invalidation.movedCount) || 0
+    const px = Math.max(Math.abs(Number(invalidation.maxDx) || 0), Math.abs(Number(invalidation.maxDy) || 0))
+    reason = moved > 0
+      ? `layout changed after your last action (${moved} control(s) moved up to ${px}px)`
+      : 'controls were added, removed, or renamed after your last action'
+  } else if (invalidation.reason === 'scroll') reason = 'the page scrolled after your last action'
+  else if (invalidation.reason === 'resize') reason = 'the viewport was resized after your last action'
+  return `${view} went stale: ${reason}. Take a fresh view and measure the coordinates again.`
+}
+
+function recordImageInvalidation(tab, reason, layout) {
+  const stored = lastViewByTab.get(tab.id)
+  imageInvalidationByTab.set(tab.id, {
+    url: tab.url ?? stored?.tab?.url ?? '',
+    viewId: stored?.viewId,
+    reason,
+    ...(layout ? {
+      movedCount: layout.movedCount,
+      maxDx: layout.maxDx,
+      maxDy: layout.maxDy,
+    } : {}),
+  })
+}
+
 /**
  * Keep the most recent captures of a tab as coordinate bases, newest first.
  * @param {number} tabId
  * @param {{viewId: number}} basis
  */
 function recordImageBasis(tabId, basis) {
+  imageInvalidationByTab.delete(tabId)
   const history = imageBasesByTab.get(tabId) ?? []
   history.unshift(basis)
   if (history.length > MAX_IMAGE_BASES) history.length = MAX_IMAGE_BASES
@@ -4823,6 +4914,48 @@ async function readActionPageText(tab, expected, frameId = 0) {
   }
 }
 
+function clickEvidencePage(phase, points) {
+  const describe = element => {
+    if (!(element instanceof Element)) return null
+    const tag = element.tagName.toLowerCase()
+    const type = String(element.getAttribute('type') ?? '').toLowerCase()
+    const explicitRole = element.getAttribute('role') ?? ''
+    const role = explicitRole || (tag === 'textarea' ? 'textbox'
+      : tag === 'input' ? (type === 'search' ? 'searchbox' : 'textbox')
+        : tag === 'button' ? 'button' : tag === 'a' ? 'link' : '')
+    const editable = element.isContentEditable === true || tag === 'textarea'
+      || (tag === 'input' && !['button', 'checkbox', 'color', 'file', 'image', 'radio', 'range', 'reset', 'submit'].includes(type))
+      || role === 'textbox' || role === 'searchbox'
+    const namedBy = element.getAttribute('aria-labelledby')
+    const name = (namedBy
+      ? namedBy.split(/\s+/u).map(id => document.getElementById(id)?.textContent ?? '').join(' ')
+      : element.getAttribute('aria-label')
+        || element.getAttribute('title')
+        || element.getAttribute('alt')
+        || element.getAttribute('data-placeholder')
+        || element.getAttribute('placeholder')
+        || (tag === 'body' ? '' : element.innerText || element.textContent || ''))
+      .replace(/\s+/gu, ' ').trim().slice(0, 60)
+    let label
+    let node = element
+    for (let depth = 0; node && depth < 8; depth += 1) {
+      const id = globalThis.__crazyagent?.idsByElement?.get(node)
+      if (Number.isSafeInteger(id)) { label = id; break }
+      node = node.parentElement ?? node.getRootNode()?.host ?? null
+    }
+    return {
+      tag,
+      ...(role ? { role } : {}),
+      ...(name ? { name } : {}),
+      editable,
+      surface: tag === 'canvas' || tag === 'iframe' || tag === 'video',
+      ...(label === undefined ? {} : { label }),
+    }
+  }
+  if (phase === 'focus') return describe(document.activeElement)
+  return points.map(point => describe(document.elementFromPoint(Number(point.x), Number(point.y))))
+}
+
 /**
  * Click points in the current view on canvas/video/iframe or unlabelled targets.
  * Ordinary pages allow 20-point bursts and skipped captures. Known document
@@ -4853,7 +4986,12 @@ async function clickAt(settings, args) {
     : request.space === 'image'
       ? resolveImageBasis({ space: request.space, viewId: request.viewId, points: request.points }, history)
       : {}
-  if (resolved.error) throw new BrowserError(resolved.error.code, resolved.error.message)
+  if (resolved.error) {
+    const invalidation = resolved.error.code === 'NO_VIEW' ? imageInvalidationByTab.get(tab.id) : undefined
+    throw new BrowserError(resolved.error.code, invalidation?.url === (tab.url ?? '')
+      ? imageInvalidationMessage(invalidation)
+      : resolved.error.message)
+  }
   const basis = resolved.basis
   const liveMetrics = canvasEditor ? await runInTab(tab.id, pageMetrics, []) : undefined
   if (canvasEditor) {
@@ -4865,7 +5003,8 @@ async function clickAt(settings, args) {
   }
   const viewport = liveMetrics?.viewport ?? before?.viewport ?? await runInTab(tab.id, pageMetrics, [])
   if (!canvasEditor && request.space === 'image' && (!before?.image?.data || !basis)) {
-    throw new BrowserError('NO_VIEW', 'Take a screenshot first so image coordinates can be mapped to the page.')
+    const invalidation = imageInvalidationByTab.get(tab.id)
+    throw new BrowserError('NO_VIEW', imageInvalidationMessage(invalidation?.url === (tab.url ?? '') ? invalidation : undefined))
   }
   const imageScale = request.space === 'image' ? basis.viewport.width / basis.imageWidth : 1
   const mismatch = request.space === 'image'
@@ -4890,6 +5029,10 @@ async function clickAt(settings, args) {
   const targets = mapClickPoints(request.points, request.space, viewport, imageScale)
   const onScreen = targets.filter(target => target.offScreen !== true)
   const offScreenCount = targets.length - onScreen.length
+  const hits = onScreen.length > 0
+    ? await runInTab(tab.id, clickEvidencePage, ['hits', onScreen.map(target => ({ x: target.cssX, y: target.cssY }))], 4_000).catch(() => [])
+    : []
+  const hitByTarget = new Map(onScreen.map((target, index) => [target, Array.isArray(hits) ? hits[index] : null]))
   if (canvasEditor && offScreenCount > 0) {
     throw new BrowserError('OFF_SCREEN', 'A canvas coordinate is outside the current viewport. Take a full fresh view and measure it again; no click was dispatched.')
   }
@@ -4912,6 +5055,9 @@ async function clickAt(settings, args) {
       if (canvasEditor) invalidateCanvasImageBases(tab.id)
     }
   }
+  const focus = onScreen.length > 0
+    ? await runInTab(tab.id, clickEvidencePage, ['focus'], 4_000).catch(() => null)
+    : null
 
   const noCapture = request.view === 'none' || request.view === 'compact' || batchDepth > 0
   const unclickedDiff = { changed: null, percent: null, mean: null }
@@ -4945,6 +5091,7 @@ async function clickAt(settings, args) {
     changed: noPixelDiff ? null : diffs[index].changed,
     pixelsChanged: noPixelDiff ? null : diffs[index].percent,
     pixelMean: noPixelDiff ? null : diffs[index].mean,
+    ...(hitByTarget.get(target) ? { hit: hitByTarget.get(target) } : {}),
   }))
   if (batchDepth > 0) {
     // Inner click_at: no capture at all. A fingerprint comparison still gives a
@@ -4956,6 +5103,7 @@ async function clickAt(settings, args) {
     const staleScroll = staleScrollInfo(before?.scroll, metrics?.scroll)
     const inner = {
       points,
+      ...(focus ? { focus } : {}),
       trusted,
       offScreenCount,
       attempted: onScreen.length > 0,
@@ -4989,6 +5137,7 @@ async function clickAt(settings, args) {
     ...payload,
     op: 'click_at',
     points,
+    ...(focus ? { focus } : {}),
     trusted,
     offScreenCount,
     attempted: onScreen.length > 0,
@@ -5022,6 +5171,7 @@ async function clickAt(settings, args) {
       cssX: points[0].cssX,
       cssY: points[0].cssY,
       offScreen: points[0].offScreen,
+      ...(points[0].hit ? { hit: points[0].hit } : {}),
     }
     result.changed = points[0].changed
     result.pixelsChanged = points[0].pixelsChanged
@@ -5544,6 +5694,7 @@ async function typeText(settings, args) {
           canvasEditor: verdict.canvasEditor,
           pageChanged: verdict.pageChanged,
           ...(verdict.canvasEditor ? { dispatched: true, verified: false } : { verified: changed === true }),
+          ...(verdict.focusEditable === false ? { focusEditable: false, targetKind: verdict.targetKind } : {}),
           ...(valuePreview === undefined ? {} : { valuePreview }),
         }),
   }
@@ -5818,7 +5969,12 @@ async function navigate(settings, args) {
   let tabId = active.id
   let newTab = false
   let history
-  if (request.url !== undefined && request.newTab) {
+  // A tab showing a browser page (the new-tab page, settings, extensions)
+  // refuses trusted input, and in Edge a tab navigated in place away from its
+  // new-tab page keeps refusing it. Open the destination in a new tab, which
+  // trusted input can attach to; the browser page stays as it was.
+  const fromBrowserPage = request.url !== undefined && !request.newTab && isBrowserPageUrl(fromUrl)
+  if (request.url !== undefined && (request.newTab || fromBrowserPage)) {
     let created
     try {
       created = await chrome.tabs.create({ url: request.url, active: true })
@@ -5831,8 +5987,9 @@ async function navigate(settings, args) {
   }
   if (request.url === undefined) history = request.history
   const waitStarted = performance.now()
-  await withDebugger(tabId, async () => {
-    if (!newTab) dialogManager.expectBeforeUnload(tabId)
+  const protectedOrigin = !newTab && isProtectedUrl(fromUrl)
+  const performNavigation = async () => {
+    if (!protectedOrigin && !newTab) dialogManager.expectBeforeUnload(tabId)
     try {
       if (!newTab && request.url !== undefined) {
         try {
@@ -5853,9 +6010,11 @@ async function navigate(settings, args) {
       const remaining = Math.max(1, 15_000 - (performance.now() - waitStarted))
       await waitForTabComplete(tabId, windowId, remaining)
     } finally {
-      dialogManager.clearBeforeUnloadIntent(tabId)
+      if (!protectedOrigin && !newTab) dialogManager.clearBeforeUnloadIntent(tabId)
     }
-  })
+  }
+  if (protectedOrigin) await performNavigation()
+  else await withDebugger(tabId, performNavigation)
   const waitMs = Math.round(performance.now() - waitStarted)
   const current = await chrome.tabs.get(tabId).catch(() => undefined)
   const timedOut = (current?.status ?? 'complete') !== 'complete'
@@ -5865,6 +6024,7 @@ async function navigate(settings, args) {
     toUrl: current?.url ?? '',
     tabId,
     newTab,
+    ...(fromBrowserPage ? { newTabReason: 'browser-page' } : {}),
     ...(history === undefined ? {} : { history }),
     status: current?.status ?? 'unknown',
     timedOut,
@@ -5962,16 +6122,62 @@ async function waitForTabConditions(tab, request, started = performance.now()) {
   const { conditions, timeoutMs } = request
   assertCapturable(tab)
   if (conditions.ms > 0) await pauseInTab(tab.id, conditions.ms)
-  const remaining = Math.max(1, timeoutMs - Math.round(performance.now() - started))
   const pageConditions = {
     text: conditions.text ?? null,
     url: conditions.url ?? null,
     idle: conditions.idle === true,
   }
-  const polled = await runInTab(tab.id, waitForConditionsPage, [pageConditions, remaining], remaining + 2_000)
-  const found = polled?.found === true
+  const fromUrl = tab.url ?? ''
+  let currentUrl = fromUrl
+  let navigated = false
+  let recovered = false
+  let found = false
+  for (;;) {
+    const remaining = timeoutMs - Math.round(performance.now() - started)
+    if (remaining <= 0) break
+    const sliceMs = Math.min(500, remaining)
+    let polled
+    try {
+      polled = await runInTab(tab.id, waitForConditionsPage, [pageConditions, sliceMs], sliceMs + 2_000)
+    } catch (error) {
+      const code = typeof error?.code === 'string' ? error.code : ''
+      const current = await chrome.tabs.get(tab.id).catch(() => undefined)
+      const changed = current !== undefined && (current.url !== currentUrl || current.status === 'loading')
+      if (recovered || !changed || !['SCRIPT_EMPTY', 'SCRIPT_FAILED', 'SCRIPT_TIMEOUT'].includes(code)) throw error
+      recovered = true
+      navigated = true
+      currentUrl = current.url ?? currentUrl
+      const remainingLoad = timeoutMs - Math.round(performance.now() - started)
+      if (remainingLoad <= 0) break
+      await waitForTabComplete(tab.id, current.windowId ?? tab.windowId ?? await getWindowId(), remainingLoad)
+      currentUrl = (await chrome.tabs.get(tab.id).catch(() => current))?.url ?? currentUrl
+      continue
+    }
+    found = polled?.found === true
+    const current = await chrome.tabs.get(tab.id).catch(() => undefined)
+    const urlChanged = current !== undefined && current.url !== currentUrl
+    const loading = current?.status === 'loading'
+    if (urlChanged || loading) {
+      navigated = true
+      currentUrl = current.url ?? currentUrl
+    }
+    if (found) break
+    if ((urlChanged || loading) && !recovered) {
+      recovered = true
+      const remainingLoad = timeoutMs - Math.round(performance.now() - started)
+      if (remainingLoad <= 0) break
+      await waitForTabComplete(tab.id, current.windowId ?? tab.windowId ?? await getWindowId(), remainingLoad)
+      currentUrl = (await chrome.tabs.get(tab.id).catch(() => current))?.url ?? currentUrl
+    }
+  }
   const elapsedMs = Math.round(performance.now() - started)
-  return { conditions, found, timedOut: !found, elapsedMs }
+  return {
+    conditions,
+    found,
+    timedOut: !found,
+    elapsedMs,
+    ...(navigated ? { navigatedDuringWait: { from: fromUrl, to: currentUrl } } : {}),
+  }
 }
 
 function batchGuardError(phase, waited, cause) {
@@ -6820,7 +7026,21 @@ async function clipboardClear() {
   }
 }
 
-function pasteImageDataTransfer(label, data) {
+export function imagePasteDeliveryResult({ pasteHandled, mutationObserved, dropDispatched, dropHandled, target }) {
+  const handledBy = pasteHandled ? 'paste' : mutationObserved ? 'page-mutation' : dropHandled ? 'drop' : undefined
+  return {
+    ok: true,
+    handled: handledBy !== undefined,
+    pasteHandled,
+    dropHandled,
+    dropDispatched,
+    ...(handledBy ? { handledBy } : {}),
+    events: dropDispatched ? ['paste', 'drop'] : ['paste'],
+    target,
+  }
+}
+
+async function pasteImageDataTransfer(label, data) {
   const state = globalThis.__crazyagent
   const target = label > 0 ? state?.byId?.get(label) : document.activeElement
   if (!target || !target.isConnected) return { ok: false, code: 'NOT_EDITABLE', message: 'The image paste target is not connected to the page' }
@@ -6829,27 +7049,60 @@ function pasteImageDataTransfer(label, data) {
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
   const transfer = new DataTransfer()
   transfer.items.add(new File([bytes], 'crazyagent-capture.png', { type: 'image/png' }))
-  const paste = new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true, composed: true })
-  target.dispatchEvent(paste)
-  const pasteHandled = paste.defaultPrevented
-  let dropHandled = false
-  if (!pasteHandled) {
-    const drop = new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true, composed: true })
-    target.dispatchEvent(drop)
-    dropHandled = drop.defaultPrevented
+  const tag = target.tagName.toLowerCase()
+  const role = target.getAttribute('role') ?? ''
+  const targetInfo = {
+    tag,
+    editable: target.isContentEditable === true || tag === 'input' || tag === 'textarea' || role === 'textbox' || role === 'searchbox',
+    body: tag === 'body',
   }
-  return { ok: true, handled: pasteHandled || dropHandled, pasteHandled, dropHandled, events: dropHandled ? ['paste', 'drop'] : ['paste'] }
+  let mutationObserved = false
+  const observationRoot = tag === 'body' ? target : target.parentElement ?? target
+  const observer = new MutationObserver(records => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node.nodeType === Node.ELEMENT_NODE
+          && (node.tagName === 'IMG' || node.querySelector?.('img'))) mutationObserved = true
+      }
+    }
+  })
+  let pasteHandled = false
+  let dropDispatched = false
+  let dropHandled = false
+  try {
+    observer.observe(observationRoot, { childList: true, subtree: true })
+    const paste = new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true, composed: true })
+    target.dispatchEvent(paste)
+    pasteHandled = paste.defaultPrevented
+    if (!pasteHandled) {
+      const started = performance.now()
+      while (!mutationObserved && performance.now() - started < 400) {
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+    }
+    if (!pasteHandled && !mutationObserved) {
+      const drop = new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true, composed: true })
+      dropDispatched = true
+      target.dispatchEvent(drop)
+      dropHandled = drop.defaultPrevented
+    }
+  } finally {
+    observer.disconnect()
+  }
+  return { pasteHandled, mutationObserved, dropDispatched, dropHandled, target: targetInfo }
 }
 
 async function syntheticImagePaste(settings, request, entry, tab) {
   const delivered = await runInTab(tab.id, pasteImageDataTransfer, [request.label ?? 0, entry.image.data], 3_000)
   if (delivered?.ok === false) throw new BrowserError(delivered.code ?? 'PASTE_FAILED', delivered.message ?? 'The image paste target is unavailable')
+  if (!delivered || typeof delivered !== 'object') throw new BrowserError('PASTE_FAILED', 'The page did not return image paste evidence')
+  const synthetic = imagePasteDeliveryResult(delivered)
   const activeTab = await getActiveTab(await getWindowId()).catch(() => tab)
   const { payload } = await buildActionView(activeTab, settings, actionViewForTab(activeTab, request.view), {
-    changed: delivered.handled ? true : null,
-    signals: delivered.handled ? ['synthetic-paste-handled'] : [],
+    changed: synthetic.handled ? true : null,
+    signals: synthetic.handled ? ['synthetic-paste-handled'] : [],
   })
-  return { ...payload, synthetic: delivered }
+  return { ...payload, synthetic }
 }
 
 /**
@@ -6956,6 +7209,9 @@ async function clipboardPaste(settings, request) {
           handled: synthetic.handled,
           pasteHandled: synthetic.pasteHandled,
           dropHandled: synthetic.dropHandled,
+          dropDispatched: synthetic.dropDispatched,
+          handledBy: synthetic.handledBy,
+          target: synthetic.target,
         } : {}),
         ...(restoreError ? { systemRestoreError: restoreError.message } : {}),
         note: synthetic
@@ -7065,6 +7321,22 @@ function docsFailure(stage, code, message) {
  */
 export function docsPageProbe(command, args = {}) {
   const normalize = value => String(value ?? '').replace(/\s+/gu, ' ').trim()
+  const gridMetrics = (gridRect, cellRect, selectedRows, selectedColumns, rows, columns) => {
+    const cellWidth = cellRect.width / selectedColumns
+    const cellHeight = cellRect.height / selectedRows
+    const maxColumns = Math.floor((gridRect.width + 0.5) / cellWidth)
+    const maxRows = Math.floor((gridRect.height + 0.5) / cellHeight)
+    const within = rows <= maxRows && columns <= maxColumns
+    return {
+      maxRows,
+      maxColumns,
+      within,
+      point: within ? {
+        x: Math.round(gridRect.left + (columns - 0.5) * cellWidth),
+        y: Math.round(gridRect.top + (rows - 0.5) * cellHeight),
+      } : undefined,
+    }
+  }
   const fontName = value => normalize(value).replace(/\s+(?:▸|›|»|▶|►)$/u, '')
   const visible = element => {
     if (!(element instanceof Element) || !element.isConnected) return false
@@ -7334,12 +7606,19 @@ export function docsPageProbe(command, args = {}) {
       checklist: ['Checklist', 'Checklist (Ctrl+Shift+9)'],
     }
     const localControls = nodes('button', toolbar.element, true).filter(element => names[attribute].includes(name(element)))
-    const controls = localControls.length === 0 && ['numbered', 'bulleted', 'checklist'].includes(attribute)
+    const controls = localControls.length === 0
       ? nodes('button', document).filter(hitVisible).filter(element => names[attribute].includes(name(element)))
       : localControls
-    if (controls.length === 0 && ['numbered', 'bulleted', 'checklist'].includes(attribute)) {
+    if (controls.length === 0) {
+      // Below about 1300 CSS px Docs moves the list buttons into an overflow
+      // that its More button opens. Docs marks that button aria-disabled even
+      // though clicking it opens the overflow (seen live 2026-11-19 at 1162 px),
+      // so only a natively disabled control is refused here. A More that
+      // reveals nothing just leaves the caller's wait to time out.
       const more = one(exact('button', 'More', toolbar.element).filter(hitVisible), 'Main toolbar More')
-      if (!more.error && !disabled(more.element)) return { ok: true, pressed: undefined, revealPoint: point(more.element) }
+      if (!more.error && more.element.disabled !== true && !more.element.matches(':disabled')) {
+        return { ok: true, pressed: undefined, revealPoint: point(more.element) }
+      }
     }
     const control = one(controls, `Main toolbar ${attribute}`)
     if (control.error) return control.error
@@ -7422,15 +7701,19 @@ export function docsPageProbe(command, args = {}) {
     const done = one(exact('button', 'Done', root), 'Done')
     const cancel = one(exact('button', 'Cancel', root), 'Cancel')
     if (done.error || cancel.error) return failure('DIALOG_CONTROLS', 'Done or Cancel is missing or ambiguous')
+    const removals = exact('button', `Remove ${wanted}`, document).filter(hitVisible)
+    if (removals.length > 1) return failure('AMBIGUOUS_CONTROL', `Remove ${wanted} is ambiguous`)
+    const added = removals.length === 1
     return {
       ok: true,
       open: true,
       searchEnabled: parts.search ? !disabled(parts.search) : false,
       searchValue: parts.search ? String(parts.search.value ?? '') : undefined,
       noFonts,
-      signature: visibleOptions.map(element => `${fontName(element.innerText)}:${selected(element)}`).join('|') + `:empty=${noFonts}`,
+      signature: visibleOptions.map(element => `${fontName(element.innerText)}:${selected(element)}`).join('|') + `:empty=${noFonts}:added=${added}`,
       found: Boolean(row),
       checked: row ? selected(row) : false,
+      added,
       point: row ? point(row) : undefined,
       done: !disabled(done.element) ? point(done.element) : undefined,
       cancel: !disabled(cancel.element) ? point(cancel.element) : undefined,
@@ -7591,6 +7874,36 @@ export function docsPageProbe(command, args = {}) {
     }
   }
 
+  const tableCreateGridState = (rows, columns) => {
+    const pickers = [...document.querySelectorAll('.goog-dimension-picker')].filter(element => {
+      if (!element.isConnected) return false
+      const rect = element.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    })
+    if (pickers.length === 0) return { ok: true, open: false }
+    if (pickers.length !== 1) return failure('AMBIGUOUS_CONTROL', `Expected one table dimension picker, found ${pickers.length}`)
+    const picker = pickers[0]
+    const grid = picker.querySelector('.goog-dimension-picker-unhighlighted')
+    const highlighted = picker.querySelector('.goog-dimension-picker-highlighted')
+    const status = normalize(picker.querySelector('.goog-dimension-picker-status')?.textContent).replace(/[\u200e\u200f\u202a-\u202e]/gu, '')
+    const match = /^(\d+)\s*x\s*(\d+)$/u.exec(status)
+    const gridRect = grid?.getBoundingClientRect()
+    const cellRect = highlighted?.getBoundingClientRect()
+    if (!match || !gridRect || !cellRect || cellRect.width <= 0 || cellRect.height <= 0) {
+      return failure('TABLE_GRID_STATE_UNKNOWN', 'The table dimension picker does not expose exact geometry and dimensions')
+    }
+    const selectedColumns = Number(match[1])
+    const selectedRows = Number(match[2])
+    if (selectedRows < 1 || selectedColumns < 1) return failure('TABLE_GRID_STATE_UNKNOWN', `The table dimension picker reported ${status}`)
+    return {
+      ok: true,
+      open: true,
+      rows: selectedRows,
+      columns: selectedColumns,
+      ...gridMetrics(gridRect, cellRect, selectedRows, selectedColumns, rows, columns),
+    }
+  }
+
   const tableCellBackgroundState = () => {
     const cell = exact('button', 'Cell').filter(hitVisible)
     const color = exact('button', 'Color').filter(hitVisible)
@@ -7621,6 +7934,7 @@ export function docsPageProbe(command, args = {}) {
       return setText('textbox', args.side, args.value)
     }
     case 'editMenu': return menuControl('Edit')
+    case 'insertMenu': return menuControl('Insert')
     case 'formatMenu': return menuControl('Format')
     case 'tableMenu': return menuControl('Table ►')
     case 'replaceMenuItem': return menuControl('Find and replace')
@@ -7643,6 +7957,7 @@ export function docsPageProbe(command, args = {}) {
     case 'menuSearch': return menuSearchState()
     case 'setMenuSearch': return setMenuSearch(args.value)
     case 'tableMenuItem': return tableMenuItem(args.name)
+    case 'tableCreateGrid': return tableCreateGridState(args.rows, args.columns)
     case 'tableCellBackground': return tableCellBackgroundState()
     case 'format': return formatState(args.attributes)
     case 'formatStyleMenu': return paragraphStyleMenu(args.style)
@@ -7933,9 +8248,9 @@ async function docsAddAndApply(context, text) {
       stableSince = now
     } else if (now - stableSince >= 100) {
       if (state.found) {
-        if (!state.checked) {
+        if (!state.checked && !state.added) {
           await docsClick(context, 'font-add', state.point)
-          await docsWait(context, 'font-add', 'fontDialog', { font }, next => next.found && next.checked)
+          await docsWait(context, 'font-add', 'fontDialog', { font }, next => next.checked || next.added)
         }
         const ready = await docsWait(context, 'font-done', 'fontDialog', { font }, next => next.done)
         await docsClick(context, 'font-done', ready.done)
@@ -8198,7 +8513,33 @@ async function docsApplyFont(context, text) {
   if (!menu.moreFonts) throw docsFailure('open-font-menu', 'DOCS_FONT_MISSING', `Font ${context.font} is absent and More fonts is unavailable`)
   await docsClick(context, 'more-fonts', menu.moreFonts)
   await docsWait(context, 'more-fonts', 'fontDialog', { font: context.font }, state => state.open && state.searchEnabled)
-  return docsAddAndApply(context, text)
+  try {
+    return await docsAddAndApply(context, text)
+  } catch (error) {
+    // Close the Fonts dialog without saving. Left open, it covers the toolbar
+    // and every following Docs action fails on missing toolbar controls.
+    let closed = false
+    try {
+      const dialog = await docsProbe(context, 'font-error-cleanup', 'fontDialog', { font: context.font })
+      if (!dialog.open) closed = true
+      else if (dialog.cancel) {
+        await docsClick(context, 'font-error-cleanup', dialog.cancel)
+        await docsWait(context, 'font-error-cleanup', 'fontDialog', { font: context.font }, state => !state.open)
+        closed = true
+      }
+    } catch {}
+    if (!closed) {
+      try {
+        await docsKey(context, 'font-error-escape', KEY_SPECS.Escape)
+        await docsWait(context, 'font-error-escape', 'fontDialog', { font: context.font }, state => !state.open)
+        closed = true
+      } catch {}
+    }
+    if (!closed && error instanceof Error) {
+      error.message += '; the Fonts dialog may still be open: press Escape and take a fresh view before any other Docs action'
+    }
+    throw error
+  }
 }
 
 async function docsSetFontFlow(context, text) {
@@ -8285,18 +8626,39 @@ function docsFormatResult(attribute, value, status, verifiedBy = 'toolbar') {
   return { attribute, value, status, verifiedBy }
 }
 
+/**
+ * Open Docs' toolbar overflow (its More button) to read controls that a narrow
+ * window moved there. The click takes keyboard focus off the document, so the
+ * caller must give it back (docsRefocusAfterReveal) before any further typing
+ * or shortcut, or that input lands in the toolbar.
+ */
+async function docsRevealOverflow(context, stage, point) {
+  await docsClick(context, stage, point)
+  context.overflowRevealed = true
+}
+
+async function docsRefocusAfterReveal(context, stage) {
+  if (context.overflowRevealed !== true) return
+  context.overflowRevealed = false
+  await docsFocusDocument(context, `${stage}-refocus`)
+}
+
 async function docsWaitFormat(context, stage, attributes, wanted, timeoutMs = 4_000) {
   const end = Math.min(context.deadline, context.driver.now() + timeoutMs)
   let latest
   while (context.driver.now() < end) {
     latest = await docsProbe(context, stage, 'format', { attributes })
-    if (attributes.every(attribute => docsFormatObservation(latest, attribute) === wanted[attribute])) return latest
+    if (attributes.every(attribute => docsFormatObservation(latest, attribute) === wanted[attribute])) {
+      await docsRefocusAfterReveal(context, stage)
+      return latest
+    }
     if (latest.revealPoint) {
-      await docsClick(context, `${stage}-reveal`, latest.revealPoint)
+      await docsRevealOverflow(context, `${stage}-reveal`, latest.revealPoint)
       continue
     }
     await context.driver.sleep(80)
   }
+  await docsRefocusAfterReveal(context, stage).catch(() => {})
   throw docsFailure(stage, 'DOCS_FORMAT_MISMATCH', `Expected ${JSON.stringify(wanted)}, observed ${JSON.stringify(latest ? docsFormatObservations(latest, attributes) : {})}`)
 }
 
@@ -8322,15 +8684,15 @@ async function docsApplyFontSize(context, value) {
   return docsFormatResult('font_size', value, 'applied')
 }
 
-async function docsApplyToggle(context, attribute, value) {
+async function docsApplyToggle(context, attribute, value, baselineExport = false) {
   const specs = {
     bold: { key: 'b', code: 'KeyB', keyCode: 66 },
     italic: { key: 'i', code: 'KeyI', keyCode: 73 },
     underline: { key: 'u', code: 'KeyU', keyCode: 85 },
   }
   await docsKey(context, `format-${attribute}`, specs[attribute], MODIFIER_BITS.ctrl)
-  await docsWaitFormat(context, `format-${attribute}-verify`, [attribute], { [attribute]: value })
-  return docsFormatResult(attribute, value, 'applied', 'toolbar-pressed')
+  if (!baselineExport) await docsWaitFormat(context, `format-${attribute}-verify`, [attribute], { [attribute]: value })
+  return docsFormatResult(attribute, value, 'applied', baselineExport ? 'baseline-export' : 'toolbar-pressed')
 }
 
 function docsFormatError(error, attribute, results) {
@@ -8345,15 +8707,40 @@ function docsFormatError(error, attribute, results) {
 
 async function docsApplyFormatStates(context, wanted, text) {
   const attributes = DOCS_FORMAT_ATTRIBUTES.filter(attribute => wanted[attribute] !== undefined)
-  const initial = await docsProbe(context, 'read-format', 'format', { attributes })
+  const evidence = context.toggleEvidence ?? {}
+  let initial
+  let initialError
+  try {
+    initial = await docsProbe(context, 'read-format', 'format', { attributes })
+  } catch (error) {
+    initialError = error
+  }
   const results = []
+  const exportFallback = new Set()
   let fontAdded = false
   for (const [index, attribute] of attributes.entries()) {
     const value = wanted[attribute]
     try {
-      const current = index === 0 ? initial : await docsProbe(context, 'read-format', 'format', { attributes: [attribute] })
-      if (docsFormatObservation(current, attribute) === value) {
-        results.push(docsFormatResult(attribute, value, 'already_applied'))
+      let current
+      let baselineExport = false
+      try {
+        if (index === 0 && initialError) throw initialError
+        current = index === 0 ? initial : await docsProbe(context, 'read-format', 'format', { attributes: [attribute] })
+        if (current.revealPoint) {
+          await docsRevealOverflow(context, 'read-format-reveal', current.revealPoint)
+          current = await docsWait(context, 'read-format-reveal', 'format', { attributes: [attribute] }, state => (
+            !state.revealPoint && docsFormatObservation(state, attribute) !== undefined
+          ))
+          await docsRefocusAfterReveal(context, 'read-format-reveal')
+        }
+      } catch (error) {
+        if (error?.code !== 'DOCS_CONTROL_NOT_FOUND' || !['bold', 'italic', 'underline'].includes(attribute) || typeof evidence[attribute] !== 'boolean') throw error
+        baselineExport = true
+        exportFallback.add(attribute)
+      }
+      const observed = baselineExport ? evidence[attribute] : docsFormatObservation(current, attribute)
+      if (observed === value) {
+        results.push(docsFormatResult(attribute, value, 'already_applied', baselineExport ? 'baseline-export' : 'toolbar'))
         continue
       }
       if (attribute === 'paragraph_style') results.push(await docsApplyParagraphStyle(context, value))
@@ -8368,15 +8755,18 @@ async function docsApplyFormatStates(context, wanted, text) {
           return { results, fontAdded, fontMissing: true }
         }
         results.push(docsFormatResult('font', value, applied.status, applied.verifiedBy))
-      } else results.push(await docsApplyToggle(context, attribute, value))
+      } else results.push(await docsApplyToggle(context, attribute, value, baselineExport))
     } catch (error) {
       throw docsFormatError(error, attribute, results)
     }
   }
-  try {
-    await docsWaitFormat(context, 'format-final-verify', attributes, wanted)
-  } catch (error) {
-    throw docsFormatError(error, 'final verification', results)
+  const toolbarAttributes = attributes.filter(attribute => !exportFallback.has(attribute))
+  if (toolbarAttributes.length > 0) {
+    try {
+      await docsWaitFormat(context, 'format-final-verify', toolbarAttributes, wanted)
+    } catch (error) {
+      throw docsFormatError(error, 'final verification', results)
+    }
   }
   return { results, fontAdded, fontMissing: false }
 }
@@ -8576,7 +8966,13 @@ async function docsFormatManyFlow(context, edits) {
           .filter(attribute => edit[attribute] !== undefined)
           .map(attribute => [attribute, docsFormatValue(edit, attribute)]))
         if (Object.keys(wanted).length > 0) {
-          const applied = await docsApplyFormatStates(context, wanted, edit.text)
+          context.toggleEvidence = docsFormatToggleEvidence(baseline, plan)
+          let applied
+          try {
+            applied = await docsApplyFormatStates(context, wanted, edit.text)
+          } finally {
+            delete context.toggleEvidence
+          }
           attributeResults = applied.results
           fontAdded = fontAdded || applied.fontAdded
           if (applied.fontMissing) {
@@ -8594,12 +8990,13 @@ async function docsFormatManyFlow(context, edits) {
         if (!editFailure) {
           for (const attribute of ['color', 'highlight']) {
             if (edit[attribute] === undefined) continue
+            let verifiedBy
             try {
-              await docsApplyWriteColor(context, attribute, edit[attribute], { prefix: 'format', cache: false })
+              verifiedBy = await docsApplyWriteColor(context, attribute, edit[attribute], { prefix: 'format', cache: false })
             } catch (error) {
               throw docsFormatError(error, attribute, attributeResults)
             }
-            attributeResults.push(docsFormatResult(attribute, edit[attribute], 'applied', 'color-dialog'))
+            attributeResults.push(docsFormatResult(attribute, edit[attribute], 'applied', verifiedBy))
           }
         }
       } catch (error) {
@@ -8666,6 +9063,7 @@ async function docsFormatManyFlow(context, edits) {
     const status = !finalFailure && allVerified
       ? mutationPossible ? 'completed' : 'already_applied'
       : verifiedCount > 0 || hasApplied ? 'partial' : 'failed'
+    const baselineEvidence = results.some(editResult => editResult.results.some(result => result.verifiedBy === 'baseline-export'))
     return await docsFinish(context, {
       status,
       editCount: edits.length,
@@ -8675,7 +9073,7 @@ async function docsFormatManyFlow(context, edits) {
       appliedCount: verifiedCount,
       alreadyAppliedCount,
       fontAdded,
-      verifiedBy: mutationPossible ? 'export' : 'toolbar',
+      verifiedBy: mutationPossible ? 'export' : baselineEvidence ? 'baseline-export' : 'toolbar',
       results,
       ...finalFailure ? { failure: finalFailure } : {},
     })
@@ -8937,7 +9335,7 @@ function docsWriteValidateBlocks(blocks) {
     if (block.blank !== undefined && block.blank !== true) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}].blank must be true when present`)
     if (block.page_break !== undefined && block.page_break !== true) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}].page_break must be true when present`)
     const kinds = [block.text !== undefined, block.runs !== undefined, block.items !== undefined, block.blank === true, block.page_break === true].filter(Boolean).length
-    if (kinds !== 1) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] must contain exactly one of text, runs, items, blank:true, or page_break:true`)
+    if (kinds !== 1) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] must contain exactly one of text, runs, items, blank:true, or page_break:true; put paragraph defaults and runs in the same block, not a formatting-only block`)
     if (block.blank === true || block.page_break === true) {
       const kind = block.blank === true ? 'blank' : 'page_break'
       if (Object.keys(block).some(key => key !== kind)) throw docsFailure('validate', 'BAD_DOCS_BLOCKS', `blocks[${index}] ${kind} cannot have text, list, or formatting attributes`)
@@ -9036,6 +9434,7 @@ async function docsApplyWriteColor(context, attribute, value, options = {}) {
     await docsWait(context, `${prefix}-${attribute}-close`, 'colorDialog', {}, state => !state.open)
   }
   if (cache) context.writeColors[attribute] = value
+  return 'color-dialog'
 }
 
 async function docsWriteApplyColors(context, wanted) {
@@ -9130,22 +9529,48 @@ function docsWriteComparableRuns(runs) {
   return merged
 }
 
-function docsWriteBlockMatches(actual, expected) {
-  for (const field of ['kind', 'style', 'text', 'listLevel', 'ordered', 'number', 'checklist', 'checked']) {
-    if (actual?.[field] !== expected[field]) return false
+/**
+ * The first way an appended block differs from the requested one, or
+ * undefined when it matches. Failures name the run and attribute so a retry
+ * can target only what is wrong.
+ */
+export function docsWriteBlockDifference(actual, expected, flattenedChecklist = false, inherited = undefined) {
+  if (actual === undefined) return 'the block is missing'
+  const flattened = flattenedChecklist && expected.checklist === true && actual?.checklist === undefined
+  for (const field of ['kind', 'style', 'text', 'listLevel', 'ordered', 'number', ...flattened ? [] : ['checklist', 'checked']]) {
+    if (actual?.[field] !== expected[field]) return `${field}: expected ${JSON.stringify(expected[field])}, found ${JSON.stringify(actual?.[field])}`
   }
-  if (expected.kind !== 'para') return true
-  const wanted = docsWriteComparableRuns(expected.runs ?? [])
-  const runs = docsWriteComparableRuns(actual?.runs ?? [])
-  if (wanted.length === 0) return runs.length === 0
-  if (runs.length !== wanted.length) return false
-  return wanted.every((format, index) => (
-    runs[index].text === format.text
-      && DOCS_WRITE_RUN_MARK_FIELDS.every(field => runs[index][field] === format[field])
-  ))
+  if (flattened && actual?.checked !== undefined) return `checked: expected no checked state on a flattened checklist, found ${JSON.stringify(actual.checked)}`
+  if (expected.kind !== 'para') return undefined
+  const expectedRuns = flattened
+    ? expected.runs.map(run => ({ ...run, strike: expected.checked === true }))
+    : expected.runs
+  const wanted = docsWriteComparableRuns(expectedRuns ?? [])
+  // A span that keeps its named style's font, size, or color carries none of
+  // them in the export; it inherits them from the element rule (p{}, li{}, h1{}).
+  const runs = docsWriteComparableRuns((actual?.runs ?? []).map(run => {
+    if (inherited === undefined) return run
+    const filled = { ...run }
+    for (const field of ['font', 'fontSize', 'color']) {
+      if (filled[field] === undefined && inherited[field] !== undefined) filled[field] = inherited[field]
+    }
+    return filled
+  }))
+  const texts = list => list.map(run => JSON.stringify(run.text)).join(' + ').slice(0, 300)
+  if (runs.length !== wanted.length) {
+    return `formatted runs: expected ${wanted.length}${wanted.length ? ` (${texts(wanted)})` : ''}, found ${runs.length}${runs.length ? ` (${texts(runs)})` : ''}`
+  }
+  for (const [index, format] of wanted.entries()) {
+    if (runs[index].text !== format.text) return `run ${index + 1} text: expected ${JSON.stringify(format.text)}, found ${JSON.stringify(runs[index].text)}`
+    const field = DOCS_WRITE_RUN_MARK_FIELDS.find(mark => runs[index][mark] !== format[mark])
+    if (field) return `run ${index + 1} ${JSON.stringify(format.text)} ${field}: expected ${JSON.stringify(format[field])}, found ${JSON.stringify(runs[index][field])}`
+  }
+  return undefined
 }
 
-function docsWriteVerify(prefix, expected, actual, blockCount) {
+const DOCS_BLOCK_ELEMENTS = { P: 'p', LI: 'li', H1: 'h1', H2: 'h2', H3: 'h3', H4: 'h4', H5: 'h5', H6: 'h6' }
+
+function docsWriteVerify(prefix, expected, actual, blockCount, flattenedChecklistOwners = new Set(), inheritedMarks = new Map()) {
   if (actual.length < prefix.length || prefix.some((block, index) => JSON.stringify(block) !== JSON.stringify(actual[index]))) {
     return { ok: false, code: 'DOCS_WRITE_COLLATERAL', index: -1, verifiedCount: 0, message: 'Content before the append position changed unexpectedly' }
   }
@@ -9157,13 +9582,14 @@ function docsWriteVerify(prefix, expected, actual, blockCount) {
     }
   }
   for (const [index, block] of expected.entries()) {
-    if (!docsWriteBlockMatches(appended[index], block)) {
+    const difference = docsWriteBlockDifference(appended[index], block, flattenedChecklistOwners.has(block.owner), inheritedMarks.get(DOCS_BLOCK_ELEMENTS[appended[index]?.style]))
+    if (difference !== undefined) {
       return {
         ok: false,
         code: 'DOCS_WRITE_VERIFY_FAILED',
         index: block.owner,
         verifiedCount: block.owner,
-        message: `Appended content diverged at user block ${block.owner}`,
+        message: `Appended content diverged at user block ${block.owner}: ${difference}`,
         expected: { style: block.style, text: block.text },
         actual: appended[index] ? { style: appended[index].style, text: appended[index].text } : undefined,
       }
@@ -9225,7 +9651,7 @@ function docsWritePrefixMatches(baseline, current, count) {
   return current.length >= count && baseline.slice(0, count).every((block, index) => JSON.stringify(block) === JSON.stringify(current[index]))
 }
 
-function docsWriteListStartMatches(baseline, current, list) {
+function docsWriteListStartMatches(baseline, current, list, flattenedChecklist = false) {
   const prefixLength = Math.max(0, baseline.length - 1)
   if (current.length !== prefixLength + 1 || !docsWritePrefixMatches(baseline, current, prefixLength)) return false
   const previous = baseline.at(-1)
@@ -9234,19 +9660,25 @@ function docsWriteListStartMatches(baseline, current, list) {
   return last?.kind === 'para' && last.style === 'LI' && !last.text.trim() && last.listLevel === 0
     && last.ordered === (list === 'numbered')
     && (list !== 'numbered' || last.number === 1)
-    && (list === 'checklist' ? last.checklist === true && last.checked === false : last.checklist !== true)
+    && (list === 'checklist'
+      ? flattenedChecklist ? last.checklist === undefined && last.checked === undefined : last.checklist === true && last.checked === false
+      : last.checklist !== true)
 }
 
-function docsWriteListCompletionMatches(baseline, current, block) {
+function docsWriteListCompletionMatches(baseline, current, block, flattenedChecklist = false) {
   const prefixLength = Math.max(0, baseline.length - 1)
   if (current.length !== prefixLength + block.items.length + 1 || !docsWritePrefixMatches(baseline, current, prefixLength)) return false
   const itemsMatch = block.items.every((entry, index) => {
     const item = current[prefixLength + index]
     const text = typeof entry === 'string' ? entry : entry.text
+    const checked = typeof entry === 'object' && entry.checked === true
+    const checklistMatches = flattenedChecklist
+      ? item?.checklist === undefined && item?.checked === undefined && Array.isArray(item?.runs) && item.runs.length > 0 && item.runs.every(run => run.strike === checked)
+      : item?.checklist === true && item.checked === checked
     return item?.kind === 'para' && item.style === 'LI' && item.text === text && item.listLevel === 0
       && item.ordered === (block.list === 'numbered')
       && (block.list !== 'numbered' || item.number === index + 1)
-      && (block.list === 'checklist' ? item.checklist === true && item.checked === (typeof entry === 'object' && entry.checked === true) : item.checklist !== true)
+      && (block.list === 'checklist' ? checklistMatches : item.checklist !== true)
   })
   const last = current.at(-1)
   return itemsMatch && last?.kind === 'para' && last.style === 'P' && !last.text.trim()
@@ -9284,6 +9716,7 @@ async function docsWriteStart(context, baseline) {
 
 async function docsWriteFlow(context, args) {
   context.attemptedCount = 0
+  const flattenedChecklistOwners = new Set()
   try {
     const baseline = parseDocStructure(await docsExport(context, 'write-baseline', 'html'))
     const lastRun = baseline.findLast(block => block.runs?.length)?.runs.at(-1)
@@ -9321,12 +9754,22 @@ async function docsWriteFlow(context, args) {
           code: `Digit${key}`,
           keyCode: Number(key) + 48,
         }, MODIFIER_BITS.ctrl | MODIFIER_BITS.shift)
+        if (block.list === 'checklist') {
+          await docsWaitFormat(context, 'write-checklist-start-verify', ['numbered', 'bulleted', 'checklist'], {
+            numbered: false,
+            bulleted: false,
+            checklist: true,
+          })
+        }
         const started = await docsWriteWaitStructure(
           context,
           'write-list-start-verify',
-          current => docsWriteListStartMatches(beforeList, current, block.list),
+          current => docsWriteListStartMatches(beforeList, current, block.list)
+            || block.list === 'checklist' && docsWriteListStartMatches(beforeList, current, block.list, true),
           `The exported document did not contain one new empty ${block.list} item at the append position`,
         )
+        const flattenedChecklist = block.list === 'checklist' && !docsWriteListStartMatches(beforeList, started, block.list)
+        if (flattenedChecklist) flattenedChecklistOwners.add(index)
         if (block.list === 'checklist') {
           for (const [itemIndex, item] of block.items.entries()) {
             await docsInsertText(context, 'write-checklist-item', item.text)
@@ -9336,12 +9779,19 @@ async function docsWriteFlow(context, args) {
         } else {
           await docsInsertText(context, 'write-list-items', block.items.join('\n'))
         }
+        if (block.list === 'checklist') {
+          await docsWaitFormat(context, 'write-checklist-finish-verify', ['numbered', 'bulleted', 'checklist'], {
+            numbered: false,
+            bulleted: false,
+            checklist: true,
+          })
+        }
         await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
         await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
         await docsWriteWaitStructure(
           context,
           'write-list-exit-verify',
-          current => docsWriteListCompletionMatches(started, current, block),
+          current => docsWriteListCompletionMatches(started, current, block, flattenedChecklist),
           'The exported document did not contain the exact requested list items followed by one empty Normal paragraph',
         )
       } else {
@@ -9364,8 +9814,9 @@ async function docsWriteFlow(context, args) {
     let verification
     let retryDelay = 500
     while (true) {
-      actual = parseDocStructure(await docsExport(context, 'write-verify', 'html'))
-      verification = docsWriteVerify(prefix, expected, actual, args.blocks.length)
+      const html = await docsExport(context, 'write-verify', 'html')
+      actual = parseDocStructure(html)
+      verification = docsWriteVerify(prefix, expected, actual, args.blocks.length, flattenedChecklistOwners, parseInheritedTextMarks(html))
       if (verification.ok || verification.code !== 'DOCS_WRITE_VERIFY_FAILED' || context.driver.now() + retryDelay > verificationEnd) break
       await context.driver.sleep(retryDelay)
       retryDelay = Math.min(2_000, retryDelay * 2)
@@ -9508,9 +9959,43 @@ function docsTableCreateVerification(prefix, tableCount, actual, args) {
   return { ok: true, table }
 }
 
-async function docsTableCreateFlow(context, args) {
-  context.attemptedCount = 0
-  const baseline = parseDocStructure(await docsExport(context, 'table-create-baseline', 'html'))
+async function docsTableCreateGridOpen(context, args) {
+  const insert = await docsProbe(context, 'table-create-insert-menu', 'insertMenu')
+  if (!insert.present || insert.disabled) throw docsFailure('table-create-insert-menu', 'DOCS_CONTROL_NOT_FOUND', 'The exact Insert menu is unavailable')
+  await docsClick(context, 'table-create-insert-menu', insert.point)
+  const table = await docsWait(context, 'table-create-table-menu', 'tableMenu', {}, state => state.present && !state.disabled && state.point)
+  await docsClick(context, 'table-create-table-menu', table.point)
+  return docsWait(context, 'table-create-grid-open', 'tableCreateGrid', args, state => state.open)
+}
+
+async function docsTableCreateGridDismiss(context) {
+  await docsKey(context, 'table-create-grid-dismiss', KEY_SPECS.Escape)
+  await docsKey(context, 'table-create-grid-dismiss', KEY_SPECS.Escape)
+}
+
+async function docsTableCreateNative(context, args, baseline) {
+  await docsFocusDocument(context)
+  const { prefix } = await docsWriteStart(context, baseline)
+  const grid = await docsTableCreateGridOpen(context, args)
+  if (!grid.within) throw docsFailure('table-create-grid', 'DOCS_TABLE_CREATE_UNSUPPORTED', `The visible native grid changed and no longer covers ${args.rows} rows by ${args.columns} columns`)
+  await docsHover(context, 'table-create-grid-select', grid.point)
+  const selected = await docsWait(context, 'table-create-grid-select', 'tableCreateGrid', args, state => (
+    state.open && state.rows === args.rows && state.columns === args.columns && state.point
+  ))
+  context.attemptedCount = 1
+  await docsClick(context, 'table-create-grid-commit', selected.point)
+  await docsWait(context, 'table-create-grid-close', 'tableCreateGrid', args, state => !state.open)
+  const values = args.values ?? Array.from({ length: args.rows }, () => Array(args.columns).fill(''))
+  for (const [rowIndex, row] of values.entries()) {
+    for (const [columnIndex, value] of row.entries()) {
+      if (value) await docsInsertText(context, 'table-create-cell', value)
+      if (rowIndex < args.rows - 1 || columnIndex < args.columns - 1) await docsKey(context, 'table-create-next-cell', KEY_SPECS.Tab)
+    }
+  }
+  return prefix
+}
+
+async function docsTableCreateClipboard(context, args, baseline) {
   let preserved
   try {
     preserved = await context.driver.preserveClipboard()
@@ -9519,9 +10004,10 @@ async function docsTableCreateFlow(context, args) {
   }
   let pasteError
   let restoreError
+  let prefix
   try {
     await docsFocusDocument(context)
-    const { prefix } = await docsWriteStart(context, baseline)
+    prefix = (await docsWriteStart(context, baseline)).prefix
     const content = docsTableCreateHtml(args)
     try {
       await context.driver.writeClipboardHtml(content.html, content.text)
@@ -9530,19 +10016,6 @@ async function docsTableCreateFlow(context, args) {
     }
     context.attemptedCount = 1
     await docsKey(context, 'table-create-paste', { key: 'v', code: 'KeyV', keyCode: 86 }, MODIFIER_BITS.ctrl)
-    const verificationEnd = Math.min(context.deadline, context.driver.now() + 10_000)
-    let retryDelay = 500
-    let actual
-    let verification
-    while (true) {
-      actual = parseDocStructure(await docsExport(context, 'table-create-verify', 'html'))
-      verification = docsTableCreateVerification(prefix, docsTables(baseline).length, actual, args)
-      if (verification.ok || verification.code === 'DOCS_TABLE_COLLATERAL' || context.driver.now() + retryDelay > verificationEnd) break
-      await context.driver.sleep(retryDelay)
-      retryDelay = Math.min(2_000, retryDelay * 2)
-    }
-    context.createVerification = verification
-    context.createTable = verification.ok ? verification.table : actual[prefix.length]?.kind === 'table' ? actual[prefix.length] : undefined
   } catch (error) {
     pasteError = error
   }
@@ -9555,7 +10028,32 @@ async function docsTableCreateFlow(context, args) {
     if (restoreError && pasteError instanceof Error) pasteError.message += `; clipboard restoration also failed: ${restoreError.message}`
     throw pasteError
   }
-  const verification = context.createVerification
+  return { prefix, restoreError }
+}
+
+async function docsTableCreateFlow(context, args) {
+  context.attemptedCount = 0
+  const baseline = parseDocStructure(await docsExport(context, 'table-create-baseline', 'html'))
+  const grid = await docsTableCreateGridOpen(context, args)
+  const native = grid.within
+  await docsTableCreateGridDismiss(context)
+  let prefix
+  let restoreError
+  if (native) prefix = await docsTableCreateNative(context, args, baseline)
+  else ({ prefix, restoreError } = await docsTableCreateClipboard(context, args, baseline))
+  const verificationEnd = Math.min(context.deadline, context.driver.now() + 10_000)
+  let retryDelay = 500
+  let actual
+  let verification
+  while (true) {
+    actual = parseDocStructure(await docsExport(context, 'table-create-verify', 'html'))
+    verification = docsTableCreateVerification(prefix, docsTables(baseline).length, actual, args)
+    if (verification.ok || verification.code === 'DOCS_TABLE_COLLATERAL' || context.driver.now() + retryDelay > verificationEnd) break
+    await context.driver.sleep(retryDelay)
+    retryDelay = Math.min(2_000, retryDelay * 2)
+  }
+  context.createVerification = verification
+  context.createTable = verification.ok ? verification.table : actual[prefix.length]?.kind === 'table' ? actual[prefix.length] : undefined
   const details = {
     tableAction: 'create',
     status: verification?.ok ? 'completed' : 'failed',
@@ -9563,7 +10061,7 @@ async function docsTableCreateFlow(context, args) {
     verifiedCount: verification?.ok ? args.rows * args.columns : 0,
     cellCount: args.rows * args.columns,
     verifiedBy: 'export',
-    clipboardRestored: restoreError === undefined,
+    ...native ? {} : { clipboardRestored: restoreError === undefined },
     ...restoreError ? { clipboardRestoreError: restoreError.message } : {},
     ...verification?.ok ? { tableIndex: verification.table.index } : { failure: { code: verification?.code ?? 'DOCS_TABLE_VERIFY_FAILED', message: verification?.message ?? 'Table creation could not be verified', ...verification?.actual !== undefined ? { actual: verification.actual } : {} } },
   }
@@ -9709,9 +10207,14 @@ async function docsWaitPaletteStable(context, stage, attribute, value, timeoutMs
   throw docsFailure(stage, 'DOCS_WAIT_TIMEOUT', `The cell-background palette did not settle on a stable exact ${value} preset or custom-color control`)
 }
 
-async function docsApplyCellBackground(context, edit) {
+async function docsApplyCellBackground(context, edit, cellCount) {
   await docsTableSelectPlan(context, edit.plan)
   await docsKey(context, 'table-cell-background-collapse', KEY_SPECS.ArrowRight)
+  if (cellCount > 1) {
+    for (let index = 0; index < cellCount; index += 1) {
+      await docsKey(context, 'table-cell-background-extend', KEY_SPECS.ArrowRight, MODIFIER_BITS.shift)
+    }
+  }
   await docsMenuCommand(context, 'Table options')
   let state = await docsWait(context, 'table-cell-background-panel', 'tableCellBackground', {}, current => current.open)
   if (!state.backgroundPoint) {
@@ -9762,33 +10265,50 @@ async function docsTableCellBackgroundFlow(context, args) {
   let appliedCount = 0
   let alreadyAppliedCount = 0
   let failure
-  for (const [index, edit] of edits.entries()) {
-    attemptedCount = index + 1
+  let cursor = 0
+  while (cursor < edits.length) {
+    const edit = edits[cursor]
+    const result = results[cursor]
+    attemptedCount = cursor + 1
     context.attemptedCount = attemptedCount
-    context.menuMutationPossible = false
-    const result = results[index]
     const before = selectDocsTable(current, args.table).rows[edit.row - 1]?.[edit.column - 1]
     if (before?.background === edit.value) {
       Object.assign(result, { status: 'already_applied', verifiedBy: 'export' })
       verifiedCount += 1
       alreadyAppliedCount += 1
+      cursor += 1
       continue
     }
+    const group = [{ edit, index: cursor }]
+    let next = cursor + 1
+    while (next < edits.length) {
+      const candidate = edits[next]
+      const previous = edits[next - 1]
+      const candidateBefore = selectDocsTable(current, args.table).rows[candidate.row - 1]?.[candidate.column - 1]
+      if (candidate.row !== edit.row || candidate.column !== previous.column + 1 || candidate.value !== edit.value || candidateBefore?.background === candidate.value) break
+      group.push({ edit: candidate, index: next })
+      next += 1
+    }
+    attemptedCount = next
+    context.attemptedCount = attemptedCount
+    context.menuMutationPossible = false
     try {
-      await docsApplyCellBackground(context, edit)
-      const { blocks: actual, verification } = await docsTableVerifiedExport(context, 'table-cell-background-verify', candidate => verifyDocsTableCellBackground(current, candidate, table.index, edit))
+      await docsApplyCellBackground(context, edit, group.length)
+      const groupEdits = group.map(item => item.edit)
+      const { blocks: actual, verification } = await docsTableVerifiedExport(context, 'table-cell-background-verify', candidate => verifyDocsTableCellBackgroundBatch(current, candidate, table.index, groupEdits))
       current = actual
       if (!verification.ok) throw docsFailure('table-cell-background-verify', verification.code, verification.message)
-      Object.assign(result, { status: 'applied', verifiedBy: 'export' })
+      for (const item of group) Object.assign(results[item.index], { status: 'applied', verifiedBy: 'export' })
       context.mutationPossible = true
-      verifiedCount += 1
-      appliedCount += 1
+      verifiedCount += group.length
+      appliedCount += group.length
     } catch (error) {
       const detail = { code: error?.code ?? 'DOCS_TABLE_CELL_BACKGROUND_FAILED', message: error instanceof Error ? error.message : String(error) }
-      Object.assign(result, { status: 'failed', error: detail })
-      failure = { index, row: edit.row, column: edit.column, ...detail, mutationPossible: context.menuMutationPossible === true }
+      for (const item of group) Object.assign(results[item.index], { status: 'failed', error: detail })
+      failure = { index: cursor, indexes: group.map(item => item.index), row: edit.row, column: edit.column, ...detail, mutationPossible: context.menuMutationPossible === true }
       break
     }
+    cursor = next
   }
   const status = !failure ? 'completed' : verifiedCount > 0 ? 'partial' : 'failed'
   let tables

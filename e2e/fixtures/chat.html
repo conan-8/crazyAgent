@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>crazyAgent Chat Attachment Fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #111418; color: #e8ebef; font: 15px/1.45 system-ui, sans-serif; }
+    main { display: grid; grid-template-columns: minmax(280px, .85fr) minmax(440px, 1.15fr); gap: 28px; padding: 28px; }
+    #question-card { align-self: start; min-height: 330px; padding: 24px; border: 1px solid #64748b; border-radius: 14px; background: #f8fafc; color: #17202a; }
+    #question-card h1 { margin-top: 0; font-size: 21px; }
+    #question-card .diagram { display: grid; place-items: center; height: 100px; margin: 20px 0; border: 1px solid #94a3b8; border-radius: 8px; background: white; font-size: 32px; }
+    #question-card li { margin: 7px 0; }
+    #chat { align-self: start; }
+    #chat h1 { margin: 0 0 18px; font-size: 20px; }
+    #reply { min-height: 68px; margin-bottom: 18px; padding: 14px 16px; border-radius: 12px; background: #242a31; }
+    #composer-shell { position: relative; padding: 14px; border: 1px solid #59636f; border-radius: 18px; background: #20262d; }
+    #attachments { display: flex; flex-wrap: wrap; gap: 9px; min-height: 0; }
+    .attachment { width: 76px; height: 68px; padding: 4px; border: 1px solid #718096; border-radius: 9px; background: #f8fafc; cursor: pointer; }
+    .attachment img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 5px; }
+    #composer { min-height: 44px; padding: 12px 6px 8px; outline: none; color: #f8fafc; }
+    #composer:empty::before { content: attr(data-placeholder); color: #929ca8; pointer-events: none; }
+    #composer.expanded { min-height: 76px; }
+    #composer-footer { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
+    #mode { color: #aab4bf; }
+    #send { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: #f8fafc; color: #17202a; cursor: pointer; }
+    #send[data-disabled="true"] { opacity: .4; cursor: wait; }
+    #send svg { width: 19px; height: 19px; fill: currentColor; }
+    #upload-state { min-height: 22px; color: #b7c0ca; }
+    #viewer { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: rgba(0, 0, 0, .94); }
+    #viewer[hidden] { display: none; }
+    #viewer canvas { width: min(70vw, 650px); height: min(65vh, 440px); border: 1px solid #64748b; background: white; }
+    #close-viewer { position: fixed; top: 18px; right: 22px; padding: 9px 13px; border: 0; border-radius: 7px; cursor: pointer; }
+    @media (max-width: 850px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <section id="question-card" aria-label="Question card">
+      <h1>Physics question 14</h1>
+      <p>A cart moves along a straight track. Which velocity graph matches the motion shown?</p>
+      <div class="diagram" aria-hidden="true">cart → &nbsp; v(t)</div>
+      <ol type="A">
+        <li>Flat at zero</li>
+        <li>Positive, then negative</li>
+        <li>Always increasing</li>
+        <li>Always decreasing</li>
+      </ol>
+    </section>
+    <section id="chat" aria-label="Chat">
+      <h1>Question assistant</h1>
+      <div id="reply">No reply yet.</div>
+      <div id="composer-shell">
+        <div id="attachments"></div>
+        <div id="composer" contenteditable="true" role="textbox" data-placeholder="Ask anything about the question"></div>
+        <div id="composer-footer">
+          <span id="mode">Standard</span>
+          <div id="send" data-disabled="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 12l5-2v9l7-16-5 2z" /></svg>
+          </div>
+        </div>
+      </div>
+      <div id="upload-state">Two reference images attached.</div>
+    </section>
+  </main>
+  <div id="viewer" hidden>
+    <canvas id="viewer-canvas" width="650" height="440"></canvas>
+    <button id="close-viewer" type="button">Close viewer</button>
+  </div>
+  <script>
+    const attachments = document.getElementById('attachments')
+    const composer = document.getElementById('composer')
+    const send = document.getElementById('send')
+    const reply = document.getElementById('reply')
+    const uploadState = document.getElementById('upload-state')
+    const state = window.chatFixtureState = { uploads: 0, viewerOpens: 0, sentMessages: [], reply: '' }
+    let pending = 0
+    let attachmentNumber = 0
+
+    const sampleSvg = number => `<svg xmlns="http://www.w3.org/2000/svg" width="90" height="70"><rect width="90" height="70" fill="%23e2e8f0"/><text x="45" y="30" text-anchor="middle" font-family="sans-serif" font-size="12" fill="%23334155">Image ${number}</text><path d="M10 52 35 35 50 47 70 25 84 52" fill="none" stroke="%232563eb" stroke-width="3"/></svg>`
+
+    function openViewer() {
+      state.viewerOpens += 1
+      document.getElementById('viewer').hidden = false
+      const canvas = document.getElementById('viewer-canvas')
+      const context = canvas.getContext('2d')
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.fillStyle = '#17202a'
+      context.font = '24px sans-serif'
+      context.fillText('Attachment viewer', 30, 50)
+    }
+
+    function addAttachment(src) {
+      attachmentNumber += 1
+      const item = document.createElement('div')
+      item.className = 'attachment'
+      const image = document.createElement('img')
+      image.src = src
+      image.alt = ''
+      item.append(image)
+      item.addEventListener('click', openViewer)
+      attachments.append(item)
+    }
+
+    function updatePending() {
+      send.dataset.disabled = String(pending > 0)
+      uploadState.textContent = pending > 0 ? `Uploading ${pending} image(s)…` : `${attachments.children.length} images attached.`
+    }
+
+    function uploadFiles(files) {
+      for (const file of files) {
+        state.uploads += 1
+        pending += 1
+        addAttachment(URL.createObjectURL(file))
+        setTimeout(() => { pending -= 1; updatePending() }, 1000)
+      }
+      updatePending()
+    }
+
+    function sendMessage() {
+      if (pending > 0 || send.dataset.disabled === 'true') return false
+      const text = composer.innerText.trim()
+      if (!text) return false
+      const message = { text, attachments: attachments.children.length }
+      state.sentMessages.push(message)
+      state.reply = 'Option C.'
+      reply.textContent = 'Reply: Option C.'
+      attachments.replaceChildren()
+      composer.replaceChildren()
+      composer.classList.remove('expanded')
+      uploadState.textContent = `Sent with ${message.attachments} images.`
+      return true
+    }
+
+    window.chatFixture = { uploadFiles, sendMessage }
+    composer.addEventListener('input', () => composer.classList.toggle('expanded', composer.innerText.length > 0))
+    send.addEventListener('click', sendMessage)
+    document.getElementById('close-viewer').addEventListener('click', () => { document.getElementById('viewer').hidden = true })
+    document.addEventListener('paste', event => {
+      const files = [...(event.clipboardData?.files ?? [])]
+      if (files.length > 0) uploadFiles(files)
+    })
+    document.addEventListener('drop', event => {
+      const files = [...(event.dataTransfer?.files ?? [])]
+      if (files.length > 0) {
+        event.preventDefault()
+        uploadFiles(files)
+      }
+    })
+    addAttachment(`data:image/svg+xml,${sampleSvg(1)}`)
+    addAttachment(`data:image/svg+xml,${sampleSvg(2)}`)
+    updatePending()
+  </script>
+</body>
+</html>

@@ -470,6 +470,11 @@ const NAVIGATE_NEW_TAB = {
   tab: { id: 8, title: 'Fixture Docs', url: 'https://example.test/docs' },
   navigated: { ...NAVIGATE.navigated, newTab: true, tabId: 8 },
 }
+const NAVIGATE_FROM_BROWSER_PAGE = {
+  ...NAVIGATE,
+  tab: { id: 9, title: 'Fixture Docs', url: 'https://example.test/docs' },
+  navigated: { ...NAVIGATE.navigated, fromUrl: 'edge://newtab/', newTab: true, newTabReason: 'browser-page', tabId: 9 },
+}
 const NAVIGATE_HISTORY = {
   ...NAVIGATE,
   navigated: {
@@ -882,6 +887,7 @@ async function startFakeBridge(options = {}) {
         if (op === 'navigate') {
           send(args.history === 'back' ? NAVIGATE_HISTORY
             : args.new_tab === true ? NAVIGATE_NEW_TAB
+              : typeof args.url === 'string' && args.url.includes('from-browser-page') ? NAVIGATE_FROM_BROWSER_PAGE
               : typeof args.url === 'string' && args.url.includes('slow') ? NAVIGATE_TIMEOUT
                 : NAVIGATE)
           return
@@ -1713,6 +1719,31 @@ test('click_at reports trusted input and pixel change', async t => {
   )
 })
 
+test('click_at reports hit identity and focus without changing outcome evidence', async t => {
+  const hit = { tag: 'button', role: 'button', name: 'Sign in', label: 3, editable: false, surface: false }
+  const { server, url } = await startFakeBridge({
+    respond: op => op === 'click_at' ? {
+      ...CLICK_AT,
+      point: { ...CLICK_AT.point, hit },
+      points: CLICK_AT.points.map(point => ({ ...point, hit })),
+      focus: { tag: 'body', editable: false },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const value = await fake.tools.get('browser_click_at').execute({ x: 100, y: 200 }, { callId: 'c-hit', signal: new AbortController().signal })
+  const text = value.content[0].text
+  assert.match(text, /hit: \[3\] button "Sign in"/u)
+  assert.match(text, /focus after click: body \(no field focused\)/u)
+  assert.match(text, /result: changed \(pixels-changed 1\.4%\)/u)
+})
+
 test('click_at multi-point content lists every point and the changed count', async t => {
   const { server, url, commands } = await startFakeBridge()
   t.after(() => {
@@ -1963,6 +1994,9 @@ test('navigate reports the destination, history moves, and timeouts', async t =>
   const newTab = await definition.execute({ url: 'https://example.test/docs', new_tab: true }, exec)
   assert.match(newTab.content[0].text, /new tab · loaded in 812ms/)
   assert.deepEqual(commands.at(-1), { op: 'navigate', args: { url: 'https://example.test/docs', new_tab: true } })
+
+  const fromBrowserPage = await definition.execute({ url: 'https://example.test/docs?from-browser-page' }, exec)
+  assert.match(fromBrowserPage.content[0].text, /new tab \(the active tab was a browser page, edge:\/\/newtab\/, which takes no trusted input; it was left open\) · loaded in 812ms/)
 
   const back = await definition.execute({ history: 'back' }, exec)
   assert.match(back.content[0].text, /navigated back to https:\/\/example\.test\/a · loaded in 120ms/)
@@ -2815,6 +2849,8 @@ test('browser_docs_table validates, routes every action family, and formats expo
   const exec = { callId: 'c-docs-table', signal: new AbortController().signal }
   assert.deepEqual(tool.parameters.required, ['action'])
   assert.ok(tool.parameters.properties.action.enum.includes('delete_table'))
+  assert.match(tool.parameters.properties.edits.description, /\{row:1,cell_background:"#d9d9d9"\}/)
+  assert.match(tool.parameters.properties.edits.description, /Never repeat overlapping regions/)
 
   const created = await tool.execute({ action: 'create', rows: 1, columns: 2, values: [['H1', 'H2']] }, exec)
   assert.deepEqual(commands.at(-1), {
@@ -2928,6 +2964,7 @@ test('Docs tools reject invalid actions and unbounded inputs before the bridge',
     ['browser_docs_write', {}, /blocks must be an array/],
     ['browser_docs_write', { blocks: [] }, /blocks must be an array/],
     ['browser_docs_write', { blocks: [{ text: 'x', items: ['y'], list: 'bulleted' }] }, /exactly one of text, runs, items, blank:true, or page_break:true/],
+    ['browser_docs_write', { blocks: [{ paragraph_style: 'Subtitle' }] }, /Put paragraph_style and other defaults in the SAME block as runs/],
     ['browser_docs_write', { blocks: [{ text: 'two\nlines' }] }, /one non-empty single-line paragraph/],
     ['browser_docs_write', { blocks: [{ blank: true, bold: true }] }, /blank cannot have text, list, or formatting attributes/],
     ['browser_docs_write', { blocks: [{ page_break: true, text: 'x' }] }, /exactly one of text, runs, items, blank:true, or page_break:true/],
@@ -3024,6 +3061,7 @@ test('wait_for reports conditions and forwards optional views without setting a 
   const { server, url, commands } = await startFakeBridge({
     respond: (op, args) => op === 'wait_for' ? {
       ...(args.text === 'NEVER' ? WAIT_FOR_TIMEOUT : WAIT_FOR),
+      ...(args.idle === true ? { waited: { conditions: { idle: true }, found: true, timedOut: false, elapsedMs: 1400, navigatedDuringWait: { from: 'https://example.test/first', to: 'https://example.test/second' } } } : {}),
       view: args.view ?? 'full',
     } : undefined,
   })
@@ -3053,6 +3091,9 @@ test('wait_for reports conditions and forwards optional views without setting a 
   assert.deepEqual(commands.at(-1), { op: 'wait_for', args: { text: 'READY', view: 'none' } })
   assert.equal(none.content.filter(block => block.type === 'image').length, 0)
   assert.match(none.content[0].text, /view: skipped — no screenshot returned/)
+
+  const redirected = await definition.execute({ idle: true, view: 'none' }, exec)
+  assert.match(redirected.content[0].text, /navigation during wait: https:\/\/example\.test\/first → https:\/\/example\.test\/second/u)
 })
 
 test('wait_for validation requires a condition, bounded values, and timeout_ms at least ms', async t => {
@@ -3338,6 +3379,42 @@ test('batch click_at reports dispatch instead of no visible change', async t => 
   assert.doesNotMatch(text, /NO VISIBLE CHANGE/)
 })
 
+test('batch click_at includes hit and focus diagnostics', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: op => op === 'batch' ? {
+      op: 'batch',
+      view: 'none',
+      screenshotSkipped: true,
+      batch: { total: 1, executed: 1, succeeded: 1, elapsedMs: 5 },
+      actions: [{
+        index: 1,
+        op: 'click_at',
+        ok: true,
+        attempted: true,
+        mutationPossible: true,
+        changed: null,
+        points: [{ x: 1, y: 2, cssX: 1, cssY: 2, hit: { tag: 'img', editable: false, surface: false } }],
+        focus: { tag: 'body', editable: false },
+      }],
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const value = await fake.tools.get('browser_batch').execute(
+    { actions: [{ op: 'click_at', x: 1, y: 2 }] },
+    { callId: 'c-batch-hit', signal: new AbortController().signal },
+  )
+  const text = value.content[0].text
+  assert.match(text, /    hit: img \(unlabelled\)/u)
+  assert.match(text, /    focus after click: body \(no field focused\)/u)
+})
+
 test('batch validation rejects bad action lists and guard conditions before the bridge', async t => {
   const { server, url, commands } = await startFakeBridge()
   t.after(() => {
@@ -3392,6 +3469,10 @@ test('batch validation rejects bad action lists and guard conditions before the 
   await assert.rejects(
     () => definition.execute({ actions: [{ op: 'click', args: { label: 3, before: { text: 'x', view: 'none' } } }] }, exec),
     /before does not accept a view field/,
+  )
+  await assert.rejects(
+    () => definition.execute({ actions: [{ op: 'click', label: 3 }, { op: 'wait_for', after: { ms: 2500 } }] }, exec),
+    /browser_batch actions\[1\] requires at least one condition/u,
   )
   assert.equal(commands.length, 0)
 })
@@ -3697,6 +3778,43 @@ test('a canvas-editor type result reports dispatched input as UNVERIFIED', async
   assert.match(text, /never retry unverified input blindly/)
   assert.doesNotMatch(text, /the field value did not change/)
   assert.doesNotMatch(text, /delivered|applied|value now|measured \+749 chars at page level/)
+})
+
+test('type reports known non-editable focus instead of claiming a canvas editor', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: op => op === 'type' ? {
+      ...TYPE,
+      changed: null,
+      signals: [],
+      typed: {
+        chars: 20,
+        mode: 'replace',
+        submitted: false,
+        method: 'trusted',
+        canvasEditor: false,
+        focusEditable: false,
+        targetKind: 'div',
+        measured: 'none',
+        pageChanged: true,
+      },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const value = await fake.tools.get('browser_type').execute(
+    { text: 'not into an editor' },
+    { callId: 'c-noneditable-type', signal: new AbortController().signal },
+  )
+  const text = value.content.map(block => block.text ?? '').join('\n')
+  assert.match(text, /focused element is div, not a text field — text was not typed into an editor \(UNVERIFIED\)/u)
+  assert.match(text, /click or label the field first/u)
+  assert.doesNotMatch(text, /input dispatched to the canvas editor/u)
 })
 
 test('read_text on a canvas app explains itself instead of printing chrome text', async t => {
@@ -4514,6 +4632,42 @@ test('clipboard reports synthetic image delivery and unhandled events honestly',
   assert.match(unhandledText, /do not retry blindly/i)
 })
 
+test('clipboard reports observed image insertion and warns about body placement', async t => {
+  const { server, url } = await startFakeBridge({
+    respond: (op, args) => op === 'clipboard' && args.action === 'paste' ? {
+      ...CLIPBOARD_PASTE_KEYS,
+      clipboard: { target: 'virtual', kind: 'image', source: 'screenshot', rich: true, width: 2, height: 3 },
+      pasted: {
+        via: 'synthetic',
+        handled: true,
+        handledBy: 'page-mutation',
+        pasteHandled: false,
+        dropHandled: false,
+        dropDispatched: false,
+        target: { tag: 'body', editable: false, body: true },
+        width: 2,
+        height: 3,
+      },
+    } : undefined,
+  })
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const value = await fake.tools.get('browser_clipboard').execute(
+    { action: 'paste' },
+    { callId: 'c-paste-mutation', signal: new AbortController().signal },
+  )
+  const text = value.content.map(block => block.text ?? '').join('\n')
+  assert.match(text, /image content appeared after the paste; the drop fallback was skipped/u)
+  assert.match(text, /target was body; attachment placement is UNVERIFIED/u)
+  assert.doesNotMatch(text, /a page handler consumed the event/u)
+})
+
 test('clipboard validation rejects bad calls before the bridge', async t => {
   const { server, url, commands } = await startFakeBridge()
   t.after(() => {
@@ -4629,6 +4783,39 @@ test('two consecutive closed-panel results open a circuit that fails later calls
     return true
   })
   assert.equal(commands.length, 5)
+})
+
+test('valid no-op view modes are stripped only from switch, screenshot, and read_text', async t => {
+  const { server, url, commands } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+
+  const cases = [
+    ['browser_switch_tab', { tab_id: 7, view: 'compact' }],
+    ['browser_screenshot', { view: 'none' }],
+    ['browser_read_text', { view: 'none' }],
+  ]
+  for (const [name, args] of cases) {
+    await fake.tools.get(name).execute(args, { callId: `noop-view-${name}`, signal: new AbortController().signal })
+  }
+  assert.deepEqual(commands, [
+    { op: 'tabs.activate', args: { tab_id: 7 } },
+    { op: 'snapshot', args: { detail: 'normal' } },
+    { op: 'read_text', args: { scope: 'page' } },
+  ])
+  const sent = commands.length
+  for (const [name] of cases) {
+    await assert.rejects(
+      () => fake.tools.get(name).execute({ view: 'sideways' }, { callId: `bad-view-${name}`, signal: new AbortController().signal }),
+      /view must be one of auto, full, compact, none/u,
+    )
+  }
+  assert.equal(commands.length, sent, 'invalid no-op views never reach the bridge')
 })
 
 test('every tool names an unknown argument and lists the accepted ones before the bridge', async t => {
@@ -5124,6 +5311,66 @@ test('Docs failure circuit stops cascades and resets on a new turn or success', 
   await assert.rejects(attempt, /DOCS_FAILURE_CIRCUIT/)
   assert.equal(commands.length, 9)
   await waitFor(() => logEvents.filter(event => event.type === 'docs.failure.circuit').length === 2)
+})
+
+test('reasoning policy classifies the raw turn prompt instead of its wrappers', async t => {
+  const { server, url, logEvents } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000 })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const rawPrompt = 'click the Bold button'
+  for (const client of server.clients) {
+    client.send(JSON.stringify({ v: 1, type: 'turn.context', turnId: 'turn-raw-prompt', prompt: rawPrompt }))
+  }
+  await new Promise(resolve => setTimeout(resolve, 25))
+  const wrapped = `<current_view>\ntab 7 "Fixture" https://example.test\n</current_view>\n\n<marathon_mode>\n${'metadata '.repeat(60)}\n</marathon_mode>\n\n${rawPrompt}`
+  const agent = { session: { id: 'raw-prompt-session', surface: { nodes: [] } } }
+  fake.listeners.get('agent/inbox/claimed')({ agent, message: { id: 'wrapped', content: [{ type: 'text', text: wrapped }] }, turn: 1 })
+  fake.listeners.get('session/event')(agent.session, { type: 'user/message', data: { content: [{ type: 'text', text: wrapped }] } })
+
+  const result = await fake.listeners.get('agent/request')({ agent, turn: 1 }, async () => ({ reasoningEffort: 'medium' }))
+  assert.equal(result.reasoningEffort, 'low', 'auto behavior remains unchanged')
+  await waitFor(() => logEvents.some(event => event.type === 'reasoning.policy'))
+  const policy = logEvents.find(event => event.type === 'reasoning.policy')
+  assert.equal(policy.data.classification, 'act')
+  assert.equal(policy.data.promptChars, rawPrompt.length)
+})
+
+test('Auto selects inspection effort before request preparation', async t => {
+  const { server, url } = await startFakeBridge()
+  t.after(() => {
+    for (const client of server.clients) client.terminate()
+    server.close()
+  })
+  const fake = makeContext()
+  apply(fake.ctx, { bridgeUrl: url, bridgeToken: 'test', requestTimeoutMs: 2_000, reasoningPolicy: 'auto' })
+  t.after(() => fake.dispose())
+  await waitFor(() => server.clients.size > 0)
+
+  const prompt = 'what is on this page?'
+  for (const client of server.clients) {
+    client.send(JSON.stringify({ v: 1, type: 'turn.context', turnId: 'turn-early-effort', prompt }))
+  }
+  await new Promise(resolve => setTimeout(resolve, 25))
+  const selections = []
+  const agent = {
+    session: { id: 'early-effort-session', surface: { nodes: [] } },
+    model: {
+      current: () => ({ provider: 'openrouter', model: 'model-x', reasoningEffort: 'low' }),
+      select: selection => selections.push(selection),
+    },
+  }
+  fake.listeners.get('agent/inbox/claimed')({ agent, message: { id: 'inspect', content: [{ type: 'text', text: prompt }] }, turn: 1 })
+  assert.deepEqual(selections, [{ provider: 'openrouter', model: 'model-x', reasoningEffort: 'medium' }])
+
+  const config = await fake.listeners.get('agent/request')({ agent, turn: 1 }, async () => ({ reasoningEffort: 'medium' }))
+  assert.equal(config.reasoningEffort, 'medium')
 })
 
 test('Auto reasoning stays low after consecutive no-progress results', async t => {

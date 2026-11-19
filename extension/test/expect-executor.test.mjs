@@ -40,6 +40,7 @@ function fakeExpectBrowser(t, options = {}) {
     mutations: 0,
     probeCalls: 0,
     guardResults: [...(options.guardResults ?? [])],
+    guardDefault: options.guardDefault ?? true,
     scriptCalls: [],
     captures: 0,
     timeOrigin: 1_000_000,
@@ -151,7 +152,7 @@ function fakeExpectBrowser(t, options = {}) {
           return [{ result: { ok: true, clicked: { label, tag: 'button', role: 'button', text: 'Noop' }, changed: false, signals: [], mutations: 0, newText: [] } }]
         }
         if (name === 'waitForConditionsPage') {
-          const found = state.guardResults.length > 0 ? state.guardResults.shift() : true
+          const found = state.guardResults.length > 0 ? state.guardResults.shift() : state.guardDefault
           return [{ result: { found, elapsedMs: 1 } }]
         }
         if (name === 'docsPageProbe') {
@@ -345,7 +346,7 @@ test('batch expectations compose with guards and retain each step outcome', asyn
 })
 
 test('batch postcondition failure preserves verified text evidence and mutation risk', async t => {
-  const fake = fakeExpectBrowser(t, { guardResults: [false] })
+  const fake = fakeExpectBrowser(t, { guardResults: [false], guardDefault: false })
   const mod = await fake.initialize()
   const result = await mod.execute('batch', {
     view: 'none',
@@ -362,7 +363,7 @@ test('batch postcondition failure preserves verified text evidence and mutation 
 })
 
 test('batch precondition failure prevents dispatch and leaves expectation unverified', async t => {
-  const fake = fakeExpectBrowser(t, { guardResults: [false] })
+  const fake = fakeExpectBrowser(t, { guardResults: [false], guardDefault: false })
   const mod = await fake.initialize()
   const result = await mod.execute('batch', {
     view: 'none',

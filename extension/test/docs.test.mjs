@@ -28,6 +28,7 @@ function fakeDocs(options = {}) {
     dialogOpen: false,
     searchValue: '',
     checked: false,
+    added: false,
     removed: false,
   }
   const events = []
@@ -69,6 +70,7 @@ function fakeDocs(options = {}) {
         state.findValue = ''
       } else if (spec.key === 'Escape') {
         state.findOpen = false
+        if (options.escapeClosesDialog !== false) state.dialogOpen = false
       } else if (spec.key === 'Delete') {
         state.removed = true
       }
@@ -79,12 +81,15 @@ function fakeDocs(options = {}) {
       if (action === 'fontControl') state.menuOpen = true
       if (action === 'applyFont' && !options.toolbarMismatch) state.toolbar = options.requestedFont
       if (action === 'moreFonts') state.dialogOpen = true
-      if (action === 'addFont') state.checked = true
+      if (action === 'addFont' && options.addFontFails !== true) {
+        state.checked = options.checkedStateMissing !== true
+        state.added = true
+      }
       if (action === 'done') {
         state.installed.add(options.requestedFont)
         state.dialogOpen = false
       }
-      if (action === 'cancel') state.dialogOpen = false
+      if (action === 'cancel' && options.cancelIgnored !== true) state.dialogOpen = false
     },
     runInTab: async (_tabId, _func, [command, args]) => {
       events.push(`probe:${command}`)
@@ -124,9 +129,10 @@ function fakeDocs(options = {}) {
             searchEnabled: true,
             searchValue: state.searchValue,
             noFonts: state.searchValue === args.font && !found,
-            signature: `${state.searchValue}:${found}:${state.checked}`,
+            signature: `${state.searchValue}:${found}:${state.checked}:${state.added}`,
             found,
             checked: found && state.checked,
+            added: found && state.added,
             point: found ? point('addFont') : undefined,
             done: doneProbes++ < (options.doneDelay ?? 0) ? undefined : point('done'),
             cancel: point('cancel'),
@@ -662,6 +668,38 @@ test('Docs adds a font, clicks Done, reopens the ordinary menu, then applies', a
     'click:fontControl', 'click:moreFonts', 'click:addFont', 'click:done', 'click:fontControl', 'click:applyFont',
   ])
   assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs accepts exact added-font evidence when the result row has no checked state', async () => {
+  const fake = fakeDocs({ installed: ['Arial'], allFonts: ['Arial', 'Syne'], requestedFont: 'Syne', checkedStateMissing: true })
+  const result = await runDocs(fake)
+  assert.equal(result.docs.status, 'applied')
+  assert.equal(result.docs.fontAdded, true)
+  assert.equal(fake.events.filter(event => event === 'click:addFont').length, 1)
+  assert.equal(fake.events.filter(event => event === 'click:done').length, 1)
+})
+
+test('Docs closes the Fonts dialog after an addition failure', async () => {
+  const fake = fakeDocs({ installed: ['Arial'], allFonts: ['Arial', 'Syne'], requestedFont: 'Syne', addFontFails: true })
+  await assert.rejects(runDocs(fake), error => error.code === 'DOCS_WAIT_TIMEOUT' && error.stage === 'font-add')
+  assert.equal(fake.state.dialogOpen, false)
+  assert.equal(fake.events.filter(event => event.startsWith('click:')).at(-1), 'click:cancel')
+  assert.equal(fake.events.includes('click:done'), false)
+  assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs presses Escape when Cancel leaves the Fonts dialog open after a failure', async () => {
+  const fake = fakeDocs({ installed: ['Arial'], allFonts: ['Arial', 'Syne'], requestedFont: 'Syne', addFontFails: true, cancelIgnored: true })
+  await assert.rejects(runDocs(fake), error => error.code === 'DOCS_WAIT_TIMEOUT' && error.stage === 'font-add' && !/may still be open/.test(error.message))
+  assert.equal(fake.state.dialogOpen, false)
+  assert.ok(fake.events.includes('click:cancel'))
+  assert.ok(fake.events.includes('key:Escape:0'))
+})
+
+test('Docs says when the Fonts dialog could not be closed after a failure', async () => {
+  const fake = fakeDocs({ installed: ['Arial'], allFonts: ['Arial', 'Syne'], requestedFont: 'Syne', addFontFails: true, cancelIgnored: true, escapeClosesDialog: false })
+  await assert.rejects(runDocs(fake), error => error.stage === 'font-add' && /the Fonts dialog may still be open: press Escape/.test(error.message))
+  assert.equal(fake.state.dialogOpen, true)
 })
 
 test('Docs waits for an asynchronously rendered ordinary font menu', async () => {
@@ -2714,4 +2752,87 @@ test('Docs format_many reports DOCS_UNSETTLED and holds the lock until the in-fl
   assert.equal(fake.state.blocks[0].runs[0].bold, true)
   assert.equal(fake.state.blocks[1].runs[0].italic, true)
   assert.equal(fake.exports.length, 3)
+})
+
+test('Docs reveals overflowed list buttons through the More toggle even when Docs marks it aria-disabled', () => {
+  // Live Docs at 1162 CSS px (2026-11-19): the list buttons sit in a hidden
+  // overflow and #moreButton carries aria-disabled="true", yet clicking it opens
+  // the overflow. Only a natively disabled More is refused.
+  class FakeElement {
+    constructor(tagName, { label, roleName, top = 0 } = {}) {
+      this.tagName = tagName.toUpperCase()
+      this.attributes = { ...(label ? { 'aria-label': label } : {}), ...(roleName ? { role: roleName } : {}) }
+      this.innerText = ''
+      this.textContent = ''
+      this.top = top
+      this.children = []
+      this.parentElement = undefined
+      this.isConnected = true
+      this.disabled = undefined
+    }
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const wanted = part.trim()
+        const roleMatch = /^\[role="([^"]+)"\]$/u.exec(wanted)
+        if (roleMatch) return this.attributes.role === roleMatch[1]
+        if (wanted === '[inert]') return 'inert' in this.attributes
+        if (wanted === '[aria-hidden="true"]') return this.attributes['aria-hidden'] === 'true'
+        if (wanted === ':disabled') return this.disabled === true
+        return false
+      })
+    }
+    querySelectorAll(selector) {
+      return this.children.flatMap(child => [...child.matches(selector) ? [child] : [], ...child.querySelectorAll(selector)])
+    }
+    closest(selector) {
+      let current = this
+      while (current) {
+        if (current.matches(selector)) return current
+        current = current.parentElement
+      }
+      return null
+    }
+    getAttribute(name) { return this.attributes[name] ?? null }
+    getBoundingClientRect() { return { left: 100, top: this.top, width: 200, height: 32 } }
+    contains(other) { return other === this || this.children.some(child => child.contains(other)) }
+  }
+  const keys = ['Element', 'document', 'getComputedStyle', 'innerWidth', 'innerHeight']
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  const install = ({ moreNativeDisabled = false } = {}) => {
+    const root = new FakeElement('div')
+    const toolbar = new FakeElement('div', { label: 'Main', roleName: 'toolbar', top: 0 })
+    const more = new FakeElement('div', { label: 'More', roleName: 'button', top: 40 })
+    more.attributes['aria-disabled'] = 'true'
+    if (moreNativeDisabled) more.disabled = true
+    toolbar.children = [more]
+    more.parentElement = toolbar
+    root.children = [toolbar]
+    toolbar.parentElement = root
+    Object.assign(globalThis, {
+      Element: FakeElement,
+      innerWidth: 1162,
+      innerHeight: 686,
+      document: {
+        querySelectorAll: selector => root.querySelectorAll(selector),
+        getElementById: () => undefined,
+        elementFromPoint: (_x, y) => (y >= 40 && y < 72 ? more : y < 32 ? toolbar : null),
+      },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    })
+  }
+  try {
+    install()
+    const revealed = docsPageProbe('format', { attributes: ['numbered'] })
+    assert.equal(revealed.ok, true)
+    assert.deepEqual(revealed.revealPoint, { x: 200, y: 56 })
+    install({ moreNativeDisabled: true })
+    const refused = docsPageProbe('format', { attributes: ['numbered'] })
+    assert.equal(refused.ok, false)
+    assert.match(refused.message, /Main toolbar numbered: expected one exact control, found 0/)
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  }
 })

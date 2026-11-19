@@ -224,11 +224,24 @@ async function run() {
   assert.equal(bridge.executorHost(), 'panel', 'the worker does not take the role back while the panel is open')
   pass('the panel executes alone while open')
 
+  // Close the panel mid-turn while it holds the turn's debugger session on the
+  // page tab. The worker that takes over must release that stale session of
+  // its own extension instead of reporting a busy DevTools.
+  bridge.sendToUi({ v: 1, type: 'chat.user', turnId: 'turn-panel-closed', origin: 'remote', text: 'x', imageCount: 0 })
+  await until('the panel turn to hold its debugger lease', async () => await read(`document.querySelectorAll('[data-crazyagent-cursor]').length`) === 1)
+  const leased = await command('press_key', { key: 'Escape' })
+  assert.equal(leased.pressed?.trusted, true, 'the panel pressed the key with trusted input')
+
   await browser.send('Target.closeTarget', { targetId: panelCreated.targetId })
   const closedAt = Date.now()
   await until('the worker to resume after the panel closes', () => bridge.executorHost() === 'background', 12_000)
   assert.equal((await command('tabs.list')).tabs.length > 0, true)
   pass(`closing the panel hands back to the worker in ${((Date.now() - closedAt) / 1000).toFixed(1)} s`)
+
+  bridge.sendToUi({ v: 1, type: 'chat.done', text: 'done' })
+  const after = await command('press_key', { key: 'Escape' })
+  assert.equal(after.pressed?.trusted, true, 'the worker attached trusted input to the same tab')
+  pass('a panel closed mid-turn leaves no busy debugger behind for the worker')
 }
 
 let failed = false

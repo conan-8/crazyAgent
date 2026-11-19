@@ -131,6 +131,8 @@ class BridgeClient {
   commandsSent = 0
   /** @type {{tool: string, message: string} | undefined} last argument rejection this turn */
   lastRejection = undefined
+  /** @type {{turnId: string, prompt: string} | undefined} raw prompt for the companion-owned active turn */
+  turnContext = undefined
 
   /** A new turn starts with a clean executor-availability record. */
   resetExecutorCircuit() {
@@ -420,6 +422,12 @@ class BridgeClient {
       this.log('bridge: connected')
       this.logEvent('bridge.connected', { url: this.url }, 'info')
       this.#flushLogs()
+      return
+    }
+    if (message.type === 'turn.context' && ws === this.#ws) {
+      this.turnContext = typeof message.turnId === 'string' && typeof message.prompt === 'string'
+        ? { turnId: message.turnId, prompt: message.prompt }
+        : undefined
       return
     }
     if (message.type === 'plan.mode' && ws === this.#ws) {
@@ -1206,6 +1214,29 @@ function offScreenLine(count) {
   return `${count} point(s) were outside the visible viewport (page scrolled/clipped) — scroll and take a fresh view`
 }
 
+function clickHitDescription(hit) {
+  if (!isRecord(hit)) return 'unknown'
+  const kind = hit.editable === true && !hit.role ? 'textbox' : hit.role || hit.tag || 'element'
+  const label = Number.isSafeInteger(Number(hit.label)) && Number(hit.label) > 0 ? `[${Number(hit.label)}] ` : ''
+  const name = typeof hit.name === 'string' ? hit.name.replace(/\s+/gu, ' ').trim().slice(0, 60) : ''
+  return `${label}${kind}${name ? ` ${JSON.stringify(name)}` : ' (unlabelled)'}${hit.surface === true ? ' · surface' : ''}`
+}
+
+function clickDiagnosticLines(result, points) {
+  const lines = []
+  for (const [index, point] of points.entries()) {
+    if (!isRecord(point?.hit)) continue
+    lines.push(`${points.length > 1 ? `  [${index + 1}] ` : ''}hit: ${clickHitDescription(point.hit)}`)
+  }
+  if (isRecord(result?.focus)) {
+    const focus = result.focus
+    const kind = focus.editable === true ? (focus.role || 'textbox') : (focus.tag || focus.role || 'element')
+    const name = typeof focus.name === 'string' ? focus.name.replace(/\s+/gu, ' ').trim().slice(0, 60) : ''
+    lines.push(`focus after click: ${kind}${name ? ` ${JSON.stringify(name)}` : ''}${focus.editable === true ? '' : ' (no field focused)'}`)
+  }
+  return lines
+}
+
 /**
  * Model-facing coordinate click result. One click keeps the compact legacy
  * shape; a points burst leads with one summary line and one line per point so
@@ -1264,6 +1295,7 @@ function clickAtContent(result) {
     if (offScreen > 0) lines.push(offScreenLine(offScreen))
     if (Number.isFinite(result?.clickMs)) lines.push(`click ${result.clickMs}ms`)
   }
+  lines.push(...clickDiagnosticLines(result, points.length > 0 ? points : [result?.point ?? {}]))
   // Optional stale-view contract: the executor reports that the page scrolled
   // since the stored screenshot, so image coordinates no longer map to it.
   const staleDy = Number(isRecord(result?.staleScroll) ? result.staleScroll.dy : NaN)
@@ -1396,7 +1428,9 @@ function typeContent(result) {
   const note = reResolvedNote(result)
   if (note !== undefined) lines.push(note)
   const added = Number.isFinite(Number(typed.charsAdded)) ? Number(typed.charsAdded) : undefined
-  if (typed.canvasEditor === true) {
+  if (typed.focusEditable === false) {
+    lines.push(`result: focused element is ${typed.targetKind || 'not a text field'}, not a text field — text was not typed into an editor (UNVERIFIED); click or label the field first.`)
+  } else if (typed.canvasEditor === true) {
     const pageChanged = typeof typed.pageChanged === 'boolean'
       ? ` pageChanged=${typed.pageChanged} is only a hint, not confirmation.`
       : ''
@@ -1474,7 +1508,11 @@ function navigateContent(result) {
       : navigated.history === 'reload' ? 'reloaded'
         : 'navigated to'
   const parts = [`${verb} ${target}`]
-  if (navigated.newTab === true) parts.push('new tab')
+  if (navigated.newTab === true) {
+    parts.push(navigated.newTabReason === 'browser-page'
+      ? `new tab (the active tab was a browser page, ${navigated.fromUrl ?? '?'}, which takes no trusted input; it was left open)`
+      : 'new tab')
+  }
   const waitMs = Number(navigated.waitMs)
   if (navigated.timedOut === true) {
     parts.push(`load timed out after ${Number.isFinite(waitMs) ? waitMs : '?'}ms — the page may still be loading; take a view or use browser_wait_for`)
@@ -1525,7 +1563,11 @@ function waitForContent(result) {
   const header = waited.timedOut === true
     ? `timed out after ${elapsed ?? '?'}ms (${description} not found)`
     : `waited for ${description} · found after ${elapsed ?? '?'}ms`
-  return actionContent(result, [header])
+  const lines = [header]
+  if (isRecord(waited.navigatedDuringWait)) {
+    lines.push(`navigation during wait: ${waited.navigatedDuringWait.from ?? '?'} → ${waited.navigatedDuringWait.to ?? '?'}`)
+  }
+  return actionContent(result, lines)
 }
 
 /**
@@ -1826,7 +1868,11 @@ function batchContent(result, requestedActions) {
   }
   for (const [position, entry] of entries.entries()) {
     const index = Number.isFinite(Number(entry?.index)) ? Number(entry.index) : position + 1
-    lines.push(batchActionLine(entry, requestedActions[index - 1] ?? {}, index))
+    const requested = requestedActions[index - 1] ?? {}
+    lines.push(batchActionLine(entry, requested, index))
+    if ((entry?.op ?? requested.op) === 'click_at') {
+      lines.push(...clickDiagnosticLines(entry, Array.isArray(entry?.points) ? entry.points : []).map(line => `    ${line}`))
+    }
     for (const evidence of actionEvidenceLines(entry)) {
       lines.push(...evidence.split('\n').map(line => `    ${line}`))
     }
@@ -1972,9 +2018,14 @@ function clipboardPasteContent(result) {
     const dimensions = `${pasted.width ?? clipboard.width ?? '?'}x${pasted.height ?? clipboard.height ?? '?'}`
     const lines = [`delivered the ${dimensions} image from the ${target} to ${targetLabel} via a synthetic paste event`]
     if (pasted.handled === true) {
-      lines.push(`a page handler consumed the event${pasted.dropHandled ? ' via the drop fallback' : ''}; inspect the page to verify the attachment, not just event dispatch`)
+      lines.push(pasted.handledBy === 'page-mutation'
+        ? 'image content appeared after the paste; the drop fallback was skipped. Inspect the page to verify exactly one attachment landed'
+        : `a page handler consumed the event${pasted.dropHandled ? ' via the drop fallback' : ''}; inspect the page to verify the attachment, not just event dispatch`)
     } else {
       lines.push('warning: no page handler consumed the event; the app may ignore synthetic files and require a real OS clipboard paste. Do not retry blindly.')
+    }
+    if (isRecord(pasted.target) && (pasted.target.body === true || pasted.target.editable === false)) {
+      lines.push(`warning: the synthetic paste target was ${pasted.target.body === true ? 'body' : `non-editable ${pasted.target.tag ?? 'element'}`}; attachment placement is UNVERIFIED`)
     }
     if (pasted.systemRestored === true) lines.push('the previous system clipboard was restored after the agent-image handoff')
     if (pasted.systemRestored === false) {
@@ -2119,6 +2170,8 @@ function placesContent(result) {
   return { content: [{ type: 'text', text: lines.join('\n') }] }
 }
 
+const NO_OP_VIEW_TOOLS = new Set(['browser_switch_tab', 'browser_screenshot', 'browser_read_text'])
+
 /**
  * Register the Phase 1 tools behind the shared repeat guard.
  * @param {import('@deepseek-ai/cordis').Context} ctx
@@ -2163,6 +2216,11 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
         guard.beginCall(definition.name, toolArgs)
         const sentBefore = bridge.commandsSent
         try {
+          if (NO_OP_VIEW_TOOLS.has(definition.name) && isRecord(toolArgs) && toolArgs.view !== undefined) {
+            checkedView(toolArgs.view)
+            toolArgs = { ...toolArgs }
+            delete toolArgs.view
+          }
           if (topLevelKeys !== undefined && isRecord(toolArgs)) rejectUnknownArguments(definition.name, toolArgs, topLevelKeys)
           const result = await call(toolArgs, exec)
           bridge.lastRejection = undefined
@@ -3239,12 +3297,15 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
         throw new Error(`Upload readback was missing or mismatched for ${expectedName}; assignment may have succeeded, so inspect the page before retrying.`)
       }
       const target = upload.input ?? {}
+      const takenByPage = upload.inputClearedByPage === true || upload.inputReplacedByPage === true
       const lines = [
         `attached ${JSON.stringify(upload.filename)} · ${upload.size} bytes${upload.mime ? ` · ${upload.mime}` : ''}`,
-        upload.inputClearedByPage === true
-          ? `verified at the change event${target.index ? ` on input ${target.index}` : ''}${target.name ? ` ${JSON.stringify(target.name)}` : ''}: the input held exactly this file, then the page emptied the input (upload widgets do this after taking the file). Do not attach it again; check the page for the file it took.`
+        takenByPage
+          ? `verified at the change event${target.index ? ` on input ${target.index}` : ''}${target.name ? ` ${JSON.stringify(target.name)}` : ''}: the input held exactly this file, then the page ${upload.inputReplacedByPage === true ? 'replaced the input with a fresh one' : 'emptied the input'} (upload widgets do this after taking the file). Do not attach it again; input numbers may have changed.`
           : `verified by file-input readback${target.index ? ` on input ${target.index}` : ''}${target.name ? ` ${JSON.stringify(target.name)}` : ''}`,
-        'attachment is verified; server submission/persistence is not. Submit with the page control if required and independently inspect the result.',
+        takenByPage
+          ? 'the page received the file; that it kept it (and any server upload) is not verified. Check that the page shows it, for example an attachment chip, before sending or submitting.'
+          : 'attachment is verified; server submission/persistence is not. Submit with the page control if required and independently inspect the result.',
       ]
       return viewContent(result, lines.join('\n'))
     },
@@ -3562,7 +3623,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
         values: { type: 'array', description: 'Optional create matrix with exactly rows arrays of columns single-line strings.', items: { type: 'array', items: { type: 'string', maxLength: 2000 } } },
         edits: {
           type: 'array', minItems: 1, maxItems: 100,
-          description: 'For write: {row,column,value}. For text format: optional row/column (omit both for the whole table) plus at least one text-formatting attribute. For native cell shading, use a dedicated call containing only cell_background edits.',
+          description: 'For write: {row,column,value}. For text format: optional row/column (omit both for the whole table) plus at least one text-formatting attribute. For native shading, use a dedicated cell_background-only call and one edit per region: {row:1,cell_background:"#d9d9d9"} shades the header; omit row/column for the whole table. Never repeat overlapping regions.',
           items: {
             type: 'object', additionalProperties: false,
             properties: {
@@ -3828,7 +3889,14 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
         }
         const expect = checkedActionExpect(actionArgs.expect, op, `browser_batch.actions[${index}].expect`, true)
         if (expect !== undefined) actionArgs.expect = expect
-        if (op === 'wait_for') declaredWaitMs += declaredWaitBudget(actionArgs)
+        if (op === 'wait_for') {
+          const { before: _before, after: _after, expect: _expect, ...waitArgs } = actionArgs
+          actionArgs = {
+            ...actionArgs,
+            ...normalizeWaitConditions(waitArgs, `browser_batch actions[${index}]`),
+          }
+          declaredWaitMs += declaredWaitBudget(actionArgs)
+        }
         // Batch key presses get the same composite-chord normalization as the
         // standalone tool, so {"op":"press_key","key":"shift+Tab"} works here too.
         if (op === 'press_key') {
@@ -3991,6 +4059,31 @@ export function apply(ctx, config = {}) {
     const toolNames = registerTools(ctx, bridge, guard, imageDedupe, downloadsFolder, helpRuntime, docsBlockBySession)
     /** @type {Map<number, number>} consecutive no-progress tool results per turn */
     const noProgressByTurn = new Map()
+    const resolveTurnEffort = (agent, turn) => {
+      const sessionId = agent?.session?.id === undefined || agent?.session?.id === null ? undefined : String(agent.session.id)
+      if (!Number.isSafeInteger(turn) || sessionId === undefined) return undefined
+      const key = `${sessionId}:${turn}`
+      let effort = effortByTurn.get(key)
+      if (effort === undefined) {
+        const claimed = claimedPrompt?.turn === turn ? claimedPrompt.text : undefined
+        const prompt = bridge.turnContext?.prompt ?? claimed ?? lastPromptBySession.get(sessionId) ?? ''
+        const classification = classifyPrompt(prompt)
+        effort = effortFor(reasoningPolicy, classification)
+        effortByTurn.set(key, effort)
+        if (effortByTurn.size > 200) {
+          const oldest = effortByTurn.keys().next().value
+          if (oldest !== undefined) effortByTurn.delete(oldest)
+        }
+        bridge.logEvent('reasoning.policy', {
+          policy: reasoningPolicy,
+          classification,
+          effort,
+          promptChars: prompt.length,
+        }, 'info')
+        bridge.activity({ kind: 'policy', policy: reasoningPolicy, classification, effort })
+      }
+      return effort
+    }
     // Transient live model activity: reasoning/thinking deltas, visible text,
     // partial tool calls, usage, and finish reasons. The durable session events
     // still drive the committed transcript.
@@ -4023,6 +4116,14 @@ export function apply(ctx, config = {}) {
         if (sessionId !== undefined && sessionId !== null) {
           docsBlockBySession.set(String(sessionId), text.includes('<docs_mode>'))
           if (docsBlockBySession.size > 50) docsBlockBySession.delete(docsBlockBySession.keys().next().value)
+        }
+        if (reasoningPolicy === 'auto') {
+          const effort = resolveTurnEffort(agent, turn)
+          const current = agent?.model?.current?.()
+          if (effort !== undefined && current !== undefined) {
+            // DSH fixes the route during step preparation, before agent/request.
+            agent.model.select({ ...current, reasoningEffort: effort })
+          }
         }
       } catch {
         // Policy tracking must never break a turn.
@@ -4346,25 +4447,8 @@ export function apply(ctx, config = {}) {
         if (Number.isSafeInteger(turn)) guard.setTurn(`${sessionId ?? 'unknown'}:${turn}`)
         if (!config.reasoningEffort || sessionId === undefined) return config
         const key = `${sessionId}:${turn}`
-        let effort = effortByTurn.get(key)
-        if (effort === undefined) {
-          const claimed = claimedPrompt?.turn === turn ? claimedPrompt.text : undefined
-          const prompt = claimed ?? lastPromptBySession.get(sessionId) ?? ''
-          const classification = classifyPrompt(prompt)
-          effort = effortFor(reasoningPolicy, classification)
-          effortByTurn.set(key, effort)
-          if (effortByTurn.size > 200) {
-            const oldest = effortByTurn.keys().next().value
-            if (oldest !== undefined) effortByTurn.delete(oldest)
-          }
-          bridge.logEvent('reasoning.policy', {
-            policy: reasoningPolicy,
-            classification,
-            effort,
-            promptChars: prompt.length,
-          }, 'info')
-          bridge.activity({ kind: 'policy', policy: reasoningPolicy, classification, effort })
-        } else if (reasoningPolicy === 'auto' && effort === 'off') {
+        let effort = resolveTurnEffort(agent, turn)
+        if (reasoningPolicy === 'auto' && effort === 'off') {
           // The turn started with reasoning off for pure browser work, but the
           // page keeps refusing to move. Switch to `low` for the rest of the
           // turn: the effort cache makes this fire once, and a manual operator

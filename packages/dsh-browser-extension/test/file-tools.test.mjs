@@ -109,6 +109,26 @@ test('provider chains a verified download into an upload with a Downloads-only e
   })
 })
 
+test('an upload the page took by replacing its input asks for a page check before sending', async t => {
+  const { tools, root } = await setup(t, async op => ({
+    op,
+    view: 'none',
+    screenshotSkipped: true,
+    tab: { id: 7, title: 'Compose', url: 'https://mail.example.test/compose' },
+    upload: {
+      status: 'attached', filename: 'report.txt', size: 6, mime: 'text/plain',
+      verifiedBy: 'change-event-capture', inputReplacedByPage: true, input: { index: 1, name: 'Filedata' },
+    },
+  }))
+  await writeFile(join(root, 'report.txt'), 'report')
+  const uploaded = await tools.get('browser_upload').execute({ filename: 'report.txt', input: 1, view: 'none' }, exec)
+  const text = uploaded.content[0].text
+  assert.match(text, /verified at the change event on input 1 "Filedata": the input held exactly this file, then the page replaced the input with a fresh one/)
+  assert.match(text, /Do not attach it again; input numbers may have changed/)
+  assert.match(text, /that it kept it \(and any server upload\) is not verified\. Check that the page shows it/)
+  assert.doesNotMatch(text, /attachment is verified/)
+})
+
 test('provider rejects invalid targets and paths before bridge traffic', async t => {
   const { tools, commands, root } = await setup(t, () => { throw new Error('unexpected browser call') })
   await writeFile(join(root, 'report.txt'), 'report')

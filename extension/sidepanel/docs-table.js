@@ -308,7 +308,7 @@ export function docsTableCellBackgroundEdits(blocks, table, requests) {
     if (cells.length === 0) throw tableFailure('DOCS_TABLE_TARGET_NOT_FOUND', `edits[${requestIndex}] does not match any table cells`)
     for (const { rowIndex, columnIndex } of cells) {
       const key = `${rowIndex}:${columnIndex}`
-      if (seen.has(key)) throw tableFailure('DOCS_TABLE_DUPLICATE_TARGET', `edits[${requestIndex}] overlaps an earlier cell-background target`)
+      if (seen.has(key)) throw tableFailure('DOCS_TABLE_DUPLICATE_TARGET', `edits[${requestIndex}] overlaps an earlier cell-background target; use one edit per region, such as {row:1,cell_background:"#d9d9d9"} for the header row; planning failed before any background mutation`)
       seen.add(key)
       edits.push({
         row: rowIndex + 1,
@@ -431,18 +431,24 @@ function verificationError(code, message, details = {}) {
   return { ok: false, code, message, ...details }
 }
 
-export function verifyDocsTableCellBackground(baseline, final, tableIndex, edit) {
+export function verifyDocsTableCellBackgroundBatch(baseline, final, tableIndex, edits) {
   if (!sameOutside(baseline, final, tableIndex)) return verificationError('DOCS_TABLE_COLLATERAL', 'Content outside the target table changed unexpectedly')
   const before = selectDocsTable(baseline, tableIndex)
   const after = selectDocsTable(final, tableIndex)
-  const actual = after.rows[edit.row - 1]?.[edit.column - 1]
-  if (actual?.background !== edit.value) {
-    return verificationError('DOCS_TABLE_VERIFY_FAILED', `Cell background readback was ${JSON.stringify(actual?.background)} instead of ${JSON.stringify(edit.value)}`, { actual: actual?.background })
-  }
   const expected = structuredClone(before)
-  expected.rows[edit.row - 1][edit.column - 1].background = edit.value
-  if (JSON.stringify(expected) !== JSON.stringify(after)) return verificationError('DOCS_TABLE_COLLATERAL', `Cell background formatting changed content or formatting outside row ${edit.row}, column ${edit.column}`)
+  for (const edit of edits) {
+    const actual = after.rows[edit.row - 1]?.[edit.column - 1]
+    if (actual?.background !== edit.value) {
+      return verificationError('DOCS_TABLE_VERIFY_FAILED', `Cell background at row ${edit.row}, column ${edit.column} was ${JSON.stringify(actual?.background)} instead of ${JSON.stringify(edit.value)}`, { actual: actual?.background })
+    }
+    expected.rows[edit.row - 1][edit.column - 1].background = edit.value
+  }
+  if (JSON.stringify(expected) !== JSON.stringify(after)) return verificationError('DOCS_TABLE_COLLATERAL', 'Cell background formatting changed content, formatting, or cells outside the requested region')
   return { ok: true }
+}
+
+export function verifyDocsTableCellBackground(baseline, final, tableIndex, edit) {
+  return verifyDocsTableCellBackgroundBatch(baseline, final, tableIndex, [edit])
 }
 
 export function verifyDocsTableWrite(baseline, final, tableIndex, edit) {

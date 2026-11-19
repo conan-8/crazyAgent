@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { docsWrite } from '../sidepanel/browser.js'
+import { docsWrite, docsWriteBlockDifference } from '../sidepanel/browser.js'
 import { parseDocStructure } from '../sidepanel/docs-structure.js'
 
 const URL = 'https://docs.google.com/document/d/abc/edit'
@@ -20,7 +20,7 @@ const styleAttr = format => [
 const spans = block => (block.runsData ?? [{ text: block.text, format: block.format }])
   .map(run => `<span style="${styleAttr(run.format)}">${escapeHtml(run.text)}</span>`).join('')
 
-function exportHtml(blocks) {
+function exportHtml(blocks, options = {}) {
   const body = []
   for (let index = 0; index < blocks.length;) {
     const block = blocks[index]
@@ -42,8 +42,10 @@ function exportHtml(blocks) {
     const items = []
     while (index < blocks.length && blocks[index].style === 'LI' && blocks[index].ordered === ordered && (blocks[index].checklist === true) === checklist) {
       const current = blocks[index]
-      const checkbox = checklist ? `<input type="checkbox"${current.checked ? ' checked="checked"' : ''}>` : ''
-      items.push(`<li style="${styleAttr(current.format)}">${checkbox}${spans(current)}</li>`)
+      const flattened = checklist && options.flattenChecklistExport === true
+      const checkbox = checklist && !flattened ? `<input type="checkbox"${current.checked ? ' checked="checked"' : ''}>` : ''
+      const checkedStyle = flattened && current.checked && options.flattenCheckedStyleMissing !== true ? 'text-decoration:line-through' : ''
+      items.push(`<li style="${styleAttr(current.format)}${checkedStyle ? `;${checkedStyle}` : ''}">${checkbox}${spans(current)}</li>`)
       index += 1
     }
     body.push(`<${ordered ? 'ol' : 'ul'}${ordered && start !== 1 ? ` start="${start}"` : ''}>${items.join('')}</${ordered ? 'ol' : 'ul'}>`)
@@ -132,7 +134,7 @@ function fakeWrite(options = {}) {
           ? { ...block, text: ' ', runsData: [{ text: ' ', format: block.format ?? NORMAL }] }
           : block)
         : state.blocks
-      return { body: exportHtml(stale ? (options.blocks ?? [para('Sentinel')]) : positioned) }
+      return { body: exportHtml(stale ? (options.blocks ?? [para('Sentinel')]) : positioned, options) }
     },
     dispatchTrustedKey: async (_tabId, spec, mask) => {
       events.push(`key:${spec.key}:${mask}`)
@@ -278,6 +280,7 @@ function fakeWrite(options = {}) {
         if (options.listControlsHidden && !state.controlsRevealed && args.attributes.some(attribute => ['numbered', 'bulleted', 'checklist'].includes(attribute))) {
           return { ok: true, revealPoint: { x: 15, y: 20 } }
         }
+        const textControlsHidden = options.textControlsHidden && !state.controlsRevealed && args.attributes.some(attribute => ['bold', 'italic', 'underline'].includes(attribute))
         const result = { ok: true }
         for (const attribute of args.attributes) {
           if (attribute === 'paragraph_style') Object.assign(result, { paragraphStyle: state.paragraphStyle, paragraphStylePoint: { x: 100, y: 20 } })
@@ -289,6 +292,12 @@ function fakeWrite(options = {}) {
           })
           else if (attribute === 'font') result.font = state.font
           else result[attribute] = state[attribute]
+        }
+        if (textControlsHidden) {
+          for (const attribute of args.attributes) {
+            if (['bold', 'italic', 'underline'].includes(attribute)) result[attribute] = undefined
+          }
+          result.revealPoint = { x: 15, y: 20 }
         }
         return result
       }
@@ -450,6 +459,43 @@ test('Docs write inserts a page break and verifies checked checklist items', asy
   assert.equal(fake.events.filter(event => event === 'insert:Completed task').length, 1)
   assert.equal(fake.exports.length, 6)
   assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs write accepts flattened checklist export only with live semantic evidence', async () => {
+  const fake = fakeWrite({ flattenChecklistExport: true })
+  const result = await runWrite(fake, [{ items: [
+    { text: 'Completed task', checked: true },
+    { text: 'Pending task', checked: false },
+  ], list: 'checklist' }])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.deepEqual(fake.state.blocks.slice(1, 3).map(block => [block.checklist, block.checked]), [[true, true], [true, false]])
+  const exported = parseDocStructure(exportHtml(fake.state.blocks, { flattenChecklistExport: true }))
+  assert.equal(exported[1].checklist, undefined)
+  assert.equal(exported[1].runs[0].strike, true)
+  assert.equal(exported[2].runs[0].strike, false)
+})
+
+test('Docs write rejects flattened checklist export without checked-state evidence', async () => {
+  const fake = fakeWrite({ flattenChecklistExport: true, flattenCheckedStyleMissing: true })
+  await assert.rejects(runWrite(fake, [{ items: [{ text: 'Completed task', checked: true }], list: 'checklist' }]), error => (
+    error.code === 'DOCS_FORMAT_MISMATCH' && error.stage === 'write-list-exit-verify'
+  ))
+})
+
+test('Docs write never infers a checklist from bullets when semantic controls are unavailable', async () => {
+  const fake = fakeWrite({ flattenChecklistExport: true, listProbeFails: true })
+  await assert.rejects(runWrite(fake, [{ items: [{ text: 'Task', checked: false }], list: 'checklist' }]), error => error.code === 'DOCS_CONTROL_NOT_FOUND')
+  assert.equal(fake.events.some(event => event.startsWith('insert:')), false)
+})
+
+test('Docs write reveals hidden text controls before reading or toggling them', async () => {
+  const fake = fakeWrite({ textControlsHidden: true })
+  const result = await runWrite(fake, [{ text: 'Marked', bold: true }])
+  assert.equal(result.docs.status, 'completed', JSON.stringify({ docs: result.docs, blocks: fake.state.blocks, parsed: parseDocStructure(exportHtml(fake.state.blocks)) }))
+  const reveal = fake.events.indexOf('click:15')
+  const toggle = fake.events.indexOf('key:b:2')
+  assert.ok(reveal >= 0 && reveal < toggle, JSON.stringify(fake.events))
+  assert.equal(fake.state.bold, true)
 })
 
 test('Docs write resets non-default baseline colors only when needed', async () => {
@@ -665,4 +711,33 @@ test('Docs write refuses to mutate when the baseline export is unavailable', asy
   await assert.rejects(runWrite(fake, [{ text: 'Not typed' }]), error => error.code === 'DOCS_EXPORT_PERMISSION')
   assert.equal(fake.events.some(event => event.startsWith('key:') || event.startsWith('insert:')), false)
   assert.equal(fake.snapshots(), 0)
+})
+
+test('write verification fills a span\'s missing font, size, or color from the element rule and names the first real difference', () => {
+  const run = (text, font, extra = {}) => ({ text, bold: false, italic: false, underline: false, strike: false, ...(font ? { font } : {}), ...extra })
+  const expected = {
+    kind: 'para', style: 'P', text: 'Under and italic end.', owner: 0,
+    runs: [
+      run('Under', 'Arial', { underline: true, fontSize: 11, color: '#000000' }),
+      run(' and italic', 'Arial', { italic: true, fontSize: 11, color: '#000000' }),
+      run(' end.', 'Arial', { fontSize: 11, color: '#000000' }),
+    ],
+  }
+  // Live Docs export (2026-11-19): .c2{text-decoration:underline} and
+  // .c8{font-style:italic} spans carry no font, size, or color; p{} does.
+  const actual = {
+    kind: 'para', style: 'P', text: 'Under and italic end.',
+    runs: [run('Under', undefined, { underline: true }), run(' and italic', undefined, { italic: true }), run(' end.', 'Arial', { fontSize: 11, color: '#000000' })],
+  }
+  const p = { font: 'Arial', fontSize: 11, color: '#000000' }
+  assert.equal(docsWriteBlockDifference(actual, expected, false, p), undefined)
+  // Without the element rule the unsized spans still differ, and the difference is named.
+  assert.equal(docsWriteBlockDifference(actual, expected), 'run 1 "Under" font: expected "Arial", found undefined')
+  // An explicit wrong value is never overwritten by the inherited one.
+  const wrongFont = { ...actual, runs: [run('Under', 'Georgia', { underline: true }), ...actual.runs.slice(1)] }
+  assert.equal(docsWriteBlockDifference(wrongFont, expected, false, p), 'run 1 "Under" font: expected "Arial", found "Georgia"')
+  const merged = { ...actual, runs: [run('Under and italic end.', 'Arial', { fontSize: 11, color: '#000000' })] }
+  assert.equal(docsWriteBlockDifference(merged, expected, false, p), 'formatted runs: expected 3 ("Under" + " and italic" + " end."), found 1 ("Under and italic end.")')
+  assert.equal(docsWriteBlockDifference(undefined, expected), 'the block is missing')
+  assert.equal(docsWriteBlockDifference({ ...actual, style: 'H1' }, expected, false, p), 'style: expected "P", found "H1"')
 })

@@ -31,7 +31,7 @@ function applyStyle(marks, body) {
   if (weight) marks.bold = /^(?:700|bold)$/iu.test(weight.trim())
   const fontStyle = /font-style\s*:\s*([^;}]+)/iu.exec(body)?.[1]
   if (fontStyle) marks.italic = /^italic$/iu.test(fontStyle.trim())
-  const decoration = /text-decoration[^:]*:\s*([^;}]+)/iu.exec(body)?.[1]
+  const decoration = [...body.matchAll(/(?:^|;)\s*text-decoration\s*:\s*([^;}]+)/giu)].at(-1)?.[1]
   if (decoration) {
     marks.underline = /underline/iu.test(decoration)
     marks.strike = /line-through/iu.test(decoration)
@@ -53,6 +53,31 @@ export function parseClassMarks(html) {
     const marks = {}
     applyStyle(marks, match[2])
     if (Object.keys(marks).length > 0) out.set(match[1], marks)
+  }
+  return out
+}
+
+/**
+ * The font, size, and color a paragraph's text inherits from the export's
+ * element rules (`p{}`, `li{}`, `h1{}`…`h6{}`). Docs leaves those three off a
+ * span that keeps its named style's value, so a span without them takes these.
+ * Kept apart from run marks: element rules also carry heading weights that
+ * spans override, and other consumers compare explicit span marks only.
+ * @param {string} html
+ * @returns {Map<string, {font?: string, fontSize?: number, color?: string}>}
+ */
+export function parseInheritedTextMarks(html) {
+  const out = new Map()
+  const style = /<style[^>]*>([\s\S]*?)<\/style>/iu.exec(html)?.[1] ?? ''
+  for (const match of style.matchAll(/(?<=^|[}\s])(p|li|h[1-6])\s*\{([^}]*)\}/gu)) {
+    const marks = {}
+    applyStyle(marks, match[2])
+    const inherited = {
+      ...(marks.font ? { font: marks.font } : {}),
+      ...(marks.fontSize !== undefined ? { fontSize: marks.fontSize } : {}),
+      ...(marks.color ? { color: marks.color } : {}),
+    }
+    if (Object.keys(inherited).length > 0) out.set(match[1].toLowerCase(), inherited)
   }
   return out
 }
@@ -114,7 +139,13 @@ export function parseDocStructure(html) {
   let tableCount = 0
   let bodyMarks = {}
 
-  const currentMarks = () => Object.assign({}, bodyMarks, para?.marks, ...spanMarks)
+  const currentMarks = () => {
+    const levels = [bodyMarks, para?.marks, ...spanMarks]
+    const merged = Object.assign({}, ...levels)
+    if (levels.some(marks => marks?.underline === true)) merged.underline = true
+    if (levels.some(marks => marks?.strike === true)) merged.strike = true
+    return merged
+  }
   const append = raw => {
     if (!para) para = { style: 'P', text: '', marked: '', runs: [], marks: {} }
     para.text += raw

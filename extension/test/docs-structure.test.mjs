@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { decodeEntities, formatOutline, parseClassMarks, parseDocStructure } from '../sidepanel/docs-structure.js'
+import { parseInheritedTextMarks, decodeEntities, formatOutline, parseClassMarks, parseDocStructure } from '../sidepanel/docs-structure.js'
 
 const STYLE = '<style>.c7{font-weight:700}.c8{font-style:italic}.c9{text-decoration:underline}.c33{text-decoration:line-through}.roboto{font-family:"Roboto";font-size:11pt}.display{font-family:\'Playfair Display\';font-size:28pt}.bodyFont{font-family:Arial;font-size:10pt}</style>'
 const doc = body => `<html><head>${STYLE}</head><body class="bodyFont">${body}</body></html>`
@@ -97,12 +97,23 @@ test('Docs structure preserves run color and highlight evidence without page bac
   assert.equal(formatOutline(blocks), 'P: plain blue clear')
 })
 
-test('Docs structure honors explicit normal formatting over inherited emphasis', () => {
+test('Docs structure honors explicit normal font formatting and preserves ancestor text decoration', () => {
   const blocks = parseDocStructure('<html><head><style>.fancy{font-style:italic;font-weight:700;text-decoration:underline}.plain{font-style:normal;font-weight:400;text-decoration:none}</style></head><body><p class="fancy"><span class="plain">plain</span><span>fancy</span></p></body></html>')
   assert.deepEqual(blocks[0].runs.map(run => ({ text: run.text, bold: run.bold, italic: run.italic, underline: run.underline })), [
-    { text: 'plain', bold: false, italic: false, underline: false },
+    { text: 'plain', bold: false, italic: false, underline: true },
     { text: 'fancy', bold: true, italic: true, underline: true },
   ])
+})
+
+test('Docs structure reads exact text-decoration properties and ancestor checked styling', () => {
+  const blocks = parseDocStructure('<html><head><style>.c5{color:#000000;font-weight:400;text-decoration:none;vertical-align:baseline;font-size:11pt;font-family:"Roboto";font-style:normal}.c8{font-weight:400;font-family:"Roboto"}.c24{text-decoration-skip-ink:none;-webkit-text-decoration-skip:none;text-decoration:underline}.c26{text-decoration:line-through}</style></head><body><p><span class="c8">plain </span><span class="c8 c24">underlined</span></p><ul><li class="c26"><span class="c5">checked</span></li></ul></body></html>')
+  assert.equal(blocks[0].runs[1].text, 'underlined')
+  assert.equal(blocks[0].runs[1].underline, true)
+  assert.equal(blocks[0].runs[1].strike, false)
+  assert.equal(blocks[0].marked, 'plain __underlined__')
+  assert.equal(blocks[1].runs[0].text, 'checked')
+  assert.equal(blocks[1].runs[0].strike, true)
+  assert.equal(blocks[1].marked, '~~checked~~')
 })
 
 test('Docs structure preserves per-run link identity and does not merge different links', () => {
@@ -116,4 +127,19 @@ test('Docs structure preserves per-run link identity and does not merge differen
     { text: 'plain', href: undefined },
   ])
   assert.equal(blocks[0].marked, '[same](https://ex.com/a)[same](https://other.test)plain')
+})
+
+test('element rules give the font, size, and color an unsized span inherits', () => {
+  // Excerpt of a live Docs HTML export (2026-11-19).
+  const html = '<html><head><style type="text/css">ol{margin:0;padding:0}.c2{text-decoration:underline}'
+    + '.lst-kix_a-0>li{counter-increment:lst-ctn-kix_a-0}li{color:#000000;font-size:11pt;font-family:"Arial"}'
+    + 'p{margin:0;color:#000000;font-size:11pt;font-family:"Arial"}'
+    + 'h1{padding-top:12pt;color:#000000;font-weight:700;font-size:24pt;font-family:"Arial"}'
+    + '.title{color:#000000;font-size:36pt;font-family:"Arial"}</style></head><body><p class="c1"><span class="c2">Under</span></p></body></html>'
+  const marks = parseInheritedTextMarks(html)
+  assert.deepEqual(marks.get('p'), { font: 'Arial', fontSize: 11, color: '#000000' })
+  assert.deepEqual(marks.get('li'), { font: 'Arial', fontSize: 11, color: '#000000' })
+  assert.deepEqual(marks.get('h1'), { font: 'Arial', fontSize: 24, color: '#000000' }, 'heading weight is not part of the inherited text marks')
+  assert.equal(marks.has('title'), false, 'class rules stay with parseClassMarks')
+  assert.equal(marks.size, 3)
 })

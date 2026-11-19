@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Redirect Wait Fixture</title>
+</head>
+<body>
+  <p>Waiting to redirect: <span id="ticks">0</span></p>
+  <script>
+    let ticks = 0
+    const interval = setInterval(() => {
+      ticks += 1
+      document.getElementById('ticks').textContent = String(ticks)
+    }, 100)
+    setTimeout(() => {
+      clearInterval(interval)
+      location.replace('./second.html?from=redirect')
+    }, 1200)
+  </script>
+</body>
+</html>

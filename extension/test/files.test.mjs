@@ -126,6 +126,24 @@ test('upload selects a unique hidden input and verifies the attached file', asyn
   assert.equal(io.calls.at(-1).mode, 'cleanup')
 })
 
+test('upload reports a file the page took by replacing its input as change-event evidence', async () => {
+  const io = uploadIo({
+    runInFrame: async (_tabId, _frameId, _func, args) => {
+      const request = args[0]
+      io.calls.push(request)
+      if (request.mode === 'cleanup') return { ok: true }
+      if (request.mode === 'verify') return { ok: true, files: [{ name: 'report.txt', size: 4, type: 'text/plain' }], replacedByPage: true, name: 'Filedata' }
+      return { ok: true, localIndex: 0, name: 'Filedata', signature: 'one' }
+    },
+  })
+  const result = await executeUpload(BASE_UPLOAD, io)
+  assert.equal(result.upload.status, 'attached')
+  assert.equal(result.upload.verifiedBy, 'change-event-capture')
+  assert.equal(result.upload.inputReplacedByPage, true)
+  assert.equal(result.upload.inputClearedByPage, undefined)
+  assert.equal(io.calls.at(-1).mode, 'cleanup')
+})
+
 test('upload resolves an exact accessible name across frames', async () => {
   const io = uploadIo({
     runInAllFrames: async () => [

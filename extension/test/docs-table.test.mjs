@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { docsTable, executeOperation } from '../sidepanel/browser.js'
-import { planDocsFormatEdits, verifyDocsFormatEdits } from '../sidepanel/docs-format.js'
+import { docsPageProbe, docsTable, executeOperation } from '../sidepanel/browser.js'
+import { docsFormatToggleEvidence, planDocsFormatEdits, verifyDocsFormatEdits } from '../sidepanel/docs-format.js'
 import { parseDocStructure } from '../sidepanel/docs-structure.js'
 import {
   docsTableCreateHtml,
@@ -14,6 +14,7 @@ import {
   planDocsTableWrite,
   selectDocsTable,
   verifyDocsTableCellBackground,
+  verifyDocsTableCellBackgroundBatch,
   verifyDocsTableStructure,
   verifyDocsTableUnmerge,
 } from '../sidepanel/docs-table.js'
@@ -55,7 +56,11 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
     menuOpen: false,
     menuQuery: '',
     formatMenuOpen: false,
+    insertMenuOpen: false,
     tableMenuOpen: false,
+    tableGridOpen: false,
+    tableGridRows: 1,
+    tableGridColumns: 1,
     cellPanelOpen: false,
     cellSectionOpen: false,
     colorSectionOpen: false,
@@ -67,6 +72,7 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
     clipboardHtml: undefined,
     restored: 0,
     inserts: 0,
+    exports: 0,
     clicks: [],
     hovers: [],
   }
@@ -122,7 +128,10 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
     getActiveTab: async () => ({ ...tab }),
     getTab: async () => ({ ...tab }),
     withDebugger: async (_tabId, fn) => fn(),
-    fetchExport: async () => ({ body: exportHtml(state.blocks) }),
+    fetchExport: async () => {
+      state.exports += 1
+      return { body: exportHtml(state.blocks) }
+    },
     preserveClipboard: async () => ({ items: ['before'] }),
     writeClipboardHtml: async (html, text) => { state.clipboardHtml = { html, text } },
     restoreClipboard: async () => { state.restored += 1 },
@@ -170,6 +179,8 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
         if (state.findOpen) selectCurrent()
         state.findOpen = false
         state.menuOpen = false
+        state.insertMenuOpen = false
+        state.tableGridOpen = false
         return
       }
       if (key === 'arrowright' && mask === 8) {
@@ -185,7 +196,7 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
           state.selection = undefined
           state.cellSpan = 1
         }
-        state.cellSpan = Math.min(2, (state.cellSpan ?? 1) + 1)
+        state.cellSpan = (state.cellSpan ?? 1) + 1
         return
       }
       if (key === 'arrowright') {
@@ -194,6 +205,7 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
           state.currentCell = { tableIndex: entry.tableIndex, rowIndex: entry.rowIndex, columnIndex: entry.columnIndex }
         }
         state.selection = undefined
+        state.cellSpan = 0
         return
       }
       if (key === 'tab') {
@@ -234,12 +246,34 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
         state.blocks.push(para())
       }
     },
-    trustedHover: async (_tabId, x) => {
+    trustedHover: async (_tabId, x, y) => {
       state.hovers.push(x)
       if (x === 71) state.tableMenuOpen = true
+      if (x >= 90) {
+        state.tableGridColumns = x - 90
+        state.tableGridRows = y
+      }
     },
-    trustedClick: async (_tabId, x) => {
+    trustedClick: async (_tabId, x, y) => {
       state.clicks.push(x)
+      if (x === 80) {
+        state.insertMenuOpen = true
+        return
+      }
+      if (x === 81) {
+        state.tableGridOpen = true
+        state.tableGridRows = 1
+        state.tableGridColumns = 1
+        return
+      }
+      if (x >= 90 && state.tableGridOpen) {
+        state.tableGridOpen = false
+        state.insertMenuOpen = false
+        const rows = Array.from({ length: state.tableGridRows }, () => Array.from({ length: state.tableGridColumns }, () => cell()))
+        state.blocks.push(table(rows.map(row => row.map(item => item.text)), state.blocks.filter(block => block.kind === 'table').length + 1), para())
+        state.currentCell = { tableIndex: state.blocks.filter(block => block.kind === 'table').length, rowIndex: 0, columnIndex: 0 }
+        return
+      }
       if (x === 70) {
         state.formatMenuOpen = true
         return
@@ -265,9 +299,13 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
         return
       }
       if (x === 63) {
-        const { target } = currentTableAndCell()
-        if (!target) throw new Error('cell background outside table')
-        target.background = '#d9d9d9'
+        const { tableBlock } = currentTableAndCell()
+        if (!tableBlock) throw new Error('cell background outside table')
+        const row = tableBlock.rows[state.currentCell.rowIndex]
+        const count = Math.max(1, state.cellSpan ?? 0)
+        const targets = row.slice(state.currentCell.columnIndex, state.currentCell.columnIndex + count)
+        if (targets.length !== count) throw new Error('cell background selection crosses the row')
+        for (const target of targets) target.background = '#d9d9d9'
         return
       }
       if (x === 12) {
@@ -280,9 +318,13 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
         return
       }
       if (x === 16) {
-        const { target } = currentTableAndCell()
-        if (!target) throw new Error('cell background outside table')
-        target.background = state.hexValue
+        const { tableBlock } = currentTableAndCell()
+        if (!tableBlock) throw new Error('cell background outside table')
+        const row = tableBlock.rows[state.currentCell.rowIndex]
+        const count = Math.max(1, state.cellSpan ?? 0)
+        const targets = row.slice(state.currentCell.columnIndex, state.currentCell.columnIndex + count)
+        if (targets.length !== count) throw new Error('cell background selection crosses the row')
+        for (const target of targets) target.background = state.hexValue
         state.hexFocused = false
         state.colorDialogOpen = false
         return
@@ -362,7 +404,18 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
         return { ok: true, readback: true }
       }
       if (command === 'formatMenu') return { ok: true, present: true, disabled: false, point: { x: 70, y: 20 } }
-      if (command === 'tableMenu') return { ok: true, present: state.formatMenuOpen, disabled: false, point: state.formatMenuOpen ? { x: 71, y: 20 } : undefined }
+      if (command === 'insertMenu') return { ok: true, present: true, disabled: false, point: { x: 80, y: 20 } }
+      if (command === 'tableMenu') return { ok: true, present: state.formatMenuOpen || state.insertMenuOpen, disabled: false, point: state.formatMenuOpen ? { x: 71, y: 20 } : state.insertMenuOpen ? { x: 81, y: 20 } : undefined }
+      if (command === 'tableCreateGrid') return {
+        ok: true,
+        open: state.tableGridOpen,
+        rows: state.tableGridRows,
+        columns: state.tableGridColumns,
+        maxRows: 5,
+        maxColumns: 11,
+        within: args.rows <= 5 && args.columns <= 11,
+        point: { x: 90 + args.columns, y: args.rows },
+      }
       if (command === 'tableMenuItem') {
         if (state.tableMenuOpen) state.menuQuery = args.name
         const present = state.tableMenuOpen || state.menuOpen && state.menuQuery === args.name
@@ -403,6 +456,7 @@ function fakeDocs(initialBlocks = [para()], options = {}) {
         okPoint: state.colorDialogOpen ? { x: 16, y: 20 } : undefined,
       }
       if (command === 'format') {
+        if (options.toolbarUnavailable) return { ok: false, code: 'CONTROL_NOT_FOUND', message: 'Main toolbar bold: expected one exact control, found 0' }
         const block = selectedParagraph()
         const bold = Boolean(block?.runs.some(run => positions(block.text, state.findValue).length && run.bold))
         return { ok: true, bold }
@@ -493,19 +547,64 @@ test('Docs table structural verification preserves existing cells and detects co
   assert.equal(verifyDocsTableStructure(baseline, inserted, 1, { action: 'insert_rows', row: 1, position: 'after', count: 1 }).code, 'DOCS_TABLE_COLLATERAL')
 })
 
-test('Docs table executor accepts the provider envelope, creates a native table, and restores the clipboard', async () => {
+test('Docs table grid probe divides an expanded highlight back into unit cells', () => {
+  const rect = (left, top, width, height) => ({ left, top, width, height })
+  const picker = {
+    isConnected: true,
+    getBoundingClientRect: () => rect(485, 153, 206, 113),
+    querySelector(selector) {
+      if (selector === '.goog-dimension-picker-unhighlighted') return { getBoundingClientRect: () => rect(489.125, 157, 198, 90) }
+      if (selector === '.goog-dimension-picker-highlighted') return { getBoundingClientRect: () => rect(489.125, 157, 72, 54) }
+      if (selector === '.goog-dimension-picker-status') return { textContent: '‪4 x 3‬' }
+      return null
+    },
+  }
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document')
+  globalThis.document = { querySelectorAll: selector => selector === '.goog-dimension-picker' ? [picker] : [] }
+  try {
+    const state = docsPageProbe('tableCreateGrid', { rows: 3, columns: 4 })
+    assert.deepEqual(state, {
+      ok: true,
+      open: true,
+      rows: 3,
+      columns: 4,
+      maxRows: 5,
+      maxColumns: 11,
+      within: true,
+      point: { x: 552, y: 202 },
+    })
+    const revived = new Function(`return (${docsPageProbe.toString()})`)()
+    assert.deepEqual(revived('tableCreateGrid', { rows: 3, columns: 4 }), state)
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'document', previous)
+    else delete globalThis.document
+  }
+})
+
+test('Docs table executor creates through the native grid without touching the clipboard', async () => {
   const fake = fakeDocs()
   const values = [['A', 'B', 'C', 'D'], ['E', 'F', 'G', 'H'], ['I', 'J', 'K', 'L']]
   const result = await executeOperation('docs', { action: 'table', tableAction: 'create', rows: 3, columns: 4, values }, {}, fake.io)
-  assert.equal(result.docs.status, 'completed')
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
   assert.equal(result.docs.tableAction, 'create')
   assert.equal(result.docs.verifiedCount, 12)
   assert.equal(result.view, 'none')
-  assert.equal(fake.state.restored, 1)
+  assert.equal(fake.state.restored, 0)
+  assert.equal(fake.state.clipboardHtml, undefined)
   assert.deepEqual(result.tables[0].cells.map(row => row.map(item => item.value)), values)
   assert.equal(fake.state.blocks.filter(block => block.kind === 'table').length, 1)
   assert.equal(fake.state.blocks[0].kind, 'para')
   assert.equal(fake.state.blocks[1].kind, 'table')
+})
+
+test('Docs table creation retains clipboard paste for dimensions beyond the visible native grid', async () => {
+  const fake = fakeDocs()
+  const values = Array.from({ length: 6 }, (_, index) => [`row ${index + 1}`])
+  const result = await docsTable({}, { action: 'create', rows: 6, columns: 1, values }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(fake.state.restored, 1)
+  assert.ok(fake.state.clipboardHtml)
+  assert.deepEqual(result.tables[0].cells.map(row => row.map(item => item.value)), values)
 })
 
 test('Docs table write replaces duplicate and empty cells with per-cell export verification', async () => {
@@ -563,6 +662,29 @@ test('Docs table formats a header row without changing data rows', async () => {
   assert.ok(actual.rows[1].every(item => item.paragraphs[0].runs.every(run => !run.bold)))
 })
 
+test('Docs table formatting uses exact baseline toggle evidence when the toolbar is unavailable', async () => {
+  const initial = [table([['H1', 'H2'], ['D1', 'D2']])]
+  const plans = planDocsFormatEdits(initial, [{ text: 'H1', bold: true }])
+  assert.deepEqual(docsFormatToggleEvidence(initial, plans[0]), { bold: false, italic: false, underline: false })
+  const fake = fakeDocs(initial, { toolbarUnavailable: true })
+  const result = await docsTable({}, { action: 'format', edits: [{ row: 1, bold: true }] }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  const actual = selectDocsTable(fake.state.blocks)
+  assert.ok(actual.rows[0].every(item => item.paragraphs[0].runs.every(run => run.bold)))
+  assert.ok(actual.rows[1].every(item => item.paragraphs[0].runs.every(run => !run.bold)))
+})
+
+test('Docs table already-applied formatting reports baseline export evidence without mutating', async () => {
+  const initial = [table([['H1', 'H2'], ['D1', 'D2']])]
+  for (const target of initial[0].rows[0]) for (const run of target.paragraphs[0].runs) run.bold = true
+  const fake = fakeDocs(initial, { toolbarUnavailable: true })
+  const result = await docsTable({}, { action: 'format', edits: [{ row: 1, bold: true }] }, fake.io)
+  assert.equal(result.docs.status, 'already_applied', JSON.stringify(result.docs))
+  assert.equal(result.docs.verifiedBy, 'baseline-export')
+  assert.equal(result.docs.verifiedCount, 2)
+  assert.equal(result.docs.alreadyAppliedCount, 2)
+})
+
 test('Docs table formatting waits for document focus before trusting the selected cell toolbar', async () => {
   const fake = fakeDocs([table([['H1', 'H2', 'H3'], ['D1', 'D2', 'D3']])])
   const runInTab = fake.io.runInTab
@@ -593,6 +715,8 @@ test('Docs table applies exact cell backgrounds without changing text highlights
   assert.deepEqual(actual.rows.map(row => row.map(item => item.background)), [['#cccccc', '#cccccc', '#cccccc'], ['none', 'none', 'none']])
   assert.ok(actual.rows.flat().every(item => item.paragraphs.flatMap(paragraph => paragraph.runs).every(run => run.highlight === 'none')))
   assert.equal(result.tables[0].cells[0][0].background, '#cccccc')
+  assert.equal(fake.state.clicks.filter(x => x === 16).length, 1)
+  assert.equal(fake.state.exports, 2)
 })
 
 test('Docs table applies an exact visible background preset without opening the custom dialog', async () => {
@@ -601,9 +725,10 @@ test('Docs table applies an exact visible background preset without opening the 
   assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
   assert.equal(result.docs.verifiedCount, 3)
   assert.deepEqual(selectDocsTable(fake.state.blocks).rows.map(row => row.map(item => item.background)), [['#d9d9d9', '#d9d9d9', '#d9d9d9'], ['none', 'none', 'none']])
-  assert.equal(fake.state.clicks.filter(x => x === 63).length, 3)
+  assert.equal(fake.state.clicks.filter(x => x === 63).length, 1)
   assert.equal(fake.state.clicks.includes(12), false)
   assert.equal(fake.state.clicks.includes(16), false)
+  assert.equal(fake.state.exports, 2)
 })
 
 test('Docs table waits for the reflowing palette to settle before clicking the exact preset', async () => {
@@ -614,8 +739,33 @@ test('Docs table waits for the reflowing palette to settle before clicking the e
   const result = await docsTable({}, { action: 'format', edits: [{ row: 1, cell_background: '#D9D9D9' }] }, fake.io)
   assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
   assert.deepEqual(selectDocsTable(fake.state.blocks).rows.map(row => row.map(item => item.background)), [['#d9d9d9', '#d9d9d9'], ['none', 'none']])
-  assert.equal(fake.state.clicks.filter(x => x === 63).length, 2)
+  assert.equal(fake.state.clicks.filter(x => x === 63).length, 1)
   assert.equal(fake.state.clicks.some(x => x >= 100), false)
+  assert.equal(fake.state.exports, 2)
+})
+
+test('Docs table batches whole-table backgrounds once per row', async () => {
+  const fake = fakeDocs([table([['A1', 'A2', 'A3'], ['B1', 'B2', 'B3'], ['C1', 'C2', 'C3']])], { backgroundPresetOnly: true })
+  const result = await docsTable({}, { action: 'format', edits: [{ cell_background: '#D9D9D9' }] }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(result.docs.verifiedCount, 9)
+  assert.equal(result.docs.appliedCount, 9)
+  assert.equal(fake.state.clicks.filter(x => x === 63).length, 3)
+  assert.equal(fake.state.exports, 4)
+  assert.ok(selectDocsTable(fake.state.blocks).rows.every(row => row.every(item => item.background === '#d9d9d9')))
+})
+
+test('Docs table overlapping background regions fail during planning with a scoped correction', async () => {
+  const fake = fakeDocs([table([['H1', 'H2'], ['D1', 'D2']])], { backgroundPresetOnly: true })
+  await assert.rejects(docsTable({}, { action: 'format', edits: [{ cell_background: '#d9d9d9' }, { cell_background: '#d9d9d9' }] }, fake.io), error => {
+    assert.equal(error.code, 'DOCS_TABLE_DUPLICATE_TARGET')
+    assert.match(error.message, /use one edit per region/)
+    assert.match(error.message, /planning failed before any background mutation/)
+    return true
+  })
+  assert.equal(fake.state.exports, 1)
+  assert.equal(fake.state.clicks.includes(63), false)
+  assert.ok(selectDocsTable(fake.state.blocks).rows.every(row => row.every(item => item.background === 'none')))
 })
 
 test('Docs table fails closed when the palette never settles on a stable point', async () => {
@@ -644,8 +794,13 @@ test('Docs table cell-background verification detects wrong values and collatera
   final[0].rows[0][0].background = '#cccccc'
   assert.equal(verifyDocsTableCellBackground(baseline, final, 1, { row: 1, column: 1, value: '#cccccc' }).ok, true)
   assert.equal(verifyDocsTableCellBackground(baseline, final, 1, { row: 1, column: 1, value: '#ffff00' }).code, 'DOCS_TABLE_VERIFY_FAILED')
+  const edits = [{ row: 1, column: 1, value: '#cccccc' }, { row: 1, column: 2, value: '#cccccc' }]
+  assert.equal(verifyDocsTableCellBackgroundBatch(baseline, final, 1, edits).code, 'DOCS_TABLE_VERIFY_FAILED')
+  final[0].rows[0][1].background = '#cccccc'
+  assert.equal(verifyDocsTableCellBackgroundBatch(baseline, final, 1, edits).ok, true)
   final[0].rows[1][1].background = '#ff0000'
   assert.equal(verifyDocsTableCellBackground(baseline, final, 1, { row: 1, column: 1, value: '#cccccc' }).code, 'DOCS_TABLE_COLLATERAL')
+  assert.equal(verifyDocsTableCellBackgroundBatch(baseline, final, 1, edits).code, 'DOCS_TABLE_COLLATERAL')
 })
 
 test('Docs table inserts and deletes rows and columns through exact native commands', async () => {

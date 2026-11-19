@@ -243,7 +243,30 @@ export function fileInputProbe(request) {
     return { ok: true }
   }
   let element
-  if (request.mode === 'label') {
+  const exact = list => Array.isArray(list) && list.length === 1 && list[0].name === request.expectedName && list[0].size === request.expectedSize
+  if (request.mode === 'verify') {
+    // Find the assigned input by its token, not by position: a page that
+    // inserts, removes, or swaps file inputs shifts the positions.
+    const captured = globalThis.__crazyagentUploadCaptures?.get(request.token)
+    element = allInputs().find(candidate => candidate.getAttribute('data-crazyagent-upload') === request.token)
+      ?? (captured?.element?.isConnected === true ? captured.element : undefined)
+    if (!element) {
+      const atChange = captured?.capture.files
+      // The page removed the assigned input after its change event carried
+      // exactly the requested file: upload widgets (Gmail compose among them)
+      // take the file in their change handler and swap in a fresh input.
+      if (captured !== undefined && exact(atChange)) {
+        return { ok: true, files: atChange, replacedByPage: true, ...describe(captured.element, request.localIndex) }
+      }
+      return {
+        ok: false,
+        code: 'UPLOAD_STALE',
+        message: Array.isArray(atChange) && atChange.length > 0
+          ? `The page replaced the file input after a change event that did not carry exactly ${JSON.stringify(request.expectedName)} (${request.expectedSize} bytes). Assignment was attempted; inspect the page before any retry.`
+          : 'The page removed the file input before any change event carried the file. Assignment was attempted; inspect the page before any retry.',
+      }
+    }
+  } else if (request.mode === 'label') {
     const state = globalThis.__crazyagent
     const labelled = state?.byId?.get(request.label)
     if (!labelled) return { ok: false, code: 'UNKNOWN_LABEL', message: `Label ${request.label} is not in the current view.` }
@@ -255,13 +278,9 @@ export function fileInputProbe(request) {
   } else {
     element = allInputs()[request.localIndex]
     if (!element) return { ok: false, code: 'UPLOAD_STALE', message: 'The selected file input no longer exists; inspect current file inputs before retrying.' }
-    if (request.mode === 'verify' && element.getAttribute('data-crazyagent-upload') !== request.token) {
-      return { ok: false, code: 'UPLOAD_STALE', message: 'The selected file input changed before verification; do not retry blindly.' }
-    }
   }
   if (request.mode === 'verify') {
     const files = [...element.files ?? []].map(file => ({ name: file.name, size: file.size, type: file.type }))
-    const exact = list => Array.isArray(list) && list.length === 1 && list[0].name === request.expectedName && list[0].size === request.expectedSize
     if (!exact(files)) {
       const atChange = globalThis.__crazyagentUploadCaptures?.get(request.token)?.capture.files
       // The input held exactly the requested file when change fired and the page
@@ -460,8 +479,9 @@ export async function executeUpload(args, io) {
         filename: verified.files[0].name,
         size: verified.files[0].size,
         mime: verified.files[0].type,
-        verifiedBy: verified.clearedByPage === true ? 'change-event-capture' : 'file-input-readback',
+        verifiedBy: verified.clearedByPage === true || verified.replacedByPage === true ? 'change-event-capture' : 'file-input-readback',
         ...(verified.clearedByPage === true ? { inputClearedByPage: true } : {}),
+        ...(verified.replacedByPage === true ? { inputReplacedByPage: true } : {}),
         input: {
           index: target.input,
           name: prepared.name,

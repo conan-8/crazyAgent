@@ -71,6 +71,7 @@ const SUITES = [
   { name: 'expect', script: 'edge-expect-e2e.mjs', class: 'attach', timeoutS: 180 },
   { name: 'table', script: 'edge-table-e2e.mjs', class: 'attach', timeoutS: 180 },
   { name: 'work', script: 'edge-work-e2e.mjs', class: 'attach', timeoutS: 240 },
+  { name: 'chat', script: 'edge-chat-e2e.mjs', class: 'attach', timeoutS: 180 },
   { name: 'dialog', script: 'edge-dialog-e2e.mjs', class: 'attach', timeoutS: 180 },
   { name: 'files', script: 'edge-files-e2e.mjs', class: 'attach', timeoutS: 240 },
   { name: 'canvas', script: 'edge-canvas-e2e.mjs', class: 'attach', timeoutS: 240, fixedFixturePort: 17872, needsTab: 'canvas.html' },

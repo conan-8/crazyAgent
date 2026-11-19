@@ -130,7 +130,7 @@ answer phase is synthesized: the tampered state counts as acting before the
 answer, the solved state after it, and the untouched state has no answer at
 all. Scenario files starting with `_` are shared helpers, not scenarios.
 
-## Current scenarios (11 A1 seeds + 2 marathon M0 scenarios + 2 M2 carry-over scenarios + 3 confirmation gates)
+## Current scenarios
 
 | Scenario | Fixture | Passes only if |
 |---|---|---|
@@ -143,6 +143,7 @@ all. Scenario files starting with `_` are shared helpers, not scenarios.
 | `drag-reorder` | drag.html | pointer order becomes Beta, Gamma, Alpha; other slider/selection state untouched |
 | `slider-value` | drag.html | native range value and rendered output both 75; custom slider/order untouched |
 | `canvas-click` | canvas.html | exactly one trusted canvas pointerdown (synthetic input does not count) |
+| `chat-attach-send` | chat.html | exactly one message with `Which option?` and three attachments is sent; exactly one image upload and zero wrong-target viewer openings; scripted reply visible |
 | `download-upload` | files.html | a Downloads file, the Visible input, and exactly one multipart upload all hold the payload bytes; other inputs empty |
 | `frame-canvas-slider` | frame-canvas.html | inside the cross-site frame, the canvas Length slider is 70 by trusted drag; Mass untouched |
 | `marathon-long` | marathon-01.html | all 12 permit stations recorded exactly once on the fixture server (`POST /marathon/step`), in order, with the right word + chained receipt; the tracked page ends on station 12's completion view. A re-recorded station is a redo (partial), which is how the M2 continuation check detects re-done steps across turns |

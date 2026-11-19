@@ -5,6 +5,7 @@ import {
   makeImageClipboardEntry,
   normalizeClipboardEntry,
 } from '../sidepanel/clipboard.js'
+import { imagePasteDeliveryResult } from '../sidepanel/browser.js'
 
 const image = { data: 'iVBORw==', mimeType: 'image/png', width: 2, height: 3, bytes: 4 }
 
@@ -26,4 +27,33 @@ test('image clipboard normalization rejects corrupt, oversized, and non-PNG data
   assert.equal(normalizeClipboardEntry({ kind: 'image', image: { ...image, bytes: CLIPBOARD_IMAGE_MAX_BYTES + 1 } }), undefined)
   assert.equal(normalizeClipboardEntry({ kind: 'image', image: { ...image, data: `A${'A'.repeat(CLIPBOARD_IMAGE_MAX_BYTES * 2)}` } }), undefined)
   assert.throws(() => makeImageClipboardEntry({ image: { ...image, height: -1 } }), error => error.code === 'BAD_CLIPBOARD_IMAGE')
+})
+
+test('image paste delivery distinguishes observed insertion from paste and drop handling', () => {
+  const target = { tag: 'div', editable: true, body: false }
+  assert.deepEqual(imagePasteDeliveryResult({
+    pasteHandled: false,
+    mutationObserved: true,
+    dropDispatched: false,
+    dropHandled: false,
+    target,
+  }), {
+    ok: true,
+    handled: true,
+    pasteHandled: false,
+    dropHandled: false,
+    dropDispatched: false,
+    handledBy: 'page-mutation',
+    events: ['paste'],
+    target,
+  })
+  const dropped = imagePasteDeliveryResult({
+    pasteHandled: false,
+    mutationObserved: false,
+    dropDispatched: true,
+    dropHandled: true,
+    target,
+  })
+  assert.equal(dropped.handledBy, 'drop')
+  assert.deepEqual(dropped.events, ['paste', 'drop'])
 })

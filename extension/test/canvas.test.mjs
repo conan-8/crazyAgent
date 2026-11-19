@@ -12,6 +12,7 @@ import {
   findCoordinateBasisMismatch,
   formatMissingLabelMessage,
   inspectLabelAssignment,
+  imageInvalidationMessage,
   mapClickPoints,
   parseClickAtArgs,
   resolveCanvasImageBasis,
@@ -129,7 +130,7 @@ test('deriveTypeVerdict detects a same-length contenteditable edit by its previe
   assert.equal(verdict.canvasEditor, false)
 })
 
-test('deriveTypeVerdict never treats aggregate page text as canvas delivery', () => {
+test('deriveTypeVerdict identifies non-editable focus and never treats aggregate page text as delivery', () => {
   const body = { tag: 'body', type: '', readable: false, measurable: false, chars: 0, preview: '', hasFocus: true }
   const before = { textLen: 5_000, mutations: 0, focus: body }
   const after = { textLen: 5_749, mutations: 14, focus: body }
@@ -137,7 +138,8 @@ test('deriveTypeVerdict never treats aggregate page text as canvas delivery', ()
     changed: null,
     charsAdded: null,
     measured: 'none',
-    canvasEditor: true,
+    canvasEditor: false,
+    focusEditable: false,
     fieldChanged: null,
     pageChanged: true,
     targetKind: 'body',
@@ -232,6 +234,13 @@ test('deriveTypeVerdict is null when a probe is missing', () => {
 
 /** @param {string} text @param {number} x @param {number} y */
 const control = (text, x, y) => ({ tag: 'button', text, x, y, w: 100, h: 24 })
+
+test('imageInvalidationMessage names the stale view and layout movement', () => {
+  const message = imageInvalidationMessage({ viewId: 42, reason: 'layout', movedCount: 3, maxDx: 0, maxDy: 75 })
+  assert.match(message, /View #42 went stale: layout changed after your last action \(3 control\(s\) moved up to 75px\)/u)
+  assert.match(message, /Take a fresh view and measure the coordinates again/u)
+  assert.equal(imageInvalidationMessage(undefined), 'Take a screenshot first so image coordinates can be mapped to the page.')
+})
 
 test('compareLayoutFingerprints reports no shift for an identical layout', () => {
   const layout = [control('Alpha', 20, 100), control('Beta', 20, 140)]

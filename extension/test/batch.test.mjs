@@ -38,6 +38,7 @@ function fakeBrowser(t, options = {}) {
     captures: 0,
     scriptCalls: [],
     conditionResults: [...(options.conditionResults ?? [])],
+    conditionDefault: options.conditionDefault ?? true,
   }
   globalThis.createImageBitmap = async () => ({ width: 640, height: 360, close: () => {} })
   globalThis.chrome = {
@@ -58,7 +59,7 @@ function fakeBrowser(t, options = {}) {
         const name = request.func?.name
         fake.scriptCalls.push({ name, args: request.args })
         if (name === 'waitForConditionsPage') {
-          const found = fake.conditionResults.length > 0 ? fake.conditionResults.shift() : true
+          const found = fake.conditionResults.length > 0 ? fake.conditionResults.shift() : fake.conditionDefault
           return [{ result: { found, elapsedMs: 1 } }]
         }
         if (name === 'syntheticKeyPage') {
@@ -113,7 +114,7 @@ test('batch guards run around dispatch with successful outcomes and one final vi
 })
 
 test('batch precondition timeout prevents dispatch and stops with stop_on_error false', async t => {
-  const fake = fakeBrowser(t, { conditionResults: [false] })
+  const fake = fakeBrowser(t, { conditionResults: [false], conditionDefault: false })
   const result = await execute('batch', {
     view: 'none',
     stop_on_error: false,
@@ -132,7 +133,7 @@ test('batch precondition timeout prevents dispatch and stops with stop_on_error 
 })
 
 test('batch postcondition timeout reports mutation risk and stops with stop_on_error false', async t => {
-  const fake = fakeBrowser(t, { conditionResults: [false] })
+  const fake = fakeBrowser(t, { conditionResults: [false], conditionDefault: false })
   const result = await execute('batch', {
     view: 'none',
     stop_on_error: false,

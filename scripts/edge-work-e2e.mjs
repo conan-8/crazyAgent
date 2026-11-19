@@ -342,6 +342,33 @@ assert.ok(navigateBack.image && navigateBack.image.width > 0, 'history back retu
 assert.match(navigateBack.text, /Work fixture/, 'form content is visible after history back')
 console.log('PASS navigate history back — fresh view of the form')
 
+const protectedNavigation = await evaluate(`(async () => { ${prefix}
+  // A separate new-tab page, so the suite's own tab is never navigated in place
+  // away from a browser page (Edge can keep refusing trusted input there).
+  const browserPage = await chrome.tabs.create({ url: 'edge://newtab', active: true })
+  await new Promise(resolve => setTimeout(resolve, 700))
+  const otherBefore = (await chrome.tabs.query({})).filter(tab => tab.id !== browserPage.id).map(tab => ({ id: tab.id, url: tab.url }))
+  const result = await mod.execute('navigate', { url: '${BASE}/second.html?from=protected' }, settings)
+  const all = await chrome.tabs.query({})
+  const otherAfter = all.filter(tab => tab.id !== browserPage.id && tab.id !== result.tab.id).map(tab => ({ id: tab.id, url: tab.url }))
+  const original = all.find(tab => tab.id === browserPage.id)
+  const opened = all.find(tab => tab.id === result.tab.id)
+  for (const id of new Set([browserPage.id, result.tab.id])) if (id !== tabId) await chrome.tabs.remove(id).catch(() => {})
+  await chrome.tabs.update(tabId, { active: true })
+  await new Promise(resolve => setTimeout(resolve, 300))
+  return { navigated: result.navigated, browserPageId: browserPage.id, tabId: result.tab.id, tabUrl: result.tab.url, openedActive: opened?.active === true, originalUrl: original?.pendingUrl ?? original?.url, otherBefore, otherAfter }
+})()`)
+assert.match(protectedNavigation.navigated.fromUrl, /^edge:\/\//u)
+assert.equal(protectedNavigation.navigated.toUrl, `${BASE}/second.html?from=protected`)
+assert.equal(protectedNavigation.navigated.newTab, true, 'a browser page is never navigated in place')
+assert.equal(protectedNavigation.navigated.newTabReason, 'browser-page')
+assert.notEqual(protectedNavigation.tabId, protectedNavigation.browserPageId)
+assert.equal(protectedNavigation.tabUrl, `${BASE}/second.html?from=protected`)
+assert.equal(protectedNavigation.openedActive, true, 'the destination tab is the active one')
+assert.match(protectedNavigation.originalUrl, /^edge:\/\//u, 'the browser page stayed as it was')
+assert.deepEqual(protectedNavigation.otherAfter, protectedNavigation.otherBefore, 'no other tab was navigated')
+console.log('PASS navigate from a protected Edge page opens the destination in a new tab and leaves every other tab unchanged')
+
 const placesMarker = `crazyAgent Places ${Date.now()}`
 const places = await evaluate(`(async () => { ${prefix}
   const bookmark = await chrome.bookmarks.create({ title: '${placesMarker}', url: '${BASE}/second.html?from=bookmark' })
@@ -404,7 +431,23 @@ assert.ok(waitMissing.waited.elapsedMs >= 1200, `wait_for honoured the timeout (
 assert.ok(waitMissing.image && waitMissing.image.width > 0, 'a timed-out wait still returns a fresh view')
 console.log(`PASS missing text times out — ${waitMissing.waited.elapsedMs}ms`)
 
+const redirectWait = await evaluate(`(async () => { ${prefix}
+  await mod.execute('navigate', { url: '${BASE}/redirect.html' }, settings)
+  const result = await mod.execute('wait_for', { idle: true, timeout_ms: 8000, view: 'none' }, settings)
+  return { waited: result.waited, url: result.tab.url, text: await pageText() }
+})()`)
+assert.equal(redirectWait.waited.found, true, JSON.stringify(redirectWait.waited))
+assert.equal(redirectWait.waited.timedOut, false)
+assert.match(redirectWait.waited.navigatedDuringWait?.from ?? '', /redirect\.html/u)
+assert.match(redirectWait.waited.navigatedDuringWait?.to ?? '', /second\.html\?from=redirect/u)
+assert.ok(redirectWait.waited.elapsedMs <= 8500, `redirect recovery stayed within the wait budget plus overhead (${redirectWait.waited.elapsedMs}ms)`)
+assert.match(redirectWait.url, /second\.html\?from=redirect/u)
+assert.match(redirectWait.text, /SECOND-MARKER/u)
+console.log(`PASS wait_for idle survives a redirect — ${redirectWait.waited.elapsedMs}ms, second document found`)
+
 const labelLess = await evaluate(`(async () => { ${prefix}
+  await chrome.tabs.update(tabId, { url: '${BASE}/form.html' })
+  await new Promise(resolve => setTimeout(resolve, 700))
   const scrolled = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => {
@@ -737,9 +780,11 @@ const focusFallback = await evaluate(`(async () => { ${prefix}
     target: { tabId },
     func: () => document.getElementById('comment-edit')?.innerText ?? '',
   }))[0].result
-  return { labelFound: Boolean(card), typed: result.typed, changed: result.changed, value, view: result.view }
+  const directLabelFound = snap.labels.some(item => item.tag === 'div' && item.role === 'textbox' && item.text === 'Comment text')
+  return { labelFound: Boolean(card), directLabelFound, typed: result.typed, changed: result.changed, value, view: result.view }
 })()`)
 assert.equal(focusFallback.labelFound, true, 'comment card label is visible after scrolling')
+assert.equal(focusFallback.directLabelFound, true, 'comment contenteditable is directly labelled after scrolling into view')
 assert.equal(focusFallback.typed.method, 'trusted-focus', 'non-editable label falls back to focused trusted typing')
 assert.ok(focusFallback.typed.afterChars > 0, 'fallback typing reports inserted characters')
 assert.match(focusFallback.value, /focus fallback text/, 'text landed in the editable descendant')

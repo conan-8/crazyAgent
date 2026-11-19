@@ -180,6 +180,17 @@ export function planDocsFormatEdits(blocks, edits) {
   return plans
 }
 
+export function docsFormatToggleEvidence(blocks, plan) {
+  const paragraph = comparableParagraphs(blocks)[plan?.paragraphIndex]
+  if (!paragraph || !Number.isInteger(plan.start) || !Number.isInteger(plan.end)) return {}
+  const selected = characterMarks(paragraph, plan.paragraphIndex, 'baseline').slice(plan.start, plan.end)
+  if (selected.length === 0) return {}
+  return Object.fromEntries(['bold', 'italic', 'underline'].flatMap(attribute => {
+    const value = selected[0][attribute]
+    return selected.every(marks => marks[attribute] === value) ? [[attribute, value]] : []
+  }))
+}
+
 function resultsFor(edits, attemptedCount, failedIndex) {
   return edits.map((_, index) => ({
     index,

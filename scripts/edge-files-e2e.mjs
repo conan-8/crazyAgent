@@ -310,6 +310,79 @@ try {
   assert.equal(consumed.dropped.mutationPossible, true)
   console.log('PASS an input the page empties after taking the file verifies by change capture; an unproven empty input still fails')
 
+  // Gmail compose takes the file in its change handler, removes that input, and
+  // appends a fresh one after the other inputs, so positions shift. The change
+  // capture proves what the page took; a swap before any change still fails.
+  const swapped = await evaluate(`(async () => { ${prefix}
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => {
+      window.__swapTaken = []
+      const make = () => {
+        const input = document.createElement('input')
+        input.type = 'file'
+        input.className = 'swapping-file'
+        input.setAttribute('aria-label', 'Swapping attachment')
+        input.addEventListener('change', () => {
+          for (const file of input.files) window.__swapTaken.push({ name: file.name, size: file.size })
+          input.remove()
+          document.body.append(make())
+        })
+        return input
+      }
+      const holder = document.createElement('div')
+      holder.id = 'swap-holder'
+      holder.append(make())
+      const neighbour = document.createElement('input')
+      neighbour.type = 'file'
+      neighbour.id = 'swap-neighbour'
+      neighbour.setAttribute('aria-label', 'Neighbour attachment')
+      holder.append(neighbour)
+      document.body.append(holder)
+    } })
+    const result = await mod.execute('upload', { filename: ${JSON.stringify(oddName)}, path: ${JSON.stringify(oddPath)}, root, size: ${payload.length}, name: 'Swapping attachment', view: 'none' }, settings)
+    const page = (await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => ({
+      taken: window.__swapTaken,
+      fresh: document.querySelectorAll('.swapping-file').length,
+      freshFiles: document.querySelector('.swapping-file')?.files.length ?? -1,
+      neighbourFiles: document.getElementById('swap-neighbour').files.length,
+      marked: document.querySelectorAll('[data-crazyagent-upload]').length,
+    }) }))[0].result
+    // A page that swaps the input before any change event reaches our capture.
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => {
+      for (const input of document.querySelectorAll('.swapping-file')) input.remove()
+      const vanishing = document.createElement('input')
+      vanishing.type = 'file'
+      vanishing.id = 'vanishing-file'
+      vanishing.setAttribute('aria-label', 'Vanishing attachment')
+      vanishing.addEventListener('change', event => {
+        event.stopImmediatePropagation()
+        vanishing.remove()
+        const fresh = document.createElement('input')
+        fresh.type = 'file'
+        fresh.id = 'vanishing-fresh'
+        document.body.append(fresh)
+      }, { capture: true })
+      document.getElementById('swap-holder').prepend(vanishing)
+    } })
+    let vanished
+    try {
+      await mod.execute('upload', { filename: ${JSON.stringify(oddName)}, path: ${JSON.stringify(oddPath)}, root, size: ${payload.length}, name: 'Vanishing attachment', view: 'none' }, settings)
+      vanished = { code: 'NO_ERROR' }
+    } catch (error) { vanished = { code: error.code, message: error.message, mutationPossible: error.mutationPossible } }
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => {
+      document.getElementById('swap-holder')?.remove()
+      document.getElementById('vanishing-fresh')?.remove()
+    } })
+    return { upload: result.upload, page, vanished }
+  })()`)
+  assert.equal(swapped.upload.status, 'attached')
+  assert.equal(swapped.upload.verifiedBy, 'change-event-capture')
+  assert.equal(swapped.upload.inputReplacedByPage, true)
+  assert.deepEqual(swapped.page, { taken: [{ name: oddName, size: payload.length }], fresh: 1, freshFiles: 0, neighbourFiles: 0, marked: 0 }, 'the page independently took the exact file once; no other input received it')
+  assert.equal(swapped.vanished.code, 'UPLOAD_STALE', 'an input swapped before any change event carried the file still fails')
+  assert.match(swapped.vanished.message, /removed the file input before any change event carried the file/u)
+  assert.equal(swapped.vanished.mutationPossible, true)
+  console.log('PASS an input the page swaps after taking the file verifies by change capture; a swap before change still fails')
+
   // B5: a label that is not a file input names the real inputs.
   const notInput = await evaluate(`(async () => { ${prefix}
     const view = await mod.execute('snapshot', {}, settings)
