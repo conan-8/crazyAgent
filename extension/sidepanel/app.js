@@ -7,7 +7,7 @@
  */
 
 import { DEFAULT_SETTINGS, execute, testCapture, imageDataUrl, beginDebuggerRun, endDebuggerRun, cleanImageFor, displayImageField } from './browser.js'
-import { foreignPrompt, helpNotice, confirmNotice, isBusyRefusal } from './remote-turn.js'
+import { foreignPrompt, helpNotice, confirmNotice, isBusyRefusal, runningTurnPrompt } from './remote-turn.js'
 import { textStreamDeltaAction, hasLeakedReplyRow, removeLeakedReplyRows } from './leaked-markup.js'
 import { ClientLogger } from './logger.js'
 import { renderMarkdown } from './markdown.js'
@@ -15,7 +15,8 @@ import { createPlanPanelModel, renderPlanPanel } from './plan-panel.js'
 import { watchNotice, renderWatchRow, watchIsActionable } from './watch-row.js'
 import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protocol.js'
 import { matchSlashCommands, nextSlashIndex, resolveSlashCommand, slashQuery } from './slash.js'
-import { completedUpdateNotice, updateNotice } from './update-notice.js'
+import { completedUpdateNotice, settingsUpdateDetails, updateNotice } from './update-notice.js'
+import { formatCompactTokenCount, lifetimeUsageSegments, normalizeLifetimeUsage } from './usage-meter.js'
 import { browserErrorSummary, browserResultSummary, browserRunningText, chatErrorSummary, reasoningActivityText, toolResultSummary, toolRunningText } from './activity-presenter.js'
 
 const SETTINGS_KEY = 'crazyagent.settings'
@@ -80,6 +81,9 @@ let lastAnswerText = ''
 let sessionId = ''
 let bannerAction = () => {}
 let updateNoticePrefs = { completed: '', dismissed: '' }
+let companionVersion = ''
+let updateStatus = null
+let lifetimeUsage = normalizeLifetimeUsage(null)
 let statusKind = 'offline'
 let statusLabel = 'Connecting…'
 let toastTimer = null
@@ -166,6 +170,7 @@ const els = {
   backHome: $('back-home'),
   settings: $('settings'),
   settingsModal: $('settings-modal'),
+  settingsBody: document.querySelector('#settings-modal .settings-body'),
   settingsClose: $('settings-close'),
   settingUrl: $('setting-url'),
   settingToken: $('setting-token'),
@@ -179,10 +184,24 @@ const els = {
   settingRememberKey: $('setting-remember-key'),
   settingEffort: $('setting-effort'),
   effortStatus: $('effort-status'),
+  effortHint: $('effort-hint'),
   settingWidth: $('setting-width'),
   settingQuality: $('setting-quality'),
   settingAutoCapture: $('setting-autocapture'),
   settingConfirmIrreversible: $('setting-confirm-irreversible'),
+  settingsVersion: $('settings-version'),
+  settingsUpdated: $('settings-updated'),
+  usageCard: $('usage-card'),
+  settingsUsageTurns: $('settings-usage-turns'),
+  settingsUsageTotal: $('settings-usage-total'),
+  settingsUsageBar: $('settings-usage-bar'),
+  settingsUsageInput: $('settings-usage-input'),
+  settingsUsageCacheRead: $('settings-usage-cache-read'),
+  settingsUsageCacheWrite: $('settings-usage-cache-write'),
+  settingsUsageOutput: $('settings-usage-output'),
+  settingsUsageReasoningRow: $('settings-usage-reasoning-row'),
+  settingsUsageReasoning: $('settings-usage-reasoning'),
+  settingsUsageSince: $('settings-usage-since'),
   confirmCard: $('confirm-card'),
   confirmAction: $('confirm-card-action'),
   confirmTarget: $('confirm-card-target'),
@@ -305,7 +324,12 @@ function populateSettings() {
 }
 
 function setEffortSelection(value) {
-  settingsDraftEffort = EFFORT_LABELS[value] ? value : 'medium'
+  settingsDraftEffort = EFFORT_LABELS[value] ? value : 'auto'
+  if (els.effortHint) {
+    els.effortHint.textContent = settingsDraftEffort === 'auto'
+      ? 'Low for actions; medium for reading and synthesis'
+      : `Every turn requests ${effortLabel(settingsDraftEffort).toLowerCase()}`
+  }
   for (const button of els.settingEffort.querySelectorAll('[data-effort]')) {
     const selected = button.dataset.effort === settingsDraftEffort
     button.classList.toggle('active', selected)
@@ -337,14 +361,14 @@ function contextWindowBadge(model) {
 
 function renderComposerModel() {
   const model = modelsState.models.find(item => item.id === llmState.model?.id) ?? llmState.model
-  const policy = llmState.reasoningEffort ?? settings.reasoningEffort ?? 'medium'
+  const policy = llmState.reasoningEffort ?? settings.reasoningEffort ?? 'auto'
   const context = contextWindowBadge(model)
   // `med` keeps the footer compact so more of the model name fits; the tooltip
   // still spells out the full effort label.
-  const effortText = model?.reasoning === false ? 'no CoT' : policy === 'auto' ? 'low' : policy === 'medium' ? 'med' : policy
+  const effortText = model?.reasoning === false ? 'no CoT' : policy === 'medium' ? 'med' : policy
   const effortTitle = model?.reasoning === false
     ? 'This model does not support reasoning'
-    : `Reasoning effort: ${policy === 'auto' ? 'Auto (low from the first step)' : effortLabel(policy)}`
+    : `Reasoning effort: ${effortLabel(policy)}`
   const used = Number.isFinite(latestContextTokens) ? Math.max(0, latestContextTokens) : 0
   const ratio = context.tokens > 0 ? used / context.tokens : 0
   const percentage = ratio * 100
@@ -432,7 +456,7 @@ function renderModelMenu() {
         baseUrl: llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL,
         model: model.id,
         remember: true,
-        reasoningEffort: llmState.reasoningEffort ?? settings.reasoningEffort ?? 'medium',
+        reasoningEffort: llmState.reasoningEffort ?? settings.reasoningEffort ?? 'auto',
       })
     })
     els.modelMenuList.appendChild(button)
@@ -973,7 +997,7 @@ function restoreConversation(id) {
 }
 
 const EFFORT_LABELS = {
-  auto: 'Auto (low for every turn)',
+  auto: 'Auto (task-based)',
   off: 'Off',
   low: 'Low',
   medium: 'Medium',
@@ -981,12 +1005,12 @@ const EFFORT_LABELS = {
 }
 
 function effortLabel(value) {
-  return EFFORT_LABELS[value] ?? EFFORT_LABELS.medium
+  return EFFORT_LABELS[value] ?? EFFORT_LABELS.auto
 }
 
 function renderEffortStatus() {
   if (!els.effortStatus) return
-  const policy = llmState.reasoningEffort ?? 'medium'
+  const policy = llmState.reasoningEffort ?? 'auto'
   if (!llmState.model) {
     els.effortStatus.textContent = 'Select a model to configure reasoning.'
     return
@@ -996,7 +1020,7 @@ function renderEffortStatus() {
     return
   }
   els.effortStatus.textContent = policy === 'auto'
-    ? 'Auto: low reasoning from the first model step for every turn.'
+    ? 'Auto: low for action/navigation/reactive turns; medium for inspection/synthesis.'
     : `Every turn requests ${effortLabel(policy).toLowerCase()}.`
 }
 
@@ -1054,7 +1078,7 @@ function renderProviderStatus() {
     kind = 'hint error'
   } else if (selected) {
     text = modelLabel(selected)
-      + (selected.reasoning ? ` · effort ${effortLabel(llmState.reasoningEffort ?? 'medium')}` : ' · no reasoning')
+      + (selected.reasoning ? ` · effort ${effortLabel(llmState.reasoningEffort ?? 'auto')}` : ' · no reasoning')
       + (compatibleCount > 0 ? ` · ${compatibleCount} agent-compatible models loaded` : '')
   } else if (compatibleCount > 0) {
     text = `${compatibleCount} agent-compatible models loaded. Choose one above.`
@@ -1252,14 +1276,72 @@ function syncProviderInputs() {
   renderProviderStatus()
 }
 
+function setUsageMetric(element, value) {
+  element.textContent = formatCompactTokenCount(value)
+  element.title = `${value.toLocaleString('en-US')} tokens`
+}
+
+function renderLifetimeUsage() {
+  const usage = lifetimeUsage
+  const segments = lifetimeUsageSegments(usage)
+  els.usageCard.dataset.state = usage.turns > 0 ? 'active' : 'empty'
+  els.settingsUsageTurns.textContent = `${usage.turns.toLocaleString('en-US')} ${usage.turns === 1 ? 'turn' : 'turns'}`
+  els.settingsUsageTotal.textContent = formatCompactTokenCount(usage.totalTokens)
+  els.settingsUsageTotal.title = `${usage.totalTokens.toLocaleString('en-US')} total agent tokens`
+  setUsageMetric(els.settingsUsageInput, usage.inputTokens)
+  setUsageMetric(els.settingsUsageCacheRead, usage.cacheReadTokens)
+  setUsageMetric(els.settingsUsageCacheWrite, usage.cacheWriteTokens)
+  setUsageMetric(els.settingsUsageOutput, usage.outputTokens)
+  for (const segment of segments) {
+    const element = els.settingsUsageBar.querySelector(`[data-usage-segment="${segment.key}"]`)
+    element.style.width = `${segment.percent}%`
+  }
+  els.settingsUsageBar.setAttribute('aria-label', usage.totalTokens === 0
+    ? 'No agent token usage recorded'
+    : `${usage.totalTokens.toLocaleString('en-US')} total agent tokens. ${segments.map(segment => `${segment.label}: ${segment.value.toLocaleString('en-US')}`).join('. ')}`)
+  els.settingsUsageReasoningRow.classList.toggle('hidden', usage.reasoningTokens === 0)
+  setUsageMetric(els.settingsUsageReasoning, usage.reasoningTokens)
+  if (usage.turns === 0) {
+    els.settingsUsageSince.textContent = 'Your first recorded turn will appear here. Restarts and updates preserve this history.'
+    els.settingsUsageSince.removeAttribute('title')
+  } else {
+    const since = usage.startedAt === null ? null : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(usage.startedAt))
+    els.settingsUsageSince.textContent = `${since === null ? 'Saved on this device' : `Tracking since ${since}`} · watcher tokens are reported separately.`
+    if (usage.updatedAt === null) els.settingsUsageSince.removeAttribute('title')
+    else els.settingsUsageSince.title = `Last recorded turn: ${usage.updatedAt}`
+  }
+}
+
+function applyLifetimeUsage(value) {
+  lifetimeUsage = normalizeLifetimeUsage(value)
+  renderLifetimeUsage()
+}
+
+function renderSettingsAbout() {
+  const manifestVersion = chrome.runtime.getManifest().version
+  const details = settingsUpdateDetails(updateStatus, companionVersion || manifestVersion)
+  els.settingsVersion.textContent = details.version ?? 'Unavailable'
+  if (details.updatedAt === null) {
+    els.settingsUpdated.textContent = 'No completed update recorded'
+    els.settingsUpdated.removeAttribute('title')
+    return
+  }
+  const updatedAt = new Date(details.updatedAt)
+  els.settingsUpdated.textContent = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(updatedAt)
+  els.settingsUpdated.title = `Last successful update: ${details.updatedAt}`
+}
+
 function openSettings() {
+  els.settingsBody.scrollTo({ top: 0, behavior: 'instant' })
   populateSettings()
+  renderSettingsAbout()
+  renderLifetimeUsage()
   els.settingApiKey.value = ''
   els.settingBaseUrl.value = llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL
   els.settingModel.value = llmState.model?.id || settings.modelId || ''
   els.settingRememberKey.checked = true
   els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
-  setEffortSelection(llmState.reasoningEffort ?? 'medium')
+  setEffortSelection(llmState.reasoningEffort ?? 'auto')
   renderProviderStatus()
   els.settingsModal.classList.remove('hidden')
   // Model info leads the panel, so a configured setup opens at the top; a panel
@@ -1373,6 +1455,8 @@ function saveUpdateNoticePrefs() {
 }
 
 function applyUpdateStatus(status) {
+  if (status !== undefined) updateStatus = status
+  renderSettingsAbout()
   const notice = updateNotice(status)
   if (notice && notice.key !== updateNoticePrefs.dismissed) {
     els.updateNoticeText.textContent = notice.text
@@ -2624,7 +2708,7 @@ function turnTokenText(usage) {
 function formatTokenUsage(usage) {
   if (!usage || typeof usage !== 'object') return ''
   const parts = []
-  for (const key of ['inputTokens', 'outputTokens', 'totalTokens', 'cacheReadTokens', 'reasoningTokens']) {
+  for (const key of ['inputTokens', 'outputTokens', 'totalTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens']) {
     if (Number.isFinite(usage[key]) && usage[key] !== 0) {
       parts.push(`${key.replace(/Tokens$/u, '').toLowerCase()} ${usage[key]}`)
     }
@@ -2760,6 +2844,7 @@ function handleFrame(frame) {
       return
     case 'chat.hello':
       dshState = frame.dsh?.state ?? 'unknown'
+      if (typeof frame.companion === 'string') companionVersion = frame.companion
       if (frame.llm && typeof frame.llm === 'object') llmState = { ...llmState, ...frame.llm }
       if (frame.credentials && typeof frame.credentials === 'object') credentialState = { ...credentialState, ...frame.credentials }
       if (frame.settings && typeof frame.settings === 'object') {
@@ -2769,6 +2854,7 @@ function handleFrame(frame) {
       // The hello carries the authoritative switch state (reconnect resync).
       applyMarathonState(frame.marathon)
       applyUpdateStatus(frame.update)
+      applyLifetimeUsage(frame.lifetimeUsage)
       if (llmState.model?.id) {
         settings.modelId = llmState.model.id
         els.sessionInfo.dataset.model = llmState.model.id
@@ -2811,7 +2897,17 @@ function handleFrame(frame) {
         setNewChatDraft(false)
         if (hasConversation()) els.activityEmpty?.classList.add('hidden')
       }
-      if (newChatOnNextConnect) newChat()
+      // A turn already running (this panel reopened mid-turn, or another
+      // client's turn) is shown as it runs: a new chat would only be refused
+      // as busy and leave the panel in an error state.
+      const runningTurn = runningTurnPrompt(frame.turn)
+      if (runningTurn !== null) {
+        newChatOnNextConnect = false
+        if (!busy && !stopping) {
+          logger.log('chat.turn.attached', { origin: runningTurn.origin, turnId: runningTurn.turnId }, 'info')
+          startForeignTurn(runningTurn)
+        }
+      } else if (newChatOnNextConnect) newChat()
       refreshStatus()
       return
     case 'chat.status':
@@ -2861,6 +2957,9 @@ function handleFrame(frame) {
       return
     case 'update.state':
       applyUpdateStatus(frame.update)
+      return
+    case 'usage.updated':
+      applyLifetimeUsage(frame.lifetimeUsage)
       return
     case 'chat.watch':
       handleWatch(frame)
@@ -4286,7 +4385,7 @@ els.settingsSave.addEventListener('click', () => {
   }
   const reconnectNeeded = settings.bridgeUrl !== url || settings.token !== token
   const modelChanged = model !== (llmState.model?.id ?? '') || baseUrl !== (llmState.baseUrl ?? settings.modelBaseUrl)
-  const effortChanged = reasoningEffort !== (llmState.reasoningEffort ?? 'medium')
+  const effortChanged = reasoningEffort !== (llmState.reasoningEffort ?? 'auto')
   const llmUpdate = (modelChanged || effortChanged || apiKey.length > 0)
     ? { baseUrl, model, remember, reasoningEffort, ...(apiKey.length > 0 ? { apiKey } : {}) }
     : null
@@ -4591,7 +4690,7 @@ async function boot() {
   await loadSettings()
   await loadHistory()
   populateSettings()
-  setEffortSelection(settings.reasoningEffort ?? 'medium')
+  setEffortSelection(settings.reasoningEffort ?? 'auto')
   renderComposerModel()
   renderImageChips()
   updateMicButton()

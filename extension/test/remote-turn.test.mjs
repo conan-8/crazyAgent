@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BUSY_REFUSAL_CODES, foreignPrompt, helpNotice, confirmNotice, isBusyRefusal } from '../sidepanel/remote-turn.js'
+import { BUSY_REFUSAL_CODES, foreignPrompt, helpNotice, confirmNotice, isBusyRefusal, runningTurnPrompt } from '../sidepanel/remote-turn.js'
 
 test('a phone prompt becomes a labelled turn with name-only image placeholders', () => {
   assert.deepEqual(foreignPrompt({ type: 'chat.user', turnId: 'turn-1', origin: 'remote', text: 'check the cart', imageCount: 2 }), {
@@ -86,4 +86,21 @@ test('a confirm notice comes only from the structured confirm field of a finishe
     { confirm: { target: 'x' } },
     { confirm: { action: 5, target: 'x' } },
   ]) assert.equal(confirmNotice(frame), null)
+})
+
+test('a turn already running when the panel connects is shown, whichever client started it', () => {
+  assert.deepEqual(runningTurnPrompt({ running: true, turnId: 'turn-9', origin: 'ui', text: 'make the doc', imageCount: 1, marathon: true }), {
+    turnId: 'turn-9',
+    origin: 'ui',
+    label: 'Still running',
+    text: 'make the doc',
+    marathon: true,
+    attachments: [{ name: 'image 1' }],
+  })
+  const phone = runningTurnPrompt({ running: true, turnId: 'turn-8', origin: 'remote', text: 'check the cart', imageCount: 0 })
+  assert.equal(phone.label, 'From phone')
+  assert.equal(phone.origin, 'remote')
+  for (const turn of [null, undefined, {}, { running: false, origin: 'ui', text: 'x' }, 'running', []]) {
+    assert.equal(runningTurnPrompt(turn), null)
+  }
 })

@@ -47,6 +47,18 @@ export function updateNotice(status) {
   }
 }
 
+export function settingsUpdateDetails(status, fallbackVersion) {
+  const current = version(status?.current) ?? version(fallbackVersion)
+  const last = status?.last
+  const at = last !== null && typeof last === 'object' && !Array.isArray(last) && typeof last.at === 'string'
+    ? Date.parse(last.at)
+    : NaN
+  return {
+    version: current,
+    updatedAt: Number.isFinite(at) ? new Date(at).toISOString() : null,
+  }
+}
+
 export function completedUpdateNotice(status) {
   if (status === null || typeof status !== 'object' || Array.isArray(status)) return null
   const last = status.last

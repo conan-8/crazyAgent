@@ -41,6 +41,34 @@ export function foreignPrompt(frame) {
 }
 
 /**
+ * The turn a reconnecting panel finds already running (`chat.hello.turn`), in
+ * the shape the panel renders foreign prompts, or null when none is running.
+ * Unlike a `chat.user` frame it may come from an earlier panel instance
+ * (origin `ui`): a panel closed and reopened mid-turn.
+ * @param {unknown} turn
+ * @returns {null | {turnId: string | null, origin: string, label: string, text: string, attachments: Array<{name: string}>, marathon: boolean | null}}
+ */
+export function runningTurnPrompt(turn) {
+  if (turn === null || typeof turn !== 'object' || Array.isArray(turn)) return null
+  const record = /** @type {Record<string, unknown>} */ (turn)
+  if (record.running !== true) return null
+  const origin = typeof record.origin === 'string' && record.origin.length > 0 ? record.origin : 'ui'
+  if (origin !== 'ui') {
+    const prompt = foreignPrompt({ ...record, type: 'chat.user', origin })
+    if (prompt !== null) return prompt
+  }
+  const count = Number.isInteger(record.imageCount) ? Math.min(Math.max(Number(record.imageCount), 0), MAX_IMAGES) : 0
+  return {
+    turnId: typeof record.turnId === 'string' ? record.turnId : null,
+    origin: 'ui',
+    label: 'Still running',
+    text: typeof record.text === 'string' ? record.text : '',
+    marathon: typeof record.marathon === 'boolean' ? record.marathon : null,
+    attachments: Array.from({ length: count }, (_, index) => ({ name: `image ${index + 1}` })),
+  }
+}
+
+/**
  * True when a chat.error refuses the panel's send because another client's
  * turn already holds the slot (not a model/runtime failure).
  * @param {unknown} frame

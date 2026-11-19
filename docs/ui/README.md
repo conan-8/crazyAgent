@@ -4,7 +4,7 @@ Screenshots of the crazyAgent side panel captured from the mocked-bridge preview
 harness (`scripts/ui-preview.mjs`). All frames were refreshed on 2026-11-06 with
 camel-case crazyAgent branding, the then-default DeepSeek V4.1 Flash model (the
 frames predate the 2026-11-16 pin to `deepseek/deepseek-v4.1-flash-1017`), and the
-recommended Medium reasoning default. No companion, extension permissions, or
+then-recommended Medium reasoning default. No companion, extension permissions, or
 model tokens are involved: the harness opens the real
 `extension/sidepanel/index.html` page in an isolated Edge instance, replaces the
 bridge WebSocket with an in-page mock, and plays scripted frames through the real
@@ -42,6 +42,17 @@ executes on send — other slash-leading text such as `/usr/local/bin`, `/new ch
 or a command with trailing whitespace is sent to the model as ordinary prose.
 The palette is keyboard-navigable and keeps focus in the textarea.
 
+The Settings modal includes a **Lifetime usage** card above About. Its stacked
+bar separates uncached input, cached reads, cache writes, and output; reasoning
+is labelled as part of output. The companion persists aggregate agent-turn totals
+in `.dsh-home/browser-agent/usage.json`, restores them on reconnect, and preserves
+them across release updates. Watcher tokens remain separate, and tracking begins
+with the first turn recorded by this feature rather than backfilling pruned logs.
+
+The Settings modal ends with an **About** section showing the current version and
+the last successful update's localized date/time. Fresh installations without a
+recorded update say so; the extension manifest supplies an offline version fallback.
+
 The browser-access Pause/Resume control has been removed. Legacy saved paused
 state is cleared on startup. Closing the model picker with Escape, an outside
 click, or by choosing a model returns focus to the composer rather than dropping
@@ -68,6 +79,7 @@ SHOT_FORMAT=jpeg node scripts/ui-preview.mjs --scenario empty --out /tmp/ui
 SHOT_FORMAT=jpeg node scripts/ui-preview.mjs --scenario states --out /tmp/ui
 SHOT_FORMAT=jpeg node scripts/ui-preview.mjs --scenario disclaimer --out /tmp/ui
 SHOT_FORMAT=jpeg node scripts/ui-preview.mjs --scenario slash --out /tmp/ui
+SHOT_FORMAT=jpeg node scripts/ui-preview.mjs --scenario usage --out /tmp/ui
 # copy the interesting frames into docs/ui with the names above
 ```
 

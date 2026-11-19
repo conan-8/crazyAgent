@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { completedUpdateNotice, updateNotice } from '../sidepanel/update-notice.js'
+import { completedUpdateNotice, settingsUpdateDetails, updateNotice } from '../sidepanel/update-notice.js'
 
 test('pending and installing updates promise automatic installation and restart', () => {
   assert.deepEqual(updateNotice({ state: 'pending', latest: '2.5.1' }), {
@@ -31,6 +31,18 @@ test('failures are bounded plain text and quiet states have no banner', () => {
   }
   assert.equal(updateNotice(null), null)
   assert.equal(updateNotice([]), null)
+})
+
+test('Settings gets a current version and a valid last-update timestamp', () => {
+  const last = { from: '2.5.1', to: '2.5.2', at: '2026-11-17T20:00:00.000Z' }
+  assert.deepEqual(settingsUpdateDetails({ current: 'v2.5.2', last }, '2.5.1'), {
+    version: '2.5.2',
+    updatedAt: '2026-11-17T20:00:00.000Z',
+  })
+  assert.deepEqual(settingsUpdateDetails(null, 'v2.5.2'), { version: '2.5.2', updatedAt: null })
+  assert.deepEqual(settingsUpdateDetails({ current: 'invalid', last: null }, '2.5.2'), { version: '2.5.2', updatedAt: null })
+  assert.deepEqual(settingsUpdateDetails({ current: '2.5.2', last: { at: 'not a date' } }), { version: '2.5.2', updatedAt: null })
+  assert.deepEqual(settingsUpdateDetails(undefined, undefined), { version: null, updatedAt: null })
 })
 
 test('a completed update has one stable announcement key', () => {

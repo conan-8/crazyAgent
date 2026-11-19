@@ -196,14 +196,14 @@
             <div class="field">
               <span>Reasoning effort</span>
               <div id="setting-effort" class="effort-options" role="group" aria-label="Reasoning effort">
-                <button type="button" data-effort="auto" aria-pressed="false">Auto</button>
+                <button class="active" type="button" data-effort="auto" aria-pressed="true">Auto</button>
                 <button type="button" data-effort="off" aria-pressed="false">Off</button>
                 <button type="button" data-effort="low" aria-pressed="false">Low</button>
-                <button class="active" type="button" data-effort="medium" aria-pressed="true">Medium</button>
+                <button type="button" data-effort="medium" aria-pressed="false">Medium</button>
                 <button type="button" data-effort="high" aria-pressed="false">High</button>
               </div>
-              <span id="effort-hint" class="hint">Medium for every turn (recommended)</span>
-              <p class="hint status-hint" id="effort-status">Medium reasoning for every turn (recommended).</p>
+              <span id="effort-hint" class="hint">Low for actions; medium for reading and synthesis</span>
+              <p class="hint status-hint" id="effort-status">Auto: low for action/navigation/reactive turns; medium for inspection/synthesis.</p>
             </div>
             <label class="check">
               <span>Remember the API key on this machine</span>
@@ -249,6 +249,70 @@
               <input id="setting-autocapture" type="checkbox" />
             </label>
             <p class="hint">The token is stored only in this browser profile. Screenshots go to your configured model provider through the local DSH runtime. Keep the side panel open while the agent runs.</p>
+          </section>
+
+          <section class="settings-section settings-usage" aria-labelledby="usage-label">
+            <div id="usage-card" class="usage-card">
+              <div class="usage-heading">
+                <div class="usage-title">
+                  <span class="usage-symbol" aria-hidden="true">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="m12 2 1.7 5.3L19 9l-5.3 1.7L12 16l-1.7-5.3L5 9l5.3-1.7L12 2Z" /><path d="m18.5 15 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" /></svg>
+                  </span>
+                  <div>
+                    <h3 id="usage-label">Lifetime usage</h3>
+                    <p>Agent tokens · saved on this device</p>
+                  </div>
+                </div>
+                <span id="settings-usage-turns" class="usage-turns">0 turns</span>
+              </div>
+              <div class="usage-total-line">
+                <strong id="settings-usage-total">0</strong>
+                <span>total tokens</span>
+              </div>
+              <div id="settings-usage-bar" class="usage-bar" role="img" aria-label="No agent token usage recorded">
+                <span class="usage-segment usage-input" data-usage-segment="input"></span>
+                <span class="usage-segment usage-cache-read" data-usage-segment="cache-read"></span>
+                <span class="usage-segment usage-cache-write" data-usage-segment="cache-write"></span>
+                <span class="usage-segment usage-output" data-usage-segment="output"></span>
+              </div>
+              <dl class="usage-breakdown">
+                <div class="usage-metric">
+                  <dt><span class="usage-dot usage-input"></span>Uncached input</dt>
+                  <dd id="settings-usage-input">0</dd>
+                </div>
+                <div class="usage-metric">
+                  <dt><span class="usage-dot usage-cache-read"></span>Cached reads</dt>
+                  <dd id="settings-usage-cache-read">0</dd>
+                </div>
+                <div class="usage-metric">
+                  <dt><span class="usage-dot usage-cache-write"></span>Cache writes</dt>
+                  <dd id="settings-usage-cache-write">0</dd>
+                </div>
+                <div class="usage-metric">
+                  <dt><span class="usage-dot usage-output"></span>Output</dt>
+                  <dd id="settings-usage-output">0</dd>
+                </div>
+              </dl>
+              <div id="settings-usage-reasoning-row" class="usage-reasoning hidden">
+                <span>Reasoning <small>included in output</small></span>
+                <strong id="settings-usage-reasoning">0</strong>
+              </div>
+              <p id="settings-usage-since" class="usage-footnote">Your first recorded turn will appear here. Restarts and updates preserve this history.</p>
+            </div>
+          </section>
+
+          <section class="settings-section settings-about" aria-labelledby="about-label">
+            <h3 id="about-label">About</h3>
+            <dl class="settings-about-list">
+              <div class="settings-about-row">
+                <dt>Version</dt>
+                <dd id="settings-version">Unavailable</dd>
+              </div>
+              <div class="settings-about-row">
+                <dt>Last updated</dt>
+                <dd id="settings-updated">No completed update recorded</dd>
+              </div>
+            </dl>
           </section>
         </div>
         <div class="modal-actions">

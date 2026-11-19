@@ -15,6 +15,7 @@
  *   node scripts/ui-preview.mjs --scenario states     # finished feed / expanded step / new chat
  *   node scripts/ui-preview.mjs --scenario rail       # prompt rail: narrow dashes, hover popup (RAIL_ASSERT=0 for baseline)
  *   node scripts/ui-preview.mjs --scenario update     # automatic update notices + one-time post-restart success
+ *   node scripts/ui-preview.mjs --scenario usage      # lifetime token meter: empty, live update, reconnect, narrow
  *   node scripts/ui-preview.mjs --scenario tools      # browser-command rows + tab-list card
  *   node scripts/ui-preview.mjs --scenario modals     # settings + debug log modals
  *   node scripts/ui-preview.mjs --scenario disclaimer # one-time full-screen notice after a reload
@@ -26,6 +27,7 @@
  *   node scripts/ui-preview.mjs --scenario marathon   # shared chip: remote-origin toggle, mid-turn off, carried-plan rendering
  *   node scripts/ui-preview.mjs --scenario watch      # watch alert row: Stop/Steer/It's fine, recovery, ended-incomplete, dismiss
  *   node scripts/ui-preview.mjs --scenario remote     # phone-started turns: render, queue, lost-race requeue
+ *   node scripts/ui-preview.mjs --scenario reopen     # panel opened mid-turn: shows the running turn, starts no new chat
  *   node scripts/ui-preview.mjs --scenario confirm    # approval card: approve/deny, abandonment, settings toggle
  *   node scripts/ui-preview.mjs --scenario stopped    # stop, reload, restore, and continue a saved chat
  *   node scripts/ui-preview.mjs --scenario deadturn   # malformed-reply error + BLOCKED dead-turn endings
@@ -708,6 +710,41 @@ async function playRemoteScenario(page, capture) {
   await sleep(150)
   assert.equal(await page.evaluate(`document.querySelectorAll('.activity-entry.error').length`), 1)
   assert.deepEqual(await queued(), [])
+}
+
+async function playReopenScenario(page, capture) {
+  const { recv, batch } = makePage(page)
+  const sent = type => page.evaluate(`window.__frames.filter(frame => frame.type === ${JSON.stringify(type)}).length`)
+  // A side panel closed and reopened mid-turn: the first hello carries the running turn.
+  // The companion reports a running turn as thinking, never ready.
+  const hello = HELLO_FRAMES.map(frame => frame.type === 'chat.hello'
+    ? { ...frame, turn: { running: true, turnId: 'turn-reopen-1', origin: 'ui', text: 'Create the feature test document', imageCount: 0, marathon: false } }
+    : frame.type === 'chat.status' ? { ...frame, status: 'thinking' } : frame)
+  await batch(hello)
+  await sleep(300)
+  const shown = await page.evaluate(`(() => {
+    const last = [...document.querySelectorAll('.activity-turn')].at(-1);
+    return {
+      label: last?.querySelector('.user-origin')?.textContent,
+      prompt: last?.querySelector('.turn-prompt')?.textContent,
+      running: document.querySelectorAll('.agent-turn.running').length,
+      errors: document.querySelectorAll('.activity-entry.error').length,
+      stopVisible: !document.getElementById('stop').hidden,
+    };
+  })()`)
+  assert.deepEqual(shown, { label: 'Still running', prompt: 'Create the feature test document', running: 1, errors: 0, stopVisible: true })
+  assert.equal(await sent('chat.new'), 0, 'a panel opened mid-turn starts no new chat')
+  await recv({ v: 1, type: 'chat.status', status: 'thinking' })
+  await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 1, attemptId: 'a1' })
+  await recv({ v: 1, type: 'chat.activity', kind: 'text', text: 'Formatting the table…' })
+  await sleep(150)
+  await capture('reopened-mid-turn')
+  await finishPrompt(page, 'session-preview0001', 'DONE — the document is ready.')
+  await sleep(200)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.agent-turn.running').length`), 0)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.activity-entry.error').length`), 0)
+  assert.equal(await sent('chat.new'), 0)
+  await capture('reopened-finished')
 }
 
 async function playConfirmScenario(page, capture) {
@@ -2619,13 +2656,106 @@ async function main() {
     await playToolScenario(page)
     await sleep(400)
     await shot('dark')
+  } else if (SCENARIO === 'usage') {
+    const { batch, recv } = makePage(page)
+    const usage = {
+      version: 1,
+      turns: 284,
+      inputTokens: 8_420_300,
+      outputTokens: 3_400_000,
+      cacheReadTokens: 22_840_500,
+      cacheWriteTokens: 1_240_000,
+      reasoningTokens: 1_296_400,
+      totalTokens: 35_900_800,
+      startedAt: '2026-08-14T15:30:00.000Z',
+      updatedAt: '2026-11-18T10:15:00.000Z',
+    }
+    const readMeter = () => page.evaluate(`(() => {
+      const card = document.getElementById('usage-card');
+      const cardRect = card.getBoundingClientRect();
+      const contentOverflow = [...card.querySelectorAll('*')].filter(node => {
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && (rect.right > cardRect.right + 1 || rect.left < cardRect.left - 1);
+      }).map(node => ({ className: node.className, id: node.id, left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right }));
+      const reasoning = document.getElementById('settings-usage-reasoning-row');
+      return {
+        state: card.dataset.state,
+        total: document.getElementById('settings-usage-total').textContent,
+        totalTitle: document.getElementById('settings-usage-total').title,
+        turns: document.getElementById('settings-usage-turns').textContent,
+        input: document.getElementById('settings-usage-input').textContent,
+        cacheRead: document.getElementById('settings-usage-cache-read').textContent,
+        cacheWrite: document.getElementById('settings-usage-cache-write').textContent,
+        output: document.getElementById('settings-usage-output').textContent,
+        reasoningHidden: reasoning.classList.contains('hidden'),
+        reasoning: document.getElementById('settings-usage-reasoning').textContent,
+        widths: [...document.querySelectorAll('#settings-usage-bar [data-usage-segment]')].map(node => Number.parseFloat(node.style.width)),
+        aria: document.getElementById('settings-usage-bar').getAttribute('aria-label'),
+        since: document.getElementById('settings-usage-since').textContent,
+        cardOverflow: card.scrollWidth - card.clientWidth,
+        contentOverflow,
+      };
+    })()`)
+    const showMeter = async () => {
+      await page.evaluate(`document.getElementById('usage-card').scrollIntoView({ block: 'center' })`)
+      await sleep(450)
+    }
+    await batch(HELLO_FRAMES)
+    await sleep(300)
+    await page.evaluate(`document.getElementById('settings').click()`)
+    await sleep(300)
+    let meter = await readMeter()
+    assert.equal(meter.state, 'empty')
+    assert.equal(meter.total, '0')
+    assert.equal(meter.turns, '0 turns')
+    assert.equal(meter.reasoningHidden, true)
+    assert.match(meter.since, /first recorded turn/u)
+
+    await recv({ v: 1, type: 'usage.updated', lifetimeUsage: usage })
+    await showMeter()
+    meter = await readMeter()
+    assert.equal(meter.state, 'active')
+    assert.equal(meter.total, '35.9M')
+    assert.equal(meter.totalTitle, '35,900,800 total agent tokens')
+    assert.equal(meter.turns, '284 turns')
+    assert.equal(meter.input, '8.4M')
+    assert.equal(meter.cacheRead, '22.8M')
+    assert.equal(meter.cacheWrite, '1.2M')
+    assert.equal(meter.output, '3.4M')
+    assert.equal(meter.reasoningHidden, false)
+    assert.equal(meter.reasoning, '1.3M')
+    assert.ok(Math.abs(meter.widths.reduce((sum, width) => sum + width, 0) - 100) < 0.0001)
+    assert.match(meter.aria, /35,900,800 total agent tokens/u)
+    assert.match(meter.aria, /Cached reads: 22,840,500/u)
+    assert.match(meter.since, /Tracking since/u)
+    assert.match(meter.since, /watcher tokens are reported separately/u)
+    assert.equal(meter.contentOverflow.length, 0, `the meter content fits its card: ${JSON.stringify(meter.contentOverflow)}`)
+    await shot('lifetime')
+
+    await page.send('Page.reload')
+    await sleep(1300)
+    const restoredHello = HELLO_FRAMES.map(frame => frame.type === 'chat.hello' ? { ...frame, lifetimeUsage: usage } : frame)
+    await batch(restoredHello)
+    await sleep(300)
+    await page.evaluate(`document.getElementById('settings').click()`)
+    await sleep(300)
+    await showMeter()
+    const restored = await readMeter()
+    assert.equal(restored.total, meter.total, 'reconnect restores the authoritative total without adding it again')
+    assert.equal(restored.turns, '284 turns')
+    await setWidth(320)
+    await showMeter()
+    const narrow = await readMeter()
+    assert.equal(narrow.contentOverflow.length, 0, `the meter fits a narrow sidebar: ${JSON.stringify(narrow.contentOverflow)}`)
+    await shot('lifetime-narrow')
   } else if (SCENARIO === 'modals') {
     await page.evaluate(`window.__mockBatch(${JSON.stringify(HELLO_FRAMES)})`)
     await sleep(400)
     await page.evaluate(`document.getElementById('settings').click()`)
     await sleep(300)
     const settingsSections = await page.evaluate(`[...document.querySelectorAll('#settings-modal .settings-body > .settings-section > h3')].map(node => node.textContent)`)
-    assert.deepEqual(settingsSections, ['Model', 'Connection', 'Capture'], 'Settings should lead with the model info')
+    assert.deepEqual(settingsSections, ['Model', 'Connection', 'Safety', 'Capture', 'About'], 'Settings should lead with the model info and end with version details')
+    assert.equal(await page.evaluate(`document.getElementById('usage-label').textContent`), 'Lifetime usage', 'the nested usage card sits above About')
     const settingsScroll = await page.evaluate(`(() => {
       const body = document.querySelector('#settings-modal .settings-body');
       const model = document.getElementById('model-label').getBoundingClientRect();
@@ -2635,7 +2765,49 @@ async function main() {
     assert.equal(settingsScroll.scrollTop, 0, 'Settings should open at the top')
     assert.ok(settingsScroll.modelTop >= settingsScroll.frameTop, 'Model heading should be visible at the top of the settings body')
     assert.equal(settingsScroll.active, 'setting-apikey', 'A configured setup should open focused on the model section')
+    assert.equal(await page.evaluate(`document.querySelector('[data-effort][aria-pressed="true"]').dataset.effort`), 'medium', 'the saved explicit Medium choice survives the Auto default')
+    await page.evaluate(`document.querySelector('[data-effort="auto"]').click()`)
+    assert.equal(await page.evaluate(`document.getElementById('effort-hint').textContent`), 'Low for actions; medium for reading and synthesis')
+    const initialAbout = await page.evaluate(`(() => ({
+      version: document.getElementById('settings-version').textContent,
+      manifest: chrome.runtime.getManifest().version,
+      updated: document.getElementById('settings-updated').textContent,
+      title: document.getElementById('settings-updated').title,
+    }))()`)
+    assert.equal(initialAbout.version, initialAbout.manifest, 'offline/fresh installs fall back to the extension version')
+    assert.equal(initialAbout.updated, 'No completed update recorded')
+    assert.equal(initialAbout.title, '')
+    const updatedAt = '2026-11-17T20:00:00.000Z'
+    await makePage(page).recv({ v: 1, type: 'update.state', update: { state: 'current', current: '2.5.2', latest: '2.5.2', last: { from: '2.5.1', to: '2.5.2', at: updatedAt } } })
+    const populatedAbout = await page.evaluate(`(() => {
+      const updated = document.getElementById('settings-updated');
+      return {
+        version: document.getElementById('settings-version').textContent,
+        updated: updated.textContent,
+        expected: new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(${JSON.stringify(updatedAt)})),
+        title: updated.title,
+      };
+    })()`)
+    assert.equal(populatedAbout.version, '2.5.2')
+    assert.equal(populatedAbout.updated, populatedAbout.expected, 'the update time is localized for the user')
+    assert.equal(populatedAbout.title, `Last successful update: ${updatedAt}`)
+    await sleep(2700)
     await shot('settings')
+    await page.evaluate(`document.getElementById('settings-updated').scrollIntoView({ block: 'end' })`)
+    await sleep(200)
+    let aboutVisibility
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      aboutVisibility = await page.evaluate(`(() => {
+        const bodyElement = document.querySelector('#settings-modal .settings-body');
+        const body = bodyElement.getBoundingClientRect();
+        const about = document.querySelector('.settings-about').getBoundingClientRect();
+        return { bodyTop: body.top, bodyBottom: body.bottom, aboutTop: about.top, aboutBottom: about.bottom, scrollTop: bodyElement.scrollTop };
+      })()`)
+      if (aboutVisibility.aboutTop >= aboutVisibility.bodyTop && aboutVisibility.aboutBottom <= aboutVisibility.bodyBottom) break
+      await sleep(50)
+    }
+    assert.ok(aboutVisibility.aboutTop >= aboutVisibility.bodyTop && aboutVisibility.aboutBottom <= aboutVisibility.bodyBottom, `the complete About section is visible after scrolling to it: ${JSON.stringify(aboutVisibility)}`)
+    await shot('settings-about')
     // The docked panel can be much shorter than this preview; opening settings
     // must still land on the model section instead of auto-scrolling to the
     // pairing token.
@@ -3075,6 +3247,8 @@ async function main() {
     await playWatchScenario(page, shot)
   } else if (SCENARIO === 'remote') {
     await playRemoteScenario(page, shot)
+  } else if (SCENARIO === 'reopen') {
+    await playReopenScenario(page, shot)
   } else if (SCENARIO === 'confirm') {
     await playConfirmScenario(page, shot)
   } else if (SCENARIO === 'deadturn') {
