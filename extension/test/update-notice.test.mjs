@@ -6,12 +6,12 @@ test('pending and installing updates promise automatic installation and restart'
   assert.deepEqual(updateNotice({ state: 'pending', latest: '2.5.1' }), {
     key: 'pending:2.5.1',
     tone: 'info',
-    text: 'Update v2.5.1 is ready. It will install automatically when crazyAgent is idle.',
+    text: 'Update v2.5.1 ready; installs when crazyAgent is idle.',
   })
   assert.deepEqual(updateNotice({ state: 'installing', latest: 'v2.5.1' }), {
     key: 'installing:2.5.1',
     tone: 'info',
-    text: 'Updating to v2.5.1… The companion will restart automatically.',
+    text: 'Updating to v2.5.1… Companion will restart.',
   })
 })
 
@@ -19,7 +19,7 @@ test('an unsupervised installation explains why an update cannot install itself'
   const notice = updateNotice({ state: 'available', latest: '2.5.1' })
   assert.equal(notice.tone, 'info')
   assert.match(notice.text, /supervisor/u)
-  assert.match(notice.text, /automatic installation/u)
+  assert.match(notice.text, /install automatically/u)
 })
 
 test('failures are bounded plain text and quiet states have no banner', () => {
@@ -49,7 +49,7 @@ test('a completed update has one stable announcement key', () => {
   const last = { from: '2.5.0', to: '2.5.1', at: '2026-11-17T20:00:00.000Z' }
   assert.deepEqual(completedUpdateNotice({ last }), {
     key: '2.5.0:2.5.1:2026-11-17T20:00:00.000Z',
-    text: 'Updated to v2.5.1. The companion restarted automatically.',
+    text: 'Updated to v2.5.1; companion restarted.',
   })
   assert.equal(completedUpdateNotice({ last: { ...last, to: 'not a version' } }), null)
   assert.equal(completedUpdateNotice({ last: { ...last, at: 'invalid' } }), null)

@@ -2717,16 +2717,21 @@ input::placeholder {
   bottom: 70px;
   left: 50%;
   z-index: 60;
+  box-sizing: border-box;
+  width: max-content;
   max-width: calc(100% - 24px);
   padding: 9px 14px;
+  overflow-wrap: anywhere;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 999px;
+  border-radius: 16px;
   background: rgba(38, 38, 38, 0.96);
   box-shadow: var(--shadow);
   color: var(--text);
   font-size: 12px;
   line-height: 1.4;
-  text-align: center;
+  text-align: left;
+  text-wrap: pretty;
+  white-space: normal;
   transform: translateX(-50%);
   animation: toast-in 0.18s ease-out;
 }

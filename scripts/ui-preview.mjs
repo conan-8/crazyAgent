@@ -3182,14 +3182,14 @@ async function main() {
     assert.equal(state.noticeHidden, false)
     assert.equal(state.noticeTone, 'info')
     assert.match(state.noticeText, /v2\.5\.1/u)
-    assert.match(state.noticeText, /install automatically/u)
+    assert.match(state.noticeText, /installs when crazyAgent is idle/u)
     await shot('pending')
 
     await recv({ v: 1, type: 'update.state', update: { state: 'installing', current: '2.5.0', latest: '2.5.1', last: null } })
     await sleep(150)
     state = await read()
     assert.equal(state.noticeHidden, false)
-    assert.match(state.noticeText, /restart automatically/u)
+    assert.match(state.noticeText, /Companion will restart/u)
     await shot('installing')
 
     const completed = {
@@ -3205,7 +3205,7 @@ async function main() {
     assert.equal(state.noticeHidden, true)
     assert.equal(state.toastHidden, false)
     assert.match(state.toastText, /Updated to v2\.5\.1/u)
-    assert.match(state.toastText, /restarted automatically/u)
+    assert.match(state.toastText, /companion restarted/u)
     await shot('updated')
 
     await sleep(2800)

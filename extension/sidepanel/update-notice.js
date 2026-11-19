@@ -19,24 +19,24 @@ export function updateNotice(status) {
         key: `pending:${latest ?? 'unknown'}`,
         tone: 'info',
         text: latest
-          ? `Update v${latest} is ready. It will install automatically when crazyAgent is idle.`
-          : 'An update is ready. It will install automatically when crazyAgent is idle.',
+          ? `Update v${latest} ready; installs when crazyAgent is idle.`
+          : 'Update ready; installs when crazyAgent is idle.',
       }
     case 'installing':
       return {
         key: `installing:${latest ?? 'unknown'}`,
         tone: 'info',
         text: latest
-          ? `Updating to v${latest}… The companion will restart automatically.`
-          : 'Updating… The companion will restart automatically.',
+          ? `Updating to v${latest}… Companion will restart.`
+          : 'Updating… Companion will restart.',
       }
     case 'available':
       return {
         key: `available:${latest ?? 'unknown'}`,
         tone: 'info',
         text: latest
-          ? `Update v${latest} is available. Start the companion with its supervisor to enable automatic installation.`
-          : 'An update is available. Start the companion with its supervisor to enable automatic installation.',
+          ? `Update v${latest} available. Start with the supervisor to install automatically.`
+          : 'Update available. Start with the supervisor to install automatically.',
       }
     case 'error': {
       const detail = reason(status.reason)
@@ -69,6 +69,6 @@ export function completedUpdateNotice(status) {
   if (!to || !from || !Number.isFinite(Date.parse(at))) return null
   return {
     key: `${from}:${to}:${at}`,
-    text: `Updated to v${to}. The companion restarted automatically.`,
+    text: `Updated to v${to}; companion restarted.`,
   }
 }

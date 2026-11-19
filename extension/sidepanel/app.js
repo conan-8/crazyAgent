@@ -989,7 +989,7 @@ function restoreConversation(id) {
   sendFrame(resume
     ? { v: PROTOCOL_VERSION, type: 'chat.resume', sessionId: item.sessionId }
     : { v: PROTOCOL_VERSION, type: 'chat.new' })
-  if (conversationStopped && !resume) toast('This stopped chat has no saved model session; starting a new chat.')
+  if (conversationStopped && !resume) toast('Saved model session unavailable; started a new chat')
   updateFooter()
   closeHistory()
   renderPromptRail()
