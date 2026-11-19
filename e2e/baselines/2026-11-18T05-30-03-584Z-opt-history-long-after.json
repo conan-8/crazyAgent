@@ -1,0 +1,1002 @@
+{
+  "startedAt": "2026-11-18T05:30:03.584Z",
+  "finishedAt": "2026-11-18T05:30:15.435Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "confirmIrreversible": false,
+  "planMode": false,
+  "marathonMode": true,
+  "armingPath": "POST /marathon {enabled:true} then bare prompt",
+  "node": "v26.8.1",
+  "dshHome": "/tmp/crazyagent-model-eval/dsh-home",
+  "repeat": 5,
+  "maxTurnSeconds": 120,
+  "maxTotalTokens": null,
+  "totalTokens": 162578,
+  "stopReason": null,
+  "scenarios": [
+    {
+      "name": "marathon-long",
+      "fixture": "marathon-01.html",
+      "prompt": "Work through the expedition permit workflow on the site I have open, from station 1 to station 12. Each station page shows its dispatch word and seal. At every station, enter the dispatch word shown on that page plus the receipt from the previous station (station 1 shows a start receipt), submit the station form, and carry the new receipt to the next station via the link. Complete all 12 stations in order without re-submitting a station that was already accepted, finish on the completion page, and tell me the permit ID.",
+      "file": "marathon-long.mjs",
+      "runs": [
+        {
+          "runIndex": 0,
+          "turnId": "turn-mwlompig-b54e",
+          "status": "fail",
+          "reasons": [
+            "no station was recorded as completed on the fixture server"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:35715/marathon-01.html",
+            "totalSteps": 12,
+            "validCount": 0,
+            "perStep": [
+              {
+                "step": 1,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 2,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 3,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 4,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 5,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 6,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 7,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 8,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 9,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 10,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 11,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 12,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              }
+            ],
+            "duplicates": [],
+            "orderOk": false,
+            "stepPostCount": 0,
+            "otherPostPaths": [],
+            "completion": null,
+            "completionOk": false
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 2247,
+            "error": "dsh profile \"sdk-minimal\": DeepSeek Harness runtime exited\nexit code: 1\nstderr tail:\ndsh: fatal uncaught exception: Error: cannot get property \"tokenMeter\" without inject\n    at pruneSessionViews (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4139:22)\n    at Timeout._onTimeout (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4173:13)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 1
+            },
+            "inputTokens": 39391,
+            "outputTokens": 166,
+            "cacheReadTokens": 0,
+            "totalTokens": 39557,
+            "usage": {
+              "inputTokens": 39391,
+              "outputTokens": 166,
+              "totalTokens": 39557,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlompig-b54e",
+              "origin": "remote",
+              "clientMessageId": "d1de5b8a-9739-4283-999c-8bd9f6956dc7",
+              "startedAt": "2026-11-18T05:30:04.841Z",
+              "endedAt": "2026-11-18T05:30:07.088Z",
+              "outcome": "error",
+              "error": "dsh profile \"sdk-minimal\": DeepSeek Harness runtime exited\nexit code: 1\nstderr tail:\ndsh: fatal uncaught exception: Error: cannot get property \"tokenMeter\" without inject\n    at pruneSessionViews (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4139:22)\n    at Timeout._onTimeout (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4173:13)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+              "label": null,
+              "usage": {
+                "inputTokens": 39391,
+                "outputTokens": 166,
+                "totalTokens": 39557,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 7
+          },
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 1,
+          "turnId": "turn-mwlomrru-c631",
+          "status": "fail",
+          "reasons": [
+            "no station was recorded as completed on the fixture server"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:35715/marathon-01.html",
+            "totalSteps": 12,
+            "validCount": 0,
+            "perStep": [
+              {
+                "step": 1,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 2,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 3,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 4,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 5,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 6,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 7,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 8,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 9,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 10,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 11,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 12,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              }
+            ],
+            "duplicates": [],
+            "orderOk": false,
+            "stepPostCount": 0,
+            "otherPostPaths": [],
+            "completion": null,
+            "completionOk": false
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 1153,
+            "error": "dsh profile \"sdk-minimal\": DeepSeek Harness runtime exited\nexit code: 1\nstderr tail:\ndsh: fatal uncaught exception: Error: cannot get property \"tokenMeter\" without inject\n    at pruneSessionViews (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4139:22)\n    at Timeout._onTimeout (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4173:13)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 1
+            },
+            "inputTokens": 5959,
+            "outputTokens": 154,
+            "cacheReadTokens": 15872,
+            "totalTokens": 21985,
+            "usage": {
+              "inputTokens": 5959,
+              "outputTokens": 154,
+              "totalTokens": 21985,
+              "cacheReadTokens": 15872
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlomrru-c631",
+              "origin": "remote",
+              "clientMessageId": "ddbaa269-6cc9-40f8-b279-4c5f8129bf3e",
+              "startedAt": "2026-11-18T05:30:07.770Z",
+              "endedAt": "2026-11-18T05:30:08.923Z",
+              "outcome": "error",
+              "error": "dsh profile \"sdk-minimal\": DeepSeek Harness runtime exited\nexit code: 1\nstderr tail:\ndsh: fatal uncaught exception: Error: cannot get property \"tokenMeter\" without inject\n    at pruneSessionViews (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4139:22)\n    at Timeout._onTimeout (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4173:13)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+              "label": null,
+              "usage": {
+                "inputTokens": 5959,
+                "outputTokens": 154,
+                "totalTokens": 21985,
+                "cacheReadTokens": 15872
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 42
+          },
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 2,
+          "turnId": "turn-mwlomt8i-e6aa",
+          "status": "fail",
+          "reasons": [
+            "no station was recorded as completed on the fixture server"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:35715/marathon-01.html",
+            "totalSteps": 12,
+            "validCount": 0,
+            "perStep": [
+              {
+                "step": 1,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 2,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 3,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 4,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 5,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 6,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 7,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 8,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 9,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 10,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 11,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 12,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              }
+            ],
+            "duplicates": [],
+            "orderOk": false,
+            "stepPostCount": 0,
+            "otherPostPaths": [],
+            "completion": null,
+            "completionOk": false
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 1164,
+            "error": "dsh profile \"sdk-minimal\": DeepSeek Harness runtime exited\nexit code: 1\nstderr tail:\ndsh: fatal uncaught exception: Error: cannot get property \"tokenMeter\" without inject\n    at pruneSessionViews (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4139:22)\n    at Timeout._onTimeout (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4173:13)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 1
+            },
+            "inputTokens": 735,
+            "outputTokens": 127,
+            "cacheReadTokens": 38656,
+            "totalTokens": 39518,
+            "usage": {
+              "inputTokens": 735,
+              "outputTokens": 127,
+              "totalTokens": 39518,
+              "cacheReadTokens": 38656
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlomt8i-e6aa",
+              "origin": "remote",
+              "clientMessageId": "a49d2903-ba6d-4fd3-922d-da252b85ba36",
+              "startedAt": "2026-11-18T05:30:09.666Z",
+              "endedAt": "2026-11-18T05:30:10.830Z",
+              "outcome": "error",
+              "error": "dsh profile \"sdk-minimal\": DeepSeek Harness runtime exited\nexit code: 1\nstderr tail:\ndsh: fatal uncaught exception: Error: cannot get property \"tokenMeter\" without inject\n    at pruneSessionViews (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4139:22)\n    at Timeout._onTimeout (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4173:13)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+              "label": null,
+              "usage": {
+                "inputTokens": 735,
+                "outputTokens": 127,
+                "totalTokens": 39518,
+                "cacheReadTokens": 38656
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 69
+          },
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 3,
+          "turnId": "turn-mwlomurx-3014",
+          "status": "fail",
+          "reasons": [
+            "no station was recorded as completed on the fixture server"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:35715/marathon-01.html",
+            "totalSteps": 12,
+            "validCount": 0,
+            "perStep": [
+              {
+                "step": 1,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 2,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 3,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 4,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 5,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 6,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 7,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 8,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 9,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 10,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 11,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 12,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              }
+            ],
+            "duplicates": [],
+            "orderOk": false,
+            "stepPostCount": 0,
+            "otherPostPaths": [],
+            "completion": null,
+            "completionOk": false
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 1443,
+            "error": "dsh profile \"sdk-minimal\": DeepSeek Harness runtime exited\nexit code: 1\nstderr tail:\ndsh: fatal uncaught exception: Error: cannot get property \"tokenMeter\" without inject\n    at pruneSessionViews (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4139:22)\n    at Timeout._onTimeout (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4173:13)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 1
+            },
+            "inputTokens": 21831,
+            "outputTokens": 133,
+            "cacheReadTokens": 0,
+            "totalTokens": 21964,
+            "usage": {
+              "inputTokens": 21831,
+              "outputTokens": 133,
+              "totalTokens": 21964,
+              "cacheReadTokens": 0
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlomurx-3014",
+              "origin": "remote",
+              "clientMessageId": "5fbe90b4-c0a8-4859-a968-63857cbf2879",
+              "startedAt": "2026-11-18T05:30:11.661Z",
+              "endedAt": "2026-11-18T05:30:13.104Z",
+              "outcome": "error",
+              "error": "dsh profile \"sdk-minimal\": DeepSeek Harness runtime exited\nexit code: 1\nstderr tail:\ndsh: fatal uncaught exception: Error: cannot get property \"tokenMeter\" without inject\n    at pruneSessionViews (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4139:22)\n    at Timeout._onTimeout (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4173:13)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+              "label": null,
+              "usage": {
+                "inputTokens": 21831,
+                "outputTokens": 133,
+                "totalTokens": 21964,
+                "cacheReadTokens": 0
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 102
+          },
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        },
+        {
+          "runIndex": 4,
+          "turnId": "turn-mwlomwn1-b509",
+          "status": "fail",
+          "reasons": [
+            "no station was recorded as completed on the fixture server"
+          ],
+          "evidence": {
+            "url": "http://127.0.0.1:35715/marathon-01.html",
+            "totalSteps": 12,
+            "validCount": 0,
+            "perStep": [
+              {
+                "step": 1,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 2,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 3,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 4,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 5,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 6,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 7,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 8,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 9,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 10,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 11,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              },
+              {
+                "step": 12,
+                "posts": 0,
+                "ok": false,
+                "word": null,
+                "receipt": null
+              }
+            ],
+            "duplicates": [],
+            "orderOk": false,
+            "stepPostCount": 0,
+            "otherPostPaths": [],
+            "completion": null,
+            "completionOk": false
+          },
+          "collateral": null,
+          "turn": {
+            "status": "error",
+            "waitingForUser": false,
+            "wallMs": 1177,
+            "error": "dsh profile \"sdk-minimal\": DeepSeek Harness runtime exited\nexit code: 1\nstderr tail:\ndsh: fatal uncaught exception: Error: cannot get property \"tokenMeter\" without inject\n    at pruneSessionViews (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4139:22)\n    at Timeout._onTimeout (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4173:13)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+            "outcome": "error",
+            "confirm": null,
+            "steps": 1,
+            "toolCalls": 1,
+            "failedCalls": 0,
+            "failed": [],
+            "toolCounts": {
+              "browser_plan": 1
+            },
+            "inputTokens": 479,
+            "outputTokens": 163,
+            "cacheReadTokens": 38912,
+            "totalTokens": 39554,
+            "usage": {
+              "inputTokens": 479,
+              "outputTokens": 163,
+              "totalTokens": 39554,
+              "cacheReadTokens": 38912
+            },
+            "finalText": null,
+            "logOk": false,
+            "logComplete": true,
+            "reportedLabel": null,
+            "loggedFailedCalls": 0,
+            "deadSteps": 0,
+            "deadRetried": 0,
+            "deadGaveUp": 0,
+            "deadRetryErrors": 0,
+            "deadKinds": {
+              "markup": 0,
+              "empty": 0,
+              "unknown": 0
+            },
+            "assistantLeaked": 0,
+            "turnRetries": 0,
+            "retries": 0,
+            "deadTurn": false,
+            "deadTurnKind": null,
+            "recovered": false,
+            "planOutcome": null,
+            "planRevision": null,
+            "planSeeded": false,
+            "planNudges": 0,
+            "planStaleReminders": 0,
+            "planFinalReason": null,
+            "finalTurnState": {
+              "status": "error",
+              "turnId": "turn-mwlomwn1-b509",
+              "origin": "remote",
+              "clientMessageId": "680c6ca2-a4b6-44c0-a651-f0b3e6cc5ec4",
+              "startedAt": "2026-11-18T05:30:14.078Z",
+              "endedAt": "2026-11-18T05:30:15.255Z",
+              "outcome": "error",
+              "error": "dsh profile \"sdk-minimal\": DeepSeek Harness runtime exited\nexit code: 1\nstderr tail:\ndsh: fatal uncaught exception: Error: cannot get property \"tokenMeter\" without inject\n    at pruneSessionViews (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4139:22)\n    at Timeout._onTimeout (file:///home/conan/Documents/GitHub/crazyAgent/packages/dsh-browser-extension/lib/index.js:4173:13)\n    at listOnTimeout (node:internal/timers:685:17)\n    at process.processTimers (node:internal/timers:618:7)",
+              "label": null,
+              "usage": {
+                "inputTokens": 479,
+                "outputTokens": 163,
+                "totalTokens": 39554,
+                "cacheReadTokens": 38912
+              },
+              "failedCalls": 0,
+              "plan": null
+            }
+          },
+          "answer": null,
+          "marathonArm": {
+            "path": "POST /marathon {enabled:true} then bare prompt",
+            "initialOffVerified": true,
+            "enabledVerified": true,
+            "sequence": 125
+          },
+          "followUp": null,
+          "serverRecords": [],
+          "serverRequestSummary": {
+            "total": 0,
+            "get": 0,
+            "post": 0,
+            "other": 0,
+            "firstAt": null,
+            "lastAt": null
+          },
+          "voidedAttempts": null,
+          "skipped": false
+        }
+      ]
+    }
+  ]
+}

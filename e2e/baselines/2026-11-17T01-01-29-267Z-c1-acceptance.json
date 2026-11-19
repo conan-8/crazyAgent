@@ -1,0 +1,73 @@
+{
+  "startedAt": "2026-11-17T01:01:29.267Z",
+  "finishedAt": "2026-11-17T01:01:44.351Z",
+  "model": "deepseek/deepseek-v4.1-flash-1017",
+  "effort": "medium",
+  "dshHome": "/tmp/crazyagent-c1/dsh-home",
+  "maxTotalTokens": 6000000,
+  "totalTokens": 188994,
+  "stopReason": null,
+  "checks": [
+    {
+      "name": "plan",
+      "status": "pass",
+      "reasons": [],
+      "evidence": {
+        "page": {
+          "name": "Grace Hopper",
+          "notes": "Compiler pioneer",
+          "result": "result: name=Grace Hopper notes=Compiler pioneer pass=10chars",
+          "submitEvents": 1,
+          "editor": "",
+          "rich": "",
+          "comment": "",
+          "selectable": "SELECT-ME-ALPHA BETA GAMMA",
+          "requested": {
+            "name": "Grace Hopper",
+            "notes": "Compiler pioneer",
+            "pass": "cobol-demo"
+          },
+          "expectedResult": "result: name=Grace Hopper notes=Compiler pioneer pass=10chars"
+        },
+        "chatDone": {
+          "planMode": true,
+          "planOutcome": "reported-complete",
+          "planRevision": 2,
+          "label": "done"
+        },
+        "turnEnd": {
+          "ok": true,
+          "aborted": false,
+          "planOutcome": "reported-complete",
+          "planRevision": 2
+        }
+      },
+      "metrics": [
+        {
+          "turnId": "turn-mwjzlgu0-86ec",
+          "wallMs": 13904,
+          "steps": 8,
+          "toolCalls": 7,
+          "failedCalls": 0,
+          "retries": 0,
+          "deadSteps": 0,
+          "deadTurn": false,
+          "totalTokens": 188994,
+          "finalText": "DONE\n\n- Filled Name=\"Grace Hopper\", Notes=\"Compiler pioneer\", Password=\"cobol-demo\", then clicked Submit once.\n- Verified by the page's own result panel: `result: name=Grace Hopper notes=Compiler pioneer pass=10chars`, and `events input=3 keydown=0 submit=1` (exactly one submit).\n- Rich text, canvas editor, comment card, and all other controls were left untouched.",
+          "reportedLabel": "done",
+          "toolCounts": {
+            "browser_plan": 2,
+            "browser_batch": 1,
+            "browser_read_text": 1,
+            "browser_screenshot": 1,
+            "browser_click": 1,
+            "browser_scroll": 1
+          }
+        }
+      ],
+      "attempts": 1,
+      "wallMs": 14114,
+      "finishedAt": "2026-11-17T01:01:44.351Z"
+    }
+  ]
+}
