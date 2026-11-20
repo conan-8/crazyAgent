@@ -96,7 +96,7 @@ There are **34 standing model-facing tools**: 25 general browser tools, 8 guarde
 - **Faster, more faithful Google Docs:** a live mixed-list write finished in **2.1 seconds with 3 exports and zero rate limits**, down from roughly 55–60 seconds per list. Named styles, replacement counters, formatting verification, below-fold fonts, embedded images, and table-cell shading received field-driven fixes.
 - **A proactive but bounded watcher:** every turn is monitored; corroborated stuck turns can receive up to **2 sanitized advisory nudges** with a 3-minute cooldown. The watcher still cannot operate the browser, stop the turn, change outcomes, or bypass confirmation. A pinned Watch Card keeps alerts visible, and Android source displays the steering text.
 - **Verified:** **1443/1443 Node tests**, **13/13 headless real-extension suites**, **23/23 model-harness self-tests**, and Android unit/lint checks pass. Live 32-item Docs acceptance, live watcher-steered recovery, docked-panel visuals, and on-device steering remain open.
-- **Android:** version remains `0.8.0 (7)` with Watch Card steering added in source. This commit does not build a replacement signed APK; the existing APK and SHA-256 below do not contain that new phone UI.
+- **Android:** version remains `0.8.0 (7)` and includes Watch Card steering. The rebuilt signed APK and new SHA-256 below are signature-verified; on-device installation and appearance remain unverified.
 
 See the complete [v2.5.4 patch notes](RELEASE-NOTES.md). Automatic updates remain fail-closed for development checkouts, edited trees, forks, and unsupervised companions.
 
@@ -136,7 +136,7 @@ See the complete [v2.3.0 patch notes](RELEASE-NOTES.md). Live docked-panel and p
 
 Use the optional Android app with an existing crazyAgent desktop installation. Basic chat, screenshots, help, and reconnects do **not** require Firebase; metadata-only push notifications are a separate optional setup.
 
-> **Android APK:** Android remains `0.8.0 (7)`, but v2.5.4 adds Watch Card steering text in the app source. The signed APK and SHA-256 below predate that UI change; this commit does not build or accept a replacement APK.
+> **Android APK:** Android remains `0.8.0 (7)` and v2.5.4 adds Watch Card steering text. The rebuilt signed APK and SHA-256 below include that change and are signature-verified; on-device installation and appearance remain unverified.
 
 **Requirements:**
 
@@ -156,7 +156,7 @@ First verify the existing installation is v2.5.4 and http://127.0.0.1:17871/heal
 Verify that Tailscale is running, identify this host's Tailscale DNS name, and confirm MagicDNS and HTTPS certificates are enabled. Inspect any existing Tailscale Serve configuration without overwriting unrelated routes.
 Enable the scoped remote API on the existing crazyAgent companion with --remote and --remote-public-host <this-host>.<tailnet>.ts.net. Preserve my existing model/settings and use the existing startup/service method rather than starting a conflicting second companion. The remote listener must remain on 127.0.0.1:17873; never expose port 17871.
 Publish only the remote listener with tailscale serve --bg http://127.0.0.1:17873. Do not enable Funnel or public port forwarding. Verify that the Serve route is tailnet-only, unauthenticated /remote/v1/state returns 401, and /bridge through that route returns 404.
-Download the official APK from https://github.com/conan-8/crazyAgent/releases/download/v2.5.4/app-release.apk into a new empty temporary directory and require SHA-256 57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d before installing it. Do not use a different APK or build unless I explicitly ask for a source build.
+Download the official APK from https://github.com/conan-8/crazyAgent/releases/download/v2.5.4/app-release.apk into a new empty temporary directory and require SHA-256 3c6b02bb216328cdb65fcb8a793c13099fb1a44842d3061b3fd0f665b7998828 before installing it. Do not use a different APK or build unless I explicitly ask for a source build.
 If adb is available and authorized, install that verified APK with adb install -r. If no usable adb device exists, give me short manual instructions to download and open the same APK on my Android phone. If Android rejects an update because the existing app has a different signature, stop and explain that uninstalling deletes the old pairing; do not uninstall or erase app data automatically.
 Do not print, read, copy, log, commit, or transmit the remote token yourself. Give me the exact npm run dev -- --pair-remote command to run in my own terminal, then tell me to paste the printed server URL and token directly into the crazyAgent Remote app. Finish with the server address, APK hash, health status, and the remaining manual pairing steps. Keep Edge and the side panel open, and do not send a test prompt until I confirm pairing is complete.
 ```
@@ -166,7 +166,7 @@ Do not print, read, copy, log, commit, or transmit the remote token yourself. Gi
 1. **Install the app:** if the agent did not install through `adb`, download the official [crazyAgent Remote APK](https://github.com/conan-8/crazyAgent/releases/download/v2.5.4/app-release.apk) onto the phone and open it. Android may ask permission to install apps from the browser or file manager.
 2. **Verify the download:** on Linux, run:
    ```sh
-   echo '57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d  app-release.apk' | sha256sum -c -
+   echo '3c6b02bb216328cdb65fcb8a793c13099fb1a44842d3061b3fd0f665b7998828  app-release.apk' | sha256sum -c -
    ```
    On macOS, use `shasum -a 256 app-release.apk`; on Windows, use `Get-FileHash .\app-release.apk -Algorithm SHA256` in PowerShell. Compare the result with the hash above before installing.
 3. **Create the phone credential:** from the crazyAgent checkout on the host, run:
