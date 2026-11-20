@@ -49,7 +49,7 @@ import {
 } from './openrouter.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const VERSION = '2.5.4'
+const VERSION = '2.6.0'
 const PROVIDER = 'openrouter'
 
 const BOOLEAN_FLAGS = new Set(['no-dsh', 'no-auto-capture', 'new-token', 'help', 'remote', 'pair-remote', 'new-remote-token', 'confirm-irreversible', 'no-auto-update'])

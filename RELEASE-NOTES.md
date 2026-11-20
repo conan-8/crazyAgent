@@ -1,8 +1,8 @@
-# crazyAgent v2.5.4
+# crazyAgent v2.6.0
 
 Changes since **v2.5.3**. This release adds page/Download image copying with OS-clipboard paste, fixes pointer-follow drag widgets and many Google Docs field failures, and turns the watcher into a proactive but bounded advisor on every turn.
 
-The extension and companion use version `2.5.4`. Android remains `0.8.0 (7)` and now renders Watch Card steering text. The signed release APK is rebuilt from this source with SHA-256 `3c6b02bb216328cdb65fcb8a793c13099fb1a44842d3061b3fd0f665b7998828`; `apksigner verify` accepted it with certificate SHA-256 `dae7cf347a740b7b56acf3c15191cad806a5691c7584c1b422dc610bbd88870a`. On-device installation and appearance remain unverified.
+The extension and companion use version `2.6.0`. Android remains `0.8.0 (7)` and now renders Watch Card steering text. The signed release APK is rebuilt from this source with SHA-256 `3c6b02bb216328cdb65fcb8a793c13099fb1a44842d3061b3fd0f665b7998828`; `apksigner verify` accepted it with certificate SHA-256 `dae7cf347a740b7b56acf3c15191cad806a5691c7584c1b422dc610bbd88870a`. On-device installation and appearance remain unverified.
 
 ## Images, clicks, and drag reliability
 
