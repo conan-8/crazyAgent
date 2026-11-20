@@ -57,27 +57,71 @@ export function parseClassMarks(html) {
   return out
 }
 
+/** Marks of the export's standalone paragraph element rules: `p{}`, `li{}`, `h1{}`…`h6{}`. */
+function parseElementRules(html) {
+  const out = new Map()
+  const style = (/<style[^>]*>([\s\S]*?)<\/style>/iu.exec(html)?.[1] ?? '').replace(/\/\*[\s\S]*?\*\//gu, '')
+  for (const match of style.matchAll(/(?<=^|[};])\s*(p|li|h[1-6])\s*\{([^}]*)\}/giu)) {
+    const tag = match[1].toLowerCase()
+    const marks = out.get(tag) ?? {}
+    applyStyle(marks, match[2])
+    out.set(tag, marks)
+  }
+  return out
+}
+
+function pickMarks(marks, fields) {
+  return Object.fromEntries(fields.filter(field => marks?.[field] !== undefined).map(field => [field, marks[field]]))
+}
+
 /**
  * The font, size, and color a paragraph's text inherits from the export's
  * element rules (`p{}`, `li{}`, `h1{}`…`h6{}`). Docs leaves those three off a
  * span that keeps its named style's value, so a span without them takes these.
- * Kept apart from run marks: element rules also carry heading weights that
- * spans override, and other consumers compare explicit span marks only.
+ * Kept apart from run marks because other consumers compare explicit span
+ * values; parseDocStructure does fold the rules' weight and italics into runs.
  * @param {string} html
  * @returns {Map<string, {font?: string, fontSize?: number, color?: string}>}
  */
 export function parseInheritedTextMarks(html) {
   const out = new Map()
-  const style = /<style[^>]*>([\s\S]*?)<\/style>/iu.exec(html)?.[1] ?? ''
-  for (const match of style.matchAll(/(?<=^|[}\s])(p|li|h[1-6])\s*\{([^}]*)\}/gu)) {
-    const marks = {}
-    applyStyle(marks, match[2])
-    const inherited = {
-      ...(marks.font ? { font: marks.font } : {}),
-      ...(marks.fontSize !== undefined ? { fontSize: marks.fontSize } : {}),
-      ...(marks.color ? { color: marks.color } : {}),
-    }
-    if (Object.keys(inherited).length > 0) out.set(match[1].toLowerCase(), inherited)
+  for (const [element, marks] of parseElementRules(html)) {
+    const inherited = pickMarks(marks, ['font', 'fontSize', 'color'])
+    if (Object.keys(inherited).length > 0) out.set(element, inherited)
+  }
+  return out
+}
+
+const NAMED_STYLE_SOURCES = [
+  ['Normal text', 'p'],
+  ['Title', 'p', 'title'],
+  ['Subtitle', 'p', 'subtitle'],
+  ['Heading 1', 'h1'], ['Heading 2', 'h2'], ['Heading 3', 'h3'],
+  ['Heading 4', 'h4'], ['Heading 5', 'h5'], ['Heading 6', 'h6'],
+]
+
+/**
+ * What text in each named paragraph style renders as by default, from the
+ * export's rules: Title/Subtitle are `<p class="title|subtitle">` (class over
+ * `p{}`), headings are their `h1{}`…`h6{}` rule. Weight and italics a rule
+ * leaves unset are false. A style whose rules lack a font or size is omitted.
+ * @param {string} html
+ * @returns {Map<string, {font: string, fontSize: number, color: string, bold: boolean, italic: boolean}>}
+ */
+export function parseNamedStyleDefaults(html) {
+  const elements = parseElementRules(html)
+  const classes = parseClassMarks(html)
+  const out = new Map()
+  for (const [name, element, className] of NAMED_STYLE_SOURCES) {
+    const marks = { ...elements.get(element), ...className ? classes.get(className) : {} }
+    if (!marks.font || marks.fontSize === undefined) continue
+    out.set(name, {
+      font: marks.font,
+      fontSize: marks.fontSize,
+      color: marks.color ?? '#000000',
+      bold: marks.bold === true,
+      italic: marks.italic === true,
+    })
   }
   return out
 }
@@ -128,6 +172,12 @@ function sameRunMarks(left, right) {
 
 export function parseDocStructure(html) {
   const classMarks = parseClassMarks(html)
+  // A heading span that keeps its style's weight carries no font-weight and
+  // inherits it from h1{}…h6{} (a live Section Three span was only
+  // `font-size:20pt` under h1{font-weight:700}). Runs take the element rule's
+  // weight and italics, under the paragraph's class and span values, so they
+  // describe rendered text; the `marked` outline keeps explicit marks only.
+  const elementEmphasis = new Map([...parseElementRules(html)].map(([element, marks]) => [element, pickMarks(marks, ['bold', 'italic'])]))
   const bodyStart = String(html).search(/<body[^>]*>/iu)
   const body = bodyStart >= 0 ? String(html).slice(bodyStart) : String(html)
   const blocks = []
@@ -139,17 +189,17 @@ export function parseDocStructure(html) {
   let tableCount = 0
   let bodyMarks = {}
 
-  const currentMarks = () => {
-    const levels = [bodyMarks, para?.marks, ...spanMarks]
+  const currentMarks = (rendered = true) => {
+    const levels = [bodyMarks, rendered ? para?.emphasis : undefined, para?.marks, ...spanMarks]
     const merged = Object.assign({}, ...levels)
     if (levels.some(marks => marks?.underline === true)) merged.underline = true
     if (levels.some(marks => marks?.strike === true)) merged.strike = true
     return merged
   }
   const append = raw => {
-    if (!para) para = { style: 'P', text: '', marked: '', runs: [], marks: {} }
+    if (!para) para = { style: 'P', text: '', marked: '', runs: [], marks: {}, emphasis: elementEmphasis.get('p') }
     para.text += raw
-    para.marked += wrap(raw, currentMarks(), href)
+    para.marked += wrap(raw, currentMarks(false), href)
     const marks = runMarks(currentMarks(), href)
     const previous = para.runs.at(-1)
     if (previous && sameRunMarks(previous, marks)) previous.text += raw
@@ -160,7 +210,7 @@ export function parseDocStructure(html) {
     const current = para
     para = undefined
     const cell = tables.at(-1)?.cell
-    const { marks, ...block } = current
+    const { marks, emphasis, ...block } = current
     if (cell) {
       cell.text.push(current.text)
       cell.paragraphs.push({ kind: 'para', ...block })
@@ -199,7 +249,7 @@ export function parseDocStructure(html) {
         let style = tag === 'p' ? 'P' : tag === 'li' ? 'LI' : tag.toUpperCase()
         if (/\btitle\b/u.test(classes)) style = 'TITLE'
         else if (/\bsubtitle\b/u.test(classes)) style = 'SUBTITLE'
-        para = { style, text: '', marked: '', runs: [], marks: marksOf(attrs, classMarks, false) }
+        para = { style, text: '', marked: '', runs: [], marks: marksOf(attrs, classMarks, false), emphasis: elementEmphasis.get(tag) }
         if (tag === 'li') {
           para.listLevel = Number(/lst-[^\s"']*-(\d+)/u.exec(classes)?.[1] ?? Math.max(0, lists.length - 1))
           const list = lists.at(-1)

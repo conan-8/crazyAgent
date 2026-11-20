@@ -246,4 +246,31 @@ class MarathonLifecycleTest {
         assertEquals(ended.watchNotice, endedResync.watchNotice)
         assertTrue(endedResync.watchNotice!!.actionable)
     }
+
+    @Test fun watcherSteerNoteIsMirroredFromLiveWatchAndResync() {
+        var state = armed()
+        val steeredBody = """
+            {"id":"w-steer","turnId":"t1","kind":"stuck","state":"open","blocker":"loop",
+             "reason":"Clicking the same submit button with no visible change.","signals":[],
+             "source":"both","steer":{"id":"s1","text":"Inspect validation errors instead of clicking Submit."},
+             "at":"2026-11-19T23:00:00.000Z"}
+        """
+        state = apply(state, 7, "remote.watch", steeredBody)
+        assertEquals("Inspect validation errors instead of clicking Submit.", state.watchNotice!!.steerText)
+        assertEquals("Inspect validation errors instead of clicking Submit.", state.marathon.watch.open?.steerText)
+
+        val projection = frame(
+            """
+            {"instanceId":"i1","latestSequence":7,"sessionId":"s1","turn":{"status":"running"},"messages":[],
+             "marathon":{"enabled":true,"since":"2026-11-17T12:00:00.000Z","plan":null,
+              "watch":{"open":{"id":"w-steer","kind":"stuck","at":"2026-11-19T23:00:00.000Z",
+               "reason":"Clicking the same submit button with no visible change.",
+               "steer":{"id":"s1","text":"Inspect validation errors instead of clicking Submit."}},
+               "lastVerdict":"stuck","lastCheckAt":"2026-11-19T23:00:00.000Z","checks":3}}}
+            """,
+        )
+        val resynced = ChatReducer.fromProjection(projection)!!
+        assertEquals("Inspect validation errors instead of clicking Submit.", resynced.watchNotice!!.steerText)
+        assertEquals("Inspect validation errors instead of clicking Submit.", resynced.marathon.watch.open?.steerText)
+    }
 }

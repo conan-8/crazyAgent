@@ -3074,6 +3074,62 @@ input::placeholder {
   color: #ff8a8a;
 }
 
+.watch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 4px 8px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 195, 0, 0.5);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.watch-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.watch-card-title {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.watch-card-reason {
+  margin: 0;
+  color: var(--text, #e6e6e6);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.watch-steer-note {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text, #e6e6e6);
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.watch-card .watch-steer-note {
+  margin-top: 0;
+}
+
+.watch-card .watch-row-signals {
+  margin-top: 2px;
+}
+
+.watch-card .watch-row-actions {
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+
 .marathon-turn-badge {
   border-color: rgba(255, 195, 0, 0.35);
   background: var(--accent-soft);

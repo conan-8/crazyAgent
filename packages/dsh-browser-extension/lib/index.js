@@ -12,6 +12,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import WebSocket from 'ws'
 import { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/brand'
 import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
@@ -19,9 +20,11 @@ import { ImageDedupe } from './image-dedupe.js'
 import { planImageOffload, planMidTurnOffload } from './image-budget.js'
 import { classifyPrompt, effortFor, escalateEffort, shouldEscalate } from './reasoning.js'
 import { createDownloadsFolder } from './downloads.js'
+import { createOsClipboard, detectImageMime, OS_CLIPBOARD_MAX_BYTES } from './os-clipboard.js'
 import { createPlanRuntime } from './plan-runtime.js'
 import { AGENT_HELP_TOOL, createHelpRuntime } from './help.js'
 import { createConfirmRuntime } from './confirm.js'
+import { createWatchSteerRuntime } from './watch-steer.js'
 import { CORE_GUIDANCE, DOCS_MODE_GUIDANCE } from './guidance.js'
 import {
   ACTION_EXPECT_BATCH_CHECKS,
@@ -74,7 +77,7 @@ const MID_TURN_IMAGE_GAP = 8
 /** Clipboard contract mirrored by the extension executor. */
 const CLIPBOARD_ACTIONS = ['copy', 'read', 'write', 'paste', 'clear']
 const CLIPBOARD_TARGETS = ['virtual', 'system']
-const CLIPBOARD_SOURCES = ['selection', 'label']
+const CLIPBOARD_SOURCES = ['selection', 'label', 'image', 'download']
 const CLIPBOARD_MAX_CHARS = 100_000
 const CLIPBOARD_TARGET_LABELS = { virtual: 'virtual clipboard', system: 'system clipboard' }
 const DOCS_TEXT_MAX_CHARS = 1_000
@@ -150,6 +153,8 @@ class BridgeClient {
     this.onDocsOutcome = options.onDocsOutcome
     this.onPlanMode = options.onPlanMode
     this.onConfirmMode = options.onConfirmMode
+    this.onTurnContext = options.onTurnContext
+    this.onWatchSteer = options.onWatchSteer
   }
 
   start() {
@@ -428,6 +433,19 @@ class BridgeClient {
       this.turnContext = typeof message.turnId === 'string' && typeof message.prompt === 'string'
         ? { turnId: message.turnId, prompt: message.prompt }
         : undefined
+      try {
+        this.onTurnContext?.(message)
+      } catch (error) {
+        this.logEvent('turn.context.error', { message: error instanceof Error ? error.message : String(error) }, 'warn')
+      }
+      return
+    }
+    if (message.type === 'watch.steer' && ws === this.#ws) {
+      try {
+        this.onWatchSteer?.(message)
+      } catch (error) {
+        this.logEvent('watch.steer.error', { message: error instanceof Error ? error.message : String(error) }, 'warn')
+      }
       return
     }
     if (message.type === 'plan.mode' && ws === this.#ws) {
@@ -1701,7 +1719,10 @@ function docsReadContent(result) {
   const docs = isRecord(result?.docs) ? result.docs : {}
   const offset = Number.isSafeInteger(docs.offset) ? docs.offset : 0
   const nextOffset = Number.isSafeInteger(docs.nextOffset) ? docs.nextOffset : null
-  const header = `docs.status=${docs.status ?? '?'} docs.format=${docs.format ?? '?'} docs.chars=${docs.chars ?? '?'} docs.truncated=${docs.truncated === true} docs.verifiedBy=${docs.verifiedBy ?? 'export'} docs.offset=${offset} docs.next_offset=${nextOffset ?? 'null'}`
+  const omitted = Number.isSafeInteger(docs.omittedImageDataCount) && docs.omittedImageDataCount > 0
+    ? ` docs.omittedImageData=${docs.omittedImageDataCount}(${docs.omittedImageDataChars ?? '?'} chars)`
+    : ''
+  const header = `docs.status=${docs.status ?? '?'} docs.format=${docs.format ?? '?'} docs.chars=${docs.chars ?? '?'} docs.truncated=${docs.truncated === true} docs.verifiedBy=${docs.verifiedBy ?? 'export'} docs.offset=${offset} docs.next_offset=${nextOffset ?? 'null'}${omitted}`
   return { content: [{ type: 'text', text: `${header}\n--- document content ---\n${docs.content ?? ''}` }] }
 }
 
@@ -1983,6 +2004,8 @@ function clipboardSourceText(clipboard) {
   const source = typeof clipboard?.source === 'string' ? clipboard.source : ''
   if (source === 'selection') return 'the page selection'
   if (source === 'label') return `label ${clipboard?.label ?? '?'}`
+  if (source === 'image') return clipboard?.label === undefined ? 'the active image tab' : `image label ${clipboard.label}`
+  if (source === 'download') return `Downloads file ${JSON.stringify(clipboard?.filename ?? '?')}`
   if (source === 'write') return 'text written with browser_clipboard'
   if (source === 'screenshot') return 'a screenshot capture'
   if (source === 'system') return 'the system clipboard'
@@ -2112,6 +2135,13 @@ function clipboardContent(result) {
     return { content: [{ type: 'text', text: lines.join('\n') }] }
   }
   if (action === 'copy') {
+    if (clipboard.kind === 'image') {
+      const lines = [
+        `copied a ${clipboard.width ?? '?'}x${clipboard.height ?? '?'} image/png from ${source} to the ${target}`,
+        'use browser_clipboard action:"paste" to insert it at the focused element or a labelled target',
+      ]
+      return { content: [{ type: 'text', text: lines.join('\n') }] }
+    }
     const lines = [`copied ${chars} chars from ${source} to the ${target}`]
     if (preview.length > 0) lines.push(`preview: ${JSON.stringify(preview)}`)
     if (clipboard.truncated === true) {
@@ -2180,8 +2210,9 @@ const NO_OP_VIEW_TOOLS = new Set(['browser_switch_tab', 'browser_screenshot', 'b
  * @param {ImageDedupe} [imageDedupe]
  * @param {ReturnType<typeof createDownloadsFolder>} downloadsFolder
  */
-function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), downloadsFolder, helpRuntime, docsBlockBySession = new Map()) {
+function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), downloadsFolder, helpRuntime, docsBlockBySession = new Map(), osClipboard = createOsClipboard()) {
   const names = []
+  let virtualClipboardIsImage = false
   /**
    * Wrap one tool definition: the guard runs before the tool body and throws a
    * normal tool error (no bridge traffic) when an identical mutating call keeps
@@ -2345,6 +2376,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       if (args.to_clipboard !== undefined) forward.to_clipboard = args.to_clipboard
       const special = scope !== 'viewport' || args.to_clipboard === true
       const result = await bridge.request({ op: 'snapshot', args: forward }, exec.callId, exec.signal, special ? 45_000 : undefined)
+      if (result?.clipboard?.kind === 'image') virtualClipboardIsImage = true
       return viewContent(result)
     },
   }))
@@ -3071,16 +3103,17 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
   ctx.tools.register(define({
     name: 'browser_clipboard',
     rawName: 'browser_clipboard',
-    description: 'Copy, read, write, paste, or clear text and captured images. target "virtual" (default) is the agent session clipboard; target "system" is the computer clipboard and is opt-in. Copy reads selection or labelled text; browser_screenshot with to_clipboard:true stores a clean PNG instead. Read returns the stored text or image. Virtual text paste types into a labelled/focused field; virtual image paste uses trusted Ctrl+V with best-effort OS preservation/restoration when available, or synthetic paste/drop File delivery when OS staging is denied, reporting handler consumption and clipboard outcomes. System rich paste sends trusted Ctrl+V; rich:false types text. Clear empties the virtual clipboard. Never expose system clipboard contents without a user request.',
+    description: 'Copy, read, write, paste, or clear text and images. target "virtual" (default) is the agent session clipboard; target "system" is the computer clipboard and is opt-in. Copy reads selection/label text, a page image (source:"image", optional label or standalone image tab), or a downloaded image file in Downloads (source:"download", filename). browser_screenshot with to_clipboard:true also stores a clean PNG. Read returns the stored text or image. Virtual text paste types; virtual image paste uses real OS clipboard staging + one trusted Ctrl+V with best-effort preservation/restoration (falling back to synthetic delivery if unavailable). System rich paste sends trusted Ctrl+V; rich:false types text. Clear empties the virtual clipboard. Never expose system clipboard contents without a user request.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       required: ['action'],
       properties: {
-        action: { type: 'string', enum: CLIPBOARD_ACTIONS, description: 'copy = read selection/label text; read = return stored text or image; write = store text; paste = insert clipboard content; clear = empty the virtual clipboard.' },
+        action: { type: 'string', enum: CLIPBOARD_ACTIONS, description: 'copy = read selection/label text, page image, or downloaded image; read = return stored text or image; write = store text; paste = insert clipboard content; clear = empty the virtual clipboard.' },
         target: { type: 'string', enum: CLIPBOARD_TARGETS, description: 'virtual (default) is the extension\'s own session clipboard; system is the computer clipboard. Use "system" only when the user asks.' },
-        source: { type: 'string', enum: CLIPBOARD_SOURCES, description: 'copy only. selection (default) reads the current page selection; label reads the labelled element. A label argument implies source:"label".' },
-        label: { type: 'integer', minimum: 1, description: 'Label id from the current view: the element to copy with source:"label", or the field to focus before a paste. Omit on paste to use the focused element.' },
+        source: { type: 'string', enum: CLIPBOARD_SOURCES, description: 'copy only. selection (default) reads selected text; label reads labelled text; image copies a labelled image/thumbnail (or solo image tab) as PNG; download loads an image file from Downloads by filename as PNG.' },
+        label: { type: 'integer', minimum: 1, description: 'Label id from the current view: element to copy with source:"label" or source:"image", or field to focus before paste. Omit on paste to use the focused element.' },
+        filename: { type: 'string', minLength: 1, maxLength: 1024, description: 'copy with source:"download" only: exact relative image filename inside Downloads (PNG/JPEG/GIF/WebP), normally returned by browser_download.' },
         text: { type: 'string', maxLength: CLIPBOARD_MAX_CHARS, description: 'write only: the text to store (at most 100000 characters).' },
         mode: { type: 'string', enum: ['replace', 'append'], description: 'paste text path: replace (default) selects the existing field text first; append keeps it. Image paste inserts at the current selection.' },
         submit: { type: 'boolean', description: 'paste text path: press Enter after pasting. Not valid for an image entry.' },
@@ -3102,7 +3135,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       }
       if (args.source !== undefined) {
         if (typeof args.source !== 'string' || !CLIPBOARD_SOURCES.includes(args.source)) {
-          throw new Error('browser_clipboard source must be "selection" or "label"')
+          throw new Error('browser_clipboard source must be "selection", "label", "image", or "download"')
         }
         if (action !== 'copy') throw new Error('browser_clipboard source is only valid with action "copy"')
       }
@@ -3113,11 +3146,25 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
         if (action !== 'copy' && action !== 'paste') throw new Error('browser_clipboard label is only valid with action "copy" or "paste"')
         label = value
       }
+      let filename
+      if (args.filename !== undefined) {
+        if (typeof args.filename !== 'string' || args.filename.trim().length === 0 || args.filename.length > 1024) {
+          throw new Error('browser_clipboard filename must be a non-empty relative path inside Downloads')
+        }
+        if (action !== 'copy') throw new Error('browser_clipboard filename is only valid with action "copy" and source "download"')
+        filename = args.filename.trim()
+      }
       let source
       if (action === 'copy') {
-        source = args.source ?? (label === undefined ? 'selection' : 'label')
+        source = args.source ?? (filename !== undefined ? 'download' : label === undefined ? 'selection' : 'label')
         if (source === 'label' && label === undefined) throw new Error('browser_clipboard copy with source "label" requires a label from the current view')
-        if (source === 'selection' && label !== undefined) throw new Error('browser_clipboard label is only valid with copy source "label"')
+        if (source === 'selection' && label !== undefined) throw new Error('browser_clipboard label is only valid with copy source "label" or "image"')
+        if (source === 'download' && filename === undefined) throw new Error('browser_clipboard copy with source "download" requires filename')
+        if (source === 'download' && label !== undefined) throw new Error('browser_clipboard label is not valid with copy source "download"')
+        if (source !== 'download' && filename !== undefined) throw new Error('browser_clipboard filename is only valid with copy source "download"')
+        if ((source === 'image' || source === 'download') && target !== 'virtual') {
+          throw new Error(`browser_clipboard copy with source "${source}" only stores in the virtual clipboard; omit target or use "virtual"`)
+        }
       }
       let text
       if (args.text !== undefined && action !== 'write') {
@@ -3153,7 +3200,130 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
       if (args.submit !== undefined) forward.submit = args.submit
       if (args.rich !== undefined) forward.rich = args.rich
       if (action === 'paste' && view !== undefined) forward.view = view
-      const result = await bridge.request({ op: 'clipboard', args: forward }, exec.callId, exec.signal, undefined, exec.agent?.session?.id)
+
+      if (action === 'copy' && source === 'download') {
+        let file
+        try {
+          file = await downloadsFolder.resolveUpload(filename)
+        } catch (error) {
+          if (error?.code === 'DOWNLOADS_FILE_NOT_FOUND') {
+            const matches = await downloadsFolder.list({ query: filename, limit: 5 }).catch(() => undefined)
+            if (matches?.files.length > 0) {
+              error.message += ` Possible actual filename(s): ${matches.files.map(item => JSON.stringify(item.filename)).join(', ')}. Retry with one exact returned filename; do not guess.`
+            } else {
+              error.message += ' Call browser_downloads to inspect actual downloaded filenames before retrying.'
+            }
+          }
+          throw error
+        }
+        if (file.size > OS_CLIPBOARD_MAX_BYTES) {
+          throw new Error(`Downloads image ${JSON.stringify(file.filename)} (${file.size} bytes) exceeds the ${OS_CLIPBOARD_MAX_BYTES}-byte limit`)
+        }
+        const bytes = await readFile(file.path)
+        const mimeType = detectImageMime(bytes)
+        if (!mimeType) {
+          throw new Error(`Downloads file ${JSON.stringify(file.filename)} is not a supported raster image (PNG, JPEG, GIF, or WebP)`)
+        }
+        forward.filename = file.filename
+        forward.mimeType = mimeType
+        forward.data = bytes.toString('base64')
+      }
+
+      const canOsStage = action === 'paste' && target === 'virtual' && args.rich !== false && osClipboard?.isAvailable?.() === true
+      if (canOsStage && virtualClipboardIsImage) {
+        forward.osStage = true
+      }
+
+      const pasteViaOsClipboard = async (image, clipboardMetaObj) => {
+        let preserved = null
+        let restoreError = null
+        try {
+          preserved = await osClipboard.preserve()
+        } catch (error) {
+          restoreError = error instanceof Error ? error : new Error(String(error))
+        }
+        const staged = await osClipboard.stagePng(Buffer.from(image.data, 'base64'))
+        let keyed
+        let pasteErr = null
+        try {
+          /** @type {Record<string, unknown>} */
+          const sysForward = { action: 'paste', target: 'system', rich: true }
+          if (label !== undefined) sysForward.label = label
+          if (view !== undefined) sysForward.view = view
+          keyed = await bridge.request({ op: 'clipboard', args: sysForward }, exec.callId, exec.signal, 30_000, exec.agent?.session?.id)
+          // Allow Wayland/X11 target apps a brief moment to finish reading the
+          // clipboard selection before releasing/restoring.
+          await new Promise(resolve => setTimeout(resolve, 150))
+        } catch (error) {
+          pasteErr = error
+        }
+        let restored = false
+        try {
+          restored = await osClipboard.restore(preserved, staged)
+        } catch (error) {
+          restoreError = error instanceof Error ? error : new Error(String(error))
+        }
+        if (pasteErr) throw pasteErr
+        const trusted = keyed?.pasted?.trusted !== false && keyed?.pressed?.trusted !== false
+        return {
+          ...keyed,
+          op: 'clipboard',
+          action: 'paste',
+          clipboard: {
+            ...(isRecord(clipboardMetaObj) ? clipboardMetaObj : {}),
+            target: 'virtual',
+            system: false,
+            kind: 'image',
+            rich: true,
+            width: image.width,
+            height: image.height,
+          },
+          pasted: {
+            ...(isRecord(keyed?.pasted) ? keyed.pasted : {}),
+            chars: null,
+            mode: 'keys',
+            ...(label === undefined ? {} : { label }),
+            via: 'keys',
+            trusted,
+            rich: true,
+            width: image.width,
+            height: image.height,
+            systemPreserved: preserved !== null,
+            systemRestored: preserved !== null && restored === true && restoreError === null,
+            systemStaged: true,
+            osClipboard: true,
+            ...(restoreError ? { systemRestoreError: restoreError.message } : {}),
+          },
+        }
+      }
+
+      const timeout = (action === 'copy' && (source === 'image' || source === 'download')) ? 30_000 : undefined
+      let result = await bridge.request({ op: 'clipboard', args: forward }, exec.callId, exec.signal, timeout, exec.agent?.session?.id)
+      if (action === 'copy' || action === 'read') {
+        if (target === 'virtual') virtualClipboardIsImage = result?.clipboard?.kind === 'image'
+      } else if (action === 'write' || action === 'clear') {
+        if (target === 'virtual') virtualClipboardIsImage = false
+      }
+      if (result?.osStageNeeded === true && isRecord(result.image) && typeof result.image.data === 'string' && canOsStage) {
+        try {
+          result = await pasteViaOsClipboard(result.image, result.clipboard)
+        } catch {
+          const fallbackForward = { ...forward, forceSynthetic: true }
+          delete fallbackForward.osStage
+          result = await bridge.request({ op: 'clipboard', args: fallbackForward }, exec.callId, exec.signal, 30_000, exec.agent?.session?.id)
+        }
+      } else if (canOsStage && !virtualClipboardIsImage
+        && result?.pasted?.via === 'synthetic' && result?.pasted?.handled === false && result?.pasted?.systemStaged === false) {
+        try {
+          const readRes = await bridge.request({ op: 'clipboard', args: { action: 'read', target: 'virtual' } }, exec.callId, exec.signal, 10_000, exec.agent?.session?.id)
+          if (readRes?.clipboard?.kind === 'image' && isRecord(readRes.image) && typeof readRes.image.data === 'string') {
+            virtualClipboardIsImage = true
+            result = await pasteViaOsClipboard(readRes.image, readRes.clipboard)
+          }
+        } catch {
+          // Keep original synthetic result honestly if OS recovery fails.
+        }
+      }
       return clipboardContent(result)
     },
   }))
@@ -4015,6 +4185,7 @@ export function apply(ctx, config = {}) {
     const docsFinalCheck = createDocsFinalCheck()
     let planRuntime
     let confirmRuntime
+    let watchSteerRuntime
     const bridge = new BridgeClient({
       url: bridgeUrl ?? DEFAULT_BRIDGE_URL,
       token: bridgeToken ?? '',
@@ -4023,9 +4194,12 @@ export function apply(ctx, config = {}) {
       onDocsOutcome: docsFinalCheck.observeBridge,
       onPlanMode: frame => planRuntime?.setMode(frame),
       onConfirmMode: frame => confirmRuntime?.setMode(frame),
+      onTurnContext: frame => watchSteerRuntime?.setTurnContext(frame),
+      onWatchSteer: frame => watchSteerRuntime?.handleSteer(frame),
     })
     planRuntime = createPlanRuntime({ ctx, bridge })
     confirmRuntime = createConfirmRuntime({ ctx, bridge })
+    watchSteerRuntime = createWatchSteerRuntime({ bridge })
     // Repeat guard: fails an identical runaway call with a normal tool error
     // before it reaches the bridge, and resets whenever a new turn starts. There
     // is no per-turn call limit.
@@ -4056,7 +4230,8 @@ export function apply(ctx, config = {}) {
     }
     bridge.start()
     const helpRuntime = createHelpRuntime({ bridge })
-    const toolNames = registerTools(ctx, bridge, guard, imageDedupe, downloadsFolder, helpRuntime, docsBlockBySession)
+    const osClipboard = config.osClipboard ?? createOsClipboard()
+    const toolNames = registerTools(ctx, bridge, guard, imageDedupe, downloadsFolder, helpRuntime, docsBlockBySession, osClipboard)
     /** @type {Map<number, number>} consecutive no-progress tool results per turn */
     const noProgressByTurn = new Map()
     const resolveTurnEffort = (agent, turn) => {
@@ -4098,6 +4273,7 @@ export function apply(ctx, config = {}) {
         // turn: it must not reset the repeat guard, the executor circuit, or
         // the no-progress count, and it is not the turn's user prompt.
         if (isInternalNotice(message.source)) return
+        watchSteerRuntime.claim(agent, turn)
         if (Number.isSafeInteger(turn)) {
           const messageId = typeof message.id === 'string' ? message.id : undefined
           guard.setTurn(messageId ? `message:${messageId}` : `turn:${turn}`)
@@ -4310,6 +4486,11 @@ export function apply(ctx, config = {}) {
               bridge.logEvent('turn.outcome.error', { part: 'confirm', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
             }
             try {
+              watchSteerRuntime.endTurn(session, turn)
+            } catch (error) {
+              bridge.logEvent('turn.outcome.error', { part: 'watch-steer', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
+            }
+            try {
               docsFinalCheck.endTurn(session?.id, turn, outcome)
             } catch (error) {
               bridge.logEvent('turn.outcome.error', { part: 'docs', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
@@ -4402,7 +4583,7 @@ export function apply(ctx, config = {}) {
         }
         if (state.needsRead && !state.nudged) {
           state.nudged = true
-          const text = 'Final Docs evidence check: call browser_docs_read exactly once with format:"html", offset:0, and max_chars:100000. Reconcile the requested document changes against that untruncated HTML read before your final response. Do not make recovery edits for this check. If the read fails, is partial, or is truncated, do not retry or loop; report the affected changes honestly as unverified or partial and stop.'
+          const text = 'Final Docs evidence check: call browser_docs_read exactly once with format:"html", offset:0, and max_chars:100000. Reconcile the requested document changes against that untruncated HTML read before your final response, keeping any requested deliverable (such as a share link) in your final answer. Do not make recovery edits for this check. If the read fails, is partial, or is truncated, do not retry or loop; report the affected changes honestly as unverified or partial and stop.'
           const message = Object.freeze({
             id: randomUUID(),
             role: 'user',
@@ -4490,6 +4671,7 @@ export function apply(ctx, config = {}) {
     yield () => {
       planRuntime.dispose()
       confirmRuntime.dispose()
+      watchSteerRuntime.dispose()
       bridge.close()
     }
   }, 'browser-use-extension.runtime')

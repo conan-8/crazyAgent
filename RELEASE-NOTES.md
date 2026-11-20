@@ -1,3 +1,41 @@
+# crazyAgent v2.5.4
+
+Changes since **v2.5.3**. This release adds page/Download image copying with OS-clipboard paste, fixes pointer-follow drag widgets and many Google Docs field failures, and turns the watcher into a proactive but bounded advisor on every turn.
+
+The extension and companion use version `2.5.4`. Android remains `0.8.0 (7)`; its source now renders Watch Card steering text. The previously signed APK remains SHA-256 `57b2fc7f979ee13030da80975d53ca580b23e5726e1257328e99cda10d92912d`; this commit does not build or accept a replacement APK containing the new phone UI.
+
+## Images, clicks, and drag reliability
+
+- Standalone content images receive bounded labels. `browser_clipboard` can copy page images/canvases or raster images inside Downloads, normalize them to PNG, stage them on the host OS clipboard with preserve/restore, and paste once with trusted input. Wayland, X11, macOS, and Windows helpers are included; a live Wayland round-trip preserved and restored a **276,648-byte PNG** byte-for-byte.
+- Menu labels no longer confuse an `<li>`'s numeric `value` with text, image controls can use child alt text, and submenu disclosure glyphs no longer break exact role matching. Click change reconciliation recognizes full-view/iframe label and layout changes instead of false `NO VISIBLE CHANGE` results.
+- Pointer-follow drag sources may move with the cursor while the destination remains exact. Detached sources, unrelated covers, and moved destinations still cancel. The live gauntlet replay filed **4/4 letters**, and the real-extension drag suite passed **29/29 checks**. Hover-growing handles remain a separate, intentionally guarded limitation.
+- Six remaining frame-destruction call sites now fail closed instead of crashing or misreporting results.
+
+## Google Docs field fixes and faster lists
+
+- HTML reads summarize embedded image payloads instead of exhausting the final-check budget. Named Title/Subtitle/Heading styles supply their own unset formatting; Find/Replace waits for a settled counter; format and preserved-prefix verification compare inherited-normalized rendered values rather than misleading raw span JSON.
+- Font menus reveal below-fold rows and wait for visibly filtered dialog results. Live checks applied **8/8 below-fold fonts in 2–3 seconds each**. Table-cell color controls scroll into view and no longer collapse an already-open section.
+- List writes verify intermediate state through live toolbar controls, skip no-op exports, and use the correct checklist shortcut. A live write containing numbered, bulleted, and checked/unchecked checklist blocks completed in **2.1 seconds with 3 exports and 0×429**, versus roughly **55–60 seconds / 21 exports / 15×429 per single list** before.
+
+## Proactive watcher with bounded advisory steering
+
+- W1–W4 watches **every running turn**, with faster hard-stall detection, `SUBGOAL_DWELL`, smart suspect gating, a **1200-token** judge budget, and 2/3/5-minute first/routine/calm cadence. Healthy runs spend fewer judge calls.
+- With `watchAutoSteer` enabled (default, toggleable in Settings), a corroborated non-hard stuck/blocked verdict can inject one sanitized `<watcher_advisory>` into the active turn. Limits: **2 steers/turn**, **3-minute cooldown**, confidence **≥0.65**, snooze respected. URLs and override phrases are rejected; login/CAPTCHA/permission blockers advise `agent_request_help`.
+- The watcher still has no browser tools and never clicks, navigates, stops, captures, changes outcomes/plans, or bypasses confirmation. A verdict and its steer are diagnostics, not verification.
+- A pinned sidebar Watch Card survives collapse/scroll/reconnect and shows the steering note; Android source renders the same text. Recorded judge replays had **0% gated false alerts and 100% stability**, with **80% holdout caught** and reduced call frequency. A live multi-minute auto-steer recovery remains unrun.
+
+## Verification
+
+- **1443/1443 Node tests** pass at the release head; model-harness self-test **23/23 scenarios** passes.
+- Real-extension gate runner: **13/13 suites passed, 0 failed, 7 excluded**; selected F0–F6 gates cover **80 cases**. Android `testDebugUnitTest lintDebug` passes.
+- Real-panel mock-bridge `watch`, `reopen`, and `modals` previews pass with inspected screenshots. Real-extension watcher fixtures pass `TOOL_HANG` and `EXECUTOR_DOWN` independently.
+- Isolated real-model smokes passed `form-submit`, `submit-gate-deny`, and `stall-loop --marathon`, with zero false alerts/steers. These do not prove live advisory recovery.
+- Still unrun: the live 32-item real-model Docs acceptance, a live multi-minute watcher-steered recovery, docked-panel visual acceptance, on-device Watch Card steering, and the full spaced Docs table suite after rate-limit cooldown.
+
+The unpatched transitive `picomatch@4.0.7` advisory documented for v2.5.3 remains unchanged.
+
+---
+
 # crazyAgent v2.5.3
 
 Changes since **v2.5.2**. This release makes Auto reasoning choose an effort level from the actual task, hardens browser and Google Docs execution, recovers more interrupted turns, and adds persistent lifetime token usage to Settings.

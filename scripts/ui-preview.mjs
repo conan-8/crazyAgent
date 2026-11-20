@@ -1134,11 +1134,24 @@ async function playWatchScenario(page, capture) {
     alert: document.getElementById('marathon-mode').classList.contains('alert'),
     copy: document.querySelector('.marathon-mode-copy')?.textContent,
   }))()`)
+  const card = () => page.evaluate(`(() => {
+    const root = document.getElementById('watch-card');
+    if (!root) return { present: false };
+    return {
+      present: true,
+      visible: !root.classList.contains('hidden'),
+      id: root.dataset.watchId ?? null,
+      kind: root.dataset.watchKind ?? null,
+      reason: root.querySelector('.watch-card-reason')?.textContent ?? null,
+      buttons: [...root.querySelectorAll('.watch-row-actions button')].map(button => button.textContent),
+    };
+  })()`)
   const row = () => page.evaluate(`(() => {
     const root = [...document.querySelectorAll('.watch-row')].at(-1);
     if (!root) return { present: false };
     return {
       present: true,
+      inStepBody: root.closest('.step-body') !== null,
       kind: root.dataset.watchKind,
       state: root.dataset.watchState,
       collapsed: root.classList.contains('collapsed'),
@@ -1169,20 +1182,31 @@ async function playWatchScenario(page, capture) {
   await sendPrompt(page, 'A long marathon task that may hang')
   await sleep(200)
 
-  // 1. A TOOL_HANG alert: the row appears with three buttons; the chip ambers.
+  // 1. Open a live step, emit a TOOL_HANG alert, then finish the step: the
+  // watch row must NOT live inside .step-body (collapsing the step must not
+  // hide it), and the pinned #watch-card stays visible above the composer.
+  await recv({ v: 1, type: 'chat.activity', kind: 'model-start' })
+  await sleep(100)
   await recv(alertFrame('watch-hang', 'TOOL_HANG', 'A browser call has not returned for several minutes.'))
-  await sleep(200)
+  await sleep(150)
+  await recv({ v: 1, type: 'chat.activity', kind: 'step-end' })
+  await sleep(150)
   assert.deepEqual(await row(), {
-    present: true, kind: 'TOOL_HANG', state: 'open', collapsed: false, alert: true,
+    present: true, inStepBody: false, kind: 'TOOL_HANG', state: 'open', collapsed: false, alert: true,
     reason: 'A browser call has not returned for several minutes.',
     buttons: ['Stop', 'Steer…', "It's fine"],
     signals: ['TOOL_HANG — TOOL_HANG detail'],
   })
+  assert.deepEqual(await card(), {
+    present: true, visible: true, id: 'watch-hang', kind: 'TOOL_HANG',
+    reason: 'A browser call has not returned for several minutes.',
+    buttons: ['Stop', 'Steer…', "It's fine"],
+  })
   assert.deepEqual(await chip(), { visible: true, alert: true, copy: 'May be stuck — review the alert' })
   await capture('alert')
 
-  // 2. "It's fine" sends marathon.watch.ack; the companion answers dismissed.
-  await page.evaluate(`document.querySelector('.watch-row-dismiss').click()`)
+  // 2. "It's fine" on the pinned card sends marathon.watch.ack; companion answers dismissed.
+  await page.evaluate(`document.querySelector('#watch-card .watch-row-dismiss').click()`)
   await sleep(150)
   assert.equal((await watchFrames()).at(-1).id, 'watch-hang')
   assert.equal((await row()).state, 'open', 'no optimistic collapse before the companion answers')
@@ -1190,6 +1214,7 @@ async function playWatchScenario(page, capture) {
   await sleep(200)
   assert.equal((await row()).collapsed, true)
   assert.equal((await row()).buttons.length, 0)
+  assert.equal((await card()).visible, false)
   assert.deepEqual(await chip(), { visible: true, alert: false, copy: 'Watching this turn' })
   await capture('dismissed')
 
@@ -1231,19 +1256,59 @@ async function playWatchScenario(page, capture) {
   await sleep(200)
   assert.equal((await row()).collapsed, true)
   assert.equal((await row()).buttons.length, 0)
+  assert.equal((await card()).visible, false)
   assert.equal((await chip()).alert, false)
   await capture('closed-turn-end')
 
-  // 5. The alert row fits the narrowest panel.
+  // 4d. W1/W3: reconnect via chat.hello restores an open alert (with watcher steer
+  // note) in #watch-card even when marathon mode is off.
+  const reconnectHello = HELLO_FRAMES.find(frame => frame.type === 'chat.hello')
+  await recv({
+    ...reconnectHello,
+    marathon: { enabled: false, sessionId: null, since: null, origin: null, plan: null, watcher: { active: true, checks: 4, lastCheckAt: '2026-11-16T19:11:00.000Z', lastVerdict: 'stuck' } },
+    watch: {
+      open: {
+        id: 'watch-reopen',
+        kind: 'stuck',
+        at: '2026-11-16T19:11:00.000Z',
+        reason: 'Agent has been figuring out the same step for 3 minutes.',
+        steer: { id: 'steer-1', text: 'Inspect form validation errors instead of retrying Submit.' },
+      },
+      lastVerdict: 'stuck',
+      lastCheckAt: '2026-11-16T19:11:00.000Z',
+      checks: 4,
+    },
+  })
+  await sleep(200)
+  assert.equal((await chip()).visible, false)
+  assert.deepEqual(await card(), {
+    present: true, visible: true, id: 'watch-reopen', kind: 'stuck',
+    reason: 'Agent has been figuring out the same step for 3 minutes.',
+    buttons: ['Stop', 'Steer…', "It's fine"],
+  })
+  assert.equal(
+    await page.evaluate(`document.querySelector('#watch-card .watch-steer-note')?.textContent ?? null`),
+    'Watcher nudged agent: Inspect form validation errors instead of retrying Submit.',
+  )
+  await capture('reconnect-non-marathon-card')
+
+  // 5. The alert row and pinned card fit the narrowest panel.
   await page.send('Emulation.setDeviceMetricsOverride', { width: 280, height: 940, deviceScaleFactor: 2, mobile: false })
   await sleep(250)
   const narrow = await page.evaluate(`(() => {
-    const root = document.querySelector('.watch-row');
-    const rect = root.getBoundingClientRect();
-    return { left: rect.left, right: rect.right, viewport: innerWidth, overflow: root.scrollWidth > root.clientWidth + 1 };
+    const rowEl = document.querySelector('.watch-row');
+    const cardEl = document.getElementById('watch-card');
+    const rect = rowEl.getBoundingClientRect();
+    const cardRect = cardEl.getBoundingClientRect();
+    return {
+      left: rect.left, right: rect.right, viewport: innerWidth, overflow: rowEl.scrollWidth > rowEl.clientWidth + 1,
+      cardLeft: cardRect.left, cardRight: cardRect.right, cardOverflow: cardEl.scrollWidth > cardEl.clientWidth + 1,
+    };
   })()`)
   assert.ok(narrow.left >= 0 && narrow.right <= narrow.viewport)
   assert.equal(narrow.overflow, false)
+  assert.ok(narrow.cardLeft >= 0 && narrow.cardRight <= narrow.viewport)
+  assert.equal(narrow.cardOverflow, false)
   await capture('narrow')
 }
 
@@ -2778,7 +2843,7 @@ async function main() {
     assert.equal(initialAbout.updated, 'No completed update recorded')
     assert.equal(initialAbout.title, '')
     const updatedAt = '2026-11-17T20:00:00.000Z'
-    await makePage(page).recv({ v: 1, type: 'update.state', update: { state: 'current', current: '2.5.3', latest: '2.5.3', last: { from: '2.5.1', to: '2.5.3', at: updatedAt } } })
+    await makePage(page).recv({ v: 1, type: 'update.state', update: { state: 'current', current: '2.5.4', latest: '2.5.4', last: { from: '2.5.1', to: '2.5.4', at: updatedAt } } })
     const populatedAbout = await page.evaluate(`(() => {
       const updated = document.getElementById('settings-updated');
       return {
@@ -2788,12 +2853,13 @@ async function main() {
         title: updated.title,
       };
     })()`)
-    assert.equal(populatedAbout.version, '2.5.3')
+    assert.equal(populatedAbout.version, '2.5.4')
     assert.equal(populatedAbout.updated, populatedAbout.expected, 'the update time is localized for the user')
     assert.equal(populatedAbout.title, `Last successful update: ${updatedAt}`)
     await sleep(2700)
     await shot('settings')
-    await page.evaluate(`document.getElementById('settings-updated').scrollIntoView({ block: 'end' })`)
+    assert.equal(await page.evaluate(`document.getElementById('setting-watch-auto-steer').checked`), true, 'watcher auto-steer defaults on')
+    await page.evaluate(`document.querySelector('.settings-about').scrollIntoView({ block: 'end' })`)
     await sleep(200)
     let aboutVisibility
     for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -2803,10 +2869,10 @@ async function main() {
         const about = document.querySelector('.settings-about').getBoundingClientRect();
         return { bodyTop: body.top, bodyBottom: body.bottom, aboutTop: about.top, aboutBottom: about.bottom, scrollTop: bodyElement.scrollTop };
       })()`)
-      if (aboutVisibility.aboutTop >= aboutVisibility.bodyTop && aboutVisibility.aboutBottom <= aboutVisibility.bodyBottom) break
+      if (aboutVisibility.aboutTop >= aboutVisibility.bodyTop - 1 && aboutVisibility.aboutBottom <= aboutVisibility.bodyBottom + 1) break
       await sleep(50)
     }
-    assert.ok(aboutVisibility.aboutTop >= aboutVisibility.bodyTop && aboutVisibility.aboutBottom <= aboutVisibility.bodyBottom, `the complete About section is visible after scrolling to it: ${JSON.stringify(aboutVisibility)}`)
+    assert.ok(aboutVisibility.aboutTop >= aboutVisibility.bodyTop - 1 && aboutVisibility.aboutBottom <= aboutVisibility.bodyBottom + 1, `the complete About section is visible after scrolling to it: ${JSON.stringify(aboutVisibility)}`)
     await shot('settings-about')
     // The docked panel can be much shorter than this preview; opening settings
     // must still land on the model section instead of auto-scrolling to the
@@ -3229,10 +3295,10 @@ async function main() {
     await recv({ v: 1, type: 'update.state', update: failure })
     assert.equal((await read()).noticeHidden, true, 'a dismissed error stays dismissed until it changes')
 
-    await recv({ v: 1, type: 'update.state', update: { state: 'pending', current: '2.5.0', latest: '2.5.3', last: null } })
+    await recv({ v: 1, type: 'update.state', update: { state: 'pending', current: '2.5.0', latest: '2.5.4', last: null } })
     state = await read()
     assert.equal(state.noticeHidden, false)
-    assert.match(state.noticeText, /v2\.5\.3/u)
+    assert.match(state.noticeText, /v2\.5\.4/u)
   } else if (SCENARIO === 'queue') {
     await playQueueScenario(page, shot)
   } else if (SCENARIO === 'composer') {

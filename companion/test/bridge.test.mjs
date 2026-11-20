@@ -729,3 +729,30 @@ test('the bridge reports whether the side panel or the background worker is the 
   await new Promise(resolve => setTimeout(resolve, 30))
   assert.equal(bridge.executorHost(), null)
 })
+
+test('W3 sendWatchSteer forwards watch.steer to tools only when turnId matches the active turn', async t => {
+  const { bridge, url } = await setup(t)
+  const tools = await connect(url, 'tools')
+  t.after(() => tools.ws.close())
+
+  // No active turn -> refused fail-closed.
+  assert.equal(bridge.sendWatchSteer({ turnId: 'turn-1', steerId: 's1', text: 'Change approach.' }), false)
+
+  bridge.setTurnId('turn-1', { userPrompt: 'do work' })
+  // Mismatched turnId or empty text -> refused.
+  assert.equal(bridge.sendWatchSteer({ turnId: 'turn-other', steerId: 's2', text: 'Change approach.' }), false)
+  assert.equal(bridge.sendWatchSteer({ turnId: 'turn-1', steerId: 's3', text: '   ' }), false)
+
+  // Matching active turnId -> delivered over tools socket.
+  assert.equal(bridge.sendWatchSteer({ turnId: 'turn-1', steerId: 's4', text: 'Try a different control.', kind: 'stuck', blocker: 'loop' }), true)
+  const frame = await tools.messages.next(message => message.type === 'watch.steer')
+  assert.deepEqual(frame, {
+    v: 1,
+    type: 'watch.steer',
+    turnId: 'turn-1',
+    steerId: 's4',
+    text: 'Try a different control.',
+    kind: 'stuck',
+    blocker: 'loop',
+  })
+})

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { watchNotice, renderWatchRow, watchIsActionable, WATCH_KIND_LABELS } from '../sidepanel/watch-row.js'
+import { watchNotice, watchNoticeFromOpen, renderWatchRow, renderWatchCard, watchIsActionable, WATCH_KIND_LABELS } from '../sidepanel/watch-row.js'
 
 class FakeClassList {
   constructor() { this.names = new Set() }
@@ -187,4 +187,79 @@ test('V1: ended-incomplete is actionable while open, collapses when closed at ne
   // Ack-dismissed also collapses.
   renderWatchRow(root, watchNotice({ ...alertFrame, id: 'ended-1', kind: 'info', state: 'dismissed', reason: 'Dismissed.', signals: [] }), {})
   assert.equal(root.classList.contains('collapsed'), true)
+})
+
+test('W1: watchNoticeFromOpen normalizes chat.hello.watch.open and rejects malformed/non-actionable values', () => {
+  const open = watchNoticeFromOpen({
+    id: 'watch-reconnect-1',
+    kind: 'stuck',
+    at: '2026-11-19T22:00:00.000Z',
+    reason: 'Spending 3 minutes retrying the same form submit.',
+  })
+  assert.equal(open.id, 'watch-reconnect-1')
+  assert.equal(open.kind, 'stuck')
+  assert.equal(open.state, 'open')
+  assert.equal(watchIsActionable(open), true)
+  assert.match(open.reason, /retrying the same form/)
+  assert.equal(watchNoticeFromOpen(null), null)
+  assert.equal(watchNoticeFromOpen({}), null)
+  assert.equal(watchNoticeFromOpen({ id: 'x', kind: 'info', reason: 'info only' }), null)
+})
+
+test('W1: renderWatchCard shows pinned card for actionable alert and hides on clear/recovery', () => {
+  const document = new FakeDocument()
+  const card = document.createElement('div')
+  card.classList.add('watch-card', 'hidden')
+  const calls = { stop: 0, steer: 0, dismiss: 0 }
+  renderWatchCard(card, watchNotice(alertFrame), {
+    onStop: () => { calls.stop += 1 },
+    onSteer: () => { calls.steer += 1 },
+    onDismiss: () => { calls.dismiss += 1 },
+  })
+  assert.equal(card.classList.contains('hidden'), false)
+  assert.equal(card.dataset.watchId, 'watch-1')
+  assert.equal(byClass(card, 'watch-row-badge').textContent, WATCH_KIND_LABELS.TOOL_HANG)
+  assert.match(byClass(card, 'watch-card-reason').textContent, /not returned/)
+  assert.equal(allByClass(card, 'watch-row-signal').length, 1)
+  byClass(card, 'watch-row-stop').click()
+  byClass(card, 'watch-row-steer').click()
+  byClass(card, 'watch-row-dismiss').click()
+  assert.deepEqual(calls, { stop: 1, steer: 1, dismiss: 1 })
+
+  // Clearing hides the card and strips its watch dataset.
+  renderWatchCard(card, null, {})
+  assert.equal(card.classList.contains('hidden'), true)
+  assert.equal(card.dataset.watchId, undefined)
+  assert.equal(card.children.length, 0)
+})
+
+test('W3: watchNotice, watchNoticeFromOpen, renderWatchRow, and renderWatchCard display watcher steer note transparently', () => {
+  const document = new FakeDocument()
+  const steered = watchNotice({
+    ...alertFrame,
+    kind: 'stuck',
+    blocker: 'loop',
+    reason: 'Clicking the same submit button with no visible change.',
+    steer: { id: 'steer-1', text: 'Inspect validation errors instead of clicking Submit.' },
+  })
+  assert.deepEqual(steered.steer, { id: 'steer-1', text: 'Inspect validation errors instead of clicking Submit.' })
+
+  const row = document.createElement('div')
+  renderWatchRow(row, steered, {})
+  assert.equal(byClass(row, 'watch-steer-note').textContent, 'Watcher nudged agent: Inspect validation errors instead of clicking Submit.')
+
+  const card = document.createElement('div')
+  renderWatchCard(card, steered, {})
+  assert.equal(byClass(card, 'watch-card-title').textContent, 'Watcher alert · nudged agent')
+  assert.equal(byClass(card, 'watch-steer-note').textContent, 'Watcher nudged agent: Inspect validation errors instead of clicking Submit.')
+
+  // Reconnect open alert preserves the steer note too.
+  const reopened = watchNoticeFromOpen({
+    id: 'watch-1',
+    kind: 'stuck',
+    at: '2026-11-19T23:00:00.000Z',
+    reason: 'Clicking the same submit button.',
+    steer: { id: 'steer-1', text: 'Inspect validation errors instead of clicking Submit.' },
+  })
+  assert.deepEqual(reopened.steer, { id: 'steer-1', text: 'Inspect validation errors instead of clicking Submit.' })
 })

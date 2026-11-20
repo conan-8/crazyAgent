@@ -118,10 +118,20 @@ function fakeDocs(options = {}) {
         }
         case 'setSearch':
           state.searchValue = args.value
+          state.staleUntil = now + (options.staleListMs ?? 0)
           events.push(`setSearch:${args.value}`)
           return { ok: true, readback: state.searchValue === args.value, value: state.searchValue }
         case 'fontDialog': {
           if (!state.dialogOpen) return { ok: true, open: false }
+          // Like the live dialog, the unfiltered list can linger after the search
+          // changes: it holds the font too, but off screen, and nothing marks it stale.
+          if (options.staleListMs !== undefined && now < state.staleUntil) {
+            return {
+              ok: true, open: true, searchEnabled: true, searchValue: state.searchValue, noFonts: false,
+              applied: false, signature: 'unfiltered-list', found: true, reachable: false, checked: false, added: false,
+              point: { x: 466, y: 854 }, done: point('done'), cancel: point('cancel'),
+            }
+          }
           const found = state.allFonts.has(args.font)
           return {
             ok: true,
@@ -129,8 +139,10 @@ function fakeDocs(options = {}) {
             searchEnabled: true,
             searchValue: state.searchValue,
             noFonts: state.searchValue === args.font && !found,
+            applied: options.searchNeverApplies !== true && state.searchValue === args.font,
             signature: `${state.searchValue}:${found}:${state.checked}:${state.added}`,
             found,
+            reachable: found,
             checked: found && state.checked,
             added: found && state.added,
             point: found ? point('addFont') : undefined,
@@ -431,7 +443,9 @@ test('Docs find probe reads the open find bar, its counter, and closed/hidden st
 
 test('Docs font menu filters unusable duplicates and rejects conflicting active menus', () => {
   class FakeElement {
-    constructor(tagName, { label = '', roleName, x = 0, y = 0, covered = false, checked = false, isDisabled = false, hidden = false } = {}) {
+    constructor(tagName, { label = '', roleName, x = 0, y = 0, covered = false, checked = false, isDisabled = false, hidden = false, revealTo } = {}) {
+      this.revealTo = revealTo
+      this.scrolled = false
       this.tagName = tagName.toUpperCase()
       this.attributes = {
         'aria-label': label,
@@ -478,6 +492,10 @@ test('Docs font menu filters unusable duplicates and rejects conflicting active 
     }
     getAttribute(name) { return this.attributes[name] ?? null }
     getBoundingClientRect() { return this.rect }
+    scrollIntoView() {
+      this.scrolled = true
+      if (this.revealTo !== undefined) this.rect = { ...this.rect, top: this.revealTo }
+    }
     contains(other) {
       let current = other
       while (current) {
@@ -537,6 +555,69 @@ test('Docs font menu filters unusable duplicates and rejects conflicting active 
 
     build([[{ label: 'Arial' }, { label: 'Arial', y: 30, isDisabled: true }]])
     assert.equal(docsPageProbe('fontMenu', { font: 'Arial' }).code, 'FONT_DISABLED')
+
+    // The font list scrolls inside the menu: a font outside the recent five can
+    // sit below the fold (live: Roboto Mono). One unique exact row is revealed.
+    build([[{ label: 'More fonts' }, { label: 'Roboto Mono ►', y: 1200, revealTo: 600 }]])
+    rows[0].attributes.role = 'menuitem'
+    const revealed = docsPageProbe('fontMenu', { font: 'Roboto Mono' })
+    assert.equal(revealed.found, true)
+    assert.deepEqual(revealed.point, { x: 50, y: 610 })
+    assert.equal(rows[1].scrolled, true)
+    assert.deepEqual(revealed.moreFonts, { x: 50, y: 10 })
+
+    build([[{ label: 'Roboto Mono', y: 1200, revealTo: 600 }, { label: 'Roboto Mono', y: 1300, revealTo: 600 }]])
+    const duplicates = docsPageProbe('fontMenu', { font: 'Roboto Mono' })
+    assert.equal(duplicates.found, false, 'never chooses between two hidden exact rows')
+    assert.equal(rows.some(row => row.scrolled), false)
+
+    // More fonts: rows count only once Docs has filtered them for the query,
+    // and only a row the hit test can see gets a click point.
+    const fontsDialog = (query, specs) => {
+      root.children = []
+      rows.length = 0
+      const dialog = make('div', { roleName: 'dialog' })
+      const search = make('input', { label: 'Search' })
+      search.value = query
+      const listbox = make('div', { label: 'List of fonts', roleName: 'listbox' })
+      const options = specs.map(spec => make('div', { roleName: 'option', ...spec }))
+      const done = make('button', { label: 'Done', x: 300 })
+      const cancel = make('button', { label: 'Cancel', x: 200 })
+      for (const option of options) option.parentElement = listbox
+      listbox.children = options
+      for (const child of [search, listbox, done, cancel]) child.parentElement = dialog
+      dialog.children = [search, listbox, done, cancel]
+      dialog.parentElement = root
+      root.children = [dialog]
+      rows.push(...options, done, cancel)
+      return options
+    }
+    let options = fontsDialog('Merriweather', [{ label: 'Roboto', y: 100 }, { label: 'Merriweather', y: 1200, revealTo: 130 }])
+    const stale = docsPageProbe('fontDialog', { font: 'Merriweather' })
+    assert.equal(stale.ok, true)
+    assert.equal(stale.applied, false, 'the unfiltered list still shows Roboto')
+    assert.equal(stale.found, true)
+    assert.equal(stale.reachable, false)
+    assert.equal(stale.point, undefined, 'an off-screen row never gets a click point')
+    assert.equal(options[1].scrolled, false, 'the stale list is not scrolled')
+
+    fontsDialog('Merriweather', [{ label: 'Merriweather', y: 100 }, { label: 'Merriweather Sans', y: 130 }])
+    const filtered = docsPageProbe('fontDialog', { font: 'Merriweather' })
+    assert.equal(filtered.applied, true)
+    assert.equal(filtered.reachable, true)
+    assert.deepEqual(filtered.point, { x: 50, y: 110 })
+    assert.equal(filtered.checked, false)
+
+    options = fontsDialog('Merriweather', [{ label: 'Merriweather Sans', y: 100 }, { label: 'Merriweather', y: 1200, revealTo: 130 }])
+    const below = docsPageProbe('fontDialog', { font: 'Merriweather' })
+    assert.equal(below.applied, true)
+    assert.equal(options[1].scrolled, true)
+    assert.deepEqual(below.point, { x: 50, y: 140 })
+
+    fontsDialog('Raleway', [{ label: 'Raleway', y: 100, checked: true }])
+    const listed = docsPageProbe('fontDialog', { font: 'Raleway' })
+    assert.equal(listed.applied, true)
+    assert.equal(listed.checked, true, 'a font already in My fonts needs no click')
 
     root.children = []
     rows.length = 0
@@ -709,6 +790,26 @@ test('Docs waits for an asynchronously rendered ordinary font menu', async () =>
   assert.equal(fake.events.filter(event => event === 'click:applyFont').length, 1)
 })
 
+test('Docs font add waits for the filtered results instead of clicking the lingering list', async () => {
+  // Field log 2026-11-19 (Merriweather twice, Roboto Mono, Roboto): the unfiltered
+  // list lingered after the search changed and held still long enough to pass as
+  // settled; the add click landed off screen and the step failed with
+  // "[font-add] Docs did not reach the required font-add state (open=true, match=unknown)".
+  const fake = fakeDocs({ staleListMs: 400, installed: [], allFonts: ['Syne'], requestedFont: 'Syne' })
+  const result = await runDocs(fake)
+  assert.equal(result.docs.status, 'applied')
+  assert.equal(result.docs.fontAdded, true)
+  assert.equal(fake.events.filter(event => event === 'click:addFont').length, 1)
+  assert.equal(fake.events.some(event => event === 'click:undefined'), false, 'no click at the lingering row')
+})
+
+test('Docs font add fails closed without a click when results never filter for the query', async () => {
+  const fake = fakeDocs({ searchNeverApplies: true, installed: [], allFonts: ['Syne'], requestedFont: 'Syne' })
+  await assert.rejects(runDocs(fake), error => error.code === 'DOCS_FONT_RESULTS_UNKNOWN' && error.stage === 'font-results')
+  assert.equal(fake.events.some(event => event.startsWith('click:addFont')), false)
+  assert.equal(fake.state.dialogOpen, false, 'the Fonts dialog is closed after the failure')
+})
+
 test('Docs waits for an asynchronously enabled More fonts Done button', async () => {
   const fake = fakeDocs({ installed: ['Arial'], allFonts: ['Arial', 'Syne'], doneDelay: 2, requestedFont: 'Syne' })
   const result = await runDocs(fake)
@@ -804,10 +905,25 @@ function fakeReplaceDocs(options = {}) {
     if (!value) return 0
     return state.document.toLowerCase().split(String(value).toLowerCase()).length - 1
   }
+  const counterFor = value => {
+    const total = occurrences(value)
+    return { current: total ? 1 : 0, total, text: `${total ? 1 : 0} of ${total}` }
+  }
+  // Real Docs recounts asynchronously: for counterLagMs after a query change
+  // the counter still shows the previous query's result (none for an empty one).
+  const shownCounter = () => (
+    options.counterLagMs !== undefined && now < state.counterStaleUntil ? state.staleCounter : counterFor(state.findValue)
+  )
+  const changeQuery = value => {
+    if (options.counterLagMs !== undefined) {
+      state.staleCounter = state.findValue ? counterFor(state.findValue) : undefined
+      state.counterStaleUntil = now + options.counterLagMs
+    }
+    state.findValue = value
+  }
   const replaceState = () => {
     if (options.missingControls) return { ok: false, code: 'REPLACE_CONTROLS', message: 'Replace or Close is missing or ambiguous' }
     if (!state.open) return { ok: true, open: false }
-    const total = occurrences(state.findValue)
     return {
       ok: true,
       open: true,
@@ -815,7 +931,7 @@ function fakeReplaceDocs(options = {}) {
       replacementEnabled: true,
       findValue: state.findValue,
       replacementValue: state.replacementValue,
-      match: { current: total ? 1 : 0, total, text: `${total ? 1 : 0} of ${total}` },
+      match: shownCounter(),
       replace: { x: 1, y: 20 },
       close: { x: 2, y: 20 },
     }
@@ -837,7 +953,7 @@ function fakeReplaceDocs(options = {}) {
         state.findValue = ''
       } else if (spec.key.toLowerCase() === 'h' && mask === 2 && !options.shortcutFails) {
         state.open = true
-        state.findValue = ''
+        state.findValue = options.retainedQuery ?? ''
         state.replacementValue = ''
       } else if (spec.key === 'Escape') {
         state.open = false
@@ -887,24 +1003,23 @@ function fakeReplaceDocs(options = {}) {
       if (command === 'editMenu') return { ok: true, present: true, point: { x: 4, y: 20 }, disabled: false }
       if (command === 'replaceMenuItem') return { ok: true, present: true, point: { x: 5, y: 20 }, disabled: false }
       if (command === 'find') {
-        const total = occurrences(state.findValue)
         return {
           ok: true,
           open: state.findOpen,
           enabled: true,
           focused: state.findOpen,
           value: state.findValue,
-          match: { current: total ? 1 : 0, total, text: `${total ? 1 : 0} of ${total}` },
+          match: shownCounter(),
         }
       }
       if (command === 'setFind') {
-        state.findValue = args.value
+        changeQuery(args.value)
         events.push(`setFind:${args.value}`)
         return { ok: true, readback: true, value: state.findValue }
       }
       if (command === 'replace') return replaceState()
       if (command === 'setReplaceFind') {
-        state.findValue = args.value
+        changeQuery(args.value)
         events.push(`setReplaceFind:${args.value}`)
         return { ok: true, readback: !options.findReadbackFails, value: state.findValue }
       }
@@ -989,6 +1104,27 @@ test('Docs replace_text verifies a duplicate replacement after Docs changes the 
   assert.equal(fake.events.filter(event => event === 'key:f:2').length, 1)
 })
 
+test('Docs replace_text waits cleanly when state.match is temporarily absent after Replace switches the query', async () => {
+  const fake = fakeReplaceDocs({
+    document: 'Benchmarks:\nThis Benchmarks turn vague progress into numbers.',
+    findAfterReplace: true,
+  })
+  let droppedOnce = false
+  const runInTab = fake.io.runInTab
+  fake.io.runInTab = async (tabId, func, payload) => {
+    const result = await runInTab(tabId, func, payload)
+    if (payload[0] === 'replace' && fake.state.replaceClicks === 1 && !droppedOnce) {
+      droppedOnce = true
+      return { ...result, match: undefined }
+    }
+    return result
+  }
+  const result = await runReplaceDocs(fake, { text: 'This Benchmarks', replacement: 'Benchmarks' })
+  assert.equal(result.docs.status, 'replaced_text')
+  assert.equal(result.docs.matchCount, 2)
+  assert.equal(droppedOnce, true)
+})
+
 test('Docs replace_text rechecks the old text when the replacement counter cannot prove mutation', async () => {
   const fake = fakeReplaceDocs({ document: 'Benchmarks:\nThis Benchmarks turn vague progress into numbers.', mutationFails: true, findAfterReplace: true })
   await assert.rejects(
@@ -1006,6 +1142,42 @@ test('Docs replace_text verifies an old string contained in its replacement', as
   assert.equal(result.docs.status, 'replaced_text')
   assert.equal(fake.state.document, 'catcat')
   assert.equal(fake.state.replaceClicks, 1)
+})
+
+test('Docs replace_text takes the replacement baseline only after the counter recounts', async () => {
+  // Field log 2026-11-19: the baseline read the previous query's "1 of 1" for a
+  // replacement that did not exist yet, so a landed replacement was reported as
+  // "[verify-replacement] Expected 2 replacement matches, found 1 of 1".
+  const text = 'Welcome to this feature test document.'
+  const replacement = 'Welcome to this feature test document. This sentence is set in Merriweather.'
+  const fake = fakeReplaceDocs({ document: text, counterLagMs: 300 })
+  const result = await runReplaceDocs(fake, { text, replacement })
+  assert.equal(result.docs.status, 'replaced_text')
+  assert.equal(result.docs.matchCount, 1)
+  assert.equal(fake.state.document, replacement)
+  assert.equal(fake.state.replaceClicks, 1)
+  assert.equal(fake.snapshots(), 1)
+})
+
+test('Docs replace_text verifies an edited suffix after a lagging counter', async () => {
+  const fake = fakeReplaceDocs({ document: 'It is almost always telling the truth.Curiosity is the game.', counterLagMs: 300 })
+  const result = await runReplaceDocs(fake, { text: 'truth.Curiosity', replacement: 'truth. Curiosity' })
+  assert.equal(result.docs.status, 'replaced_text')
+  assert.equal(fake.state.document, 'It is almost always telling the truth. Curiosity is the game.')
+  assert.equal(fake.state.replaceClicks, 1)
+})
+
+test('Docs replace_text never treats a retained query counter as uniqueness proof', async () => {
+  // The dialog reopens with its previous query; until Docs recounts, its "1 of 1"
+  // must not let a duplicated target through to an arbitrary-occurrence Replace.
+  const document = 'yea and yea and keep'
+  const fake = fakeReplaceDocs({ document, counterLagMs: 300, retainedQuery: 'keep' })
+  await assert.rejects(runReplaceDocs(fake), error => (
+    error.code === 'DOCS_MATCH_NOT_UNIQUE' && error.stage === 'replace-match' && error.message.includes('1 of 2')
+  ))
+  assert.equal(fake.state.document, document)
+  assert.equal(fake.state.replaceClicks, 0)
+  assert.equal(fake.snapshots(), 0)
 })
 
 test('Docs replace_text rejects missing and duplicate matches before mutation', async () => {
@@ -2014,8 +2186,10 @@ function fakeFormatManyDocs(options = {}) {
           searchEnabled: true,
           searchValue: state.searchValue,
           noFonts: state.searchValue === args.font && !found,
+          applied: state.searchValue === args.font,
           signature: `${state.searchValue}:${found}:${state.checked}`,
           found,
+          reachable: found,
           checked: found && state.checked,
           point: found ? { x: 4, y: 20 } : undefined,
           done: { x: 5, y: 20 },
@@ -2829,6 +3003,113 @@ test('Docs reveals overflowed list buttons through the More toggle even when Doc
     const refused = docsPageProbe('format', { attributes: ['numbered'] })
     assert.equal(refused.ok, false)
     assert.match(refused.message, /Main toolbar numbered: expected one exact control, found 0/)
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  }
+})
+
+test('Docs Table options probe scrolls a below-fold Cell background color button into view without collapsing Color', () => {
+  // Live Docs Table options (2026-11-19 at 1154x639): six accordion sections
+  // push the expanded Color region below the side sheet's scrollable fold.
+  class FakeElement {
+    constructor(tagName, { label, roleName, text = '', top = 0, width = 200, height = 40, expanded } = {}) {
+      this.tagName = tagName.toUpperCase()
+      this.attributes = {
+        ...(label ? { 'aria-label': label } : {}),
+        ...(roleName ? { role: roleName } : {}),
+        ...(expanded !== undefined ? { 'aria-expanded': String(expanded) } : {}),
+      }
+      this.innerText = text
+      this.textContent = text
+      this.top = top
+      this.width = width
+      this.height = height
+      this.children = []
+      this.parentElement = undefined
+      this.isConnected = true
+      this.scrolled = 0
+    }
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const wanted = part.trim()
+        if (wanted === 'button') return this.tagName === 'BUTTON'
+        const roleMatch = /^\[role="([^"]+)"\]$/u.exec(wanted)
+        if (roleMatch) return this.attributes.role === roleMatch[1]
+        if (wanted === '[inert]') return 'inert' in this.attributes
+        if (wanted === '[aria-hidden="true"]') return this.attributes['aria-hidden'] === 'true'
+        return false
+      })
+    }
+    querySelectorAll(selector) {
+      return this.children.flatMap(child => [...child.matches(selector) ? [child] : [], ...child.querySelectorAll(selector)])
+    }
+    closest(selector) {
+      let current = this
+      while (current) {
+        if (current.matches(selector)) return current
+        current = current.parentElement
+      }
+      return null
+    }
+    getAttribute(name) { return this.attributes[name] ?? null }
+    getBoundingClientRect() { return { left: 840, top: this.top, width: this.width, height: this.height } }
+    scrollIntoView() {
+      this.scrolled += 1
+      this.top = 360
+    }
+    contains(other) { return other === this || this.children.some(child => child.contains(other)) }
+  }
+  const keys = ['Element', 'document', 'getComputedStyle', 'innerWidth', 'innerHeight']
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  const install = ({ colorExpanded, bgTop = 640, bgZeroBox = false } = {}) => {
+    const root = new FakeElement('div')
+    const close = new FakeElement('button', { label: 'Close side sheet', top: 73, width: 40, height: 40 })
+    const color = new FakeElement('div', { roleName: 'button', text: 'Color', top: 441, width: 288, height: 48, expanded: colorExpanded })
+    const bg = new FakeElement('button', {
+      label: 'Cell background color None',
+      top: bgTop,
+      width: bgZeroBox ? 0 : 90,
+      height: bgZeroBox ? 0 : 40,
+    })
+    root.children = [close, color, bg]
+    for (const child of root.children) child.parentElement = root
+    Object.assign(globalThis, {
+      Element: FakeElement,
+      innerWidth: 1154,
+      innerHeight: 639,
+      document: {
+        querySelectorAll: selector => root.querySelectorAll(selector),
+        getElementById: () => undefined,
+        elementFromPoint: (_x, y) => {
+          if (y >= 623) return null // clipped below side sheet scroll viewport
+          return root.children.find(child => child.width > 0 && y >= child.top && y < child.top + child.height) ?? null
+        },
+      },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+    })
+    return { bg, color }
+  }
+  try {
+    // Expanded Color with Cell background color clipped below y=623: scrolls into view and returns point.
+    const expanded = install({ colorExpanded: true, bgTop: 635 })
+    const state = docsPageProbe('tableCellBackground')
+    assert.equal(state.ok, true)
+    assert.equal(state.open, true)
+    assert.equal(state.colorExpanded, true)
+    assert.equal(expanded.bg.scrolled, 1)
+    assert.deepEqual(state.backgroundPoint, { x: 885, y: 380 })
+
+    // Collapsed Color with zero-box Cell background color: does not scroll and exposes colorPoint.
+    const collapsed = install({ colorExpanded: false, bgTop: 0, bgZeroBox: true })
+    const closed = docsPageProbe('tableCellBackground')
+    assert.equal(closed.ok, true)
+    assert.equal(closed.colorExpanded, false)
+    assert.equal(collapsed.bg.scrolled, 0)
+    assert.equal(closed.backgroundPoint, undefined)
+    assert.deepEqual(closed.colorPoint, { x: 984, y: 465 })
   } finally {
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor)

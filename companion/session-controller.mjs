@@ -57,6 +57,7 @@ export class SessionController {
     this.provider = options.provider
     this.getModelId = options.getModelId
     this.getConfirmIrreversible = options.getConfirmIrreversible ?? (() => false)
+    this.getWatchAutoSteer = options.getWatchAutoSteer ?? (() => true)
     /**
      * M3: the watch ledger runs for EVERY turn (marathon or not) so a mid-turn
      * toggle already has history. It is fed from every published frame; the
@@ -102,6 +103,11 @@ export class SessionController {
       limits: options.watch?.limits,
       judge: options.watch?.judge ?? null,
       judgeLimits: options.watch?.judgeLimits,
+      steerLimits: options.watch?.steerLimits,
+      autoSteerEnabled: () => this.getWatchAutoSteer() === true,
+      onSteer: typeof options.watch?.onSteer === 'function'
+        ? options.watch.onSteer
+        : (payload => typeof this.bridge?.sendWatchSteer === 'function' && this.bridge.sendWatchSteer(payload) === true),
       log: (type, data, severity) => this.logStore.record('companion', type, data, { severity: severity ?? 'info', turnId: this.turnId }),
     })
     this.watchEnabled = options.watch?.enabled !== false
@@ -256,6 +262,15 @@ export class SessionController {
       if (confirm !== undefined) this.confirmTurnRequest = confirm
       return
     }
+    if (frame.kind === 'watch-steer') {
+      this.logStore.record('companion', 'watch.steer.ack', {
+        turnId: this.turnId,
+        steerId: typeof frame.steerId === 'string' ? frame.steerId : null,
+        status: typeof frame.status === 'string' ? frame.status : 'unknown',
+        reason: typeof frame.reason === 'string' ? frame.reason : undefined,
+      }, { severity: frame.status === 'injected' ? 'info' : 'warn', turnId: this.turnId })
+      return
+    }
     if (frame.kind === 'plan') {
       // M2: capture the live plan as the carry-over snapshot. Malformed frames
       // are ignored (fail closed); the provider already validated the list.
@@ -310,8 +325,9 @@ export class SessionController {
     if (!result.ok) return result
     if (result.changed) {
       this.logStore.record('companion', 'marathon.set', { enabled: result.state.enabled, origin: result.state.origin, sessionId: result.state.sessionId }, { severity: 'info' })
-      // V1: marathon off clears any open watch notice (the off frame tells clients).
-      if (!result.state.enabled) this.watcher.clearNotices()
+      // W2: all turns are watched now, so turning marathon off mid-turn only
+      // clears a marathon-specific ended-incomplete notice, not a live alert.
+      if (!result.state.enabled) this.watcher.clearEndedIncomplete()
       this.#publishMarathon()
     }
     return { ok: true, enabled: result.state.enabled, sessionId: result.state.sessionId, changed: result.changed }
@@ -328,27 +344,26 @@ export class SessionController {
   }
 
   /**
-   * M3: the panel-facing watcher projection (§3.4 marathon.state.watcher).
-   * `active` means a marathon turn is being watched right now.
+   * Panel-facing watcher projection (marathon.state.watcher).
+   * `active` means the current running turn is being watched.
    * @returns {{active: boolean, checks: number, lastCheckAt: string | null, lastVerdict: string | null}}
    */
   watcherPanelState() {
     const projection = this.watcher.watchProjection()
     return {
-      active: this.marathon.state.enabled && this.running,
+      active: this.watchEnabled && this.running,
       checks: projection.checks,
       lastCheckAt: projection.lastCheckAt,
       lastVerdict: projection.lastVerdict,
     }
   }
 
-  /** New chat / real chat switch / restart: the switch resets to off. */
+  /** New chat / real chat switch / restart: the switch resets to off and open notices clear. */
   #resetMarathon() {
+    this.watcher.clearNotices()
     const { changed } = this.marathon.reset()
     if (changed) {
       this.logStore.record('companion', 'marathon.reset', {}, { severity: 'info' })
-      // V1: a new chat / chat switch clears any open watch notice.
-      this.watcher.clearNotices()
       this.#publishMarathon()
     }
   }

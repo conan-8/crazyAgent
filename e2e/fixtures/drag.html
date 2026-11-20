@@ -26,6 +26,15 @@
     #longpress-item { position: relative; width: 100px; }
     #noop { user-select: none; touch-action: none; }
     #selection-text { user-select: text; padding: 5px; border: 1px solid #ccd3dd; }
+    .follow-home { display: flex; gap: 6px; min-height: 58px; padding: 5px; border: 1px dashed #8d99aa; }
+    .letter { display: flex; flex-direction: column; padding: 5px 8px; border: 1px solid #61708a; border-radius: 4px; background: #fff; cursor: grab; user-select: none; touch-action: none; }
+    .letter.dragging { opacity: .95; }
+    .letter.ghosted { opacity: .35; }
+    .letter-clone { position: fixed; z-index: 10; margin: 0; }
+    .follow-bins { display: flex; gap: 6px; margin-top: 6px; }
+    .bin { flex: 1; min-height: 64px; padding: 5px; border: 2px dashed #7c8da5; }
+    .bin.over { background: #fff3c4; }
+    #follow-cover { position: fixed; inset: 0; z-index: 50; background: rgba(23, 32, 51, .08); }
     #fixture-state { grid-column: 1 / -1; margin: 0; min-height: 44px; background: #111b2c; color: #eaf1ff; border-radius: 6px; padding: 8px; font: 11px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
     button { font: inherit; }
   </style>
@@ -109,6 +118,20 @@
       <p>Independent frame pointer-down count: <span id="frame-input-state">0</span></p>
     </section>
 
+    <section>
+      <h2>Pointer-follow trays</h2>
+      <p>Unlabelled letters follow the pointer and cover the bin under it; release files the letter into that bin.</p>
+      <div id="follow-home" class="follow-home">
+        <div id="follow-self" class="letter" data-letter="self"><small>From Fixture</small><b>Attn: Bin A</b><small>Moves itself</small></div>
+        <div id="follow-clone" class="letter" data-letter="clone"><small>From Fixture</small><b>Attn: Bin B</b><small>Drags a clone</small></div>
+      </div>
+      <div class="follow-bins">
+        <div id="follow-bin-a" class="bin"><span>BIN A</span></div>
+        <div id="follow-bin-b" class="bin"><span>BIN B</span></div>
+      </div>
+      <output id="follow-state" class="state"></output>
+    </section>
+
     <pre id="fixture-state" aria-label="Drag fixture ground truth"></pre>
   </div>
 
@@ -121,6 +144,7 @@
         rangeInput: 0, rangeChange: 0,
         customValue: 20, longReady: 0, longEarly: 0, longMoves: 0,
         noopDown: 0, noopMove: 0, noopUp: 0, rerenders: 0,
+        followDrops: 0, followCancels: 0,
       }
       let longHeldMs = 0
       let lastHtml5Text = ''
@@ -154,6 +178,14 @@
         },
         noopEvents: [counts.noopDown, counts.noopMove, counts.noopUp],
         rerenders: counts.rerenders,
+        follow: {
+          home: [...byId('follow-home').querySelectorAll('[data-letter]')].map(item => item.dataset.letter),
+          binA: [...byId('follow-bin-a').querySelectorAll('[data-letter]')].map(item => item.dataset.letter),
+          binB: [...byId('follow-bin-b').querySelectorAll('[data-letter]')].map(item => item.dataset.letter),
+          drops: counts.followDrops,
+          cancels: counts.followCancels,
+          clones: document.querySelectorAll('.letter-clone').length,
+        },
         selection: String(getSelection()),
       })
       const render = () => {
@@ -169,6 +201,7 @@
         byId('rerender-state').textContent = `replacement count: ${state.rerenders}; original node detached after drop`
         byId('selection-state').textContent = `selection: ${JSON.stringify(state.selection)}`
         byId('frame-input-state').textContent = String(state.frameInputs)
+        byId('follow-state').textContent = `home: ${state.follow.home.join(',')}; A: ${state.follow.binA.join(',')}; B: ${state.follow.binB.join(',')}\ndrops/cancels: ${state.follow.drops}/${state.follow.cancels}`
         byId('fixture-state').textContent = JSON.stringify(state, null, 2)
       }
       window.dragFixtureSnapshot = snapshot
@@ -390,6 +423,71 @@
         render()
       }
       byId('rerender-item').addEventListener('pointerup', rerender)
+
+      // Pointer-follow trays: the dragged letter (or, for "clone", a same-text
+      // overlay) is translated under the cursor, so it covers the bin it is over.
+      // No pointer capture: like the gauntlet, release lands on whatever is there.
+      const bins = [byId('follow-bin-a'), byId('follow-bin-b')]
+      const binAt = (x, y) => document.elementsFromPoint(x, y).find(element => bins.includes(element)) ?? null
+      let follow = null
+      document.addEventListener('pointerdown', event => {
+        const letter = event.target.closest?.('[data-letter]')
+        if (!letter || event.button !== 0) return
+        event.preventDefault()
+        follow = { letter, moving: letter, id: event.pointerId, x: event.clientX, y: event.clientY, active: false }
+        letter.classList.add('dragging')
+      })
+      window.addEventListener('pointermove', event => {
+        if (!follow || event.pointerId !== follow.id) return
+        const dx = event.clientX - follow.x
+        const dy = event.clientY - follow.y
+        if (!follow.active && Math.hypot(dx, dy) >= 4) {
+          follow.active = true
+          if (follow.letter.dataset.letter === 'clone') {
+            const rect = follow.letter.getBoundingClientRect()
+            const clone = follow.letter.cloneNode(true)
+            clone.removeAttribute('id')
+            clone.removeAttribute('data-letter')
+            clone.classList.remove('dragging')
+            clone.classList.add('letter-clone')
+            Object.assign(clone.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px` })
+            document.body.append(clone)
+            follow.letter.classList.add('ghosted')
+            follow.moving = clone
+          }
+          if (window.__dragTestMid === 'cover-destination') {
+            const cover = document.createElement('div')
+            cover.id = 'follow-cover'
+            cover.textContent = 'Unrelated overlay'
+            document.body.append(cover)
+            window.__midDragEvents.push(window.__dragTestMid)
+            window.__dragTestMid = ''
+          }
+        }
+        if (!follow.active) return
+        follow.moving.style.transform = `translate(${dx}px, ${dy}px)`
+        const over = binAt(event.clientX, event.clientY)
+        for (const bin of bins) bin.classList.toggle('over', bin === over)
+      })
+      const finishFollow = event => {
+        if (!follow || event.pointerId !== follow.id) return
+        const { letter, moving, active } = follow
+        const bin = active && event.type === 'pointerup' ? binAt(event.clientX, event.clientY) : null
+        letter.classList.remove('dragging', 'ghosted')
+        letter.style.transform = ''
+        if (moving !== letter) moving.remove()
+        for (const item of bins) item.classList.remove('over')
+        if (bin) {
+          bin.append(letter)
+          counts.followDrops += 1
+        } else if (active) {
+          counts.followCancels += 1
+        }
+        follow = null
+        render()
+      }
+      window.addEventListener('pointerup', finishFollow)
+      window.addEventListener('pointercancel', finishFollow)
 
       document.addEventListener('selectionchange', render)
       byId('reset').addEventListener('click', () => location.reload())

@@ -40,6 +40,8 @@ async function performExport(tabUrl, format, io, target, coordinated) {
   const now = io.now ?? (() => Date.now())
   const timeoutMs = io.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const retries = io.retries ?? DEFAULT_RETRIES
+  let rateLimitRetries = 0
+  let rateLimitWaitMs = 0
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (coordinated) exportAttempts.set(target, now())
     const controller = new AbortController()
@@ -50,6 +52,8 @@ async function performExport(tabUrl, format, io, target, coordinated) {
         const delay = docsExportRetryDelayMs(response.headers?.get?.('retry-after') ?? null, attempt)
         if (coordinated) exportCooldowns.set(target, now() + delay)
         if (attempt < retries) {
+          rateLimitRetries += 1
+          rateLimitWaitMs += delay
           await sleep(delay)
           continue
         }
@@ -61,7 +65,7 @@ async function performExport(tabUrl, format, io, target, coordinated) {
         throw exportFailure(code, `Docs export returned ${response.status}; no document mutation was attempted by this read`)
       }
       if (coordinated) exportCooldowns.delete(target)
-      return { body: await response.text(), id: docsDocumentId(tabUrl), url: target }
+      return { body: await response.text(), id: docsDocumentId(tabUrl), url: target, rateLimitRetries, rateLimitWaitMs }
     } catch (error) {
       if (error?.code?.startsWith('DOCS_')) throw error
       const timedOut = controller.signal.aborted

@@ -175,6 +175,40 @@ test('WALL_HINT is a hint only and never raises the level', () => {
   assert.equal(assessment.level, 'ok')
 })
 
+test('W2 SUBGOAL_DWELL: fires after 2.5 min on same subgoal with friction, stays quiet on smooth edits, resets on page change or plan completion', () => {
+  const t = clock()
+  const l = ledger(t)
+  // Smooth single-page editing (5 effectful acts, 0 errors, 0 no-effect): no SUBGOAL_DWELL even past 2.5 min.
+  for (let i = 0; i < 6; i += 1) {
+    call(l, `e${i}`, 'browser_click', { label: i })
+    result(l, `e${i}`, { ok: true, text: `tab 1 "Doc" https://example.com/doc\nclicked label ${i}: button "B${i}"` })
+    t.advance(30_000)
+  }
+  assert.ok(!kinds(assess(l.snapshot(), t.now())).includes('SUBGOAL_DWELL:suspect'), 'smooth single-page work does not trigger SUBGOAL_DWELL')
+
+  // Same page with friction (errors) past subgoalDwellMs -> SUBGOAL_DWELL fires.
+  call(l, 'err1', 'browser_click', { label: 91 }); result(l, 'err1', { ok: false, text: 'CLICK_FAILED: blocked' })
+  call(l, 'err2', 'browser_click', { label: 92 }); result(l, 'err2', { ok: false, text: 'CLICK_FAILED: blocked' })
+  assert.ok(kinds(assess(l.snapshot(), t.now())).includes('SUBGOAL_DWELL:suspect'), 'friction past 2.5 min triggers SUBGOAL_DWELL')
+
+  // Navigating to a different page resets subgoal dwell.
+  call(l, 'nav1', 'browser_navigate', { url: 'https://example.com/next' })
+  result(l, 'nav1', { ok: true, text: 'navigated to https://example.com/next' })
+  assert.ok(!kinds(assess(l.snapshot(), t.now())).includes('SUBGOAL_DWELL:suspect'), 'URL change resets SUBGOAL_DWELL')
+
+  // Plan completion increase also resets subgoal dwell.
+  const l2 = ledger(t)
+  l2.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 1, items: [{ content: 'A', status: 'in_progress' }, { content: 'B', status: 'pending' }] })
+  for (let i = 0; i < 5; i += 1) {
+    call(l2, `ne${i}`, 'browser_click', { label: i })
+    result(l2, `ne${i}`, { ok: true, text: 'result: NO VISIBLE CHANGE — the page did not change' })
+    t.advance(35_000)
+  }
+  assert.ok(kinds(assess(l2.snapshot(), t.now())).includes('SUBGOAL_DWELL:suspect'))
+  l2.noteFrame({ type: 'chat.activity', kind: 'plan', revision: 2, items: [{ content: 'A', status: 'completed' }, { content: 'B', status: 'in_progress' }] })
+  assert.ok(!kinds(assess(l2.snapshot(), t.now())).includes('SUBGOAL_DWELL:suspect'), 'completing a plan item resets SUBGOAL_DWELL')
+})
+
 test('hard outranks suspect; the ledger keeps only the last 40 events', () => {
   const t = clock()
   const l = ledger(t)

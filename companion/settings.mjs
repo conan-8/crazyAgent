@@ -12,13 +12,16 @@
 import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { isRecord } from './protocol.mjs'
 
-export const DEFAULT_SETTINGS = Object.freeze({ confirmIrreversible: false })
+export const DEFAULT_SETTINGS = Object.freeze({
+  confirmIrreversible: false,
+  watchAutoSteer: true,
+})
 
 /**
  * Read the persisted settings. A missing, unreadable, or malformed file falls
  * back to the defaults; unknown keys are dropped, never forwarded.
  * @param {string} path
- * @returns {{confirmIrreversible: boolean}}
+ * @returns {{confirmIrreversible: boolean, watchAutoSteer: boolean}}
  */
 export function readSettings(path) {
   let parsed
@@ -28,17 +31,23 @@ export function readSettings(path) {
     return { ...DEFAULT_SETTINGS }
   }
   if (!isRecord(parsed)) return { ...DEFAULT_SETTINGS }
-  return { confirmIrreversible: parsed.confirmIrreversible === true }
+  return {
+    confirmIrreversible: parsed.confirmIrreversible === true,
+    watchAutoSteer: parsed.watchAutoSteer !== false,
+  }
 }
 
 /**
  * Persist settings atomically with owner-only permissions.
  * @param {string} path
- * @param {{confirmIrreversible?: unknown}} settings
- * @returns {{confirmIrreversible: boolean}} the normalized stored value
+ * @param {{confirmIrreversible?: unknown, watchAutoSteer?: unknown}} settings
+ * @returns {{confirmIrreversible: boolean, watchAutoSteer: boolean}} the normalized stored value
  */
 export function writeSettings(path, settings) {
-  const normalized = { confirmIrreversible: isRecord(settings) && settings.confirmIrreversible === true }
+  const normalized = {
+    confirmIrreversible: isRecord(settings) && settings.confirmIrreversible === true,
+    watchAutoSteer: !isRecord(settings) || settings.watchAutoSteer !== false,
+  }
   const temp = `${path}.tmp`
   writeFileSync(temp, `${JSON.stringify(normalized, null, 2)}\n`, { mode: 0o600 })
   try {

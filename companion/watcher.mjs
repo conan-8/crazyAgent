@@ -28,7 +28,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { assess } from './watch-ledger.mjs'
-import { buildDigest } from './watch-judge.mjs'
+import { buildDigest, sanitizeWatchSteer, WALL_BLOCKERS, WALL_STEER_FALLBACK } from './watch-judge.mjs'
 
 export const WATCH_TICK_MS = 20_000
 
@@ -44,12 +44,12 @@ export const WATCH_ALERT_LIMITS = Object.freeze({
   recoveryAbsentTicks: 2,
 })
 
-/** Judge cadence and budget (§3.3.4). Injected/overridable for tests. */
+/** Judge cadence and budget (W2 proactive 2-3 min cadence). Injected/overridable for tests. */
 export const WATCH_JUDGE_LIMITS = Object.freeze({
-  firstCallMs: 4 * 60_000,
-  routineMs: 6 * 60_000,
-  calmMs: 10 * 60_000,
-  alertMs: 4 * 60_000,
+  firstCallMs: 2 * 60_000,
+  routineMs: 3 * 60_000,
+  calmMs: 5 * 60_000,
+  alertMs: 2 * 60_000,
   jitter: 0.15,
   triggerFloorMs: 90_000,
   maxCallsPerTurn: 40,
@@ -58,6 +58,50 @@ export const WATCH_JUDGE_LIMITS = Object.freeze({
   confidenceAlertMin: 0.6,
   previousVerdictsKept: 6,
 })
+
+/** Bounded advisory in-turn steering limits (W3). Injected/overridable for tests. */
+export const WATCH_STEER_LIMITS = Object.freeze({
+  maxSteersPerTurn: 2,
+  cooldownMs: 3 * 60_000,
+  confidenceSteerMin: 0.65,
+})
+
+const STEER_FALLBACK_TEXT = 'Stop repeating the same failing or no-effect approach. Inspect what is blocking progress, try a different control or strategy, or call agent_request_help / report BLOCKED if you need the user.'
+
+/**
+ * Pure advisory steer decision (W3). Never fires on hard stalls (a hung tool
+ * or dead socket cannot be fixed by an in-turn message), never fires without
+ * two-strike corroboration, respects snooze ("It's fine"), per-turn cap, and
+ * cooldown.
+ * @param {{
+ *   autoSteerEnabled: boolean,
+ *   hardKind: string | null,
+ *   verdict: {state: string, confidence: number, blocker: string | null, reason: string, steer?: string | null},
+ *   corroborated: boolean,
+ *   snoozedUntil: Record<string, number>,
+ *   now: number,
+ *   steersThisTurn: number,
+ *   lastSteerAt: number,
+ *   limits?: typeof WATCH_STEER_LIMITS,
+ * }} input
+ * @returns {null | {text: string, kind: string, blocker: string | null}}
+ */
+export function decideWatchSteer(input) {
+  const limits = input.limits ?? WATCH_STEER_LIMITS
+  if (input.autoSteerEnabled !== true) return null
+  if (input.hardKind !== null) return null
+  if (input.corroborated !== true) return null
+  const verdict = input.verdict
+  if (!verdict || (verdict.state !== 'stuck' && verdict.state !== 'blocked')) return null
+  if (typeof verdict.confidence !== 'number' || verdict.confidence < limits.confidenceSteerMin) return null
+  if ((input.snoozedUntil[verdict.state] ?? 0) > input.now) return null
+  if (input.steersThisTurn >= limits.maxSteersPerTurn) return null
+  if (input.lastSteerAt > 0 && (input.now - input.lastSteerAt) < limits.cooldownMs) return null
+  const sanitized = sanitizeWatchSteer(verdict.steer, { state: verdict.state, blocker: verdict.blocker ?? null })
+  const text = sanitized
+    ?? (verdict.blocker !== null && WALL_BLOCKERS.has(verdict.blocker) ? WALL_STEER_FALLBACK : STEER_FALLBACK_TEXT)
+  return { text, kind: verdict.state, blocker: verdict.blocker ?? null }
+}
 
 /** Hard-signal kinds that may alert without the model, in priority order. */
 export const HARD_ALERT_KINDS = Object.freeze(['EXECUTOR_DOWN', 'TOOL_HANG', 'SILENT_STALL'])
@@ -203,10 +247,17 @@ export class Watcher {
     this.tickMs = options.tickMs ?? WATCH_TICK_MS
     this.limits = options.limits ?? WATCH_ALERT_LIMITS
     this.judgeLimits = options.judgeLimits ?? WATCH_JUDGE_LIMITS
+    this.steerLimits = options.steerLimits ?? WATCH_STEER_LIMITS
+    this.onSteer = typeof options.onSteer === 'function' ? options.onSteer : null
+    this.autoSteerEnabled = typeof options.autoSteerEnabled === 'function'
+      ? options.autoSteerEnabled
+      : (() => this.onSteer !== null)
     this.timer = null
     this.checks = 0
     this.alertsThisTurn = 0
     this.pushesThisTurn = 0
+    this.steersThisTurn = 0
+    this.lastSteerAt = 0
     /** @type {null | {id: string, kind: string, at: number, planRevision: number, atIso: string, reason: string}} */
     this.openAlert = null
     /**
@@ -242,6 +293,8 @@ export class Watcher {
     this.budgetExhausted = false
     this.budgetNoticeEmitted = false
     this.backoffUntil = 0
+    /** @type {Set<string>} */
+    this.lastJudgeSignals = new Set()
   }
 
   start() {
@@ -261,6 +314,8 @@ export class Watcher {
     this.checks = 0
     this.alertsThisTurn = 0
     this.pushesThisTurn = 0
+    this.steersThisTurn = 0
+    this.lastSteerAt = 0
     this.openAlert = null
     this.snoozedUntil = {}
     this.lastAssessment = { level: 'ok', signals: [], hints: [] }
@@ -288,6 +343,8 @@ export class Watcher {
     this.budgetExhausted = false
     this.budgetNoticeEmitted = false
     this.backoffUntil = 0
+    /** @type {Set<string>} */
+    this.lastJudgeSignals = new Set()
   }
 
   /** Await the in-flight judge call (tests/replay); a no-op when idle. */
@@ -295,10 +352,10 @@ export class Watcher {
     return this.judgePending ?? Promise.resolve()
   }
 
-  /** One deterministic tick. Only assesses/alerts while a marathon turn runs. */
+  /** One deterministic tick. Watches every running turn (normal and marathon). */
   tick() {
     const state = this.ledger.snapshot()
-    if (!state.running || !this.marathonEnabled()) return null
+    if (!state.running) return null
     this.checks += 1
     const now = this.now()
     const assessment = assess(state, now)
@@ -370,13 +427,26 @@ export class Watcher {
     }
     if (now < this.backoffUntil) return
     const dueRoutine = now >= this.nextJudgeAt
-    const dueTrigger = assessment.level === 'suspect' && (now - this.judgeLastCallAt) >= this.judgeLimits.triggerFloorMs
+    // W2 smart suspect gating: bring a judge call forward early when a suspect
+    // assessment arrives after the trigger floor ONLY if this is the first
+    // judge check, the previous verdict was not progressing, or a new suspect
+    // signal kind appeared since the last judge check. Prevents healthy long
+    // runs with one lingering benign signal from firing every 60s and burning
+    // the per-turn input budget.
+    const signalKinds = assessment.signals.map(signal => signal.kind)
+    const suspectEscalated = this.judgeCalls === 0
+      || this.lastVerdict !== 'progressing'
+      || signalKinds.some(kind => !this.lastJudgeSignals.has(kind))
+    const dueTrigger = assessment.level === 'suspect'
+      && suspectEscalated
+      && (now - this.judgeLastCallAt) >= this.judgeLimits.triggerFloorMs
     if (!dueRoutine && !dueTrigger) return
     this.#startJudgeCall(state, assessment, now, dueRoutine ? 'routine' : 'trigger')
   }
 
   #startJudgeCall(state, assessment, now, trigger) {
     this.judgeInFlight = true
+    this.lastJudgeSignals = new Set(assessment.signals.map(signal => signal.kind))
     const turnId = state.turnId
     const callAt = now
     const digest = buildDigest(state, now, { signals: assessment.signals, hints: assessment.hints, previousVerdicts: this.previousVerdicts, carry: this.carryContext ?? null })
@@ -454,6 +524,46 @@ export class Watcher {
       const previousSupport = previous !== null && previous.state !== 'progressing'
       if (deterministicSupport || previousSupport) {
         const hardKind = HARD_ALERT_KINDS.find(kind => assessment.signals.some(signal => signal.kind === kind && signal.level === 'hard')) ?? null
+        let appliedSteer = null
+        if (this.onSteer !== null) {
+          const steerDecision = decideWatchSteer({
+            autoSteerEnabled: this.autoSteerEnabled() === true,
+            hardKind,
+            verdict,
+            corroborated: true,
+            snoozedUntil: this.snoozedUntil,
+            now,
+            steersThisTurn: this.steersThisTurn,
+            lastSteerAt: this.lastSteerAt,
+            limits: this.steerLimits,
+          })
+          if (steerDecision !== null) {
+            const steerId = randomUUID()
+            const sent = this.onSteer({
+              turnId: state.turnId,
+              steerId,
+              text: steerDecision.text,
+              kind: steerDecision.kind,
+              blocker: steerDecision.blocker,
+              reason: verdict.reason,
+            }) === true
+            if (sent) {
+              this.steersThisTurn += 1
+              this.lastSteerAt = now
+              appliedSteer = { id: steerId, text: steerDecision.text }
+              this.log('watch.steer', {
+                turnId: state.turnId,
+                steerId,
+                kind: steerDecision.kind,
+                blocker: steerDecision.blocker,
+                steers: this.steersThisTurn,
+                textChars: steerDecision.text.length,
+              }, 'info')
+            } else {
+              this.log('watch.steer.skipped', { turnId: state.turnId, steerId, reason: 'bridge-not-delivered' }, 'warn')
+            }
+          }
+        }
         const decision = decideWatch({
           hardKind,
           judgeKind: hardKind === null ? verdict.state : null,
@@ -469,14 +579,33 @@ export class Watcher {
           pushesThisTurn: this.pushesThisTurn,
           limits: this.limits,
         })
-        if (decision.emit !== null) this.#emit(decision.emit, state, assessment)
+        if (decision.emit !== null) {
+          this.#emit(decision.emit, state, assessment, appliedSteer)
+        } else if (appliedSteer !== null && this.openAlert !== null) {
+          // A follow-up auto-steer fired while the alert was already open:
+          // surface it transparently on the open alert so no steer is hidden.
+          this.openAlert.steer = appliedSteer
+          this.publish({
+            type: 'chat.watch',
+            id: this.openAlert.id,
+            turnId: state.turnId,
+            kind: this.openAlert.kind,
+            state: 'open',
+            blocker: verdict.blocker ?? this.openAlert.kind,
+            reason: verdict.reason || this.openAlert.reason,
+            signals: assessment.signals.map(signal => ({ ...signal })),
+            source: deterministicSupport ? 'both' : 'watcher',
+            steer: appliedSteer,
+            at: new Date(this.wallNow()).toISOString(),
+          })
+        }
       } else {
         this.log('watch.judge.suppressed', { turnId: state.turnId, state: verdict.state, confidence: verdict.confidence })
       }
     }
   }
 
-  #emit(emit, state, assessment) {
+  #emit(emit, state, assessment, steer = null) {
     const atIso = new Date(this.wallNow()).toISOString()
     if (emit.type === 'recovered') {
       const previous = this.openAlert
@@ -502,6 +631,7 @@ export class Watcher {
     const reason = emit.reason
     this.openAlert = {
       id, kind: emit.kind, at: this.now(), planRevision: state.planRevision, atIso, reason,
+      ...(steer !== null ? { steer } : {}),
       // V2 recovery baseline: effectful-act and completed counts at alert time,
       // the alert's own signal kinds, and the consecutive-absent tick counter.
       effectfulActCountAtAlert: state.okEffectfulActCount ?? 0,
@@ -523,9 +653,10 @@ export class Watcher {
       reason,
       signals: assessment.signals.map(signal => ({ ...signal })),
       source: emit.source ?? 'heuristic',
+      ...(steer !== null ? { steer } : {}),
       at: atIso,
     })
-    this.log('watch.alert', { turnId: state.turnId, kind: emit.kind, source: emit.source ?? 'heuristic', alerts: this.alertsThisTurn, pushes: this.pushesThisTurn, signals: assessment.signals }, 'warn')
+    this.log('watch.alert', { turnId: state.turnId, kind: emit.kind, source: emit.source ?? 'heuristic', alerts: this.alertsThisTurn, pushes: this.pushesThisTurn, steered: steer !== null, signals: assessment.signals }, 'warn')
   }
 
   /**
@@ -626,6 +757,7 @@ export class Watcher {
       turnId: state.turnId,
       calls: this.judgeCalls,
       skipped: this.judgeSkipped,
+      steers: this.steersThisTurn,
       inputTokens: this.judgeInputTokens,
       outputTokens: this.judgeOutputTokens,
       reasoningTokens: this.judgeReasoningTokens,
@@ -671,12 +803,15 @@ export class Watcher {
   }
 
   /**
-   * V1: clear all open notices without a frame (marathon off, /new, a real chat
-   * switch). The marathon.state off frame already tells clients to clear; this
-   * keeps the watcher's internal state consistent so a later ack finds nothing.
+   * V1: clear all open notices without a frame (/new, a real chat switch).
    */
   clearNotices() {
     this.openAlert = null
+    this.openEndedIncomplete = null
+  }
+
+  /** Clear only a marathon-specific ended-incomplete notice (when marathon turns off). */
+  clearEndedIncomplete() {
     this.openEndedIncomplete = null
   }
 
@@ -690,6 +825,7 @@ export class Watcher {
         kind: notice.kind,
         at: notice.atIso,
         reason: notice.reason ?? ALERT_REASON[notice.kind] ?? 'The agent may be stuck.',
+        ...(notice.steer ? { steer: { ...notice.steer } } : {}),
       },
       lastVerdict: this.lastVerdict,
       lastCheckAt: this.lastJudgeCheckWallAt ?? (this.checks > 0 ? new Date(this.wallNow()).toISOString() : null),

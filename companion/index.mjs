@@ -49,7 +49,7 @@ import {
 } from './openrouter.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const VERSION = '2.5.3'
+const VERSION = '2.5.4'
 const PROVIDER = 'openrouter'
 
 const BOOLEAN_FLAGS = new Set(['no-dsh', 'no-auto-capture', 'new-token', 'help', 'remote', 'pair-remote', 'new-remote-token', 'confirm-irreversible', 'no-auto-update'])
@@ -280,6 +280,10 @@ const confirmIrreversibleOverride = cli['confirm-irreversible'] === true || proc
 function confirmIrreversiblePolicy() {
   return confirmIrreversibleOverride || settings.confirmIrreversible === true
 }
+const watchAutoSteerDisableOverride = process.env.CRAZYAGENT_WATCH_AUTO_STEER === '0'
+function watchAutoSteerPolicy() {
+  return !watchAutoSteerDisableOverride && settings.watchAutoSteer !== false
+}
 
 const runId = `run-${new Date().toISOString().replace(/[:.]/gu, '-')}-${randomBytes(3).toString('hex')}`
 logStore = new LogStore({
@@ -374,8 +378,12 @@ function sendCompanionHello(_ui) {
     dsh: dshStatus,
     llm: llmInfo(),
     credentials: credentialsInfo(),
-    settings: { confirmIrreversible: confirmIrreversiblePolicy() },
+    settings: {
+      confirmIrreversible: confirmIrreversiblePolicy(),
+      watchAutoSteer: watchAutoSteerPolicy(),
+    },
     marathon: { ...marathonFrameBody(controller.marathonState()), watcher: controller.watcherPanelState() },
+    watch: controller.watchState(),
     update: updater?.status() ?? null,
     lifetimeUsage: lifetimeUsage.snapshot(),
     // A panel that opens mid-turn shows the running turn instead of starting a new chat.
@@ -693,12 +701,25 @@ async function handleControl(message) {
         bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'settings.updated', ok: false, error: 'confirmIrreversible must be a boolean.' })
         return
       }
+      if (message.watchAutoSteer !== undefined && typeof message.watchAutoSteer !== 'boolean') {
+        bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'settings.updated', ok: false, error: 'watchAutoSteer must be a boolean.' })
+        return
+      }
       settings = writeSettings(settingsPath, {
         confirmIrreversible: message.confirmIrreversible === undefined ? settings.confirmIrreversible : message.confirmIrreversible,
+        watchAutoSteer: message.watchAutoSteer === undefined ? settings.watchAutoSteer : message.watchAutoSteer,
       })
-      logStore.record('extension', 'settings.updated', { confirmIrreversible: settings.confirmIrreversible }, { severity: 'info' })
+      logStore.record('extension', 'settings.updated', { confirmIrreversible: settings.confirmIrreversible, watchAutoSteer: settings.watchAutoSteer }, { severity: 'info' })
       remoteHub?.updateHealth()
-      bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'settings.updated', ok: true, settings: { confirmIrreversible: confirmIrreversiblePolicy() } })
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'settings.updated',
+        ok: true,
+        settings: {
+          confirmIrreversible: confirmIrreversiblePolicy(),
+          watchAutoSteer: watchAutoSteerPolicy(),
+        },
+      })
       return
     }
     if (message.type === 'log.stats') {
@@ -801,6 +822,7 @@ const controller = new SessionController({
   provider: PROVIDER,
   getModelId: () => llmConfig?.model.id,
   getConfirmIrreversible: confirmIrreversiblePolicy,
+  getWatchAutoSteer: watchAutoSteerPolicy,
   publish,
   watch: { judge: watchJudge },
 })

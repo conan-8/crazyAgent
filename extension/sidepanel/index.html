@@ -98,6 +98,7 @@
           <span class="marathon-mode-copy">Every turn uses a live checklist</span>
           <button id="marathon-mode-cancel" class="marathon-mode-cancel" type="button" title="Turn marathon mode off" aria-label="Turn marathon mode off">×</button>
         </div>
+        <div id="watch-card" class="watch-card hidden" role="status" aria-live="polite"></div>
         <div id="confirm-card" class="confirm-card hidden" role="alertdialog" aria-labelledby="confirm-card-title" aria-describedby="confirm-card-action confirm-card-target">
           <div class="confirm-card-copy">
             <span class="confirm-card-badge">Approval</span>
@@ -230,6 +231,11 @@
               <input id="setting-confirm-irreversible" type="checkbox" />
             </label>
             <p class="hint">The agent ends its turn and waits for your Approve or Deny before an irreversible action. Applies to every turn, including turns started from the phone.</p>
+            <label class="check">
+              <span>Let watcher nudge stuck turns automatically</span>
+              <input id="setting-watch-auto-steer" type="checkbox" checked />
+            </label>
+            <p class="hint">When the watcher confirms the agent has been stuck on the same step for 2–3 minutes, it alerts you and sends a bounded course-correction hint (max 2 per turn). It cannot override your goal or confirmation gates.</p>
           </section>
 
           <section class="settings-section" aria-labelledby="capture-label">

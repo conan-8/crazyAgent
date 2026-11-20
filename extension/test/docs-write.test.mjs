@@ -20,6 +20,28 @@ const styleAttr = format => [
 const spans = block => (block.runsData ?? [{ text: block.text, format: block.format }])
   .map(run => `<span style="${styleAttr(run.format)}">${escapeHtml(run.text)}</span>`).join('')
 
+// A user's custom named styles, copied from a live export (2026-11-19). With
+// options.namedStyles the fake applies them the way Docs does: choosing a style
+// resets the caret to its look, and an exported span omits every value its
+// style already supplies (a default heading span has no font-weight or size).
+const NAMED_STYLES = {
+  P: { css: 'p{margin:0;color:#000000;font-size:11pt;font-family:"Arial"}', format: { font: 'Arial', fontSize: 11, bold: false, italic: false, color: '#000000' } },
+  H1: { css: 'h1{padding-top:12pt;color:#000000;font-weight:700;font-size:24pt;padding-bottom:12pt;font-family:"Arial"}', format: { font: 'Arial', fontSize: 24, bold: true, italic: false, color: '#000000' } },
+  TITLE: { css: '.title{padding-top:24pt;color:#000000;font-weight:700;font-size:36pt;padding-bottom:6pt;font-family:"Arial"}', format: { font: 'Arial', fontSize: 36, bold: true, italic: false, color: '#000000' } },
+  SUBTITLE: { css: '.subtitle{padding-top:18pt;color:#666666;font-size:24pt;padding-bottom:4pt;font-family:"Georgia";font-style:italic}', format: { font: 'Georgia', fontSize: 24, bold: false, italic: true, color: '#666666' } },
+}
+const namedSpanStyle = (format, defaults) => [
+  format.bold !== defaults.bold ? `font-weight:${format.bold ? 700 : 400}` : '',
+  format.italic !== defaults.italic ? `font-style:${format.italic ? 'italic' : 'normal'}` : '',
+  format.underline ? 'text-decoration:underline' : format.strike ? 'text-decoration:line-through' : '',
+  format.font && format.font !== defaults.font ? `font-family:'${format.font}'` : '',
+  format.fontSize && format.fontSize !== defaults.fontSize ? `font-size:${format.fontSize}pt` : '',
+  (format.color ?? '#000000') !== defaults.color ? `color:${format.color}` : '',
+  format.highlight && format.highlight !== 'none' ? `background-color:${format.highlight}` : '',
+].filter(Boolean).join(';')
+const namedSpans = (block, defaults) => (block.runsData ?? [{ text: block.text, format: block.format }])
+  .map(run => `<span style="${namedSpanStyle(run.format, defaults)}">${escapeHtml(run.text)}</span>`).join('')
+
 function exportHtml(blocks, options = {}) {
   const body = []
   for (let index = 0; index < blocks.length;) {
@@ -32,7 +54,10 @@ function exportHtml(blocks, options = {}) {
     if (block.style !== 'LI') {
       const tag = block.style === 'P' || block.style === 'TITLE' || block.style === 'SUBTITLE' ? 'p' : block.style.toLowerCase()
       const className = block.style === 'TITLE' ? ' class="title"' : block.style === 'SUBTITLE' ? ' class="subtitle"' : ''
-      body.push(`<${tag}${className} style="${styleAttr(block.format)}">${spans(block)}</${tag}>`)
+      const named = options.namedStyles ? NAMED_STYLES[block.style] : undefined
+      body.push(named
+        ? `<${tag}${className}>${namedSpans(block, named.format)}</${tag}>`
+        : `<${tag}${className} style="${styleAttr(block.format)}">${spans(block)}</${tag}>`)
       index += 1
       continue
     }
@@ -49,6 +74,11 @@ function exportHtml(blocks, options = {}) {
       index += 1
     }
     body.push(`<${ordered ? 'ol' : 'ul'}${ordered && start !== 1 ? ` start="${start}"` : ''}>${items.join('')}</${ordered ? 'ol' : 'ul'}>`)
+  }
+  if (options.namedStyles) {
+    const styles = options.namedStyleOverrides ? { ...NAMED_STYLES, ...options.namedStyleOverrides } : NAMED_STYLES
+    const rules = Object.values(styles).map(style => style.css).join('')
+    return `<html><head><style type="text/css">${rules}</style></head><body class="doc-content">${body.join('')}</body></html>`
   }
   return `<html><body style="font-family:Arial;font-size:11pt">${body.join('')}</body></html>`
 }
@@ -181,12 +211,13 @@ function fakeWrite(options = {}) {
         }
         return
       }
-      if (spec.key === 'Enter' && mask === 10 && state.listMode === 'checklist') {
+      if (spec.key === 'Enter' && mask === 3 && state.listMode === 'checklist') {
         const last = state.blocks.at(-1)
         if (last?.style === 'LI') last.checked = !last.checked
         return
       }
       if (options.enterFails && spec.key === 'Enter') return
+      if (options.listExitFails && state.listMode && spec.key === 'Enter' && !state.blocks.at(-1)?.text) return
       if (spec.key === 'Enter') {
         const last = state.blocks.at(-1)
         if (state.listMode && last?.style === 'LI' && !last.text) {
@@ -198,7 +229,14 @@ function fakeWrite(options = {}) {
         } else if (state.listMode) {
           const number = state.listMode === 'numbered' ? (last?.number ?? 0) + 1 : undefined
           state.blocks.push(item('', state.listMode === 'numbered', number, currentFormat(), state.listMode === 'checklist' ? { checklist: true, checked: false } : {}))
-        } else state.blocks.push(para('', state.paragraphStyle === 'Normal text' ? 'P' : state.paragraphStyle === 'Title' ? 'TITLE' : state.paragraphStyle === 'Subtitle' ? 'SUBTITLE' : `H${state.paragraphStyle.slice(-1)}`, currentFormat()))
+        } else {
+          if (options.enterResetsHeading && state.paragraphStyle !== 'Normal text') {
+            state.paragraphStyle = 'Normal text'
+            Object.assign(state, NAMED_STYLES.P.format)
+            state.fontSizeValue = String(state.fontSize)
+          }
+          state.blocks.push(para('', state.paragraphStyle === 'Normal text' ? 'P' : state.paragraphStyle === 'Title' ? 'TITLE' : state.paragraphStyle === 'Subtitle' ? 'SUBTITLE' : `H${state.paragraphStyle.slice(-1)}`, currentFormat()))
+        }
       }
     },
     insertTrustedText: async (_tabId, text) => {
@@ -245,6 +283,11 @@ function fakeWrite(options = {}) {
       if (x === 100) state.styleMenuOpen = true
       else if (x === 101) {
         state.paragraphStyle = state.requestedStyle
+        if (options.namedStyles) {
+          const key = state.paragraphStyle === 'Normal text' ? 'P' : state.paragraphStyle === 'Title' ? 'TITLE' : state.paragraphStyle === 'Subtitle' ? 'SUBTITLE' : `H${state.paragraphStyle.slice(-1)}`
+          Object.assign(state, NAMED_STYLES[key].format)
+          state.fontSizeValue = String(state.fontSize)
+        }
         const last = state.blocks.at(-1)
         if (last?.style !== 'LI' && !last?.text) {
           last.style = state.paragraphStyle === 'Normal text' ? 'P' : state.paragraphStyle === 'Title' ? 'TITLE' : state.paragraphStyle === 'Subtitle' ? 'SUBTITLE' : `H${state.paragraphStyle.slice(-1)}`
@@ -269,7 +312,10 @@ function fakeWrite(options = {}) {
         state[state.colorTarget] = state.pickerValue
         state.hexFocused = false
         state.colorDialogOpen = false
-      } else if (x === 15) state.controlsRevealed = true
+      } else if (x === 15) {
+        state.controlsRevealed = true
+        state.documentFocused = false
+      }
     },
     runInTab: async (_tabId, _func, [command, args]) => {
       events.push(`probe:${command}`)
@@ -324,8 +370,10 @@ function fakeWrite(options = {}) {
           searchEnabled: true,
           searchValue: state.searchValue,
           noFonts: state.searchValue === args.font && !found,
+          applied: state.searchValue === args.font,
           signature: `${state.searchValue}:${found}`,
           found,
+          reachable: found,
           checked: false,
           point: found ? { x: 4, y: 20 } : undefined,
           done: { x: 5, y: 20 },
@@ -412,9 +460,97 @@ test('Docs write composes formatted paragraphs, blank space, and adjacent lists 
   const bulleted = fake.events.indexOf('key:8:10')
   const bulletedItems = fake.events.indexOf('insert:alpha\nbeta')
   assert.ok(numbered >= 0 && numbered < numberedItems && numberedItems < bulleted && bulleted < bulletedItems)
-  assert.equal(fake.exports.length, 9)
+  assert.equal(fake.exports.length, 3)
   assert.equal(fake.snapshots(), 0)
   assert.equal(fake.events.some(event => event.startsWith('hex:')), false)
+})
+
+test('Docs write leaves unset Title, Subtitle, and heading attributes to the named style', async () => {
+  // Field log 2026-11-19: unset attributes were filled from Normal text, so every
+  // heading and the subtitle were typed at 11pt (non-bold, non-italic) and the
+  // export check, expecting those same values, reported the write completed.
+  const fake = fakeWrite({ namedStyles: true })
+  const result = await runWrite(fake, [
+    { text: 'Feature Test Document', paragraph_style: 'Title', font: 'Playfair Display' },
+    { text: 'November 19, 2026', paragraph_style: 'Subtitle' },
+    { text: 'Intro paragraph.' },
+    { text: 'Section One', paragraph_style: 'Heading 1' },
+    { text: 'Body after the heading.' },
+  ])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(result.docs.verifiedCount, 5)
+  const [, title, subtitle, intro, heading, body] = fake.state.blocks
+  assert.deepEqual([title.style, title.format.font, title.format.fontSize, title.format.bold], ['TITLE', 'Playfair Display', 36, true])
+  assert.deepEqual(
+    [subtitle.style, subtitle.format.font, subtitle.format.fontSize, subtitle.format.italic, subtitle.format.color],
+    ['SUBTITLE', 'Georgia', 24, true, '#666666'],
+  )
+  assert.deepEqual([heading.style, heading.format.fontSize, heading.format.bold], ['H1', 24, true])
+  for (const block of [intro, body]) {
+    assert.deepEqual([block.style, block.format.fontSize, block.format.bold, block.format.italic, block.format.color], ['P', 11, false, false, '#000000'])
+  }
+  // Each style supplied its own look: no size was typed and no color dialog opened.
+  assert.equal(fake.events.some(event => event.startsWith('size:')), false)
+  assert.equal(fake.events.some(event => event.startsWith('hex:')), false)
+})
+
+test('Docs write verifies Title and Subtitle runs that inherit font or color from p{}', async () => {
+  // .title / .subtitle may omit font-family or color, inheriting from p{};
+  // parseNamedStyleDefaults merges p{} under .title/.subtitle, so write
+  // verification must apply the same p{} fallback to TITLE and SUBTITLE blocks.
+  const fake = fakeWrite({
+    namedStyles: true,
+    namedStyleOverrides: {
+      TITLE: { css: '.title{font-weight:700;font-size:36pt}', format: NAMED_STYLES.TITLE.format },
+      SUBTITLE: { css: '.subtitle{font-size:24pt;font-style:italic}', format: { ...NAMED_STYLES.P.format, fontSize: 24, italic: true } },
+    },
+  })
+  const result = await runWrite(fake, [
+    { text: 'Inherited title', paragraph_style: 'Title' },
+    { text: 'Inherited subtitle', paragraph_style: 'Subtitle' },
+  ])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(result.docs.verifiedCount, 2)
+})
+
+test('Docs write resets cached caret color when Enter exits a Subtitle or Heading to Normal text', async () => {
+  // Real Google Docs switches from Subtitle/Heading back to Normal text (and
+  // resets the caret color) on Enter, so the next block sees Normal text as
+  // already_applied. A Normal paragraph asking for the Subtitle's color must
+  // still apply it instead of hitting a stale cache.
+  const fake = fakeWrite({ namedStyles: true, enterResetsHeading: true })
+  const result = await runWrite(fake, [
+    { text: 'Muted subtitle', paragraph_style: 'Subtitle' },
+    { text: 'Explicit gray body', color: '#666666' },
+  ])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(fake.state.blocks[1].format.color, '#666666')
+  assert.equal(fake.state.blocks[2].format.color, '#666666')
+  assert.ok(fake.events.includes('hex:#666666'), 'color dialog must run after Enter reset caret color to Normal text')
+
+  // Same after docsWriteStart presses Enter on a baseline ending in a Subtitle.
+  const chained = fakeWrite({
+    blocks: [para('Existing subtitle', 'SUBTITLE', { color: '#666666', font: 'Georgia', fontSize: 24, italic: true })],
+    namedStyles: true,
+    enterResetsHeading: true,
+  })
+  chained.state.paragraphStyle = 'Subtitle'
+  const chainedResult = await runWrite(chained, [{ text: 'Gray follow-up', color: '#666666' }])
+  assert.equal(chainedResult.docs.status, 'completed', JSON.stringify(chainedResult.docs))
+  assert.equal(chained.state.blocks[1].format.color, '#666666')
+  assert.ok(chained.events.includes('hex:#666666'))
+})
+
+test('Docs write still applies explicit attributes over a named style', async () => {
+  const fake = fakeWrite({ namedStyles: true })
+  const result = await runWrite(fake, [
+    { text: 'Quiet heading', paragraph_style: 'Heading 1', bold: false, font_size: 18 },
+    { text: 'Plain subtitle', paragraph_style: 'Subtitle', italic: false, color: '#000000' },
+  ])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  const [, heading, subtitle] = fake.state.blocks
+  assert.deepEqual([heading.style, heading.format.fontSize, heading.format.bold], ['H1', 18, false])
+  assert.deepEqual([subtitle.style, subtitle.format.font, subtitle.format.italic, subtitle.format.color], ['SUBTITLE', 'Georgia', false, '#000000'])
 })
 
 test('Docs write verifies lists by export when toolbar controls are unavailable', async () => {
@@ -423,6 +559,7 @@ test('Docs write verifies lists by export when toolbar controls are unavailable'
   assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
   assert.ok(fake.events.indexOf('key:7:10') < fake.events.indexOf('insert:first\nsecond'))
   assert.deepEqual(fake.state.blocks.slice(1, 3).map(block => [block.text, block.number]), [['first', 1], ['second', 2]])
+  assert.equal(fake.exports.length, 6)
 })
 
 test('Docs write inserts a page break and verifies checked checklist items', async () => {
@@ -454,10 +591,10 @@ test('Docs write inserts a page break and verifies checked checklist items', asy
   assert.match(result.docs.outline, /☑ Completed task/)
   assert.match(result.docs.outline, /☐ Pending task/)
   assert.ok(fake.events.indexOf('key:Enter:2') < fake.events.indexOf('key:9:10'))
-  assert.ok(fake.events.indexOf('insert:Completed task') < fake.events.indexOf('key:Enter:10'))
-  assert.ok(fake.events.indexOf('key:Enter:10') < fake.events.indexOf('insert:Pending task'))
+  assert.ok(fake.events.indexOf('insert:Completed task') < fake.events.indexOf('key:Enter:3'))
+  assert.ok(fake.events.indexOf('key:Enter:3') < fake.events.indexOf('insert:Pending task'))
   assert.equal(fake.events.filter(event => event === 'insert:Completed task').length, 1)
-  assert.equal(fake.exports.length, 6)
+  assert.equal(fake.exports.length, 3)
   assert.equal(fake.snapshots(), 0)
 })
 
@@ -468,6 +605,7 @@ test('Docs write accepts flattened checklist export only with live semantic evid
     { text: 'Pending task', checked: false },
   ], list: 'checklist' }])
   assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(fake.exports.length, 3)
   assert.deepEqual(fake.state.blocks.slice(1, 3).map(block => [block.checklist, block.checked]), [[true, true], [true, false]])
   const exported = parseDocStructure(exportHtml(fake.state.blocks, { flattenChecklistExport: true }))
   assert.equal(exported[1].checklist, undefined)
@@ -477,15 +615,47 @@ test('Docs write accepts flattened checklist export only with live semantic evid
 
 test('Docs write rejects flattened checklist export without checked-state evidence', async () => {
   const fake = fakeWrite({ flattenChecklistExport: true, flattenCheckedStyleMissing: true })
-  await assert.rejects(runWrite(fake, [{ items: [{ text: 'Completed task', checked: true }], list: 'checklist' }]), error => (
-    error.code === 'DOCS_FORMAT_MISMATCH' && error.stage === 'write-list-exit-verify'
-  ))
+  const result = await runWrite(fake, [{ items: [{ text: 'Completed task', checked: true }], list: 'checklist' }])
+  assert.equal(result.docs.status, 'failed')
+  assert.equal(result.docs.verifiedCount, 0)
+  assert.equal(result.docs.failure.code, 'DOCS_WRITE_VERIFY_FAILED')
+  assert.match(result.docs.failure.message, /strike: expected true, found false/)
 })
 
 test('Docs write never infers a checklist from bullets when semantic controls are unavailable', async () => {
   const fake = fakeWrite({ flattenChecklistExport: true, listProbeFails: true })
   await assert.rejects(runWrite(fake, [{ items: [{ text: 'Task', checked: false }], list: 'checklist' }]), error => error.code === 'DOCS_CONTROL_NOT_FOUND')
   assert.equal(fake.events.some(event => event.startsWith('insert:')), false)
+  assert.equal(fake.events.includes('key:9:10'), false)
+})
+
+test('Docs write verifies narrow-viewport lists via overflow reveal without per-list exports', async () => {
+  const fake = fakeWrite({ blocks: [para('')], listControlsHidden: true, flattenChecklistExport: true })
+  const result = await runWrite(fake, [
+    { items: ['one', 'two'], list: 'numbered' },
+    { items: ['alpha', 'beta'], list: 'bulleted' },
+    { items: [{ text: 'Done', checked: true }, { text: 'Todo', checked: false }], list: 'checklist' },
+  ])
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(result.docs.verifiedCount, 3)
+  // Fresh blank doc skips no-op write-position and all 3 lists verify via toolbar:
+  // only write-baseline + write-verify run (2 exports total instead of 12).
+  assert.equal(fake.exports.length, 2)
+  assert.equal(fake.snapshots(), 0)
+  const reveal = fake.events.indexOf('click:15')
+  const refocus = fake.events.indexOf('probe:focusDocument', reveal)
+  const listStart = fake.events.indexOf('key:7:10')
+  assert.ok(reveal >= 0 && refocus > reveal && refocus < listStart, JSON.stringify(fake.events))
+})
+
+test('Docs write fails closed before the next block if a list does not exit cleanly', async () => {
+  const fake = fakeWrite({ listExitFails: true })
+  await assert.rejects(runWrite(fake, [
+    { items: ['one', 'two'], list: 'numbered' },
+    { text: 'After list' },
+  ]), error => error.code === 'DOCS_FORMAT_MISMATCH' && error.stage === 'write-list-exit-verify')
+  assert.equal(fake.events.includes('insert:After list'), false)
+  assert.equal(fake.exports.length, 2)
 })
 
 test('Docs write reveals hidden text controls before reading or toggling them', async () => {
@@ -574,6 +744,7 @@ test('Docs write reuses a fresh document empty paragraph without a stray leading
   const fake = fakeWrite({ blocks: [para('')] })
   const result = await runWrite(fake, [{ text: 'First' }, { text: 'Second' }])
   assert.equal(result.docs.status, 'completed')
+  assert.equal(fake.exports.length, 2)
   assert.deepEqual(fake.state.blocks.map(block => block.text), ['First', 'Second'])
   const first = fake.events.indexOf('insert:First')
   const second = fake.events.indexOf('insert:Second')
@@ -581,9 +752,10 @@ test('Docs write reuses a fresh document empty paragraph without a stray leading
 })
 
 test('Docs write allows whitespace-only normalization in the reused trailing paragraph', async () => {
-  const fake = fakeWrite({ blocks: [para('')], whitespaceOnlyTrailingRunOnPosition: true })
+  const fake = fakeWrite({ blocks: [item('', false, undefined)], whitespaceOnlyTrailingRunOnPosition: true })
   const result = await runWrite(fake, [{ text: 'First' }])
   assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(fake.exports.length, 3)
   assert.deepEqual(fake.state.blocks.map(block => [block.style, block.text]), [['P', 'First']])
 })
 

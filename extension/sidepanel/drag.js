@@ -489,6 +489,99 @@ export function dragProbe(request) {
     const hitHost = hit?.getRootNode?.()?.host
     return Boolean(hit && (hit === element || element.contains(hit) || hit.contains(element) || hitHost === element || element.contains(hitHost)))
   }
+  const normalizedText = element => String(element?.textContent ?? '').replace(/\s+/gu, ' ').trim()
+  const describe = element => {
+    if (!element?.tagName) return 'another element'
+    const text = normalizedText(element).slice(0, 40)
+    return `${String(element.tagName).toLowerCase()}${text ? ` "${text}"` : ''}`
+  }
+  const parentOf = node => node?.parentElement ?? node?.getRootNode?.()?.host ?? null
+  const deepContains = (ancestor, descendant) => {
+    if (!ancestor || !descendant) return false
+    for (let node = descendant, depth = 0; node && depth < 64; node = parentOf(node), depth += 1) {
+      if (node === ancestor) return true
+    }
+    return false
+  }
+  const BOX_KEYS = ['left', 'top', 'right', 'bottom', 'width', 'height']
+  const movedFrom = (before, after) => BOX_KEYS.some(key => Math.abs(Number(after[key]) - Number(before[key])) > 1)
+  const cloneSizeFits = (candidate, unitRect) => {
+    if (!unitRect) return true
+    let rect
+    try {
+      rect = rectOf(candidate)
+    } catch {
+      return false
+    }
+    const maxWidth = Math.max(unitRect.width * 2.5, unitRect.width + 64)
+    const maxHeight = Math.max(unitRect.height * 2.5, unitRect.height + 64)
+    return rect.width <= maxWidth && rect.height <= maxHeight
+  }
+  /** The pressed element and its nearest ancestors, measured before input. */
+  const sourceChain = element => {
+    const chain = []
+    for (let node = element; node && chain.length < 8 && node !== document.body && node !== document.documentElement; node = parentOf(node)) {
+      let rect = null
+      try {
+        rect = rectOf(node)
+      } catch {}
+      const text = normalizedText(node)
+      chain.push({ element: node, rect, text: text.length <= 2_000 ? text : '' })
+    }
+    return chain
+  }
+  // After the press, a pointer-follow widget draws the dragged item under the
+  // cursor, over the destination: the pressed element and any ancestor that moved
+  // with it, or a same-text clone of one of them. That is the drag's own feedback.
+  // Unmoved source containers and anything else above the destination are covers.
+  const dropFeedback = (held, target) => {
+    if (!held?.element || !Array.isArray(held.chain)) return () => false
+    const units = held.chain.filter(unit => unit.element.isConnected && unit.element !== target && !deepContains(unit.element, target))
+    const actuallyMoved = units.filter(unit => {
+      try {
+        return Boolean(unit.rect) && movedFrom(unit.rect, rectOf(unit.element))
+      } catch {
+        return false
+      }
+    })
+    const moved = units
+      .filter(unit => unit.element === held.element || actuallyMoved.includes(unit))
+      .map(unit => unit.element)
+    // If the source (or an ancestor) moved, only moved units supply clone text.
+    // Otherwise (a static-source drag that draws a clone), keep only the pressed
+    // element and its immediate item ancestors (depth <= 2) that are not large
+    // viewport-spanning containers, so unmoved trays/sections never whitelist covers.
+    const viewportArea = Math.max(1, (window.innerWidth || 0) * (window.innerHeight || 0))
+    const cloneUnits = (actuallyMoved.length > 0
+      ? actuallyMoved
+      : units.slice(0, 3).filter(unit => !unit.rect || (unit.rect.width * unit.rect.height) <= viewportArea * 0.4)
+    ).filter(unit => Boolean(unit.text))
+    return element => {
+      if (element === target || deepContains(target, element) || deepContains(element, target)) return false
+      if (moved.some(unit => unit === element || deepContains(unit, element))) return true
+      for (let node = element, depth = 0; node && depth < 8; node = parentOf(node), depth += 1) {
+        if (node === target || node === document.body || node === document.documentElement || deepContains(node, held.element)) return false
+        const text = normalizedText(node)
+        if (text && cloneUnits.some(unit => unit.text === text && cloneSizeFits(node, unit.rect))) return true
+      }
+      return false
+    }
+  }
+  const dropHit = (x, y, held, target) => {
+    const feedback = dropFeedback(held, target)
+    let hit = null
+    let root = document
+    for (let depth = 0; depth < 16 && root; depth += 1) {
+      const stack = typeof root.elementsFromPoint === 'function'
+        ? Array.from(root.elementsFromPoint(x, y) ?? [])
+        : [root.elementFromPoint?.(x, y)]
+      const next = stack.find(element => element && !feedback(element)) ?? null
+      if (!next || next === hit) break
+      hit = next
+      root = hit.shadowRoot ?? null
+    }
+    return hit
+  }
   const rectOf = element => {
     const rect = element.getBoundingClientRect()
     return {
@@ -582,22 +675,34 @@ export function dragProbe(request) {
     }
   }
   if (request.phase === 'revalidate') {
-    const entry = sessions.get(request.token)?.[request.side]
+    // check: 'exact' (unmoved and topmost at its point), 'held' (still attached:
+    // a pressed source may follow the cursor), or 'drop' (exact, except that the
+    // held source or a same-text clone of it may cover the destination point).
+    const session = sessions.get(request.token)
+    const entry = session?.[request.side]
+    const when = request.stage === 'drop'
+      ? 'before the drop, so the drag was released at the viewport\'s top-left corner instead; inspect the page before retrying'
+      : request.stage === 'press'
+        ? 'before the press; nothing was pressed'
+        : 'before input; nothing was dispatched'
     if (!entry?.element || entry.element.isConnected !== true) {
-      return { ok: false, code: 'DRAG_STALE_TARGET', message: `The ${request.side} element was replaced during the drag.` }
+      return { ok: false, code: 'DRAG_STALE_TARGET', message: `The ${request.side} element was replaced or removed ${when}.` }
     }
-    if (request.exact === true) {
-      let rect
-      try {
-        rect = rectOf(entry.element)
-      } catch {
-        return { ok: false, code: 'DRAG_STALE_TARGET', message: `The ${request.side} element is no longer measurable.` }
-      }
-      const moved = ['left', 'top', 'right', 'bottom', 'width', 'height']
-        .some(key => Math.abs(Number(rect[key]) - Number(entry.rect[key])) > 1)
-      if (moved || !ownedHit(entry.element, deepHit(entry.x, entry.y))) {
-        return { ok: false, code: 'DRAG_STALE_TARGET', message: `The ${request.side} element moved or became covered before input completed.` }
-      }
+    if (request.check === 'held') return { ok: true }
+    let rect
+    try {
+      rect = rectOf(entry.element)
+    } catch {
+      return { ok: false, code: 'DRAG_STALE_TARGET', message: `The ${request.side} element is no longer measurable ${when}.` }
+    }
+    if (movedFrom(entry.rect, rect)) {
+      return { ok: false, code: 'DRAG_STALE_TARGET', message: `The ${request.side} element moved ${when}.` }
+    }
+    const hit = request.check === 'drop'
+      ? dropHit(entry.x, entry.y, session.source, entry.element)
+      : deepHit(entry.x, entry.y)
+    if (!ownedHit(entry.element, hit)) {
+      return { ok: false, code: 'DRAG_STALE_TARGET', message: `The ${request.side} point is covered by ${describe(hit)} ${when}.` }
     }
     return { ok: true }
   }
@@ -641,6 +746,8 @@ export function dragProbe(request) {
   }
   const session = sessions.get(request.token) ?? {}
   session[request.side] = { element, x: point.x, y: point.y, rect: { ...rect } }
+  // Lets the drop check tell the dragged item (or its clone) from a real cover.
+  if (request.side === 'source') session.source.chain = sourceChain(element)
   sessions.set(request.token, session)
   const text = String(element.getAttribute('aria-label') ?? element.textContent ?? '').replace(/\s+/gu, ' ').trim().slice(0, 120)
   // Content drawn inside these elements is invisible to DOM probes in this frame.
@@ -715,9 +822,9 @@ function assertInsideViewport(point, viewport) {
   }
 }
 
-async function revalidateTarget(tab, prepared, side, token, exact, mutationPossible, io) {
+async function revalidateTarget(tab, prepared, side, token, { check, stage }, mutationPossible, io) {
   const result = await io.runInFrame(tab.id, prepared.frameId, dragProbe, [{
-    phase: 'revalidate', side, token, exact,
+    phase: 'revalidate', side, token, check, stage,
   }], 2_000)
   if (!result?.ok) {
     throw dragFailure(result?.code ?? 'DRAG_STALE_TARGET', result?.message ?? `The ${side} target changed before input completed.`, { mutationPossible })
@@ -777,17 +884,20 @@ export async function executeDrag(args, io = {}) {
         sleep: io.sleep,
         moveCursor: (point, options) => io.moveCursor?.(tab.id, point.x, point.y, options),
         beforeHover: async () => {
-          await revalidateTarget(tab, source, 'source', token, true, false, io)
-          await revalidateTarget(tab, destination, 'destination', token, true, false, io)
+          await revalidateTarget(tab, source, 'source', token, { check: 'exact', stage: 'hover' }, false, io)
+          await revalidateTarget(tab, destination, 'destination', token, { check: 'exact', stage: 'hover' }, false, io)
         },
         beforePress: async () => {
-          await revalidateTarget(tab, source, 'source', token, true, true, io)
-          await revalidateTarget(tab, destination, 'destination', token, true, true, io)
+          await revalidateTarget(tab, source, 'source', token, { check: 'exact', stage: 'press' }, true, io)
+          await revalidateTarget(tab, destination, 'destination', token, { check: 'exact', stage: 'press' }, true, io)
         },
+        // The press picked the source up: pointer-follow widgets and sliders move
+        // or restyle it under the cursor, so it only has to stay attached. The
+        // drop point is what can land on a wrong target, so the destination stays
+        // exact apart from the held source (or its clone) drawn on top of it.
         beforeDrop: async () => {
-          const valueDriven = source.before.value?.measured === true || source.before.ariaValueNow?.value !== null
-          await revalidateTarget(tab, source, 'source', token, !valueDriven, true, io)
-          await revalidateTarget(tab, destination, 'destination', token, true, true, io)
+          await revalidateTarget(tab, source, 'source', token, { check: 'held', stage: 'drop' }, true, io)
+          await revalidateTarget(tab, destination, 'destination', token, { check: 'drop', stage: 'drop' }, true, io)
         },
       })
     })

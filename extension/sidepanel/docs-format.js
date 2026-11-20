@@ -217,12 +217,26 @@ function actualValue(value) {
   return value === undefined ? null : value
 }
 
-function comparableRunMarks(run) {
+// The HTML element each paragraph style is exported as. Title and Subtitle are
+// <p class="title|subtitle">: parseDocStructure already merges those class
+// rules into runs, so only what they leave unset falls through to p{}.
+const INHERITED_ELEMENT = new Map([
+  ['P', 'p'], ['TITLE', 'p'], ['SUBTITLE', 'p'], ['LI', 'li'],
+  ['H1', 'h1'], ['H2', 'h2'], ['H3', 'h3'], ['H4', 'h4'], ['H5', 'h5'], ['H6', 'h6'],
+])
+
+// Compare what a character renders as. Docs omits font, size, and color from a
+// span whose value equals its element rule (p{}, li{}, h1{}–h6{}), and it may
+// drop or add such a redundant value when it re-splits spans around an edit:
+// an untouched space once read as an "Unrequested font_size change" from an
+// explicit 11 to an inherited 11. `inherited` is the parseInheritedTextMarks
+// entry for the paragraph's element; an explicit span value always wins.
+function comparableRunMarks(run, inherited) {
   return {
     strike: run.strike === true,
-    font: run.font ?? null,
-    font_size: run.fontSize ?? null,
-    color: normalizeDocsColor(run.color),
+    font: run.font ?? inherited?.font ?? null,
+    font_size: run.fontSize ?? inherited?.fontSize ?? null,
+    color: normalizeDocsColor(run.color ?? inherited?.color),
     highlight: normalizeDocsColor(run.highlight),
     bold: run.bold === true,
     italic: run.italic === true,
@@ -231,7 +245,8 @@ function comparableRunMarks(run) {
   }
 }
 
-function characterMarks(block, paragraphIndex, side) {
+function characterMarks(block, paragraphIndex, side, inheritedMarks) {
+  const inherited = inheritedMarks?.get(INHERITED_ELEMENT.get(block.style))
   if (!Array.isArray(block.runs)) {
     throw formatError('DOCS_FORMAT_RUN_MISMATCH', `${side} paragraph ${paragraphIndex} has no runs array`, {
       attribute: 'runs', expected: block.text, actual: null, paragraphIndex,
@@ -246,7 +261,7 @@ function characterMarks(block, paragraphIndex, side) {
       })
     }
     text += run.text
-    const current = comparableRunMarks(run)
+    const current = comparableRunMarks(run, inherited)
     for (let offset = 0; offset < run.text.length; offset += 1) marks.push(current)
   }
   if (text !== block.text || marks.length !== block.text.length) {
@@ -301,7 +316,11 @@ function unsupportedVerification(edits, attemptedCount, block, paragraphIndex, s
   })
 }
 
-export function verifyDocsFormatEdits(baselineBlocks, finalBlocks, plans, edits, attemptedCount) {
+/**
+ * @param {object} [inherited] parseInheritedTextMarks maps of the two exports,
+ *   `{ baseline, final }`; without them, unset span values compare as null.
+ */
+export function verifyDocsFormatEdits(baselineBlocks, finalBlocks, plans, edits, attemptedCount, inherited = {}) {
   if (!Array.isArray(baselineBlocks) || !Array.isArray(finalBlocks) || !Array.isArray(plans) || !Array.isArray(edits)) {
     throw formatError('DOCS_FORMAT_INVALID_VERIFICATION_INPUT', 'baselineBlocks, finalBlocks, plans, and edits must be arrays')
   }
@@ -382,8 +401,8 @@ export function verifyDocsFormatEdits(baselineBlocks, finalBlocks, plans, edits,
   let baselineMarks
   let finalMarks
   try {
-    baselineMarks = baselineBlocks.map((block, index) => supportedParagraph(block) ? characterMarks(block, index, 'baseline') : undefined)
-    finalMarks = finalBlocks.map((block, index) => supportedParagraph(block) ? characterMarks(block, index, 'final') : undefined)
+    baselineMarks = baselineBlocks.map((block, index) => supportedParagraph(block) ? characterMarks(block, index, 'baseline', inherited.baseline) : undefined)
+    finalMarks = finalBlocks.map((block, index) => supportedParagraph(block) ? characterMarks(block, index, 'final', inherited.final) : undefined)
   } catch (error) {
     return verificationFailure(edits, attemptedCount, {
       index: -1,

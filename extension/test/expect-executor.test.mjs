@@ -121,6 +121,8 @@ function fakeExpectBrowser(t, options = {}) {
         if (name === 'expectDialogProbe') return [{ result: { visible: state.dialogOpen ? 1 : 0 } }]
         if (name === 'typeLabelled') {
           state.mutations += 1
+          if (options.nullScript === 'typeLabelled') return [{ result: null }]
+          if (options.notEditableType) return [{ result: { ok: false, code: 'NOT_EDITABLE' } }]
           const before = state.value
           const text = args[1]
           state.value = args[2] === 'append' ? before + text : text
@@ -130,6 +132,7 @@ function fakeExpectBrowser(t, options = {}) {
             afterChars: state.value.length, valuePreview: state.value, verified: true,
           } }]
         }
+        if (options.nullScript === name) return [{ result: null }]
         if (name === 'clickLabelled') {
           const label = args[0]
           state.mutations += 1
@@ -173,6 +176,7 @@ function fakeExpectBrowser(t, options = {}) {
       onDetach: detachEvents,
       sendCommand: async (_target, method, params) => {
         if (method === 'Input.dispatchMouseEvent' && params.type === 'mousePressed') state.trustedDispatches += 1
+        if (method === 'Input.insertText') state.trustedDispatches += 1
         if (method === 'Page.handleJavaScriptDialog') {
           debuggerEvents.emit({ tabId: tab.id }, 'Page.javascriptDialogClosed', { result: params.accept === true })
         }
@@ -261,6 +265,30 @@ test('a null click script result fails closed instead of crashing on result.scro
     mod.execute('click', { label: 3, view: 'none' }, {}),
     error => error.code === 'CLICK_FAILED' && !/reading 'scroll'/.test(error.message),
   )
+})
+
+test('null runInFrame results fail closed across hover, select_option, type, fallback focus, and label copy', async t => {
+  // chrome.scripting returns null when a frame is destroyed mid-injection;
+  // runInFrame preserves null (some probes legitimately return null), so
+  // callers must fail closed instead of throwing TypeError or injecting input.
+  for (const [label, opts, op, args, expectedCode] of [
+    ['hover', { nullScript: 'hoverLabelled' }, 'hover', { label: 3, view: 'none' }, 'HOVER_FAILED'],
+    ['select_option', { nullScript: 'selectOption' }, 'select_option', { label: 3, option: 'A', view: 'none' }, 'SELECT_FAILED'],
+    ['type', { nullScript: 'typeLabelled' }, 'type', { label: 7, text: 'hi', view: 'none' }, 'TYPE_FAILED'],
+    ['type fallback focus', { notEditableType: true, nullScript: 'focusTypingTarget' }, 'type', { label: 7, text: 'hi', view: 'none' }, 'TYPE_FAILED'],
+    ['clipboard label copy', { nullScript: 'readLabelClipboardText' }, 'clipboard', { action: 'copy', source: 'label', label: 3 }, 'COPY_FAILED'],
+  ]) {
+    const fake = fakeExpectBrowser(t, opts)
+    const mod = await fake.initialize()
+    await assert.rejects(
+      mod.execute(op, args, {}),
+      error => error.code === expectedCode && !/Cannot read properties of null/u.test(error.message),
+      label,
+    )
+    if (label === 'type fallback focus') {
+      assert.equal(fake.state.trustedDispatches, 0, 'null focusTypingTarget must never dispatch Input.insertText')
+    }
+  }
 })
 
 test('click text_landed verifies a page-scoped absent-to-present transition', async t => {

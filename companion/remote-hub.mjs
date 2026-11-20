@@ -671,6 +671,9 @@ export class RemoteHub {
     if (id === null) return
     const kind = stringOrNull(frame.kind) ?? 'info'
     const state = stringOrNull(frame.state) ?? 'open'
+    const steer = isRecord(frame.steer) && typeof frame.steer.text === 'string' && frame.steer.text.trim().length > 0
+      ? { id: stringOrNull(frame.steer.id), text: clip(frame.steer.text.trim(), 300) }
+      : null
     const notice = {
       id,
       turnId: stringOrNull(frame.turnId),
@@ -684,10 +687,11 @@ export class RemoteHub {
         detail: clip(stringOrNull(signal?.detail) ?? '', 200),
       })) : [],
       source: frame.source === 'watcher' || frame.source === 'both' ? frame.source : 'heuristic',
+      ...(steer !== null ? { steer } : {}),
       at: stringOrNull(frame.at) ?? new Date(this.now()).toISOString(),
     }
     this.marathon.watchOpen = (state === 'open' && (kind !== 'info' && kind !== 'recovered'))
-      ? { id: notice.id, kind: notice.kind, at: notice.at, reason: notice.reason }
+      ? { id: notice.id, kind: notice.kind, at: notice.at, reason: notice.reason, ...(steer !== null ? { steer } : {}) }
       : null
     this.publish('remote.watch', notice, { turnId: notice.turnId ?? this.turn.turnId })
   }

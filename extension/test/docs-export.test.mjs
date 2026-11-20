@@ -46,6 +46,8 @@ test('Docs export retries only bounded transient statuses and returns the body',
     sleep: async ms => sleeps.push(ms),
   })
   assert.equal(result.body, '<html>ok</html>')
+  assert.equal(result.rateLimitRetries, 2)
+  assert.equal(result.rateLimitWaitMs, 2700)
   assert.equal(calls.length, 3)
   assert.deepEqual(sleeps, [300, 2400])
   assert.equal(calls[0].options.credentials, 'include')

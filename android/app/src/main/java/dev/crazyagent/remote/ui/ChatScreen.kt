@@ -668,6 +668,13 @@ private fun WatchCard(
                 modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()),
             )
         }
+        notice.steerText?.takeIf { it.isNotBlank() }?.let { steer ->
+            Text(
+                "Watcher nudged agent: $steer",
+                style = RequestDetail,
+                color = AgentYellow,
+            )
+        }
         Text(
             if (notice.kind == "ended-incomplete") {
                 "Steer to continue the work, or dismiss this notice."

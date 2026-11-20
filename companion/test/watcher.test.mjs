@@ -260,25 +260,26 @@ test('a clean marathon turn ends without an ended-incomplete notice', () => {
   assert.equal(h.frames.filter(f => f.type === 'chat.watch').length, 0)
 })
 
-test('non-marathon turns are never assessed or alerted', () => {
-  const h = harness({ marathon: false })
-  h.call('hang', 'browser_wait_for')
-  h.advance(WATCH_THRESHOLDS.toolHangHardMs + WATCH_THRESHOLDS.silentStallHardMs)
-  assert.equal(h.tick(), null)
-  assert.equal(h.frames.length, 0)
-  assert.equal(h.watcher.checks, 0)
-  assert.equal(h.watcher.turnEnded({ outcome: 'done', planOutcome: 'unfinished' }).alerts, 0)
-  assert.equal(h.frames.filter(f => f.type === 'chat.watch').length, 0)
-})
-
-test('a mid-turn marathon toggle starts assessing with existing ledger history', () => {
+test('W2: non-marathon turns are watched for mid-turn stalls, while ended-incomplete stays marathon-only', () => {
   const h = harness({ marathon: false })
   h.call('hang', 'browser_wait_for')
   h.advance(WATCH_THRESHOLDS.toolHangHardMs)
-  assert.equal(h.tick(), null, 'off: no assessment')
-  h.setMarathon(true)
+  const assessment = h.tick()
+  assert.equal(assessment.level, 'hard')
+  assert.equal(h.watcher.checks, 1)
+  assert.equal(h.frames.filter(f => f.type === 'chat.watch' && f.kind === 'TOOL_HANG' && f.state === 'open').length, 1)
+  assert.equal(h.watcher.turnEnded({ outcome: 'done', planOutcome: 'unfinished' }).alerts, 1)
+  assert.equal(h.frames.filter(f => f.type === 'chat.watch' && f.kind === 'ended-incomplete').length, 0, 'ended-incomplete stays marathon-only')
+  assert.equal(h.frames.filter(f => f.type === 'chat.watch' && f.state === 'closed').length, 1, 'open alert closes on turn end')
+})
+
+test('W2: turning marathon off mid-turn keeps watching the running turn', () => {
+  const h = harness({ marathon: true })
+  h.setMarathon(false)
+  h.call('hang', 'browser_wait_for')
+  h.advance(WATCH_THRESHOLDS.toolHangHardMs)
   h.tick()
-  assert.equal(h.frames.filter(f => f.type === 'chat.watch' && f.state === 'open').length, 1, 'on: the existing hang alerts')
+  assert.equal(h.frames.filter(f => f.type === 'chat.watch' && f.state === 'open').length, 1, 'watching stays active when marathon toggles off')
 })
 
 test('stop() clears the timer', () => {

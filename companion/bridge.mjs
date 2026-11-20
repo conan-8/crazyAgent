@@ -261,6 +261,28 @@ export class Bridge {
   }
 
   /**
+   * Forward one bounded advisory watcher steer to the DSH provider for the
+   * active running turn. Fail-closed when turnId does not match the current
+   * turn or the tools socket is unavailable.
+   * @param {{turnId?: unknown, steerId?: unknown, text?: unknown, kind?: unknown, blocker?: unknown}} payload
+   * @returns {boolean}
+   */
+  sendWatchSteer(payload) {
+    if (!isRecord(payload)) return false
+    if (typeof payload.turnId !== 'string' || payload.turnId.length === 0 || payload.turnId !== this.currentTurnId) return false
+    if (typeof payload.text !== 'string' || payload.text.trim().length === 0) return false
+    return this.sendToTools({
+      v: PROTOCOL_VERSION,
+      type: 'watch.steer',
+      turnId: payload.turnId,
+      steerId: typeof payload.steerId === 'string' && payload.steerId.length > 0 ? payload.steerId : randomUUID(),
+      text: payload.text.trim().slice(0, 300),
+      kind: typeof payload.kind === 'string' ? payload.kind : 'stuck',
+      blocker: typeof payload.blocker === 'string' ? payload.blocker : null,
+    })
+  }
+
+  /**
    * Stamp click and type commands of a guarded turn so the executor refuses
    * controls that submit, send, pay, or delete (and type's submit:true).
    * Other commands pass through unchanged.

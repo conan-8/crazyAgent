@@ -49,12 +49,12 @@ export const WATCH_LIMITS = Object.freeze({
   promptChars: 1500,
 })
 
-/** Every threshold from the plan's table (§3.3.2), in one place. */
+/** Every threshold from the watcher signal table, in one place. */
 export const WATCH_THRESHOLDS = Object.freeze({
-  silentStallSuspectMs: 120_000,
-  silentStallHardMs: 300_000,
+  silentStallSuspectMs: 90_000,
+  silentStallHardMs: 180_000,
   toolHangSuspectMs: 90_000,
-  toolHangHardMs: 240_000,
+  toolHangHardMs: 180_000,
   executorDownSuspectMs: 30_000,
   executorDownHardMs: 120_000,
   failStreak: 5,
@@ -68,7 +68,11 @@ export const WATCH_THRESHOLDS = Object.freeze({
   noEffectWindow: 8,
   noEffectCount: 4,
   planStalledResults: 25,
-  planStalledMs: 600_000,
+  planStalledMs: 180_000,
+  subgoalDwellMs: 150_000,
+  subgoalDwellCalls: 5,
+  subgoalFrictionCount: 2,
+  subgoalObserveMin: 4,
   sidePanelClosedTrigger: 2,
 })
 
@@ -200,6 +204,15 @@ function emptyLedgerState() {
     currentPageKey: null,
     /** @type {Map<string, {count: number, ok: number, headsVary: boolean, firstHead: string, pageKey: string, name: string, argsDigest: string, controlName: string | null}>} */
     pageActStats: new Map(),
+    // W2: per-subgoal dwell tracking — resets on page URL change or plan
+    // completion increase, so smooth multi-page or smooth single-page progress
+    // does not trigger SUBGOAL_DWELL while 2.5+ min of spinning with friction does.
+    subgoalSinceAt: 0,
+    subgoalCalls: 0,
+    subgoalErrors: 0,
+    subgoalNoEffect: 0,
+    subgoalObserve: 0,
+    subgoalEffectfulActs: 0,
     actResultsTotal: 0,
     actResultsUnknownPage: 0,
   }
@@ -253,6 +266,7 @@ export class WatchLedger {
     this.state.running = true
     this.state.prompt = clip(prompt, WATCH_LIMITS.promptChars)
     this.state.turnStartAt = at
+    this.state.subgoalSinceAt = at
     this.state.lastEventAt = at
     this.state.lastModelDeltaAt = at
     this.state.executorDownSince = this.#executorDown() ? at : null
@@ -335,8 +349,14 @@ export class WatchLedger {
     this.state.lastToolResultAt = at
     // V3 (§3.4): the most recent result naming a URL updates the page key; a
     // result naming none keeps the previous key (a click does not change pages).
+    const prevPageKey = this.state.currentPageKey
     const namedPage = parsePageKey(text)
-    if (namedPage !== null) this.state.currentPageKey = namedPage
+    if (namedPage !== null) {
+      if (prevPageKey !== null && namedPage !== prevPageKey) {
+        this.#resetSubgoal(at)
+      }
+      this.state.currentPageKey = namedPage
+    }
     // V2: an ok ACT result whose text matches the provider's NO VISIBLE CHANGE
     // marker made no effect (shared predicate, agree by construction).
     const noEffect = ok && cls === 'act' && noProgressResultText(text)
@@ -358,6 +378,11 @@ export class WatchLedger {
       if (!down) this.state.executorDownSince = null
       return
     }
+    this.state.subgoalCalls += 1
+    if (!ok) this.state.subgoalErrors += 1
+    if (noEffect) this.state.subgoalNoEffect += 1
+    if (cls === 'observe') this.state.subgoalObserve += 1
+    if (ok && cls === 'act' && !noEffect) this.state.subgoalEffectfulActs += 1
     if (cls === 'act') this.state.nonPlanResultsSinceRevision += 1
     this.state.eventCount += 1
     // M4 whole-turn aggregates: fingerprint occurrence + outcome variation, and
@@ -445,7 +470,9 @@ export class WatchLedger {
         this.state.plan = { revision, items: frame.items.map(item => ({ content: String(item?.content ?? ''), status: String(item?.status ?? '') })) }
         // V2: the completed count rises only when items actually complete; a
         // revision alone or marking items blocked never raises it.
+        const prevCompleted = this.state.planCompletedCount
         this.state.planCompletedCount = this.state.plan.items.filter(item => item.status === 'completed').length
+        if (this.state.planCompletedCount > prevCompleted) this.#resetSubgoal(at)
         // M4 open-item trajectory: a decrease resets the flat clock; flat/rising
         // open items while mutations continue is the wander/stall signature.
         const open = this.state.plan.items.filter(item => item.status === 'pending' || item.status === 'in_progress').length
@@ -462,6 +489,15 @@ export class WatchLedger {
         if (this.state.planOpenSamples.length > WATCH_AGGREGATE_LIMITS.planOpenSamples) this.state.planOpenSamples.shift()
       }
     }
+  }
+
+  #resetSubgoal(at) {
+    this.state.subgoalSinceAt = at
+    this.state.subgoalCalls = 0
+    this.state.subgoalErrors = 0
+    this.state.subgoalNoEffect = 0
+    this.state.subgoalObserve = 0
+    this.state.subgoalEffectfulActs = 0
   }
 
   /** A plain, bounded snapshot for the judge digest (M4) and diagnostics. */
@@ -489,6 +525,14 @@ export class WatchLedger {
       nonPlanResultsSinceRevision: s.nonPlanResultsSinceRevision,
       okEffectfulActCount: s.okEffectfulActCount,
       planCompletedCount: s.planCompletedCount,
+      subgoal: {
+        sinceAt: s.subgoalSinceAt,
+        calls: s.subgoalCalls,
+        errors: s.subgoalErrors,
+        noEffect: s.subgoalNoEffect,
+        observe: s.subgoalObserve,
+        effectfulActs: s.subgoalEffectfulActs,
+      },
       sidePanelClosedStreak: s.sidePanelClosedStreak,
       uiConnected: s.uiConnected,
       toolsConnected: s.toolsConnected,
@@ -651,6 +695,29 @@ export function assess(state, now) {
       && open.okMutationsSinceDecrease >= WATCH_AGGREGATE_LIMITS.openFlatMutations
     if (ag.mutationRevisit) push('REVISIT_HINT', 'suspect', 'an effectful action repeats on the same page against the same control with the same outcome')
     else if (openFlat) push('REVISIT_HINT', 'suspect', `open plan items flat for ${Math.round(openFlatMs / 1000)}s while mutations continue`)
+  }
+
+  // SUBGOAL_DWELL (W2) — spending >=2.5 min on the same page/subgoal with
+  // active friction (errors, no-effect actions, revisit, zero effectful acts,
+  // or heavy observation without headway). Soft: never alerts alone; wakes the
+  // judge early and corroborates a stuck verdict under two-strike.
+  if (state.running && state.subgoal !== undefined) {
+    const sg = state.subgoal
+    const dwellMs = now - sg.sinceAt
+    if (dwellMs >= t.subgoalDwellMs && sg.calls >= t.subgoalDwellCalls) {
+      const friction = sg.errors >= t.subgoalFrictionCount
+        || sg.noEffect >= t.subgoalFrictionCount
+        || state.aggregates?.mutationRevisit === true
+        || sg.effectfulActs === 0
+        || (sg.observe >= t.subgoalObserveMin && sg.observe > sg.effectfulActs * 2)
+      if (friction) {
+        const parts = [`${Math.round(dwellMs / 1000)}s on same subgoal`, `${sg.calls} calls`]
+        if (sg.errors > 0) parts.push(`${sg.errors} errors`)
+        if (sg.noEffect > 0) parts.push(`${sg.noEffect} no-effect`)
+        if (sg.effectfulActs === 0) parts.push('0 effectful actions')
+        push('SUBGOAL_DWELL', 'suspect', parts.join(', '))
+      }
+    }
   }
 
   // WALL_HINT — a wall pattern in recent result text while the agent keeps acting.

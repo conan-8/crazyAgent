@@ -11,30 +11,32 @@ function tempDir(t) {
   return dir
 }
 
-test('missing, malformed, or foreign settings files fall back to off', t => {
+test('missing, malformed, or foreign settings files fall back to defaults', t => {
   const dir = tempDir(t)
   const path = join(dir, 'settings.json')
-  assert.deepEqual(readSettings(path), { confirmIrreversible: false })
+  assert.deepEqual(readSettings(path), { confirmIrreversible: false, watchAutoSteer: true })
   writeFileSync(path, 'not json')
   assert.deepEqual(readSettings(path), DEFAULT_SETTINGS)
   writeFileSync(path, '[]')
   assert.deepEqual(readSettings(path), DEFAULT_SETTINGS)
   writeFileSync(path, JSON.stringify({ confirmIrreversible: 'yes', other: true }))
-  assert.deepEqual(readSettings(path), { confirmIrreversible: false })
+  assert.deepEqual(readSettings(path), { confirmIrreversible: false, watchAutoSteer: true })
+  writeFileSync(path, JSON.stringify({ confirmIrreversible: true, watchAutoSteer: false }))
+  assert.deepEqual(readSettings(path), { confirmIrreversible: true, watchAutoSteer: false })
 })
 
-test('writeSettings persists only the normalized boolean, atomically and owner-only', t => {
+test('writeSettings persists only the normalized booleans, atomically and owner-only', t => {
   const dir = tempDir(t)
   const path = join(dir, 'settings.json')
-  assert.deepEqual(writeSettings(path, { confirmIrreversible: true }), { confirmIrreversible: true })
-  assert.deepEqual(readSettings(path), { confirmIrreversible: true })
-  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { confirmIrreversible: true })
+  assert.deepEqual(writeSettings(path, { confirmIrreversible: true, watchAutoSteer: false }), { confirmIrreversible: true, watchAutoSteer: false })
+  assert.deepEqual(readSettings(path), { confirmIrreversible: true, watchAutoSteer: false })
+  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { confirmIrreversible: true, watchAutoSteer: false })
   assert.equal(readFileSync(path, 'utf8').includes('other'), false)
-  // A non-boolean never turns the flow on.
+  // A non-boolean never turns confirmIrreversible on; omitted watchAutoSteer stays true.
   writeSettings(path, { confirmIrreversible: 'true' })
-  assert.deepEqual(readSettings(path), { confirmIrreversible: false })
+  assert.deepEqual(readSettings(path), { confirmIrreversible: false, watchAutoSteer: true })
   writeSettings(path, undefined)
-  assert.deepEqual(readSettings(path), { confirmIrreversible: false })
+  assert.deepEqual(readSettings(path), { confirmIrreversible: false, watchAutoSteer: true })
   const mode = process.platform === 'win32' ? null : statSync(path).mode & 0o777
   if (mode !== null) assert.equal(mode, 0o600)
 })

@@ -423,7 +423,7 @@ function validateDocsWriteBlocks(blocks) {
     if (block.blank !== undefined && block.blank !== true) throw new Error(`browser_docs_write blocks[${index}].blank must be true when present`)
     if (block.page_break !== undefined && block.page_break !== true) throw new Error(`browser_docs_write blocks[${index}].page_break must be true when present`)
     const kinds = [block.text !== undefined, block.runs !== undefined, block.items !== undefined, block.blank === true, block.page_break === true].filter(Boolean).length
-    if (kinds !== 1) throw new Error(`browser_docs_write blocks[${index}] must contain exactly one of text, runs, items, blank:true, or page_break:true. Put paragraph_style and other defaults in the SAME block as runs: {"paragraph_style":"Subtitle","runs":[{"text":"date"}]}; a formatting-only block is invalid. Other examples: {"text":"Title","paragraph_style":"heading 1"} or {"blank":true}`)
+    if (kinds !== 1) throw new Error(`browser_docs_write blocks[${index}] must contain exactly one of text, runs, items, blank:true, or page_break:true. Put paragraph_style and other defaults in the SAME block as runs: {"paragraph_style":"Subtitle","runs":[{"text":"date"}]}; a formatting-only block is invalid. Other examples: {"text":"Section One","paragraph_style":"Heading 1"} or {"blank":true}`)
     if (block.blank === true || block.page_break === true) {
       const kind = block.blank === true ? 'blank' : 'page_break'
       if (Object.keys(block).some(key => key !== kind)) throw new Error(`browser_docs_write blocks[${index}] ${kind} cannot have text, list, or formatting attributes`)

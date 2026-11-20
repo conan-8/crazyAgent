@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseInheritedTextMarks, decodeEntities, formatOutline, parseClassMarks, parseDocStructure } from '../sidepanel/docs-structure.js'
+import { parseInheritedTextMarks, decodeEntities, formatOutline, parseClassMarks, parseDocStructure, parseNamedStyleDefaults } from '../sidepanel/docs-structure.js'
 
 const STYLE = '<style>.c7{font-weight:700}.c8{font-style:italic}.c9{text-decoration:underline}.c33{text-decoration:line-through}.roboto{font-family:"Roboto";font-size:11pt}.display{font-family:\'Playfair Display\';font-size:28pt}.bodyFont{font-family:Arial;font-size:10pt}</style>'
 const doc = body => `<html><head>${STYLE}</head><body class="bodyFont">${body}</body></html>`
@@ -142,4 +142,61 @@ test('element rules give the font, size, and color an unsized span inherits', ()
   assert.deepEqual(marks.get('h1'), { font: 'Arial', fontSize: 24, color: '#000000' }, 'heading weight is not part of the inherited text marks')
   assert.equal(marks.has('title'), false, 'class rules stay with parseClassMarks')
   assert.equal(marks.size, 3)
+})
+
+test('element rules ignore descendant selectors and merge repeated standalone rules', () => {
+  const html = '<html><head><style type="text/css">'
+    + '@import url(https://fonts.example/css);'
+    + 'p{color:#000000;font-family:"Arial"} p{font-size:11pt}'
+    + 'td p{margin:0;color:#ff0000;font-size:9pt}'
+    + 'li{color:#000000;font-size:11pt;font-family:"Arial"}'
+    + 'ul li{margin:0;font-family:"Courier New"}'
+    + '/* comment */ h1{font-size:24pt;font-weight:700;font-family:"Arial"}'
+    + '.box h1{font-size:12pt;font-weight:400}'
+    + '</style></head><body></body></html>'
+  const marks = parseInheritedTextMarks(html)
+  assert.deepEqual(marks.get('p'), { font: 'Arial', fontSize: 11, color: '#000000' })
+  assert.deepEqual(marks.get('li'), { font: 'Arial', fontSize: 11, color: '#000000' })
+  assert.deepEqual(marks.get('h1'), { font: 'Arial', fontSize: 24 })
+  const styles = parseNamedStyleDefaults(html)
+  assert.deepEqual(styles.get('Normal text'), { font: 'Arial', fontSize: 11, color: '#000000', bold: false, italic: false })
+  assert.deepEqual(styles.get('Heading 1'), { font: 'Arial', fontSize: 24, color: '#000000', bold: true, italic: false })
+})
+
+// Named-style rules copied from a live export with custom styles (2026-11-19).
+const NAMED_RULES = '<style>.c23{font-size:20pt}.c40{font-weight:400}'
+  + 'li{color:#000000;font-size:11pt;font-family:"Arial"}p{margin:0;color:#000000;font-size:11pt;font-family:"Arial"}'
+  + 'h1{padding-top:12pt;color:#000000;font-weight:700;font-size:24pt;padding-bottom:12pt;font-family:"Arial";line-height:1.0;text-align:left}'
+  + 'h6{padding-top:12pt;color:#666666;font-size:11pt;padding-bottom:4pt;font-family:"Arial";line-height:1.0;font-style:italic;text-align:left}'
+  + '.title{padding-top:24pt;color:#000000;font-weight:700;font-size:36pt;padding-bottom:6pt;font-family:"Arial";line-height:1.0;page-break-after:avoid;text-align:left}'
+  + '.subtitle{padding-top:18pt;color:#666666;font-size:24pt;padding-bottom:4pt;font-family:"Georgia";line-height:1.0;page-break-after:avoid;font-style:italic;text-align:left}</style>'
+
+test('heading runs inherit weight and italics from their element rule; the outline keeps explicit marks', () => {
+  // A live Section Three span was only font-size:20pt under h1{font-weight:700}:
+  // it rendered bold, but parsed as bold:false and failed a bold verification.
+  const blocks = parseDocStructure(`<html><head>${NAMED_RULES}</head><body class="c0">`
+    + '<h1 class="c9"><span class="c23">Section Three</span></h1>'
+    + '<h1 class="c9"><span class="c40">Light heading</span></h1>'
+    + '<h6 class="c9"><span>Small print</span></h6>'
+    + '<p class="c1"><span>Body</span></p></body></html>')
+  assert.deepEqual(blocks.map(block => [block.style, block.runs[0].bold, block.runs[0].italic]), [
+    ['H1', true, false],
+    ['H1', false, false],
+    ['H6', false, true],
+    ['P', false, false],
+  ])
+  assert.equal(blocks[0].runs[0].fontSize, 20)
+  assert.deepEqual(blocks.map(block => block.marked), ['Section Three', 'Light heading', 'Small print', 'Body'])
+  assert.equal(Object.hasOwn(blocks[0], 'emphasis'), false)
+})
+
+test('named style defaults combine class and element rules the way Docs renders them', () => {
+  const html = `<html><head>${NAMED_RULES}</head><body></body></html>`
+  const styles = parseNamedStyleDefaults(html)
+  assert.deepEqual(styles.get('Normal text'), { font: 'Arial', fontSize: 11, color: '#000000', bold: false, italic: false })
+  assert.deepEqual(styles.get('Title'), { font: 'Arial', fontSize: 36, color: '#000000', bold: true, italic: false })
+  assert.deepEqual(styles.get('Subtitle'), { font: 'Georgia', fontSize: 24, color: '#666666', bold: false, italic: true })
+  assert.deepEqual(styles.get('Heading 1'), { font: 'Arial', fontSize: 24, color: '#000000', bold: true, italic: false })
+  assert.deepEqual(styles.get('Heading 6'), { font: 'Arial', fontSize: 11, color: '#666666', bold: false, italic: true })
+  assert.equal(styles.has('Heading 2'), false, 'a style without exported rules is left to the caller')
 })

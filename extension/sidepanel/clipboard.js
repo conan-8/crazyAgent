@@ -24,7 +24,7 @@ export const CLIPBOARD_TRUNCATION_MARKER = '\n[clipboard truncated]'
 
 export const CLIPBOARD_ACTIONS = ['copy', 'read', 'write', 'paste', 'clear']
 export const CLIPBOARD_TARGETS = ['virtual', 'system']
-export const CLIPBOARD_SOURCES = ['selection', 'label']
+export const CLIPBOARD_SOURCES = ['selection', 'label', 'image', 'download']
 
 /**
  * Clamp an optional positive integer cap. Falls back to the default on a
@@ -132,11 +132,13 @@ export function makeImageClipboardEntry(input) {
     error.code = 'BAD_CLIPBOARD_IMAGE'
     throw error
   }
+  const filename = typeof input?.filename === 'string' && input.filename.length > 0 ? input.filename : undefined
   return {
     kind: 'image',
     text: '',
     chars: 0,
     source: typeof input?.source === 'string' && input.source.length > 0 ? input.source : 'screenshot',
+    ...(filename === undefined ? {} : { filename }),
     tabId: Number.isSafeInteger(input?.tabId) ? input.tabId : null,
     url: typeof input?.url === 'string' ? input.url : '',
     at: Number.isFinite(input?.at) ? Number(input.at) : Date.now(),

@@ -44,6 +44,13 @@ export function watchNotice(frame) {
         detail: typeof signal.detail === 'string' ? signal.detail.slice(0, 200) : '',
       }))
     : []
+  const steer = frame.steer !== null && typeof frame.steer === 'object' && !Array.isArray(frame.steer)
+    && typeof frame.steer.text === 'string' && frame.steer.text.trim().length > 0
+    ? {
+        id: typeof frame.steer.id === 'string' ? frame.steer.id : null,
+        text: frame.steer.text.trim().slice(0, 300),
+      }
+    : null
   return {
     id: frame.id,
     turnId: typeof frame.turnId === 'string' ? frame.turnId : null,
@@ -53,6 +60,7 @@ export function watchNotice(frame) {
     reason: typeof frame.reason === 'string' ? frame.reason.slice(0, 500) : '',
     signals,
     source: frame.source === 'watcher' || frame.source === 'both' ? frame.source : 'heuristic',
+    steer,
     at: typeof frame.at === 'string' ? frame.at : null,
   }
 }
@@ -62,11 +70,54 @@ export function watchIsActionable(notice) {
   return notice !== null && OPEN_STATES.has(notice.state) && ACTIONABLE_KINDS.has(notice.kind)
 }
 
+/**
+ * Normalize an open watch summary from chat.hello.watch.open into a watchNotice,
+ * or null when absent/malformed.
+ * @param {unknown} open
+ * @returns {ReturnType<typeof watchNotice>}
+ */
+export function watchNoticeFromOpen(open) {
+  if (open === null || typeof open !== 'object' || Array.isArray(open)) return null
+  if (typeof open.id !== 'string' || open.id.length === 0) return null
+  const notice = watchNotice({
+    type: 'chat.watch',
+    id: open.id,
+    turnId: typeof open.turnId === 'string' ? open.turnId : null,
+    kind: typeof open.kind === 'string' ? open.kind : 'stuck',
+    state: 'open',
+    blocker: typeof open.blocker === 'string' ? open.blocker : (typeof open.kind === 'string' ? open.kind : null),
+    reason: typeof open.reason === 'string' ? open.reason : '',
+    signals: Array.isArray(open.signals) ? open.signals : [],
+    source: typeof open.source === 'string' ? open.source : 'heuristic',
+    steer: open.steer ?? null,
+    at: typeof open.at === 'string' ? open.at : null,
+  })
+  return watchIsActionable(notice) ? notice : null
+}
+
 function element(document, tagName, className, text) {
   const node = document.createElement(tagName)
   if (className) node.className = className
   if (text !== undefined) node.textContent = text
   return node
+}
+
+function appendWatchActions(document, root, handlers) {
+  const actions = element(document, 'div', 'watch-row-actions')
+  const stop = element(document, 'button', 'watch-row-stop', 'Stop')
+  stop.type = 'button'
+  stop.title = 'Stop the current turn'
+  if (typeof handlers.onStop === 'function') stop.addEventListener('click', handlers.onStop)
+  const steer = element(document, 'button', 'watch-row-steer', 'Steer…')
+  steer.type = 'button'
+  steer.title = 'Send a steering message to the running turn'
+  if (typeof handlers.onSteer === 'function') steer.addEventListener('click', handlers.onSteer)
+  const dismiss = element(document, 'button', 'watch-row-dismiss', "It's fine")
+  dismiss.type = 'button'
+  dismiss.title = 'Dismiss this alert and snooze its kind for 15 minutes'
+  if (typeof handlers.onDismiss === 'function') dismiss.addEventListener('click', handlers.onDismiss)
+  actions.append(stop, steer, dismiss)
+  root.appendChild(actions)
 }
 
 /**
@@ -96,6 +147,11 @@ export function renderWatchRow(root, notice, handlers = {}) {
 
   if (!actionable) return
 
+  if (notice.steer) {
+    const steerNote = element(document, 'p', 'watch-steer-note', `Watcher nudged agent: ${notice.steer.text}`)
+    root.appendChild(steerNote)
+  }
+
   if (notice.signals.length > 0) {
     const signals = element(document, 'ul', 'watch-row-signals')
     for (const signal of notice.signals.slice(0, 6)) {
@@ -105,19 +161,47 @@ export function renderWatchRow(root, notice, handlers = {}) {
     root.appendChild(signals)
   }
 
-  const actions = element(document, 'div', 'watch-row-actions')
-  const stop = element(document, 'button', 'watch-row-stop', 'Stop')
-  stop.type = 'button'
-  stop.title = 'Stop the current turn'
-  if (typeof handlers.onStop === 'function') stop.addEventListener('click', handlers.onStop)
-  const steer = element(document, 'button', 'watch-row-steer', 'Steer…')
-  steer.type = 'button'
-  steer.title = 'Send a steering message to the running turn'
-  if (typeof handlers.onSteer === 'function') steer.addEventListener('click', handlers.onSteer)
-  const dismiss = element(document, 'button', 'watch-row-dismiss', "It's fine")
-  dismiss.type = 'button'
-  dismiss.title = 'Dismiss this alert and snooze its kind for 15 minutes'
-  if (typeof handlers.onDismiss === 'function') dismiss.addEventListener('click', handlers.onDismiss)
-  actions.append(stop, steer, dismiss)
-  root.appendChild(actions)
+  appendWatchActions(document, root, handlers)
+}
+
+/**
+ * Render or hide the pinned sidebar watch card above the composer. Keeps the
+ * active watch alert visible even when steps collapse, the user scrolls, or
+ * marathon mode is off.
+ * @param {HTMLElement | null} root
+ * @param {ReturnType<typeof watchNotice>} notice
+ * @param {{onStop?: () => void, onSteer?: () => void, onDismiss?: () => void}} [handlers]
+ */
+export function renderWatchCard(root, notice, handlers = {}) {
+  if (!root) return
+  root.replaceChildren()
+  const actionable = watchIsActionable(notice)
+  root.classList.toggle('hidden', !actionable)
+  if (!actionable) {
+    delete root.dataset.watchId
+    delete root.dataset.watchKind
+    return
+  }
+  root.dataset.watchId = notice.id
+  root.dataset.watchKind = notice.kind
+  const document = root.ownerDocument
+  const head = element(document, 'div', 'watch-card-head')
+  const badge = element(document, 'span', 'watch-row-badge', WATCH_KIND_LABELS[notice.kind] ?? 'Watch')
+  const title = element(document, 'span', 'watch-card-title', notice.steer ? 'Watcher alert · nudged agent' : 'Watcher alert')
+  head.append(badge, title)
+  const reason = element(document, 'p', 'watch-card-reason', notice.reason || (WATCH_KIND_LABELS[notice.kind] ?? 'Watch notice'))
+  root.append(head, reason)
+  if (notice.steer) {
+    const steerNote = element(document, 'p', 'watch-steer-note', `Watcher nudged agent: ${notice.steer.text}`)
+    root.appendChild(steerNote)
+  }
+  if (notice.signals.length > 0) {
+    const signals = element(document, 'ul', 'watch-row-signals')
+    for (const signal of notice.signals.slice(0, 3)) {
+      const item = element(document, 'li', 'watch-row-signal', `${signal.kind}${signal.detail ? ` — ${signal.detail}` : ''}`)
+      signals.appendChild(item)
+    }
+    root.appendChild(signals)
+  }
+  appendWatchActions(document, root, handlers)
 }

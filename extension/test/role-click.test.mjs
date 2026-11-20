@@ -5,6 +5,7 @@ import {
   normalizeRoleClickName,
   parseRoleClickArgs,
   roleClickFrameOwnershipProbe,
+  roleClickProbe,
   roleClickTransition,
   roleClickViewportStabilityProbe,
 } from '../sidepanel/role-click.js'
@@ -694,4 +695,86 @@ test('persistent final loading remains bounded and does not change dispatch comp
   assert.equal(result.tab.url, OTHER_URL)
   assert.equal(result.tab.status, 'loading')
   assert.equal(fake.state.now, 3_100)
+})
+
+test('roleClickProbe matches Docs submenu items with trailing arrow glyphs and allows buttons inside Docs popups', t => {
+  const prev = {
+    window: globalThis.window,
+    document: globalThis.document,
+    location: globalThis.location,
+    Node: globalThis.Node,
+    getComputedStyle: globalThis.getComputedStyle,
+    __crazyagentRoleClickIdentities: globalThis.__crazyagentRoleClickIdentities,
+  }
+  t.after(() => {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete globalThis[k]
+      else globalThis[k] = v
+    }
+  })
+  globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1 }
+  globalThis.location = { href: 'https://docs.google.com/document/d/abc/edit' }
+  globalThis.getComputedStyle = () => ({ display: 'block', visibility: 'visible', contentVisibility: 'visible', opacity: '1' })
+  const win = { innerWidth: 1200, innerHeight: 800 }
+  win.top = win
+  globalThis.window = win
+
+  const makeEl = ({ tag = 'div', role = '', text = '', classes = [], parent = null, rect = { left: 20, top: 20, width: 100, height: 30 } }) => {
+    const el = {
+      nodeType: 1,
+      tagName: tag.toUpperCase(),
+      isConnected: true,
+      hidden: false,
+      inert: false,
+      disabled: false,
+      isContentEditable: false,
+      parentElement: parent,
+      children: [],
+      childNodes: text ? [{ nodeType: 3, textContent: text }] : [],
+      getAttribute: name => (name === 'role' && role ? role : null),
+      hasAttribute: () => false,
+      getBoundingClientRect: () => ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height }),
+      getRootNode: () => globalThis.document,
+      matches: sel => sel.split(',').some(part => {
+        const s = part.trim()
+        if (s.startsWith('.')) return classes.includes(s.slice(1))
+        return s === tag
+      }),
+    }
+    if (parent) parent.children.push(el)
+    return el
+  }
+
+  const editor = makeEl({ tag: 'div', classes: ['kix-appview-editor'] })
+  const bubble = makeEl({ tag: 'div', classes: ['docs-bubble'], parent: editor })
+  const applyBtn = makeEl({ tag: 'button', text: 'Apply', parent: bubble, rect: { left: 50, top: 50, width: 60, height: 24 } })
+  const rawEditorBtn = makeEl({ tag: 'button', text: 'DirectEditorBtn', parent: editor, rect: { left: 200, top: 50, width: 80, height: 24 } })
+  const submenu = makeEl({ tag: 'div', role: 'menuitem', text: 'Version history ►', rect: { left: 20, top: 120, width: 160, height: 24 } })
+  const buttonWithArrow = makeEl({ tag: 'button', text: 'Next ►', rect: { left: 20, top: 160, width: 80, height: 24 } })
+
+  const all = [editor, bubble, applyBtn, rawEditorBtn, submenu, buttonWithArrow]
+  globalThis.document = {
+    designMode: 'off',
+    querySelectorAll: () => all,
+    elementFromPoint: (x, y) => all.findLast(el => {
+      const r = el.getBoundingClientRect()
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+    }) ?? null,
+  }
+
+  const submenuRes = roleClickProbe({ role: 'menuitem', name: 'Version history' })
+  assert.equal(submenuRes.ok, true)
+  assert.equal(submenuRes.matches.length, 1)
+  assert.equal(submenuRes.matches[0].name, 'Version history')
+
+  const arrowBtnRes = roleClickProbe({ role: 'button', name: 'Next' })
+  assert.equal(arrowBtnRes.matches.length, 0)
+
+  const applyRes = roleClickProbe({ role: 'button', name: 'Apply' })
+  assert.equal(applyRes.matches.length, 1)
+  assert.equal(applyRes.matches[0].editor, false)
+
+  const rawRes = roleClickProbe({ role: 'button', name: 'DirectEditorBtn' })
+  assert.equal(rawRes.matches.length, 1)
+  assert.equal(rawRes.matches[0].editor, true)
 })

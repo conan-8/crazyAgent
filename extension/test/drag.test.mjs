@@ -928,3 +928,249 @@ test('probe off-screen target is rejected', t => {
   installProbeDom(t, { rect: box(-100, 30, 60, 24) })
   assert.equal(dragProbe({ phase: 'prepare', side: 'source', token: 'offscreen', localId: 11 }).code, 'DRAG_OFF_SCREEN')
 })
+
+/**
+ * A small hit-testable tree shaped like the Browser Gauntlet mail sorter:
+ * stage > [tray > card > b "Attn: Finance", bin]. `paint` is top-first z-order.
+ */
+function installTreeDom(t) {
+  const previous = new Map()
+  for (const key of ['document', 'window', '__crazyagent', '__crazyagentDragSessions', '__crazyagentDragIdentities']) {
+    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
+  }
+  let html
+  let document
+  const make = (tagName, ownText, rect) => {
+    const node = {
+      tagName,
+      ownText,
+      rect,
+      children: [],
+      parentElement: null,
+      attributes: new Map(),
+      get ownerDocument() { return document },
+      get isConnected() {
+        let root = this
+        while (root.parentElement) root = root.parentElement
+        return root === html
+      },
+      get textContent() { return [this.ownText, ...this.children.map(child => child.textContent)].filter(Boolean).join(' ') },
+      getBoundingClientRect() { return { ...this.rect } },
+      getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null },
+      contains(other) {
+        for (let current = other; current; current = current.parentElement) if (current === this) return true
+        return false
+      },
+      getRootNode: () => ({}),
+      append(...children) {
+        for (const child of children) {
+          child.remove()
+          child.parentElement = this
+          this.children.push(child)
+        }
+      },
+      remove() {
+        if (!this.parentElement) return
+        this.parentElement.children.splice(this.parentElement.children.indexOf(this), 1)
+        this.parentElement = null
+      },
+    }
+    return node
+  }
+  html = make('HTML', '', box(0, 0, 1200, 800))
+  const body = make('BODY', '', box(0, 0, 1200, 800))
+  html.append(body)
+  const stage = make('DIV', '', box(300, 200, 720, 400))
+  const tray = make('DIV', '', box(330, 210, 690, 180))
+  const card = make('DIV', 'From Yusuf Tanaka', box(338, 218, 170, 76))
+  const label = make('B', 'Attn: Finance', box(350, 245, 80, 16))
+  const bin = make('DIV', 'FINANCE', box(773, 409, 212, 170))
+  body.append(stage)
+  stage.append(tray, bin)
+  tray.append(card)
+  card.append(label)
+  const dom = { html, body, stage, tray, card, label, bin, make, paint: [label, card, bin, tray, stage, body, html] }
+  const inside = (rect, x, y) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+  const stackAt = (x, y) => dom.paint.filter(node => node.isConnected && inside(node.rect, x, y))
+  const selection = { isCollapsed: true, rangeCount: 0, toString: () => '' }
+  document = {
+    body,
+    documentElement: html,
+    elementsFromPoint: stackAt,
+    elementFromPoint: (x, y) => stackAt(x, y)[0] ?? null,
+    getSelection: () => selection,
+  }
+  const window = { innerWidth: 1200, innerHeight: 800 }
+  window.top = window
+  delete globalThis.__crazyagentDragSessions
+  delete globalThis.__crazyagentDragIdentities
+  Object.assign(globalThis, { document, window, __crazyagent: { byId: new Map(), infoById: new Map() } })
+  /** Like a CSS transform: the node and everything inside it move together. */
+  dom.translate = (node, dx, dy) => {
+    node.rect = box(node.rect.left + dx, node.rect.top + dy, node.rect.width, node.rect.height)
+    for (const child of node.children) dom.translate(child, dx, dy)
+  }
+  /** Press the card's text by coordinates and measure the bin point, as the gauntlet run did. */
+  dom.prepare = token => {
+    const source = dragProbe({ phase: 'prepare', side: 'source', token, x: 360, y: 250 })
+    const destination = dragProbe({ phase: 'prepare', side: 'destination', token, x: 880, y: 494 })
+    assert.equal(source.ok, true, JSON.stringify(source))
+    assert.equal(destination.ok, true, JSON.stringify(destination))
+    return { source, destination }
+  }
+  dom.check = (token, side, check, stage) => dragProbe({ phase: 'revalidate', side, token, check, stage })
+  t.after(() => {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  })
+  return dom
+}
+
+test('a held item that follows the cursor onto the destination passes the drop checks', t => {
+  const dom = installTreeDom(t)
+  const { source } = dom.prepare('follow')
+  assert.equal(source.target.text, 'Attn: Finance', 'a coordinate press holds the deepest element, not the card')
+  for (const side of ['source', 'destination']) {
+    assert.deepEqual(dom.check('follow', side, 'exact', 'press'), { ok: true }, side)
+  }
+  // The widget translates the whole card (not just the pressed text) with the cursor, onto the bin.
+  dom.translate(dom.card, 456, 238)
+  assert.deepEqual(dom.check('follow', 'source', 'held', 'drop'), { ok: true })
+  assert.deepEqual(dom.check('follow', 'destination', 'drop', 'drop'), { ok: true })
+  // The exact checks that used to run here are what refused the gauntlet drag.
+  const sourceExact = dom.check('follow', 'source', 'exact', 'drop')
+  assert.equal(sourceExact.code, 'DRAG_STALE_TARGET')
+  assert.match(sourceExact.message, /^The source element moved before the drop, so the drag was released at the viewport's top-left corner instead/)
+  const destinationExact = dom.check('follow', 'destination', 'exact', 'drop')
+  assert.equal(destinationExact.code, 'DRAG_STALE_TARGET')
+  assert.match(destinationExact.message, /^The destination point is covered by b "Attn: Finance" before the drop/)
+})
+
+test('a same-text clone of the held item drawn over the destination is drag feedback', t => {
+  const dom = installTreeDom(t)
+  dom.prepare('clone')
+  const clone = dom.make('DIV', 'From Yusuf Tanaka', box(794, 456, 170, 76))
+  const cloneLabel = dom.make('B', 'Attn: Finance', box(806, 483, 80, 16))
+  clone.append(cloneLabel)
+  dom.body.append(clone)
+  dom.paint.unshift(cloneLabel, clone)
+  assert.deepEqual(dom.check('clone', 'destination', 'drop', 'drop'), { ok: true })
+})
+
+test('drop checks still refuse an unrelated cover, an unmoved source container, and a moved destination', t => {
+  const dom = installTreeDom(t)
+  // The tray already spans the bin point but is painted under the bin until the drag raises it.
+  dom.tray.rect = box(330, 210, 690, 380)
+  dom.prepare('covers')
+  dom.translate(dom.card, 456, 238)
+  assert.deepEqual(dom.check('covers', 'destination', 'drop', 'drop'), { ok: true })
+
+  const banner = dom.make('DIV', 'Session expired', box(700, 400, 400, 200))
+  dom.body.append(banner)
+  dom.paint.unshift(banner)
+  const covered = dom.check('covers', 'destination', 'drop', 'drop')
+  assert.equal(covered.code, 'DRAG_STALE_TARGET')
+  assert.match(covered.message, /^The destination point is covered by div "Session expired" before the drop/)
+  banner.remove()
+
+  dom.paint = [dom.label, dom.card, dom.tray, dom.bin, dom.stage, dom.body, dom.html]
+  const container = dom.check('covers', 'destination', 'drop', 'drop')
+  assert.equal(container.code, 'DRAG_STALE_TARGET', 'an unmoved ancestor of the pressed element is a cover, not feedback')
+  assert.match(container.message, /covered by div "From Yusuf Tanaka Attn: Finance"/)
+
+  dom.paint = [dom.label, dom.card, dom.bin, dom.tray, dom.stage, dom.body, dom.html]
+  dom.translate(dom.bin, 0, 40)
+  const moved = dom.check('covers', 'destination', 'drop', 'drop')
+  assert.equal(moved.code, 'DRAG_STALE_TARGET')
+  assert.match(moved.message, /^The destination element moved before the drop/)
+})
+
+test('drop checks refuse oversized modals sharing text and deep unmoved container text', t => {
+  const dom = installTreeDom(t)
+  // Static-source drag (clone mode): an oversized modal sharing the card's text is a cover, not a clone.
+  dom.prepare('oversized')
+  const modal = dom.make('DIV', 'From Yusuf Tanaka Attn: Finance', box(400, 100, 700, 500))
+  dom.body.append(modal)
+  dom.paint.unshift(modal)
+  const bigCover = dom.check('oversized', 'destination', 'drop', 'drop')
+  assert.equal(bigCover.code, 'DRAG_STALE_TARGET')
+  assert.match(bigCover.message, /covered by div "From Yusuf Tanaka Attn: Finance"/)
+  modal.remove()
+
+  // Unrelated sibling container copying an unmoved deep container (depth 3+) is refused.
+  const panel = dom.make('DIV', 'Inbox panel', box(320, 205, 700, 190))
+  const section = dom.make('SECTION', 'Mail section', box(310, 200, 710, 200))
+  dom.stage.append(section)
+  section.append(panel)
+  panel.append(dom.tray)
+  dom.paint = [dom.label, dom.card, dom.bin, dom.tray, panel, section, dom.stage, dom.body, dom.html]
+  dom.prepare('deep-ancestor')
+  const spoof = dom.make('DIV', 'Mail section Inbox panel From Yusuf Tanaka Attn: Finance', box(780, 420, 200, 120))
+  dom.body.append(spoof)
+  dom.paint.unshift(spoof)
+  const deepCover = dom.check('deep-ancestor', 'destination', 'drop', 'drop')
+  assert.equal(deepCover.code, 'DRAG_STALE_TARGET')
+})
+
+test('drop checks treat an unmoved Shadow DOM host of the held source as a cover', t => {
+  const dom = installTreeDom(t)
+  // Simulate held label living inside a shadow root hosted by card (parentElement is null across boundary).
+  const shadowRoot = { host: dom.card }
+  dom.card.children.splice(dom.card.children.indexOf(dom.label), 1)
+  dom.label.parentElement = null
+  dom.label.getRootNode = () => shadowRoot
+  Object.defineProperty(dom.label, 'isConnected', { get: () => dom.card.isConnected })
+  dom.card.rect = box(338, 218, 660, 380)
+  dom.paint = [dom.label, dom.bin, dom.card, dom.tray, dom.stage, dom.body, dom.html]
+  dom.prepare('shadow-host')
+  // Move only the inner label inside the shadow root; leave the shadow host unmoved and raise it above the bin.
+  dom.translate(dom.label, 456, 238)
+  dom.paint = [dom.label, dom.card, dom.bin, dom.tray, dom.stage, dom.body, dom.html]
+  const covered = dom.check('shadow-host', 'destination', 'drop', 'drop')
+  assert.equal(covered.code, 'DRAG_STALE_TARGET', 'unmoved shadow host raised over destination must not be treated as clone feedback')
+  assert.match(covered.message, /covered by div "From Yusuf Tanaka"/)
+})
+
+test('a detached held source fails the drop check, and a destination without a held source stays exact', t => {
+  const dom = installTreeDom(t)
+  dom.prepare('detached')
+  dom.translate(dom.card, 456, 238)
+  dom.card.remove()
+  const detached = dom.check('detached', 'source', 'held', 'drop')
+  assert.equal(detached.code, 'DRAG_STALE_TARGET')
+  assert.match(detached.message, /^The source element was replaced or removed before the drop/)
+
+  dom.tray.append(dom.card)
+  dom.translate(dom.card, -456, -238)
+  // A destination prepared in another frame's session has no held source to excuse.
+  assert.equal(dragProbe({ phase: 'prepare', side: 'destination', token: 'frame', x: 880, y: 494 }).ok, true)
+  dom.translate(dom.card, 456, 238)
+  const exact = dom.check('frame', 'destination', 'drop', 'drop')
+  assert.equal(exact.code, 'DRAG_STALE_TARGET')
+  assert.match(exact.message, /covered by b "Attn: Finance"/)
+})
+
+test('pre-input checks stay exact for both sides and say nothing was pressed', t => {
+  const dom = installTreeDom(t)
+  dom.prepare('pre-input')
+  dom.translate(dom.card, 0, 3)
+  const hover = dom.check('pre-input', 'source', 'exact', 'hover')
+  assert.match(hover.message, /^The source element moved before input; nothing was dispatched\.$/)
+  const press = dom.check('pre-input', 'source', 'exact', 'press')
+  assert.match(press.message, /^The source element moved before the press; nothing was pressed\.$/)
+})
+
+test('executeDrag keeps both sides exact before input and checks the held source and drop point before release', async () => {
+  const fake = fakeExecution()
+  await executeDrag({ label: 1, to_label: 2 }, fake.io)
+  assert.deepEqual(
+    fake.probes.filter(probe => probe.phase === 'revalidate').map(probe => `${probe.side}:${probe.check}:${probe.stage}`),
+    [
+      'source:exact:hover', 'destination:exact:hover',
+      'source:exact:press', 'destination:exact:press',
+      'source:held:drop', 'destination:drop:drop',
+    ],
+  )
+})

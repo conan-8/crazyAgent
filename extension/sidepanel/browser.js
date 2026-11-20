@@ -24,7 +24,7 @@ import {
 import { checkedFullPageSize, mapScreenshotRegion, parseScreenshotArgs } from './capture.js'
 import { docsFetchExport } from './docs-export.js'
 import { docsFormatToggleEvidence, planDocsFormatEdits, validateDocsFormatEdits, verifyDocsFormatEdits } from './docs-format.js'
-import { formatOutline, parseDocStructure, parseInheritedTextMarks } from './docs-structure.js'
+import { formatOutline, parseDocStructure, parseInheritedTextMarks, parseNamedStyleDefaults } from './docs-structure.js'
 import {
   docsTableAnchor,
   docsTableCellBackgroundEdits,
@@ -1323,7 +1323,7 @@ function pageMetrics() {
  * copy of the screenshot (see drawHitboxes).
  * @param {number} limit maximum labels to report
  */
-async function labelPage(limit) {
+export async function labelPage(limit) {
   try {
     return await (async () => {
   const LABEL_SELECTOR = [
@@ -1379,8 +1379,12 @@ async function labelPage(limit) {
   }
   const labelText = el => {
     const read = value => String(value ?? '').replace(/\s+/gu, ' ').trim()
+    const tag = (el.tagName || '').toLowerCase()
     const type = (el.type || '').toLowerCase()
     const labelledBy = el.getAttribute?.('aria-labelledby')
+    const formValue = (tag === 'input' || tag === 'textarea' || tag === 'select')
+      ? (type === 'password' ? '' : el.value)
+      : ''
     const candidates = [
       el.getAttribute?.('aria-label'),
       labelledBy
@@ -1388,9 +1392,10 @@ async function labelPage(limit) {
         : '',
       el.getAttribute?.('title'),
       el.getAttribute?.('alt'),
-      type === 'password' ? '' : el.value,
+      formValue,
       el.innerText,
       el.textContent,
+      el.querySelector?.('img[alt]')?.getAttribute('alt'),
       el.getAttribute?.('aria-placeholder'),
       el.getAttribute?.('data-placeholder'),
       el.querySelector?.('[data-placeholder]')?.getAttribute('data-placeholder'),
@@ -1481,6 +1486,58 @@ async function labelPage(limit) {
       h: Math.round(rect.height),
     })
 
+  }
+
+  // Bounded standalone large images (articles, Wikipedia, direct image tabs) so
+  // the agent can copy unlinked images by label without bloating the list with
+  // decorative icons. Images already inside a labelled link/button stay owned
+  // by that interactive label (browser_clipboard source:"image" resolves them).
+  const labelledElements = new Set(labels.map(entry => state.byId.get(entry.id)).filter(Boolean))
+  let imgLabelCount = 0
+  for (const el of document.querySelectorAll('img')) {
+    if (imgLabelCount >= 10 || labels.length >= cap) break
+    if (!(el instanceof Element)) continue
+    if (labelledElements.has(el)) continue
+    if (el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert')) continue
+    let insideLabelled = false
+    for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+      if (labelledElements.has(parent)) { insideLabelled = true; break }
+    }
+    if (insideLabelled) continue
+    if (el.complete === false) continue
+    const natW = Number(el.naturalWidth) || 0
+    const natH = Number(el.naturalHeight) || 0
+    if (natW < 48 || natH < 48) continue
+    const rect = el.getBoundingClientRect()
+    if (rect.width < 80 || rect.height < 80) continue
+    if (rect.bottom < 1 || rect.right < 1 || rect.top > vh - 1 || rect.left > vw - 1) continue
+    const style = getComputedStyle(el)
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue
+    const cx = Math.max(0, Math.min(vw - 1, rect.left + rect.width / 2))
+    const cy = Math.max(0, Math.min(vh - 1, rect.top + rect.height / 2))
+    const hit = document.elementFromPoint(cx, cy)
+    if (!hit || (hit !== el && !el.contains(hit) && !hit.contains(el))) continue
+    let id = state.idsByElement.get(el)
+    if (id === undefined) {
+      id = state.nextId++
+      state.idsByElement.set(el, id)
+      state.byId.set(id, el)
+    }
+    if (state.byId.get(id) !== el) state.byId.set(id, el)
+    const text = labelText(el) || 'image'
+    state.infoById.set(id, { tag: 'img', role: 'img', text, disabled: false })
+    imgLabelCount += 1
+    labels.push({
+      id,
+      tag: 'img',
+      role: 'img',
+      text,
+      disabled: false,
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      w: Math.round(rect.width),
+      h: Math.round(rect.height),
+    })
   }
 
   const surfaces = []
@@ -1815,7 +1872,7 @@ async function decorateStaleLabelError(tab, error, preferText, freshLabels) {
  * click produces, then report whether the page changed.
  * @param {number} label persistent label id
  */
-async function clickLabelled(label, confirmGuardPattern) {
+export async function clickLabelled(label, confirmGuardPattern) {
   const __t0 = performance.now()
   const state = globalThis.__crazyagent
   const el = state?.byId?.get(label)
@@ -1995,11 +2052,15 @@ async function clickLabelled(label, confirmGuardPattern) {
     return { ok: false, code: 'DISPATCH_FAILED', message: error instanceof Error ? error.message : String(error), clicked: { label, tag, role, text } }
   }
 
-  // Links and submit buttons may unload the frame; observing would hang until
-  // the timeout. Report dispatch and let the tab-level wait confirm navigation.
+  // Links and in-form submit buttons may unload the frame; observing would hang
+  // until the timeout. Report dispatch and let the tab-level wait confirm
+  // navigation. Standalone <button> elements default to type="submit" in HTML
+  // even with el.form === null, so only form-associated submitters skip the
+  // mutation observer.
+  const inForm = el.form !== null && el.form !== undefined
   const navigationProne = tag === 'a'
-    || (tag === 'button' && (el.type === 'submit' || (el.form !== null && el.form !== undefined)))
-    || (tag === 'input' && (el.type === 'submit' || el.type === 'image'))
+    || (tag === 'button' && inForm && el.type === 'submit')
+    || (tag === 'input' && inForm && (el.type === 'submit' || el.type === 'image'))
   if (navigationProne) {
     observer.disconnect()
     return { ok: true, clicked: { label, tag, role, text }, changed: true, signals: ['navigation-possible'], mutations: 0, pendingNavigation: true, scroll, scrolledIntoView }
@@ -2507,6 +2568,93 @@ function readLabelClipboardText(label) {
     tag,
     readFrom,
   }
+}
+
+/**
+ * Self-contained page script for browser_clipboard copy with source:"image".
+ * Resolves an <img>, <canvas>, clickable container holding an <img> (e.g. a
+ * Google Images thumbnail link), CSS background-image, or standalone image tab.
+ * Fails closed when zero or multiple unlabelled images are visible.
+ * @param {number} label
+ */
+export function extractImageForClipboard(label) {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const visibleRect = el => {
+    const rect = el.getBoundingClientRect()
+    if (rect.width < 16 || rect.height < 16) return null
+    if (rect.bottom < 1 || rect.right < 1 || rect.top > vh - 1 || rect.left > vw - 1) return null
+    const style = getComputedStyle(el)
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return null
+    return rect
+  }
+  const bgUrl = el => {
+    const raw = String(getComputedStyle(el)?.backgroundImage ?? '')
+    const match = /url\(\s*["']?([^"')]+)["']?\s*\)/iu.exec(raw)
+    return match?.[1] ? match[1].trim() : ''
+  }
+  const describeImg = img => {
+    const src = String(img.currentSrc || img.getAttribute?.('src') || img.src || '').trim()
+    if (!src) return { ok: false, code: 'NO_IMAGE_SRC', message: 'The image element has no loaded source URL.' }
+    return {
+      ok: true,
+      kind: 'url',
+      src,
+      alt: String(img.getAttribute?.('alt') ?? '').trim().slice(0, 120),
+      naturalWidth: Number(img.naturalWidth) || 0,
+      naturalHeight: Number(img.naturalHeight) || 0,
+    }
+  }
+  const describeCanvas = canvas => {
+    try {
+      const src = canvas.toDataURL('image/png')
+      return { ok: true, kind: 'dataUrl', src, alt: '', naturalWidth: Number(canvas.width) || 0, naturalHeight: Number(canvas.height) || 0 }
+    } catch {
+      return { ok: false, code: 'CANVAS_TAINTED', message: 'This canvas is cross-origin tainted and cannot be exported directly; use browser_screenshot scope:"region" with to_clipboard:true instead.' }
+    }
+  }
+
+  if (label > 0) {
+    const state = globalThis.__crazyagent
+    const el = state?.byId?.get(label)
+    if (!el) return { ok: false, code: 'UNKNOWN_LABEL', message: `Label ${label} is not in the current view. Take a fresh screenshot.` }
+    if (!el.isConnected) return { ok: false, code: 'DETACHED', message: `Label ${label} no longer exists. Take a fresh screenshot.` }
+    const tag = String(el.tagName ?? '').toLowerCase()
+    if (tag === 'img') return describeImg(el)
+    if (tag === 'canvas') return describeCanvas(el)
+    const imgs = Array.from(el.querySelectorAll?.('img') ?? [])
+      .map(img => ({ img, rect: visibleRect(img) }))
+      .filter(entry => entry.rect !== null)
+      .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height))
+    if (imgs.length > 0) return describeImg(imgs[0].img)
+    const canvas = el.querySelector?.('canvas')
+    if (canvas) return describeCanvas(canvas)
+    const bg = bgUrl(el)
+    if (bg) return { ok: true, kind: 'url', src: bg, alt: '', naturalWidth: 0, naturalHeight: 0 }
+    return { ok: false, code: 'NO_IMAGE_AT_LABEL', message: `Label ${label} does not contain a visible image. Pick an image label or thumbnail, or open the image in a tab.` }
+  }
+
+  const contentType = String(document.contentType ?? '').toLowerCase()
+  if (contentType.startsWith('image/')) {
+    const solo = document.querySelector('img')
+    if (solo) return describeImg(solo)
+    return { ok: true, kind: 'url', src: location.href, alt: '', naturalWidth: 0, naturalHeight: 0 }
+  }
+  const visibleImages = Array.from(document.querySelectorAll('img')).filter(img => {
+    const rect = visibleRect(img)
+    if (!rect || rect.width < 48 || rect.height < 48) return false
+    if (img.complete === false) return false
+    const natW = Number(img.naturalWidth) || 0
+    const natH = Number(img.naturalHeight) || 0
+    return natW >= 48 && natH >= 48
+  })
+  if (visibleImages.length === 0) {
+    return { ok: false, code: 'IMAGE_NOT_FOUND', message: 'No visible image was found on the page. Open an image tab or pass label:<n> for the image you want to copy.' }
+  }
+  if (visibleImages.length > 1) {
+    return { ok: false, code: 'AMBIGUOUS_IMAGE', message: `Multiple visible images (${visibleImages.length}) are on this page. Pass label:<n> to copy a specific image.` }
+  }
+  return describeImg(visibleImages[0])
 }
 
 /**
@@ -3278,6 +3426,65 @@ async function clipboardImageFromCapture(dataUrl) {
   throw new BrowserError('CLIPBOARD_IMAGE_TOO_LARGE', `The capture could not be reduced to the ${CLIPBOARD_IMAGE_MAX_BYTES}-byte clipboard limit; capture a smaller region.`)
 }
 
+const CLIPBOARD_IMAGE_FETCH_MAX_BYTES = 25_000_000
+const CLIPBOARD_IMAGE_MAX_DIM = 2_048
+
+async function clipboardImageFromBlob(blob, maxDim = CLIPBOARD_IMAGE_MAX_DIM) {
+  if (!blob || blob.size === 0) throw new BrowserError('BAD_CLIPBOARD_IMAGE', 'The image data is empty')
+  if (blob.size > CLIPBOARD_IMAGE_FETCH_MAX_BYTES) {
+    throw new BrowserError('CLIPBOARD_IMAGE_TOO_LARGE', `The image exceeds the ${CLIPBOARD_IMAGE_FETCH_MAX_BYTES}-byte decode limit`)
+  }
+  let bitmap
+  try {
+    bitmap = await createImageBitmap(blob)
+  } catch (error) {
+    throw new BrowserError('BAD_CLIPBOARD_IMAGE', `Could not decode the image: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  try {
+    const origW = Math.max(1, Math.floor(Number(bitmap.width) || 1))
+    const origH = Math.max(1, Math.floor(Number(bitmap.height) || 1))
+    if (blob.type === 'image/png' && origW <= maxDim && origH <= maxDim && blob.size <= CLIPBOARD_IMAGE_MAX_BYTES) {
+      return {
+        data: bytesToBase64(new Uint8Array(await blob.arrayBuffer())),
+        mimeType: 'image/png',
+        width: origW,
+        height: origH,
+        bytes: blob.size,
+      }
+    }
+    const maxEdge = Math.max(origW, origH)
+    const initialScale = maxEdge > maxDim ? maxDim / maxEdge : 1
+    let width = Math.max(1, Math.floor(origW * initialScale))
+    let height = Math.max(1, Math.floor(origH * initialScale))
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const canvas = typeof OffscreenCanvas === 'function'
+        ? new OffscreenCanvas(width, height)
+        : (() => { const element = document.createElement('canvas'); element.width = width; element.height = height; return element })()
+      const context = canvas.getContext('2d')
+      if (!context) throw new BrowserError('CAPTURE_ENCODE', 'Could not encode the clipboard image')
+      context.drawImage(bitmap, 0, 0, width, height)
+      const encoded = typeof canvas.convertToBlob === 'function'
+        ? await canvas.convertToBlob({ type: 'image/png' })
+        : await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('canvas.toBlob returned null')), 'image/png'))
+      if (encoded.size <= CLIPBOARD_IMAGE_MAX_BYTES) {
+        return {
+          data: bytesToBase64(new Uint8Array(await encoded.arrayBuffer())),
+          mimeType: 'image/png',
+          width,
+          height,
+          bytes: encoded.size,
+        }
+      }
+      const ratio = attempt === 0 ? Math.max(0.25, Math.sqrt(CLIPBOARD_IMAGE_MAX_BYTES / encoded.size) * 0.85) : 0.7
+      width = Math.max(1, Math.floor(width * ratio))
+      height = Math.max(1, Math.floor(height * ratio))
+    }
+  } finally {
+    bitmap.close?.()
+  }
+  throw new BrowserError('CLIPBOARD_IMAGE_TOO_LARGE', `The image still exceeded the ${CLIPBOARD_IMAGE_MAX_BYTES}-byte virtual clipboard limit after resizing`)
+}
+
 /**
  * @param {'fast'|'normal'|'high'} detail
  * @param {import('./protocol.js').Settings} settings
@@ -3646,6 +3853,33 @@ export function deriveTypeVerdict(before, after) {
  * @param {Array<Record<string, any>>} previousLabels
  * @param {Array<Record<string, any>>} currentLabels
  */
+export function reconcileClickViewChange({
+  changed,
+  signals = [],
+  pendingNavigation = false,
+  navigated = false,
+  beforeLabels,
+  afterLabels,
+  labelsDelta,
+  layoutChanged = false,
+}) {
+  const baseSignals = Array.isArray(signals) ? [...signals] : []
+  if (changed === true) return { changed: true, signals: baseSignals }
+  const delta = labelsDelta ?? (Array.isArray(beforeLabels) && Array.isArray(afterLabels) ? labelDelta(beforeLabels, afterLabels) : undefined)
+  const extra = []
+  if (delta && Number(delta.addedCount) > 0) extra.push('labels-added')
+  if (delta && Number(delta.removedCount) > 0) extra.push('labels-removed')
+  if (layoutChanged === true) extra.push('layout-changed')
+  if (extra.length === 0) return { changed: false, signals: baseSignals }
+  const kept = pendingNavigation && !navigated
+    ? baseSignals.filter(signal => signal !== 'navigation-possible')
+    : baseSignals
+  return {
+    changed: true,
+    signals: [...new Set([...kept, ...extra])],
+  }
+}
+
 function labelDelta(previousLabels, currentLabels) {
   const previous = new Map()
   for (const label of previousLabels ?? []) {
@@ -5305,20 +5539,38 @@ async function click(settings, args) {
     return inner
   }
   const activeTab = await getActiveTab(windowId).catch(() => tab)
+  const storedBefore = lastViewByTab.get(activeTab.id)
   const __beforeView = performance.now()
   const { payload, mode } = await buildActionView(activeTab, settings, viewMode, { changed: baseChanged, signals, layoutBaseline })
   const viewMs = Math.round(performance.now() - __beforeView)
-  const changed = mode === 'full' && pendingNavigation
+  const initialChanged = mode === 'full' && pendingNavigation
     ? navigated || (payload.tab?.title ?? '') !== (tab.title ?? '')
     : (payload.changed ?? baseChanged)
+  const initialSignals = mode === 'full'
+    ? signals
+    : (Array.isArray(payload.signals) ? payload.signals : [])
+  const afterView = lastViewByTab.get(activeTab.id)
+  const afterLabels = Array.isArray(payload.labels) ? payload.labels : afterView?.labels
+  const fullActionShift = mode === 'full' && layoutBaseline !== undefined && afterView !== undefined
+    ? deriveLayoutShiftOutcome(layoutBaseline, afterView)
+    : undefined
+  const reconciled = reconcileClickViewChange({
+    changed: initialChanged,
+    signals: initialSignals,
+    pendingNavigation,
+    navigated,
+    beforeLabels: storedBefore?.labels,
+    afterLabels,
+    labelsDelta: payload.labelsDelta,
+    layoutChanged: fullActionShift?.layoutChanged === true,
+  })
+  const changed = reconciled.changed
   // Keep the page-scroll metadata from the view and add the click's own scroll
   // delta, so the provider can report fromY/toY/dy without losing y/maxY/atTop.
   const resultScroll = clickScroll
     ? { ...(payload?.scroll && typeof payload.scroll === 'object' ? payload.scroll : {}), ...clickScroll }
     : undefined
-  const reportedSignals = mode === 'full'
-    ? signals
-    : (Array.isArray(payload.signals) ? payload.signals : [])
+  const reportedSignals = reconciled.signals
   const finalResult = {
     ...payload,
     op: 'click',
@@ -5380,7 +5632,10 @@ async function hover(settings, args) {
       if (retried?.ok === true) hovered = retried
     }
   }
-  if (hovered?.ok === false) throw new BrowserError(hovered.code ?? 'HOVER_FAILED', hovered.message ?? 'Could not hover')
+  if (!hovered || typeof hovered !== 'object') {
+    throw await decorateStaleLabelError(tab, new BrowserError('HOVER_FAILED', 'Hover produced no result; the target frame may have changed mid-hover. Take a fresh view before trying again.'))
+  }
+  if (hovered.ok === false) throw new BrowserError(hovered.code ?? 'HOVER_FAILED', hovered.message ?? 'Could not hover')
   const reResolved = staleRecovery?.recovered && staleRecovery.recovered.label !== label
     ? { from: label, to: staleRecovery.recovered.label, ...staleRecovery.recovered.signature }
     : undefined
@@ -5426,7 +5681,10 @@ async function selectOptionOp(settings, args) {
   const target = resolveLabelTarget(tab, label)
   if (!target) throw await decorateStaleLabelError(tab, missingLabelError(tab, label))
   const picked = await runInFrame(tab.id, target.frameId, selectOption, [target.localId, String(args.option ?? '')], 3_000)
-  if (picked?.ok === false) throw new BrowserError(picked.code ?? 'SELECT_FAILED', picked.message ?? 'Could not select the option')
+  if (!picked || typeof picked !== 'object') {
+    throw await decorateStaleLabelError(tab, new BrowserError('SELECT_FAILED', 'Selecting the option produced no result; the target frame may have changed. Take a fresh view before trying again.'))
+  }
+  if (picked.ok === false) throw new BrowserError(picked.code ?? 'SELECT_FAILED', picked.message ?? 'Could not select the option')
   await pauseInTab(tab.id, 90)
   const changed = String(picked.previousValue ?? '') !== String(picked.selected?.value ?? '')
   const signals = changed ? ['value-changed'] : []
@@ -5634,7 +5892,10 @@ async function typeText(settings, args) {
         if (code === 'SCRIPT_TIMEOUT') throw new BrowserError('TYPE_TIMEOUT', 'Typing into this field did not complete. Take a fresh view and try again.')
         throw error
       }
-      if (domResult?.ok === false) {
+      if (!domResult || typeof domResult !== 'object') {
+        throw await decorateStaleLabelError(tab, new BrowserError('TYPE_FAILED', 'Typing into this field produced no result; the target frame may have changed. Take a fresh view before trying again.'))
+      }
+      if (domResult.ok === false) {
         if (domResult.code === 'NOT_EDITABLE') {
           outcome = await trustedTypeIntoFallbackTarget(tab.id, textTarget, request)
         } else {
@@ -6610,7 +6871,10 @@ async function trustedTypeIntoFallbackTarget(tabId, target, request) {
     }
     throw error
   }
-  if (focused?.ok === false) {
+  if (!focused || typeof focused !== 'object') {
+    throw new BrowserError('TYPE_FAILED', 'Focusing the typing target produced no result; the target frame may have changed. Take a fresh view before trying again.')
+  }
+  if (focused.ok === false) {
     throw new BrowserError(focused.code ?? 'NOT_EDITABLE', focused.message ?? 'This element does not accept text.')
   }
   try {
@@ -6743,6 +7007,7 @@ function clipboardMeta(target, extra = {}) {
     ...(extra.kind === 'image' ? { kind: 'image' } : {}),
     ...(typeof extra.preview === 'string' && extra.preview.length > 0 ? { preview: extra.preview } : {}),
     ...(typeof extra.source === 'string' && extra.source.length > 0 ? { source: extra.source } : {}),
+    ...(typeof extra.filename === 'string' && extra.filename.length > 0 ? { filename: extra.filename } : {}),
     ...(extra.label === undefined ? {} : { label: extra.label }),
     ...(extra.truncated === true ? { truncated: true } : {}),
     ...(Number.isFinite(Number(extra.originalChars)) ? { originalChars: Math.floor(Number(extra.originalChars)) } : {}),
@@ -6786,14 +7051,23 @@ export function parseClipboardArgs(args = {}) {
     }
     label = value
   }
+  let filename
+  if (raw.filename !== undefined && raw.filename !== null) {
+    if (typeof raw.filename !== 'string' || raw.filename.trim().length === 0 || raw.filename.length > 1024) {
+      throw new BrowserError('BAD_FILENAME', 'filename must be a non-empty relative path inside Downloads')
+    }
+    filename = raw.filename.trim()
+  }
   let source = 'selection'
   if (action === 'copy') {
     const explicitSource = raw.source
     if (explicitSource !== undefined && explicitSource !== null) {
       if (typeof explicitSource !== 'string' || !CLIPBOARD_SOURCES.includes(explicitSource)) {
-        throw new BrowserError('BAD_CLIPBOARD_SOURCE', "source must be 'selection' or 'label'")
+        throw new BrowserError('BAD_CLIPBOARD_SOURCE', "source must be 'selection', 'label', 'image', or 'download'")
       }
       source = explicitSource
+    } else if (filename !== undefined) {
+      source = 'download'
     } else if (label !== undefined) {
       source = 'label'
     }
@@ -6801,10 +7075,27 @@ export function parseClipboardArgs(args = {}) {
       throw new BrowserError('BAD_LABEL', 'copy with source:"label" requires a label from the current view')
     }
     if (source === 'selection' && label !== undefined) {
-      throw new BrowserError('BAD_LABEL', 'label is only valid with copy source:"label"')
+      throw new BrowserError('BAD_LABEL', 'label is only valid with copy source:"label" or source:"image"')
     }
-  } else if (raw.source !== undefined && raw.source !== null) {
-    throw new BrowserError('BAD_CLIPBOARD_SOURCE', 'source is only valid for action "copy"')
+    if (source === 'download' && filename === undefined) {
+      throw new BrowserError('BAD_FILENAME', 'copy with source:"download" requires filename')
+    }
+    if (source === 'download' && label !== undefined) {
+      throw new BrowserError('BAD_LABEL', 'label is not valid with copy source:"download"')
+    }
+    if (source !== 'download' && filename !== undefined) {
+      throw new BrowserError('BAD_FILENAME', 'filename is only valid with copy source:"download"')
+    }
+    if ((source === 'image' || source === 'download') && target !== 'virtual') {
+      throw new BrowserError('BAD_CLIPBOARD_TARGET', `copy with source:${JSON.stringify(source)} stores a PNG in the virtual clipboard only; omit target or use target:"virtual"`)
+    }
+  } else {
+    if (raw.source !== undefined && raw.source !== null) {
+      throw new BrowserError('BAD_CLIPBOARD_SOURCE', 'source is only valid for action "copy"')
+    }
+    if (filename !== undefined) {
+      throw new BrowserError('BAD_FILENAME', 'filename is only valid for action "copy" with source:"download"')
+    }
   }
   let text
   if (action === 'write') {
@@ -6835,10 +7126,15 @@ export function parseClipboardArgs(args = {}) {
     target,
     source,
     label,
+    filename,
+    data: typeof raw.data === 'string' ? raw.data : undefined,
+    mimeType: typeof raw.mimeType === 'string' ? raw.mimeType : undefined,
     text,
     mode,
     submit: raw.submit === true,
     rich,
+    osStage: raw.osStage === true,
+    forceSynthetic: raw.forceSynthetic === true,
     view: parseViewArg(raw, action === 'paste' ? 'auto' : 'none'),
   }
 }
@@ -6850,9 +7146,94 @@ export function parseClipboardArgs(args = {}) {
  */
 async function clipboardCopy(request) {
   const started = performance.now()
+  if (request.source === 'download') {
+    if (typeof request.data !== 'string' || request.data.length === 0 || typeof request.mimeType !== 'string') {
+      throw new BrowserError('BAD_CLIPBOARD_IMAGE', 'Downloads image copy requires verified image bytes from the companion')
+    }
+    const binary = atob(request.data)
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+    const image = await clipboardImageFromBlob(new Blob([bytes], { type: request.mimeType }))
+    await writeVirtualClipboard(makeImageClipboardEntry({
+      image,
+      source: 'download',
+      filename: request.filename,
+      tabId: null,
+      url: '',
+      at: Date.now(),
+    }))
+    return {
+      op: 'clipboard',
+      action: 'copy',
+      clipboard: clipboardMeta('virtual', {
+        kind: 'image',
+        chars: 0,
+        source: 'download',
+        filename: request.filename,
+        ...image,
+      }),
+      totalMs: Math.round(performance.now() - started),
+    }
+  }
   const windowId = await getWindowId()
   const tab = await getActiveTab(windowId)
   assertCapturable(tab)
+  if (request.source === 'image') {
+    let extracted
+    if (request.label !== undefined) {
+      const target = resolveLabelTarget(tab, request.label)
+      if (!target) throw missingLabelError(tab, request.label)
+      extracted = await runInFrame(tab.id, target.frameId, extractImageForClipboard, [target.localId], 3_000)
+    } else {
+      extracted = await runInTab(tab.id, extractImageForClipboard, [0], 3_000)
+    }
+    if (!extracted || typeof extracted !== 'object') {
+      throw new BrowserError('COPY_FAILED', 'Inspecting the image produced no result; take a fresh view and retry.')
+    }
+    if (extracted.ok === false) {
+      throw new BrowserError(
+        typeof extracted.code === 'string' ? extracted.code : 'COPY_FAILED',
+        typeof extracted.message === 'string' ? extracted.message : 'Could not locate an image to copy.',
+      )
+    }
+    const src = String(extracted.src ?? '').trim()
+    if (!/^(?:https?:\/\/|data:image\/)/iu.test(src)) {
+      throw new BrowserError('BAD_IMAGE_URL', 'Only http(s) and data:image/ sources can be copied to the clipboard')
+    }
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15_000)
+    let blob
+    try {
+      const response = await fetch(src, { credentials: 'include', signal: controller.signal })
+      if (!response.ok) throw new BrowserError('IMAGE_FETCH_FAILED', `Could not fetch the image (HTTP ${response.status})`)
+      blob = await response.blob()
+    } catch (error) {
+      if (error instanceof BrowserError) throw error
+      throw new BrowserError('IMAGE_FETCH_FAILED', `Could not fetch the image: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      clearTimeout(timer)
+    }
+    const image = await clipboardImageFromBlob(blob)
+    await writeVirtualClipboard(makeImageClipboardEntry({
+      image,
+      source: 'image',
+      tabId: tab.id,
+      url: typeof tab.url === 'string' ? tab.url : '',
+      at: Date.now(),
+    }))
+    return {
+      op: 'clipboard',
+      action: 'copy',
+      clipboard: clipboardMeta('virtual', {
+        kind: 'image',
+        chars: 0,
+        source: 'image',
+        ...(request.label === undefined ? {} : { label: request.label }),
+        ...image,
+      }),
+      totalMs: Math.round(performance.now() - started),
+    }
+  }
   let text = ''
   let totalChars = 0
   if (request.source === 'label') {
@@ -6868,7 +7249,10 @@ async function clipboardCopy(request) {
       }
       throw error
     }
-    if (read?.ok === false) {
+    if (!read || typeof read !== 'object') {
+      throw new BrowserError('COPY_FAILED', `Reading label ${request.label} produced no result; the target frame may have changed. Take a fresh view before trying again.`)
+    }
+    if (read.ok === false) {
       throw new BrowserError(
         typeof read.code === 'string' ? read.code : 'COPY_FAILED',
         typeof read.message === 'string' ? read.message : `Could not read label ${request.label}.`,
@@ -7156,30 +7540,51 @@ async function clipboardPaste(settings, request) {
     let restoreError
     let keyed
     let pasteError
-    try {
+    if (request.forceSynthetic === true) {
+      keyed = await syntheticImagePaste(settings, request, virtualEntry, tab)
+    } else {
       try {
-        preserved = await preserveSystemClipboard()
+        try {
+          preserved = await preserveSystemClipboard()
+        } catch (error) {
+          restoreError = error
+        }
+        await writeImageToSystemClipboard(virtualEntry.image)
+        keyed = await dispatchRichPaste()
       } catch (error) {
-        restoreError = error
+        pasteError = error
       }
-      await writeImageToSystemClipboard(virtualEntry.image)
-      keyed = await dispatchRichPaste()
-    } catch (error) {
-      pasteError = error
-    }
-    if (preserved !== undefined) {
-      try {
-        await restoreSystemClipboard(preserved)
-      } catch (error) {
-        restoreError = error
+      if (preserved !== undefined) {
+        try {
+          await restoreSystemClipboard(preserved)
+        } catch (error) {
+          restoreError = error
+        }
       }
-    }
-    if (pasteError?.code === 'CLIPBOARD_DENIED') {
-      try {
-        keyed = await syntheticImagePaste(settings, request, virtualEntry, tab)
-        pasteError = undefined
-      } catch (error) {
-        pasteError.message += ` Synthetic paste also failed: ${error instanceof Error ? error.message : String(error)}`
+      if (pasteError?.code === 'CLIPBOARD_DENIED' && request.osStage === true) {
+        return {
+          op: 'clipboard',
+          action: 'paste',
+          osStageNeeded: true,
+          clipboard: clipboardMeta('virtual', {
+            kind: 'image',
+            chars: 0,
+            rich: true,
+            source: virtualEntry.source,
+            ...(virtualEntry.filename ? { filename: virtualEntry.filename } : {}),
+            ...virtualEntry.image,
+          }),
+          image: virtualEntry.image,
+          totalMs: Math.round(performance.now() - started),
+        }
+      }
+      if (pasteError?.code === 'CLIPBOARD_DENIED') {
+        try {
+          keyed = await syntheticImagePaste(settings, request, virtualEntry, tab)
+          pasteError = undefined
+        } catch (error) {
+          pasteError.message += ` Synthetic paste also failed: ${error instanceof Error ? error.message : String(error)}`
+        }
       }
     }
     if (pasteError) {
@@ -7657,7 +8062,17 @@ export function docsPageProbe(command, args = {}) {
     return result
   }
   const menuState = wanted => {
-    const matches = nodes('menuitemcheckbox').filter(hitVisible).filter(element => fontName(name(element)) === wanted)
+    const exactRows = nodes('menuitemcheckbox').filter(element => fontName(name(element)) === wanted)
+    let matches = exactRows.filter(hitVisible)
+    // The font list scrolls inside the menu (div.docs-fontmenu-fonts, about
+    // 300 px on a docked viewport), so a font outside the recent five can sit
+    // below its fold: Roboto Mono did, and the lookup fell through to More
+    // fonts. Scroll one unique exact row into view and re-measure; never
+    // choose between duplicates, and never return a point the hit test cannot see.
+    if (matches.length === 0 && exactRows.length === 1 && typeof exactRows[0].scrollIntoView === 'function') {
+      exactRows[0].scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      matches = exactRows.filter(hitVisible)
+    }
     const menus = new Set(matches.map(element => element.closest('[role="menu"]')))
     if (menus.size > 1 || matches.length > 1 && matches.some(element => element.closest('[role="menu"]') === null)) {
       return failure('DUPLICATE_FONT', `Font menu contains ${matches.length} conflicting exact ${wanted} rows`)
@@ -7704,17 +8119,33 @@ export function docsPageProbe(command, args = {}) {
     const removals = exact('button', `Remove ${wanted}`, document).filter(hitVisible)
     if (removals.length > 1) return failure('AMBIGUOUS_CONTROL', `Remove ${wanted} is ambiguous`)
     const added = removals.length === 1
+    // The list keeps its previous rows for a moment after the search changes:
+    // live, the unfiltered 50-font list (Merriweather at y=854 on a 686 px
+    // viewport) held still for 150 ms before the filtered rows arrived, long
+    // enough to pass as settled, so the add click landed off screen. Only rows
+    // Docs has filtered for this query count (every row contains it, or "No
+    // fonts found."), and only a row the hit test can see gets a click point.
+    const query = wanted.toLowerCase()
+    const applied = noFonts || visibleOptions.length > 0
+      && visibleOptions.every(element => fontName(element.innerText).toLowerCase().includes(query))
+    let reachable = row ? hitVisible(row) : false
+    if (row && applied && !reachable && typeof row.scrollIntoView === 'function') {
+      row.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      reachable = hitVisible(row)
+    }
     return {
       ok: true,
       open: true,
       searchEnabled: parts.search ? !disabled(parts.search) : false,
       searchValue: parts.search ? String(parts.search.value ?? '') : undefined,
       noFonts,
+      applied,
       signature: visibleOptions.map(element => `${fontName(element.innerText)}:${selected(element)}`).join('|') + `:empty=${noFonts}:added=${added}`,
       found: Boolean(row),
+      reachable,
       checked: row ? selected(row) : false,
       added,
-      point: row ? point(row) : undefined,
+      point: row && reachable ? point(row) : undefined,
       done: !disabled(done.element) ? point(done.element) : undefined,
       cancel: !disabled(cancel.element) ? point(cancel.element) : undefined,
     }
@@ -7905,16 +8336,43 @@ export function docsPageProbe(command, args = {}) {
   }
 
   const tableCellBackgroundState = () => {
-    const cell = exact('button', 'Cell').filter(hitVisible)
-    const color = exact('button', 'Color').filter(hitVisible)
-    const background = nodes('button').filter(hitVisible).filter(element => name(element).startsWith('Cell background color'))
     const close = exact('button', 'Close side sheet').filter(hitVisible)
+    const cell = exact('button', 'Cell').filter(hitVisible)
+    const allColor = exact('button', 'Color')
+    const allBackground = nodes('button').filter(element => name(element).startsWith('Cell background color'))
+    const revealSingleRendered = candidates => {
+      const matches = candidates.filter(hitVisible)
+      if (matches.length > 0) return matches
+      const rendered = candidates.filter(element => {
+        const box = element.getBoundingClientRect()
+        return box.width > 0 && box.height > 0 && !disabled(element)
+      })
+      if (rendered.length === 1 && typeof rendered[0].scrollIntoView === 'function') {
+        rendered[0].scrollIntoView({ block: 'center', inline: 'nearest' })
+        return rendered.filter(hitVisible)
+      }
+      return matches
+    }
+    // Live Docs Table options (2026-11-19): six accordion sections (Quick
+    // layouts..Color) push the expanded Color region below the side sheet's
+    // scrollable fold at docked/headless heights (~639–770 px). Scroll one
+    // unique rendered Cell background color control into view when Color is
+    // open, and never collapse an already-expanded Color section.
+    const visibleColor = allColor.filter(hitVisible)
+    const renderedColor = visibleColor.length > 0 ? visibleColor : allColor.filter(element => {
+      const box = element.getBoundingClientRect()
+      return box.width > 0 && box.height > 0
+    })
+    const colorExpanded = renderedColor.length === 1 ? renderedColor[0].getAttribute('aria-expanded') === 'true' : undefined
+    const background = colorExpanded === false ? allBackground.filter(hitVisible) : revealSingleRendered(allBackground)
+    const color = background.length > 0 ? allColor.filter(hitVisible) : revealSingleRendered(allColor)
     if ([cell, color, background, close].some(items => items.length > 1)) return failure('AMBIGUOUS_CONTROL', 'Table cell-background controls are ambiguous')
     return {
       ok: true,
       open: close.length === 1,
       cellPoint: cell.length === 1 ? point(cell[0]) : undefined,
       colorPoint: color.length === 1 ? point(color[0]) : undefined,
+      colorExpanded,
       backgroundPoint: background.length === 1 ? point(background[0]) : undefined,
       closePoint: close.length === 1 ? point(close[0]) : undefined,
     }
@@ -8029,10 +8487,26 @@ async function docsExport(context, stage, format) {
   try {
     const result = await context.driver.fetchExport(context.initialUrl, format)
     await docsCurrent(context, stage)
+    if (context) {
+      const stats = context.exportStats ??= { calls: 0, rateLimitRetries: 0, rateLimitWaitMs: 0 }
+      stats.calls += 1
+      if (result && typeof result === 'object') {
+        if (Number.isFinite(Number(result.rateLimitRetries))) stats.rateLimitRetries += Number(result.rateLimitRetries)
+        if (Number.isFinite(Number(result.rateLimitWaitMs))) stats.rateLimitWaitMs += Number(result.rateLimitWaitMs)
+      }
+    }
     return typeof result === 'string' ? result : result.body
   } catch (error) {
     throw docsDriverError(stage, error?.code ?? 'DOCS_EXPORT_FAILED', error)
   }
+}
+
+const DOCS_VERIFY_INITIAL_SETTLE_MS = 350
+
+async function docsVerifyInitialSettle(context, verificationEnd) {
+  const remaining = verificationEnd - context.driver.now()
+  const settle = Math.min(DOCS_VERIFY_INITIAL_SETTLE_MS, Math.max(0, remaining - 1_000))
+  if (settle > 0) await context.driver.sleep(settle)
 }
 
 async function docsKey(context, stage, spec, mask = 0) {
@@ -8142,7 +8616,36 @@ async function docsCloseFind(context, stage, awaitDocumentFocus = false) {
 }
 
 
-async function docsFindQuery(context, stage, text) {
+// Docs recounts Find matches asynchronously, so a counter read right after a
+// query change can still describe the PREVIOUS query. docsCounterSettled
+// returns a stateful predicate over successive counter readings: it accepts a
+// reading once it has held for DOCS_COUNTER_SETTLE_MS, but a reading identical
+// to the previous query's counter only after DOCS_COUNTER_STALE_HOLD_MS,
+// because until Docs recounts it cannot be told apart from the stale value. An
+// absent counter (undefined) never settles; a genuine zero-match query still
+// settles at 0 of 0 and fails closed where uniqueness is required.
+const DOCS_COUNTER_SETTLE_MS = 80
+const DOCS_COUNTER_STALE_HOLD_MS = 1_200
+
+function docsCounterSettled(previous) {
+  let reading
+  let since = 0
+  return (current, now) => {
+    if (current === undefined || current !== reading) {
+      reading = current
+      since = now
+      return false
+    }
+    return now - since >= (previous !== undefined && current === previous ? DOCS_COUNTER_STALE_HOLD_MS : DOCS_COUNTER_SETTLE_MS)
+  }
+}
+
+async function docsFindQuery(context, stage, text, { holdPrevious = false } = {}) {
+  // With holdPrevious, a reading equal to the counter shown before the query
+  // changed must outlast Docs' recount (docsCounterSettled). Replacement
+  // verification needs that: its expected count can equal the retained query's.
+  const before = holdPrevious ? await docsProbe(context, stage, 'find', {}) : undefined
+  const previous = before?.open && before.value !== text ? before.match?.text : undefined
   await docsNativeText(context, stage, 'setFind', text)
   // The find bar opens retaining the PREVIOUS query, and after a mutation that
   // deleted that query its counter can briefly read "0 of 0" while the value
@@ -8152,29 +8655,21 @@ async function docsFindQuery(context, stage, text) {
   // write deleted the previous query). Wait until the counter is stable across
   // two consecutive reads before trusting it; a genuine zero-match query still
   // settles at 0 of 0 and fails closed in occurrence resolution.
+  const settled = docsCounterSettled(previous)
   const end = Math.min(context.deadline, context.driver.now() + 3_000)
   let latest
-  let lastSignature
-  let stableSince = 0
   while (context.driver.now() < end) {
     latest = await docsProbe(context, stage, 'find', {})
-    const signature = JSON.stringify(latest.match ?? null)
-    const now = context.driver.now()
-    if (docsFindReady(latest, text) && signature === lastSignature) {
-      if (now - stableSince >= 80) return latest
-    } else {
-      lastSignature = signature
-      stableSince = now
-    }
+    if (settled(docsFindReady(latest, text) ? latest.match.text : undefined, context.driver.now())) return latest
     await context.driver.sleep(60)
   }
   throw docsFailure(stage, 'DOCS_WAIT_TIMEOUT', `Find did not settle on a stable counter for ${JSON.stringify(text.slice(0, 80))} (last ${latest?.match?.text ?? 'unknown'})`)
 }
 
-async function docsOpenFind(context, text) {
+async function docsOpenFind(context, text, options = {}) {
   await docsKey(context, 'open-find', { key: 'f', code: 'KeyF', keyCode: 70 }, MODIFIER_BITS.ctrl)
   await docsWait(context, 'open-find', 'find', {}, state => state.open && state.enabled && state.focused === true)
-  return docsFindQuery(context, 'find-query', text)
+  return docsFindQuery(context, 'find-query', text, options)
 }
 
 async function docsVerifyFont(context, font, fontAdded) {
@@ -8195,6 +8690,9 @@ async function docsVerifyFont(context, font, fontAdded) {
 }
 
 async function docsFinish(context, details) {
+  const rateLimit = context?.exportStats?.rateLimitRetries > 0
+    ? { exportRateLimit: { retries: context.exportStats.rateLimitRetries, waitMs: context.exportStats.rateLimitWaitMs } }
+    : {}
   if (details.status === 'completed' && details.verifiedBy === 'export') {
     const current = await docsCurrent(context, 'final-summary')
     return {
@@ -8203,7 +8701,7 @@ async function docsFinish(context, details) {
       screenshotSkipped: true,
       capture: { status: 'skipped', reason: 'DOCS_EXPORT_VERIFIED' },
       tab: tabSummary(current),
-      docs: { action: context.action ?? 'set_font', ...details },
+      docs: { action: context.action ?? 'set_font', ...details, ...rateLimit },
     }
   }
   docsCheckDeadline(context, 'final-snapshot')
@@ -8213,7 +8711,7 @@ async function docsFinish(context, details) {
   } catch (error) {
     throw docsDriverError('final-snapshot', 'DOCS_SNAPSHOT_FAILED', error)
   }
-  return { ...shot, op: 'docs', docs: { action: context.action ?? 'set_font', ...details } }
+  return { ...shot, op: 'docs', docs: { action: context.action ?? 'set_font', ...details, ...rateLimit } }
 }
 
 async function docsRemoveMatchedText(context, text) {
@@ -8246,8 +8744,10 @@ async function docsAddAndApply(context, text) {
     if (state.signature !== stableSignature) {
       stableSignature = state.signature
       stableSince = now
-    } else if (now - stableSince >= 100) {
-      if (state.found) {
+    } else if (now - stableSince >= 100 && state.applied) {
+      // A row Docs already marks as added needs no click; otherwise only a
+      // reachable row of the filtered results is clicked (see dialogState).
+      if (state.found && (state.checked || state.added || state.point)) {
         if (!state.checked && !state.added) {
           await docsClick(context, 'font-add', state.point)
           await docsWait(context, 'font-add', 'fontDialog', { font }, next => next.checked || next.added)
@@ -8265,7 +8765,7 @@ async function docsAddAndApply(context, text) {
     }
     await context.driver.sleep(80)
   }
-  throw docsFailure('font-results', 'DOCS_FONT_RESULTS_UNKNOWN', 'Font search results did not stabilize with an exact row or a scoped no-results message')
+  throw docsFailure('font-results', 'DOCS_FONT_RESULTS_UNKNOWN', 'Font search results did not settle on a reachable exact row or a scoped no-results message for this query')
 }
 
 function docsResolveOccurrence(occurrence, total, stage = 'find-match') {
@@ -8938,7 +9438,9 @@ async function docsFormatManyFlow(context, edits) {
     results: docsFormatManyAttributeResults(edit, []),
   }))
   try {
-    const baseline = parseDocStructure(await docsExport(context, 'format-many-baseline', 'html'))
+    const baselineHtml = await docsExport(context, 'format-many-baseline', 'html')
+    const baseline = parseDocStructure(baselineHtml)
+    const baselineInherited = parseInheritedTextMarks(baselineHtml)
     plans = planDocsFormatEdits(baseline, edits)
     for (const [index, plan] of plans.entries()) results[index].occurrence = plan.occurrence
 
@@ -9023,10 +9525,15 @@ async function docsFormatManyFlow(context, edits) {
     let verification
     if (mutationPossible) {
       const verificationEnd = Math.min(context.deadline, context.driver.now() + 8_000)
+      await docsVerifyInitialSettle(context, verificationEnd)
       let retryDelay = 500
       while (true) {
-        const actual = parseDocStructure(await docsExport(context, 'format-many-verify', 'html'))
-        verification = verifyDocsFormatEdits(baseline, actual, plans, edits, attemptedCount)
+        const actualHtml = await docsExport(context, 'format-many-verify', 'html')
+        const actual = parseDocStructure(actualHtml)
+        verification = verifyDocsFormatEdits(baseline, actual, plans, edits, attemptedCount, {
+          baseline: baselineInherited,
+          final: parseInheritedTextMarks(actualHtml),
+        })
         if (verification.ok || failure || verification.failure?.code !== 'DOCS_FORMAT_VERIFY_FAILED'
           || context.driver.now() + retryDelay > verificationEnd) break
         await context.driver.sleep(retryDelay)
@@ -9203,13 +9710,32 @@ export async function docsFormatMany(settings, args, io = {}) {
 }
 
 const DOCS_READ_DEADLINE_MS = 45_000
+const HTML_IMAGE_DATA_URI_RE = /(["'(])(data:image\/[a-zA-Z0-9.+-]+;base64,)([A-Za-z0-9+/=\s]{64,})(["')])/gu
+
+export function stripHtmlImageDataUris(html) {
+  let omittedCount = 0
+  let omittedChars = 0
+  const stripped = String(html ?? '').replace(HTML_IMAGE_DATA_URI_RE, (match, open, prefix, payload, close) => {
+    const expectedClose = open === '(' ? ')' : open
+    if (close !== expectedClose) return match
+    omittedCount += 1
+    omittedChars += payload.length
+    return `${open}${prefix}[omitted ${payload.length} chars]${close}`
+  })
+  return { html: stripped, omittedCount, omittedChars }
+}
 
 async function docsReadFlow(context, args) {
   const format = args.format ?? 'outline'
   const maxChars = args.max_chars ?? 16_000
   const offset = args.offset ?? 0
   const exported = await docsExport(context, 'read-export', format === 'text' ? 'txt' : 'html')
-  const full = format === 'outline' ? formatOutline(parseDocStructure(exported)) : exported
+  const htmlSummary = format === 'html' ? stripHtmlImageDataUris(exported) : undefined
+  const full = format === 'outline'
+    ? formatOutline(parseDocStructure(exported))
+    : format === 'html'
+      ? htmlSummary.html
+      : exported
   const end = Math.min(offset + maxChars, full.length)
   const truncated = end < full.length
   const page = offset >= full.length ? '' : full.slice(offset, end)
@@ -9225,6 +9751,10 @@ async function docsReadFlow(context, args) {
       offset,
       nextOffset: truncated ? end : null,
       truncated,
+      ...(htmlSummary && htmlSummary.omittedCount > 0 ? {
+        omittedImageDataCount: htmlSummary.omittedCount,
+        omittedImageDataChars: htmlSummary.omittedChars,
+      } : {}),
       content,
       verifiedBy: 'export',
     },
@@ -9445,15 +9975,23 @@ async function docsWriteApplyColors(context, wanted) {
   }
 }
 
-function docsWriteBlockFormat(block, normal) {
+// Attributes a block leaves unset take its paragraph style's look: Normal text
+// from the toolbar at the append position, other named styles from the
+// export's rules (parseNamedStyleDefaults). Filling them from Normal text
+// instead made every Title, Subtitle, and heading render as 11pt body text —
+// non-bold, non-italic — while verification, expecting the same values,
+// reported the write as completed.
+function docsWriteBlockFormat(block, normal, styles = new Map()) {
+  const paragraphStyle = block.list ? 'Normal text' : block.paragraph_style ?? 'Normal text'
+  const named = paragraphStyle === 'Normal text' ? undefined : styles.get(paragraphStyle)
   return {
-    paragraph_style: block.list ? 'Normal text' : block.paragraph_style ?? 'Normal text',
-    font_size: block.font_size ?? normal.fontSize,
-    font: block.font ?? normal.font,
-    bold: block.bold ?? false,
-    italic: block.italic ?? false,
+    paragraph_style: paragraphStyle,
+    font_size: block.font_size ?? named?.fontSize ?? normal.fontSize,
+    font: block.font ?? named?.font ?? normal.font,
+    bold: block.bold ?? named?.bold ?? false,
+    italic: block.italic ?? named?.italic ?? false,
     underline: block.underline ?? false,
-    color: block.color ?? '#000000',
+    color: block.color ?? named?.color ?? '#000000',
     highlight: block.highlight ?? 'none',
   }
 }
@@ -9478,10 +10016,10 @@ function docsWriteExpectedRuns(text, format) {
   }]
 }
 
-function docsWriteExpectedBlocks(blocks, normal) {
+function docsWriteExpectedBlocks(blocks, normal, styles = new Map()) {
   const expected = []
   for (const [owner, block] of blocks.entries()) {
-    const format = docsWriteBlockFormat(block, normal)
+    const format = docsWriteBlockFormat(block, normal, styles)
     if (block.page_break === true) {
       expected.push({ kind: 'pagebreak', owner })
     } else if (block.blank === true) {
@@ -9568,11 +10106,103 @@ export function docsWriteBlockDifference(actual, expected, flattenedChecklist = 
   return undefined
 }
 
-const DOCS_BLOCK_ELEMENTS = { P: 'p', LI: 'li', H1: 'h1', H2: 'h2', H3: 'h3', H4: 'h4', H5: 'h5', H6: 'h6' }
+const DOCS_BLOCK_ELEMENTS = { P: 'p', TITLE: 'p', SUBTITLE: 'p', LI: 'li', H1: 'h1', H2: 'h2', H3: 'h3', H4: 'h4', H5: 'h5', H6: 'h6' }
 
-function docsWriteVerify(prefix, expected, actual, blockCount, flattenedChecklistOwners = new Set(), inheritedMarks = new Map()) {
-  if (actual.length < prefix.length || prefix.some((block, index) => JSON.stringify(block) !== JSON.stringify(actual[index]))) {
-    return { ok: false, code: 'DOCS_WRITE_COLLATERAL', index: -1, verifiedCount: 0, message: 'Content before the append position changed unexpectedly' }
+function docsComparablePrefixRuns(runs, inherited) {
+  const normalized = []
+  for (const run of runs ?? []) {
+    if (!run || !run.text) continue
+    const next = {
+      text: run.text,
+      bold: run.bold === true,
+      italic: run.italic === true,
+      underline: run.underline === true,
+      strike: run.strike === true,
+      ...(run.font !== undefined ? { font: run.font } : inherited?.font !== undefined ? { font: inherited.font } : {}),
+      ...(run.fontSize !== undefined ? { fontSize: run.fontSize } : inherited?.fontSize !== undefined ? { fontSize: inherited.fontSize } : {}),
+      ...(run.color !== undefined ? { color: run.color } : inherited?.color !== undefined ? { color: inherited.color } : {}),
+      ...(run.highlight !== undefined ? { highlight: run.highlight } : {}),
+      ...(run.href !== undefined ? { href: run.href } : {}),
+    }
+    const prev = normalized.at(-1)
+    if (prev
+      && prev.bold === next.bold && prev.italic === next.italic
+      && prev.underline === next.underline && prev.strike === next.strike
+      && prev.font === next.font && prev.fontSize === next.fontSize
+      && prev.color === next.color && prev.highlight === next.highlight
+      && prev.href === next.href) {
+      prev.text += next.text
+    } else {
+      normalized.push(next)
+    }
+  }
+  return normalized
+}
+
+function docsComparablePrefixBlock(block, inheritedMarks) {
+  if (!block || typeof block !== 'object') return block
+  if (block.kind === 'para') {
+    const inherited = inheritedMarks?.get?.(DOCS_BLOCK_ELEMENTS[block.style])
+    return {
+      kind: 'para',
+      style: block.style,
+      text: block.text,
+      runs: docsComparablePrefixRuns(block.runs, inherited),
+      ...(block.listLevel !== undefined ? { listLevel: block.listLevel } : {}),
+      ...(block.ordered !== undefined ? { ordered: block.ordered } : {}),
+      ...(block.number !== undefined ? { number: block.number } : {}),
+      ...(block.checklist !== undefined ? { checklist: block.checklist } : {}),
+      ...(block.checked !== undefined ? { checked: block.checked } : {}),
+    }
+  }
+  if (block.kind === 'table') {
+    return {
+      kind: 'table',
+      rows: (block.rows ?? []).map(row => row.map(cell => ({
+        text: cell.text,
+        rowspan: cell.rowspan,
+        colspan: cell.colspan,
+        ...(cell.background !== undefined ? { background: cell.background } : {}),
+        paragraphs: (cell.paragraphs ?? []).map(para => docsComparablePrefixBlock(para, inheritedMarks)),
+      }))),
+    }
+  }
+  return { kind: block.kind }
+}
+
+/**
+ * Compare a preserved document prefix across two Docs HTML exports using
+ * rendered runs normalized against each export's element rules (`p{}`, `li{}`,
+ * `h1{}`…`h6{}`). Ignores pure CSS-class compaction (explicit span vs inherited
+ * element rule or `marked`-only syntax drift) while still failing closed on
+ * any text, structure, list, table, or rendered formatting collateral change.
+ */
+export function docsPrefixDifference(prefix, actual, baselineInherited, actualInherited) {
+  if (!Array.isArray(actual) || actual.length < prefix.length) {
+    return `prefix truncated (expected ${prefix.length} block(s), found ${actual?.length ?? 0})`
+  }
+  for (let index = 0; index < prefix.length; index += 1) {
+    const expectedBlock = docsComparablePrefixBlock(prefix[index], baselineInherited)
+    const actualBlock = docsComparablePrefixBlock(actual[index], actualInherited)
+    if (JSON.stringify(expectedBlock) !== JSON.stringify(actualBlock)) {
+      const label = prefix[index]?.kind === 'para'
+        ? `${prefix[index].style} ${JSON.stringify(String(prefix[index].text ?? '').slice(0, 40))}`
+        : String(prefix[index]?.kind ?? 'block')
+      const field = expectedBlock?.kind !== actualBlock?.kind ? 'kind'
+        : expectedBlock?.style !== actualBlock?.style ? 'style'
+          : expectedBlock?.text !== actualBlock?.text ? 'text'
+            : JSON.stringify(expectedBlock?.runs) !== JSON.stringify(actualBlock?.runs) ? 'formatting'
+              : 'structure'
+      return `block ${index + 1} (${label}) ${field} changed`
+    }
+  }
+  return undefined
+}
+
+function docsWriteVerify(prefix, expected, actual, blockCount, flattenedChecklistOwners = new Set(), inheritedMarks = new Map(), baselineInherited = new Map()) {
+  const prefixDiff = docsPrefixDifference(prefix, actual, baselineInherited, inheritedMarks)
+  if (prefixDiff !== undefined) {
+    return { ok: false, code: 'DOCS_WRITE_COLLATERAL', index: -1, verifiedCount: 0, message: `Content before the append position changed unexpectedly (${prefixDiff})` }
   }
   const appended = actual.slice(prefix.length)
   for (const [index, block] of appended.entries()) {
@@ -9606,6 +10236,7 @@ async function docsFrameProbe(context, frameId, stage, command) {
   try {
     const result = await runInFrame(context.tab.id, frameId, docsPageProbe, [command, {}])
     await docsCurrent(context, stage)
+    if (!result?.ok) throw docsFailure(stage, result?.code ?? 'DOCS_PROBE_FAILED', result?.message ?? 'The Docs frame probe returned no result')
     return result
   } catch (error) {
     await docsCurrent(context, stage)
@@ -9697,9 +10328,21 @@ async function docsWriteWaitStructure(context, stage, matches, message) {
   throw docsFailure(stage, 'DOCS_FORMAT_MISMATCH', message)
 }
 
+const DOCS_LIST_ATTRIBUTES = ['numbered', 'bulleted', 'checklist']
+const DOCS_LIST_EXITED = { numbered: false, bulleted: false, checklist: false }
+
+function docsListWantedState(list) {
+  return {
+    numbered: list === 'numbered',
+    bulleted: list === 'bulleted',
+    checklist: list === 'checklist',
+  }
+}
+
 async function docsWriteStart(context, baseline) {
   const last = baseline.at(-1)
   let reused = false
+  let mutated = false
   await docsKey(context, 'write-document-end', { ...KEY_SPECS.End }, MODIFIER_BITS.ctrl)
   if (last?.kind === 'para' && last.style === 'LI') {
     if (last.text.trim()) {
@@ -9709,91 +10352,130 @@ async function docsWriteStart(context, baseline) {
       await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
       reused = true
     }
+    mutated = true
   } else if (last?.kind === 'para' && !last.text.trim()) reused = true
-  else if (last) await docsKey(context, 'write-next-paragraph', KEY_SPECS.Enter)
-  return { prefix: reused ? baseline.slice(0, -1) : baseline, reused }
+  else if (last) {
+    await docsKey(context, 'write-next-paragraph', KEY_SPECS.Enter)
+    mutated = true
+  }
+  return { prefix: reused ? baseline.slice(0, -1) : baseline, reused, mutated }
 }
 
 async function docsWriteFlow(context, args) {
   context.attemptedCount = 0
-  const flattenedChecklistOwners = new Set()
+  const liveChecklistOwners = new Set()
   try {
-    const baseline = parseDocStructure(await docsExport(context, 'write-baseline', 'html'))
+    const baselineHtml = await docsExport(context, 'write-baseline', 'html')
+    const baseline = parseDocStructure(baselineHtml)
+    const styles = parseNamedStyleDefaults(baselineHtml)
     const lastRun = baseline.findLast(block => block.runs?.length)?.runs.at(-1)
     context.writeColors = {
       color: lastRun?.color ?? '#000000',
       highlight: lastRun?.highlight ?? 'none',
     }
-    await docsFocusDocument(context)
-    const { prefix, reused } = await docsWriteStart(context, baseline)
-    const positioned = parseDocStructure(await docsExport(context, 'write-position', 'html'))
-    if (!docsWritePositionMatches(baseline, positioned, reused)) {
-      throw docsFailure('write-position', 'DOCS_WRITE_POSITION', 'Document end was not established before formatting; no blocks were typed')
+    // Applying a named style recolors the caret to that style's text color (a
+    // Subtitle typed in its gray while this cache still said black), so after
+    // a style change the cache restarts from the style's color. Export
+    // verification still catches a caret color Docs did not reset.
+    const restartColorAfterStyle = (results, paragraphStyle) => {
+      if (results.some(result => result.attribute === 'paragraph_style' && result.status === 'applied')) {
+        context.writeColors.color = styles.get(paragraphStyle)?.color ?? '#000000'
+      }
     }
-    await docsApplyFormatStates(context, { paragraph_style: 'Normal text' }, '')
+    await docsFocusDocument(context)
+    const { prefix, reused, mutated } = await docsWriteStart(context, baseline)
+    const lastBaseline = baseline.at(-1)
+    if (mutated && lastBaseline?.kind === 'para' && !['P', 'LI'].includes(lastBaseline.style)) {
+      // Pressing Enter at the end of a Title, Subtitle, or Heading resets the
+      // new paragraph's style and caret color to Normal text in Google Docs.
+      context.writeColors.color = styles.get('Normal text')?.color ?? '#000000'
+    }
+    if (mutated) {
+      const positioned = parseDocStructure(await docsExport(context, 'write-position', 'html'))
+      if (!docsWritePositionMatches(baseline, positioned, reused)) {
+        throw docsFailure('write-position', 'DOCS_WRITE_POSITION', 'Document end was not established before formatting; no blocks were typed')
+      }
+    }
+    const normalStyle = await docsApplyFormatStates(context, { paragraph_style: 'Normal text' }, '')
+    restartColorAfterStyle(normalStyle.results, 'Normal text')
     const normal = await docsProbe(context, 'write-normal-defaults', 'format', { attributes: DOCS_FORMAT_ATTRIBUTES })
-    const expected = docsWriteExpectedBlocks(args.blocks, normal)
+    const expected = docsWriteExpectedBlocks(args.blocks, normal, styles)
     const apply = async (wanted, index, runIndex) => {
-      const { fontMissing } = await docsApplyFormatStates(context, wanted, '')
+      const { results, fontMissing } = await docsApplyFormatStates(context, wanted, '')
       if (fontMissing) throw docsFailure('write-font', 'DOCS_FONT_MISSING', `Font ${JSON.stringify(wanted.font)} is unavailable; block ${index}${runIndex === undefined ? '' : ` run ${runIndex}`} was not typed`)
+      restartColorAfterStyle(results, wanted.paragraph_style)
       await docsWriteApplyColors(context, wanted)
     }
     for (const [index, block] of args.blocks.entries()) {
       context.attemptedCount = index + 1
-      const wanted = docsWriteBlockFormat(block, normal)
+      const wanted = docsWriteBlockFormat(block, normal, styles)
       if (block.page_break === true) {
         await docsKey(context, 'write-page-break', KEY_SPECS.Enter, MODIFIER_BITS.ctrl)
         continue
       }
       if (block.list) {
         await apply(wanted, index)
-        const beforeList = parseDocStructure(await docsExport(context, 'write-list-start-baseline', 'html'))
+        // Verify list start and exit via live toolbar aria-pressed controls to
+        // avoid 3 intermediate HTML exports per list block (which trigger
+        // Google's 429 export rate limit); final write-verify still proves
+        // server persistence end to end. Fall back to export-based checks only
+        // for numbered/bulleted lists when the toolbar controls are missing;
+        // checklists always require live semantic control evidence.
+        let useToolbarListChecks = true
+        try {
+          await docsWaitFormat(context, 'write-list-precheck', DOCS_LIST_ATTRIBUTES, DOCS_LIST_EXITED)
+        } catch (error) {
+          if (block.list === 'checklist' || error?.code !== 'DOCS_CONTROL_NOT_FOUND') throw error
+          useToolbarListChecks = false
+        }
+        const beforeList = useToolbarListChecks
+          ? undefined
+          : parseDocStructure(await docsExport(context, 'write-list-start-baseline', 'html'))
         const key = { numbered: '7', bulleted: '8', checklist: '9' }[block.list]
         await docsKey(context, 'write-list-start', {
           key,
           code: `Digit${key}`,
           keyCode: Number(key) + 48,
         }, MODIFIER_BITS.ctrl | MODIFIER_BITS.shift)
-        if (block.list === 'checklist') {
-          await docsWaitFormat(context, 'write-checklist-start-verify', ['numbered', 'bulleted', 'checklist'], {
-            numbered: false,
-            bulleted: false,
-            checklist: true,
-          })
+        let started
+        if (useToolbarListChecks) {
+          await docsWaitFormat(
+            context,
+            block.list === 'checklist' ? 'write-checklist-start-verify' : 'write-list-start-verify',
+            DOCS_LIST_ATTRIBUTES,
+            docsListWantedState(block.list),
+          )
+        } else {
+          started = await docsWriteWaitStructure(
+            context,
+            'write-list-start-verify',
+            current => docsWriteListStartMatches(beforeList, current, block.list),
+            `The exported document did not contain one new empty ${block.list} item at the append position`,
+          )
         }
-        const started = await docsWriteWaitStructure(
-          context,
-          'write-list-start-verify',
-          current => docsWriteListStartMatches(beforeList, current, block.list)
-            || block.list === 'checklist' && docsWriteListStartMatches(beforeList, current, block.list, true),
-          `The exported document did not contain one new empty ${block.list} item at the append position`,
-        )
-        const flattenedChecklist = block.list === 'checklist' && !docsWriteListStartMatches(beforeList, started, block.list)
-        if (flattenedChecklist) flattenedChecklistOwners.add(index)
         if (block.list === 'checklist') {
           for (const [itemIndex, item] of block.items.entries()) {
             await docsInsertText(context, 'write-checklist-item', item.text)
-            if (item.checked) await docsKey(context, 'write-checklist-checked', KEY_SPECS.Enter, MODIFIER_BITS.ctrl | MODIFIER_BITS.shift)
+            if (item.checked) await docsKey(context, 'write-checklist-checked', KEY_SPECS.Enter, MODIFIER_BITS.ctrl | MODIFIER_BITS.alt)
             if (itemIndex < block.items.length - 1) await docsKey(context, 'write-checklist-next', KEY_SPECS.Enter)
           }
+          await docsWaitFormat(context, 'write-checklist-finish-verify', DOCS_LIST_ATTRIBUTES, docsListWantedState('checklist'))
+          liveChecklistOwners.add(index)
         } else {
           await docsInsertText(context, 'write-list-items', block.items.join('\n'))
         }
-        if (block.list === 'checklist') {
-          await docsWaitFormat(context, 'write-checklist-finish-verify', ['numbered', 'bulleted', 'checklist'], {
-            numbered: false,
-            bulleted: false,
-            checklist: true,
-          })
+        await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
+        await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
+        if (useToolbarListChecks) {
+          await docsWaitFormat(context, 'write-list-exit-verify', DOCS_LIST_ATTRIBUTES, DOCS_LIST_EXITED)
+        } else {
+          await docsWriteWaitStructure(
+            context,
+            'write-list-exit-verify',
+            current => docsWriteListCompletionMatches(started, current, block, false),
+            'The exported document did not contain the exact requested list items followed by one empty Normal paragraph',
+          )
         }
-        await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
-        await docsKey(context, 'write-list-exit', KEY_SPECS.Enter)
-        await docsWriteWaitStructure(
-          context,
-          'write-list-exit-verify',
-          current => docsWriteListCompletionMatches(started, current, block, flattenedChecklist),
-          'The exported document did not contain the exact requested list items followed by one empty Normal paragraph',
-        )
       } else {
         if (block.runs) {
           for (const [runIndex, run] of block.runs.entries()) {
@@ -9806,17 +10488,25 @@ async function docsWriteFlow(context, args) {
         }
         if (index < args.blocks.length - 1 && args.blocks[index + 1].page_break !== true) {
           await docsKey(context, 'write-next-paragraph', KEY_SPECS.Enter)
+          if (wanted.paragraph_style !== 'Normal text') {
+            // Enter exits Title, Subtitle, and headings back to Normal text
+            // automatically, resetting the caret color even when the next
+            // block sees Normal text as already_applied.
+            context.writeColors.color = styles.get('Normal text')?.color ?? '#000000'
+          }
         }
       }
     }
+    const baselineInherited = parseInheritedTextMarks(baselineHtml)
     const verificationEnd = Math.min(context.deadline, context.driver.now() + 8_000)
+    await docsVerifyInitialSettle(context, verificationEnd)
     let actual
     let verification
     let retryDelay = 500
     while (true) {
       const html = await docsExport(context, 'write-verify', 'html')
       actual = parseDocStructure(html)
-      verification = docsWriteVerify(prefix, expected, actual, args.blocks.length, flattenedChecklistOwners, parseInheritedTextMarks(html))
+      verification = docsWriteVerify(prefix, expected, actual, args.blocks.length, liveChecklistOwners, parseInheritedTextMarks(html), baselineInherited)
       if (verification.ok || verification.code !== 'DOCS_WRITE_VERIFY_FAILED' || context.driver.now() + retryDelay > verificationEnd) break
       await context.driver.sleep(retryDelay)
       retryDelay = Math.min(2_000, retryDelay * 2)
@@ -9931,9 +10621,10 @@ async function docsTableReadFlow(context, args) {
   }, tables)
 }
 
-function docsTableCreateVerification(prefix, tableCount, actual, args) {
-  if (JSON.stringify(actual.slice(0, prefix.length)) !== JSON.stringify(prefix)) {
-    return { ok: false, code: 'DOCS_TABLE_COLLATERAL', message: 'The preserved document prefix changed during table creation' }
+export function docsTableCreateVerification(prefix, tableCount, actual, args, baselineInherited, actualInherited) {
+  const prefixDiff = docsPrefixDifference(prefix, actual, baselineInherited, actualInherited)
+  if (prefixDiff !== undefined) {
+    return { ok: false, code: 'DOCS_TABLE_COLLATERAL', message: `The preserved document prefix changed during table creation (${prefixDiff})` }
   }
   if (docsTables(actual).length !== tableCount + 1) {
     return { ok: false, code: 'DOCS_TABLE_VERIFY_FAILED', message: `Expected one new table, found ${docsTables(actual).length - tableCount}` }
@@ -10033,7 +10724,9 @@ async function docsTableCreateClipboard(context, args, baseline) {
 
 async function docsTableCreateFlow(context, args) {
   context.attemptedCount = 0
-  const baseline = parseDocStructure(await docsExport(context, 'table-create-baseline', 'html'))
+  const baselineHtml = await docsExport(context, 'table-create-baseline', 'html')
+  const baseline = parseDocStructure(baselineHtml)
+  const baselineInherited = parseInheritedTextMarks(baselineHtml)
   const grid = await docsTableCreateGridOpen(context, args)
   const native = grid.within
   await docsTableCreateGridDismiss(context)
@@ -10042,18 +10735,22 @@ async function docsTableCreateFlow(context, args) {
   if (native) prefix = await docsTableCreateNative(context, args, baseline)
   else ({ prefix, restoreError } = await docsTableCreateClipboard(context, args, baseline))
   const verificationEnd = Math.min(context.deadline, context.driver.now() + 10_000)
+  await docsVerifyInitialSettle(context, verificationEnd)
   let retryDelay = 500
   let actual
   let verification
   while (true) {
-    actual = parseDocStructure(await docsExport(context, 'table-create-verify', 'html'))
-    verification = docsTableCreateVerification(prefix, docsTables(baseline).length, actual, args)
+    const actualHtml = await docsExport(context, 'table-create-verify', 'html')
+    actual = parseDocStructure(actualHtml)
+    verification = docsTableCreateVerification(prefix, docsTables(baseline).length, actual, args, baselineInherited, parseInheritedTextMarks(actualHtml))
     if (verification.ok || verification.code === 'DOCS_TABLE_COLLATERAL' || context.driver.now() + retryDelay > verificationEnd) break
     await context.driver.sleep(retryDelay)
     retryDelay = Math.min(2_000, retryDelay * 2)
   }
   context.createVerification = verification
-  context.createTable = verification.ok ? verification.table : actual[prefix.length]?.kind === 'table' ? actual[prefix.length] : undefined
+  const leading = actual[prefix.length]
+  const tableOffset = leading?.kind === 'para' && !leading.text.trim() ? prefix.length + 1 : prefix.length
+  context.createTable = verification.ok ? verification.table : actual[tableOffset]?.kind === 'table' ? actual[tableOffset] : undefined
   const details = {
     tableAction: 'create',
     status: verification?.ok ? 'completed' : 'failed',
@@ -10078,6 +10775,7 @@ async function docsTableSelectPlan(context, plan) {
 
 async function docsTableVerifiedExport(context, stage, verify) {
   const verificationEnd = Math.min(context.deadline, context.driver.now() + 8_000)
+  await docsVerifyInitialSettle(context, verificationEnd)
   let retryDelay = 500
   while (true) {
     const blocks = parseDocStructure(await docsExport(context, stage, 'html'))
@@ -10218,12 +10916,14 @@ async function docsApplyCellBackground(context, edit, cellCount) {
   await docsMenuCommand(context, 'Table options')
   let state = await docsWait(context, 'table-cell-background-panel', 'tableCellBackground', {}, current => current.open)
   if (!state.backgroundPoint) {
-    if (!state.colorPoint) {
+    if (!state.colorPoint && state.colorExpanded !== true) {
       await docsClick(context, 'table-cell-background-cell', state.cellPoint)
       state = await docsWait(context, 'table-cell-background-cell', 'tableCellBackground', {}, current => current.colorPoint || current.backgroundPoint)
     }
     if (!state.backgroundPoint) {
-      await docsClick(context, 'table-cell-background-color', state.colorPoint)
+      if (state.colorExpanded !== true) {
+        await docsClick(context, 'table-cell-background-color', state.colorPoint)
+      }
       state = await docsWait(context, 'table-cell-background-color', 'tableCellBackground', {}, current => current.backgroundPoint)
     }
   }
@@ -10503,23 +11203,40 @@ function docsTextOccurrences(haystack, needle) {
 
 const DOCS_REPLACE_WAIT_MS = 8_000
 
+// Set the Find and replace query and return the first counter Docs has
+// recounted for it. Right after a query change the counter can still show the
+// PREVIOUS query's result: a replacement baseline read then took "1 of 1" for
+// text that did not exist yet, so landed replacements failed verification
+// ("Expected 2 replacement matches, found 1 of 1"), and a uniqueness read could
+// let a duplicated target through to Replace. See docsCounterSettled.
+async function docsSettledReplaceQuery(context, stage, query) {
+  const before = await docsProbe(context, stage, 'replace')
+  const previous = before.open && before.findValue !== query ? before.match?.text : undefined
+  await docsNativeText(context, stage, 'setReplaceFind', query)
+  const settled = docsCounterSettled(previous)
+  const end = Math.min(context.deadline, context.driver.now() + DOCS_REPLACE_WAIT_MS)
+  let latest
+  while (context.driver.now() < end) {
+    latest = await docsProbe(context, stage, 'replace')
+    if (settled(latest.open && latest.findValue === query ? latest.match?.text : undefined, context.driver.now())) return latest
+    await context.driver.sleep(60)
+  }
+  throw docsFailure(stage, 'DOCS_WAIT_TIMEOUT', `Find and replace did not settle on a recounted counter for ${JSON.stringify(query.slice(0, 80))} (last ${latest?.match?.text ?? 'unknown'})`)
+}
+
 async function docsApplyReplacement(context, text, replacement) {
-  await docsNativeText(context, 'replace-query', 'setReplaceFind', text)
-  const found = await docsWait(context, 'replace-query', 'replace', {}, state => state.findValue === text && state.match !== undefined, DOCS_REPLACE_WAIT_MS)
+  const found = await docsSettledReplaceQuery(context, 'replace-query', text)
   if (found.match.total !== 1 || found.match.current !== 1) {
     throw docsFailure('replace-match', 'DOCS_MATCH_NOT_UNIQUE', `Expected normalized 1 of 1, found ${found.match.text}`)
   }
   let replacementBaseline = 0
   if (replacement) {
-    await docsNativeText(context, 'replacement-baseline', 'setReplaceFind', replacement)
-    const baseline = await docsWait(context, 'replacement-baseline', 'replace', {}, state => (
-      state.findValue === replacement && state.match !== undefined
-    ), DOCS_REPLACE_WAIT_MS)
+    const baseline = await docsSettledReplaceQuery(context, 'replacement-baseline', replacement)
     replacementBaseline = baseline.match.total
-    await docsNativeText(context, 'replace-query-restore', 'setReplaceFind', text)
-    await docsWait(context, 'replace-query-restore', 'replace', {}, state => (
-      state.findValue === text && state.match?.current === 1 && state.match.total === 1
-    ), DOCS_REPLACE_WAIT_MS)
+    const restored = await docsSettledReplaceQuery(context, 'replace-query-restore', text)
+    if (restored.match.total !== 1 || restored.match.current !== 1) {
+      throw docsFailure('replace-query-restore', 'DOCS_MATCH_NOT_UNIQUE', `Expected normalized 1 of 1 after restoring the query, found ${restored.match.text}`)
+    }
   }
   await docsNativeText(context, 'replacement-value', 'setReplaceWith', replacement)
   const ready = await docsWait(context, 'replace-input', 'replace', {}, state => (
@@ -10533,13 +11250,13 @@ async function docsApplyReplacement(context, text, replacement) {
   }
   const verified = await docsWait(context, 'verify-replacement', 'replace', {}, state => (
     (state.findValue === text && state.match?.total === expectedOldMatches)
-      || (replacement && state.findValue === replacement && state.match.total === expectedNewMatches)
+      || (replacement && state.findValue === replacement && state.match?.total === expectedNewMatches)
   ), DOCS_REPLACE_WAIT_MS)
   if (!replacement) return { matchCount: 0 }
   if (verified.findValue === replacement) {
     if (expectedNewMatches !== replacementBaseline) return { matchCount: verified.match.total }
     await docsCloseReplace(context)
-    const oldText = await docsOpenFind(context, text)
+    const oldText = await docsOpenFind(context, text, { holdPrevious: true })
     if (oldText.match.total !== expectedOldMatches) {
       throw docsFailure('verify-replacement', 'DOCS_VERIFY_FAILED', `Expected ${expectedOldMatches} old-text matches, found ${oldText.match.text}`)
     }
@@ -10547,7 +11264,7 @@ async function docsApplyReplacement(context, text, replacement) {
     return { matchCount: expectedNewMatches }
   }
   await docsCloseReplace(context)
-  const replacementState = await docsOpenFind(context, replacement)
+  const replacementState = await docsOpenFind(context, replacement, { holdPrevious: true })
   if (replacementState.match.total !== expectedNewMatches) {
     throw docsFailure('verify-replacement', 'DOCS_VERIFY_FAILED', `Expected ${expectedNewMatches} replacement matches, found ${replacementState.match.text}`)
   }

@@ -1237,19 +1237,22 @@ test('EXECUTOR_DOWN alerts when the panel socket drops mid-marathon-turn', async
   await turn.done
 })
 
-test('a non-marathon turn never alerts, even with a hanging call', async () => {
+test('W2: a non-marathon turn also watches for hangs and closes alerts on end without ended-incomplete', async () => {
   const clock = watchClock()
   const { controller, runner, frames } = setup({ watch: clock.options })
   const turn = controller.submit({ text: 'quick task' })
   await runner.started()
   runner.event('tool/call', { callId: 'hang-1', name: 'browser_wait_for', arguments: '{}' })
-  clock.advance(400_000)
-  assert.equal(controller.watcher.tick(), null)
-  assert.equal(frames.filter(frame => frame.type === 'chat.watch').length, 0)
+  clock.advance(180_000)
+  const assessment = controller.watcher.tick()
+  assert.equal(assessment.level, 'hard')
+  assert.equal(frames.filter(frame => frame.type === 'chat.watch' && frame.kind === 'TOOL_HANG' && frame.state === 'open').length, 1)
   runner.toolResult({ callId: 'hang-1' })
   runner.current.resolve('done')
   await turn.done
-  assert.deepEqual(frames.find(frame => frame.type === 'chat.done').watch, { checks: 0, alerts: 0, usage: 0 })
+  assert.equal(frames.filter(frame => frame.type === 'chat.watch' && frame.kind === 'ended-incomplete').length, 0)
+  assert.deepEqual(frames.find(frame => frame.type === 'chat.done').watch, { checks: 1, alerts: 1, usage: 0 })
+  assert.equal(controller.watchState().open, null)
 })
 
 test('a marathon turn ending unfinished emits ended-incomplete; a clean one does not', async () => {

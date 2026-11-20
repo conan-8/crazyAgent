@@ -12,7 +12,7 @@ import { textStreamDeltaAction, hasLeakedReplyRow, removeLeakedReplyRows } from 
 import { ClientLogger } from './logger.js'
 import { renderMarkdown } from './markdown.js'
 import { createPlanPanelModel, renderPlanPanel } from './plan-panel.js'
-import { watchNotice, renderWatchRow, watchIsActionable } from './watch-row.js'
+import { watchNotice, watchNoticeFromOpen, renderWatchRow, renderWatchCard, watchIsActionable } from './watch-row.js'
 import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protocol.js'
 import { matchSlashCommands, nextSlashIndex, resolveSlashCommand, slashQuery } from './slash.js'
 import { completedUpdateNotice, settingsUpdateDetails, updateNotice } from './update-notice.js'
@@ -98,7 +98,7 @@ let llmState = { provider: 'openrouter', baseUrl: DEFAULT_MODEL_BASE_URL, model:
 /** @type {{configured: boolean, source: string}} */
 let credentialState = { configured: false, source: 'none' }
 /** Companion-owned behavior settings, mirrored from chat.hello / settings.updated. */
-let companionSettings = { confirmIrreversible: false }
+let companionSettings = { confirmIrreversible: false, watchAutoSteer: true }
 /** The open approval request shown in the confirm card, if any. */
 let confirmRequest = null
 /** @type {{baseUrl: string, models: Array<Record<string, any>>, loading: boolean, error: string}} */
@@ -189,6 +189,7 @@ const els = {
   settingQuality: $('setting-quality'),
   settingAutoCapture: $('setting-autocapture'),
   settingConfirmIrreversible: $('setting-confirm-irreversible'),
+  settingWatchAutoSteer: $('setting-watch-auto-steer'),
   settingsVersion: $('settings-version'),
   settingsUpdated: $('settings-updated'),
   usageCard: $('usage-card'),
@@ -202,6 +203,7 @@ const els = {
   settingsUsageReasoningRow: $('settings-usage-reasoning-row'),
   settingsUsageReasoning: $('settings-usage-reasoning'),
   settingsUsageSince: $('settings-usage-since'),
+  watchCard: $('watch-card'),
   confirmCard: $('confirm-card'),
   confirmAction: $('confirm-card-action'),
   confirmTarget: $('confirm-card-target'),
@@ -603,6 +605,37 @@ function applyMarathonState(value) {
       lastVerdict: typeof watcher.lastVerdict === 'string' ? watcher.lastVerdict : null,
     },
   }
+  if (!marathonState.enabled && watchAlert?.kind === 'ended-incomplete') {
+    syncWatchAlert(null)
+    return
+  }
+  renderMarathonChip()
+}
+
+function watchActionHandlers(notice) {
+  if (!notice) return {}
+  return {
+    onStop: () => stopTurn(),
+    onSteer: () => {
+      els.input.focus({ preventScroll: true })
+      toast(busy ? 'Type a steer message and send — it replaces the running turn' : 'Type a message and send')
+    },
+    onDismiss: () => {
+      if (!connected) {
+        toast('Not connected to the companion')
+        return
+      }
+      if (sendFrame({ v: PROTOCOL_VERSION, type: 'marathon.watch.ack', id: notice.id })) {
+        logger.log('ui.watch.ack', { id: notice.id, kind: notice.kind }, 'info')
+      }
+    },
+  }
+}
+
+/** Keep the pinned sidebar watch card and marathon chip in sync with the active alert. */
+function syncWatchAlert(notice) {
+  watchAlert = watchIsActionable(notice) ? notice : null
+  renderWatchCard(els.watchCard, watchAlert, watchActionHandlers(watchAlert))
   renderMarathonChip()
 }
 
@@ -622,10 +655,10 @@ function toggleMarathon() {
 }
 
 /**
- * A marathon watch notice (§3.5). Render/update a transcript row keyed by id;
- * open actionable alerts show Stop / Steer… / It's fine and amber the chip;
- * recovered/dismissed notices collapse the row and clear the chip alert. The
- * row is ordinary transcript DOM, so history saves it like any other row.
+ * A watch notice. Render/update a durable transcript row at the turn root
+ * (never inside a collapsible step body) and mirror actionable alerts into the
+ * pinned sidebar Watch Card above the composer; recovered/dismissed/closed
+ * notices collapse the row and hide the card.
  * @param {Record<string, any>} frame
  */
 function handleWatch(frame) {
@@ -635,27 +668,13 @@ function handleWatch(frame) {
   let root = els.activityLog.querySelector(`.watch-row[data-watch-id="${CSS.escape(notice.id)}"]`)
   if (!root) {
     root = document.createElement('div')
-    activityContainer().appendChild(root)
+    // Place on the turn root (sibling of .agent-turn-steps), never inside
+    // currentStep.bodyEl, so collapsing a completed step never hides the row.
+    ;(currentTurn?.root ?? els.activityLog).appendChild(root)
     enterRow(root)
   }
-  renderWatchRow(root, notice, {
-    onStop: () => stopTurn(),
-    onSteer: () => {
-      els.input.focus({ preventScroll: true })
-      toast(busy ? 'Type a steer message and send — it replaces the running turn' : 'Type a message and send')
-    },
-    onDismiss: () => {
-      if (!connected) {
-        toast('Not connected to the companion')
-        return
-      }
-      if (sendFrame({ v: PROTOCOL_VERSION, type: 'marathon.watch.ack', id: notice.id })) {
-        logger.log('ui.watch.ack', { id: notice.id, kind: notice.kind }, 'info')
-      }
-    },
-  })
-  watchAlert = watchIsActionable(notice) ? notice : null
-  renderMarathonChip()
+  renderWatchRow(root, notice, watchActionHandlers(notice))
+  syncWatchAlert(watchIsActionable(notice) ? notice : null)
   if (notice.state === 'open' && notice.kind !== 'info') {
     els.activityLatest.textContent = activityPreview(`Watch: ${notice.reason}`)
     scrollActivity()
@@ -1341,6 +1360,7 @@ function openSettings() {
   els.settingModel.value = llmState.model?.id || settings.modelId || ''
   els.settingRememberKey.checked = true
   els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
+  if (els.settingWatchAutoSteer) els.settingWatchAutoSteer.checked = companionSettings.watchAutoSteer !== false
   setEffortSelection(llmState.reasoningEffort ?? 'auto')
   renderProviderStatus()
   els.settingsModal.classList.remove('hidden')
@@ -2848,11 +2868,18 @@ function handleFrame(frame) {
       if (frame.llm && typeof frame.llm === 'object') llmState = { ...llmState, ...frame.llm }
       if (frame.credentials && typeof frame.credentials === 'object') credentialState = { ...credentialState, ...frame.credentials }
       if (frame.settings && typeof frame.settings === 'object') {
-        companionSettings = { confirmIrreversible: frame.settings.confirmIrreversible === true }
-        if (!els.settingsModal.classList.contains('hidden')) els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
+        companionSettings = {
+          confirmIrreversible: frame.settings.confirmIrreversible === true,
+          watchAutoSteer: frame.settings.watchAutoSteer !== false,
+        }
+        if (!els.settingsModal.classList.contains('hidden')) {
+          els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
+          if (els.settingWatchAutoSteer) els.settingWatchAutoSteer.checked = companionSettings.watchAutoSteer
+        }
       }
-      // The hello carries the authoritative switch state (reconnect resync).
+      // The hello carries the authoritative switch state and open watch alert (reconnect resync).
       applyMarathonState(frame.marathon)
+      syncWatchAlert(watchNoticeFromOpen(frame.watch?.open))
       applyUpdateStatus(frame.update)
       applyLifetimeUsage(frame.lifetimeUsage)
       if (llmState.model?.id) {
@@ -2975,9 +3002,16 @@ function handleFrame(frame) {
       return
     case 'settings.updated':
       if (frame.ok === true && frame.settings && typeof frame.settings === 'object') {
-        companionSettings = { confirmIrreversible: frame.settings.confirmIrreversible === true }
+        companionSettings = {
+          confirmIrreversible: frame.settings.confirmIrreversible === true,
+          watchAutoSteer: frame.settings.watchAutoSteer !== false,
+        }
         els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
-        logger.log('settings.updated', { confirmIrreversible: companionSettings.confirmIrreversible }, 'info')
+        if (els.settingWatchAutoSteer) els.settingWatchAutoSteer.checked = companionSettings.watchAutoSteer
+        logger.log('settings.updated', {
+          confirmIrreversible: companionSettings.confirmIrreversible,
+          watchAutoSteer: companionSettings.watchAutoSteer,
+        }, 'info')
       } else {
         toast(typeof frame.error === 'string' ? frame.error : 'The companion refused the settings change')
       }
@@ -4099,8 +4133,8 @@ function clearChat() {
   conversationStopped = false
   // The marathon chip is companion-owned: it clears when marathon.state off
   // arrives after chat.new, never optimistically here. The local watch-alert
-  // mirror clears with the transcript (the rows are removed by clearActivity).
-  watchAlert = null
+  // mirror and pinned card clear with the transcript (rows removed by clearActivity).
+  syncWatchAlert(null)
   els.app.classList.remove('new-chat-draft')
   clearTimeout(queueDispatchTimer)
   queueDispatchTimer = null
@@ -4425,13 +4459,20 @@ els.settingsSave.addEventListener('click', () => {
   void saveSettings()
   els.settingApiKey.value = ''
   closeSettings()
-  // The confirmation setting lives in the companion, not in local storage.
+  // Behavior settings live in the companion, not in local storage.
   const confirmChanged = els.settingConfirmIrreversible.checked !== companionSettings.confirmIrreversible
-  if (confirmChanged) {
+  const watchAutoSteerChecked = els.settingWatchAutoSteer ? els.settingWatchAutoSteer.checked : companionSettings.watchAutoSteer
+  const watchSteerChanged = watchAutoSteerChecked !== companionSettings.watchAutoSteer
+  if (confirmChanged || watchSteerChanged) {
     if (connected) {
-      sendFrame({ v: PROTOCOL_VERSION, type: 'settings.update', confirmIrreversible: els.settingConfirmIrreversible.checked })
+      sendFrame({
+        v: PROTOCOL_VERSION,
+        type: 'settings.update',
+        ...(confirmChanged ? { confirmIrreversible: els.settingConfirmIrreversible.checked } : {}),
+        ...(watchSteerChanged ? { watchAutoSteer: watchAutoSteerChecked } : {}),
+      })
     } else {
-      toast('Connect to the companion to change the confirmation setting')
+      toast('Connect to the companion to change behavior settings')
     }
   }
   if (reconnectNeeded || !connected) {

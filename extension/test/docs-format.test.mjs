@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { planDocsFormatEdits, verifyDocsFormatEdits } from '../sidepanel/docs-format.js'
+import { parseDocStructure, parseInheritedTextMarks } from '../sidepanel/docs-structure.js'
 
 const NORMAL = {
   bold: false,
@@ -424,4 +425,75 @@ test('Docs format verification detects unrelated link removal and destination ch
     assert.equal(result.failure.actual, href ?? null)
     assert.equal(result.failure.start, 6)
   }
+})
+
+// Element rules copied from a live Docs export (2026-11-19).
+const ELEMENT_RULES = 'p{margin:0;color:#000000;font-size:11pt;font-family:"Arial"}'
+  + 'li{color:#000000;font-size:11pt;font-family:"Arial"}'
+  + 'h1{padding-top:12pt;color:#000000;font-weight:700;font-size:24pt;padding-bottom:12pt;font-family:"Arial"}'
+const exportHtml = (classes, body) => (
+  `<html><head><style type="text/css">${classes}${ELEMENT_RULES}</style></head><body class="c0 doc-content">${body}</body></html>`
+)
+const FULL_ROBOTO = 'color:#000000;font-weight:400;text-decoration:none;vertical-align:baseline;font-size:11pt;font-family:"Roboto";font-style:normal'
+
+function verifyExports(baselineHtml, finalHtml, edits, withElementRules = true) {
+  const baseline = parseDocStructure(baselineHtml)
+  const final = parseDocStructure(finalHtml)
+  const plans = planDocsFormatEdits(baseline, edits)
+  return verifyDocsFormatEdits(baseline, final, plans, edits, edits.length, withElementRules
+    ? { baseline: parseInheritedTextMarks(baselineHtml), final: parseInheritedTextMarks(finalHtml) }
+    : undefined)
+}
+
+test('Docs format verification compares an inherited size with an equal explicit size as unchanged', () => {
+  // Field log 2026-11-19: bold, italic, underline, color, and highlight all
+  // landed, but Docs re-split the untouched text without its redundant explicit
+  // 11pt and black, and the batch reported partial 0/5 on an "Unrequested
+  // font_size change" from 11 to null (inherited from p{} as 11pt).
+  const baselineHtml = exportHtml(`.c3{${FULL_ROBOTO}}`, '<p class="c1"><span class="c3">It showcases bold styling.</span></p>')
+  const finalHtml = exportHtml(
+    `.c13{${FULL_ROBOTO}}.c17{font-weight:400;font-family:"Roboto"}.c19{font-weight:700;font-family:"Roboto"}`,
+    '<p class="c1"><span class="c17">It showcases </span><span class="c19">bold</span><span class="c13"> styling.</span></p>',
+  )
+  const edits = [{ text: 'bold', bold: true }]
+  const raw = verifyExports(baselineHtml, finalHtml, edits, false)
+  assert.equal(raw.failure?.code, 'DOCS_FORMAT_COLLATERAL', 'without element rules the old false collateral reproduces')
+  assert.equal(raw.failure?.attribute, 'font_size')
+  const result = verifyExports(baselineHtml, finalHtml, edits)
+  assert.equal(result.ok, true, JSON.stringify(result))
+})
+
+test('Docs format verification still reports a rendered change behind an inherited value', () => {
+  // The explicit 14pt disappears from untouched text, which now renders at the
+  // p{} 11pt: a real collateral change, not a representation difference.
+  const baselineHtml = exportHtml('.c3{font-weight:400;font-size:14pt;font-family:"Roboto"}', '<p class="c1"><span class="c3">Keep this size. Target</span></p>')
+  const finalHtml = exportHtml(
+    '.c5{font-weight:400;font-family:"Roboto"}.c6{font-weight:700;font-size:14pt;font-family:"Roboto"}',
+    '<p class="c1"><span class="c5">Keep this size. </span><span class="c6">Target</span></p>',
+  )
+  const result = verifyExports(baselineHtml, finalHtml, [{ text: 'Target', bold: true }])
+  assert.equal(result.ok, false, JSON.stringify(result))
+  assert.equal(result.failure.code, 'DOCS_FORMAT_COLLATERAL')
+  assert.equal(result.failure.attribute, 'font_size')
+  assert.equal(result.failure.expected, 14)
+  assert.equal(result.failure.actual, 11)
+  assert.equal(result.failure.start, 0)
+})
+
+test('Docs format verification reads a requested size that Docs left to the heading rule', () => {
+  // Setting a heading word to the h1{} size can leave its span without an
+  // explicit size; that is the requested 24pt, not a missing one.
+  const baselineHtml = exportHtml('.c4{font-weight:700;font-size:20pt;font-family:"Arial"}', '<h1 class="c2"><span class="c4">Section One</span></h1>')
+  const finalHtml = exportHtml('.c7{font-weight:700;font-family:"Arial"}', '<h1 class="c2"><span class="c7">Section One</span></h1>')
+  const result = verifyExports(baselineHtml, finalHtml, [{ text: 'Section One', font_size: 24 }])
+  assert.equal(result.ok, true, JSON.stringify(result))
+})
+
+test('Docs format verification reads a heading weight that Docs left to the element rule', () => {
+  // Field log 2026-11-18: "Section Three" was already bold through h1{font-weight:700}
+  // with a span of only font-size:20pt, yet the batch failed with "Edit 2 attribute
+  // bold diverged ... expected true, actual false".
+  const html = exportHtml('.c23{font-size:20pt}', '<h1 class="c2"><span class="c23">Section Three</span></h1>')
+  const result = verifyExports(html, html, [{ text: 'Section Three', bold: true, font_size: 20 }])
+  assert.equal(result.ok, true, JSON.stringify(result))
 })

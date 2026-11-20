@@ -187,7 +187,13 @@ data class MarathonPlan(
 }
 
 /** The open watch alert exactly as the `/state` projection carries it. */
-data class WatchOpen(val id: String, val kind: String, val at: String?, val reason: String)
+data class WatchOpen(
+    val id: String,
+    val kind: String,
+    val at: String?,
+    val reason: String,
+    val steerText: String? = null,
+)
 
 /** The watcher's per-chat counters and last check (M3; verdicts arrive with M4). */
 data class MarathonWatch(
@@ -222,6 +228,7 @@ data class WatchNotice(
     val state: String,
     val reason: String,
     val at: String?,
+    val steerText: String? = null,
 ) {
     /**
      * Open and actionable: the hard alert kinds, the M4 judge verdict kinds

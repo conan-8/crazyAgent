@@ -238,6 +238,7 @@ function semantic(state) {
     longMoves: state.longPress.moves,
     rerenders: state.rerenders,
     selection: state.selection,
+    follow: [state.follow.home, state.follow.binA, state.follow.binB],
   }
 }
 
@@ -556,15 +557,73 @@ try {
     to_label: label(view, 'Pointer Beta').id,
     to_position: 'top',
   })
-  assert.equal(sourceMoved.error.code, 'DRAG_STALE_TARGET', JSON.stringify(sourceMoved.error))
-  assert.equal(sourceMoved.error.mutationPossible, true)
+  result = successful(sourceMoved)
+  assert.equal(result.observed, 'changed', JSON.stringify(result.drag))
   current = await state()
-  assert.deepEqual(current.pointerOrder, ['Alpha', 'Beta', 'Gamma'])
+  assert.deepEqual(current.pointerOrder, ['Alpha', 'Gamma', 'Beta'])
   assert.deepEqual(current.midDragEvents, ['source-move'])
+  assert.equal(current.pointerCommits, 1)
+  assert.equal(current.pointerLastDrop.target, 'Beta')
+  assert.equal(current.html5Parent, 'html5-origin')
+  log('PASS a held source that moves mid-drag still drops on the measured destination')
+
+  view = await reset('#pointer-gamma')
+  await fixtureEvaluate('window.__dragTestMid = "source-detach"')
+  const sourceDetached = await call('browser_drag', {
+    label: label(view, 'Pointer Gamma').id,
+    to_label: label(view, 'Pointer Beta').id,
+    to_position: 'top',
+  })
+  assert.equal(sourceDetached.error?.code, 'DRAG_STALE_TARGET', JSON.stringify(sourceDetached))
+  assert.equal(sourceDetached.error.mutationPossible, true)
+  assert.match(sourceDetached.error.message, /source element was replaced or removed before the drop/)
+  current = await state()
+  assert.deepEqual(current.pointerOrder, ['Alpha', 'Beta'], 'only the fixture itself removed Gamma')
+  assert.deepEqual(current.midDragEvents, ['source-detach'])
   assert.equal(current.pointerCommits, 0)
-  assert.equal(current.pointerLastDrop.x, 0)
-  assert.ok(current.pointerEvents[0] > 0 && current.pointerEvents[2] > 0)
-  log('PASS mid-drag source movement cancels without drop or collateral')
+  log('PASS a held source removed mid-drag cancels without a drop')
+
+  // Mirrors the Browser Gauntlet mail sorter: unlabelled letters that follow the
+  // pointer (covering the bin under it), pressed on their text by coordinates.
+  const followPoints = (letterId, binId) => fixtureEvaluate(`(() => {
+    const text = document.querySelector('#${letterId} b').getBoundingClientRect()
+    const bin = document.getElementById('${binId}').getBoundingClientRect()
+    return {
+      from: { x: text.left + text.width / 2, y: text.top + text.height / 2 },
+      to: { x: bin.left + bin.width / 2, y: bin.top + bin.height * 0.65 },
+    }
+  })()`)
+  view = await reset('#follow-home')
+  let follow = await followPoints('follow-self', 'follow-bin-a')
+  const followed = await call('browser_drag', { x: follow.from.x, y: follow.from.y, to_x: follow.to.x, to_y: follow.to.y, space: 'css' })
+  result = successful(followed)
+  assert.equal(result.observed, 'changed', JSON.stringify(result.drag))
+  assert.equal(result.drag.dispatch.mode, 'pointer')
+  current = await state()
+  assert.deepEqual(current.follow, { home: ['clone'], binA: ['self'], binB: [], drops: 1, cancels: 0, clones: 0 })
+  assert.deepEqual(current.pointerOrder, ['Alpha', 'Beta', 'Gamma'])
+  log('PASS pointer-follow letter that covers its bin drops into it')
+
+  view = await reset('#follow-home')
+  follow = await followPoints('follow-clone', 'follow-bin-b')
+  const overlaid = await call('browser_drag', { x: follow.from.x, y: follow.from.y, to_x: follow.to.x, to_y: follow.to.y, space: 'css' })
+  result = successful(overlaid)
+  assert.equal(result.observed, 'changed', JSON.stringify(result.drag))
+  current = await state()
+  assert.deepEqual(current.follow, { home: ['self'], binA: [], binB: ['clone'], drops: 1, cancels: 0, clones: 0 })
+  log('PASS same-text clone overlay over the bin is drag feedback, not a cover')
+
+  view = await reset('#follow-home')
+  await fixtureEvaluate('window.__dragTestMid = "cover-destination"')
+  follow = await followPoints('follow-self', 'follow-bin-a')
+  const coveredDrop = await call('browser_drag', { x: follow.from.x, y: follow.from.y, to_x: follow.to.x, to_y: follow.to.y, space: 'css' })
+  assert.equal(coveredDrop.error?.code, 'DRAG_STALE_TARGET', JSON.stringify(coveredDrop))
+  assert.equal(coveredDrop.error.mutationPossible, true)
+  assert.match(coveredDrop.error.message, /destination point is covered by div "Unrelated overlay" before the drop/)
+  current = await state()
+  assert.deepEqual(current.midDragEvents, ['cover-destination'])
+  assert.deepEqual(current.follow, { home: ['self', 'clone'], binA: [], binB: [], drops: 0, cancels: 1, clones: 0 })
+  log('PASS an unrelated element covering the bin mid-drag still cancels without a drop')
 
   view = await reset('#pointer-gamma')
   await fixtureEvaluate('window.__dragTestMid = "destination-detach"')

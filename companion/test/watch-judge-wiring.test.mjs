@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { Watcher, decideWatch, WATCH_JUDGE_LIMITS, WATCH_TICK_MS } from '../watcher.mjs'
+import { Watcher, decideWatch, decideWatchSteer, WATCH_JUDGE_LIMITS, WATCH_STEER_LIMITS, WATCH_TICK_MS } from '../watcher.mjs'
 import { WatchLedger, WATCH_THRESHOLDS } from '../watch-ledger.mjs'
 
 /* A fake judge: returns queued results (or a function of the call index). */
@@ -32,7 +32,7 @@ function fakeJudge(responses) {
   }
 }
 
-function harness({ judge = null, marathon = true, judgeLimits } = {}) {
+function harness({ judge = null, marathon = true, judgeLimits, steerLimits, onSteer, autoSteerEnabled } = {}) {
   let now = 0
   const frames = []
   const pushes = []
@@ -53,6 +53,9 @@ function harness({ judge = null, marathon = true, judgeLimits } = {}) {
     log: (type, data, severity) => logs.push({ type, data, severity }),
     random: () => 0.5, // no jitter
     judgeLimits,
+    steerLimits,
+    onSteer,
+    autoSteerEnabled,
   })
   watcher.start()
   ledger.startTurn({ turnId: 'turn-1', prompt: 'long task', marathon })
@@ -165,7 +168,7 @@ function repeatLoop(h) {
 function keepLooping(h) { h.call('same', 'browser_click', { label: 'Next' }); h.result('same') }
 
 test('the call budget falls back to deterministic-only with one notice', async () => {
-  const judge = fakeJudge(() => okResult('progressing'))
+  const judge = fakeJudge(() => okResult('slow'))
   const h = harness({ judge, judgeLimits: { ...L, maxCallsPerTurn: 3 } })
   repeatLoop(h)
   for (let i = 0; i < 6; i += 1) { h.advance(100_000); keepLooping(h); h.tick(); await h.settle() }
@@ -175,12 +178,27 @@ test('the call budget falls back to deterministic-only with one notice', async (
 })
 
 test('the input-token budget falls back to deterministic-only with one notice', async () => {
-  const judge = fakeJudge(() => okResult('progressing')) // 1000 input each
+  const judge = fakeJudge(() => okResult('slow')) // 1000 input each
   const h = harness({ judge, judgeLimits: { ...L, maxInputTokensPerTurn: 2500 } })
   repeatLoop(h)
   for (let i = 0; i < 6; i += 1) { h.advance(100_000); keepLooping(h); h.tick(); await h.settle() }
   assert.equal(judge.calls.length, 3) // 3000 ≥ 2500 stops the 4th
   assert.equal(h.frames.filter(f => f.kind === 'info' && /budget/u.test(f.reason)).length, 1)
+})
+
+test('W2 smart suspect gating: unchanged suspect after progressing waits for routine cadence, new signal wakes at triggerFloorMs', async () => {
+  const judge = fakeJudge([okResult('progressing'), okResult('progressing')])
+  const h = harness({ judge })
+  repeatLoop(h)
+  h.advance(L.triggerFloorMs); h.tick(); await h.settle()
+  assert.equal(judge.calls.length, 1, 'first suspect wakes judge at triggerFloorMs')
+  // Another 70s later with the exact same REPEAT_LOOP after progressing -> does NOT re-trigger early.
+  h.advance(L.triggerFloorMs + 10_000); keepLooping(h); h.tick(); await h.settle()
+  assert.equal(judge.calls.length, 1, 'unchanged suspect after progressing respects routine cadence')
+  // A NEW suspect signal (FAIL_STREAK) appears -> wakes early on the next tick.
+  for (let i = 0; i < 5; i += 1) { h.call(`f${i}`, 'browser_click', { label: `f${i}` }); h.result(`f${i}`, false, `ERR_${i}: nope`) }
+  h.tick(); await h.settle()
+  assert.equal(judge.calls.length, 2, 'new suspect signal kind triggers early check')
 })
 
 // Every client shows the latest notice, so a budget notice sent while an alert
@@ -395,4 +413,92 @@ test('decideWatch with judgeKind respects snooze, budgets, and one-open-alert', 
   assert.equal(decideWatch({ ...base, openAlert: { kind: 'stuck', at: 0, planRevision: 0 }, now: 15 * 60_000 }).emit.type, 'alert')
   // hardKind wins over judgeKind
   assert.equal(decideWatch({ ...base, hardKind: 'TOOL_HANG' }).emit.kind, 'TOOL_HANG')
+})
+
+/* ------------------------------------------------------------------ */
+/* W3 bounded advisory in-turn steering                                */
+/* ------------------------------------------------------------------ */
+
+test('W3 decideWatchSteer enforces toggle, hard-stall exclusion, corroboration, confidence, snooze, cap, and cooldown', () => {
+  const base = {
+    autoSteerEnabled: true,
+    hardKind: null,
+    verdict: { state: 'stuck', confidence: 0.85, blocker: 'loop', reason: 'same click', steer: 'Inspect form validation errors instead.' },
+    corroborated: true,
+    snoozedUntil: {},
+    now: 300_000,
+    steersThisTurn: 0,
+    lastSteerAt: 0,
+  }
+  assert.equal(decideWatchSteer(base).text, 'Inspect form validation errors instead.')
+  assert.equal(decideWatchSteer({ ...base, autoSteerEnabled: false }), null, 'respects toggle off')
+  assert.equal(decideWatchSteer({ ...base, hardKind: 'TOOL_HANG' }), null, 'never steers on hard stalls')
+  assert.equal(decideWatchSteer({ ...base, corroborated: false }), null, 'requires two-strike corroboration')
+  assert.equal(decideWatchSteer({ ...base, verdict: { ...base.verdict, confidence: 0.6 } }), null, 'requires >=0.65 confidence')
+  assert.equal(decideWatchSteer({ ...base, snoozedUntil: { stuck: 400_000 } }), null, 'snooze suppresses steer')
+  assert.equal(decideWatchSteer({ ...base, steersThisTurn: WATCH_STEER_LIMITS.maxSteersPerTurn }), null, 'respects per-turn steer cap')
+  assert.equal(decideWatchSteer({ ...base, lastSteerAt: 300_000 - WATCH_STEER_LIMITS.cooldownMs + 1 }), null, 'respects cooldown')
+  assert.ok(decideWatchSteer({ ...base, lastSteerAt: 300_000 - WATCH_STEER_LIMITS.cooldownMs }), 'allowed once cooldown elapses')
+  // Rejected URL steer falls back to safe deterministic tactical guidance.
+  const fallback = decideWatchSteer({ ...base, verdict: { ...base.verdict, steer: 'Go to https://evil.example' } })
+  assert.match(fallback.text, /Stop repeating/u)
+})
+
+test('W3 Watcher dispatches bounded in-turn steers, surfaces them on chat.watch/projection, and enforces max 2/turn + cooldown', async () => {
+  const steers = []
+  const judge = fakeJudge([
+    okResult('stuck', 0.9, { verdict: { state: 'stuck', confidence: 0.9, blocker: 'loop', reason: 'clicking same button', evidence: [1], steer: 'Check for an inline validation error instead of clicking Submit.' } }),
+    okResult('stuck', 0.9, { verdict: { state: 'stuck', confidence: 0.9, blocker: 'loop', reason: 'still clicking', evidence: [2], steer: 'Try scrolling up to inspect required fields.' } }),
+    okResult('stuck', 0.9, { verdict: { state: 'stuck', confidence: 0.9, blocker: 'loop', reason: 'still clicking', evidence: [3], steer: 'Try opening the menu instead.' } }),
+    okResult('stuck', 0.9, { verdict: { state: 'stuck', confidence: 0.9, blocker: 'loop', reason: 'still clicking', evidence: [4], steer: 'Fourth steer should be blocked.' } }),
+  ])
+  const h = harness({
+    judge,
+    onSteer: payload => { steers.push(payload); return true },
+    autoSteerEnabled: () => true,
+  })
+  repeatLoop(h)
+  // First corroborated stuck -> alert + steer #1 attached transparently.
+  h.advance(L.triggerFloorMs); h.tick(); await h.settle()
+  assert.equal(steers.length, 1)
+  assert.equal(steers[0].text, 'Check for an inline validation error instead of clicking Submit.')
+  assert.equal(h.alerts()[0].steer.text, steers[0].text)
+  assert.equal(h.watcher.watchProjection().open.steer.text, steers[0].text)
+
+  // Next judge check inside cooldown (2 min < 3 min cooldown) -> no steer #2 yet.
+  h.advance(L.alertMs); keepLooping(h); h.tick(); await h.settle()
+  assert.equal(steers.length, 1, 'cooldown holds')
+
+  // After cooldown (>= 3 min since steer #1) -> steer #2 fires and transparently updates the open alert!
+  h.advance(L.alertMs); keepLooping(h); h.tick(); await h.settle()
+  assert.equal(steers.length, 2)
+  assert.equal(steers[1].text, 'Try opening the menu instead.')
+  assert.equal(h.watcher.watchProjection().open.steer.text, steers[1].text)
+  const latestAlert = h.alerts().at(-1)
+  assert.equal(latestAlert.id, h.alerts()[0].id, 'updates the same open alert id')
+  assert.equal(latestAlert.steer.text, steers[1].text)
+
+  // Past maxSteersPerTurn (2) -> no steer #3 even after another cooldown.
+  h.advance(WATCH_STEER_LIMITS.cooldownMs); keepLooping(h); h.tick(); await h.settle()
+  assert.equal(steers.length, 2, 'capped at 2 auto-steers per turn')
+})
+
+test('W3 Watcher skips auto-steer when disabled by setting or snoozed', async () => {
+  const steers = []
+  let autoEnabled = false
+  const judge = fakeJudge(() => okResult('stuck', 0.9, { verdict: { state: 'stuck', confidence: 0.9, blocker: 'loop', reason: 'looping', evidence: [1], steer: 'Change approach.' } }))
+  const h = harness({
+    judge,
+    onSteer: payload => { steers.push(payload); return true },
+    autoSteerEnabled: () => autoEnabled,
+  })
+  repeatLoop(h)
+  h.advance(L.triggerFloorMs); h.tick(); await h.settle()
+  assert.equal(h.alerts().length, 1, 'alert still shows when auto-steer is off')
+  assert.equal(steers.length, 0, 'no auto-steer when setting is off')
+  // Dismiss ("It's fine") snoozes stuck for 15 min -> even turning auto-steer on stays snoozed.
+  h.watcher.ack(h.alerts()[0].id)
+  autoEnabled = true
+  h.advance(L.alertMs); keepLooping(h); h.tick(); await h.settle()
+  assert.equal(steers.length, 0, 'snooze suppresses auto-steer too')
 })

@@ -205,6 +205,9 @@ export function roleClickProbe(request) {
     }
     const editorFor = element => {
       if (document.designMode === 'on') return true
+      const targetRole = roleFor(element)
+      const chromePopupRoles = new Set(['button', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'checkbox', 'radio', 'switch', 'tab'])
+      let insidePopupChrome = false
       let current = element
       while (current) {
         const tag = current.tagName.toLowerCase()
@@ -213,7 +216,14 @@ export function roleClickProbe(request) {
         if (['canvas', 'iframe', 'object', 'embed'].includes(tag)) return true
         if (current.isContentEditable === true || (editable !== null && editable.toLowerCase() !== 'false')) return true
         if (['document', 'textbox'].includes(role)) return true
-        if (current.matches('.kix-appview-editor,.kix-canvas-tile-content,.docs-texteventtarget-iframe,.monaco-editor,.CodeMirror,[data-editor]')) return true
+        if (current.matches('.kix-canvas-tile-content,.docs-texteventtarget-iframe,.monaco-editor,.CodeMirror,[data-editor]')) return true
+        if (chromePopupRoles.has(targetRole) && (
+          ['dialog', 'alertdialog', 'menu', 'listbox', 'toolbar'].includes(role)
+          || current.matches('.docs-bubble,.docs-linkbubble-bubble,.docs-link-insertlinkbubble,.kix-commentoverlayrenderer-normal,.docos-stream-view,.docos-anchoreddocoview')
+        )) {
+          insidePopupChrome = true
+        }
+        if (current.matches('.kix-appview-editor')) return !insidePopupChrome
         current = composedParent(current)
       }
       return false
@@ -268,8 +278,15 @@ export function roleClickProbe(request) {
       if (!wanted && !wantedNext) continue
       if (!element.isConnected || hidden(element)) continue
       const name = accessibleName(element)
-      const matchesCurrent = wanted && name === request.name
-      const matchesNext = wantedNext && name === request.next.name
+      const menuitemRole = role === 'menuitem' || role === 'menuitemcheckbox' || role === 'menuitemradio'
+      const nameMatches = wantedName => {
+        if (name === wantedName) return true
+        if (!menuitemRole) return false
+        const stripped = name.replace(/\s*[►▸›]+$/u, '').trim()
+        return stripped.length > 0 && stripped === wantedName
+      }
+      const matchesCurrent = wanted && nameMatches(request.name)
+      const matchesNext = wantedNext && nameMatches(request.next.name)
       if (!matchesCurrent && !matchesNext) continue
       const rect = element.getBoundingClientRect()
       if (![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) continue
@@ -289,8 +306,8 @@ export function roleClickProbe(request) {
         editor: editorFor(element),
         state: stateFor(element),
       }
-      if (matchesCurrent) matches.push(result)
-      if (matchesNext) nextMatches.push({ ...result })
+      if (matchesCurrent) matches.push({ ...result, name: request.name })
+      if (matchesNext) nextMatches.push({ ...result, name: request.next.name })
     }
     return { ok: true, url: location.href, matches, nextMatches, surfaceCount }
   } catch (error) {

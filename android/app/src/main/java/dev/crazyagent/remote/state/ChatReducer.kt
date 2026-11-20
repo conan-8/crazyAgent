@@ -99,7 +99,7 @@ object ChatReducer {
         // are journaled but not committed messages, so the projection's block is
         // the only source for a resync (M5).
         val marathon = projection.obj("marathon")?.let(::marathonProjectionOf) ?: MarathonState()
-        val watchNotice = marathon.watch.open?.let { WatchNotice(it.id, it.kind, "open", it.reason, it.at) }
+        val watchNotice = marathon.watch.open?.let { WatchNotice(it.id, it.kind, "open", it.reason, it.at, it.steerText) }
         state = state.copy(draft = projection.obj("draft")?.let(::draftOf), help = help, confirm = confirm, marathon = marathon, watchNotice = watchNotice)
         return state
     }
@@ -207,7 +207,7 @@ object ChatReducer {
                     // nor recovered is the open alert (hard kinds, judge
                     // stuck/blocked, ended-incomplete, or a future kind).
                     val open = if (notice.state == "open" && notice.kind != "info" && notice.kind != "recovered") {
-                        WatchOpen(notice.id, notice.kind, notice.at, notice.reason)
+                        WatchOpen(notice.id, notice.kind, notice.at, notice.reason, notice.steerText)
                     } else null
                     state.copy(watchNotice = notice, marathon = state.marathon.copy(watch = state.marathon.watch.copy(open = open)))
                 }
@@ -449,16 +449,18 @@ object ChatReducer {
         )
     }
 
+    private fun watchSteerTextOf(body: JsonObject): String? =
+        body.obj("steer")?.string("text")?.trim()?.takeIf { it.isNotEmpty() }?.take(300)
+
     private fun watchOpenOf(body: JsonObject): WatchOpen? {
         val id = body.string("id")?.takeIf { it.isNotEmpty() } ?: return null
-        return WatchOpen(id, body.string("kind") ?: "info", body.string("at"), body.string("reason").orEmpty())
+        return WatchOpen(id, body.string("kind") ?: "info", body.string("at"), body.string("reason").orEmpty(), watchSteerTextOf(body))
     }
 
     /**
-     * One watch notice (`remote.watch`). The card shows kind and reason; the
-     * projection's open alert carries exactly those, so a resync reconstructs
-     * the same card. Signals/blocker/source are diagnostic on the wire and are
-     * not mirrored.
+     * One watch notice (`remote.watch`). The card shows kind, reason, and any
+     * optional watcher steer note; the projection's open alert carries the same
+     * fields so a resync reconstructs the same card.
      */
     private fun watchNoticeOf(body: JsonObject): WatchNotice? {
         val id = body.string("id")?.takeIf { it.isNotEmpty() } ?: return null
@@ -468,6 +470,7 @@ object ChatReducer {
             state = body.string("state") ?: "open",
             reason = body.string("reason").orEmpty().take(500),
             at = body.string("at"),
+            steerText = watchSteerTextOf(body),
         )
     }
 

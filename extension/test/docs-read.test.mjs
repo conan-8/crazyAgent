@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { docsRead } from '../sidepanel/browser.js'
+import { docsRead, stripHtmlImageDataUris } from '../sidepanel/browser.js'
 
 const URL = 'https://docs.google.com/document/d/abc/edit'
 const HTML = '<html><head><style>.title{font-size:28pt}</style></head><body><p class="title"><span>Heading</span></p><ul><li><span>one</span></li><li><span>two</span></li></ul><p></p></body></html>'
@@ -20,7 +20,7 @@ function fakeRead(options = {}) {
     },
     fetchExport: async (url, format) => {
       calls.push({ url, format })
-      return { body: format === 'txt' ? (options.text ?? 'Heading\none\ntwo\n') : HTML }
+      return { body: format === 'txt' ? (options.text ?? 'Heading\none\ntwo\n') : (options.html ?? HTML) }
     },
     snapshot: async () => { snapshots += 1 },
   }
@@ -99,4 +99,30 @@ test('Docs read validates inputs before using the tab', async () => {
   await assert.rejects(docsRead({}, { action: 'read', unexpected: true }, fake.io), error => error.code === 'DOCS_BAD_DOCS_READ_ARGUMENT')
   assert.equal(fake.calls.length, 0)
   assert.equal(fake.snapshots(), 0)
+})
+
+test('Docs read HTML summarizes embedded base64 image data URIs so tail content stays untruncated', async () => {
+  const bigJpeg = 'A'.repeat(110_000)
+  const smallEq = 'B'.repeat(850)
+  const docHtml = `<html><body><p>Before</p><p><img src="data:image/png;base64,${smallEq}"></p><p><img alt="Fjord" style="width:288px;height:180px" src="data:image/jpeg;base64,${bigJpeg}"></p><p>Tail comments and footer</p></body></html>`
+  const fake = fakeRead({ html: docHtml })
+  const result = await docsRead({}, { action: 'read', format: 'html', max_chars: 100_000 }, fake.io)
+  assert.equal(result.docs.truncated, false)
+  assert.equal(result.docs.nextOffset, null)
+  assert.equal(result.docs.omittedImageDataCount, 2)
+  assert.equal(result.docs.omittedImageDataChars, 110_850)
+  assert.match(result.docs.content, /alt="Fjord"/)
+  assert.match(result.docs.content, /data:image\/jpeg;base64,\[omitted 110000 chars\]/)
+  assert.match(result.docs.content, /data:image\/png;base64,\[omitted 850 chars\]/)
+  assert.match(result.docs.content, /Tail comments and footer/)
+  assert.ok(result.docs.chars < 500)
+})
+
+test('stripHtmlImageDataUris leaves non-attribute text and short data URIs untouched', () => {
+  const prose = '<p>Literal text data:image/png;base64,' + 'A'.repeat(100) + ' in prose</p>'
+  const res = stripHtmlImageDataUris(prose)
+  assert.equal(res.omittedCount, 0)
+  assert.equal(res.html, prose)
+  const mismatched = '<img src="data:image/png;base64,' + 'A'.repeat(100) + '\'>'
+  assert.equal(stripHtmlImageDataUris(mismatched).omittedCount, 0)
 })

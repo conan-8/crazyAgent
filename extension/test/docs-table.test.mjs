@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { docsPageProbe, docsTable, executeOperation } from '../sidepanel/browser.js'
+import { docsPageProbe, docsPrefixDifference, docsTable, docsTableCreateVerification, executeOperation } from '../sidepanel/browser.js'
 import { docsFormatToggleEvidence, planDocsFormatEdits, verifyDocsFormatEdits } from '../sidepanel/docs-format.js'
-import { parseDocStructure } from '../sidepanel/docs-structure.js'
+import { parseDocStructure, parseInheritedTextMarks } from '../sidepanel/docs-structure.js'
 import {
   docsTableCreateHtml,
   docsTableFindPlan,
@@ -1006,4 +1006,78 @@ test('Docs table HTML generator escapes cell content and preserves the requested
   assert.match(content.html, /<p style="margin:0;padding:0">/u)
   const parsed = parseDocStructure(`<html><body>${content.html}</body></html>`)
   assert.deepEqual(parsed[0].rows[0].map(item => item.text), ['<a>&"', 'plain'])
+})
+
+test('Docs table cell-background never collapses an already-expanded Color section while waiting for the button', async () => {
+  const fake = fakeDocs([para('sentinel'), table([['A', 'B'], ['C', 'D']])], { backgroundPresetOnly: true })
+  const runInTab = fake.io.runInTab
+  let panelProbes = 0
+  let colorClicks = 0
+  const trustedClick = fake.io.trustedClick
+  fake.io.trustedClick = async (tabId, x, y) => {
+    if (x === 61) colorClicks += 1
+    return trustedClick(tabId, x, y)
+  }
+  fake.io.runInTab = async (tabId, func, payload) => {
+    if (payload[0] === 'tableCellBackground' && fake.state.cellPanelOpen) {
+      panelProbes += 1
+      return {
+        ok: true,
+        open: true,
+        cellPoint: { x: 60, y: 20 },
+        colorPoint: { x: 61, y: 20 },
+        colorExpanded: true,
+        backgroundPoint: panelProbes >= 2 ? { x: 62, y: 20 } : undefined,
+        closePoint: { x: 17, y: 20 },
+      }
+    }
+    return runInTab(tabId, func, payload)
+  }
+  const result = await docsTable({}, { action: 'format', table: 1, edits: [{ row: 1, column: 1, cell_background: '#d9d9d9' }] }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.equal(colorClicks, 0, 'already-expanded Color button must not be clicked')
+  assert.equal(fake.state.blocks[1].rows[0][0].background, '#d9d9d9')
+})
+
+test('docsTableCreateVerification ignores CSS-class compaction on inherited H1 prefix while catching real collateral', () => {
+  const baselineHtml = `<html><head><style>
+    h1{color:#000000;font-weight:700;font-size:24pt;font-family:"Arial"}
+    .c3{color:#000000;font-weight:700}
+    .c24{font-size:24pt;font-family:"Arial"}
+  </style></head><body><h1 id="h.two"><span class="c24 c3">Section Two</span></h1></body></html>`
+  const afterHtml = `<html><head><style>
+    h1{color:#000000;font-weight:700;font-size:24pt;font-family:"Arial"}
+    p{color:#000000;font-size:11pt;font-family:"Arial"}
+  </style></head><body><h1 id="h.two"><span>Section Two</span></h1><p><span></span></p><table><tr><td><p><span>Name</span></p></td><td><p><span>Value</span></p></td></tr></table></body></html>`
+
+  const prefix = parseDocStructure(baselineHtml)
+  const actual = parseDocStructure(afterHtml)
+  const verified = docsTableCreateVerification(
+    prefix,
+    0,
+    actual,
+    { rows: 1, columns: 2, values: [['Name', 'Value']] },
+    parseInheritedTextMarks(baselineHtml),
+    parseInheritedTextMarks(afterHtml),
+  )
+  assert.equal(verified.ok, true, JSON.stringify(verified))
+
+  const damagedHtml = afterHtml.replace('Section Two', 'Section Changed')
+  const damaged = docsTableCreateVerification(
+    prefix,
+    0,
+    parseDocStructure(damagedHtml),
+    { rows: 1, columns: 2, values: [['Name', 'Value']] },
+    parseInheritedTextMarks(baselineHtml),
+    parseInheritedTextMarks(damagedHtml),
+  )
+  assert.equal(damaged.ok, false)
+  assert.equal(damaged.code, 'DOCS_TABLE_COLLATERAL')
+  assert.match(damaged.message, /block 1 .*text changed/)
+
+  const unboldedHtml = afterHtml.replace('font-weight:700', 'font-weight:400')
+  assert.match(
+    docsPrefixDifference(prefix, parseDocStructure(unboldedHtml), parseInheritedTextMarks(baselineHtml), parseInheritedTextMarks(unboldedHtml)) ?? '',
+    /block 1 .*formatting changed/,
+  )
 })
