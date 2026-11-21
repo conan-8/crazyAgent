@@ -32,6 +32,8 @@ import { PushRegistry, PushService, createFcmProvider, pushTypeForTurn } from '.
 import { PROTOCOL_VERSION, errorMessage } from './protocol.mjs'
 import { clearKeyFile, resolveApiKey, writeKeyFile } from './credentials.mjs'
 import { readSettings, writeSettings } from './settings.mjs'
+import { DiaryStore } from './diary.mjs'
+import { createDiarySuggester } from './diary-suggester.mjs'
 import { Updater } from './updater.mjs'
 import {
   DEFAULT_BASE_URL,
@@ -49,7 +51,7 @@ import {
 } from './openrouter.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const VERSION = '2.6.0'
+const VERSION = '2.6.1'
 const PROVIDER = 'openrouter'
 
 const BOOLEAN_FLAGS = new Set(['no-dsh', 'no-auto-capture', 'new-token', 'help', 'remote', 'pair-remote', 'new-remote-token', 'confirm-irreversible', 'no-auto-update'])
@@ -284,6 +286,10 @@ const watchAutoSteerDisableOverride = process.env.CRAZYAGENT_WATCH_AUTO_STEER ==
 function watchAutoSteerPolicy() {
   return !watchAutoSteerDisableOverride && settings.watchAutoSteer !== false
 }
+const diaryAutoSuggestDisableOverride = process.env.CRAZYAGENT_DIARY_AUTO_SUGGEST === '0'
+function diaryAutoSuggestPolicy() {
+  return !diaryAutoSuggestDisableOverride && settings.diaryAutoSuggest !== false
+}
 
 const runId = `run-${new Date().toISOString().replace(/[:.]/gu, '-')}-${randomBytes(3).toString('hex')}`
 logStore = new LogStore({
@@ -312,6 +318,7 @@ try {
 }
 
 const lifetimeUsage = new LifetimeUsageStore({ file: join(browserDir, 'usage.json') })
+const diaryStore = new DiaryStore({ file: join(browserDir, 'diary.json'), log })
 
 if (!existsSync(patchFile)) {
   log(`patch: ${patchFile} not found; the DSH runtime will boot the stock sdk-minimal profile`)
@@ -381,9 +388,12 @@ function sendCompanionHello(_ui) {
     settings: {
       confirmIrreversible: confirmIrreversiblePolicy(),
       watchAutoSteer: watchAutoSteerPolicy(),
+      diaryAutoSuggest: diaryAutoSuggestPolicy(),
     },
     marathon: { ...marathonFrameBody(controller.marathonState()), watcher: controller.watcherPanelState() },
     watch: controller.watchState(),
+    diary: diaryStore.snapshot(),
+    diarySuggestions: controller.diarySuggestionsState(),
     update: updater?.status() ?? null,
     lifetimeUsage: lifetimeUsage.snapshot(),
     // A panel that opens mid-turn shows the running turn instead of starting a new chat.
@@ -705,11 +715,20 @@ async function handleControl(message) {
         bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'settings.updated', ok: false, error: 'watchAutoSteer must be a boolean.' })
         return
       }
+      if (message.diaryAutoSuggest !== undefined && typeof message.diaryAutoSuggest !== 'boolean') {
+        bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'settings.updated', ok: false, error: 'diaryAutoSuggest must be a boolean.' })
+        return
+      }
       settings = writeSettings(settingsPath, {
         confirmIrreversible: message.confirmIrreversible === undefined ? settings.confirmIrreversible : message.confirmIrreversible,
         watchAutoSteer: message.watchAutoSteer === undefined ? settings.watchAutoSteer : message.watchAutoSteer,
+        diaryAutoSuggest: message.diaryAutoSuggest === undefined ? settings.diaryAutoSuggest : message.diaryAutoSuggest,
       })
-      logStore.record('extension', 'settings.updated', { confirmIrreversible: settings.confirmIrreversible, watchAutoSteer: settings.watchAutoSteer }, { severity: 'info' })
+      logStore.record('extension', 'settings.updated', {
+        confirmIrreversible: settings.confirmIrreversible,
+        watchAutoSteer: settings.watchAutoSteer,
+        diaryAutoSuggest: settings.diaryAutoSuggest,
+      }, { severity: 'info' })
       remoteHub?.updateHealth()
       bridge.sendToUi({
         v: PROTOCOL_VERSION,
@@ -718,7 +737,134 @@ async function handleControl(message) {
         settings: {
           confirmIrreversible: confirmIrreversiblePolicy(),
           watchAutoSteer: watchAutoSteerPolicy(),
+          diaryAutoSuggest: diaryAutoSuggestPolicy(),
         },
+      })
+      return
+    }
+    if (message.type === 'diary.list') {
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'diary.state',
+        ok: true,
+        diary: diaryStore.snapshot(),
+        requestId: message.requestId,
+      })
+      return
+    }
+    if (message.type === 'diary.create') {
+      const result = diaryStore.create({
+        scope: message.scope,
+        sites: message.sites,
+        title: message.title,
+        content: message.content,
+        enabled: message.enabled,
+        source: 'manual',
+      })
+      if (result.ok) {
+        controller.syncDiaryToTools()
+        logStore.record('extension', 'diary.created', { scope: result.entry.scope, entryId: result.entry.id }, { severity: 'info' })
+      }
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'diary.state',
+        ok: result.ok,
+        ...(result.ok ? { entry: result.entry } : { code: result.code, error: result.error }),
+        diary: diaryStore.snapshot(),
+        requestId: message.requestId,
+      })
+      return
+    }
+    if (message.type === 'diary.update') {
+      const result = diaryStore.update(message.id, {
+        scope: message.scope,
+        sites: message.sites,
+        title: message.title,
+        content: message.content,
+        enabled: message.enabled,
+      })
+      if (result.ok) {
+        controller.syncDiaryToTools()
+        logStore.record('extension', 'diary.updated', { scope: result.entry.scope, entryId: result.entry.id, enabled: result.entry.enabled }, { severity: 'info' })
+      }
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'diary.state',
+        ok: result.ok,
+        ...(result.ok ? { entry: result.entry } : { code: result.code, error: result.error }),
+        diary: diaryStore.snapshot(),
+        requestId: message.requestId,
+      })
+      return
+    }
+    if (message.type === 'diary.delete') {
+      const result = diaryStore.remove(message.id)
+      if (result.ok) {
+        controller.syncDiaryToTools()
+        logStore.record('extension', 'diary.deleted', { entryId: message.id }, { severity: 'info' })
+      }
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'diary.state',
+        ok: result.ok,
+        ...(result.ok ? {} : { code: result.code, error: result.error }),
+        diary: diaryStore.snapshot(),
+        requestId: message.requestId,
+      })
+      return
+    }
+    if (message.type === 'diary.suggestion.accept') {
+      const result = controller.acceptDiarySuggestion(message.id, {
+        scope: message.scope,
+        sites: message.sites,
+        title: message.title,
+        content: message.content,
+      })
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'diary.state',
+        ok: result.ok,
+        ...(result.ok ? { entry: result.entry } : { code: result.code, error: result.error }),
+        diary: diaryStore.snapshot(),
+        requestId: message.requestId,
+      })
+      if (result.ok || result.code === 'NOT_FOUND') {
+        bridge.sendToUi({
+          v: PROTOCOL_VERSION,
+          type: 'diary.suggestions',
+          suggestions: controller.diarySuggestionsState(),
+        })
+      }
+      return
+    }
+    if (message.type === 'diary.suggestion.dismiss') {
+      const result = controller.dismissDiarySuggestion(message.id, { all: message.all === true })
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'diary.suggestions',
+        suggestions: result.suggestions,
+      })
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'diary.state',
+        ok: result.ok,
+        ...(result.ok ? {} : { code: result.code, error: result.error }),
+        diary: diaryStore.snapshot(),
+        requestId: message.requestId,
+      })
+      return
+    }
+    if (message.type === 'diary.suppressed.clear') {
+      const result = diaryStore.clearSuppressed()
+      if (result.cleared > 0) {
+        logStore.record('extension', 'diary.suppressed.cleared', { cleared: result.cleared }, { severity: 'info' })
+      }
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'diary.state',
+        ok: true,
+        diary: diaryStore.snapshot(),
+        requestId: message.requestId,
       })
       return
     }
@@ -812,6 +958,13 @@ const watchJudge = createWatchJudge({
   log: (type, data, severity) => logStore.record('companion', type, data, { severity: severity ?? 'info' }),
 })
 
+const diarySuggester = createDiarySuggester({
+  getApiKey: () => apiKey,
+  getBaseUrl: () => llmConfig?.baseUrl ?? baseUrlOption,
+  getModel: () => llmConfig?.model ?? null,
+  log: (type, data, severity) => logStore.record('companion', type, data, { severity: severity ?? 'info' }),
+})
+
 const controller = new SessionController({
   bridge,
   getRunner: () => runner,
@@ -823,9 +976,13 @@ const controller = new SessionController({
   getModelId: () => llmConfig?.model.id,
   getConfirmIrreversible: confirmIrreversiblePolicy,
   getWatchAutoSteer: watchAutoSteerPolicy,
+  getDiaryAutoSuggest: diaryAutoSuggestPolicy,
+  diaryStore,
+  diarySuggester,
   publish,
   watch: { judge: watchJudge },
 })
+controller.syncDiaryToTools()
 
 controller.addObserver({
   turnEnded: info => {
@@ -958,7 +1115,7 @@ the token from the file above into Settings (copy it without printing it).
 Enter your OpenRouter API key, refresh/select a model,
 and Save. After that the panel can be closed: the extension keeps running
 browser actions in the background while Edge is open.
-The side panel's Debug log button exports a detailed ZIP bundle.
+The side panel's Settings → Debug log exports a detailed ZIP bundle.
 `)
 
 if (!noDsh) {

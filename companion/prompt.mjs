@@ -8,6 +8,7 @@
 
 import { DOCS_MODE_GUIDANCE } from '../packages/dsh-browser-extension/lib/guidance.js'
 import { PLAN_LIMITS } from '../packages/dsh-browser-extension/lib/plan.js'
+import { formatViewLabels } from '../packages/dsh-browser-extension/lib/view-labels.js'
 
 const MAX_PROMPT_IMAGES = 4
 const MAX_PROMPT_IMAGE_BYTES = 5_000_000
@@ -161,15 +162,7 @@ export function formatViewText(view) {
   }
   const labels = Array.isArray(view.labels) ? view.labels : []
   if (labels.length > 0) {
-    const listed = labels.slice(0, 60)
-    lines.push(`labels (click by number): ${labels.length}`)
-    for (const label of listed) {
-      const role = label?.role || label?.tag || 'element'
-      lines.push(`[${label?.id}] ${role}${label?.disabled ? ' (disabled)' : ''}${label?.frame ? ' (iframe)' : ''} ${JSON.stringify(String(label?.text ?? ''))}`)
-    }
-    if (labels.length > listed.length) {
-      lines.push(`... ${labels.length - listed.length} more labels not listed; take a fresh view for the rest`)
-    }
+    lines.push(...formatViewLabels(labels))
   }
   if (typeof view.text === 'string' && view.text.length > 0) {
     lines.push(`rendered_text ${JSON.stringify(view.text)}`)
@@ -196,7 +189,7 @@ function formatTimeContext(now) {
  * @param {string} text
  * @param {Date} now
  * @param {Array<{mimeType: string, data: string}>} images
- * @param {{planMode?: boolean, confirmMode?: boolean, docsMode?: boolean, marathon?: {seed?: unknown}}} [options]
+ * @param {{planMode?: boolean, confirmMode?: boolean, docsMode?: boolean, diaryBlock?: string, marathon?: {seed?: unknown}}} [options]
  * @returns {Array<Record<string, unknown>>}
  */
 export function buildPromptBlocks(view, text, now = new Date(), images = [], options = {}) {
@@ -206,8 +199,9 @@ export function buildPromptBlocks(view, text, now = new Date(), images = [], opt
   const planGuidance = options.planMode === true ? `\n\n${marathonModeBlock(options.marathon?.seed)}` : ''
   const confirmGuidance = options.confirmMode === true ? `\n\n${CONFIRM_MODE_GUIDANCE}` : ''
   const docsGuidance = options.docsMode === true ? `\n\n${DOCS_MODE_GUIDANCE}` : ''
+  const diaryGuidance = typeof options.diaryBlock === 'string' && options.diaryBlock.length > 0 ? `\n\n${options.diaryBlock}` : ''
   /** @type {Array<Record<string, unknown>>} */
-  const blocks = [{ type: 'text', text: `${header}\n\n${formatTimeContext(now)}${planGuidance}${confirmGuidance}${docsGuidance}\n\n${text}` }]
+  const blocks = [{ type: 'text', text: `${header}\n\n${formatTimeContext(now)}${planGuidance}${confirmGuidance}${docsGuidance}${diaryGuidance}\n\n${text}` }]
   for (const image of images) blocks.push({ type: 'image', data: image.data, mimeType: image.mimeType })
   if (typeof view?.image?.data === 'string' && view.image.data.length > 0 && typeof view.image.mimeType === 'string') {
     blocks.push({ type: 'image', data: view.image.data, mimeType: view.image.mimeType })

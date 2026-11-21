@@ -22,7 +22,7 @@ import {
   normalizeClipboardEntry,
 } from './clipboard.js'
 import { checkedFullPageSize, mapScreenshotRegion, parseScreenshotArgs } from './capture.js'
-import { docsFetchExport } from './docs-export.js'
+import { docsDocumentId, docsFetchExport } from './docs-export.js'
 import { docsFormatToggleEvidence, planDocsFormatEdits, validateDocsFormatEdits, verifyDocsFormatEdits } from './docs-format.js'
 import { formatOutline, parseDocStructure, parseInheritedTextMarks, parseNamedStyleDefaults } from './docs-structure.js'
 import {
@@ -114,6 +114,7 @@ export const DEFAULT_SETTINGS = {
   modelBaseUrl: 'https://openrouter.ai/api/v1',
   modelId: '',
   reasoningEffort: 'auto',
+  verboseActivity: false,
 }
 
 const CAPTURE_INTERVAL_MS = 0
@@ -362,6 +363,26 @@ async function waitForTabComplete(tabId, windowId, timeoutMs) {
   await dialogManager.racePending(tabId, loaded)
 }
 
+async function waitForNewTabTransition(tab, windowId, timeoutMs = 2_500) {
+  let current = tab
+  const deadline = performance.now() + timeoutMs
+  while (current?.id !== undefined && performance.now() < deadline) {
+    const url = current.url ?? ''
+    const transient = url.length === 0 || url.toLowerCase().startsWith('about:')
+    if (!isProtectedUrl(url) && current.status === 'complete') return current
+    if (!transient && isProtectedUrl(url) && current.status === 'complete') return current
+    await waitForTabComplete(current.id, windowId, Math.max(150, Math.min(800, Math.round(deadline - performance.now()))))
+    current = await chrome.tabs.get(current.id).catch(() => current)
+    const nextUrl = current?.url ?? ''
+    if (!isProtectedUrl(nextUrl) && current?.status === 'complete') return current
+    if ((nextUrl.length === 0 || nextUrl.toLowerCase().startsWith('about:')) && current?.status === 'complete') {
+      await new Promise(resolve => setTimeout(resolve, 120))
+      current = await chrome.tabs.get(current.id).catch(() => current)
+    }
+  }
+  return current
+}
+
 /**
  * @param {number} tabId
  * @param {Function} func
@@ -468,22 +489,85 @@ async function pauseInTab(tabId, ms) {
 }
 
 /**
- * Page-side paint wait for a burst: two animation frames, with a timer
- * fallback so a throttled page still settles. Not a fixed sleep: canvas apps
- * paint immediately after input, so two frames is usually enough.
+ * Page-side paint wait for a burst: two animation frames (with a timer
+ * fallback) on ordinary pages, or a brief mutation-quiet settle when an active
+ * combobox / open listbox or menu popup is present (e.g. Google Docs Alt+/ menu
+ * search or Ctrl+K link suggestions, which debounce listbox DOM swaps ~150-250ms).
+ * Self-contained page function; exported for unit tests.
  * @param {number} maxMs
  */
-function waitForPaint(maxMs) {
+export function waitForPaint(maxMs) {
   return new Promise(resolve => {
+    const active = document.activeElement
+    const activeRole = String(active?.getAttribute?.('role') ?? '').toLowerCase()
+    const hasActiveCombobox = Boolean(active) && (
+      activeRole === 'combobox'
+      || active?.getAttribute?.('aria-autocomplete') != null
+      || active?.getAttribute?.('aria-expanded') === 'true'
+      || active?.getAttribute?.('aria-controls') != null
+      || active?.getAttribute?.('aria-owns') != null
+    )
+    const hasOpenPopup = hasActiveCombobox || (() => {
+      try {
+        const popups = document.querySelectorAll?.('[role="listbox"],[role="menu"]') ?? []
+        for (const el of popups) {
+          if (el.getAttribute?.('aria-hidden') === 'true') continue
+          const r = el.getBoundingClientRect?.()
+          if (!r || r.width < 10 || r.height < 10) continue
+          const s = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null
+          if (!s || (s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity) !== 0)) return true
+        }
+      } catch {}
+      return false
+    })()
+    if (!hasOpenPopup) {
+      let finished = false
+      const finish = () => {
+        if (finished) return
+        finished = true
+        clearTimeout(timer)
+        resolve()
+      }
+      const timer = setTimeout(finish, Math.max(0, maxMs))
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => requestAnimationFrame(finish))
+      }
+      return
+    }
+    const quietMs = 80
+    const idleCapMs = Math.max(Number(maxMs) || 120, 300)
+    const hardCapMs = Math.max(idleCapMs + 160, 480)
     let finished = false
+    let settleTimer
+    let observer
     const finish = () => {
       if (finished) return
       finished = true
-      clearTimeout(timer)
-      resolve()
+      clearTimeout(settleTimer)
+      clearTimeout(hardTimer)
+      observer?.disconnect()
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve())
+      else resolve()
     }
-    const timer = setTimeout(finish, Math.max(0, maxMs))
-    requestAnimationFrame(() => requestAnimationFrame(finish))
+    const hardTimer = setTimeout(finish, hardCapMs)
+    settleTimer = setTimeout(finish, idleCapMs)
+    try {
+      if (typeof MutationObserver === 'function' && document.documentElement) {
+        observer = new MutationObserver(() => {
+          clearTimeout(settleTimer)
+          settleTimer = setTimeout(finish, quietMs)
+        })
+        observer.observe(document.documentElement, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true,
+          attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'aria-expanded', 'aria-activedescendant'],
+        })
+      }
+    } catch {
+      // Fall back to the timer when MutationObserver cannot attach.
+    }
   })
 }
 
@@ -1198,7 +1282,6 @@ function resolveLabelTarget(tab, label) {
   const registry = tabLabelsByTab.get(tab.id)
   if (!registry) return undefined
   if (registry.url !== (tab.url ?? '')) {
-    tabLabelsByTab.delete(tab.id)
     return undefined
   }
   return registry.labels.get(label)
@@ -1207,16 +1290,18 @@ function resolveLabelTarget(tab, label) {
 
 /**
  * Describe a label id the registry cannot resolve, using the cumulative label
- * registry of this page. A registry recorded for a different URL is ignored:
- * those ids belong to the previous page and cannot resolve here.
+ * registry of this page. When the tab navigated to a new URL since labels were
+ * recorded, say so clearly instead of claiming no labels were ever handed out.
  * @param {chrome.tabs.Tab} tab
  * @param {number} label
  */
 function missingLabelError(tab, label) {
   const registry = tabLabelsByTab.get(tab.id)
-  const samePage = registry !== undefined && registry.url === (tab.url ?? '')
+  const urlChanged = registry !== undefined && registry.url !== (tab.url ?? '')
+  if (urlChanged) tabLabelsByTab.delete(tab.id)
+  const samePage = registry !== undefined && !urlChanged
   const assignment = inspectLabelAssignment(label, samePage ? registry : undefined)
-  const described = formatMissingLabelMessage(label, assignment)
+  const described = formatMissingLabelMessage(label, assignment, { urlChanged })
   return new BrowserError('UNKNOWN_LABEL', described.message)
 }
 
@@ -1236,16 +1321,88 @@ async function clearAllFrames(tabId) {
  * in labelPage because page functions are serialized independently.
  * @returns {Record<string, any>}
  */
-function pageMetrics() {
+export function pageMetrics() {
   const root = document.scrollingElement || document.documentElement
-  const maxY = Math.max(0, root.scrollHeight - root.clientHeight)
-  const maxX = Math.max(0, root.scrollWidth - root.clientWidth)
+  const rootMaxY = Math.max(0, (root?.scrollHeight || 0) - (root?.clientHeight || 0))
+  const rootMaxX = Math.max(0, (root?.scrollWidth || 0) - (root?.clientWidth || 0))
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  let scrollTarget = root
+  if (rootMaxY <= 1 && rootMaxX <= 1 && vw > 0 && vh > 0) {
+    const minArea = vw * vh * 0.2
+    const minW = vw * 0.3
+    const minH = vh * 0.3
+    const seen = new Set()
+    let best = null
+    const consider = el => {
+      for (let node = el; node && node !== document.documentElement && node !== root; node = node.parentElement) {
+        if (seen.has(node)) break
+        seen.add(node)
+        if (node.nodeType !== undefined && node.nodeType !== 1) continue
+        const ch = Number(node.clientHeight) || 0
+        const cw = Number(node.clientWidth) || 0
+        if (ch < 20 || cw < 20) continue
+        const mY = Math.max(0, (Number(node.scrollHeight) || 0) - ch)
+        const mX = Math.max(0, (Number(node.scrollWidth) || 0) - cw)
+        if (mY <= 2 && mX <= 2) continue
+        const style = typeof getComputedStyle === 'function' ? getComputedStyle(node) : null
+        if (!style || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue
+        const canY = mY > 2 && (style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflowY === 'overlay')
+        const canX = mX > 2 && (style.overflowX === 'auto' || style.overflowX === 'scroll' || style.overflowX === 'overlay')
+        if (!canY && !canX) continue
+        const rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null
+        if (!rect) continue
+        const w = Math.max(0, Math.min(rect.right, vw) - Math.max(rect.left, 0))
+        const h = Math.max(0, Math.min(rect.bottom, vh) - Math.max(rect.top, 0))
+        if (w < minW || h < minH) continue
+        const area = w * h
+        if (area < minArea) continue
+        if (!best || area > best.area || (area === best.area && mY > best.maxY)) {
+          best = { el: node, area, maxY: mY }
+        }
+      }
+    }
+    const points = [
+      [vw * 0.5, vh * 0.5],
+      [vw * 0.5, vh * 0.25],
+      [vw * 0.5, vh * 0.75],
+      [vw * 0.25, vh * 0.5],
+      [vw * 0.75, vh * 0.5],
+      [vw * 0.5, vh * 0.65],
+      [vw * 0.35, vh * 0.7],
+      [vw * 0.65, vh * 0.35],
+    ]
+    for (const [px, py] of points) {
+      if (typeof document.elementsFromPoint === 'function') {
+        for (const hit of document.elementsFromPoint(px, py)) consider(hit)
+      } else if (typeof document.elementFromPoint === 'function') {
+        const hit = document.elementFromPoint(px, py)
+        if (hit) consider(hit)
+      }
+    }
+    if (best) scrollTarget = best.el
+  }
+  const describeScrollTarget = el => {
+    if (!el || el === root) return 'document'
+    const tag = el.tagName ? el.tagName.toLowerCase() : 'element'
+    const id = el.id ? `#${String(el.id).replace(/[^A-Za-z0-9_-]/gu, '').slice(0, 40)}` : ''
+    let cls = ''
+    if (!id && typeof el.className === 'string') {
+      const first = el.className.trim().split(/\s+/u).find(token => /^[A-Za-z_-][A-Za-z0-9_-]*$/u.test(token))
+      if (first) cls = `.${first.slice(0, 40)}`
+    }
+    const role = el.getAttribute?.('role')
+    return `${tag}${id || cls}${role ? `[role=${role}]` : ''}`
+  }
+  const scrollX = scrollTarget?.scrollLeft || 0
+  const scrollY = scrollTarget?.scrollTop || 0
+  const maxY = Math.max(0, (scrollTarget?.scrollHeight || 0) - (scrollTarget?.clientHeight || 0))
+  const maxX = Math.max(0, (scrollTarget?.scrollWidth || 0) - (scrollTarget?.clientWidth || 0))
+  const scrollContainer = describeScrollTarget(scrollTarget)
   const active = document.activeElement
   const layout = (() => {
     const items = []
     const nodes = document.querySelectorAll('a[href],button,input,select,textarea,summary,[role],[contenteditable]:not([contenteditable="false"]),[onclick],[tabindex]:not([tabindex="-1"]),canvas,iframe')
-    const vw = window.innerWidth
-    const vh = window.innerHeight
     let reads = 0
     for (const node of nodes) {
       if (reads >= 600 || items.length >= 40) break
@@ -1276,23 +1433,23 @@ function pageMetrics() {
     fingerprint: {
       url: location.href,
       title: document.title,
-      scrollX: Math.round(root.scrollLeft || 0),
-      scrollY: Math.round(root.scrollTop || 0),
+      scrollX: Math.round(scrollX),
+      scrollY: Math.round(scrollY),
       textLen: String(document.body?.innerText ?? '').length,
       active: active ? `${active.tagName.toLowerCase()}${active.id ? `#${active.id}` : ''}` : '',
       layout,
     },
-    viewport: { width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1 },
+    viewport: { width: vw, height: vh, dpr: window.devicePixelRatio || 1 },
     scroll: {
-      x: root.scrollLeft || 0,
-      y: root.scrollTop || 0,
+      x: scrollX,
+      y: scrollY,
       maxX,
       maxY,
-      container: 'document',
-      pageHeight: root.scrollHeight,
-      pageWidth: root.scrollWidth,
-      atTop: (root.scrollTop || 0) <= 1,
-      atBottom: (root.scrollTop || 0) >= maxY - 1,
+      container: scrollContainer,
+      pageHeight: scrollTarget?.scrollHeight || 0,
+      pageWidth: scrollTarget?.scrollWidth || 0,
+      atTop: scrollY <= 1,
+      atBottom: scrollY >= maxY - 1,
     },
   }
 }
@@ -1385,6 +1542,12 @@ export async function labelPage(limit) {
     const formValue = (tag === 'input' || tag === 'textarea' || tag === 'select')
       ? (type === 'password' ? '' : el.value)
       : ''
+    const slottedText = typeof el.querySelectorAll === 'function'
+      ? Array.from(el.querySelectorAll('slot'))
+        .flatMap(slot => (typeof slot.assignedNodes === 'function' ? slot.assignedNodes({ flatten: true }) : []))
+        .map(node => node?.textContent ?? '')
+        .join(' ')
+      : ''
     const candidates = [
       el.getAttribute?.('aria-label'),
       labelledBy
@@ -1395,6 +1558,7 @@ export async function labelPage(limit) {
       formValue,
       el.innerText,
       el.textContent,
+      slottedText,
       el.querySelector?.('img[alt]')?.getAttribute('alt'),
       el.getAttribute?.('aria-placeholder'),
       el.getAttribute?.('data-placeholder'),
@@ -1410,10 +1574,82 @@ export async function labelPage(limit) {
   }
 
   const root = document.scrollingElement || document.documentElement
-  const maxY = Math.max(0, root.scrollHeight - root.clientHeight)
-  const maxX = Math.max(0, root.scrollWidth - root.clientWidth)
+  const rootMaxY = Math.max(0, (root?.scrollHeight || 0) - (root?.clientHeight || 0))
+  const rootMaxX = Math.max(0, (root?.scrollWidth || 0) - (root?.clientWidth || 0))
   const vw = window.innerWidth
   const vh = window.innerHeight
+  let scrollTarget = root
+  if (rootMaxY <= 1 && rootMaxX <= 1 && vw > 0 && vh > 0) {
+    const minArea = vw * vh * 0.2
+    const minW = vw * 0.3
+    const minH = vh * 0.3
+    const seen = new Set()
+    let best = null
+    const consider = el => {
+      for (let node = el; node && node !== document.documentElement && node !== root; node = node.parentElement) {
+        if (seen.has(node)) break
+        seen.add(node)
+        if (node.nodeType !== undefined && node.nodeType !== 1) continue
+        const ch = Number(node.clientHeight) || 0
+        const cw = Number(node.clientWidth) || 0
+        if (ch < 20 || cw < 20) continue
+        const mY = Math.max(0, (Number(node.scrollHeight) || 0) - ch)
+        const mX = Math.max(0, (Number(node.scrollWidth) || 0) - cw)
+        if (mY <= 2 && mX <= 2) continue
+        const style = typeof getComputedStyle === 'function' ? getComputedStyle(node) : null
+        if (!style || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue
+        const canY = mY > 2 && (style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflowY === 'overlay')
+        const canX = mX > 2 && (style.overflowX === 'auto' || style.overflowX === 'scroll' || style.overflowX === 'overlay')
+        if (!canY && !canX) continue
+        const rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null
+        if (!rect) continue
+        const w = Math.max(0, Math.min(rect.right, vw) - Math.max(rect.left, 0))
+        const h = Math.max(0, Math.min(rect.bottom, vh) - Math.max(rect.top, 0))
+        if (w < minW || h < minH) continue
+        const area = w * h
+        if (area < minArea) continue
+        if (!best || area > best.area || (area === best.area && mY > best.maxY)) {
+          best = { el: node, area, maxY: mY }
+        }
+      }
+    }
+    const points = [
+      [vw * 0.5, vh * 0.5],
+      [vw * 0.5, vh * 0.25],
+      [vw * 0.5, vh * 0.75],
+      [vw * 0.25, vh * 0.5],
+      [vw * 0.75, vh * 0.5],
+      [vw * 0.5, vh * 0.65],
+      [vw * 0.35, vh * 0.7],
+      [vw * 0.65, vh * 0.35],
+    ]
+    for (const [px, py] of points) {
+      if (typeof document.elementsFromPoint === 'function') {
+        for (const hit of document.elementsFromPoint(px, py)) consider(hit)
+      } else if (typeof document.elementFromPoint === 'function') {
+        const hit = document.elementFromPoint(px, py)
+        if (hit) consider(hit)
+      }
+    }
+    if (best) scrollTarget = best.el
+  }
+  const describeScrollTarget = el => {
+    if (!el || el === root) return 'document'
+    const tag = el.tagName ? el.tagName.toLowerCase() : 'element'
+    const id = el.id ? `#${String(el.id).replace(/[^A-Za-z0-9_-]/gu, '').slice(0, 40)}` : ''
+    let cls = ''
+    if (!id && typeof el.className === 'string') {
+      const first = el.className.trim().split(/\s+/u).find(token => /^[A-Za-z_-][A-Za-z0-9_-]*$/u.test(token))
+      if (first) cls = `.${first.slice(0, 40)}`
+    }
+    const role = el.getAttribute?.('role')
+    return `${tag}${id || cls}${role ? `[role=${role}]` : ''}`
+  }
+  const scrollX = scrollTarget?.scrollLeft || 0
+  const scrollY = scrollTarget?.scrollTop || 0
+  const maxY = Math.max(0, (scrollTarget?.scrollHeight || 0) - (scrollTarget?.clientHeight || 0))
+  const maxX = Math.max(0, (scrollTarget?.scrollWidth || 0) - (scrollTarget?.clientWidth || 0))
+  const scrollContainer = describeScrollTarget(scrollTarget)
 
   const labels = []
   let editableLabelCount = 0
@@ -1448,18 +1684,58 @@ export async function labelPage(limit) {
       && (el.isContentEditable === true || el.matches('[role="textbox"],[role="searchbox"]'))
     if (editableOnly && (editableLabelCount >= 20 || rect.width * rect.height > vw * vh * 0.5)) continue
 
-    // Only label what a real click would hit at the centre. This keeps modal
-    // overlays and cookie banners from exposing targets behind them.
+    // Only label what a real click would hit at the centre. Walk the composed
+    // tree (open shadow roots + <slot> projections) so Web Component buttons
+    // like <sl-button> inside <sl-dialog> are labelled while covered targets
+    // behind overlays stay excluded.
     const cx = Math.max(0, Math.min(vw - 1, rect.left + rect.width / 2))
     const cy = Math.max(0, Math.min(vh - 1, rect.top + rect.height / 2))
-    const rootNode = el.getRootNode()
-    const hit = rootNode instanceof ShadowRoot && typeof rootNode.elementFromPoint === 'function'
-      ? rootNode.elementFromPoint(cx, cy)
-      : document.elementFromPoint(cx, cy)
+    const composedParent = node => {
+      if (!node) return null
+      if (node.assignedSlot) return node.assignedSlot
+      if (node.parentElement) return node.parentElement
+      const r = node.getRootNode?.()
+      return r instanceof ShadowRoot ? r.host : null
+    }
+    const composedContains = (ancestor, node) => {
+      let cur = node
+      for (let depth = 0; depth < 32 && cur; depth += 1) {
+        if (cur === ancestor) return true
+        cur = composedParent(cur)
+      }
+      return false
+    }
+    const deepHitAt = (x, y) => {
+      let node = document.elementFromPoint(x, y)
+      for (let depth = 0; depth < 16 && node; depth += 1) {
+        if (node.shadowRoot && typeof node.shadowRoot.elementFromPoint === 'function') {
+          const nested = node.shadowRoot.elementFromPoint(x, y)
+          if (!nested || nested === node) break
+          node = nested
+          continue
+        }
+        if (node.tagName?.toLowerCase() === 'slot' && typeof node.assignedElements === 'function') {
+          const assigned = node.assignedElements({ flatten: true })
+          let slotted = null
+          for (let i = assigned.length - 1; i >= 0; i -= 1) {
+            const candidate = assigned[i]
+            const box = candidate.getBoundingClientRect?.()
+            if (box && x >= box.left && x <= box.right && y >= box.top && y <= box.bottom) {
+              slotted = candidate
+              break
+            }
+          }
+          if (!slotted || slotted === node) break
+          node = slotted
+          continue
+        }
+        break
+      }
+      return node
+    }
+    const hit = deepHitAt(cx, cy)
     if (!hit) continue
-    const hitRoot = hit.getRootNode?.()
-    const hitHost = hitRoot instanceof ShadowRoot ? hitRoot.host : undefined
-    if (hit !== el && !el.contains(hit) && !hit.contains(el) && hitHost !== el && !el.contains(hitHost)) continue
+    if (hit !== el && !el.contains(hit) && !hit.contains(el) && !composedContains(el, hit) && !composedContains(hit, el)) continue
 
     let id = state.idsByElement.get(el)
     if (id === undefined) {
@@ -1472,6 +1748,18 @@ export async function labelPage(limit) {
     const disabled = el.disabled === true || el.getAttribute('aria-disabled') === 'true' || el.matches(':disabled')
     const role = labelRole(el)
     const text = labelText(el)
+    const OVERLAY_SELECTOR = '[role="menu"],[role="listbox"],[role="dialog"],[role="alertdialog"],dialog[open],[aria-modal="true"],.goog-menu,.docs-bubble,.docs-linkbubble-bubble,.docs-link-insertlinkbubble'
+    let popup = false
+    let inChromeBar = false
+    for (let cur = el, depth = 0; depth < 32 && cur; depth += 1, cur = composedParent(cur)) {
+      if (typeof cur.matches === 'function') {
+        if (cur.matches(OVERLAY_SELECTOR)) { popup = true; break }
+        if (cur.matches('[role="menubar"],[role="toolbar"]')) { inChromeBar = true; break }
+      }
+    }
+    if (!popup && !inChromeBar && (role === 'menuitemcheckbox' || role === 'menuitemradio' || role === 'option' || role === 'dialog' || role === 'alertdialog' || role === 'listbox' || role === 'menu')) {
+      popup = true
+    }
     state.infoById.set(id, { tag, role, text, disabled })
     if (editableOnly) editableLabelCount += 1
     labels.push({
@@ -1480,6 +1768,7 @@ export async function labelPage(limit) {
       role,
       text,
       disabled,
+      ...(popup ? { popup: true } : {}),
       x: Math.round(rect.left),
       y: Math.round(rect.top),
       w: Math.round(rect.width),
@@ -1611,23 +1900,23 @@ export async function labelPage(limit) {
     fingerprint: {
       url: location.href,
       title: document.title,
-      scrollX: Math.round(root.scrollLeft || 0),
-      scrollY: Math.round(root.scrollTop || 0),
+      scrollX: Math.round(scrollX),
+      scrollY: Math.round(scrollY),
       textLen: String(document.body?.innerText ?? '').length,
       active: activeElement ? `${activeElement.tagName.toLowerCase()}${activeElement.id ? `#${activeElement.id}` : ''}` : '',
       layout,
     },
     viewport: { width: vw, height: vh, dpr: window.devicePixelRatio || 1 },
     scroll: {
-      x: root.scrollLeft || 0,
-      y: root.scrollTop || 0,
+      x: scrollX,
+      y: scrollY,
       maxX,
       maxY,
-      container: 'document',
-      pageHeight: root.scrollHeight,
-      pageWidth: root.scrollWidth,
-      atTop: (root.scrollTop || 0) <= 1,
-      atBottom: (root.scrollTop || 0) >= maxY - 1,
+      container: scrollContainer,
+      pageHeight: scrollTarget?.scrollHeight || 0,
+      pageWidth: scrollTarget?.scrollWidth || 0,
+      atTop: scrollY <= 1,
+      atBottom: scrollY >= maxY - 1,
     },
     labels,
     knownLabels,
@@ -1760,7 +2049,7 @@ export function formatLabelsHint(labels, options = {}) {
     const text = String(label.text ?? '').replace(/\s+/gu, ' ').trim()
     const role = String(label.role || label.tag || 'element')
     const haystack = text.toLowerCase()
-    let relevance = 0
+    let relevance = label.popup === true ? 0.5 : 0
     if (prefer.length > 0 && haystack.length > 0) {
       if (haystack === prefer) relevance = 2
       else if (haystack.includes(prefer) || prefer.includes(haystack)) relevance = 1
@@ -1949,13 +2238,47 @@ export async function clickLabelled(label, confirmGuardPattern) {
   }
   const cx = Math.max(0, Math.min(vw - 1, rect.left + rect.width / 2))
   const cy = Math.max(0, Math.min(vh - 1, rect.top + rect.height / 2))
-  const rootNode = el.getRootNode()
-  const hit = rootNode instanceof ShadowRoot && typeof rootNode.elementFromPoint === 'function'
-    ? rootNode.elementFromPoint(cx, cy)
-    : document.elementFromPoint(cx, cy)
-  const hitRoot = hit?.getRootNode?.()
-  const hitHost = hitRoot instanceof ShadowRoot ? hitRoot.host : undefined
-  if (!hit || (hit !== el && !el.contains(hit) && !hit.contains(el) && hitHost !== el && !el.contains(hitHost))) {
+  const composedParent = node => {
+    if (!node) return null
+    if (node.assignedSlot) return node.assignedSlot
+    if (node.parentElement) return node.parentElement
+    const r = node.getRootNode?.()
+    return r instanceof ShadowRoot ? r.host : null
+  }
+  const composedContains = (ancestor, node) => {
+    let cur = node
+    for (let depth = 0; depth < 32 && cur; depth += 1) {
+      if (cur === ancestor) return true
+      cur = composedParent(cur)
+    }
+    return false
+  }
+  let hit = document.elementFromPoint(cx, cy)
+  for (let depth = 0; depth < 16 && hit; depth += 1) {
+    if (hit.shadowRoot && typeof hit.shadowRoot.elementFromPoint === 'function') {
+      const nested = hit.shadowRoot.elementFromPoint(cx, cy)
+      if (!nested || nested === hit) break
+      hit = nested
+      continue
+    }
+    if (hit.tagName?.toLowerCase() === 'slot' && typeof hit.assignedElements === 'function') {
+      const assigned = hit.assignedElements({ flatten: true })
+      let slotted = null
+      for (let i = assigned.length - 1; i >= 0; i -= 1) {
+        const candidate = assigned[i]
+        const box = candidate.getBoundingClientRect?.()
+        if (box && cx >= box.left && cx <= box.right && cy >= box.top && cy <= box.bottom) {
+          slotted = candidate
+          break
+        }
+      }
+      if (!slotted || slotted === hit) break
+      hit = slotted
+      continue
+    }
+    break
+  }
+  if (!hit || (hit !== el && !el.contains(hit) && !hit.contains(el) && !composedContains(el, hit) && !composedContains(hit, el))) {
     // Say what is on top, and its label when it has one, so the model can
     // dismiss or click it in one step instead of taking a view to find out.
     let cover
@@ -2068,19 +2391,33 @@ export async function clickLabelled(label, confirmGuardPattern) {
 
   // Resolve as soon as the page reacts, with a short ceiling. A click that
   // changes nothing still costs the full window so the result is trustworthy.
+  // Clicking a popup option/menuitem often mutates selection state first and
+  // tears down the popup ~40-80ms later, so wait briefly for mutations to go
+  // quiet (still within the same 150ms ceiling) before capturing the view.
+  const inPopupControl = ['option', 'menuitem', 'menuitemcheckbox', 'menuitemradio'].includes(role)
+    || Boolean(el.closest?.('[role="listbox"],[role="menu"]'))
   await new Promise(resolve => {
     let done = false
+    let quietTimer
     const finish = () => {
       if (done) return
       done = true
       clearTimeout(timer)
+      clearTimeout(quietTimer)
       observer.disconnect()
+      settle.disconnect()
       resolve()
     }
     const timer = setTimeout(finish, 150)
     const settle = new MutationObserver(records => {
       // A batch containing only self-injected overlay churn is not a response.
-      if (performance.now() - __tDispatch > 20 && pageMutations(records) > 0) finish()
+      if (pageMutations(records) === 0) return
+      if (inPopupControl) {
+        clearTimeout(quietTimer)
+        quietTimer = setTimeout(finish, 45)
+        return
+      }
+      if (performance.now() - __tDispatch > 20) finish()
     })
     settle.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true })
     setTimeout(() => settle.disconnect(), 160)
@@ -2329,13 +2666,31 @@ function readFocusedField() {
  * use the full fresh view instead.
  * @param {'start'|'end'} phase
  */
-function contentProbePage(phase) {
+export function contentProbePage(phase, onlyIfMeasurable = false) {
   const KEY = '__crazyagentContentProbe'
   const state = globalThis[KEY] ?? { mutations: 0, startedAt: 0, observer: undefined }
   globalThis[KEY] = state
   const readFocus = () => {
-    const el = document.activeElement
+    let el = document.activeElement
+    while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
     if (!el) return undefined
+    let inCanvasProxyFrame = false
+    try {
+      const frameEl = typeof window !== 'undefined' ? window.frameElement : null
+      if (frameEl) {
+        const cls = String(frameEl.className ?? '')
+        const fRect = typeof frameEl.getBoundingClientRect === 'function' ? frameEl.getBoundingClientRect() : null
+        const fStyle = typeof getComputedStyle === 'function' ? getComputedStyle(frameEl) : null
+        const fHidden = Boolean(fStyle) && (fStyle.display === 'none' || fStyle.visibility === 'hidden' || Number(fStyle.opacity) === 0)
+        const fTiny = Boolean(fRect) && (fRect.width < 8 || fRect.height < 8)
+        const fOffscreen = Boolean(fRect) && (fRect.right <= 0 || fRect.bottom <= 0)
+        if (/\bdocs-texteventtarget-iframe\b/u.test(cls) || frameEl.getAttribute?.('aria-hidden') === 'true' || fHidden || fTiny || fOffscreen) {
+          inCanvasProxyFrame = true
+        }
+      }
+    } catch {
+      // Cross-origin parent frame: rely on element box and style below.
+    }
     const tag = el.tagName.toLowerCase()
     const type = (el.type || '').toLowerCase()
     const isField = tag === 'input' || tag === 'textarea'
@@ -2349,9 +2704,26 @@ function contentProbePage(phase) {
     } catch {
       rect = undefined
     }
-    // A contenteditable body inside a 1px event-target iframe is not the editor
-    // and its text is not a measurement of what landed; require a real box.
-    const measurable = readable && Boolean(rect) && rect.width >= 8 && rect.height >= 8
+    let elHidden = false
+    try {
+      const style = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null
+      if (style && (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0)) {
+        elHidden = true
+      }
+    } catch {}
+    const elFarOffscreen = Boolean(rect) && (rect.right < -500 || rect.bottom < -500)
+    const elCls = String(el.className ?? '')
+    const isCanvasProxyIframe = tag === 'iframe' && (
+      /\bdocs-texteventtarget-iframe\b/u.test(elCls)
+      || el.getAttribute?.('aria-hidden') === 'true'
+      || elHidden
+      || (Boolean(rect) && (rect.width < 8 || rect.height < 8 || rect.right <= 0 || rect.bottom <= 0))
+    )
+    // A contenteditable body inside a hidden/1px event-target iframe (such as
+    // Docs' .docs-texteventtarget-iframe) is not a real DOM field and its text
+    // is not a measurement of what landed; require a real visible box outside
+    // any canvas proxy frame.
+    const measurable = !inCanvasProxyFrame && !elHidden && !elFarOffscreen && readable && Boolean(rect) && rect.width >= 8 && rect.height >= 8
     const path = []
     for (let node = el, depth = 0; node && depth < 8; node = node.parentElement, depth += 1) {
       const nodeTag = node.tagName.toLowerCase()
@@ -2372,6 +2744,8 @@ function contentProbePage(phase) {
       editable,
       readable,
       measurable,
+      ...(inCanvasProxyFrame ? { inCanvasProxyFrame: true } : {}),
+      ...(isCanvasProxyIframe ? { isCanvasProxyIframe: true } : {}),
       hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : false,
       chars: readable ? value.length : 0,
       // Passwords are masked exactly like readFocusedField did, so a preview
@@ -2389,11 +2763,15 @@ function contentProbePage(phase) {
   })
   if (phase === 'start') {
     state.observer?.disconnect()
+    state.observer = undefined
     state.mutations = 0
     state.startedAt = performance.now()
-    state.observer = new MutationObserver(records => { state.mutations += records.length })
-    state.observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true })
-    return { ...snapshot(), startedAt: state.startedAt }
+    const snap = snapshot()
+    if (!onlyIfMeasurable || snap.focus?.measurable === true) {
+      state.observer = new MutationObserver(records => { state.mutations += records.length })
+      state.observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true })
+    }
+    return { ...snap, startedAt: state.startedAt, observing: Boolean(state.observer) }
   }
   const snapshotAfter = snapshot()
   const elapsedMs = Math.max(0, Math.round(performance.now() - (Number(state.startedAt) || performance.now())))
@@ -2819,9 +3197,14 @@ async function scrollPage(direction, pages, amountPx) {
   const describe = (el) => {
     if (el === doc) return 'document'
     const tag = el.tagName ? el.tagName.toLowerCase() : 'element'
-    const id = el.id ? `#${el.id}` : ''
+    const id = el.id ? `#${String(el.id).replace(/[^A-Za-z0-9_-]/gu, '').slice(0, 40)}` : ''
+    let cls = ''
+    if (!id && typeof el.className === 'string') {
+      const first = el.className.trim().split(/\s+/u).find(token => /^[A-Za-z_-][A-Za-z0-9_-]*$/u.test(token))
+      if (first) cls = `.${first.slice(0, 40)}`
+    }
     const role = el.getAttribute ? el.getAttribute('role') : null
-    return `${tag}${id}${role ? `[role=${role}]` : ''}`
+    return `${tag}${id || cls}${role ? `[role=${role}]` : ''}`
   }
 
   let target = doc
@@ -3281,7 +3664,12 @@ function resolveScreenshotRegion(tab, metrics, request) {
       { x: request.region.x + request.region.width, y: request.region.y + request.region.height },
     ]
     const resolved = resolveImageBasis({ space: 'image', viewId: request.viewId, points }, history)
-    if (resolved.error) throw new BrowserError(resolved.error.code, resolved.error.message)
+    if (resolved.error) {
+      const invalidation = resolved.error.code === 'NO_VIEW' ? imageInvalidationByTab.get(tab.id) : undefined
+      throw new BrowserError(resolved.error.code, invalidation?.url === (tab.url ?? '')
+        ? imageInvalidationMessage(invalidation)
+        : resolved.error.message)
+    }
     basis = resolved.basis
     const stored = lastViewByTab.get(tab.id)
     if (!stored?.image?.data || Number(stored.viewId) !== Number(basis.viewId)) {
@@ -3314,6 +3702,8 @@ async function capturePageImage(tab, metrics, request, region) {
     let cssSize = { width: metrics.viewport.width, height: metrics.viewport.height }
     let clip
     let captureBeyondViewport = false
+    const docScrollX = metrics.scroll?.container === 'document' ? (metrics.scroll.x || 0) : 0
+    const docScrollY = metrics.scroll?.container === 'document' ? (metrics.scroll.y || 0) : 0
     if (request.scope === 'full_page') {
       const layout = await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.getLayoutMetrics', {})
       const size = layout.cssContentSize ?? layout.contentSize
@@ -3322,8 +3712,8 @@ async function capturePageImage(tab, metrics, request, region) {
       captureBeyondViewport = true
     } else {
       const area = request.scope === 'region'
-        ? { x: metrics.scroll.x + region.x, y: metrics.scroll.y + region.y, width: region.width, height: region.height }
-        : { x: metrics.scroll.x, y: metrics.scroll.y, width: metrics.viewport.width, height: metrics.viewport.height }
+        ? { x: docScrollX + region.x, y: docScrollY + region.y, width: region.width, height: region.height }
+        : { x: docScrollX, y: docScrollY, width: metrics.viewport.width, height: metrics.viewport.height }
       clip = { ...area, scale: 1 }
       cssSize = { width: area.width, height: area.height }
       captureBeyondViewport = request.scope === 'region'
@@ -3363,15 +3753,15 @@ async function capturePageImage(tab, metrics, request, region) {
           cleanupError = error
         }
         await pauseInTab(tab.id, 60)
-        const restored = await runInTab(tab.id, restorePageScroll, [metrics.scroll.x, metrics.scroll.y], 2_000).catch(error => {
+        const restored = await runInTab(tab.id, restorePageScroll, [docScrollX, docScrollY], 2_000).catch(error => {
           cleanupError ??= error
           return undefined
         })
         if (cleanupError) {
           throw new BrowserError('CAPTURE_VIEWPORT_RESTORE', `Could not restore the viewport after full-page capture: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`)
         }
-        if (!restored || Math.abs(restored.x - metrics.scroll.x) > 1 || Math.abs(restored.y - metrics.scroll.y) > 1) {
-          throw new BrowserError('CAPTURE_SCROLL_RESTORE', `Could not restore scroll position ${metrics.scroll.x},${metrics.scroll.y} after full-page capture`)
+        if (!restored || Math.abs(restored.x - docScrollX) > 1 || Math.abs(restored.y - docScrollY) > 1) {
+          throw new BrowserError('CAPTURE_SCROLL_RESTORE', `Could not restore scroll position ${docScrollX},${docScrollY} after full-page capture`)
         }
       }
     }
@@ -3503,26 +3893,41 @@ async function snapshot(detail, settings, retried = false, delayMs = 0, captureR
   if (delayMs > 0) await pauseInTab(tab.id, delayMs)
   const quality = detail === 'high' ? 80 : detail === 'fast' ? 50 : Number(settings.quality) || 72
   const maxWidth = detail === 'high' ? 2048 : detail === 'fast' ? 640 : Number(settings.captureWidth) || 1280
-  const labelStarted = performance.now()
-  const labelled = await labelAllFrames(tab.id, LABEL_LIMIT)
-  const metrics = labelled.metrics
-  metrics.labels = labelled.labels
-  const labelMs = Math.round(performance.now() - labelStarted)
   const special = request.scope !== 'viewport' || request.toClipboard
-  const resolved = special ? resolveScreenshotRegion(tab, metrics, request) : {}
+  let labelled
+  let metrics
+  let labelMs
+  let resolved = {}
   let captured
   if (special) {
+    const labelStarted = performance.now()
+    labelled = await labelAllFrames(tab.id, LABEL_LIMIT)
+    metrics = labelled.metrics
+    metrics.labels = labelled.labels
+    labelMs = Math.round(performance.now() - labelStarted)
+    resolved = resolveScreenshotRegion(tab, metrics, request)
     captured = await agentCursor.whileHidden(tab.id, () => capturePageImage(tab, metrics, request, resolved.region))
+    const tabAfter = await getActiveTab(windowId)
+    if ((tabAfter.id !== tab.id || tabAfter.url !== tab.url) && !retried) {
+      return snapshot(detail, settings, true, 0, request)
+    }
+    if (tabAfter.id !== tab.id || tabAfter.url !== tab.url) {
+      throw new BrowserError('STALE_TAB', 'The tab changed during capture; no clipboard content was stored.')
+    }
   } else {
+    // Capture the viewport BEFORE labelling so cursor-hide, capture interval
+    // sleeps, and compositor readback never leave older detached popup labels
+    // burned onto newer screenshot pixels.
     captured = await agentCursor.whileHidden(tab.id, () => captureViewportImage(windowId, tab, quality))
-  }
-
-  const tabAfter = await getActiveTab(windowId)
-  if ((tabAfter.id !== tab.id || special && tabAfter.url !== tab.url) && !retried) {
-    return snapshot(detail, settings, true, 0, request)
-  }
-  if (special && (tabAfter.id !== tab.id || tabAfter.url !== tab.url)) {
-    throw new BrowserError('STALE_TAB', 'The tab changed during capture; no clipboard content was stored.')
+    const tabAfter = await getActiveTab(windowId)
+    if ((tabAfter.id !== tab.id || (tab.url && tabAfter.url && tabAfter.url !== tab.url)) && !retried) {
+      return snapshot(detail, settings, true, 0, request)
+    }
+    const labelStarted = performance.now()
+    labelled = await labelAllFrames(tab.id, LABEL_LIMIT)
+    metrics = labelled.metrics
+    metrics.labels = labelled.labels
+    labelMs = Math.round(performance.now() - labelStarted)
   }
 
   const hitboxes = !special && metrics.labels.length > 0
@@ -3770,6 +4175,18 @@ function deriveLabelDeltaOutcome(delta) {
  * @param {Array<{frameId: number, result: Record<string, any>}>} [frames]
  * @returns {{textLen: number, mutations: number, focus: Record<string, any> | undefined, frameCount: number}}
  */
+/**
+ * True when the focused element reported by contentProbePage is a real visible
+ * DOM input/textarea/contenteditable rather than a canvas surface or hidden
+ * event-target iframe (e.g. Google Docs' .docs-texteventtarget-iframe). Pure.
+ * @param {Record<string, any> | undefined} focus
+ */
+export function isRealDomEditableFocus(focus) {
+  if (!focus || typeof focus !== 'object') return false
+  if (focus.inCanvasProxyFrame === true || focus.isCanvasProxyIframe === true) return false
+  return focus.readable === true && focus.measurable === true
+}
+
 export function summarizeContentProbe(frames) {
   const list = (Array.isArray(frames) ? frames : []).filter(frame => frame && frame.result && typeof frame.result === 'object')
   let textLen = 0
@@ -3783,9 +4200,17 @@ export function summarizeContentProbe(frames) {
     }
   }
   const focused = focuses.filter(entry => entry.hasFocus === true)
+  const topFocus = focuses.find(entry => entry.frameId === 0)
+  // When the browser window is unfocused (e.g. side panel focused), if frame 0
+  // explicitly points at a hidden canvas proxy iframe (.docs-texteventtarget-iframe),
+  // do not let an unrelated background iframe claim focus over the canvas.
+  if (focused.length === 0 && topFocus?.isCanvasProxyIframe === true) {
+    return { textLen, mutations, focus: topFocus, frameCount: list.length }
+  }
   const ranked = [...(focused.length > 0 ? focused : focuses)].sort((a, b) =>
-    Number(b.readable === true) - Number(a.readable === true)
-    || Number(b.measurable === true) - Number(a.measurable === true)
+    Number(b.measurable === true) - Number(a.measurable === true)
+    || Number(b.readable === true) - Number(a.readable === true)
+    || Number(a.inCanvasProxyFrame === true) - Number(b.inCanvasProxyFrame === true)
     || Number(a.frameId) - Number(b.frameId))
   const focus = ranked[0]
   return { textLen, mutations, focus, frameCount: list.length }
@@ -3834,6 +4259,8 @@ export function deriveTypeVerdict(before, after) {
     }
   }
   const knownNonEditable = focus !== undefined && focus.readable === false
+    && focus.inCanvasProxyFrame !== true
+    && focus.isCanvasProxyIframe !== true
     && !['canvas', 'frame', 'iframe', 'object', 'embed', 'video'].includes(String(focus.tag ?? ''))
   return {
     changed: null,
@@ -4328,19 +4755,92 @@ function readPageText(scope, offset, maxChars, canvasEditors) {
   const start = Math.max(0, Math.floor(Number(offset) || 0))
   const limit = Math.max(500, Math.min(30_000, Math.floor(Number(maxChars) || 12_000)))
   const root = document.scrollingElement || document.documentElement
-  const maxY = Math.max(0, root.scrollHeight - root.clientHeight)
-  const maxX = Math.max(0, root.scrollWidth - root.clientWidth)
-  const viewport = { width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1 }
+  const rootMaxY = Math.max(0, (root?.scrollHeight || 0) - (root?.clientHeight || 0))
+  const rootMaxX = Math.max(0, (root?.scrollWidth || 0) - (root?.clientWidth || 0))
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const viewport = { width: vw, height: vh, dpr: window.devicePixelRatio || 1 }
+  let scrollTarget = root
+  if (rootMaxY <= 1 && rootMaxX <= 1 && vw > 0 && vh > 0) {
+    const minArea = vw * vh * 0.2
+    const minW = vw * 0.3
+    const minH = vh * 0.3
+    const seen = new Set()
+    let best = null
+    const consider = el => {
+      for (let node = el; node && node !== document.documentElement && node !== root; node = node.parentElement) {
+        if (seen.has(node)) break
+        seen.add(node)
+        if (node.nodeType !== undefined && node.nodeType !== 1) continue
+        const ch = Number(node.clientHeight) || 0
+        const cw = Number(node.clientWidth) || 0
+        if (ch < 20 || cw < 20) continue
+        const mY = Math.max(0, (Number(node.scrollHeight) || 0) - ch)
+        const mX = Math.max(0, (Number(node.scrollWidth) || 0) - cw)
+        if (mY <= 2 && mX <= 2) continue
+        const style = typeof getComputedStyle === 'function' ? getComputedStyle(node) : null
+        if (!style || style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue
+        const canY = mY > 2 && (style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflowY === 'overlay')
+        const canX = mX > 2 && (style.overflowX === 'auto' || style.overflowX === 'scroll' || style.overflowX === 'overlay')
+        if (!canY && !canX) continue
+        const rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null
+        if (!rect) continue
+        const w = Math.max(0, Math.min(rect.right, vw) - Math.max(rect.left, 0))
+        const h = Math.max(0, Math.min(rect.bottom, vh) - Math.max(rect.top, 0))
+        if (w < minW || h < minH) continue
+        const area = w * h
+        if (area < minArea) continue
+        if (!best || area > best.area || (area === best.area && mY > best.maxY)) {
+          best = { el: node, area, maxY: mY }
+        }
+      }
+    }
+    const points = [
+      [vw * 0.5, vh * 0.5],
+      [vw * 0.5, vh * 0.25],
+      [vw * 0.5, vh * 0.75],
+      [vw * 0.25, vh * 0.5],
+      [vw * 0.75, vh * 0.5],
+      [vw * 0.5, vh * 0.65],
+      [vw * 0.35, vh * 0.7],
+      [vw * 0.65, vh * 0.35],
+    ]
+    for (const [px, py] of points) {
+      if (typeof document.elementsFromPoint === 'function') {
+        for (const hit of document.elementsFromPoint(px, py)) consider(hit)
+      } else if (typeof document.elementFromPoint === 'function') {
+        const hit = document.elementFromPoint(px, py)
+        if (hit) consider(hit)
+      }
+    }
+    if (best) scrollTarget = best.el
+  }
+  const describeScrollTarget = el => {
+    if (!el || el === root) return 'document'
+    const tag = el.tagName ? el.tagName.toLowerCase() : 'element'
+    const id = el.id ? `#${String(el.id).replace(/[^A-Za-z0-9_-]/gu, '').slice(0, 40)}` : ''
+    let cls = ''
+    if (!id && typeof el.className === 'string') {
+      const first = el.className.trim().split(/\s+/u).find(token => /^[A-Za-z_-][A-Za-z0-9_-]*$/u.test(token))
+      if (first) cls = `.${first.slice(0, 40)}`
+    }
+    const role = el.getAttribute?.('role')
+    return `${tag}${id || cls}${role ? `[role=${role}]` : ''}`
+  }
+  const scrollX = scrollTarget?.scrollLeft || 0
+  const scrollY = scrollTarget?.scrollTop || 0
+  const maxY = Math.max(0, (scrollTarget?.scrollHeight || 0) - (scrollTarget?.clientHeight || 0))
+  const maxX = Math.max(0, (scrollTarget?.scrollWidth || 0) - (scrollTarget?.clientWidth || 0))
   const scroll = {
-    x: root.scrollLeft || 0,
-    y: root.scrollTop || 0,
+    x: scrollX,
+    y: scrollY,
     maxX,
     maxY,
-    container: 'document',
-    pageHeight: root.scrollHeight,
-    pageWidth: root.scrollWidth,
-    atTop: (root.scrollTop || 0) <= 1,
-    atBottom: (root.scrollTop || 0) >= maxY - 1,
+    container: describeScrollTarget(scrollTarget),
+    pageHeight: scrollTarget?.scrollHeight || 0,
+    pageWidth: scrollTarget?.scrollWidth || 0,
+    atTop: scrollY <= 1,
+    atBottom: scrollY >= maxY - 1,
   }
 
   const normalize = (value) => String(value || '')
@@ -5538,14 +6038,19 @@ async function click(settings, args) {
     if (expectSession.expectation) inner.expect = expectSession.expectation
     return inner
   }
-  const activeTab = await getActiveTab(windowId).catch(() => tab)
+  let activeTab = await getActiveTab(windowId).catch(() => tab)
+  const openedNewTab = activeTab?.id !== undefined && activeTab.id !== tab.id
+  if (openedNewTab && (activeTab.status === 'loading' || isProtectedUrl(activeTab.url))) {
+    activeTab = await waitForNewTabTransition(activeTab, windowId, 2_500)
+  }
+  const clickNavigated = navigated || openedNewTab
   const storedBefore = lastViewByTab.get(activeTab.id)
   const __beforeView = performance.now()
-  const { payload, mode } = await buildActionView(activeTab, settings, viewMode, { changed: baseChanged, signals, layoutBaseline })
+  const { payload, mode } = await buildActionView(activeTab, settings, viewMode, { changed: baseChanged || openedNewTab, signals, layoutBaseline })
   const viewMs = Math.round(performance.now() - __beforeView)
   const initialChanged = mode === 'full' && pendingNavigation
-    ? navigated || (payload.tab?.title ?? '') !== (tab.title ?? '')
-    : (payload.changed ?? baseChanged)
+    ? clickNavigated || (payload.tab?.title ?? '') !== (tab.title ?? '')
+    : (payload.changed ?? (baseChanged || openedNewTab))
   const initialSignals = mode === 'full'
     ? signals
     : (Array.isArray(payload.signals) ? payload.signals : [])
@@ -5558,7 +6063,7 @@ async function click(settings, args) {
     changed: initialChanged,
     signals: initialSignals,
     pendingNavigation,
-    navigated,
+    navigated: clickNavigated,
     beforeLabels: storedBefore?.labels,
     afterLabels,
     labelsDelta: payload.labelsDelta,
@@ -5577,7 +6082,7 @@ async function click(settings, args) {
     clicked: result.clicked,
     changed,
     signals: reportedSignals,
-    navigated,
+    navigated: clickNavigated,
     ...(resultScroll ? { scroll: resultScroll } : {}),
     scrolledIntoView,
     clickMs: Math.round(performance.now() - started),
@@ -5776,14 +6281,45 @@ async function trustedTypeIntoLabel(tabId, target, request, domResult) {
 }
 
 /**
+ * Error message when unlabelled append or empty-text clearing is requested on
+ * a known canvas editor URL. Explicitly states that Google Docs canvas
+ * Input.insertText inserts at the caret and does NOT replace an active
+ * selection, so callers know to press Delete/Backspace first if replacing one.
+ * Pure helper; exported for unit tests.
+ * @param {string} canvasEditor
+ */
+export function canvasTypeUnsupportedMessage(canvasEditor) {
+  if (canvasEditor === 'Google Docs') {
+    return 'Google Docs unlabelled typing inserts at the caret and does NOT replace an active canvas selection (press Delete or Backspace first if replacing a selection, e.g. in Suggesting mode or manual canvas edits). Append and empty-text clearing are not verifiable here; use a labelled field or browser_docs_replace instead.'
+  }
+  return `${canvasEditor} unlabelled typing inserts at the caret (it may not replace an active canvas selection; press Delete or Backspace first if replacing a selection). Append and empty-text clearing are not verifiable here; use a labelled field, or select the intended range and use Backspace/Delete in a separate action.`
+}
+
+/**
  * Label-less trusted typing: Input.insertText goes to whatever already has
- * focus (the canvas-editor case, where a caret click put it there).
+ * focus. On a canvas-editor URL, first check whether focus is actually on a
+ * real visible DOM input/textarea/contenteditable (such as Docs' Alt+/ menu
+ * search combobox, Ctrl+K link input, Find bar, or Rename field); if so, run
+ * the normal DOM-measurable verification path and report actual valuePreview
+ * and changed. Only take the unverified canvas path when focus is on the canvas
+ * / hidden event-target iframe (e.g. .docs-texteventtarget-iframe).
  * @param {number} tabId
  * @param {{text: string}} request
  * @param {string|undefined} canvasEditor
  */
 async function trustedTypeIntoFocus(tabId, request, canvasEditor) {
-  if (canvasEditor) {
+  let probeFrames
+  let before
+  try {
+    probeFrames = await runInAllFrames(tabId, contentProbePage, ['start', Boolean(canvasEditor)], 2_500)
+    before = summarizeContentProbe(probeFrames)
+  } catch {
+    probeFrames = undefined
+    before = undefined
+  }
+  if (canvasEditor && !isRealDomEditableFocus(before?.focus)) {
+    const anyObserving = Array.isArray(probeFrames) && probeFrames.some(frame => frame?.result?.observing === true)
+    if (anyObserving) await runInAllFrames(tabId, contentProbePage, ['end'], 1_000).catch(() => {})
     await withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: request.text }))
     await settleAfterInput(tabId, undefined)
     return {
@@ -5797,17 +6333,12 @@ async function trustedTypeIntoFocus(tabId, request, canvasEditor) {
         charsAdded: null,
         measured: 'none',
         canvasEditor: true,
+        canvasEditorName: canvasEditor,
         fieldChanged: null,
         pageChanged: null,
         targetKind: 'canvas',
       },
     }
-  }
-  let before
-  try {
-    before = summarizeContentProbe(await runInAllFrames(tabId, contentProbePage, ['start'], 2_500))
-  } catch {
-    before = undefined
   }
   try {
     await withDebugger(tabId, () => chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: request.text }))
@@ -5824,6 +6355,9 @@ async function trustedTypeIntoFocus(tabId, request, canvasEditor) {
     after = undefined
   }
   const verdict = deriveTypeVerdict(before, after)
+  if (canvasEditor && verdict.canvasEditor === true) {
+    verdict.canvasEditorName = canvasEditor
+  }
   const measurable = verdict.measured === 'field'
   return {
     method: 'trusted',
@@ -5868,10 +6402,7 @@ async function typeText(settings, args) {
   const request = parseTypeArgs(args)
   const canvasEditor = canvasEditorForUrl(tab.url)
   if (canvasEditor && request.label === undefined && (request.mode === 'append' || request.text.length === 0)) {
-    throw new BrowserError(
-      'CANVAS_TYPE_UNSUPPORTED',
-      `${canvasEditor} unlabelled typing inserts at the caret or replaces the current selection. Append and empty-text clearing are not verifiable here; use a labelled field, or select the intended range and use Backspace/Delete in a separate action.`,
-    )
+    throw new BrowserError('CANVAS_TYPE_UNSUPPORTED', canvasTypeUnsupportedMessage(canvasEditor))
   }
   const expectSession = await startActionExpect('type', args, tab, settings)
   let textTarget
@@ -5953,6 +6484,7 @@ async function typeText(settings, args) {
       : {
           measured: verdict.measured,
           canvasEditor: verdict.canvasEditor,
+          ...(verdict.canvasEditorName ? { canvasEditorName: verdict.canvasEditorName } : {}),
           pageChanged: verdict.pageChanged,
           ...(verdict.canvasEditor ? { dispatched: true, verified: false } : { verified: changed === true }),
           ...(verdict.focusEditable === false ? { focusEditable: false, targetKind: verdict.targetKind } : {}),
@@ -8463,6 +8995,18 @@ async function docsCurrent(context, stage) {
     throw docsDriverError(stage, 'DOCS_TAB_CHECK_FAILED', error)
   }
   if (!current || current.id !== context.tab.id || !docsSameDocumentUrl(context.initialUrl, current.url)) {
+    const initialDocId = docsDocumentId(context.initialUrl)
+    const currentDocId = current ? docsDocumentId(current.url) : undefined
+    if (current && current.id === context.tab.id && initialDocId && initialDocId === currentDocId) {
+      const tabParam = raw => {
+        try { return new URL(raw).searchParams.get('tab') ?? 'default' } catch { return 'unknown' }
+      }
+      throw docsFailure(
+        stage,
+        'DOCS_STALE_TAB',
+        `The active Google Docs document tab changed from ${tabParam(context.initialUrl)} to ${tabParam(current.url)}; switch to the target document tab first before editing, and inspect the document before retrying`,
+      )
+    }
     throw docsFailure(stage, 'DOCS_STALE_TAB', 'The tab or document URL changed; no further mutation was attempted')
   }
   docsCheckDeadline(context, stage)
@@ -8549,17 +9093,23 @@ async function docsNativeMenuCommand(context, label) {
 
 async function docsMenuCommand(context, label) {
   try {
+    let item
+    let seenDisabled = false
     try {
       await docsKey(context, 'table-menu-open', KEY_SPECS.Slash, MODIFIER_BITS.alt)
       await docsWait(context, 'table-menu-open', 'menuSearch', {}, state => state.present && state.enabled && state.focused)
+      await docsNativeText(context, 'table-menu-query', 'setMenuSearch', label)
+      await docsWait(context, 'table-menu-query', 'menuSearch', {}, state => state.focused && state.value === label)
+      item = await docsWait(context, 'table-menu-item', 'tableMenuItem', { name: label }, state => {
+        if (state.present && state.disabled) seenDisabled = true
+        return state.present && !state.disabled && state.point
+      })
     } catch (error) {
-      if (error?.code !== 'DOCS_WAIT_TIMEOUT') throw error
+      if (error?.code !== 'DOCS_WAIT_TIMEOUT' || seenDisabled) throw error
+      try { await docsKey(context, 'table-menu-dismiss', KEY_SPECS.Escape) } catch {}
       await docsNativeMenuCommand(context, label)
       return
     }
-    await docsNativeText(context, 'table-menu-query', 'setMenuSearch', label)
-    await docsWait(context, 'table-menu-query', 'menuSearch', {}, state => state.focused && state.value === label)
-    const item = await docsWait(context, 'table-menu-item', 'tableMenuItem', { name: label }, state => state.present && !state.disabled && state.point)
     context.menuMutationPossible = true
     await docsClick(context, 'table-menu-command', item.point)
   } catch (error) {
@@ -8594,10 +9144,11 @@ async function docsHover(context, stage, target) {
   docsCheckDeadline(context, stage)
 }
 
-async function docsWait(context, stage, command, args, predicate, timeoutMs = 3_000) {
+async function docsWait(context, stage, command, args, predicate, timeoutMs = 3_000, options = {}) {
   const end = Math.min(context.deadline, context.driver.now() + timeoutMs)
   let latest
   while (context.driver.now() < end) {
+    if (options.checkTab === true) await docsCurrent(context, stage)
     latest = await docsProbe(context, stage, command, args)
     if (predicate(latest)) return latest
     await context.driver.sleep(60)
@@ -10391,8 +10942,26 @@ async function docsWriteFlow(context, args) {
       context.writeColors.color = styles.get('Normal text')?.color ?? '#000000'
     }
     if (mutated) {
-      const positioned = parseDocStructure(await docsExport(context, 'write-position', 'html'))
-      if (!docsWritePositionMatches(baseline, positioned, reused)) {
+      // Google Docs flushes Ctrl+End + Enter asynchronously to Drive's export
+      // endpoint. Settle briefly and poll while the export still equals the
+      // unchanged baseline, but fail closed immediately on any unexpected diff.
+      const baselineJson = JSON.stringify(baseline)
+      const positionEnd = Math.min(context.deadline, context.driver.now() + 4_000)
+      await docsVerifyInitialSettle(context, positionEnd)
+      let retryDelay = 300
+      let positionedOk = false
+      while (true) {
+        const positioned = parseDocStructure(await docsExport(context, 'write-position', 'html'))
+        if (docsWritePositionMatches(baseline, positioned, reused)) {
+          positionedOk = true
+          break
+        }
+        if (JSON.stringify(positioned) !== baselineJson) break
+        if (context.driver.now() + retryDelay > positionEnd) break
+        await context.driver.sleep(retryDelay)
+        retryDelay = Math.min(1_000, retryDelay * 2)
+      }
+      if (!positionedOk) {
         throw docsFailure('write-position', 'DOCS_WRITE_POSITION', 'Document end was not established before formatting; no blocks were typed')
       }
     }
@@ -10722,17 +11291,38 @@ async function docsTableCreateClipboard(context, args, baseline) {
   return { prefix, restoreError }
 }
 
+async function docsTableCreateOsStaged(context, baseline) {
+  await docsFocusDocument(context)
+  const prefix = (await docsWriteStart(context, baseline)).prefix
+  context.attemptedCount = 1
+  await docsKey(context, 'table-create-paste', { key: 'v', code: 'KeyV', keyCode: 86 }, MODIFIER_BITS.ctrl)
+  return { prefix }
+}
+
 async function docsTableCreateFlow(context, args) {
   context.attemptedCount = 0
   const baselineHtml = await docsExport(context, 'table-create-baseline', 'html')
   const baseline = parseDocStructure(baselineHtml)
   const baselineInherited = parseInheritedTextMarks(baselineHtml)
-  const grid = await docsTableCreateGridOpen(context, args)
-  const native = grid.within
-  await docsTableCreateGridDismiss(context)
+  let native = false
+  if (args.osStaged !== true) {
+    const grid = await docsTableCreateGridOpen(context, args)
+    native = grid.within
+    await docsTableCreateGridDismiss(context)
+    if (!native && args.osStage === true) {
+      const content = docsTableCreateHtml(args)
+      return {
+        op: 'docs',
+        osTableStageNeeded: true,
+        tableHtml: content.html,
+        tableText: content.text,
+      }
+    }
+  }
   let prefix
   let restoreError
   if (native) prefix = await docsTableCreateNative(context, args, baseline)
+  else if (args.osStaged === true) ({ prefix } = await docsTableCreateOsStaged(context, baseline))
   else ({ prefix, restoreError } = await docsTableCreateClipboard(context, args, baseline))
   const verificationEnd = Math.min(context.deadline, context.driver.now() + 10_000)
   await docsVerifyInitialSettle(context, verificationEnd)
@@ -10758,7 +11348,8 @@ async function docsTableCreateFlow(context, args) {
     verifiedCount: verification?.ok ? args.rows * args.columns : 0,
     cellCount: args.rows * args.columns,
     verifiedBy: 'export',
-    ...native ? {} : { clipboardRestored: restoreError === undefined },
+    ...native || args.osStaged === true ? {} : { clipboardRestored: restoreError === undefined },
+    ...args.osStaged === true ? { osClipboard: true } : {},
     ...restoreError ? { clipboardRestoreError: restoreError.message } : {},
     ...verification?.ok ? { tableIndex: verification.table.index } : { failure: { code: verification?.code ?? 'DOCS_TABLE_VERIFY_FAILED', message: verification?.message ?? 'Table creation could not be verified', ...verification?.actual !== undefined ? { actual: verification.actual } : {} } },
   }
@@ -11169,7 +11760,12 @@ async function docsTableLocked(settings, args, tab, driver) {
 }
 
 export async function docsTable(settings, args, io = {}) {
-  const normalizedArgs = parseDocsTableArgs(args)
+  const isCreate = args?.action === 'create' || (args?.action === 'table' && args?.tableAction === 'create')
+  const { osStage, osStaged, ...publicArgs } = isCreate && args && typeof args === 'object' && !Array.isArray(args)
+    ? args
+    : { osStage: undefined, osStaged: undefined, ...(args && typeof args === 'object' && !Array.isArray(args) ? args : {}) }
+  const normalizedArgs = parseDocsTableArgs(isCreate ? publicArgs : args)
+  const flowArgs = isCreate ? { ...normalizedArgs, osStage: osStage === true, osStaged: osStaged === true } : normalizedArgs
   const driver = docsDriver(io)
   let tab
   try {
@@ -11182,7 +11778,7 @@ export async function docsTable(settings, args, io = {}) {
     throw docsFailure('validate-tab', 'DOCS_URL_UNSUPPORTED', 'The active tab must be an https://docs.google.com/document URL')
   }
   const previous = docsTabLocks.get(tab.id) ?? Promise.resolve()
-  const run = previous.catch(() => {}).then(() => docsTableLocked(settings, normalizedArgs, tab, driver))
+  const run = previous.catch(() => {}).then(() => docsTableLocked(settings, flowArgs, tab, driver))
   const gate = run.catch(() => {})
   docsTabLocks.set(tab.id, gate)
   try {
@@ -11251,7 +11847,7 @@ async function docsApplyReplacement(context, text, replacement) {
   const verified = await docsWait(context, 'verify-replacement', 'replace', {}, state => (
     (state.findValue === text && state.match?.total === expectedOldMatches)
       || (replacement && state.findValue === replacement && state.match?.total === expectedNewMatches)
-  ), DOCS_REPLACE_WAIT_MS)
+  ), DOCS_REPLACE_WAIT_MS, { checkTab: true })
   if (!replacement) return { matchCount: 0 }
   if (verified.findValue === replacement) {
     if (expectedNewMatches !== replacementBaseline) return { matchCount: verified.match.total }
@@ -11301,15 +11897,20 @@ async function docsCloseReplace(context) {
 }
 
 async function docsReplaceTextFlow(context, text, replacement) {
-  await docsOpenReplace(context)
-  const applied = await docsApplyReplacement(context, text, replacement)
-  await docsCloseReplace(context)
-  return docsFinish(context, {
-    status: replacement ? 'replaced_text' : 'removed_text',
-    matchCount: applied.matchCount,
-    verifiedBy: 'find-counter',
-    ...replacement ? {} : { removedText: text },
-  })
+  try {
+    await docsOpenReplace(context)
+    const applied = await docsApplyReplacement(context, text, replacement)
+    await docsCloseReplace(context)
+    return docsFinish(context, {
+      status: replacement ? 'replaced_text' : 'removed_text',
+      matchCount: applied.matchCount,
+      verifiedBy: 'find-counter',
+      ...replacement ? {} : { removedText: text },
+    })
+  } catch (error) {
+    try { await docsCloseReplace(context) } catch {}
+    throw error
+  }
 }
 
 async function docsReplaceTextLocked(settings, args, tab, driver) {
@@ -11409,6 +12010,7 @@ async function docsReplaceManyFlow(context, edits) {
       ...failure ? { failure } : {},
     })
   } catch (error) {
+    try { await docsCloseReplace(context) } catch {}
     if (appliedCount > 0 && error instanceof Error) {
       error.message += `; ${appliedCount} earlier edit${appliedCount === 1 ? ' was' : 's were'} applied before this failure`
     }

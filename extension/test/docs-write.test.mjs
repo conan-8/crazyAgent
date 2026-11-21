@@ -158,13 +158,14 @@ function fakeWrite(options = {}) {
       exports.push(state.blocks.map(block => `${block.style}:${block.text}`))
       if (options.exportError) throw options.exportError
       if (options.mutatePrefixOnVerify && exports.length > 2) state.blocks[0].text = 'Changed sentinel'
+      const stalePosition = options.stalePositionReads && exports.length > 1 && exports.length - 1 <= options.stalePositionReads
       const stale = options.staleVerifyReads && exports.length > 2 && exports.length - 2 <= options.staleVerifyReads
       const positioned = options.whitespaceOnlyTrailingRunOnPosition && exports.length === 2
         ? state.blocks.map((block, index) => index === state.blocks.length - 1 && block.kind === 'para' && !block.text.trim()
           ? { ...block, text: ' ', runsData: [{ text: ' ', format: block.format ?? NORMAL }] }
           : block)
         : state.blocks
-      return { body: exportHtml(stale ? (options.blocks ?? [para('Sentinel')]) : positioned, options) }
+      return { body: exportHtml(stalePosition || stale ? (options.blocks ?? [para('Sentinel')]) : positioned, options) }
     },
     dispatchTrustedKey: async (_tabId, spec, mask) => {
       events.push(`key:${spec.key}:${mask}`)
@@ -821,13 +822,27 @@ test('Docs write bounds verification reads and never retries missing input', asy
 })
 
 test('Docs write stops before formatting when document end is not established', async () => {
-  for (const options of [{ mutatePrefix: true }, { enterFails: true }]) {
-    const fake = fakeWrite(options)
-    await assert.rejects(runWrite(fake, [{ text: 'New content' }]), error => error.code === 'DOCS_WRITE_POSITION')
-    assert.equal(fake.events.some(event => event.startsWith('insert:')), false)
-    assert.equal(fake.exports.length, 2)
-    assert.equal(fake.snapshots(), 0)
-  }
+  const mutated = fakeWrite({ mutatePrefix: true })
+  await assert.rejects(runWrite(mutated, [{ text: 'New content' }]), error => error.code === 'DOCS_WRITE_POSITION')
+  assert.equal(mutated.events.some(event => event.startsWith('insert:')), false)
+  assert.equal(mutated.exports.length, 2, 'unexpected prefix divergence fails closed immediately without polling')
+  assert.equal(mutated.snapshots(), 0)
+
+  const stuck = fakeWrite({ enterFails: true })
+  await assert.rejects(runWrite(stuck, [{ text: 'New content' }]), error => error.code === 'DOCS_WRITE_POSITION')
+  assert.equal(stuck.events.some(event => event.startsWith('insert:')), false)
+  assert.ok(stuck.exports.length >= 2 && stuck.exports.length <= 6, `bounded write-position retries (got ${stuck.exports.length})`)
+  assert.equal(stuck.snapshots(), 0)
+})
+
+test('Docs write polls write-position until Drive flushes the trailing Enter', async () => {
+  const fake = fakeWrite({ stalePositionReads: 2 })
+  const result = await runWrite(fake, [{ text: 'Appended after Drive lag' }])
+  assert.equal(result.docs.status, 'completed')
+  assert.equal(result.docs.verifiedCount, 1)
+  // 1 baseline + 2 stale write-position + 1 converged write-position + 1 final verify = 5 exports.
+  assert.equal(fake.exports.length, 5)
+  assert.equal(fake.snapshots(), 0)
 })
 
 test('Docs write rejects collateral changes during final verification', async () => {

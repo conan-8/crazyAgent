@@ -13,8 +13,9 @@
   <body>
     <svg class="svg-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="icon-grid-dots" viewBox="0 0 24 24"><circle cx="8.5" cy="8.5" r="1.75" fill="currentColor" stroke="none" /><circle cx="15.5" cy="8.5" r="1.75" fill="currentColor" stroke="none" /><circle cx="8.5" cy="15.5" r="1.75" fill="currentColor" stroke="none" /><circle cx="15.5" cy="15.5" r="1.75" fill="currentColor" stroke="none" /></symbol>
       <symbol id="icon-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></symbol>
-      <symbol id="icon-log" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8M8 17h6" /></symbol>
+      <symbol id="icon-diary" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /><path d="M9 7h7M9 11h5" /></symbol>
       <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08a1.7 1.7 0 0 0 1.06 1.52 1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z" /></symbol>
       <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
       <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></symbol>
@@ -38,10 +39,15 @@
     <div class="app">
       <header class="topbar" aria-label="Chat utilities">
         <div class="top-actions">
-          <button id="new-chat" class="icon-btn" type="button" title="New chat" aria-label="New chat"><svg class="icon"><use href="#icon-plus" /></svg></button>
-          <button id="history" class="icon-btn" type="button" title="Chat history" aria-label="Chat history"><svg class="icon"><use href="#icon-history" /></svg></button>
-          <button id="debug-log" class="icon-btn" type="button" title="Debug log" aria-label="Debug log"><svg class="icon"><use href="#icon-log" /></svg></button>
-          <button id="settings" class="icon-btn" type="button" title="Settings" aria-label="Settings"><svg class="icon"><use href="#icon-settings" /></svg></button>
+          <div class="top-actions-tray">
+            <div class="top-actions-items">
+              <button id="settings" class="icon-btn" type="button" title="Settings" aria-label="Settings"><svg class="icon"><use href="#icon-settings" /></svg></button>
+              <button id="diary" class="icon-btn" type="button" title="Diary" aria-label="Diary"><svg class="icon"><use href="#icon-diary" /></svg></button>
+              <button id="history" class="icon-btn" type="button" title="Chat history" aria-label="Chat history"><svg class="icon"><use href="#icon-history" /></svg></button>
+              <button id="new-chat" class="icon-btn" type="button" title="New chat" aria-label="New chat"><svg class="icon"><use href="#icon-plus" /></svg></button>
+            </div>
+          </div>
+          <button id="utilities-toggle" class="icon-btn top-actions-toggle" type="button" title="Utilities" aria-label="Utilities" aria-expanded="false"><svg class="icon"><use href="#icon-grid-dots" /></svg></button>
         </div>
       </header>
 
@@ -111,36 +117,41 @@
             <button id="confirm-approve" class="primary" type="button">Approve</button>
           </div>
         </div>
-        <div class="composer-field">
-          <div id="image-chips" class="image-chips" aria-live="polite"></div>
-          <div class="composer-input">
-            <textarea id="input" rows="2" placeholder="Ask or tell me what to do…" autocomplete="off" spellcheck="false" role="combobox" aria-label="Message" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="slash-menu-list"></textarea>
-            <div id="dictation-indicator" class="dictation-indicator" role="status" hidden>
-              <span class="dictation-dots" aria-hidden="true"><span class="dictation-dot"></span><span class="dictation-dot"></span><span class="dictation-dot"></span></span>
-              <span class="dictation-label">Listening</span>
-            </div>
+        <div id="diary-suggest-card" class="diary-suggest-card hidden" role="region" aria-label="Diary suggestions"></div>
+        <div class="composer-shell">
+          <div id="composer-aura" class="composer-aura" aria-hidden="true">
+            <div class="composer-aura-glow"></div>
+            <div class="composer-aura-surge"></div>
+            <div class="composer-aura-fluid"></div>
+            <div class="composer-aura-rim"></div>
           </div>
-          <div class="composer-controls">
-            <button id="mic" class="mic" type="button" title="Start dictation" aria-label="Start dictation" aria-pressed="false"><svg class="icon"><use href="#icon-mic" /></svg></button>
-            <span class="composer-spacer"></span>
-            <span id="composer-model-context" class="composer-model-context" role="img" aria-label="Context usage" hidden>
-              <svg class="composer-context-ring" viewBox="0 0 20 20" aria-hidden="true">
-                <circle class="context-ring-track" cx="10" cy="10" r="7"></circle>
-                <circle id="composer-context-progress" class="context-ring-progress" cx="10" cy="10" r="7"></circle>
-              </svg>
-              <span id="composer-context-tooltip" class="composer-context-tooltip" role="tooltip">
-                <span id="composer-context-usage"></span>
-                <strong id="composer-context-percent"></strong>
+          <div class="composer-field">
+            <div id="image-chips" class="image-chips" aria-live="polite"></div>
+            <div class="composer-input">
+              <textarea id="input" rows="2" placeholder="Ask or tell me what to do…" autocomplete="off" spellcheck="false" role="combobox" aria-label="Message" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="slash-menu-list"></textarea>
+            </div>
+            <div class="composer-controls">
+              <button id="mic" class="mic" type="button" title="Start dictation" aria-label="Start dictation" aria-pressed="false"><svg class="icon"><use href="#icon-mic" /></svg></button>
+              <span class="composer-spacer"></span>
+              <span id="composer-model-context" class="composer-model-context" role="img" aria-label="Context usage" hidden>
+                <svg class="composer-context-ring" viewBox="0 0 20 20" aria-hidden="true">
+                  <circle class="context-ring-track" cx="10" cy="10" r="7"></circle>
+                  <circle id="composer-context-progress" class="context-ring-progress" cx="10" cy="10" r="7"></circle>
+                </svg>
+                <span id="composer-context-tooltip" class="composer-context-tooltip" role="tooltip">
+                  <span id="composer-context-usage"></span>
+                  <strong id="composer-context-percent"></strong>
+                </span>
               </span>
-            </span>
-            <button id="composer-model" class="composer-model" type="button" aria-haspopup="listbox" aria-expanded="false" title="Choose model">
-              <span id="composer-model-name">Select model</span>
-              <span id="composer-model-effort" class="composer-model-effort" hidden></span>
-              <svg class="icon"><use href="#icon-chevron" /></svg>
-            </button>
-            <div class="composer-submit">
-              <button id="stop" class="stop hidden" type="button" title="Stop the current turn" aria-label="Stop the current turn" aria-busy="false"><span aria-hidden="true"></span></button>
-              <button id="send" class="send" type="submit" title="Send" aria-label="Send"><svg class="icon"><use href="#icon-arrow-up" /></svg></button>
+              <button id="composer-model" class="composer-model" type="button" aria-haspopup="listbox" aria-expanded="false" title="Choose model">
+                <span id="composer-model-name">Select model</span>
+                <span id="composer-model-effort" class="composer-model-effort" hidden></span>
+                <svg class="icon"><use href="#icon-chevron" /></svg>
+              </button>
+              <div class="composer-submit">
+                <button id="stop" class="stop hidden" type="button" title="Stop the current turn" aria-label="Stop the current turn" aria-busy="false"><span aria-hidden="true"></span></button>
+                <button id="send" class="send" type="submit" title="Send" aria-label="Send"><svg class="icon"><use href="#icon-arrow-up" /></svg></button>
+              </div>
             </div>
           </div>
         </div>
@@ -170,105 +181,10 @@
           <button id="settings-close" class="icon-btn close-btn" type="button" title="Close" aria-label="Close settings"><svg class="icon"><use href="#icon-close" /></svg></button>
         </div>
         <div class="modal-body settings-body">
-          <section class="settings-section" aria-labelledby="model-label">
-            <h3 id="model-label">Model</h3>
-            <label class="field">
-              <span>OpenRouter API key</span>
-              <input id="setting-apikey" type="password" spellcheck="false" autocomplete="new-password" placeholder="sk-or-v1-…" />
-            </label>
-            <p class="hint status-hint" id="key-status">No OpenRouter API key configured.</p>
-            <label class="field">
-              <span>Model base URL</span>
-              <input id="setting-base-url" type="url" spellcheck="false" placeholder="https://openrouter.ai/api/v1" />
-            </label>
-            <div class="field model-field">
-              <span>Model</span>
-              <div class="model-row">
-                <div class="model-picker">
-                  <svg class="icon input-icon"><use href="#icon-search" /></svg>
-                  <input id="setting-model" type="text" spellcheck="false" placeholder="Search OpenRouter models…" autocomplete="off" aria-controls="model-options" />
-                  <svg class="icon picker-chevron"><use href="#icon-chevron" /></svg>
-                  <div id="model-options" class="model-options hidden" role="listbox" aria-label="Available models"></div>
-                </div>
-                <button id="refresh-models" class="secondary refresh-models" type="button"><svg class="icon"><use href="#icon-refresh" /></svg><span>Refresh</span></button>
-              </div>
-            </div>
-            <p class="hint status-hint" id="model-status">OpenRouter models have not been loaded yet.</p>
-            <div class="field">
-              <span>Reasoning effort</span>
-              <div id="setting-effort" class="effort-options" role="group" aria-label="Reasoning effort">
-                <button class="active" type="button" data-effort="auto" aria-pressed="true">Auto</button>
-                <button type="button" data-effort="off" aria-pressed="false">Off</button>
-                <button type="button" data-effort="low" aria-pressed="false">Low</button>
-                <button type="button" data-effort="medium" aria-pressed="false">Medium</button>
-                <button type="button" data-effort="high" aria-pressed="false">High</button>
-              </div>
-              <span id="effort-hint" class="hint">Low for actions; medium for reading and synthesis</span>
-              <p class="hint status-hint" id="effort-status">Auto: low for action/navigation/reactive turns; medium for inspection/synthesis.</p>
-            </div>
-            <label class="check">
-              <span>Remember the API key on this machine</span>
-              <input id="setting-remember-key" type="checkbox" checked />
-            </label>
-          </section>
-
-          <section class="settings-section" aria-labelledby="connection-label">
-            <h3 id="connection-label">Connection</h3>
-            <label class="field">
-              <span>Bridge URL</span>
-              <input id="setting-url" type="text" spellcheck="false" />
-            </label>
-            <label class="field">
-              <span>Pairing token</span>
-              <input id="setting-token" type="password" spellcheck="false" placeholder="Printed by npm run dev" />
-            </label>
-          </section>
-
-          <section class="settings-section" aria-labelledby="safety-label">
-            <h3 id="safety-label">Safety</h3>
-            <label class="check">
-              <span>Ask before submitting, sending, paying, or deleting</span>
-              <input id="setting-confirm-irreversible" type="checkbox" />
-            </label>
-            <p class="hint">The agent ends its turn and waits for your Approve or Deny before an irreversible action. Applies to every turn, including turns started from the phone.</p>
-            <label class="check">
-              <span>Let watcher nudge stuck turns automatically</span>
-              <input id="setting-watch-auto-steer" type="checkbox" checked />
-            </label>
-            <p class="hint">When the watcher confirms the agent has been stuck on the same step for 2–3 minutes, it alerts you and sends a bounded course-correction hint (max 2 per turn). It cannot override your goal or confirmation gates.</p>
-          </section>
-
-          <section class="settings-section" aria-labelledby="capture-label">
-            <h3 id="capture-label">Capture</h3>
-            <div class="field-row">
-              <label class="field">
-                <span>Capture width</span>
-                <input id="setting-width" type="number" min="640" max="2048" step="64" />
-              </label>
-              <label class="field">
-                <span>JPEG quality</span>
-                <input id="setting-quality" type="number" min="40" max="90" step="1" />
-              </label>
-            </div>
-            <label class="check">
-              <span>Attach a fresh view to every message</span>
-              <input id="setting-autocapture" type="checkbox" />
-            </label>
-            <p class="hint">The token is stored only in this browser profile. Screenshots go to your configured model provider through the local DSH runtime. Keep the side panel open while the agent runs.</p>
-          </section>
-
           <section class="settings-section settings-usage" aria-labelledby="usage-label">
             <div id="usage-card" class="usage-card">
               <div class="usage-heading">
-                <div class="usage-title">
-                  <span class="usage-symbol" aria-hidden="true">
-                    <svg class="icon" viewBox="0 0 24 24"><path d="m12 2 1.7 5.3L19 9l-5.3 1.7L12 16l-1.7-5.3L5 9l5.3-1.7L12 2Z" /><path d="m18.5 15 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" /></svg>
-                  </span>
-                  <div>
-                    <h3 id="usage-label">Lifetime usage</h3>
-                    <p>Agent tokens · saved on this device</p>
-                  </div>
-                </div>
+                <h3 id="usage-label">Lifetime usage</h3>
                 <span id="settings-usage-turns" class="usage-turns">0 turns</span>
               </div>
               <div class="usage-total-line">
@@ -307,6 +223,76 @@
             </div>
           </section>
 
+          <section class="settings-section" aria-labelledby="model-label">
+            <h3 id="model-label">Model</h3>
+            <label class="field">
+              <span>OpenRouter API key</span>
+              <input id="setting-apikey" type="password" spellcheck="false" autocomplete="new-password" placeholder="sk-or-v1-…" />
+            </label>
+            <p class="hint status-hint" id="key-status">No OpenRouter API key configured.</p>
+            <div class="field model-field">
+              <span>Model</span>
+              <div class="model-row">
+                <div class="model-picker">
+                  <svg class="icon input-icon"><use href="#icon-search" /></svg>
+                  <input id="setting-model" type="text" spellcheck="false" placeholder="Search OpenRouter models…" autocomplete="off" aria-controls="model-options" />
+                  <svg class="icon picker-chevron"><use href="#icon-chevron" /></svg>
+                  <div id="model-options" class="model-options hidden" role="listbox" aria-label="Available models"></div>
+                </div>
+                <button id="refresh-models" class="secondary refresh-models" type="button"><svg class="icon"><use href="#icon-refresh" /></svg><span>Refresh</span></button>
+              </div>
+            </div>
+            <p class="hint status-hint" id="model-status">OpenRouter models have not been loaded yet.</p>
+            <div class="field">
+              <span>Reasoning effort</span>
+              <div id="setting-effort" class="effort-options" role="group" aria-label="Reasoning effort">
+                <button class="active" type="button" data-effort="auto" aria-pressed="true">Auto</button>
+                <button type="button" data-effort="off" aria-pressed="false">Off</button>
+                <button type="button" data-effort="low" aria-pressed="false">Low</button>
+                <button type="button" data-effort="medium" aria-pressed="false">Medium</button>
+                <button type="button" data-effort="high" aria-pressed="false">High</button>
+              </div>
+              <span id="effort-hint" class="hint">Low for actions; medium for reading and synthesis</span>
+              <p class="hint status-hint" id="effort-status">Auto: low for action/navigation/reactive turns; medium for inspection/synthesis.</p>
+            </div>
+            <label class="check">
+              <span>Remember the API key on this machine</span>
+              <input id="setting-remember-key" type="checkbox" checked />
+            </label>
+          </section>
+
+          <section class="settings-section" aria-labelledby="safety-label">
+            <h3 id="safety-label">Safety</h3>
+            <label class="check">
+              <span>Ask before submitting, sending, paying, or deleting</span>
+              <input id="setting-confirm-irreversible" type="checkbox" />
+            </label>
+            <p class="hint">The agent ends its turn and waits for your Approve or Deny before an irreversible action. Applies to every turn, including turns started from the phone.</p>
+            <label class="check">
+              <span>Let watcher nudge stuck turns automatically</span>
+              <input id="setting-watch-auto-steer" type="checkbox" checked />
+            </label>
+            <p class="hint">When the watcher confirms the agent has been stuck on the same step for 2–3 minutes, it alerts you and sends a bounded course-correction hint (max 2 per turn). It cannot override your goal or confirmation gates.</p>
+          </section>
+
+          <section class="settings-section" aria-labelledby="diary-settings-label">
+            <h3 id="diary-settings-label">Diary</h3>
+            <label class="check">
+              <span>Suggest diary entries after runs</span>
+              <input id="setting-diary-auto-suggest" type="checkbox" checked />
+            </label>
+            <p class="hint">After a finished turn, checks for reusable emails, site workflows, or standing preferences and asks before saving them to your Diary.</p>
+          </section>
+
+          <section class="settings-section" aria-labelledby="interface-settings-label">
+            <h3 id="interface-settings-label">Interface</h3>
+            <label class="check">
+              <span>Verbose live activity</span>
+              <input id="setting-verbose-activity" type="checkbox" />
+            </label>
+            <p class="hint">Show full thinking text, tool details, and every step while running instead of the compact scrolling ticker.</p>
+          </section>
+
           <section class="settings-section settings-about" aria-labelledby="about-label">
             <h3 id="about-label">About</h3>
             <dl class="settings-about-list">
@@ -320,10 +306,92 @@
               </div>
             </dl>
           </section>
+
+          <section class="settings-section settings-advanced" aria-labelledby="advanced-settings-toggle">
+            <details id="settings-advanced" class="settings-collapsible">
+              <summary id="advanced-settings-toggle" class="settings-collapsible-summary">
+                <span>Advanced</span>
+                <svg class="icon settings-collapsible-chevron" aria-hidden="true"><use href="#icon-chevron" /></svg>
+              </summary>
+              <div class="settings-collapsible-body">
+                <div class="log-subsection">
+                  <h4>Connection</h4>
+                  <label class="field">
+                    <span>Bridge URL</span>
+                    <input id="setting-url" type="text" spellcheck="false" />
+                  </label>
+                  <label class="field">
+                    <span>Pairing token</span>
+                    <input id="setting-token" type="password" spellcheck="false" placeholder="Printed by npm run dev" />
+                  </label>
+                  <label class="field">
+                    <span>Model base URL</span>
+                    <input id="setting-base-url" type="url" spellcheck="false" placeholder="https://openrouter.ai/api/v1" />
+                  </label>
+                </div>
+                <div class="log-subsection">
+                  <h4>Capture</h4>
+                  <div class="field-row">
+                    <label class="field">
+                      <span>Capture width</span>
+                      <input id="setting-width" type="number" min="640" max="2048" step="64" />
+                    </label>
+                    <label class="field">
+                      <span>JPEG quality</span>
+                      <input id="setting-quality" type="number" min="40" max="90" step="1" />
+                    </label>
+                  </div>
+                  <label class="check">
+                    <span>Attach a fresh view to every message</span>
+                    <input id="setting-autocapture" type="checkbox" />
+                  </label>
+                  <div class="log-actions-inline">
+                    <button id="test-capture" class="secondary" type="button">Test capture</button>
+                  </div>
+                  <p class="hint">The token is stored only in this browser profile. Screenshots go to your configured model provider through the local DSH runtime. Keep the side panel open while the agent runs.</p>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <section class="settings-section settings-debug-log" aria-labelledby="debug-log-toggle">
+            <details id="settings-debug-log" class="settings-collapsible">
+              <summary id="debug-log-toggle" class="settings-collapsible-summary">
+                <span>Debug log</span>
+                <svg class="icon settings-collapsible-chevron" aria-hidden="true"><use href="#icon-chevron" /></svg>
+              </summary>
+              <div class="settings-collapsible-body">
+                <div class="log-subsection">
+                  <h4>Session</h4>
+                  <div id="log-stats" class="log-stats">Connecting…</div>
+                </div>
+                <div class="log-subsection">
+                  <h4>Signals</h4>
+                  <div id="log-signals" class="log-signals"></div>
+                </div>
+                <div class="log-subsection">
+                  <h4>Bundle</h4>
+                  <label class="check">
+                    <span>Include screenshots</span>
+                    <input id="log-include-screenshots" type="checkbox" checked />
+                  </label>
+                  <label class="check">
+                    <span>Include raw DSH session log</span>
+                    <input id="log-include-session" type="checkbox" checked />
+                  </label>
+                  <p class="hint">The ZIP contains events.jsonl, summary.md, environment.json, and optionally screenshots and the DSH session log. Pairing tokens, API keys, authorization headers, and secret-named fields are redacted from JSONL. Screenshots may contain page content.</p>
+                </div>
+                <div class="log-actions-inline">
+                  <button id="log-copy-summary" class="secondary" type="button">Copy summary</button>
+                  <button id="log-copy-path" class="secondary" type="button">Copy path</button>
+                  <button id="log-export" class="primary" type="button"><svg class="icon"><use href="#icon-download" /></svg><span>Download</span></button>
+                </div>
+              </div>
+            </details>
+          </section>
         </div>
         <div class="modal-actions">
           <span id="settings-status" class="settings-status" role="status"></span>
-          <button id="test-capture" class="secondary" type="button">Test capture</button>
           <button id="settings-save" class="primary" type="button">Save</button>
         </div>
       </div>
@@ -349,39 +417,66 @@
       </div>
     </div>
 
-    <div id="log-modal" class="modal panel-modal hidden" role="dialog" aria-modal="true" aria-labelledby="log-title">
+    <div id="diary-modal" class="modal panel-modal hidden" role="dialog" aria-modal="true" aria-labelledby="diary-title">
       <div class="modal-card">
         <div class="modal-head">
-          <h2 id="log-title">Debug log</h2>
-          <button id="log-close" class="icon-btn close-btn" type="button" title="Close" aria-label="Close debug log"><svg class="icon"><use href="#icon-close" /></svg></button>
+          <h2 id="diary-title">Diary</h2>
+          <button id="diary-close" class="icon-btn close-btn" type="button" title="Close" aria-label="Close diary"><svg class="icon"><use href="#icon-close" /></svg></button>
         </div>
-        <div class="modal-body log-body">
-          <section class="settings-section" aria-labelledby="session-label">
-            <h3 id="session-label">Session</h3>
-            <div id="log-stats" class="log-stats">Connecting…</div>
-          </section>
-          <section class="settings-section" aria-labelledby="signals-label">
-            <h3 id="signals-label">Signals</h3>
-            <div id="log-signals" class="log-signals"></div>
-          </section>
-          <section class="settings-section" aria-labelledby="bundle-label">
-            <h3 id="bundle-label">Bundle</h3>
-            <label class="check">
-              <span>Include screenshots</span>
-              <input id="log-include-screenshots" type="checkbox" checked />
+        <div class="modal-body diary-body">
+          <p class="hint diary-hint">Saved locally and shared with the agent globally or on matching websites. Don't store passwords, 2FA codes, or API keys.</p>
+          <p id="diary-offline-note" class="hint diary-offline-note hidden">Connect to the companion to save, edit, or delete entries.</p>
+
+          <div class="diary-toolbar">
+            <div class="diary-search">
+              <svg class="icon"><use href="#icon-search" /></svg>
+              <input id="diary-search" type="search" placeholder="Search diary…" spellcheck="false" autocomplete="off" aria-label="Search diary" />
+            </div>
+            <button id="diary-add" class="primary" type="button">+ Add</button>
+          </div>
+
+          <div class="diary-filters" role="group" aria-label="Filter diary entries">
+            <button class="active" type="button" data-diary-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-diary-filter="global" aria-pressed="false">Global</button>
+            <button type="button" data-diary-filter="site" aria-pressed="false">Websites</button>
+          </div>
+
+          <form id="diary-editor" class="diary-editor hidden" novalidate>
+            <div class="diary-scope-toggle" role="group" aria-label="Entry scope">
+              <button id="diary-scope-global" class="active" type="button" data-diary-scope="global" aria-pressed="true">Global</button>
+              <button id="diary-scope-site" type="button" data-diary-scope="site" aria-pressed="false">Specific site(s)</button>
+            </div>
+            <div id="diary-sites-field" class="field hidden">
+              <span>Websites (comma-separated domains)</span>
+              <div class="diary-sites-row">
+                <input id="diary-field-sites" type="text" spellcheck="false" autocomplete="off" placeholder="kimi.ai, chat.kimi.ai" />
+                <button id="diary-use-current-tab" class="secondary" type="button">Use current tab</button>
+              </div>
+            </div>
+            <label class="field">
+              <span>Title</span>
+              <input id="diary-field-title" type="text" maxlength="80" autocomplete="off" placeholder="e.g. Kimi login email" />
             </label>
-            <label class="check">
-              <span>Include raw DSH session log</span>
-              <input id="log-include-session" type="checkbox" checked />
+            <label class="field">
+              <div class="diary-field-label-row">
+                <span>Instructions or note</span>
+                <span id="diary-content-count" class="diary-char-count">0 / 500</span>
+              </div>
+              <textarea id="diary-field-content" rows="3" maxlength="500" placeholder="e.g. Always sign in with alice@gmail.com on Kimi."></textarea>
             </label>
-            <p class="hint">The ZIP contains events.jsonl, summary.md, environment.json, and optionally screenshots and the DSH session log. Pairing tokens, API keys, authorization headers, and secret-named fields are redacted from JSONL. Screenshots may contain page content.</p>
-          </section>
-        </div>
-        <div class="modal-actions log-actions">
-          <button id="log-copy-summary" class="secondary" type="button">Copy summary</button>
-          <button id="log-copy-path" class="secondary" type="button">Copy path</button>
-          <span class="action-spacer"></span>
-          <button id="log-export" class="primary" type="button"><svg class="icon"><use href="#icon-download" /></svg><span>Download</span></button>
+            <p id="diary-editor-error" class="diary-editor-error hidden" role="alert"></p>
+            <div class="diary-editor-actions">
+              <button id="diary-editor-cancel" class="secondary" type="button">Cancel</button>
+              <button id="diary-editor-save" class="primary" type="submit">Save</button>
+            </div>
+          </form>
+
+          <div id="diary-list" class="diary-list"></div>
+          <div id="diary-empty" class="diary-empty">No diary entries yet. Add your email preferences, site workflows, or standing rules here.</div>
+
+          <div class="diary-footer-actions">
+            <button id="diary-clear-suppressed" class="link hidden" type="button">Reset dismissed suggestions</button>
+          </div>
         </div>
       </div>
     </div>

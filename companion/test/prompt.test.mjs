@@ -235,6 +235,34 @@ test('formatViewText caps the label list', () => {
   assert.match(text, /10 more labels not listed/)
 })
 
+test('H3: formatViewText prioritizes open popup/menu/dialog labels above the 60-label cutoff', () => {
+  // 52 permanent top-chrome labels (including menubar menuitems without popup:true)
+  // plus 17 open Insert dropdown menu items tagged popup:true (69 total).
+  const chrome = Array.from({ length: 52 }, (_, index) => ({
+    id: index + 1,
+    tag: 'div',
+    role: index >= 12 && index <= 21 ? 'menuitem' : 'button',
+    text: `Chrome ${index + 1}`,
+    disabled: false,
+  }))
+  const menu = Array.from({ length: 17 }, (_, index) => ({
+    id: 119 + index,
+    tag: 'div',
+    role: 'menuitem',
+    text: index === 15 ? 'Page elements Updated ►' : `Insert item ${index + 1}`,
+    disabled: false,
+    popup: true,
+  }))
+  const text = formatViewText(view({ labels: [...chrome, ...menu] }))
+  assert.match(text, /labels \(click by number\): 69/)
+  assert.match(text, /\[119\] menuitem "Insert item 1"/)
+  assert.match(text, /\[134\] menuitem "Page elements Updated ►"/)
+  assert.match(text, /\[135\] menuitem "Insert item 17"/)
+  assert.match(text, /9 more labels not listed \(17 popup\/menu\/dialog labels prioritized\)/)
+  const labelLines = text.split('\n').filter(line => /^\[\d+\] /u.test(line))
+  assert.equal(labelLines.length, 60, 'strictly respects the 60-label token budget')
+})
+
 
 test('formatViewText reports canvas and iframe surfaces', () => {
   const text = formatViewText(view({
@@ -299,4 +327,17 @@ test('V8: normalizePlanSeed keeps a blocked-item reason; buildPromptBlocks accep
   assert.match(text, /Carried plan, revision 4 \(1 open\)/)
   assert.match(text, /- \[in_progress\] Fill the shipping form/)
   assert.ok(!text.includes('- [blocked]'), 'blocked items are not listed in the carried prompt')
+})
+
+test('buildPromptBlocks appends options.diaryBlock before the user request when provided', () => {
+  const now = new Date('2026-11-16T12:00:00.000Z')
+  const withoutDiary = buildPromptBlocks(view(), 'open kimi', now, [], {})[0].text
+  assert.ok(!withoutDiary.includes('<user_diary>'))
+
+  const diaryBlock = '<user_diary>\n- Primary email: alice@example.com\n</user_diary>'
+  const withDiary = buildPromptBlocks(view(), 'open kimi', now, [], { diaryBlock })[0].text
+  const diaryIdx = withDiary.indexOf('<user_diary>')
+  const promptIdx = withDiary.lastIndexOf('\n\nopen kimi')
+  assert.ok(diaryIdx >= 0, 'diaryBlock should be included')
+  assert.ok(promptIdx > diaryIdx, 'diaryBlock should appear before the user request')
 })

@@ -5,10 +5,10 @@ Each companion run records side-panel, bridge, provider, and DSH activity under 
 ## Export
 
 1. Keep the companion and side panel connected.
-2. Click **▤** in the side panel.
+2. Open **Settings** and expand **Debug log** at the bottom.
 3. Review the run id, path, counts, warnings/errors, and recent signals.
 4. Choose whether to include screenshots and the raw DSH session.
-5. Click **Download bundle**.
+5. Click **Download**.
 
 The bundle is written to:
 

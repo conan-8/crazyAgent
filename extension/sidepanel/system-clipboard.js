@@ -25,7 +25,7 @@ export async function preserveSystemClipboard(api = globalThis.navigator?.clipbo
     if (typeof api.read !== 'function') throw new Error('navigator.clipboard.read is unavailable')
     read = await api.read()
   } catch (error) {
-    throw clipboardError('CLIPBOARD_PRESERVE_FAILED', 'preserving the previous clipboard before image paste', error)
+    throw clipboardError('CLIPBOARD_PRESERVE_FAILED', 'preserving the previous clipboard before rich paste', error)
   }
   const items = []
   let bytes = 0
@@ -46,7 +46,7 @@ export async function preserveSystemClipboard(api = globalThis.navigator?.clipbo
     }
   } catch (error) {
     if (error?.code === 'CLIPBOARD_PRESERVE_FAILED') throw error
-    throw clipboardError('CLIPBOARD_PRESERVE_FAILED', 'preserving the previous clipboard before image paste', error)
+    throw clipboardError('CLIPBOARD_PRESERVE_FAILED', 'preserving the previous clipboard before rich paste', error)
   }
   return { items }
 }
@@ -111,6 +111,6 @@ export async function restoreSystemClipboard(
     const items = snapshot.items.map(entries => new ClipboardItemCtor(Object.fromEntries(entries.map(entry => [entry.type, entry.blob]))))
     await api.write(items)
   } catch (error) {
-    throw clipboardError('CLIPBOARD_RESTORE_FAILED', 'restoring the previous clipboard after image paste', error)
+    throw clipboardError('CLIPBOARD_RESTORE_FAILED', 'restoring the previous clipboard after rich paste', error)
   }
 }

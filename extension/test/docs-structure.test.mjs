@@ -200,3 +200,19 @@ test('named style defaults combine class and element rules the way Docs renders 
   assert.deepEqual(styles.get('Heading 6'), { font: 'Arial', fontSize: 11, color: '#666666', bold: false, italic: true })
   assert.equal(styles.has('Heading 2'), false, 'a style without exported rules is left to the caller')
 })
+
+test('Docs structure decodes Google Docs typographic, math, Greek, and Latin named entities', () => {
+  assert.equal(
+    decodeEntities('TDJ4M &ndash; Design &mdash; List A &middot; &ldquo;hi&rdquo; &lsquo;ok&rsquo; &hellip; 1 k&Omega; &plusmn;0.5 &deg;C 16&times;2 &frac12; x&sup2; &iquest;C&oacute;mo est&aacute;s? &ntilde; &alpha;&ne;&beta;'),
+    'TDJ4M – Design — List A · “hi” ‘ok’ … 1 kΩ ±0.5 °C 16×2 ½ x² ¿Cómo estás? ñ α≠β',
+  )
+  // Case-sensitive entities stay distinct and unknown/out-of-range entities stay intact.
+  assert.equal(decodeEntities('&Omega;/&omega; &Eacute;/&eacute; &notanentity; &#999999999;'), 'Ω/ω É/é &notanentity; &#999999999;')
+  const blocks = parseDocStructure(doc(
+    '<p><span>Teacher Feedback &mdash; Proposal Draft Marked</span></p>'
+      + '<p><span>Parts: pump (List A) &middot; LCD (List A) &middot; button (List B)</span></p>',
+  ))
+  assert.equal(blocks[0].text, 'Teacher Feedback — Proposal Draft Marked')
+  assert.equal(blocks[1].text, 'Parts: pump (List A) · LCD (List A) · button (List B)')
+  assert.equal(formatOutline(blocks), 'P: Teacher Feedback — Proposal Draft Marked\nP: Parts: pump (List A) · LCD (List A) · button (List B)')
+})

@@ -66,11 +66,18 @@ export function inspectLabelAssignment(label, registry) {
  * is the valid range plus the coordinate alternative). Pure.
  * @param {number} label
  * @param {ReturnType<typeof inspectLabelAssignment>} assignment
- * @returns {{kind: 'never-assigned'|'stale'|'no-labels', message: string}}
+ * @param {{urlChanged?: boolean}} [options]
+ * @returns {{kind: 'never-assigned'|'stale'|'no-labels'|'url-changed', message: string}}
  */
-export function formatMissingLabelMessage(label, assignment) {
+export function formatMissingLabelMessage(label, assignment, options = {}) {
   const frameId = Number(assignment?.frameId) || 0
   const maxLocalId = Number(assignment?.maxLocalId) || 0
+  if (options?.urlChanged === true) {
+    return {
+      kind: 'url-changed',
+      message: `Label ${label} belongs to a previous page URL and is no longer valid after navigation. Take a fresh screenshot (or use one of the current labels listed below).`,
+    }
+  }
   if (!assignment || assignment.hasAnyLabels !== true) {
     return {
       kind: 'no-labels',

@@ -1,13 +1,82 @@
-const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" }
+// Case-sensitive HTML5 named entities commonly emitted by Google Docs HTML
+// exports (punctuation, math, currency, Greek, Latin-1). Keeping this static
+// map lets Node unit tests decode them identically to Chromium, while a cached
+// DOM <textarea> fallback covers any rare HTML5 entity in the browser runtime.
+const ENTITIES = Object.assign(Object.create(null), {
+  // Core XML/HTML + spaces
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  ensp: '\u2002', emsp: '\u2003', thinsp: '\u2009', shy: '\u00ad', zwnj: '\u200c', zwj: '\u200d',
+  // Dashes, quotes, bullets, typographic punctuation (Google Docs exports these as named entities)
+  ndash: '–', mdash: '—', middot: '·', bull: '•', hellip: '…',
+  lsquo: '‘', rsquo: '’', sbquo: '‚', ldquo: '“', rdquo: '”', bdquo: '„',
+  laquo: '«', raquo: '»', lsaquo: '‹', rsaquo: '›',
+  prime: '′', Prime: '″', dagger: '†', Dagger: '‡', permil: '‰',
+  iexcl: '¡', iquest: '¿', sect: '§', para: '¶', brvbar: '¦', macr: '¯',
+  acute: '´', cedil: '¸', uml: '¨', ordf: 'ª', ordm: 'º',
+  // Currency, legal, math, fractions, superscripts
+  copy: '©', reg: '®', trade: '™', euro: '€', pound: '£', yen: '¥', cent: '¢', curren: '¤',
+  deg: '°', plusmn: '±', times: '×', divide: '÷', minus: '−', not: '¬', micro: 'µ',
+  frac14: '¼', frac12: '½', frac34: '¾', sup1: '¹', sup2: '²', sup3: '³',
+  le: '≤', ge: '≥', ne: '≠', asymp: '≈', equiv: '≡', infin: '∞', radic: '√',
+  sum: '∑', prod: '∏', int: '∫', part: '∂', nabla: '∇', lowast: '∗', prop: '∝',
+  ang: '∠', and: '∧', or: '∨', cap: '∩', cup: '∪', sim: '∼', cong: '≅',
+  sub: '⊂', sup: '⊃', sube: '⊆', supe: '⊇', isin: '∈', notin: '∉', empty: '∅',
+  forall: '∀', exist: '∃', sdot: '⋅', oplus: '⊕', otimes: '⊗', perp: '⊥',
+  // Arrows
+  larr: '←', uarr: '↑', rarr: '→', darr: '↓', harr: '↔',
+  lArr: '⇐', uArr: '⇑', rArr: '⇒', dArr: '⇓', hArr: '⇔',
+  // Greek letters (case-sensitive!)
+  Alpha: 'Α', Beta: 'Β', Gamma: 'Γ', Delta: 'Δ', Epsilon: 'Ε', Zeta: 'Ζ', Eta: 'Η', Theta: 'Θ',
+  Iota: 'Ι', Kappa: 'Κ', Lambda: 'Λ', Mu: 'Μ', Nu: 'Ν', Xi: 'Ξ', Omicron: 'Ο', Pi: 'Π',
+  Rho: 'Ρ', Sigma: 'Σ', Tau: 'Τ', Upsilon: 'Υ', Phi: 'Φ', Chi: 'Χ', Psi: 'Ψ', Omega: 'Ω',
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', zeta: 'ζ', eta: 'η', theta: 'θ',
+  iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', omicron: 'ο', pi: 'π',
+  rho: 'ρ', sigmaf: 'ς', sigma: 'σ', tau: 'τ', upsilon: 'υ', phi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+  ohm: 'Ω',
+  // Latin-1 / extended Latin letters (Spanish, French, German, Portuguese, etc.)
+  Agrave: 'À', Aacute: 'Á', Acirc: 'Â', Atilde: 'Ã', Auml: 'Ä', Aring: 'Å', AElig: 'Æ', Ccedil: 'Ç',
+  Egrave: 'È', Eacute: 'É', Ecirc: 'Ê', Euml: 'Ë', Igrave: 'Ì', Iacute: 'Í', Icirc: 'Î', Iuml: 'Ï',
+  ETH: 'Ð', Ntilde: 'Ñ', Ograve: 'Ò', Oacute: 'Ó', Ocirc: 'Ô', Otilde: 'Õ', Ouml: 'Ö', Oslash: 'Ø',
+  Ugrave: 'Ù', Uacute: 'Ú', Ucirc: 'Û', Uuml: 'Ü', Yacute: 'Ý', THORN: 'Þ', szlig: 'ß',
+  agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å', aelig: 'æ', ccedil: 'ç',
+  egrave: 'è', eacute: 'é', ecirc: 'ê', euml: 'ë', igrave: 'ì', iacute: 'í', icirc: 'î', iuml: 'ï',
+  eth: 'ð', ntilde: 'ñ', ograve: 'ò', oacute: 'ó', ocirc: 'ô', otilde: 'õ', ouml: 'ö', oslash: 'ø',
+  ugrave: 'ù', uacute: 'ú', ucirc: 'û', uuml: 'ü', yacute: 'ý', thorn: 'þ', yuml: 'ÿ',
+  OElig: 'Œ', oelig: 'œ', Scaron: 'Š', scaron: 'š', Yuml: 'Ÿ', fnof: 'ƒ',
+})
+
+// Lowercase fallback only for case-insensitive XML/ASCII entities (never
+// overriding case-distinct entities like &Omega;/&omega; or &Eacute;/&eacute;).
+const ENTITIES_CI = Object.assign(Object.create(null), {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+})
+
+let entityDecoderElement
+
+function decodeNamedEntityInDom(match) {
+  if (typeof globalThis.document?.createElement !== 'function') return match
+  try {
+    entityDecoderElement ??= globalThis.document.createElement('textarea')
+    entityDecoderElement.innerHTML = match
+    const decoded = entityDecoderElement.value
+    if (!decoded || decoded === match) return match
+    return decoded === '\u00a0' ? ' ' : decoded
+  } catch {
+    return match
+  }
+}
 
 export function decodeEntities(value) {
-  return String(value ?? '').replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/giu, (match, name) => {
+  return String(value ?? '').replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);/giu, (match, name) => {
     if (name[0] === '#') {
       const code = name[1].toLowerCase() === 'x' ? Number.parseInt(name.slice(2), 16) : Number.parseInt(name.slice(1), 10)
-      if (!Number.isFinite(code)) return match
+      if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return match
       return code === 160 ? ' ' : String.fromCodePoint(code)
     }
-    return ENTITIES[name.toLowerCase()] ?? match
+    if (ENTITIES[name] !== undefined) return ENTITIES[name]
+    const lower = name.toLowerCase()
+    if (ENTITIES_CI[lower] !== undefined) return ENTITIES_CI[lower]
+    return decodeNamedEntityInDom(match)
   })
 }
 

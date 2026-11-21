@@ -1,9 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { BUSY_MESSAGE, NOT_READY_MESSAGE, STOPPING_MESSAGE, SessionController, confirmationPromptBlock, isLeakedToolCallText, normalizeConfirmRequest, parseReportedLabel, uiRejectionFrame } from '../session-controller.mjs'
 import { FakeRunner, fakeBridge, fakeLogStore } from './remote-fixtures.mjs'
 import { assess } from '../watch-ledger.mjs'
 import { pushTypeForTurn } from '../remote-push.mjs'
+import { DiaryStore } from '../diary.mjs'
+import { createDiarySuggester } from '../diary-suggester.mjs'
 
 function setup(options = {}) {
   const runner = options.runner === null ? undefined : (options.runner ?? new FakeRunner())
@@ -1482,4 +1487,144 @@ test('V1: newChat clears the open ended-incomplete notice', async () => {
   assert.equal(s.controller.watchState().open.kind, 'ended-incomplete')
   await s.controller.newChat()
   assert.equal(s.controller.watchState().open, null)
+})
+
+test('Diary turn-start injection, mid-turn sync, post-run suggestion accept/dismiss, and new-turn abort/clear', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'crazyagent-sc-diary-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const diaryStore = new DiaryStore({ file: join(dir, 'diary.json') })
+  diaryStore.create({ scope: 'global', title: 'Verification codes', content: 'Go to my Gmail tab instead of asking me.' })
+  diaryStore.create({ scope: 'site', sites: ['kimi.ai'], title: 'Kimi login', content: 'Use alice@gmail.com.' })
+
+  const runner = new FakeRunner()
+  const uiFrames = []
+  const syncedContexts = []
+  const bridge = fakeBridge()
+  bridge.sendToUi = frame => { uiFrames.push(frame); return true }
+  bridge.syncDiaryContext = ctx => { syncedContexts.push(ctx); return true }
+  bridge.requestUi = async command => {
+    bridge.requests.push(command)
+    return { tab: { id: 1, title: 'Kimi', url: 'https://chat.kimi.ai/' }, view: 'compact', screenshotSkipped: true }
+  }
+
+  let suggestCall = 0
+  let resolveSlowSuggest = null
+  const diarySuggester = createDiarySuggester({
+    getApiKey: () => 'sk-test',
+    getBaseUrl: () => 'https://openrouter.ai/api/v1',
+    getModel: () => ({ id: 'anthropic/claude-sonnet-4.5', reasoning: false }),
+    fetchImpl: async (_url, init) => {
+      suggestCall += 1
+      if (suggestCall === 1) {
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return {
+              choices: [{
+                finish_reason: 'stop',
+                message: {
+                  content: JSON.stringify({
+                    suggestions: [{
+                      action: 'add',
+                      replacesId: null,
+                      scope: 'site',
+                      sites: ['notion.so'],
+                      title: 'Notion workspace',
+                      content: 'Open the Personal workspace on Notion.',
+                      question: 'Save Personal workspace preference for Notion?',
+                    }],
+                  }),
+                },
+              }],
+            }
+          },
+        }
+      }
+      return new Promise((resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+        resolveSlowSuggest = resolve
+      })
+    },
+  })
+
+  const frames = []
+  const controller = new SessionController({
+    bridge,
+    getRunner: () => runner,
+    logStore: fakeLogStore(),
+    autoCapture: true,
+    provider: 'openrouter',
+    getModelId: () => 'anthropic/claude-sonnet-4.5',
+    diaryStore,
+    diarySuggester,
+    getDiaryAutoSuggest: () => true,
+    publish: frame => frames.push(frame),
+  })
+
+  // Turn 1: injects matched global + kimi.ai entries into prompt & emits UI-only diary-applied row (never RemoteHub).
+  const turn1 = controller.submit({ text: 'Sign in and save my note', origin: 'ui' })
+  await runner.started()
+  const promptText = runner.runs[0][0].text
+  assert.match(promptText, /<user_diary>/)
+  assert.match(promptText, /Verification codes/)
+  assert.match(promptText, /Kimi login/)
+  assert.equal(uiFrames.some(f => f.type === 'chat.activity' && f.kind === 'diary-applied'), true)
+  assert.equal(frames.some(f => f.kind === 'diary-applied'), false, 'diary-applied does not leak into RemoteHub publish stream')
+  assert.equal(syncedContexts.at(-1).entries.length, 1)
+  assert.equal(syncedContexts.at(-1).deliveredIds.length, 2)
+
+  runner.toolCall('c1', 'browser_navigate', { url: 'https://notion.so/' })
+  runner.toolResult({ callId: 'c1', text: 'tab 1 "Notion" https://notion.so/work' })
+  runner.current.resolve('DONE — opened Personal workspace.')
+  await turn1.done
+
+  // Wait briefly for non-blocking post-run suggestion frame.
+  for (let i = 0; i < 40; i += 1) {
+    if (uiFrames.some(f => f.type === 'diary.suggestions' && f.suggestions.length > 0)) break
+    await new Promise(r => setTimeout(r, 10))
+  }
+  const sugFrame = uiFrames.find(f => f.type === 'diary.suggestions' && f.suggestions.length > 0)
+  assert.ok(sugFrame)
+  const sugId = sugFrame.suggestions[0].id
+  assert.equal(controller.diarySuggestionsState().length, 1)
+
+  // Accept suggestion -> creates entry, syncs tools, clears pending, rejects duplicate click.
+  const accepted = controller.acceptDiarySuggestion(sugId, { title: 'Notion personal workspace' })
+  assert.equal(accepted.ok, true)
+  assert.equal(accepted.entry.title, 'Notion personal workspace')
+  assert.equal(accepted.suggestions.length, 0)
+  assert.equal(controller.acceptDiarySuggestion(sugId).code, 'NOT_FOUND')
+  assert.equal(syncedContexts.at(-1).entries.length, 2)
+
+  // Turn 2 triggers slow suggestion; starting Turn 3 aborts it cleanly without emitting stale suggestions.
+  const turn2 = controller.submit({ text: 'Check another page on example.com', origin: 'ui' })
+  await runner.started()
+  runner.current.resolve('DONE')
+  await turn2.done
+  await new Promise(r => setTimeout(r, 20))
+  const beforeCount = uiFrames.filter(f => f.type === 'diary.suggestions').length
+  const turn3 = controller.submit({ text: 'New task', origin: 'ui' })
+  await runner.started()
+  resolveSlowSuggest?.({ ok: true, status: 200, async json() { return { choices: [{ finish_reason: 'stop', message: { content: '{"suggestions":[]}' } }] } } })
+  runner.current.resolve('DONE')
+  await turn3.done
+  await new Promise(r => setTimeout(r, 20))
+  const afterSugs = uiFrames.filter(f => f.type === 'diary.suggestions').slice(beforeCount)
+  assert.equal(afterSugs.every(f => f.suggestions.length === 0), true)
+
+  // Dismissing a suggestion suppresses it in DiaryStore.
+  controller.pendingDiarySuggestions = [{
+    id: 'sug-dismiss',
+    action: 'add',
+    replacesId: null,
+    scope: 'global',
+    sites: [],
+    title: 'Tone',
+    content: 'Keep answers short.',
+    question: 'Save tone?',
+  }]
+  const dismissed = controller.dismissDiarySuggestion('sug-dismiss')
+  assert.equal(dismissed.ok, true)
+  assert.equal(diaryStore.isSuppressed({ scope: 'global', sites: [], content: 'Keep answers short.' }), true)
 })

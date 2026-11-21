@@ -1081,3 +1081,45 @@ test('docsTableCreateVerification ignores CSS-class compaction on inherited H1 p
     /block 1 .*formatting changed/,
   )
 })
+
+test('Docs table create supports two-step host OS-clipboard HTML handoff for tables larger than the native grid', async () => {
+  const fake = fakeDocs([para('Sentinel')], { gridMaxRows: 5, gridMaxColumns: 5 })
+  const values = Array.from({ length: 6 }, (_, r) => Array.from({ length: 5 }, (_, c) => `r${r + 1}c${c + 1}`))
+  let preserveCalls = 0
+  fake.io.preserveClipboard = async () => {
+    preserveCalls += 1
+    throw new Error('Document is not focused')
+  }
+  // Step 1: osStage:true returns the table HTML without calling side-panel clipboard or mutating Docs.
+  const stageReq = await docsTable({}, { action: 'create', rows: 6, columns: 5, values, osStage: true }, fake.io)
+  assert.equal(stageReq.osTableStageNeeded, true)
+  assert.match(stageReq.tableHtml, /<table\b/i)
+  assert.match(stageReq.tableHtml, /r6c5/)
+  assert.equal(preserveCalls, 0)
+  assert.equal(fake.state.blocks.length, 1, 'step 1 must not mutate the document')
+
+  // Step 2: host stages HTML onto OS clipboard, then sends osStaged:true; executor sends one trusted Ctrl+V and verifies.
+  fake.state.clipboardHtml = { html: stageReq.tableHtml, text: stageReq.tableText }
+  const created = await docsTable({}, { action: 'create', rows: 6, columns: 5, values, osStaged: true }, fake.io)
+  assert.equal(created.docs.status, 'completed', JSON.stringify(created.docs))
+  assert.equal(created.docs.verifiedCount, 30)
+  assert.equal(created.docs.osClipboard, true)
+  assert.equal(preserveCalls, 0, 'osStaged bypasses unfocused side-panel navigator.clipboard')
+})
+
+test('Docs table menu command falls back to Format > Table when Alt+/ search opens without matching item', async () => {
+  const fake = fakeDocs([table([['A', 'B'], ['C', 'D']])])
+  const origRun = fake.io.runInTab
+  fake.io.runInTab = async (tabId, func, payload) => {
+    // Simulate Alt+/ opening cleanly, but menu search never surfacing the exact menuitem
+    // (as observed on turn-mwomauwf-4482 #7); native Format > Table submenu still has it.
+    if (payload[0] === 'tableMenuItem' && fake.state.menuOpen && !fake.state.tableMenuOpen) {
+      return { ok: true, present: false }
+    }
+    return origRun(tabId, func, payload)
+  }
+  const result = await docsTable({}, { action: 'merge', row: 1, column: 1 }, fake.io)
+  assert.equal(result.docs.status, 'completed', JSON.stringify(result.docs))
+  assert.ok(fake.state.clicks.includes(70), 'fell back to native Format menu')
+  assert.ok(fake.state.hovers.includes(71), 'hovered native Table submenu')
+})

@@ -17,6 +17,8 @@ import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protoco
 import { matchSlashCommands, nextSlashIndex, resolveSlashCommand, slashQuery } from './slash.js'
 import { completedUpdateNotice, settingsUpdateDetails, updateNotice } from './update-notice.js'
 import { formatCompactTokenCount, lifetimeUsageSegments, normalizeLifetimeUsage } from './usage-meter.js'
+import { DIARY_CONTENT_MAX_CHARS, filterDiaryEntries, formatDiaryAppliedText, formatDiaryHeaderPill, mergeDiaryAppliedEntries, normalizeDiarySnapshot, normalizeDiarySuggestions, parseSitesInput, siteFromTabUrl } from './diary-panel.js'
+import { createInteractiveAuraState, createSpeechAuraState, estimateCaretFocusX, measureAudioFrame, stepInteractiveAura, stepSpeechAura, transcriptImpulse } from './speech-aura.js'
 import { browserErrorSummary, browserResultSummary, browserRunningText, chatErrorSummary, reasoningActivityText, toolResultSummary, toolRunningText } from './activity-presenter.js'
 
 const SETTINGS_KEY = 'crazyagent.settings'
@@ -89,6 +91,7 @@ let statusLabel = 'Connecting…'
 let toastTimer = null
 let tabRefreshTimer = null
 let lastTabSignature = ''
+let currentActiveTabUrl = ''
 /** @type {Record<string, any> | null} */
 let currentLogStats = null
 let currentLogPath = ''
@@ -98,9 +101,28 @@ let llmState = { provider: 'openrouter', baseUrl: DEFAULT_MODEL_BASE_URL, model:
 /** @type {{configured: boolean, source: string}} */
 let credentialState = { configured: false, source: 'none' }
 /** Companion-owned behavior settings, mirrored from chat.hello / settings.updated. */
-let companionSettings = { confirmIrreversible: false, watchAutoSteer: true }
+let companionSettings = { confirmIrreversible: false, watchAutoSteer: true, diaryAutoSuggest: true }
+let sentCompanionSettings = {}
+let settingsStatusTimer = null
 /** The open approval request shown in the confirm card, if any. */
 let confirmRequest = null
+/** Diary state mirrored from companion. */
+let diaryState = normalizeDiarySnapshot(null)
+let diarySuggestions = []
+let diaryFilter = 'all'
+let diaryEditorOpen = false
+let diaryEditingId = null
+let diaryEditingEnabled = true
+let diaryEditorScope = 'global'
+let diaryDeleteConfirmId = null
+const DIARY_REQUEST_TIMEOUT_MS = 8_000
+let companionHelloReceived = false
+let diarySupported = false
+let diaryBusy = false
+let diaryBusyTimer = null
+let diaryEditorAwaitingSave = false
+let diarySuggestEditingId = null
+const diarySuggestPendingIds = new Set()
 /** @type {{baseUrl: string, models: Array<Record<string, any>>, loading: boolean, error: string}} */
 let modelsState = { baseUrl: '', models: [], loading: false, error: '' }
 let latestContextTokens = 0
@@ -166,12 +188,15 @@ const els = {
   updateNoticeDismiss: $('update-notice-dismiss'),
   sessionInfo: $('session-info'),
   timing: $('timing'),
+  topbar: document.querySelector('.topbar'),
+  utilitiesToggle: $('utilities-toggle'),
   newChat: $('new-chat'),
   backHome: $('back-home'),
   settings: $('settings'),
   settingsModal: $('settings-modal'),
   settingsBody: document.querySelector('#settings-modal .settings-body'),
   settingsClose: $('settings-close'),
+  settingsAdvanced: $('settings-advanced'),
   settingUrl: $('setting-url'),
   settingToken: $('setting-token'),
   settingApiKey: $('setting-apikey'),
@@ -190,6 +215,10 @@ const els = {
   settingAutoCapture: $('setting-autocapture'),
   settingConfirmIrreversible: $('setting-confirm-irreversible'),
   settingWatchAutoSteer: $('setting-watch-auto-steer'),
+  settingDiaryAutoSuggest: $('setting-diary-auto-suggest'),
+  settingVerboseActivity: $('setting-verbose-activity'),
+  settingsDebugLog: $('settings-debug-log'),
+  debugLogToggle: $('debug-log-toggle'),
   settingsVersion: $('settings-version'),
   settingsUpdated: $('settings-updated'),
   usageCard: $('usage-card'),
@@ -209,6 +238,7 @@ const els = {
   confirmTarget: $('confirm-card-target'),
   confirmApprove: $('confirm-approve'),
   confirmDeny: $('confirm-deny'),
+  diarySuggestCard: $('diary-suggest-card'),
   settingsSave: $('settings-save'),
   testCapture: $('test-capture'),
   imageModal: $('image-modal'),
@@ -217,9 +247,28 @@ const els = {
   disclaimer: $('disclaimer'),
   disclaimerDismiss: $('disclaimer-dismiss'),
   toast: $('toast'),
-  debugLog: $('debug-log'),
-  logModal: $('log-modal'),
-  logClose: $('log-close'),
+  diary: $('diary'),
+  diaryModal: $('diary-modal'),
+  diaryClose: $('diary-close'),
+  diaryOfflineNote: $('diary-offline-note'),
+  diarySearch: $('diary-search'),
+  diaryAdd: $('diary-add'),
+  diaryFilters: document.querySelectorAll('[data-diary-filter]'),
+  diaryEditor: $('diary-editor'),
+  diaryScopeGlobal: $('diary-scope-global'),
+  diaryScopeSite: $('diary-scope-site'),
+  diarySitesField: $('diary-sites-field'),
+  diaryFieldSites: $('diary-field-sites'),
+  diaryUseCurrentTab: $('diary-use-current-tab'),
+  diaryFieldTitle: $('diary-field-title'),
+  diaryFieldContent: $('diary-field-content'),
+  diaryContentCount: $('diary-content-count'),
+  diaryEditorError: $('diary-editor-error'),
+  diaryEditorCancel: $('diary-editor-cancel'),
+  diaryEditorSave: $('diary-editor-save'),
+  diaryList: $('diary-list'),
+  diaryEmpty: $('diary-empty'),
+  diaryClearSuppressed: $('diary-clear-suppressed'),
   logStats: $('log-stats'),
   logSignals: $('log-signals'),
   logIncludeScreenshots: $('log-include-screenshots'),
@@ -235,6 +284,8 @@ const els = {
   historyCurrent: $('history-current'),
   historyCurrentTitle: $('history-current-title'),
   historyEmpty: $('history-empty'),
+  composer: $('composer'),
+  composerShell: document.querySelector('.composer-shell'),
   composerModel: $('composer-model'),
   composerModelName: $('composer-model-name'),
   composerModelEffort: $('composer-model-effort'),
@@ -248,7 +299,6 @@ const els = {
   slashMenu: $('slash-menu'),
   slashMenuList: $('slash-menu-list'),
   mic: $('mic'),
-  dictationIndicator: $('dictation-indicator'),
   imageChips: $('image-chips'),
   messageQueue: $('message-queue'),
   marathonMode: $('marathon-mode'),
@@ -287,6 +337,15 @@ console.error = (...args) => {
 /* settings                                                            */
 /* ------------------------------------------------------------------ */
 
+function isVerboseActivity() {
+  return settings.verboseActivity === true
+}
+
+function applyVerboseActivityMode() {
+  els.app?.classList.toggle('verbose-activity', isVerboseActivity())
+  syncCompactTickerScroll(currentTurn)
+}
+
 async function loadSettings() {
   try {
     const stored = await chrome.storage.local.get([SETTINGS_KEY, UPDATE_NOTICE_PREFS_KEY])
@@ -306,6 +365,7 @@ async function loadSettings() {
   }
   const clearLegacyPause = settings.paused === true
   settings.paused = false
+  applyVerboseActivityMode()
   if (clearLegacyPause) void saveSettings()
 }
 
@@ -323,6 +383,7 @@ function populateSettings() {
   els.settingWidth.value = String(settings.captureWidth)
   els.settingQuality.value = String(settings.quality)
   els.settingAutoCapture.checked = settings.autoCapture !== false
+  if (els.settingVerboseActivity) els.settingVerboseActivity.checked = isVerboseActivity()
 }
 
 function setEffortSelection(value) {
@@ -734,6 +795,7 @@ function renderImageChips() {
     chip.append(thumbnail, name, size, remove)
     els.imageChips.appendChild(chip)
   })
+  updateComposerDraftState()
 }
 
 function readImage(file) {
@@ -940,7 +1002,18 @@ function renderHistory() {
   els.historyEmpty.classList.toggle('hidden', matches.length > 0 || (hasConversation() && !query))
 }
 
+function syncUtilitiesAria() {
+  const expanded = !els.app.classList.contains('chat-open') || els.app.classList.contains('utilities-open')
+  els.utilitiesToggle?.setAttribute('aria-expanded', String(expanded))
+}
+
+function setUtilitiesOpen(open) {
+  els.app.classList.toggle('utilities-open', open)
+  syncUtilitiesAria()
+}
+
 function openHistory() {
+  setUtilitiesOpen(false)
   closeModelMenu()
   renderHistory()
   els.historyModal.classList.remove('hidden')
@@ -1351,22 +1424,38 @@ function renderSettingsAbout() {
 }
 
 function openSettings() {
+  setUtilitiesOpen(false)
   els.settingsBody.scrollTo({ top: 0, behavior: 'instant' })
   populateSettings()
   renderSettingsAbout()
   renderLifetimeUsage()
+  if (els.settingsAdvanced) els.settingsAdvanced.open = !settings.token || authFailed
+  if (els.settingsDebugLog) els.settingsDebugLog.open = false
+  if (els.settingsStatus) els.settingsStatus.textContent = ''
+  clearTimeout(settingsStatusTimer)
+  settingsStatusTimer = null
   els.settingApiKey.value = ''
   els.settingBaseUrl.value = llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL
   els.settingModel.value = llmState.model?.id || settings.modelId || ''
   els.settingRememberKey.checked = true
   els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
   if (els.settingWatchAutoSteer) els.settingWatchAutoSteer.checked = companionSettings.watchAutoSteer !== false
+  if (els.settingDiaryAutoSuggest) els.settingDiaryAutoSuggest.checked = companionSettings.diaryAutoSuggest !== false
   setEffortSelection(llmState.reasoningEffort ?? 'auto')
   renderProviderStatus()
   els.settingsModal.classList.remove('hidden')
-  // Model info leads the panel, so a configured setup opens at the top; a panel
-  // that still needs pairing jumps down to the token field instead.
-  setTimeout(() => (!settings.token || authFailed ? els.settingToken : els.settingApiKey).focus(), 10)
+  // Lifetime usage sits at the very top of Settings. On an already-configured
+  // setup, focus without scrolling so scrollTop stays 0 and the usage card is visible.
+  setTimeout(() => {
+    if (!settings.token || authFailed) {
+      els.settingToken.focus()
+    } else if (!credentialState.configured || !llmState.model) {
+      els.settingApiKey.focus()
+    } else {
+      els.settingApiKey.focus({ preventScroll: true })
+      els.settingsBody.scrollTo({ top: 0, behavior: 'instant' })
+    }
+  }, 10)
   if (connected && (modelsState.models.length === 0 || modelsState.baseUrl !== els.settingBaseUrl.value.trim())) {
     void refreshModels()
   } else if (modelsState.models.length > 0) {
@@ -1507,6 +1596,7 @@ function showConfirmCard(notice) {
   els.confirmAction.textContent = notice.action
   els.confirmTarget.textContent = `Target: ${notice.target}`
   els.confirmCard.classList.remove('hidden')
+  renderDiarySuggestCard()
   els.confirmApprove.focus({ preventScroll: true })
 }
 
@@ -1515,6 +1605,7 @@ function hideConfirmCard() {
   confirmRequest = null
   const hadFocus = els.confirmCard.contains(document.activeElement)
   els.confirmCard.classList.add('hidden')
+  renderDiarySuggestCard()
   if (hadFocus) els.input.focus({ preventScroll: true })
 }
 
@@ -1644,6 +1735,9 @@ function connect() {
     ws = null
   }
   connected = false
+  companionHelloReceived = false
+  diarySupported = false
+  setDiaryBusy(false)
   dshState = 'unknown'
   refreshStatus()
 
@@ -1695,6 +1789,8 @@ function connect() {
     if (ws !== socket) return
     ws = null
     connected = false
+    companionHelloReceived = false
+    diarySupported = false
     stopping = false
     steeringMessageId = null
     lastDispatchedItem = null
@@ -1713,6 +1809,14 @@ function connect() {
     if (modelsState.loading) modelsState = { ...modelsState, loading: false, error: 'Companion disconnected' }
     logger.log('bridge.closed', { code: event.code, reason: event.reason, wasAuthFailure: event.code === 4001 }, event.code === 4001 ? 'warn' : 'info')
     logger.setReady(false)
+    setDiaryBusy(false)
+    diaryEditorAwaitingSave = false
+    diarySuggestPendingIds.clear()
+    if (!els.diaryModal.classList.contains('hidden')) renderDiaryModal()
+    if (els.settingsDebugLog?.open) {
+      els.logStats.textContent = 'Companion offline. Start it with npm run dev, then reconnect to export logs.'
+      els.logSignals.replaceChildren()
+    }
     if (event.code === 4001) {
       authFailed = true
       showBanner('Invalid pairing token. Copy the token printed by npm run dev into Settings.', 'Open settings', openSettings)
@@ -1946,6 +2050,61 @@ function fadeOutFeed() {
     .finished.catch(() => {}).finally(() => ghost.remove())
 }
 
+let newChatFlash = null
+let newChatSpin = null
+let newChatConfirmTimer = null
+
+/**
+ * Localized yellow ripple and icon pulse on #new-chat so clicking it always
+ * registers visually, whether clearing a chat or already on the new-chat page.
+ */
+function pulseNewChat() {
+  const button = els.newChat
+  if (!button?.isConnected) return
+  if (reducedMotion.matches) {
+    clearTimeout(newChatConfirmTimer)
+    button.classList.add('new-chat-confirmed')
+    newChatConfirmTimer = setTimeout(() => {
+      button.classList.remove('new-chat-confirmed')
+      newChatConfirmTimer = null
+    }, MOTION.slow)
+    return
+  }
+  const ring = document.createElement('span')
+  ring.className = 'new-chat-ripple'
+  ring.setAttribute('aria-hidden', 'true')
+  button.prepend(ring)
+  ring.animate(
+    [
+      { opacity: 0.95, transform: 'scale(0.85)' },
+      { opacity: 0.85, transform: 'scale(1.42)', offset: 0.35 },
+      { opacity: 0.42, transform: 'scale(1.8)', offset: 0.7 },
+      { opacity: 0, transform: 'scale(2)' },
+    ],
+    { duration: 460, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' },
+  ).finished.catch(() => {}).finally(() => ring.remove())
+
+  newChatFlash?.cancel()
+  newChatFlash = button.animate(
+    [
+      { backgroundColor: 'rgba(255, 195, 0, 0.3)', color: '#ffc300' },
+      { backgroundColor: 'rgba(255, 195, 0, 0.22)', color: '#ffc300', offset: 0.45 },
+      {},
+    ],
+    { duration: 420, easing: MOTION.ease },
+  )
+
+  const icon = button.querySelector('.icon')
+  newChatSpin?.cancel()
+  newChatSpin = icon?.animate(
+    [
+      { transform: 'rotate(0deg) scale(0.88)' },
+      { transform: 'rotate(90deg) scale(1)' },
+    ],
+    { duration: MOTION.slow, easing: MOTION.ease },
+  ) ?? null
+}
+
 const SCROLL_FOLLOW_MS = MOTION.slow + 40
 let scrollFollowFrame = null
 let scrollFollowUntil = 0
@@ -1958,6 +2117,14 @@ let scrollFollowBody = null
  */
 let answerAnchor = null
 const ANSWER_TOP_GAP = 12
+const CHAT_TOP_FADE_HEIGHT = 64
+
+function answerTopGap() {
+  if (!els.app?.classList.contains('chat-open')) return ANSWER_TOP_GAP
+  // When #plan-dock sits above #activity-log, the feed starts below the top fade scrim.
+  const dockHeight = els.planDock && !els.planDock.hidden ? els.planDock.getBoundingClientRect().height : 0
+  return Math.max(ANSWER_TOP_GAP, Math.max(0, CHAT_TOP_FADE_HEIGHT - dockHeight) + 8)
+}
 
 function stopScrollFollow() {
   if (scrollFollowFrame !== null) cancelAnimationFrame(scrollFollowFrame)
@@ -1972,11 +2139,26 @@ function feedScrollTarget() {
   const bottom = Math.max(0, feed.scrollHeight - feed.clientHeight)
   if (!answerAnchor?.isConnected) return { top: bottom, anchored: false }
   const answerTop = answerAnchor.getBoundingClientRect().top - feed.getBoundingClientRect().top + feed.scrollTop
-  return { top: Math.min(bottom, Math.max(0, answerTop - ANSWER_TOP_GAP)), anchored: true }
+  return { top: Math.min(bottom, Math.max(0, answerTop - answerTopGap())), anchored: true }
+}
+
+function syncCompactTickerScroll(turn) {
+  const steps = turn?.stepsEl
+  if (!steps) return
+  if (!turn || turn.done || isVerboseActivity()) {
+    steps.classList.remove('ticker-scrolling')
+    return
+  }
+  const overflowing = steps.scrollHeight > steps.clientHeight + 2
+  steps.classList.toggle('ticker-scrolling', overflowing)
+  if (overflowing) {
+    steps.scrollTo({ top: steps.scrollHeight, behavior: reducedMotion.matches ? 'instant' : 'smooth' })
+  }
 }
 
 /** Stay pinned to the bottom for as long as new rows are still growing in. */
 function scrollActivity() {
+  if (currentTurn && !currentTurn.done) syncCompactTickerScroll(currentTurn)
   scrollFollowUntil = performance.now() + SCROLL_FOLLOW_MS
   const body = currentStep?.bodyEl
   if (body && body.scrollHeight - body.scrollTop - body.clientHeight < 32) scrollFollowBody = body
@@ -2016,6 +2198,7 @@ function renderPromptRail() {
   const prompts = [...els.activityLog.querySelectorAll('.activity-turn')]
   const chatOpen = prompts.length > 0 && !newChatDraft
   els.app.classList.toggle('chat-open', chatOpen)
+  syncUtilitiesAria()
   els.backHome.classList.toggle('hidden', !chatOpen)
   els.promptRail.classList.toggle('hidden', !chatOpen)
   els.promptRailList.replaceChildren()
@@ -2237,6 +2420,8 @@ function startTurn(text, attachments = [], options = {}) {
 
   const agentTurn = document.createElement('section')
   agentTurn.className = 'agent-turn running'
+  const turnHead = document.createElement('div')
+  turnHead.className = 'agent-turn-head'
   const summary = document.createElement('button')
   summary.type = 'button'
   summary.className = 'agent-turn-summary'
@@ -2246,6 +2431,10 @@ function startTurn(text, attachments = [], options = {}) {
     const collapsed = agentTurn.classList.toggle('collapsed')
     summary.setAttribute('aria-expanded', String(!collapsed))
   })
+  const diaryPill = document.createElement('span')
+  diaryPill.className = 'turn-diary-pill hidden'
+  diaryPill.setAttribute('role', 'status')
+  turnHead.append(summary, diaryPill)
   const steps = document.createElement('div')
   steps.className = 'agent-turn-steps'
   const planModel = options.marathon === true ? createPlanPanelModel() : null
@@ -2259,7 +2448,7 @@ function startTurn(text, attachments = [], options = {}) {
     els.planDock.replaceChildren(planRoot)
     els.planDock.hidden = true
   }
-  agentTurn.append(summary, steps)
+  agentTurn.append(turnHead, steps)
   els.activityLog.appendChild(agentTurn)
   enterRow(agentTurn)
   lastAgentTurn = agentTurn
@@ -2269,6 +2458,8 @@ function startTurn(text, attachments = [], options = {}) {
     root: agentTurn,
     stepsEl: steps,
     summaryEl: summary,
+    diaryPillEl: diaryPill,
+    diaryApplied: [],
     divider,
     durationEl: duration,
     planModel,
@@ -2326,6 +2517,7 @@ function createStepIcon() {
 function setStepTitle(step, text, { settled = false } = {}) {
   crossfadeLabel(step.titleEl, text)
   step.block.classList.toggle('settled', settled)
+  if (currentTurn && !currentTurn.done) syncCompactTickerScroll(currentTurn)
 }
 
 function setStepKind(step, kind) {
@@ -2389,6 +2581,7 @@ function beginStep(frame) {
     finish: undefined,
   }
   head.addEventListener('click', () => {
+    if (!isVerboseActivity() && block.closest('.agent-turn.running')) return
     step.collapsed = !step.collapsed
     block.classList.toggle('collapsed', step.collapsed)
     head.setAttribute('aria-expanded', String(!step.collapsed))
@@ -2396,10 +2589,20 @@ function beginStep(frame) {
   })
 
   ;(currentTurn?.stepsEl ?? activityContainer()).appendChild(block)
-  enterRow(block)
+  if (!isVerboseActivity() && currentTurn?.stepsEl) {
+    if (!reducedMotion.matches) {
+      block.animate(
+        { opacity: [0, 1], transform: ['translateY(10px)', 'translateY(0)'] },
+        { duration: MOTION.slow, easing: MOTION.ease },
+      )
+    }
+  } else {
+    enterRow(block)
+  }
   currentStep = step
   if (currentTurn) currentTurn.stepCount = Math.max(currentTurn.stepCount ?? 0, index)
   refreshLiveClocks()
+  syncCompactTickerScroll(currentTurn)
   scrollActivity()
 }
 
@@ -2429,6 +2632,10 @@ function closeStep(at = now()) {
   step.head.setAttribute('aria-expanded', 'false')
   step.totalMs = Math.max(0, at - step.startedAt)
   step.block.classList.remove('running')
+  if (!step.block.classList.contains('abandoned')) {
+    if (step.titleEl.textContent === 'Responding…') step.titleEl.textContent = 'Responded'
+    else if (step.titleEl.textContent === 'Thinking…') step.titleEl.textContent = 'Thought'
+  }
   step.durationEl.classList.remove('live')
   step.durationEl.textContent = formatDuration(step.totalMs)
   step.durationEl.title = [
@@ -2460,6 +2667,8 @@ function finishTurn({ totalMs, usage, failedCalls } = {}) {
     currentTurn.durationEl.title = `turn ${currentTurn.number} total`
     currentTurn.root.classList.remove('running')
     currentTurn.root.classList.add('collapsed')
+    currentTurn.diaryPillEl?.classList.add('hidden')
+    currentTurn.stepsEl?.classList.remove('ticker-scrolling')
     currentTurn.summaryEl.setAttribute('aria-expanded', 'false')
     const actions = currentTurn.root.querySelectorAll('.activity-entry.tool, .activity-entry.browser').length
     const observedFailures = currentTurn.root.querySelectorAll('.activity-entry.fail').length
@@ -2752,6 +2961,9 @@ function handleActivity(frame) {
     }
     case 'policy':
       return
+    case 'diary-applied':
+      pushDiaryAppliedRow(frame)
+      return
     case 'model-start':
       finalizeStreamActivity()
       sawReasoningStream = false
@@ -2861,8 +3073,11 @@ function handleFrame(frame) {
       if (!els.settingsModal.classList.contains('hidden') && connected && modelsState.models.length === 0) {
         void refreshModels()
       }
+      if (!els.diaryModal.classList.contains('hidden')) renderDiaryModal()
       return
     case 'chat.hello':
+      companionHelloReceived = true
+      diarySupported = frame.diary !== null && typeof frame.diary === 'object'
       dshState = frame.dsh?.state ?? 'unknown'
       if (typeof frame.companion === 'string') companionVersion = frame.companion
       if (frame.llm && typeof frame.llm === 'object') llmState = { ...llmState, ...frame.llm }
@@ -2871,10 +3086,13 @@ function handleFrame(frame) {
         companionSettings = {
           confirmIrreversible: frame.settings.confirmIrreversible === true,
           watchAutoSteer: frame.settings.watchAutoSteer !== false,
+          diaryAutoSuggest: frame.settings.diaryAutoSuggest !== false,
         }
+        sentCompanionSettings = {}
         if (!els.settingsModal.classList.contains('hidden')) {
           els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
           if (els.settingWatchAutoSteer) els.settingWatchAutoSteer.checked = companionSettings.watchAutoSteer
+          if (els.settingDiaryAutoSuggest) els.settingDiaryAutoSuggest.checked = companionSettings.diaryAutoSuggest
         }
       }
       // The hello carries the authoritative switch state and open watch alert (reconnect resync).
@@ -2882,6 +3100,8 @@ function handleFrame(frame) {
       syncWatchAlert(watchNoticeFromOpen(frame.watch?.open))
       applyUpdateStatus(frame.update)
       applyLifetimeUsage(frame.lifetimeUsage)
+      applyDiarySnapshot(frame.diary)
+      applyDiarySuggestions(frame.diarySuggestions)
       if (llmState.model?.id) {
         settings.modelId = llmState.model.id
         els.sessionInfo.dataset.model = llmState.model.id
@@ -2906,6 +3126,7 @@ function handleFrame(frame) {
       if (!els.settingsModal.classList.contains('hidden')) {
         syncProviderInputs()
         if (connected && modelsState.models.length === 0 && !modelsState.loading) void refreshModels()
+        if (connected && els.settingsDebugLog?.open) sendFrame({ v: PROTOCOL_VERSION, type: 'log.stats' })
       }
       if (!setupPrompted && (!llmState.model || !credentialState.configured)) {
         setupPrompted = true
@@ -3001,20 +3222,31 @@ function handleFrame(frame) {
       handleLlmConfigured(frame)
       return
     case 'settings.updated':
+      sentCompanionSettings = {}
       if (frame.ok === true && frame.settings && typeof frame.settings === 'object') {
         companionSettings = {
           confirmIrreversible: frame.settings.confirmIrreversible === true,
           watchAutoSteer: frame.settings.watchAutoSteer !== false,
+          diaryAutoSuggest: frame.settings.diaryAutoSuggest !== false,
         }
         els.settingConfirmIrreversible.checked = companionSettings.confirmIrreversible
         if (els.settingWatchAutoSteer) els.settingWatchAutoSteer.checked = companionSettings.watchAutoSteer
+        if (els.settingDiaryAutoSuggest) els.settingDiaryAutoSuggest.checked = companionSettings.diaryAutoSuggest
         logger.log('settings.updated', {
           confirmIrreversible: companionSettings.confirmIrreversible,
           watchAutoSteer: companionSettings.watchAutoSteer,
+          diaryAutoSuggest: companionSettings.diaryAutoSuggest,
         }, 'info')
       } else {
         toast(typeof frame.error === 'string' ? frame.error : 'The companion refused the settings change')
       }
+      return
+    case 'diary.state':
+      handleDiaryStateFrame(frame)
+      return
+    case 'diary.suggestions':
+      diarySupported = true
+      applyDiarySuggestions(frame.suggestions)
       return
     case 'log.stats.result':
       renderLogStats(frame.stats)
@@ -3321,6 +3553,7 @@ function pushAnswer(text) {
 
 /** Reset per-turn state and open the turn divider when a message is sent. */
 function beginUserTurn(text, attachments = [], options = {}) {
+  setUtilitiesOpen(false)
   answerAnchor = null
   conversationStopped = false
   planTerminalPhase = null
@@ -3345,6 +3578,7 @@ function handleForeignPrompt(frame) {
   if (prompt === null) return
   // Any prompt from another client abandons an open confirmation.
   hideConfirmCard()
+  applyDiarySuggestions([])
   logger.log('chat.user.foreign', {
     origin: prompt.origin,
     turnId: prompt.turnId,
@@ -3731,6 +3965,215 @@ function closeImage() {
 /* composer / controls                                                 */
 /* ------------------------------------------------------------------ */
 
+const interactiveAura = createInteractiveAuraState()
+let interactiveAuraRaf = 0
+let interactiveAuraLastTime = 0
+
+function isComposerAuraActive() {
+  return !els.app?.classList.contains('chat-open') || dictation !== null
+}
+
+function resetInteractiveAura() {
+  if (interactiveAuraRaf) {
+    cancelAnimationFrame(interactiveAuraRaf)
+    interactiveAuraRaf = 0
+  }
+  interactiveAuraLastTime = 0
+  interactiveAura.x = 50
+  interactiveAura.y = 50
+  interactiveAura.vx = 0
+  interactiveAura.vy = 0
+  interactiveAura.hoverEnergy = 0
+  interactiveAura.wake = 0
+  interactiveAura.typeEnergy = 0
+  if (!els.composer) return
+  els.composer.classList.remove('fluid-active')
+  els.composer.style.removeProperty('--fluid-x')
+  els.composer.style.removeProperty('--fluid-y')
+  els.composer.style.removeProperty('--fluid-energy')
+  els.composer.style.removeProperty('--fluid-type')
+  els.composer.style.removeProperty('--fluid-stretch')
+  els.composer.style.removeProperty('--fluid-dx')
+  els.composer.style.removeProperty('--fluid-dy')
+  els.composer.style.removeProperty('--fluid-angle')
+}
+
+function applyInteractiveAuraFrame(frame) {
+  if (!els.composer) return
+  els.composer.classList.add('fluid-active')
+  els.composer.style.setProperty('--fluid-x', `${frame.x.toFixed(1)}%`)
+  els.composer.style.setProperty('--fluid-y', `${frame.y.toFixed(1)}%`)
+  els.composer.style.setProperty('--fluid-energy', frame.hoverEnergy.toFixed(3))
+  els.composer.style.setProperty('--fluid-type', frame.typeEnergy.toFixed(3))
+  els.composer.style.setProperty('--fluid-stretch', frame.stretch.toFixed(3))
+  els.composer.style.setProperty('--fluid-dx', frame.dx.toFixed(3))
+  els.composer.style.setProperty('--fluid-dy', frame.dy.toFixed(3))
+  els.composer.style.setProperty('--fluid-angle', `${frame.angle.toFixed(1)}deg`)
+}
+
+function startInteractiveAuraLoop() {
+  if (!isComposerAuraActive()) {
+    resetInteractiveAura()
+    return
+  }
+  if (interactiveAuraRaf) return
+  interactiveAuraLastTime = performance.now()
+  const tick = frameTime => {
+    interactiveAuraRaf = 0
+    if (!isComposerAuraActive()) {
+      resetInteractiveAura()
+      return
+    }
+    const dtMs = frameTime - interactiveAuraLastTime
+    interactiveAuraLastTime = frameTime
+    const frame = stepInteractiveAura(interactiveAura, {
+      dtMs,
+      reducedMotion: reducedMotion.matches,
+    })
+    if (!frame.active) {
+      resetInteractiveAura()
+      return
+    }
+    applyInteractiveAuraFrame(frame)
+    interactiveAuraRaf = requestAnimationFrame(tick)
+  }
+  interactiveAuraRaf = requestAnimationFrame(tick)
+}
+
+function handleComposerAuraPointer(event) {
+  const shell = els.composerShell
+  if (!shell) return
+  const rect = shell.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
+  const nextX = Math.max(4, Math.min(96, ((event.clientX - rect.left) / rect.width) * 100))
+  const nextY = Math.max(4, Math.min(96, ((event.clientY - rect.top) / rect.height) * 100))
+  const dist = Math.hypot(nextX - interactiveAura.targetX, nextY - interactiveAura.targetY)
+  const wakeBoost = event.type === 'pointerenter' ? 0.45 : Math.min(0.65, dist / 24)
+  interactiveAura.wake = Math.min(1, interactiveAura.wake + wakeBoost)
+  interactiveAura.hovering = true
+  interactiveAura.targetX = nextX
+  interactiveAura.targetY = nextY
+  if (isComposerAuraActive()) startInteractiveAuraLoop()
+}
+
+function pulseInteractiveTyping(boost = 0.45) {
+  if (!els.input) return
+  const caret = els.input.selectionEnd ?? els.input.value.length
+  interactiveAura.typeX = estimateCaretFocusX(els.input.value, caret)
+  interactiveAura.typeEnergy = Math.min(1, Math.max(interactiveAura.typeEnergy + boost * 0.65, boost))
+  if (isComposerAuraActive()) startInteractiveAuraLoop()
+}
+
+function resetComposerSpeechAura() {
+  if (!els.composer) return
+  els.composer.classList.remove('speaking')
+  els.composer.style.removeProperty('--speech-level')
+  els.composer.style.removeProperty('--speech-peak')
+  els.composer.style.removeProperty('--speech-focus-x')
+  els.composer.style.removeProperty('--speech-angle')
+}
+
+function cleanupDictationSession(session) {
+  if (session?.rafId) {
+    cancelAnimationFrame(session.rafId)
+    session.rafId = 0
+  }
+  if (session?.mediaStream) {
+    for (const track of session.mediaStream.getTracks()) track.stop()
+    session.mediaStream = null
+  }
+  if (session?.audioContext) {
+    void session.audioContext.close().catch(() => {})
+    session.audioContext = null
+  }
+  if (session) {
+    session.analyser = null
+    session.timeData = null
+    session.freqData = null
+  }
+  if (dictation === null) {
+    els.composer?.classList.remove('dictating')
+    resetComposerSpeechAura()
+  }
+}
+
+async function startAudioMeter(session) {
+  if (!session || session.audioStarted || dictation !== session) return
+  session.audioStarted = true
+  const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices)
+  const AudioCtx = window.AudioContext || window.webkitAudioContext
+  if (!getUserMedia || !AudioCtx) return
+  let stream
+  try {
+    stream = await getUserMedia({ audio: true })
+  } catch {
+    return
+  }
+  if (dictation !== session) {
+    for (const track of stream.getTracks()) track.stop()
+    return
+  }
+  try {
+    const audioContext = new AudioCtx()
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume().catch(() => {})
+    }
+    if (dictation !== session) {
+      for (const track of stream.getTracks()) track.stop()
+      void audioContext.close().catch(() => {})
+      return
+    }
+    const source = audioContext.createMediaStreamSource(stream)
+    const analyser = audioContext.createAnalyser()
+    analyser.fftSize = 256
+    analyser.smoothingTimeConstant = 0.45
+    source.connect(analyser)
+    session.mediaStream = stream
+    session.audioContext = audioContext
+    session.analyser = analyser
+    session.timeData = new Uint8Array(analyser.fftSize)
+    session.freqData = new Uint8Array(analyser.frequencyBinCount)
+  } catch {
+    for (const track of stream.getTracks()) track.stop()
+  }
+}
+
+function startDictationAuraLoop(session) {
+  let lastTime = performance.now()
+  const tick = frameTime => {
+    if (dictation !== session) return
+    const dtMs = frameTime - lastTime
+    lastTime = frameTime
+    let micLevel = 0
+    let micBalance = 0
+    if (session.analyser && session.timeData && session.freqData) {
+      session.analyser.getByteTimeDomainData(session.timeData)
+      session.analyser.getByteFrequencyData(session.freqData)
+      const measured = measureAudioFrame(session.timeData, session.freqData, session.aura.noiseFloor)
+      session.aura.noiseFloor = measured.noiseFloor
+      micLevel = measured.level
+      micBalance = measured.balance
+    }
+    const frame = stepSpeechAura(session.aura, {
+      now: frameTime,
+      dtMs,
+      micLevel,
+      micBalance,
+      hasMicStream: Boolean(session.analyser),
+      reducedMotion: reducedMotion.matches,
+    })
+    if (els.composer) {
+      els.composer.style.setProperty('--speech-level', frame.level.toFixed(3))
+      els.composer.style.setProperty('--speech-peak', frame.peak.toFixed(3))
+      els.composer.style.setProperty('--speech-focus-x', `${frame.focusX.toFixed(1)}%`)
+      els.composer.style.setProperty('--speech-angle', `${frame.angle.toFixed(1)}deg`)
+      els.composer.classList.toggle('speaking', frame.speaking)
+    }
+    session.rafId = requestAnimationFrame(tick)
+  }
+  session.rafId = requestAnimationFrame(tick)
+}
+
 function updateMicButton() {
   const supported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
   const active = dictation !== null
@@ -3740,7 +4183,11 @@ function updateMicButton() {
   els.mic.title = label
   els.mic.setAttribute('aria-label', label)
   els.mic.setAttribute('aria-pressed', String(active))
-  els.dictationIndicator.hidden = !active
+  els.composer?.classList.toggle('dictating', active)
+  if (!active) resetComposerSpeechAura()
+  else if (interactiveAura.hovering || interactiveAura.hoverEnergy > 0.004 || interactiveAura.typeEnergy > 0.004) {
+    startInteractiveAuraLoop()
+  }
 }
 
 function stopDictation() {
@@ -3752,6 +4199,7 @@ function stopDictation() {
   } catch {
     // The recognition may already have ended.
   }
+  cleanupDictationSession(session)
   updateMicButton()
   logger.log('speech.stop', {}, 'info')
 }
@@ -3785,16 +4233,53 @@ function toggleDictation() {
   const rawAfter = els.input.value.slice(end)
   const before = rawBefore && !/\s$/u.test(rawBefore) ? `${rawBefore} ` : rawBefore
   const after = rawAfter && !/^\s/u.test(rawAfter) ? ` ${rawAfter}` : rawAfter
-  const session = { recognition, before, after }
+  const session = {
+    recognition,
+    before,
+    after,
+    aura: createSpeechAuraState(),
+    rafId: 0,
+    audioStarted: false,
+    mediaStream: null,
+    audioContext: null,
+    analyser: null,
+    timeData: null,
+    freqData: null,
+  }
   recognition.continuous = true
   recognition.interimResults = true
   recognition.lang = navigator.language || 'en-US'
+  recognition.onaudiostart = () => {
+    if (dictation !== session) return
+    void startAudioMeter(session)
+  }
+  recognition.onsoundstart = () => {
+    if (dictation !== session) return
+    session.aura.speechActive = true
+    session.aura.pulse = Math.max(session.aura.pulse, 0.48)
+  }
+  recognition.onspeechstart = () => {
+    if (dictation !== session) return
+    session.aura.speechActive = true
+    session.aura.pulse = Math.max(session.aura.pulse, 0.82)
+  }
+  recognition.onspeechend = () => {
+    if (dictation !== session) return
+    session.aura.speechActive = false
+  }
+  recognition.onsoundend = () => {
+    if (dictation !== session) return
+    session.aura.speechActive = false
+  }
   recognition.onresult = event => {
     if (dictation !== session) return
     let transcript = ''
     for (let index = 0; index < event.results.length; index += 1) {
       transcript += event.results[index][0].transcript
     }
+    session.aura.pulse = Math.max(session.aura.pulse, transcriptImpulse(session.aura.lastTranscriptLen, transcript.length))
+    session.aura.lastTranscriptLen = transcript.length
+    session.aura.speechHoldUntil = performance.now() + 380
     els.input.value = `${session.before}${transcript}${session.after}`
     const caret = session.before.length + transcript.length
     els.input.setSelectionRange(caret, caret)
@@ -3803,6 +4288,7 @@ function toggleDictation() {
   recognition.onerror = event => {
     if (dictation !== session) return
     dictation = null
+    cleanupDictationSession(session)
     updateMicButton()
     logger.log('speech.error', { code: event.error }, 'warn')
     toast(dictationError(event.error))
@@ -3810,6 +4296,7 @@ function toggleDictation() {
   recognition.onend = () => {
     if (dictation !== session) return
     dictation = null
+    cleanupDictationSession(session)
     updateMicButton()
     logger.log('speech.end', {}, 'info')
   }
@@ -3817,18 +4304,31 @@ function toggleDictation() {
     recognition.start()
     dictation = session
     updateMicButton()
+    startDictationAuraLoop(session)
+    void navigator.permissions?.query({ name: 'microphone' })
+      .then(status => {
+        if (dictation === session && status.state === 'granted') void startAudioMeter(session)
+      })
+      .catch(() => {})
     els.input.focus()
     logger.log('speech.start', { language: recognition.lang }, 'info')
   } catch (error) {
     dictation = null
+    cleanupDictationSession(session)
     updateMicButton()
     toast(`Could not start dictation: ${errorMessage(error)}`)
   }
 }
 
+function updateComposerDraftState() {
+  const hasDraft = els.input.value.trim().length > 0 || attachedImages.length > 0
+  els.composer?.classList.toggle('has-draft', hasDraft)
+}
+
 function resizeInput() {
   els.input.style.height = 'auto'
   els.input.style.height = `${Math.min(els.input.scrollHeight, 132)}px`
+  updateComposerDraftState()
 }
 
 function queuedMessagePreview(item) {
@@ -3965,6 +4465,7 @@ function dispatchMessage(item) {
   beginUserTurn(echoText, item.images, { marathon: marathonState.enabled })
   // Any prompt answers or abandons an open confirmation.
   hideConfirmCard()
+  applyDiarySuggestions([])
   setBusy(true)
   setStatus('busy', 'Sending…')
   return true
@@ -4103,12 +4604,12 @@ function newChat() {
   logger.log('chat.new', {}, 'info')
   if (busy && !stopAvailable) {
     toast('Wait for the current operation to finish')
-    return
+    return false
   }
   if (busy) {
     archiveCurrentConversation()
     setNewChatDraft(true)
-    return
+    return true
   }
   newChatOnNextConnect = !connected
   stopDictation()
@@ -4126,6 +4627,7 @@ function newChat() {
   updateFooter()
   renderRecentSessions()
   if (connected) setStatus('online', 'Connected')
+  return true
 }
 
 function clearChat() {
@@ -4135,6 +4637,10 @@ function clearChat() {
   // arrives after chat.new, never optimistically here. The local watch-alert
   // mirror and pinned card clear with the transcript (rows removed by clearActivity).
   syncWatchAlert(null)
+  diarySuggestions = []
+  diarySuggestEditingId = null
+  diarySuggestPendingIds.clear()
+  renderDiarySuggestCard()
   els.app.classList.remove('new-chat-draft')
   clearTimeout(queueDispatchTimer)
   queueDispatchTimer = null
@@ -4171,6 +4677,7 @@ async function refreshActiveTab() {
     const tabs = await chrome.tabs.query({ windowId: win.id, active: true })
     const tab = tabs[0]
     if (tab) {
+      currentActiveTabUrl = tab.url || ''
       const signature = `${tab.id ?? ''}|${tab.url ?? ''}|${tab.title ?? ''}`
       if (signature !== lastTabSignature) {
         lastTabSignature = signature
@@ -4179,11 +4686,16 @@ async function refreshActiveTab() {
       els.activeTab.textContent = truncate(tab.title || tab.url || 'Untitled tab', 60)
       els.activeTab.title = tab.url || ''
     } else {
+      currentActiveTabUrl = ''
       els.activeTab.textContent = 'No active tab'
       els.activeTab.title = ''
     }
   } catch {
+    currentActiveTabUrl = ''
     els.activeTab.textContent = 'No active tab'
+  }
+  if (els.diaryUseCurrentTab) {
+    els.diaryUseCurrentTab.disabled = !diaryCanMutate() || siteFromTabUrl(currentActiveTabUrl) === null
   }
 }
 
@@ -4193,26 +4705,666 @@ function scheduleTabRefresh() {
 }
 
 /* ------------------------------------------------------------------ */
-/* debug log modal and export                                          */
+/* diary modal, applied rows, and post-run suggestion cards            */
 /* ------------------------------------------------------------------ */
 
-function openLogModal() {
-  els.logModal.classList.remove('hidden')
-  els.logStats.textContent = 'Requesting log stats…'
-  els.logSignals.replaceChildren()
-  logger.log('log.modal.open', {}, 'debug')
-  if (!connected) {
-    els.logStats.textContent = 'Companion offline. Start it with npm run dev, then reconnect to export logs.'
+function renderTurnDiaryPill(turn) {
+  const pillEl = turn?.diaryPillEl
+  if (!pillEl) return
+  const state = formatDiaryHeaderPill(turn.diaryApplied)
+  if (!state.visible || turn.done) {
+    pillEl.classList.add('hidden')
+    pillEl.replaceChildren()
+    pillEl.removeAttribute('title')
     return
   }
-  sendFrame({ v: PROTOCOL_VERSION, type: 'log.stats' })
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  icon.setAttribute('class', 'icon turn-diary-icon')
+  icon.setAttribute('aria-hidden', 'true')
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use')
+  use.setAttribute('href', '#icon-diary')
+  icon.appendChild(use)
+
+  const title = document.createElement('span')
+  title.className = 'turn-diary-title'
+  title.textContent = `Diary · ${state.latest}`
+
+  pillEl.replaceChildren(icon, title)
+  if (state.overflow > 0) {
+    const more = document.createElement('span')
+    more.className = 'turn-diary-more'
+    more.textContent = `+${state.overflow}`
+    pillEl.append(' ', more)
+  }
+  pillEl.title = state.tooltip
+  pillEl.classList.remove('hidden')
 }
 
-function closeLogModal() {
-  const hadFocus = els.logModal.contains(document.activeElement)
-  els.logModal.classList.add('hidden')
+function pushDiaryAppliedRow(frame) {
+  if (!newChatDraft) els.activityEmpty?.classList.add('hidden')
+  if (!currentTurn) return
+  currentTurn.diaryApplied = mergeDiaryAppliedEntries(currentTurn.diaryApplied, frame)
+  renderTurnDiaryPill(currentTurn)
+}
+
+function diaryUnsupportedByCompanion() {
+  return connected && companionHelloReceived && !diarySupported
+}
+
+function diaryCanMutate() {
+  return connected && (!companionHelloReceived || diarySupported)
+}
+
+function setDiaryBusy(nextBusy) {
+  if (diaryBusyTimer !== null) {
+    clearTimeout(diaryBusyTimer)
+    diaryBusyTimer = null
+  }
+  diaryBusy = nextBusy === true
+  if (!diaryBusy) return
+  diaryBusyTimer = setTimeout(() => {
+    diaryBusyTimer = null
+    const wasAwaitingEditor = diaryEditorAwaitingSave
+    diaryBusy = false
+    diaryEditorAwaitingSave = false
+    diarySuggestPendingIds.clear()
+    const message = 'The companion did not respond. Restart the companion if it is running an older version.'
+    if (wasAwaitingEditor && !els.diaryModal.classList.contains('hidden') && diaryEditorOpen) {
+      showDiaryEditorError(message)
+    } else {
+      toast('The companion did not respond to the Diary request. Try restarting the companion.')
+    }
+    if (!els.diaryModal.classList.contains('hidden')) renderDiaryModal()
+    renderDiarySuggestCard()
+  }, DIARY_REQUEST_TIMEOUT_MS)
+}
+
+function applyDiarySnapshot(value) {
+  diaryState = normalizeDiarySnapshot(value)
+  if (!els.diaryModal.classList.contains('hidden')) renderDiaryModal()
+}
+
+function applyDiarySuggestions(value) {
+  diarySuggestions = normalizeDiarySuggestions(value)
+  for (const id of [...diarySuggestPendingIds]) {
+    if (!diarySuggestions.some(item => item.id === id)) diarySuggestPendingIds.delete(id)
+  }
+  if (diarySuggestPendingIds.size === 0 && !diaryEditorAwaitingSave && diaryBusy) {
+    setDiaryBusy(false)
+  }
+  if (diarySuggestEditingId !== null && !diarySuggestions.some(item => item.id === diarySuggestEditingId)) {
+    diarySuggestEditingId = null
+  }
+  renderDiarySuggestCard()
+}
+
+function handleDiaryStateFrame(frame) {
+  diarySupported = true
+  setDiaryBusy(false)
+  if (els.diaryEditorSave) els.diaryEditorSave.disabled = !diaryCanMutate()
+  const hadPendingSuggestion = diarySuggestPendingIds.size > 0
+  diarySuggestPendingIds.clear()
+  if (frame.diary) diaryState = normalizeDiarySnapshot(frame.diary)
+  if (frame.ok === false) {
+    const message = typeof frame.error === 'string' && frame.error.length > 0 ? frame.error : 'Diary request failed'
+    if (diaryEditorAwaitingSave && !els.diaryModal.classList.contains('hidden') && diaryEditorOpen) {
+      diaryEditorAwaitingSave = false
+      showDiaryEditorError(message)
+    } else {
+      diaryEditorAwaitingSave = false
+      toast(message)
+    }
+    if (!els.diaryModal.classList.contains('hidden')) renderDiaryModal()
+    renderDiarySuggestCard()
+    return
+  }
+  if (diaryEditorAwaitingSave) {
+    diaryEditorAwaitingSave = false
+    closeDiaryEditor()
+    toast('Saved to Diary')
+  } else if (hadPendingSuggestion && frame.entry) {
+    toast('Saved to Diary')
+  }
+  if (!els.diaryModal.classList.contains('hidden')) renderDiaryModal()
+  renderDiarySuggestCard()
+}
+
+function setDiaryEditorScope(scope) {
+  diaryEditorScope = scope === 'site' ? 'site' : 'global'
+  const isSite = diaryEditorScope === 'site'
+  els.diaryScopeGlobal.classList.toggle('active', !isSite)
+  els.diaryScopeGlobal.setAttribute('aria-pressed', String(!isSite))
+  els.diaryScopeSite.classList.toggle('active', isSite)
+  els.diaryScopeSite.setAttribute('aria-pressed', String(isSite))
+  els.diarySitesField.classList.toggle('hidden', !isSite)
+  els.diaryUseCurrentTab.disabled = !diaryCanMutate() || siteFromTabUrl(currentActiveTabUrl) === null
+}
+
+function updateDiaryContentCount() {
+  const len = els.diaryFieldContent.value.length
+  els.diaryContentCount.textContent = `${len} / ${DIARY_CONTENT_MAX_CHARS}`
+}
+
+function showDiaryEditorError(message) {
+  if (!message) {
+    els.diaryEditorError.textContent = ''
+    els.diaryEditorError.classList.add('hidden')
+    return
+  }
+  els.diaryEditorError.textContent = message
+  els.diaryEditorError.classList.remove('hidden')
+}
+
+function openDiaryEditor(entry = null) {
+  diaryEditorOpen = true
+  diaryEditingId = entry ? entry.id : null
+  diaryEditingEnabled = entry ? entry.enabled !== false : true
+  diaryDeleteConfirmId = null
+  showDiaryEditorError('')
+  setDiaryEditorScope(entry?.scope === 'site' ? 'site' : 'global')
+  els.diaryFieldSites.value = entry?.scope === 'site' ? (entry.sites ?? []).join(', ') : ''
+  els.diaryFieldTitle.value = entry?.title ?? ''
+  els.diaryFieldContent.value = entry?.content ?? ''
+  updateDiaryContentCount()
+  els.diaryEditorSave.textContent = entry ? 'Save changes' : 'Save'
+  els.diaryEditorSave.disabled = !diaryCanMutate() || diaryBusy
+  els.diaryEditor.classList.remove('hidden')
+  els.diaryEditor.scrollIntoView({ block: 'nearest' })
+  setTimeout(() => {
+    if (diaryEditorScope === 'site' && els.diaryFieldSites.value.trim().length === 0) {
+      els.diaryFieldSites.focus()
+    } else {
+      els.diaryFieldTitle.focus()
+    }
+  }, 10)
+}
+
+function closeDiaryEditor() {
+  diaryEditorOpen = false
+  diaryEditingId = null
+  diaryEditingEnabled = true
+  if (diaryEditorAwaitingSave) {
+    diaryEditorAwaitingSave = false
+    setDiaryBusy(false)
+  }
+  showDiaryEditorError('')
+  els.diaryEditor.classList.add('hidden')
+}
+
+function openDiary() {
+  setUtilitiesOpen(false)
+  closeModelMenu()
+  closeSlashMenu()
+  diaryDeleteConfirmId = null
+  renderDiaryModal()
+  els.diaryModal.classList.remove('hidden')
+  logger.log('diary.modal.open', { count: diaryState.entries.length }, 'debug')
+  if (connected && diaryCanMutate()) {
+    sendFrame({ v: PROTOCOL_VERSION, type: 'diary.list' })
+  }
+  setTimeout(() => els.diarySearch.focus({ preventScroll: true }), 10)
+}
+
+function closeDiary() {
+  const hadFocus = els.diaryModal.contains(document.activeElement)
+  closeDiaryEditor()
+  diaryDeleteConfirmId = null
+  els.diaryModal.classList.add('hidden')
   if (hadFocus) els.input.focus({ preventScroll: true })
 }
+
+function renderDiaryModal() {
+  if (!connected) {
+    els.diaryOfflineNote.textContent = 'Connect to the companion to save, edit, or delete entries.'
+    els.diaryOfflineNote.classList.remove('hidden')
+  } else if (diaryUnsupportedByCompanion()) {
+    els.diaryOfflineNote.textContent = 'Restart the companion to use Diary (the running companion predates Diary support).'
+    els.diaryOfflineNote.classList.remove('hidden')
+  } else {
+    els.diaryOfflineNote.classList.add('hidden')
+  }
+  const canMutate = diaryCanMutate()
+  els.diaryAdd.disabled = !canMutate
+  els.diaryEditorSave.disabled = !canMutate || diaryBusy
+  els.diaryUseCurrentTab.disabled = !canMutate || siteFromTabUrl(currentActiveTabUrl) === null
+
+  for (const button of els.diaryFilters) {
+    const active = button.dataset.diaryFilter === diaryFilter
+    button.classList.toggle('active', active)
+    button.setAttribute('aria-pressed', String(active))
+  }
+
+  const filtered = filterDiaryEntries(diaryState.entries, {
+    query: els.diarySearch.value,
+    scope: diaryFilter,
+  })
+
+  els.diaryList.replaceChildren()
+  if (filtered.length === 0) {
+    els.diaryEmpty.textContent = diaryState.entries.length > 0
+      ? 'No matching diary entries.'
+      : 'No diary entries yet. Add your email preferences, site workflows, or standing rules here.'
+    els.diaryEmpty.classList.remove('hidden')
+  } else {
+    els.diaryEmpty.classList.add('hidden')
+  }
+
+  for (const entry of filtered) {
+    const card = document.createElement('article')
+    card.className = `diary-entry${entry.enabled === false ? ' paused' : ''}`
+    card.dataset.diaryId = entry.id
+
+    const head = document.createElement('div')
+    head.className = 'diary-entry-head'
+
+    const badges = document.createElement('div')
+    badges.className = 'diary-entry-badges'
+
+    const scopeBadge = document.createElement('span')
+    scopeBadge.className = entry.scope === 'site' ? 'diary-badge diary-badge-site' : 'diary-badge diary-badge-global'
+    scopeBadge.textContent = entry.scope === 'site' ? entry.sites.join(', ') : 'Global'
+    badges.appendChild(scopeBadge)
+
+    if (entry.source === 'suggested') {
+      const sourceTag = document.createElement('span')
+      sourceTag.className = 'diary-tag'
+      sourceTag.textContent = 'Suggested'
+      badges.appendChild(sourceTag)
+    }
+    if (entry.enabled === false) {
+      const pausedTag = document.createElement('span')
+      pausedTag.className = 'diary-tag diary-tag-paused'
+      pausedTag.textContent = 'Paused'
+      badges.appendChild(pausedTag)
+    }
+
+    const titleEl = document.createElement('h3')
+    titleEl.className = 'diary-entry-title'
+    titleEl.textContent = entry.title
+
+    head.append(badges, titleEl)
+
+    const contentEl = document.createElement('p')
+    contentEl.className = 'diary-entry-content'
+    contentEl.textContent = entry.content
+
+    const actions = document.createElement('div')
+    actions.className = 'diary-entry-actions'
+
+    const editBtn = document.createElement('button')
+    editBtn.type = 'button'
+    editBtn.className = 'diary-action-btn'
+    editBtn.textContent = 'Edit'
+    editBtn.disabled = !canMutate || diaryBusy
+    editBtn.addEventListener('click', () => {
+      openDiaryEditor(entry)
+    })
+
+    const toggleBtn = document.createElement('button')
+    toggleBtn.type = 'button'
+    toggleBtn.className = 'diary-action-btn'
+    toggleBtn.textContent = entry.enabled === false ? 'Enable' : 'Pause'
+    toggleBtn.disabled = !canMutate || diaryBusy
+    toggleBtn.addEventListener('click', () => {
+      if (!canMutate) return
+      setDiaryBusy(true)
+      renderDiaryModal()
+      if (!sendFrame({
+        v: PROTOCOL_VERSION,
+        type: 'diary.update',
+        id: entry.id,
+        enabled: entry.enabled === false,
+      })) {
+        setDiaryBusy(false)
+        renderDiaryModal()
+        toast('Could not send to the companion')
+      }
+    })
+
+    actions.append(editBtn, toggleBtn)
+
+    if (diaryDeleteConfirmId === entry.id) {
+      const confirmBtn = document.createElement('button')
+      confirmBtn.type = 'button'
+      confirmBtn.className = 'diary-action-btn danger'
+      confirmBtn.textContent = 'Confirm delete'
+      confirmBtn.disabled = !canMutate || diaryBusy
+      confirmBtn.addEventListener('click', () => {
+        if (!canMutate) return
+        diaryDeleteConfirmId = null
+        setDiaryBusy(true)
+        renderDiaryModal()
+        if (!sendFrame({ v: PROTOCOL_VERSION, type: 'diary.delete', id: entry.id })) {
+          setDiaryBusy(false)
+          renderDiaryModal()
+          toast('Could not send to the companion')
+        }
+      })
+
+      const cancelBtn = document.createElement('button')
+      cancelBtn.type = 'button'
+      cancelBtn.className = 'diary-action-btn'
+      cancelBtn.textContent = 'Cancel'
+      cancelBtn.addEventListener('click', () => {
+        diaryDeleteConfirmId = null
+        renderDiaryModal()
+      })
+      actions.append(confirmBtn, cancelBtn)
+    } else {
+      const deleteBtn = document.createElement('button')
+      deleteBtn.type = 'button'
+      deleteBtn.className = 'diary-action-btn danger-text'
+      deleteBtn.textContent = 'Delete'
+      deleteBtn.disabled = !canMutate || diaryBusy
+      deleteBtn.addEventListener('click', () => {
+        diaryDeleteConfirmId = entry.id
+        renderDiaryModal()
+      })
+      actions.appendChild(deleteBtn)
+    }
+
+    card.append(head, contentEl, actions)
+    els.diaryList.appendChild(card)
+  }
+
+  els.diaryClearSuppressed.classList.toggle('hidden', diaryState.suppressedCount === 0)
+  els.diaryClearSuppressed.disabled = !canMutate || diaryBusy
+}
+
+function renderDiarySuggestCard() {
+  const card = els.diarySuggestCard
+  if (!card) return
+  if (diarySuggestions.length === 0 || confirmRequest !== null) {
+    card.replaceChildren()
+    card.classList.add('hidden')
+    return
+  }
+
+  card.replaceChildren()
+  const head = document.createElement('div')
+  head.className = 'diary-suggest-head'
+
+  const heading = document.createElement('span')
+  heading.className = 'diary-suggest-badge'
+  heading.textContent = diarySuggestions.length === 1
+    ? 'Diary suggestion'
+    : `Diary suggestions (${diarySuggestions.length})`
+
+  const dismissAll = document.createElement('button')
+  dismissAll.type = 'button'
+  dismissAll.className = 'diary-suggest-close'
+  dismissAll.textContent = '×'
+  dismissAll.title = 'Dismiss all diary suggestions'
+  dismissAll.setAttribute('aria-label', 'Dismiss all diary suggestions')
+  dismissAll.addEventListener('click', () => {
+    if (!connected) {
+      toast('Not connected to the companion')
+      return
+    }
+    if (diaryUnsupportedByCompanion()) {
+      toast('Restart the companion to use Diary (the running companion predates Diary support).')
+      return
+    }
+    diarySuggestEditingId = null
+    diarySuggestPendingIds.clear()
+    if (!sendFrame({ v: PROTOCOL_VERSION, type: 'diary.suggestion.dismiss', all: true })) {
+      toast('Could not send to the companion')
+    }
+  })
+
+  head.append(heading, dismissAll)
+  card.appendChild(head)
+
+  const canMutate = diaryCanMutate()
+
+  for (const sug of diarySuggestions) {
+    const pending = diarySuggestPendingIds.has(sug.id)
+    const row = document.createElement('div')
+    row.className = 'diary-suggest-item'
+    row.dataset.suggestionId = sug.id
+
+    if (diarySuggestEditingId === sug.id) {
+      let editScope = sug.scope === 'site' ? 'site' : 'global'
+      const form = document.createElement('div')
+      form.className = 'diary-suggest-edit'
+
+      const scopeRow = document.createElement('div')
+      scopeRow.className = 'diary-scope-toggle'
+      const globalBtn = document.createElement('button')
+      globalBtn.type = 'button'
+      globalBtn.textContent = 'Global'
+      const siteBtn = document.createElement('button')
+      siteBtn.type = 'button'
+      siteBtn.textContent = 'Specific site(s)'
+
+      const sitesInput = document.createElement('input')
+      sitesInput.type = 'text'
+      sitesInput.className = 'diary-suggest-input'
+      sitesInput.placeholder = 'kimi.ai, chat.kimi.ai'
+      sitesInput.value = (sug.sites ?? []).join(', ')
+      sitesInput.setAttribute('aria-label', 'Suggestion websites')
+
+      const syncScope = nextScope => {
+        editScope = nextScope
+        globalBtn.classList.toggle('active', nextScope === 'global')
+        siteBtn.classList.toggle('active', nextScope === 'site')
+        sitesInput.classList.toggle('hidden', nextScope !== 'site')
+      }
+      globalBtn.addEventListener('click', () => syncScope('global'))
+      siteBtn.addEventListener('click', () => syncScope('site'))
+      scopeRow.append(globalBtn, siteBtn)
+
+      const titleInput = document.createElement('input')
+      titleInput.type = 'text'
+      titleInput.className = 'diary-suggest-input'
+      titleInput.maxLength = 80
+      titleInput.value = sug.title
+      titleInput.placeholder = 'Title'
+      titleInput.setAttribute('aria-label', 'Suggestion title')
+
+      const contentInput = document.createElement('textarea')
+      contentInput.className = 'diary-suggest-textarea'
+      contentInput.rows = 2
+      contentInput.maxLength = DIARY_CONTENT_MAX_CHARS
+      contentInput.value = sug.content
+      contentInput.placeholder = 'Instructions or note'
+      contentInput.setAttribute('aria-label', 'Suggestion note')
+
+      const errEl = document.createElement('p')
+      errEl.className = 'diary-editor-error hidden'
+
+      const actions = document.createElement('div')
+      actions.className = 'diary-suggest-actions'
+
+      const saveBtn = document.createElement('button')
+      saveBtn.type = 'button'
+      saveBtn.className = 'primary diary-suggest-btn'
+      saveBtn.textContent = 'Save'
+      saveBtn.disabled = !canMutate || pending
+
+      const cancelBtn = document.createElement('button')
+      cancelBtn.type = 'button'
+      cancelBtn.className = 'secondary diary-suggest-btn'
+      cancelBtn.textContent = 'Cancel'
+      cancelBtn.disabled = pending
+      cancelBtn.addEventListener('click', () => {
+        diarySuggestEditingId = null
+        renderDiarySuggestCard()
+      })
+
+      saveBtn.addEventListener('click', () => {
+        if (!connected) {
+          toast('Not connected to the companion')
+          return
+        }
+        if (diaryUnsupportedByCompanion()) {
+          errEl.textContent = 'Restart the companion to use Diary (the running companion predates Diary support).'
+          errEl.classList.remove('hidden')
+          return
+        }
+        let sites = []
+        if (editScope === 'site') {
+          const parsed = parseSitesInput(sitesInput.value)
+          if (parsed.invalid.length > 0) {
+            errEl.textContent = `Invalid website: ${parsed.invalid.slice(0, 3).join(', ')}`
+            errEl.classList.remove('hidden')
+            return
+          }
+          if (parsed.tooMany || parsed.sites.length === 0) {
+            errEl.textContent = parsed.tooMany ? 'At most 5 websites allowed.' : 'Enter at least one valid website domain.'
+            errEl.classList.remove('hidden')
+            return
+          }
+          sites = parsed.sites
+        }
+        const title = titleInput.value.trim()
+        const content = contentInput.value.trim()
+        if (!title || !content) {
+          errEl.textContent = 'Title and note text are required.'
+          errEl.classList.remove('hidden')
+          return
+        }
+        errEl.classList.add('hidden')
+        diarySuggestPendingIds.add(sug.id)
+        const prevEditingId = diarySuggestEditingId
+        diarySuggestEditingId = null
+        setDiaryBusy(true)
+        renderDiarySuggestCard()
+        if (!sendFrame({
+          v: PROTOCOL_VERSION,
+          type: 'diary.suggestion.accept',
+          id: sug.id,
+          scope: editScope,
+          sites,
+          title,
+          content,
+        })) {
+          diarySuggestPendingIds.delete(sug.id)
+          diarySuggestEditingId = prevEditingId
+          setDiaryBusy(false)
+          renderDiarySuggestCard()
+          toast('Could not send to the companion')
+        }
+      })
+
+      syncScope(editScope)
+      actions.append(cancelBtn, saveBtn)
+      form.append(scopeRow, sitesInput, titleInput, contentInput, errEl, actions)
+      row.appendChild(form)
+      card.appendChild(row)
+      continue
+    }
+
+    const meta = document.createElement('div')
+    meta.className = 'diary-suggest-meta'
+    const scopeBadge = document.createElement('span')
+    scopeBadge.className = sug.scope === 'site' ? 'diary-badge diary-badge-site' : 'diary-badge diary-badge-global'
+    scopeBadge.textContent = sug.scope === 'site' ? sug.sites.join(', ') : 'Global'
+    meta.appendChild(scopeBadge)
+    if (sug.action === 'update') {
+      const updateBadge = document.createElement('span')
+      updateBadge.className = 'diary-tag diary-tag-update'
+      updateBadge.textContent = 'Update'
+      meta.appendChild(updateBadge)
+    }
+
+    const questionEl = document.createElement('p')
+    questionEl.className = 'diary-suggest-question'
+    questionEl.textContent = sug.question
+
+    const preview = document.createElement('div')
+    preview.className = 'diary-suggest-preview'
+    const titleEl = document.createElement('strong')
+    titleEl.className = 'diary-suggest-title'
+    titleEl.textContent = sug.title
+    const contentEl = document.createElement('p')
+    contentEl.className = 'diary-suggest-content'
+    contentEl.textContent = sug.content
+    preview.append(titleEl, contentEl)
+
+    row.append(meta, questionEl, preview)
+
+    if (sug.action === 'update' && sug.previousEntry) {
+      const prevEl = document.createElement('p')
+      prevEl.className = 'diary-suggest-prev'
+      prevEl.textContent = `Replaces: ${sug.previousEntry.title} — ${sug.previousEntry.content}`
+      row.appendChild(prevEl)
+    }
+
+    const actions = document.createElement('div')
+    actions.className = 'diary-suggest-actions'
+
+    const saveBtn = document.createElement('button')
+    saveBtn.type = 'button'
+    saveBtn.className = 'primary diary-suggest-btn'
+    saveBtn.textContent = sug.action === 'update' ? 'Update' : 'Save'
+    saveBtn.disabled = !canMutate || pending
+    saveBtn.addEventListener('click', () => {
+      if (!connected) {
+        toast('Not connected to the companion')
+        return
+      }
+      if (diaryUnsupportedByCompanion()) {
+        toast('Restart the companion to use Diary (the running companion predates Diary support).')
+        return
+      }
+      diarySuggestPendingIds.add(sug.id)
+      setDiaryBusy(true)
+      renderDiarySuggestCard()
+      if (!sendFrame({ v: PROTOCOL_VERSION, type: 'diary.suggestion.accept', id: sug.id })) {
+        diarySuggestPendingIds.delete(sug.id)
+        setDiaryBusy(false)
+        renderDiarySuggestCard()
+        toast('Could not send to the companion')
+      }
+    })
+
+    const editBtn = document.createElement('button')
+    editBtn.type = 'button'
+    editBtn.className = 'secondary diary-suggest-btn'
+    editBtn.textContent = 'Edit'
+    editBtn.disabled = pending
+    editBtn.addEventListener('click', () => {
+      diarySuggestEditingId = sug.id
+      renderDiarySuggestCard()
+    })
+
+    const dismissBtn = document.createElement('button')
+    dismissBtn.type = 'button'
+    dismissBtn.className = 'secondary diary-suggest-btn'
+    dismissBtn.textContent = 'Dismiss'
+    dismissBtn.disabled = !canMutate || pending
+    dismissBtn.addEventListener('click', () => {
+      if (!connected) {
+        toast('Not connected to the companion')
+        return
+      }
+      if (diaryUnsupportedByCompanion()) {
+        toast('Restart the companion to use Diary (the running companion predates Diary support).')
+        return
+      }
+      diarySuggestPendingIds.add(sug.id)
+      setDiaryBusy(true)
+      renderDiarySuggestCard()
+      if (!sendFrame({ v: PROTOCOL_VERSION, type: 'diary.suggestion.dismiss', id: sug.id })) {
+        diarySuggestPendingIds.delete(sug.id)
+        setDiaryBusy(false)
+        renderDiarySuggestCard()
+        toast('Could not send to the companion')
+      }
+    })
+
+    actions.append(dismissBtn, editBtn, saveBtn)
+    row.appendChild(actions)
+    card.appendChild(row)
+  }
+
+  card.classList.remove('hidden')
+}
+
+/* ------------------------------------------------------------------ */
+/* debug log stats and export (inside Settings)                        */
+/* ------------------------------------------------------------------ */
 
 /** @param {Record<string, any> | null} stats */
 function renderLogStats(stats) {
@@ -4379,6 +5531,47 @@ async function copyText(text) {
 /* events                                                              */
 /* ------------------------------------------------------------------ */
 
+function flashSettingsStatus(text) {
+  if (!els.settingsStatus) return
+  els.settingsStatus.textContent = text
+  clearTimeout(settingsStatusTimer)
+  settingsStatusTimer = setTimeout(() => {
+    if (els.settingsStatus) els.settingsStatus.textContent = ''
+    settingsStatusTimer = null
+  }, 1_800)
+}
+
+function syncCompanionToggle(key, value) {
+  if (connected) {
+    sentCompanionSettings[key] = value
+    sendFrame({ v: PROTOCOL_VERSION, type: 'settings.update', [key]: value })
+    flashSettingsStatus('Saved')
+  } else {
+    flashSettingsStatus('Connect to save')
+  }
+}
+
+els.settingConfirmIrreversible.addEventListener('change', () => {
+  syncCompanionToggle('confirmIrreversible', els.settingConfirmIrreversible.checked)
+})
+els.settingWatchAutoSteer?.addEventListener('change', () => {
+  syncCompanionToggle('watchAutoSteer', els.settingWatchAutoSteer.checked)
+})
+els.settingDiaryAutoSuggest?.addEventListener('change', () => {
+  syncCompanionToggle('diaryAutoSuggest', els.settingDiaryAutoSuggest.checked)
+})
+els.settingAutoCapture.addEventListener('change', () => {
+  settings = { ...settings, autoCapture: els.settingAutoCapture.checked }
+  void saveSettings()
+  flashSettingsStatus('Saved')
+})
+els.settingVerboseActivity?.addEventListener('change', () => {
+  settings = { ...settings, verboseActivity: els.settingVerboseActivity.checked }
+  applyVerboseActivityMode()
+  void saveSettings()
+  flashSettingsStatus('Saved')
+})
+
 els.settingsSave.addEventListener('click', () => {
   const url = els.settingUrl.value.trim()
   const token = els.settingToken.value.trim()
@@ -4390,14 +5583,17 @@ els.settingsSave.addEventListener('click', () => {
   const width = Number(els.settingWidth.value)
   const quality = Number(els.settingQuality.value)
   if (!/^wss?:\/\//u.test(url)) {
+    if (els.settingsAdvanced) els.settingsAdvanced.open = true
     toast('Bridge URL must start with ws:// or wss://')
     return
   }
   if (token.length === 0) {
+    if (els.settingsAdvanced) els.settingsAdvanced.open = true
     toast('Paste the pairing token printed by npm run dev')
     return
   }
   if (!/^https?:\/\//u.test(baseUrl)) {
+    if (els.settingsAdvanced) els.settingsAdvanced.open = true
     toast('Model base URL must start with http:// or https://')
     return
   }
@@ -4410,10 +5606,12 @@ els.settingsSave.addEventListener('click', () => {
     return
   }
   if (!Number.isFinite(width) || width < 640 || width > 2048) {
+    if (els.settingsAdvanced) els.settingsAdvanced.open = true
     toast('Capture width must be between 640 and 2048')
     return
   }
   if (!Number.isFinite(quality) || quality < 40 || quality > 90) {
+    if (els.settingsAdvanced) els.settingsAdvanced.open = true
     toast('JPEG quality must be between 40 and 90')
     return
   }
@@ -4438,9 +5636,11 @@ els.settingsSave.addEventListener('click', () => {
     captureWidth: Math.round(width),
     quality: Math.round(quality),
     autoCapture: els.settingAutoCapture.checked,
+    verboseActivity: els.settingVerboseActivity ? els.settingVerboseActivity.checked : isVerboseActivity(),
     modelBaseUrl: baseUrl,
     modelId: model,
   }
+  applyVerboseActivityMode()
   logger.log('settings.save', {
     bridgeUrl: url,
     captureWidth: settings.captureWidth,
@@ -4460,16 +5660,19 @@ els.settingsSave.addEventListener('click', () => {
   els.settingApiKey.value = ''
   closeSettings()
   // Behavior settings live in the companion, not in local storage.
-  const confirmChanged = els.settingConfirmIrreversible.checked !== companionSettings.confirmIrreversible
+  const confirmChanged = els.settingConfirmIrreversible.checked !== (sentCompanionSettings.confirmIrreversible ?? companionSettings.confirmIrreversible)
   const watchAutoSteerChecked = els.settingWatchAutoSteer ? els.settingWatchAutoSteer.checked : companionSettings.watchAutoSteer
-  const watchSteerChanged = watchAutoSteerChecked !== companionSettings.watchAutoSteer
-  if (confirmChanged || watchSteerChanged) {
+  const watchSteerChanged = watchAutoSteerChecked !== (sentCompanionSettings.watchAutoSteer ?? companionSettings.watchAutoSteer)
+  const diaryAutoSuggestChecked = els.settingDiaryAutoSuggest ? els.settingDiaryAutoSuggest.checked : companionSettings.diaryAutoSuggest
+  const diaryAutoSuggestChanged = diaryAutoSuggestChecked !== (sentCompanionSettings.diaryAutoSuggest ?? companionSettings.diaryAutoSuggest)
+  if (confirmChanged || watchSteerChanged || diaryAutoSuggestChanged) {
     if (connected) {
       sendFrame({
         v: PROTOCOL_VERSION,
         type: 'settings.update',
         ...(confirmChanged ? { confirmIrreversible: els.settingConfirmIrreversible.checked } : {}),
         ...(watchSteerChanged ? { watchAutoSteer: watchAutoSteerChecked } : {}),
+        ...(diaryAutoSuggestChanged ? { diaryAutoSuggest: diaryAutoSuggestChecked } : {}),
       })
     } else {
       toast('Connect to the companion to change behavior settings')
@@ -4516,10 +5719,122 @@ els.settings.addEventListener('click', openSettings)
 els.confirmApprove.addEventListener('click', () => sendConfirmation('approve'))
 els.confirmDeny.addEventListener('click', () => sendConfirmation('deny'))
 els.settingsClose.addEventListener('click', closeSettings)
-els.debugLog.addEventListener('click', openLogModal)
-els.logClose.addEventListener('click', closeLogModal)
-els.logModal.addEventListener('click', event => {
-  if (event.target === els.logModal) closeLogModal()
+els.settingsDebugLog?.addEventListener('toggle', () => {
+  if (!els.settingsDebugLog.open) return
+  logger.log('log.section.open', {}, 'debug')
+  if (!connected) {
+    els.logStats.textContent = 'Companion offline. Start it with npm run dev, then reconnect to export logs.'
+    els.logSignals.replaceChildren()
+    return
+  }
+  els.logStats.textContent = 'Requesting log stats…'
+  els.logSignals.replaceChildren()
+  sendFrame({ v: PROTOCOL_VERSION, type: 'log.stats' })
+})
+els.diary.addEventListener('click', openDiary)
+els.diaryClose.addEventListener('click', closeDiary)
+els.diaryModal.addEventListener('click', event => {
+  if (event.target === els.diaryModal) closeDiary()
+})
+els.diarySearch.addEventListener('input', () => renderDiaryModal())
+for (const button of els.diaryFilters) {
+  button.addEventListener('click', () => {
+    diaryFilter = button.dataset.diaryFilter ?? 'all'
+    renderDiaryModal()
+  })
+}
+els.diaryAdd.addEventListener('click', () => openDiaryEditor(null))
+els.diaryScopeGlobal.addEventListener('click', () => setDiaryEditorScope('global'))
+els.diaryScopeSite.addEventListener('click', () => setDiaryEditorScope('site'))
+els.diaryUseCurrentTab.addEventListener('click', () => {
+  const host = siteFromTabUrl(currentActiveTabUrl)
+  if (host === null) return
+  const existing = parseSitesInput(els.diaryFieldSites.value).sites
+  if (existing.includes(host)) return
+  els.diaryFieldSites.value = existing.length > 0 ? `${existing.join(', ')}, ${host}` : host
+  showDiaryEditorError('')
+})
+els.diaryFieldContent.addEventListener('input', updateDiaryContentCount)
+els.diaryEditorCancel.addEventListener('click', closeDiaryEditor)
+els.diaryEditor.addEventListener('submit', event => {
+  event.preventDefault()
+  if (!connected) {
+    showDiaryEditorError('Connect to the companion before saving.')
+    return
+  }
+  if (diaryUnsupportedByCompanion()) {
+    showDiaryEditorError('Restart the companion to use Diary (the running companion predates Diary support).')
+    return
+  }
+  if (diaryBusy) return
+  let sites = []
+  if (diaryEditorScope === 'site') {
+    const parsedSites = parseSitesInput(els.diaryFieldSites.value)
+    if (parsedSites.invalid.length > 0) {
+      showDiaryEditorError(`Invalid website domain${parsedSites.invalid.length === 1 ? '' : 's'}: ${parsedSites.invalid.slice(0, 3).join(', ')}.`)
+      return
+    }
+    if (parsedSites.tooMany) {
+      showDiaryEditorError('At most 5 websites are allowed per diary entry.')
+      return
+    }
+    if (parsedSites.sites.length === 0) {
+      showDiaryEditorError('Enter at least one valid website domain (for example, kimi.ai).')
+      return
+    }
+    sites = parsedSites.sites
+  }
+  const title = els.diaryFieldTitle.value.trim()
+  if (title.length === 0) {
+    showDiaryEditorError('Title is required.')
+    return
+  }
+  const content = els.diaryFieldContent.value.trim()
+  if (content.length === 0) {
+    showDiaryEditorError('Note text is required.')
+    return
+  }
+  showDiaryEditorError('')
+  setDiaryBusy(true)
+  diaryEditorAwaitingSave = true
+  els.diaryEditorSave.disabled = true
+  const frame = diaryEditingId !== null
+    ? {
+      v: PROTOCOL_VERSION,
+      type: 'diary.update',
+      id: diaryEditingId,
+      scope: diaryEditorScope,
+      sites,
+      title,
+      content,
+      enabled: diaryEditingEnabled,
+    }
+    : {
+      v: PROTOCOL_VERSION,
+      type: 'diary.create',
+      scope: diaryEditorScope,
+      sites,
+      title,
+      content,
+    }
+  if (!sendFrame(frame)) {
+    setDiaryBusy(false)
+    diaryEditorAwaitingSave = false
+    els.diaryEditorSave.disabled = !diaryCanMutate()
+    showDiaryEditorError('Could not send to the companion. Check that the companion is running.')
+  }
+})
+els.diaryClearSuppressed.addEventListener('click', () => {
+  if (!diaryCanMutate() || diaryBusy) return
+  setDiaryBusy(true)
+  renderDiaryModal()
+  if (!sendFrame({ v: PROTOCOL_VERSION, type: 'diary.suppressed.clear' })) {
+    setDiaryBusy(false)
+    renderDiaryModal()
+    toast('Could not send to the companion')
+    return
+  }
+  toast('Cleared dismissed suggestion history')
 })
 els.logExport.addEventListener('click', exportLog)
 els.logCopySummary.addEventListener('click', copySummary)
@@ -4591,13 +5906,14 @@ els.input.addEventListener('paste', event => {
   void addImages(files)
 })
 els.activityLog.addEventListener('scroll', updatePromptRail, { passive: true })
-document.querySelector('.topbar').addEventListener('pointerenter', () => {
-  els.app.classList.add('utilities-open')
-})
-document.addEventListener('pointermove', event => {
-  if (event.clientX < window.innerWidth - 84) els.app.classList.remove('utilities-open')
+els.utilitiesToggle?.addEventListener('click', () => {
+  if (!els.app.classList.contains('chat-open')) return
+  setUtilitiesOpen(!els.app.classList.contains('utilities-open'))
 })
 document.addEventListener('click', event => {
+  if (els.app.classList.contains('utilities-open') && !els.topbar?.contains(event.target)) {
+    setUtilitiesOpen(false)
+  }
   // A click that runs a slash command may open the model picker, so the
   // palette itself must not count as an outside click. Dismissing the picker
   // from outside hands focus back to the composer instead of dropping it.
@@ -4638,7 +5954,9 @@ els.updateNoticeDismiss.addEventListener('click', () => {
   els.updateNotice.classList.add('hidden')
 })
 
-els.newChat.addEventListener('click', newChat)
+els.newChat.addEventListener('click', () => {
+  if (newChat()) pulseNewChat()
+})
 els.backHome.addEventListener('click', newChat)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return
@@ -4650,15 +5968,25 @@ els.stop.addEventListener('click', () => {
   stopTurn()
 })
 
+els.composerShell?.addEventListener('pointerenter', handleComposerAuraPointer)
+els.composerShell?.addEventListener('pointermove', handleComposerAuraPointer)
+els.composerShell?.addEventListener('pointerleave', () => {
+  interactiveAura.hovering = false
+})
+
 els.input.addEventListener('input', event => {
   resizeInput()
   renderSlashMenu()
+  pulseInteractiveTyping(0.56)
   if (event.isTrusted) stopDictation()
 })
 els.input.addEventListener('blur', () => closeSlashMenu())
 els.input.addEventListener('keydown', event => {
   // Enter during IME composition confirms the candidate, not the draft.
   if (event.isComposing) return
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete')) {
+    pulseInteractiveTyping(0.36)
+  }
   if (slashMenuOpen) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
@@ -4697,8 +6025,15 @@ document.addEventListener('keydown', event => {
     else if (!els.modelOptions.classList.contains('hidden')) els.modelOptions.classList.add('hidden')
     else if (!els.imageModal.classList.contains('hidden')) closeImage()
     else if (!els.historyModal.classList.contains('hidden')) closeHistory()
-    else if (!els.logModal.classList.contains('hidden')) closeLogModal()
+    else if (!els.diaryModal.classList.contains('hidden')) {
+      if (diaryEditorOpen) closeDiaryEditor()
+      else closeDiary()
+    }
     else if (!els.settingsModal.classList.contains('hidden')) closeSettings()
+    else if (els.app.classList.contains('utilities-open')) {
+      setUtilitiesOpen(false)
+      if (els.topbar?.contains(document.activeElement)) els.utilitiesToggle?.blur()
+    }
   }
 })
 
@@ -4734,6 +6069,8 @@ async function boot() {
   setEffortSelection(settings.reasoningEffort ?? 'auto')
   renderComposerModel()
   renderImageChips()
+  updateComposerDraftState()
+  syncUtilitiesAria()
   updateMicButton()
   logger.log('settings.loaded', {
     hasToken: settings.token.length > 0,

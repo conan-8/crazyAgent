@@ -1216,6 +1216,30 @@ test('Docs replace_text stops on a stale tab before filling the query', async ()
   assert.equal(fake.snapshots(), 0)
 })
 
+test('Docs replace_text reports Google Docs document-tab switches immediately during verify-replacement and closes dialog on error', async () => {
+  const fake = fakeReplaceDocs({ mutationFails: true })
+  const initial = `${DOCS_URL}?tab=t.proposal`
+  fake.io.getActiveTab = async () => ({ id: 9, url: initial })
+  let tabUrl = initial
+  fake.io.getTab = async () => ({ id: 9, url: tabUrl })
+  const origClick = fake.io.trustedClick
+  fake.io.trustedClick = async (tabId, x, y) => {
+    await origClick(tabId, x, y)
+    // Simulate Google Docs cross-tab Find jumping to the Ideas tab on Replace click.
+    if (fake.state.replaceClicks === 1) tabUrl = `${DOCS_URL}?tab=t.ideas`
+  }
+  await assert.rejects(runReplaceDocs(fake), error => (
+    error.code === 'DOCS_STALE_TAB'
+      && error.stage === 'verify-replacement'
+      && /document tab changed from t\.proposal to t\.ideas/u.test(error.message)
+  ))
+
+  // On a same-tab failure (verify-replacement timeout), Find & Replace is closed instead of left open.
+  const sameTab = fakeReplaceDocs({ mutationFails: true })
+  await assert.rejects(runReplaceDocs(sameTab), error => error.code === 'DOCS_WAIT_TIMEOUT')
+  assert.equal(sameTab.state.open, false, 'Find & Replace must be dismissed on error')
+})
+
 async function runReplaceManyDocs(fake, edits) {
   return docsReplaceMany({}, { action: 'replace_many', edits }, fake.io)
 }

@@ -6,13 +6,16 @@ import {
   canvasBurstError,
   canvasEditorForUrl,
   canvasSelectionError,
+  canvasTypeUnsupportedMessage,
   compareLayoutFingerprints,
+  contentProbePage,
   deriveLayoutShiftOutcome,
   deriveTypeVerdict,
   findCoordinateBasisMismatch,
   formatMissingLabelMessage,
   inspectLabelAssignment,
   imageInvalidationMessage,
+  isRealDomEditableFocus,
   mapClickPoints,
   parseClickAtArgs,
   resolveCanvasImageBasis,
@@ -499,6 +502,13 @@ test('formatMissingLabelMessage says no labels exist when the page was never lab
   assert.match(described.message, /no labels have been handed out/u)
 })
 
+test('formatMissingLabelMessage reports URL navigation instead of claiming no labels exist', () => {
+  const described = formatMissingLabelMessage(102, inspectLabelAssignment(102, undefined), { urlChanged: true })
+  assert.equal(described.kind, 'url-changed')
+  assert.match(described.message, /previous page URL/u)
+  assert.doesNotMatch(described.message, /no labels have been handed out/u)
+})
+
 test('formatMissingLabelMessage explains subframe label ranges', () => {
   const registry = registryOf([[2, 6]])
   const described = formatMissingLabelMessage(200_009, inspectLabelAssignment(200_009, registry))
@@ -620,4 +630,126 @@ test('parseClickAtArgs parses and validates view_id', () => {
       `view_id ${JSON.stringify(bad)} must be rejected`,
     )
   }
+})
+
+/* ---------------------------------------------------------------- */
+/* H1-B + H4: real DOM focus on canvas URLs & honest Docs messaging  */
+/* ---------------------------------------------------------------- */
+
+test('H1-B: isRealDomEditableFocus distinguishes real visible DOM inputs from canvas proxy iframes', () => {
+  assert.equal(isRealDomEditableFocus({ tag: 'input', readable: true, measurable: true }), true)
+  assert.equal(isRealDomEditableFocus({ tag: 'textarea', readable: true, measurable: true }), true)
+  assert.equal(isRealDomEditableFocus({ tag: 'div', readable: true, measurable: true }), true)
+  assert.equal(isRealDomEditableFocus({ tag: 'div', readable: true, measurable: true, inCanvasProxyFrame: true }), false)
+  assert.equal(isRealDomEditableFocus({ tag: 'iframe', readable: false, measurable: false, isCanvasProxyIframe: true }), false)
+  assert.equal(isRealDomEditableFocus({ tag: 'body', readable: false, measurable: false }), false)
+  assert.equal(isRealDomEditableFocus(undefined), false)
+})
+
+test('H1-B: summarizeContentProbe keeps focus on .docs-texteventtarget-iframe when window is unfocused', () => {
+  const summary = summarizeContentProbe(probeFrames([
+    {
+      frameId: 0,
+      textLen: 100,
+      mutations: 0,
+      focus: { tag: 'iframe', readable: false, measurable: false, isCanvasProxyIframe: true, hasFocus: false },
+    },
+    {
+      frameId: 7,
+      textLen: 50,
+      mutations: 0,
+      focus: { tag: 'input', readable: true, measurable: true, hasFocus: false, chars: 12, preview: 'unrelated' },
+    },
+  ]))
+  assert.equal(summary.focus.frameId, 0)
+  assert.equal(isRealDomEditableFocus(summary.focus), false)
+})
+
+test('H1-B: contentProbePage measures a visible combobox input and excludes .docs-texteventtarget-iframe', t => {
+  const prev = {
+    document: globalThis.document,
+    window: globalThis.window,
+    location: globalThis.location,
+    getComputedStyle: globalThis.getComputedStyle,
+    MutationObserver: globalThis.MutationObserver,
+    __crazyagentContentProbe: globalThis.__crazyagentContentProbe,
+  }
+  t.after(() => {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete globalThis[k]
+      else globalThis[k] = v
+    }
+  })
+  let observersCreated = 0
+  globalThis.MutationObserver = class {
+    constructor() { observersCreated += 1 }
+    observe() {}
+    disconnect() {}
+  }
+  globalThis.location = { href: 'https://docs.google.com/document/d/abc/edit' }
+  globalThis.getComputedStyle = () => ({ display: 'block', visibility: 'visible', opacity: '1' })
+
+  // Case 1: Docs Alt+/ menu search combobox in the top frame.
+  const combo = {
+    tagName: 'INPUT',
+    type: 'text',
+    value: 'table',
+    className: 'docs-omnibox-input',
+    parentElement: null,
+    getAttribute: name => (name === 'role' ? 'combobox' : null),
+    getBoundingClientRect: () => ({ left: 200, top: 80, right: 450, bottom: 108, width: 250, height: 28 }),
+  }
+  globalThis.window = { frameElement: null, innerWidth: 1162, innerHeight: 770 }
+  globalThis.document = {
+    title: 'Test Doc - Google Docs',
+    activeElement: combo,
+    body: { innerText: 'Menu bar' },
+    documentElement: {},
+    hasFocus: () => true,
+  }
+  const startCombo = contentProbePage('start', true)
+  assert.equal(startCombo.focus.measurable, true)
+  assert.equal(startCombo.focus.readable, true)
+  assert.equal(startCombo.focus.preview, 'table')
+  assert.equal(startCombo.observing, true)
+  assert.equal(isRealDomEditableFocus(startCombo.focus), true)
+  contentProbePage('end')
+
+  // Case 2: Hidden contenteditable inside .docs-texteventtarget-iframe.
+  observersCreated = 0
+  const proxyEditor = {
+    tagName: 'DIV',
+    isContentEditable: true,
+    innerText: '',
+    textContent: '',
+    parentElement: null,
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 200, bottom: 30, width: 200, height: 30 }),
+  }
+  globalThis.window = {
+    frameElement: {
+      className: 'docs-texteventtarget-iframe',
+      getAttribute: () => 'true',
+      getBoundingClientRect: () => ({ left: -10000, top: 0, right: -9998, bottom: 2, width: 2, height: 2 }),
+    },
+    innerWidth: 2,
+    innerHeight: 2,
+  }
+  globalThis.document.activeElement = proxyEditor
+  const startProxy = contentProbePage('start', true)
+  assert.equal(startProxy.focus.inCanvasProxyFrame, true)
+  assert.equal(startProxy.focus.measurable, false)
+  assert.equal(startProxy.observing, false, 'onlyIfMeasurable avoids attaching an observer inside the canvas proxy')
+  assert.equal(observersCreated, 0)
+  assert.equal(isRealDomEditableFocus(startProxy.focus), false)
+})
+
+test('H4: canvasTypeUnsupportedMessage honestly warns that Docs insertText does not replace a selection', () => {
+  const docsMsg = canvasTypeUnsupportedMessage('Google Docs')
+  assert.match(docsMsg, /inserts at the caret and does NOT replace an active canvas selection/u)
+  assert.match(docsMsg, /press Delete or Backspace first/u)
+  assert.doesNotMatch(docsMsg, /or replaces the current selection/u)
+  const otherMsg = canvasTypeUnsupportedMessage('Google Slides')
+  assert.match(otherMsg, /may not replace an active canvas selection/u)
+  assert.doesNotMatch(otherMsg, /or replaces the current selection/u)
 })

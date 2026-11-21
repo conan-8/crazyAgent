@@ -1,3 +1,38 @@
+# crazyAgent v2.6.1
+
+Changes since **v2.6.0**. This release adds a privacy-bounded user Diary, a redesigned sidebar with interactive and speech-reactive visuals, and another field-driven round of browser and Google Docs reliability fixes.
+
+The extension and companion use version `2.6.1`. Android source is unchanged and remains `0.8.0 (7)`; the release carries the same signed APK as v2.6.0, SHA-256 `3c6b02bb216328cdb65fcb8a793c13099fb1a44842d3061b3fd0f665b7998828`.
+
+## User Diary
+
+- Save reusable global preferences, personal facts such as preferred account emails, and site-specific instructions in `.dsh-home/browser-agent/diary.json` (`0600`). The Diary topbar button supports search, filters, add/edit/delete, enable/disable, and site lists.
+- Matching global/site entries join the prompt, and newly visited sites can add matching entries once per turn using Chrome-authenticated tab URLs rather than webpage text.
+- Optional post-run suggestions (`diaryAutoSuggest`, default on) use one stateless, tool-less model call and appear as Save/Edit/Dismiss cards. The extractor cannot modify the Diary itself; suggestion tokens are logged separately from lifetime agent usage.
+- Likely secrets and prompt-injection payloads are rejected. Diary state survives updates and is deleted by an explicit full clean. Privacy docs disclose which matching entries and compact turn digests go to the configured model provider.
+
+## Sidebar redesign and speech feedback
+
+- Settings now leads with Lifetime usage, groups Model/Safety/Diary/Interface/About, and moves Debug log to a collapsible bottom section. Diary replaces the old topbar Debug log button.
+- The composer/panel receive a substantial visual refresh, including interactive yellow aura behavior that reacts to hover, typing, microphone energy, and speech events, with reduced-motion handling.
+
+## Browser and Google Docs reliability
+
+- G1–G6 add broad HTML entity decoding, bounded Docs write-position settling, host OS-clipboard HTML staging for large tables, Shadow DOM/slot-aware labels and role clicks, Docs menu fallback and document-tab detection, Find & Replace cleanup, resolved-comment notes, and clearer navigation/view errors.
+- H1–H4 capture pixels before labeling, settle popup/combobox mutations, prioritize open-overlay labels within the 60-label cap, recognize real DOM inputs on canvas-editor pages, and report inner Docs viewport scrolling accurately.
+- Canvas typing guidance now explicitly says `Input.insertText` inserts at the caret and does not replace an active Docs canvas selection; it never auto-deletes that selection.
+
+## Verification
+
+- **1497/1497 Node tests** pass at the release head; model-harness self-test **23/23 scenarios** passes.
+- Real-extension gate runner: **13/13 suites passed, 0 failed, 7 excluded**. Isolated H1–H3 real-Edge fixtures pass, including zero detached/ghost popup clicks, inner-scroll verification, and preservation of all 17 open-menu labels inside the 60-label cap.
+- Real-panel mock-bridge `diary`, `modals`, and relevant motion/previews pass with inspected screenshots.
+- The signed APK is unchanged and signature-verified. Live real-model 32-item Docs acceptance, multi-tab/VHL acceptance, live docked-panel visual acceptance, and on-device phone checks remain open.
+
+The unpatched transitive `picomatch@4.0.7` advisory documented for v2.6.0 remains unchanged.
+
+---
+
 # crazyAgent v2.6.0
 
 Changes since **v2.5.3**. This release adds page/Download image copying with OS-clipboard paste, fixes pointer-follow drag widgets and many Google Docs field failures, and turns the watcher into a proactive but bounded advisor on every turn.

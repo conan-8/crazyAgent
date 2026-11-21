@@ -28,8 +28,18 @@ async function startFixture(t, { respond, downloadsDir, osClipboard }) {
         const op = frame.command?.op
         const args = frame.command?.args ?? {}
         commands.push({ op, args })
-        const result = respond(op, args)
-        ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: frame.id, ok: true, result }))
+        try {
+          const result = respond(op, args)
+          ws.send(JSON.stringify({ v: 1, type: 'browser.result', id: frame.id, ok: true, result }))
+        } catch (err) {
+          ws.send(JSON.stringify({
+            v: 1,
+            type: 'browser.result',
+            id: frame.id,
+            ok: false,
+            error: { code: err?.code ?? 'ERROR', message: err instanceof Error ? err.message : String(err) },
+          }))
+        }
       }
     })
   })
@@ -166,4 +176,51 @@ test('browser_clipboard image paste uses host OS clipboard staging when side pan
   assert.match(pasted.content[0].text, /pasted the 800x500 image from the virtual clipboard into the focused element via one trusted Ctrl\+V/)
   assert.match(pasted.content[0].text, /previous system clipboard was restored/)
   assert.deepEqual(events, ['preserve', `stage:${VALID_PNG.length}`, 'trusted-ctrl-v', 'release', 'restore:user-clip'])
+})
+
+test('browser_docs_table create stages HTML via host OS clipboard when side-panel clipboard is unfocused', async t => {
+  const events = []
+  const osClipboard = {
+    isAvailable: () => true,
+    preserve: async () => { events.push('preserve'); return { kind: 'bytes', mimeType: 'text/plain', data: Buffer.from('user-clip') } },
+    stageHtml: async (html, text) => {
+      events.push(`stageHtml:${html.includes('<table')}:${text.split('\n').length}`)
+      return { backend: 'wayland', release: () => events.push('release') }
+    },
+    restore: async (snap, staged) => {
+      staged.release()
+      events.push(`restore:${snap.data.toString('utf8')}`)
+      return true
+    },
+  }
+  const fx = await startFixture(t, {
+    osClipboard,
+    respond: (_op, args) => {
+      if (args.tableAction === 'create' && args.osStaged !== true) {
+        events.push('ext-initial-unfocused')
+        const err = new Error('[table-create-preserve] The system clipboard is unavailable for preserving the previous clipboard before rich paste (NotAllowedError: Document is not focused.).')
+        err.code = 'DOCS_CLIPBOARD_PRESERVE_FAILED'
+        throw err
+      }
+      if (args.tableAction === 'create' && args.osStaged === true) {
+        events.push('ext-paste-verify')
+        return {
+          op: 'docs',
+          docs: {
+            action: 'table', tableAction: 'create', status: 'completed',
+            attemptedCount: 1, verifiedCount: 40, cellCount: 40, tableIndex: 1,
+            verifiedBy: 'export', osClipboard: true,
+          },
+          tables: [{ index: 1, rows: 8, columns: 5, cells: [] }],
+        }
+      }
+      throw new Error(`unexpected docs_table args: ${JSON.stringify(args)}`)
+    },
+  })
+  const tool = fx.tools.get('browser_docs_table')
+  const exec = { callId: 'c-tbl', signal: new AbortController().signal }
+  const created = await tool.execute({ action: 'create', rows: 8, columns: 5 }, exec)
+  assert.match(created.content[0].text, /docs\.table\.create: completed/)
+  assert.match(created.content[0].text, /40\/40 verified/)
+  assert.deepEqual(events, ['ext-initial-unfocused', 'preserve', 'stageHtml:true:8', 'ext-paste-verify', 'release', 'restore:user-clip'])
 })

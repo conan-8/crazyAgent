@@ -756,3 +756,33 @@ test('W3 sendWatchSteer forwards watch.steer to tools only when turnId matches t
     blocker: 'loop',
   })
 })
+
+test('diary.* control frames reach onControl and diary.context syncs on tools connect/reconnect', async t => {
+  const controls = []
+  const { bridge, url } = await setup(t, {
+    onControl: message => { controls.push(message) },
+  })
+  const ui = await connect(url, 'ui')
+  t.after(() => ui.ws.close())
+
+  ui.ws.send(JSON.stringify({ v: 1, type: 'diary.create', scope: 'global', title: 'OTP', content: 'Check email' }))
+  await sleep(50)
+  assert.equal(controls.length, 1)
+  assert.equal(controls[0].type, 'diary.create')
+
+  const entries = [{ id: 'd-1', sites: ['kimi.ai'], title: 'Kimi', content: 'Use alice@gmail.com' }]
+  bridge.setTurnId('turn-d', { diaryContext: { entries, deliveredIds: [] } })
+  const tools = await connect(url, 'tools')
+  t.after(() => tools.ws.close())
+  const synced = await tools.messages.next(message => message.type === 'diary.context')
+  assert.deepEqual(synced, { v: 1, type: 'diary.context', turnId: 'turn-d', entries, deliveredIds: [] })
+
+  bridge.syncDiaryContext({ entries: [...entries, { id: 'd-2', sites: ['notion.so'], title: 'Notion', content: 'Work' }] })
+  const updated = await tools.messages.next(message => message.type === 'diary.context' && message.entries.length === 2)
+  assert.equal(updated.turnId, 'turn-d')
+
+  bridge.setTurnId(undefined)
+  const cleared = await tools.messages.next(message => message.type === 'diary.context' && message.turnId === null)
+  assert.equal(cleared.entries.length, 2)
+  assert.deepEqual(cleared.deliveredIds, [])
+})

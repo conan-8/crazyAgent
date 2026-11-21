@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { createOsClipboard, detectImageMime, detectOsClipboardBackend } from '../lib/os-clipboard.js'
+import { createOsClipboard, detectImageMime, detectOsClipboardBackend, formatWindowsCfHtml } from '../lib/os-clipboard.js'
 
 const VALID_PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d])
 const VALID_JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01])
@@ -130,4 +130,44 @@ test('wayland backend surfaces early wl-copy exit as a staging error', async () 
     },
   })
   await assert.rejects(() => osClip.stagePng(VALID_PNG), /Failed to connect to compositor/)
+})
+
+test('stageHtml stages text/html on Wayland and restores the preserved clipboard', async () => {
+  const spawnCalls = []
+  const osClip = createOsClipboard({
+    platform: 'linux',
+    backend: 'wayland',
+    settleMs: 10,
+    execFile: (cmd, args, _opts, cb) => {
+      if (cmd === 'wl-paste' && args.includes('--list-types')) return cb(null, 'text/plain;charset=utf-8\n')
+      if (cmd === 'wl-paste' && args.includes('text/plain;charset=utf-8')) return cb(null, Buffer.from('user clip', 'utf8'))
+      cb(null, '')
+    },
+    spawn: (cmd, args, opts) => {
+      const fake = fakeSpawnChild()
+      spawnCalls.push({ cmd, args, opts, ...fake })
+      return fake.child
+    },
+  })
+  const saved = await osClip.preserve()
+  const html = '<table><tr><td>A</td><td>B</td></tr></table>'
+  const staged = await osClip.stageHtml(html, 'A\tB')
+  assert.equal(staged.backend, 'wayland')
+  assert.equal(spawnCalls[0].cmd, 'wl-copy')
+  assert.deepEqual(spawnCalls[0].args, ['--foreground', '--type', 'text/html'])
+  assert.equal(Buffer.concat(spawnCalls[0].written).toString('utf8'), html)
+  const restored = await osClip.restore(saved, staged)
+  assert.equal(restored, true)
+  assert.equal(spawnCalls[0].child.killed, true)
+  assert.equal(Buffer.concat(spawnCalls[1].written).toString('utf8'), 'user clip')
+  await assert.rejects(() => osClip.stageHtml(''), /non-empty HTML/)
+})
+
+test('formatWindowsCfHtml computes exact UTF-8 byte offsets for StartHTML/EndHTML/Fragment', () => {
+  const fragment = '<table><tr><td>Café — 1</td></tr></table>'
+  const cf = formatWindowsCfHtml(fragment)
+  const buf = Buffer.from(cf, 'utf8')
+  const num = key => Number(new RegExp(`${key}:(\\d{10})`).exec(cf)[1])
+  assert.equal(buf.subarray(num('StartFragment'), num('EndFragment')).toString('utf8'), fragment)
+  assert.equal(buf.subarray(num('StartHTML'), num('EndHTML')).toString('utf8'), `<html><body><!--StartFragment-->${fragment}<!--EndFragment--></body></html>`)
 })

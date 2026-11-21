@@ -92,6 +92,7 @@ export class Bridge {
     this.currentPlanMode = false
     this.currentConfirmMode = false
     this.currentTurnPrompt = ''
+    this.currentDiaryContext = null
     /** @type {Map<string, {ws: import('ws').WebSocket, turnId?: string, callId?: string, command?: Record<string, unknown>}>} */
     this.upstream = new Map()
     /** @type {Map<string, {resolve: (v: any) => void, reject: (e: Error) => void, timer: NodeJS.Timeout, turnId?: string, callId?: string, command?: Record<string, unknown>}>} */
@@ -215,7 +216,7 @@ export class Bridge {
     })
   }
 
-  /** @param {string | undefined} turnId @param {{planMode?: boolean, confirmMode?: boolean, confirmGuard?: boolean, userPrompt?: string, planSeed?: {revision: number, items: Array<{content: string, status: string, reason?: string}>} | null}} [options] */
+  /** @param {string | undefined} turnId @param {{planMode?: boolean, confirmMode?: boolean, confirmGuard?: boolean, userPrompt?: string, planSeed?: {revision: number, items: Array<{content: string, status: string, reason?: string}>} | null, diaryContext?: {entries?: unknown[], deliveredIds?: unknown[]}}} [options] */
   setTurnId(turnId, options = {}) {
     this.currentTurnId = turnId
     this.currentPlanMode = turnId !== undefined && options.planMode === true
@@ -227,9 +228,49 @@ export class Bridge {
     // M2: the carried plan snapshot for this turn (null when none). The
     // provider validates it strictly (seedPlanState) and fails closed.
     this.currentPlanSeed = turnId !== undefined && isRecord(options.planSeed) ? options.planSeed : null
+    if (isRecord(options.diaryContext)) {
+      this.currentDiaryContext = {
+        entries: Array.isArray(options.diaryContext.entries) ? options.diaryContext.entries : [],
+        deliveredIds: Array.isArray(options.diaryContext.deliveredIds) ? options.diaryContext.deliveredIds : [],
+      }
+    } else if (turnId === undefined && this.currentDiaryContext !== null) {
+      this.currentDiaryContext = {
+        entries: this.currentDiaryContext.entries,
+        deliveredIds: [],
+      }
+    }
     this.#syncPlanMode()
     this.#syncConfirmMode()
     this.#syncTurnContext()
+    this.#syncDiaryContext()
+  }
+
+  /**
+   * Push updated Diary site entries to the DSH provider (used at turn start,
+   * provider reconnect, and mid-turn manual edits).
+   * @param {{entries?: unknown[], deliveredIds?: unknown[]}} context
+   */
+  syncDiaryContext(context) {
+    if (isRecord(context)) {
+      this.currentDiaryContext = {
+        entries: Array.isArray(context.entries) ? context.entries : [],
+        deliveredIds: Array.isArray(context.deliveredIds)
+          ? context.deliveredIds
+          : this.currentDiaryContext?.deliveredIds ?? [],
+      }
+    }
+    return this.#syncDiaryContext()
+  }
+
+  #syncDiaryContext() {
+    if (this.currentDiaryContext === null) return false
+    return this.sendToTools({
+      v: PROTOCOL_VERSION,
+      type: 'diary.context',
+      turnId: this.currentTurnId ?? null,
+      entries: this.currentDiaryContext.entries,
+      deliveredIds: this.currentDiaryContext.deliveredIds,
+    })
   }
 
   #syncTurnContext() {
@@ -397,6 +438,7 @@ export class Bridge {
         this.#syncPlanMode()
         this.#syncConfirmMode()
         this.#syncTurnContext()
+        this.#syncDiaryContext()
       }
       ws.on('message', data2 => this.#onMessage(ws, role, data2))
       this.onConnectionChange?.()
@@ -576,7 +618,7 @@ export class Bridge {
         this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'pong' })
         return
       }
-      if (typeof message.type === 'string' && (message.type.startsWith('log.') || message.type.startsWith('llm.') || message.type.startsWith('settings.')) && this.onControl !== undefined) {
+      if (typeof message.type === 'string' && (message.type.startsWith('log.') || message.type.startsWith('llm.') || message.type.startsWith('settings.') || message.type.startsWith('diary.')) && this.onControl !== undefined) {
         Promise.resolve(this.onControl(message, ws)).catch(error => {
           this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'log.error', message: errorMessage(error) })
         })

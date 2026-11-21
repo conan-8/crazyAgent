@@ -15,13 +15,14 @@
  *   node scripts/ui-preview.mjs --scenario states     # finished feed / expanded step / new chat
  *   node scripts/ui-preview.mjs --scenario rail       # prompt rail: narrow dashes, hover popup (RAIL_ASSERT=0 for baseline)
  *   node scripts/ui-preview.mjs --scenario update     # automatic update notices + one-time post-restart success
- *   node scripts/ui-preview.mjs --scenario usage      # lifetime token meter: empty, live update, reconnect, narrow
+ *   node scripts/ui-preview.mjs --scenario usage      # lifetime token meter: top of Settings, live update, reconnect, narrow
  *   node scripts/ui-preview.mjs --scenario tools      # browser-command rows + tab-list card
- *   node scripts/ui-preview.mjs --scenario modals     # settings + debug log modals
+ *   node scripts/ui-preview.mjs --scenario modals     # settings (usage top, collapsible debug log bottom) + diary modal
+ *   node scripts/ui-preview.mjs --scenario diary      # diary CRUD, filters, narrow overflow, and post-run suggestion cards
  *   node scripts/ui-preview.mjs --scenario disclaimer # one-time full-screen notice after a reload
  *   node scripts/ui-preview.mjs --scenario queue      # queued messages + steer/cancel actions
  *   node scripts/ui-preview.mjs --scenario recent     # new-chat recents + running session indicator
- *   node scripts/ui-preview.mjs --scenario composer   # image paste + model search + dictation dots
+ *   node scripts/ui-preview.mjs --scenario composer   # image paste + model search + dictation aura
  *   node scripts/ui-preview.mjs --scenario slash      # slash-command palette: filter, keys, execution
  *   node scripts/ui-preview.mjs --scenario plan       # marathon arm, live checklist, queue/race preservation
  *   node scripts/ui-preview.mjs --scenario marathon   # shared chip: remote-origin toggle, mid-turn off, carried-plan rendering
@@ -166,6 +167,11 @@ const MOCK_BRIDGE = `(() => {
       return result;
     }) });
   };
+  window.__mockSpeechEvent = name => {
+    const recognition = window.__mockSpeech;
+    const handler = recognition && recognition['on' + name];
+    if (typeof handler === 'function') handler({});
+  };
 })();`
 
 const settings = {
@@ -196,6 +202,8 @@ const HELLO_FRAMES = [
       reasoningEffort: 'medium',
     },
     credentials: { configured: true, source: 'stored' },
+    diary: { version: 1, entries: [], suppressedCount: 0 },
+    diarySuggestions: [],
     log: { runId: 'run-preview', path: OUT },
   },
   { v: 1, type: 'chat.status', status: 'ready' },
@@ -267,12 +275,21 @@ async function assertVisibleReasoning(page, selector, expectedText) {
 /**
  * Scripted turn (model text, reasoning, tool rows, finish).
  * `stopAfter: 'step2-running'` stops mid-step so the live clocks stay visible.
- * @param {{stopAfter?: 'step2-running'}} [options]
+ * @param {{stopAfter?: 'step2-running', verbose?: boolean}} [options]
  */
 async function playTurn(page, options = {}) {
   const { recv, batch } = makePage(page)
   await batch(HELLO_FRAMES)
   await sleep(300)
+  if (options.verbose === true) {
+    await page.evaluate(`(() => {
+      document.getElementById('settings').click();
+      const toggle = document.getElementById('setting-verbose-activity');
+      if (toggle && !toggle.checked) toggle.click();
+      document.getElementById('settings-close').click();
+    })()`)
+    await sleep(180)
+  }
 
   await sendPrompt(page, 'Find the Increment button, click it twice, and tell me the count. Then check the switch tabs behavior.')
   await recv({ v: 1, type: 'chat.activity', kind: 'policy', policy: 'auto', classification: 'inspect', effort: 'low' })
@@ -284,7 +301,9 @@ async function playTurn(page, options = {}) {
   for (const text of ['Looking at the current view. ', 'The Increment button is labelled ', '#12. I will click it.']) {
     await recv({ v: 1, type: 'chat.activity', kind: 'reasoning', text })
     streamedReasoning += text
-    await assertVisibleReasoning(page, '.activity-step.running .activity-entry.reasoning.streaming', reasoningActivityText(streamedReasoning))
+    if (options.verbose === true) {
+      await assertVisibleReasoning(page, '.activity-step.running .activity-entry.reasoning.streaming', reasoningActivityText(streamedReasoning))
+    }
     await sleep(200)
   }
   await recv({ v: 1, type: 'chat.activity', kind: 'tool-call-delta', id: 'call-1', name: 'browser_click', argumentsDelta: '{"label":' })
@@ -317,7 +336,9 @@ async function playTurn(page, options = {}) {
   await sleep(260)
   const committedReasoning = 'The count should now be 2. I will verify the visible text before answering.'
   await recv({ v: 1, type: 'chat.activity', kind: 'reasoning-committed', text: committedReasoning })
-  await assertVisibleReasoning(page, '.activity-step.running .activity-entry.reasoning:not(.streaming)', committedReasoning)
+  if (options.verbose === true) {
+    await assertVisibleReasoning(page, '.activity-step.running .activity-entry.reasoning:not(.streaming)', committedReasoning)
+  }
   await recv({ v: 1, type: 'chat.activity', kind: 'tool-call-delta', id: 'call-3', name: 'browser_read_text', argumentsDelta: '{"scope":"viewport"}' })
   await sleep(650)
   await recv({ v: 1, type: 'chat.activity', kind: 'finish', reason: { kind: 'stop' } })
@@ -511,9 +532,10 @@ async function playQueueScenario(page, capture) {
   assert.equal(runningComposer.paddingTop, '8px')
   assert.equal(runningComposer.paddingBottom, '8px')
   assert.equal(runningComposer.gap, '4px')
-  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('input')).paddingRight`), '48px')
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('input')).paddingRight`), '4px')
 
   await pasteImage(page, 'notes.png')
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('input')).paddingRight`), '48px')
   await sendPrompt(page, 'Queue this direction')
 
   await pasteImage(page, 'later.png')
@@ -972,6 +994,7 @@ async function playPlanScenario(page, capture) {
     phase: 'Plan 1/4',
     collapsed: false,
   })
+  assert.equal(await page.evaluate(`document.querySelector('#plan-dock .plan-panel-current').getClientRects().length`), 0, 'Current summary hides while expanded')
   await capture('live')
 
   for (let index = 0; index < 18; index += 1) {
@@ -1008,6 +1031,7 @@ async function playPlanScenario(page, capture) {
   await page.evaluate(`document.querySelector('#plan-dock .plan-panel-toggle').click()`)
   assert.equal((await panel()).detailsHidden, true)
   await sleep(MOTION_SETTLE_MS)
+  assert.ok(await page.evaluate(`document.querySelector('#plan-dock .plan-panel-current').getClientRects().length`) > 0, 'Current summary shows on its own row when collapsed')
   const collapsedDockHeight = await page.evaluate(`document.getElementById('plan-dock').offsetHeight`)
   assert.ok(collapsedDockHeight < expandedDockHeight, 'collapse must shrink the sticky dock')
   await capture('collapsed')
@@ -1515,75 +1539,118 @@ async function playComposerScenario(page, capture) {
   assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1).model`), 'anthropic/claude-sonnet-4.5')
   await recv({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'medium' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })
 
-  // Empty composer: starting dictation shows the listening dots inside the
-  // textarea, they bounce, and stopping removes them.
-  assert.equal(await page.evaluate(`document.getElementById('dictation-indicator').hidden`), true)
-  await page.evaluate(`document.getElementById('mic').click()`)
-  await sleep(250)
-  const dictation = await page.evaluate(`(() => {
-    const indicator = document.getElementById('dictation-indicator');
-    const input = document.getElementById('input');
-    const dots = [...indicator.querySelectorAll('.dictation-dot')];
-    const rect = indicator.getBoundingClientRect();
-    const inputRect = input.getBoundingClientRect();
+  // No listening pill inside the textarea; instead a living yellow aura radiates around
+  // the dark obsidian composer on new chats and reacts heavily during dictation.
+  assert.equal(await page.evaluate(`document.getElementById('dictation-indicator')`), null)
+  const idleAura = await page.evaluate(`(() => {
+    const field = document.querySelector('.composer-field');
+    const aura = document.getElementById('composer-aura');
+    const rim = document.querySelector('.composer-aura-rim');
+    const fieldStyle = getComputedStyle(field);
+    const auraStyle = getComputedStyle(aura);
+    const rimStyle = getComputedStyle(rim);
     return {
-      visible: !indicator.hidden && indicator.getClientRects().length > 0,
-      label: indicator.textContent.trim(),
-      insideTextArea: rect.left >= inputRect.left - 1 && rect.right <= inputRect.right + 1 && rect.top >= inputRect.top - 1 && rect.bottom <= inputRect.bottom + 1,
-      dotCount: dots.length,
-      animationNames: dots.map(dot => getComputedStyle(dot).animationName),
-      animationDelays: dots.map(dot => Math.round(parseFloat(getComputedStyle(dot).animationDelay) * 1000)),
-      playState: getComputedStyle(dots[0]).animationPlayState,
-      paddingRight: parseFloat(getComputedStyle(input).paddingRight),
+      borderTopColor: fieldStyle.borderTopColor,
+      auraOpacity: auraStyle.opacity,
+      rimAnimName: rimStyle.animationName,
+      rimPlayState: rimStyle.animationPlayState,
     };
   })()`)
-  assert.equal(dictation.visible, true)
-  assert.equal(dictation.label, 'Listening')
-  assert.equal(dictation.insideTextArea, true)
-  assert.equal(dictation.dotCount, 3)
-  assert.deepEqual(dictation.animationNames, ['dictation-dot', 'dictation-dot', 'dictation-dot'])
-  assert.deepEqual(dictation.animationDelays, [0, 160, 320])
-  assert.equal(dictation.playState, 'running')
-  assert.ok(dictation.paddingRight >= 100, `dictation should reserve textarea space, got ${dictation.paddingRight}`)
-  const bouncing = await page.evaluate(`(async () => {
-    const dot = document.querySelector('.dictation-dot');
-    const seen = new Set();
-    for (let index = 0; index < 12; index += 1) {
-      seen.add(getComputedStyle(dot).transform);
-      if (seen.size > 1) return true;
-      await new Promise(resolve => setTimeout(resolve, 60));
-    }
-    return false;
+  assert.notEqual(idleAura.borderTopColor, 'rgb(255, 195, 0)', 'chatbox must not have a solid yellow border')
+  assert.equal(idleAura.auraOpacity, '1', 'new-chat aura should be visible while idle')
+  assert.equal(idleAura.rimAnimName, 'composer-aura-spin')
+  assert.equal(idleAura.rimPlayState, 'running')
+
+  // Fluid hover & typing reactivity on new-chat aura before dictation starts.
+  const shellBox = await page.evaluate(`(() => {
+    const r = document.querySelector('.composer-shell').getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
   })()`)
-  assert.equal(bouncing, true, 'bouncing dots should animate')
-  await sleep(2_700) // let the model-configured toast fade before the screenshot
+  await page.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: shellBox.left + shellBox.width * 0.82,
+    y: shellBox.top + shellBox.height * 0.3,
+  })
+  await sleep(220)
+  const hoverState = await page.evaluate(`(() => {
+    const c = document.getElementById('composer');
+    return {
+      active: c.classList.contains('fluid-active'),
+      energy: parseFloat(c.style.getPropertyValue('--fluid-energy') || '0'),
+      x: parseFloat(c.style.getPropertyValue('--fluid-x') || '50'),
+    };
+  })()`)
+  assert.equal(hoverState.active, true)
+  assert.ok(hoverState.energy > 0.2, `cursor hover should energize fluid aura (> 0.2), got ${hoverState.energy}`)
+  assert.ok(hoverState.x > 58, `cursor hover on right edge shifts fluid-x right (> 58), got ${hoverState.x}`)
+  await sleep(2_500) // let any residual model-configured toast fade before the screenshot
+  await capture('fluid-hover')
+
+  await page.evaluate(`(() => {
+    const input = document.getElementById('input');
+    input.focus();
+    input.value = 'Testing fluid typing glow';
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  await sleep(120)
+  const typingEnergy = await page.evaluate(`parseFloat(document.getElementById('composer').style.getPropertyValue('--fluid-type') || '0')`)
+  assert.ok(typingEnergy > 0.25, `typing should boost fluid-type (> 0.25), got ${typingEnergy}`)
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 10, y: 10 })
+  await page.evaluate(`(() => {
+    const input = document.getElementById('input');
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  await sleep(300)
+
+  await page.evaluate(`document.getElementById('mic').click()`)
+  await sleep(220)
+  const dictatingStart = await page.evaluate(`(() => {
+    const composer = document.getElementById('composer');
+    const mic = document.getElementById('mic');
+    const input = document.getElementById('input');
+    return {
+      dictating: composer.classList.contains('dictating'),
+      recording: mic.classList.contains('recording'),
+      pressed: mic.getAttribute('aria-pressed'),
+      micColor: getComputedStyle(mic).color,
+      paddingRight: getComputedStyle(input).paddingRight,
+      angle: parseFloat(composer.style.getPropertyValue('--speech-angle') || '0'),
+    };
+  })()`)
+  assert.equal(dictatingStart.dictating, true)
+  assert.equal(dictatingStart.recording, true)
+  assert.equal(dictatingStart.pressed, 'true')
+  assert.equal(dictatingStart.micColor, 'rgb(255, 195, 0)')
+  assert.equal(dictatingStart.paddingRight, '4px', 'input keeps full width without listening pill')
+  await sleep(250)
+  const dictatingAngleLater = await page.evaluate(`parseFloat(document.getElementById('composer').style.getPropertyValue('--speech-angle') || '0')`)
+  assert.notEqual(dictatingAngleLater, dictatingStart.angle, 'speech-angle should advance while dictating')
+  await sleep(2_500) // let the model-configured toast fade before the screenshot
   await capture('dictation')
 
-  // Narrowest supported panel: the pill must stay inside the field and leave
-  // enough room for dictated text next to the reserved corner.
+  // Narrowest supported panel: aura and composer must not cause horizontal overflow
+  // and input keeps its full width.
   await page.send('Emulation.setDeviceMetricsOverride', { width: 280, height: 940, deviceScaleFactor: 2, mobile: false })
   await sleep(250)
   const narrowDictation = await page.evaluate(`(() => {
-    const field = document.querySelector('.composer-field').getBoundingClientRect();
-    const indicatorEl = document.getElementById('dictation-indicator');
-    const indicator = indicatorEl.getBoundingClientRect();
+    const app = document.querySelector('.app');
     const input = document.getElementById('input');
     return {
-      insideField: indicator.left >= field.left - 1 && indicator.right <= field.right + 1 && indicator.bottom <= field.bottom + 1,
-      labelClipped: indicatorEl.scrollWidth > indicatorEl.clientWidth + 1,
+      scrollWidth: app.scrollWidth,
       inputContentWidth: input.clientWidth - parseFloat(getComputedStyle(input).paddingRight),
     };
   })()`)
-  assert.equal(narrowDictation.insideField, true, 'listening pill must stay inside the composer field')
-  assert.equal(narrowDictation.labelClipped, false)
-  assert.ok(narrowDictation.inputContentWidth > 80, `narrow dictation textarea is too tight: ${narrowDictation.inputContentWidth}`)
+  assert.ok(narrowDictation.scrollWidth <= 280, `narrow dictation overflowed: ${narrowDictation.scrollWidth}`)
+  assert.ok(narrowDictation.inputContentWidth > 180, `narrow dictation textarea should keep full width: ${narrowDictation.inputContentWidth}`)
   await capture('dictation-narrow')
   await page.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 940, deviceScaleFactor: 2, mobile: false })
   await sleep(250)
 
   await page.evaluate(`document.getElementById('mic').click()`)
   await sleep(50)
-  assert.equal(await page.evaluate(`document.getElementById('dictation-indicator').hidden`), true)
+  assert.equal(await page.evaluate(`document.getElementById('composer').classList.contains('dictating')`), false)
 
   await page.evaluate(`(() => {
     const input = document.getElementById('input');
@@ -1593,13 +1660,30 @@ async function playComposerScenario(page, capture) {
   })()`)
   assert.equal(await page.evaluate(`document.getElementById('mic').classList.contains('recording')`), true)
   assert.equal(await page.evaluate(`document.getElementById('mic').getAttribute('aria-pressed')`), 'true')
-  assert.equal(await page.evaluate(`document.getElementById('dictation-indicator').hidden`), false)
   await sleep(200)
   assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('mic')).color`), 'rgb(255, 195, 0)')
+  await page.evaluate(`window.__mockSpeechEvent('speechstart')`)
   await page.evaluate(`window.__mockSpeechResults([['team', false]])`)
   assert.equal(await page.evaluate(`document.getElementById('input').value`), 'Hello team world')
   await page.evaluate(`window.__mockSpeechResults([['team', true], [' mates', false]])`)
   assert.equal(await page.evaluate(`document.getElementById('input').value`), 'Hello team mates world')
+  await sleep(120)
+  const speakingState = await page.evaluate(`(() => {
+    const composer = document.getElementById('composer');
+    const surge = document.querySelector('.composer-aura-surge');
+    return {
+      speaking: composer.classList.contains('speaking'),
+      level: parseFloat(composer.style.getPropertyValue('--speech-level') || '0'),
+      peak: parseFloat(composer.style.getPropertyValue('--speech-peak') || '0'),
+      surgeOpacity: parseFloat(getComputedStyle(surge).opacity || '0'),
+    };
+  })()`)
+  assert.equal(speakingState.speaking, true)
+  assert.ok(speakingState.level > 0.35, `speech level should surge (> 0.35), got ${speakingState.level}`)
+  assert.ok(speakingState.peak > 0.45, `speech peak should surge (> 0.45), got ${speakingState.peak}`)
+  assert.ok(speakingState.surgeOpacity > 0.35, `surge layer should illuminate (> 0.35), got ${speakingState.surgeOpacity}`)
+  await capture('speaking')
+
   await pasteImage(page, 'screenshot.png')
   assert.equal(await page.evaluate(`document.querySelector('.image-chip').textContent.includes('screenshot.png')`), true)
   assert.equal(await page.evaluate(`document.querySelector('.image-chip img').src.startsWith('data:image/png;base64,')`), true)
@@ -1608,15 +1692,26 @@ async function playComposerScenario(page, capture) {
   await page.evaluate(`document.getElementById('mic').click()`)
   assert.equal(await page.evaluate(`document.getElementById('mic').classList.contains('recording')`), false)
   assert.equal(await page.evaluate(`document.getElementById('mic').getAttribute('aria-pressed')`), 'false')
-  assert.equal(await page.evaluate(`document.getElementById('dictation-indicator').hidden`), true)
+  assert.equal(await page.evaluate(`document.getElementById('composer').classList.contains('dictating')`), false)
+  assert.equal(await page.evaluate(`document.getElementById('composer').classList.contains('speaking')`), false)
+  assert.equal(await page.evaluate(`document.getElementById('composer').style.getPropertyValue('--speech-level')`), '')
   await sleep(250)
   assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('input')).paddingRight`), '4px')
   await page.evaluate(`document.getElementById('composer').requestSubmit()`)
-  await sleep(250)
+  await sleep(550)
   const sent = await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.send').at(-1)`)
   assert.equal(sent.text, 'Hello team mates world')
   assert.equal(sent.images.length, 1)
   assert.equal(sent.images[0].name, 'screenshot.png')
+
+  // Open chat while idle: aura fades calm; dictating in open chat lights it back up.
+  assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('chat-open')`), true)
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('composer-aura')).opacity`), '0', 'idle open chat keeps aura calm')
+  await page.evaluate(`document.getElementById('mic').click()`)
+  await sleep(250)
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('composer-aura')).opacity`), '1', 'dictating in open chat lights aura up')
+  await page.evaluate(`document.getElementById('mic').click()`)
+  await sleep(100)
 }
 
 /** Slash-command composer: trigger rules, filtering, keyboard selection, execution. */
@@ -2231,9 +2326,303 @@ async function playDeadTurnScenario(page, capture) {
   await shot('continued')
 }
 
+async function playDiaryScenario(page, capture, setWidth) {
+  const { recv, batch } = makePage(page)
+  const sentOf = type => page.evaluate(`window.__frames.filter(frame => frame.type === ${JSON.stringify(type)})`)
+  await batch(HELLO_FRAMES)
+  await sleep(300)
+
+  // 1. Open Diary modal from the topbar button (replaced Debug log icon).
+  await page.evaluate(`document.getElementById('diary').click()`)
+  await sleep(250)
+  const emptyState = await page.evaluate(`(() => ({
+    modalHidden: document.getElementById('diary-modal').classList.contains('hidden'),
+    emptyHidden: document.getElementById('diary-empty').classList.contains('hidden'),
+    emptyText: document.getElementById('diary-empty').textContent,
+    items: document.querySelectorAll('.diary-entry').length,
+  }))()`)
+  assert.equal(emptyState.modalHidden, false)
+  assert.equal(emptyState.emptyHidden, false)
+  assert.equal(emptyState.items, 0)
+  await capture('empty-modal')
+
+  // 2. Add a global entry through the inline editor, verifying Save button styling & direct click submit.
+  await page.evaluate(`document.getElementById('diary-add').click()`)
+  await sleep(150)
+  const saveStyle = await page.evaluate(`(() => {
+    const btn = document.getElementById('diary-editor-save');
+    const s = getComputedStyle(btn);
+    return { disabled: btn.disabled, bg: s.backgroundColor, opacity: s.opacity };
+  })()`)
+  assert.equal(saveStyle.disabled, false, 'Save button is enabled when companion supports Diary')
+  assert.equal(saveStyle.bg, 'rgb(255, 195, 0)', 'Save button has yellow primary background')
+  assert.equal(saveStyle.opacity, '1', 'Save button is full opacity when enabled')
+  await capture('editor')
+  await page.evaluate(`(() => {
+    document.getElementById('diary-field-title').value = 'Verification codes';
+    document.getElementById('diary-field-content').value = 'When asked for a verification code, go to my Gmail tab to retrieve it instead of asking me.';
+    document.getElementById('diary-field-content').dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('diary-editor-save').click();
+  })()`)
+  await sleep(150)
+  const createGlobal = (await sentOf('diary.create')).at(-1)
+  assert.equal(createGlobal.scope, 'global')
+  assert.equal(createGlobal.title, 'Verification codes')
+  const globalEntry = {
+    id: 'diary-g1',
+    scope: 'global',
+    sites: [],
+    title: createGlobal.title,
+    content: createGlobal.content,
+    enabled: true,
+    source: 'manual',
+    createdAt: '2026-11-21T18:00:00.000Z',
+    updatedAt: '2026-11-21T18:00:00.000Z',
+  }
+  await recv({ v: 1, type: 'diary.state', ok: true, entry: globalEntry, diary: { version: 1, entries: [globalEntry], suppressedCount: 0 } })
+  await sleep(150)
+  assert.equal(await page.evaluate(`document.getElementById('diary-editor').classList.contains('hidden')`), true)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.diary-entry').length`), 1)
+
+  // 3. Open editor for a site-specific entry; verify disabled Use-current-tab on extension URL, then test with active HTTP tab.
+  await page.evaluate(`document.getElementById('diary-add').click()`)
+  await sleep(120)
+  await page.evaluate(`document.getElementById('diary-scope-site').click()`)
+  await sleep(100)
+  assert.equal(await page.evaluate(`document.getElementById('diary-use-current-tab').disabled`), true, 'internal chrome-extension URL cannot be used as a site')
+
+  if (fixtureUrl) {
+    const version = await (await fetch(`${CDP}/json/version`)).json()
+    const browser = await connect(version.webSocketDebuggerUrl)
+    const created = await browser.send('Target.createTarget', { url: fixtureUrl })
+    for (let i = 0; i < 30; i += 1) {
+      await sleep(100)
+      if (await page.evaluate(`document.getElementById('diary-use-current-tab').disabled === false`)) break
+    }
+    assert.equal(await page.evaluate(`document.getElementById('diary-use-current-tab').disabled`), false, 'HTTP fixture tab enables Use current tab')
+    await page.evaluate(`document.getElementById('diary-use-current-tab').click()`)
+    assert.equal(await page.evaluate(`document.getElementById('diary-field-sites').value`), '127.0.0.1')
+    await page.evaluate(`document.getElementById('diary-field-sites').value = ''`)
+    await browser.send('Target.closeTarget', { targetId: created.targetId }).catch(() => {})
+    browser.close()
+    await page.send('Page.bringToFront').catch(() => {})
+    await sleep(250)
+  }
+
+  // Test inline validation error (invalid domain) then valid submission.
+  await page.evaluate(`(() => {
+    document.getElementById('diary-field-sites').value = 'chrome://settings';
+    document.getElementById('diary-field-title').value = 'Kimi login email';
+    document.getElementById('diary-field-content').value = 'Use alice@gmail.com when signing in.';
+    document.getElementById('diary-editor').requestSubmit();
+  })()`)
+  await sleep(100)
+  assert.equal(await page.evaluate(`document.getElementById('diary-editor-error').classList.contains('hidden')`), false)
+
+  await page.evaluate(`(() => {
+    document.getElementById('diary-field-sites').value = 'https://www.kimi.ai/chat';
+    document.getElementById('diary-editor').requestSubmit();
+  })()`)
+  await sleep(150)
+  const createSite = (await sentOf('diary.create')).at(-1)
+  assert.equal(createSite.scope, 'site')
+  assert.deepEqual(createSite.sites, ['kimi.ai'])
+  const siteEntry = {
+    id: 'diary-s1',
+    scope: 'site',
+    sites: ['kimi.ai'],
+    title: createSite.title,
+    content: createSite.content,
+    enabled: true,
+    source: 'suggested',
+    createdAt: '2026-11-21T18:01:00.000Z',
+    updatedAt: '2026-11-21T18:01:00.000Z',
+  }
+  await recv({ v: 1, type: 'diary.state', ok: true, entry: siteEntry, diary: { version: 1, entries: [siteEntry, globalEntry], suppressedCount: 1 } })
+  await sleep(200)
+
+  // 4. Verify filters, search, two-step delete confirm, pause toggle, and narrow 280px layout.
+  assert.equal(await page.evaluate(`document.querySelectorAll('.diary-entry').length`), 2)
+  assert.equal(await page.evaluate(`document.getElementById('diary-clear-suppressed').classList.contains('hidden')`), false)
+  await capture('list')
+
+  await page.evaluate(`document.querySelector('[data-diary-filter="site"]').click()`)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.diary-entry').length`), 1)
+  await page.evaluate(`document.querySelector('[data-diary-filter="all"]').click()`)
+  await page.evaluate(`(() => {
+    const s = document.getElementById('diary-search');
+    s.value = 'gmail';
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.diary-entry').length`), 2)
+  await page.evaluate(`(() => {
+    const s = document.getElementById('diary-search');
+    s.value = '';
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+
+  // Two-step delete confirm.
+  await page.evaluate(`document.querySelector('.diary-entry .danger-text').click()`)
+  assert.equal(await page.evaluate(`document.querySelector('.diary-entry .danger').textContent`), 'Confirm delete')
+  await page.evaluate(`document.querySelector('.diary-entry .diary-entry-actions button:last-child').click()`)
+  assert.equal(await page.evaluate(`document.querySelector('.diary-entry .danger')`), null)
+
+  // Narrow 280px check inside Diary modal.
+  await setWidth(280)
+  const narrowModal = await page.evaluate(`(() => {
+    const modal = document.getElementById('diary-modal');
+    const body = modal.querySelector('.diary-body');
+    const rect = body.getBoundingClientRect();
+    const overflow = [...body.querySelectorAll('*')].filter(n => {
+      const r = n.getBoundingClientRect();
+      return r.width > 0 && (r.right > rect.right + 1 || r.left < rect.left - 1);
+    }).length;
+    return { scrollWidth: body.scrollWidth, clientWidth: body.clientWidth, overflow };
+  })()`)
+  assert.equal(narrowModal.overflow, 0, 'diary modal fits 280px without horizontal overflow')
+  await setWidth(420)
+  await page.evaluate(`document.getElementById('diary-close').click()`)
+  await sleep(250)
+
+  // 5. Turn-start diary-applied header pill beside Working… + post-run suggestion cards.
+  await sendPrompt(page, 'Sign in to Kimi')
+  await recv({ v: 1, type: 'chat.activity', kind: 'diary-applied', scope: 'turn-start', count: 1, titles: ['Kimi login email'] })
+  await sleep(80)
+  const firstPill = await page.evaluate(`(() => {
+    const pill = document.querySelector('.agent-turn.running .turn-diary-pill');
+    const summary = document.querySelector('.agent-turn.running .agent-turn-summary');
+    return {
+      visible: pill && pill.getClientRects().length > 0,
+      text: pill?.textContent?.trim() ?? '',
+      hasMore: pill?.querySelector('.turn-diary-more') !== null,
+      leftOfPill: pill?.getBoundingClientRect().left ?? 0,
+      rightOfSummary: summary?.getBoundingClientRect().right ?? 0,
+    };
+  })()`)
+  assert.equal(firstPill.visible, true)
+  assert.equal(firstPill.text, 'Diary · Kimi login email')
+  assert.equal(firstPill.hasMore, false)
+  assert.ok(firstPill.leftOfPill >= firstPill.rightOfSummary, 'diary pill sits to the right of Working…')
+
+  await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 1, attemptId: 'diary-1' })
+  await recv({ v: 1, type: 'chat.activity', kind: 'diary-applied', scope: 'site', host: 'kimi.ai', count: 3, titles: ['Kimi login email', 'Verification codes', 'Concise PR style'] })
+  await sleep(180)
+  const multiPill = await page.evaluate(`(() => {
+    const pill = document.querySelector('.agent-turn.running .turn-diary-pill');
+    const summary = document.querySelector('.agent-turn.running .agent-turn-summary');
+    const pRect = pill?.getBoundingClientRect();
+    const sRect = summary?.getBoundingClientRect();
+    return {
+      visible: pill && pill.getClientRects().length > 0,
+      text: pill?.textContent?.trim() ?? '',
+      more: pill?.querySelector('.turn-diary-more')?.textContent ?? '',
+      tooltip: pill?.title ?? '',
+      sameRow: Boolean(pRect && sRect && pRect.left >= sRect.right && Math.abs((pRect.top + pRect.height / 2) - (sRect.top + sRect.height / 2)) < 8),
+      thinkingWaits: document.querySelectorAll('.thinking-wait').length,
+    };
+  })()`)
+  assert.equal(multiPill.visible, true)
+  assert.equal(multiPill.text, 'Diary · Concise PR style +2')
+  assert.equal(multiPill.more, '+2')
+  assert.ok(multiPill.tooltip.includes('Kimi login email') && multiPill.tooltip.includes('Verification codes') && multiPill.tooltip.includes('Concise PR style'))
+  assert.equal(multiPill.sameRow, true, 'diary pill aligns to the right of Working… on the same row')
+  assert.equal(multiPill.thinkingWaits, 1, 'diary-applied must not suppress the thinking placeholder')
+  await capture('header-pill')
+  await finishPrompt(page, 'session-preview0001', 'DONE — signed in with alice@gmail.com.')
+  assert.equal(await page.evaluate(`document.querySelector('.agent-turn:last-of-type .turn-diary-pill').getClientRects().length`), 0, 'diary pill hides once turn finishes')
+
+  const sug1 = {
+    id: 'sug-1',
+    action: 'add',
+    replacesId: null,
+    scope: 'site',
+    sites: ['kimi.ai'],
+    title: 'Kimi login email',
+    content: 'Use alice@gmail.com when signing in to kimi.ai.',
+    question: 'Save alice@gmail.com as your Kimi login email?',
+  }
+  const sug2 = {
+    id: 'sug-2',
+    action: 'update',
+    replacesId: 'diary-g1',
+    previousEntry: { id: 'diary-g1', scope: 'global', sites: [], title: 'Verification codes', content: 'Check Gmail.' },
+    scope: 'global',
+    sites: [],
+    title: 'Verification codes',
+    content: 'Check my Gmail tab first for verification codes instead of asking me.',
+    question: 'Update your Verification codes note in the Diary?',
+  }
+  await recv({ v: 1, type: 'diary.suggestions', turnId: 'turn-1', suggestions: [sug1, sug2] })
+  await sleep(250)
+  assert.equal(await page.evaluate(`document.getElementById('diary-suggest-card').classList.contains('hidden')`), false)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.diary-suggest-item').length`), 2)
+  await capture('suggestions')
+
+  // Inline edit + Save on sug-1.
+  await page.evaluate(`document.querySelector('[data-suggestion-id="sug-1"] .diary-suggest-actions button:nth-child(2)').click()`)
+  await sleep(100)
+  await page.evaluate(`(() => {
+    const item = document.querySelector('[data-suggestion-id="sug-1"]');
+    item.querySelector('input[aria-label="Suggestion title"]').value = 'Kimi preferred email';
+    item.querySelector('.diary-suggest-actions .primary').click();
+  })()`)
+  await sleep(150)
+  const accepted = (await sentOf('diary.suggestion.accept')).at(-1)
+  assert.equal(accepted.id, 'sug-1')
+  assert.equal(accepted.title, 'Kimi preferred email')
+  await recv({ v: 1, type: 'diary.state', ok: true, entry: { ...siteEntry, title: 'Kimi preferred email' }, diary: { version: 1, entries: [siteEntry, globalEntry], suppressedCount: 1 } })
+  await recv({ v: 1, type: 'diary.suggestions', suggestions: [sug2] })
+  await sleep(150)
+  assert.equal(await page.evaluate(`document.querySelectorAll('.diary-suggest-item').length`), 1)
+
+  // Confirm card temporarily hides suggestions without losing them.
+  await recv({ v: 1, type: 'chat.done', sessionId: 'session-preview0001', text: 'BLOCKED — confirm', timings: { totalMs: 400 }, confirm: { action: 'Submit form', target: 'Submit button' } })
+  await sleep(150)
+  assert.equal(await page.evaluate(`document.getElementById('confirm-card').classList.contains('hidden')`), false)
+  assert.equal(await page.evaluate(`document.getElementById('diary-suggest-card').classList.contains('hidden')`), true, 'suggestion card yields while confirm card is shown')
+  await recv({ v: 1, type: 'chat.error', code: 'NO_CONFIRMATION_PENDING', message: 'gone', recoverable: true })
+  await sleep(150)
+  assert.equal(await page.evaluate(`document.getElementById('diary-suggest-card').classList.contains('hidden')`), false, 'suggestion card returns once confirm card clears')
+
+  // Narrow 280px check on suggestion card.
+  await setWidth(280)
+  const narrowCard = await page.evaluate(`(() => {
+    const card = document.getElementById('diary-suggest-card');
+    return { scrollWidth: card.scrollWidth, clientWidth: card.clientWidth };
+  })()`)
+  assert.ok(narrowCard.scrollWidth <= narrowCard.clientWidth + 1, `suggestion card fits 280px (${JSON.stringify(narrowCard)})`)
+  await setWidth(420)
+
+  // Dismiss remaining suggestion.
+  await page.evaluate(`document.querySelector('[data-suggestion-id="sug-2"] .diary-suggest-actions button:first-child').click()`)
+  await sleep(150)
+  assert.equal((await sentOf('diary.suggestion.dismiss')).at(-1).id, 'sug-2')
+  await recv({ v: 1, type: 'diary.suggestions', suggestions: [] })
+  await sleep(250)
+  assert.equal(await page.evaluate(`document.getElementById('diary-suggest-card').classList.contains('hidden')`), true)
+
+  // Old companion without diary field in chat.hello explains the need to restart and disables mutations.
+  const staleHello = { ...HELLO_FRAMES.find(frame => frame.type === 'chat.hello') }
+  delete staleHello.diary
+  delete staleHello.diarySuggestions
+  await recv(staleHello)
+  await page.evaluate(`document.getElementById('diary').click()`)
+  await sleep(150)
+  const staleState = await page.evaluate(`(() => ({
+    noteHidden: document.getElementById('diary-offline-note').classList.contains('hidden'),
+    noteText: document.getElementById('diary-offline-note').textContent,
+    addDisabled: document.getElementById('diary-add').disabled,
+  }))()`)
+  assert.equal(staleState.noteHidden, false)
+  assert.match(staleState.noteText, /Restart the companion/i)
+  assert.equal(staleState.addDisabled, true)
+  await page.evaluate(`document.getElementById('diary-close').click()`)
+  await sleep(100)
+}
+
 async function main() {
   if (!existsSync(join(ROOT, 'extension', 'manifest.json'))) throw new Error(`extension/ not found under ${ROOT}`)
-  if (SCENARIO === 'tools') {
+  if (SCENARIO === 'tools' || SCENARIO === 'diary') {
     fixtureServer = createServer((_request, response) => {
       response.writeHead(200, { 'content-type': 'text/html' })
       response.end('<!doctype html><title>UI preview fixture</title><button>Increment</button><p>Fixture page</p>')
@@ -2273,10 +2662,10 @@ async function main() {
   }
 
   const shotFormat = process.env.SHOT_FORMAT ?? 'png'
-  const shot = async (name, bringFront = true) => {
+  const shot = async (name, bringFront = true, waitMs = 250) => {
     // bringToFront can drop synthetic CDP hover; hover-state shots skip it.
     if (bringFront) await page.send('Page.bringToFront').catch(() => {})
-    await sleep(250)
+    if (waitMs > 0) await sleep(waitMs)
     const params = shotFormat === 'jpeg'
       ? { format: 'jpeg', quality: 86, fromSurface: true, captureBeyondViewport: false }
       : { format: 'png', fromSurface: true, captureBeyondViewport: false }
@@ -2303,7 +2692,7 @@ async function main() {
     await setTheme('light')
     await shot('light')
   } else if (SCENARIO === 'live') {
-    await playTurn(page, { stopAfter: 'step2-running' })
+    await playTurn(page, { stopAfter: 'step2-running', verbose: true })
     await shot('dark')
   } else if (SCENARIO === 'waiting') {
     const { recv, batch } = makePage(page)
@@ -2384,8 +2773,6 @@ async function main() {
     const { recv, batch } = makePage(page)
     await batch(HELLO_FRAMES)
     await sleep(300)
-    await sendPrompt(page, 'Show me the motion.')
-    // Samples every animation frame, then reports what the user would have seen.
     const sample = (selector, read, ms = 260) => page.evaluate(`(async () => {
       const seen = [];
       const end = performance.now() + ${ms};
@@ -2399,6 +2786,69 @@ async function main() {
     const distinct = values => new Set(values.filter(value => value !== null)).size
     const YELLOW = 'rgb(255, 195, 0)'
     const titleColor = () => page.evaluate(`getComputedStyle(document.querySelector('.activity-step.running .step-title')).color`)
+
+    // Default mode: compact scrolling ticker (3-4 yellow rows visible, top/bottom gradient fade, no bodies).
+    assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('verbose-activity')`), false)
+    await sendPrompt(page, 'Track 5 compact actions')
+    for (let s = 1; s <= 4; s += 1) {
+      await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: s, attemptId: `c-${s}` })
+      await sleep(80)
+      await recv({ v: 1, type: 'chat.tool_call', callId: `c-call-${s}`, name: s % 2 === 0 ? 'browser_read_text' : 'browser_click', args: s % 2 === 0 ? '{}' : '{"label":"12"}' })
+      await sleep(80)
+      await recv({ v: 1, type: 'chat.tool_result', callId: `c-call-${s}`, ok: true, text: s % 2 === 0 ? 'Read the page cleanly' : 'clicked #12 Submit · changed' })
+    }
+    await recv({ v: 1, type: 'chat.activity', kind: 'model-start', turn: 1, step: 5, attemptId: 'c-5' })
+    await sleep(80)
+    await recv({ v: 1, type: 'chat.tool_call', callId: 'c-call-5', name: 'browser_screenshot', args: '{}' })
+    await sleep(500)
+    const compact = await page.evaluate(`(() => {
+      const stepsEl = document.querySelector('.agent-turn.running .agent-turn-steps');
+      const style = getComputedStyle(stepsEl);
+      const bodies = [...stepsEl.querySelectorAll('.step-body')].map(node => getComputedStyle(node).display);
+      const titleColors = [...stepsEl.querySelectorAll('.step-title')].map(node => getComputedStyle(node).color);
+      const iconColors = [...stepsEl.querySelectorAll('.step-icon')].map(node => getComputedStyle(node).color);
+      return {
+        height: Math.round(stepsEl.getBoundingClientRect().height),
+        scrolling: stepsEl.classList.contains('ticker-scrolling'),
+        scrollTop: Math.round(stepsEl.scrollTop),
+        mask: style.maskImage || style.webkitMaskImage || '',
+        bodies,
+        titleColors,
+        iconColors,
+      };
+    })()`)
+    assert.ok(compact.height <= 136, `compact ticker height stays bounded (${compact.height})`)
+    assert.equal(compact.scrolling, true, 'compact ticker enables scroll fade when 5 steps exceed 3-4 rows')
+    assert.ok(compact.scrollTop > 0, `compact ticker scrolls to newest row (${compact.scrollTop})`)
+    assert.match(compact.mask, /linear-gradient/, 'compact ticker applies top/bottom fade mask')
+    assert.equal(compact.bodies.every(d => d === 'none'), true, 'compact ticker keeps all step bodies collapsed')
+    assert.equal(compact.titleColors.every(c => c === YELLOW), true, `compact ticker keeps all step titles yellow: ${compact.titleColors}`)
+    assert.equal(compact.iconColors.every(c => c === YELLOW), true, `compact ticker keeps all step icons yellow: ${compact.iconColors}`)
+    await shot('compact-ticker')
+
+    // Finishing the compact turn still lets clicking the summary inspect expanded steps.
+    await recv({ v: 1, type: 'chat.done', text: 'Compact complete.', timings: { totalMs: 900 }, sessionId: 'session-compact' })
+    await recv({ v: 1, type: 'status', status: 'idle' })
+    await sleep(250)
+    await page.evaluate(`document.querySelector('.agent-turn .agent-turn-summary').click()`)
+    await sleep(250)
+    await page.evaluate(`document.querySelector('.agent-turn .step-head').click()`)
+    await sleep(200)
+    assert.notEqual(await page.evaluate(`getComputedStyle(document.querySelector('.agent-turn .step-body')).display`), 'none', 'finished compact turn expands details on click')
+
+    // Clear Turn 1 cleanly and turn Verbose live activity ON to verify full detail mode & motion.
+    await page.evaluate(`document.getElementById('new-chat').click()`)
+    await sleep(500)
+    await page.evaluate(`document.getElementById('settings').click()`)
+    await sleep(200)
+    assert.equal(await page.evaluate(`document.getElementById('setting-verbose-activity').checked`), false)
+    await page.evaluate(`document.getElementById('setting-verbose-activity').click()`)
+    assert.equal(await page.evaluate(`document.getElementById('setting-verbose-activity').checked`), true)
+    assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('verbose-activity')`), true)
+    await page.evaluate(`document.getElementById('settings-close').click()`)
+    await sleep(250)
+
+    await sendPrompt(page, 'Show me the motion.')
 
     // Step arrival grows from nothing instead of popping.
     const arriving = sample('.activity-step', `node => Math.round(node.getBoundingClientRect().height)`)
@@ -2463,15 +2913,95 @@ async function main() {
     assert.equal(await page.evaluate(`document.querySelectorAll('.feed-ghost, .motion-ghost, .leaving').length`), 0)
     await shot('finished')
 
-    // Clearing the chat fades the old feed out; the saved copy has no ghost in it.
-    const clearing = sample('.feed-ghost', `node => Number(getComputedStyle(node).opacity).toFixed(2)`)
-    await page.evaluate(`document.getElementById('new-chat').click()`)
-    const feedOpacity = await clearing
-    assert.ok(distinct(feedOpacity) >= 3, `old feed should fade: ${feedOpacity}`)
-    await sleep(MOTION_SETTLE_MS)
-    assert.equal(await page.evaluate(`document.querySelectorAll('.feed-ghost').length`), 0, 'feed ghost cleans up')
+    // On an open chat page, the top-right 2x2 four-dots button collapses to a pill and toggles leftward on click.
+    assert.equal(await page.evaluate(`document.getElementById('utilities-toggle').getAttribute('aria-expanded')`), 'false')
+    assert.ok(await page.evaluate(`document.querySelector('.top-actions-tray').getBoundingClientRect().width`) <= 1, 'utility tray starts collapsed on an open chat')
+    await page.evaluate(`document.getElementById('utilities-toggle').click()`)
+    await sleep(340)
+    assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('utilities-open')`), true)
+    assert.equal(await page.evaluate(`document.getElementById('utilities-toggle').getAttribute('aria-expanded')`), 'true')
+    assert.ok(await page.evaluate(`document.querySelector('.top-actions-tray').getBoundingClientRect().width`) > 100, 'utility tray expands leftward')
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.top-actions-items > button')].map(btn => btn.id)`), ['settings', 'diary', 'history', 'new-chat'])
+    await page.evaluate(`document.getElementById('utilities-toggle').click()`)
+    await sleep(340)
+    assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('utilities-open')`), false)
+    assert.equal(await page.evaluate(`document.getElementById('utilities-toggle').getAttribute('aria-expanded')`), 'false')
+    assert.ok(await page.evaluate(`document.querySelector('.top-actions-tray').getBoundingClientRect().width`) <= 1, 'utility tray collapses on second click')
+    await page.evaluate(`document.getElementById('utilities-toggle').click()`)
+    await sleep(340)
 
-    log('motion samples', JSON.stringify({ stepHeights, waitOpacity, ghostOpacity, bodyHeights, modalOpacity, stepsHeights, feedOpacity }))
+    // Clearing the chat fades the old feed out and ripples #new-chat; the saved copy has no ghost in it.
+    const clearing = sample('.feed-ghost', `node => Number(getComputedStyle(node).opacity).toFixed(2)`)
+    const chatRippling = sample('.new-chat-ripple', `node => {
+      const r = node.getBoundingClientRect();
+      return {
+        w: Math.round(r.width),
+        top: Math.round(r.top),
+        right: Math.round(r.right),
+        vw: window.innerWidth,
+        opacity: Number(getComputedStyle(node).opacity).toFixed(2),
+      };
+    }`, 420)
+    await page.evaluate(`document.getElementById('new-chat').click()`)
+    const [feedOpacity, chatRippleFrames] = await Promise.all([clearing, chatRippling])
+    assert.ok(distinct(feedOpacity) >= 3, `old feed should fade: ${feedOpacity}`)
+    const chatRippleHits = chatRippleFrames.filter(Boolean)
+    assert.ok(distinct(chatRippleHits.map(f => f.w)) >= 3, `new-chat ripple should expand: ${JSON.stringify(chatRippleHits)}`)
+    const chatRippleMaxW = Math.max(...chatRippleHits.map(f => f.w))
+    const chatRippleMinTop = Math.min(...chatRippleHits.map(f => f.top))
+    const chatRippleMaxRight = Math.max(...chatRippleHits.map(f => f.right))
+    assert.ok(chatRippleMaxW > 34 && chatRippleMaxW <= 90, `ripple should stay localized: maxW=${chatRippleMaxW}`)
+    assert.ok(chatRippleMinTop >= -2, `ripple should not clip top: minTop=${chatRippleMinTop}`)
+    assert.ok(chatRippleMaxRight <= chatRippleHits[0].vw + 2, `ripple should not clip right: maxRight=${chatRippleMaxRight} vw=${chatRippleHits[0].vw}`)
+    await sleep(540)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.feed-ghost').length`), 0, 'feed ghost cleans up')
+    assert.equal(await page.evaluate(`document.querySelectorAll('.new-chat-ripple').length`), 0, 'new-chat ripple cleans up')
+
+    // Clicking #new-chat while already on the new-chat page still gives the same ripple.
+    await page.send('Page.bringToFront').catch(() => {})
+    await page.evaluate(`document.getElementById('new-chat').click()`)
+    await sleep(100)
+    await shot('new-chat-ripple', false, 0)
+    await sleep(480)
+
+    const emptyRippling = sample('.new-chat-ripple', `node => {
+      const r = node.getBoundingClientRect();
+      return { w: Math.round(r.width), opacity: Number(getComputedStyle(node).opacity).toFixed(2) };
+    }`, 420)
+    await page.evaluate(`document.getElementById('new-chat').click()`)
+    const emptyRippleHits = (await emptyRippling).filter(Boolean)
+    assert.ok(distinct(emptyRippleHits.map(f => f.w)) >= 3, `empty-page new-chat ripple should expand: ${JSON.stringify(emptyRippleHits)}`)
+    const emptyRippleMaxW = Math.max(...emptyRippleHits.map(f => f.w))
+    assert.ok(emptyRippleMaxW > 34 && emptyRippleMaxW <= 90, `empty-page ripple should stay localized: maxW=${emptyRippleMaxW}`)
+    await sleep(540)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.new-chat-ripple').length`), 0, 'empty-page ripple cleans up')
+
+    // Rapid clicks spawn overlapping ripples and clean up cleanly.
+    await page.evaluate(`document.getElementById('new-chat').click()`)
+    await sleep(80)
+    await page.evaluate(`document.getElementById('new-chat').click()`)
+    assert.ok(await page.evaluate(`document.querySelectorAll('.new-chat-ripple').length`) >= 2, 'rapid clicks spawn overlapping ripples')
+    await sleep(620)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.new-chat-ripple').length`), 0, 'rapid-click ripples clean up')
+
+    // Reduced motion swaps the expanding ring for a brief yellow confirmation highlight.
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    await sleep(50)
+    await page.evaluate(`document.getElementById('new-chat').click()`)
+    assert.equal(await page.evaluate(`document.querySelectorAll('.new-chat-ripple').length`), 0, 'reduced motion skips ripple element')
+    assert.equal(await page.evaluate(`document.getElementById('new-chat').classList.contains('new-chat-confirmed')`), true, 'reduced motion flashes confirmed ring')
+    await sleep(320)
+    assert.equal(await page.evaluate(`document.getElementById('new-chat').classList.contains('new-chat-confirmed')`), false, 'reduced motion ring clears')
+    // On the new-chat page, clearing utilities-open or clicking the toggle leaves the tray expanded.
+    await page.evaluate(`document.getElementById('activity-empty').click()`)
+    assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('utilities-open')`), false)
+    assert.equal(await page.evaluate(`document.getElementById('utilities-toggle').getAttribute('aria-expanded')`), 'true')
+    assert.ok(await page.evaluate(`document.querySelector('.top-actions-tray').getBoundingClientRect().width`) > 100, 'utility tray stays open on new-chat page')
+    await page.evaluate(`document.getElementById('utilities-toggle').click()`)
+    assert.equal(await page.evaluate(`document.getElementById('utilities-toggle').getAttribute('aria-expanded')`), 'true')
+    assert.ok(await page.evaluate(`document.querySelector('.top-actions-tray').getBoundingClientRect().width`) > 100, 'toggle click keeps new-chat toolbar expanded')
+
+    log('motion samples', JSON.stringify({ stepHeights, waitOpacity, ghostOpacity, bodyHeights, modalOpacity, stepsHeights, feedOpacity, chatRippleWidths: chatRippleHits.map(f => f.w), emptyRippleWidths: emptyRippleHits.map(f => f.w) }))
   } else if (SCENARIO === 'answer') {
     const { recv, batch } = makePage(page)
     await batch(HELLO_FRAMES)
@@ -2504,7 +3034,7 @@ async function main() {
     const longView = await playAnswer(1, `DONE The first line of the long answer.\n\n${long}`)
     await shot('long')
     assert.ok(longView.answerBottom > longView.feedHeight, `the long answer is taller than the view: ${JSON.stringify(longView)}`)
-    assert.ok(longView.answerTop >= 0 && longView.answerTop <= 40, `a long answer rests at its top: ${JSON.stringify(longView)}`)
+    assert.ok(longView.answerTop >= 64 && longView.answerTop <= 88, `a long answer rests at its top below the top fade: ${JSON.stringify(longView)}`)
     const shortView = await playAnswer(2, 'DONE A short answer.')
     assert.equal(shortView.fromBottom, 0, `a short answer ends at the bottom: ${JSON.stringify(shortView)}`)
     assert.ok(shortView.answerTop >= 0 && shortView.answerBottom <= shortView.feedHeight, `the short answer is fully in view: ${JSON.stringify(shortView)}`)
@@ -2769,6 +3299,23 @@ async function main() {
     await sleep(300)
     await page.evaluate(`document.getElementById('settings').click()`)
     await sleep(300)
+    const topUsage = await page.evaluate(`(() => {
+      const body = document.querySelector('#settings-modal .settings-body');
+      const card = document.getElementById('usage-card');
+      const bodyRect = body.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      return {
+        scrollTop: body.scrollTop,
+        firstSection: body.firstElementChild?.classList.contains('settings-usage') ?? false,
+        cardTop: cardRect.top,
+        cardBottom: cardRect.bottom,
+        bodyTop: bodyRect.top,
+        bodyBottom: bodyRect.bottom,
+      };
+    })()`)
+    assert.equal(topUsage.firstSection, true, 'Lifetime usage is the first section in Settings')
+    assert.equal(topUsage.scrollTop, 0, 'Settings opens at top with Lifetime usage visible')
+    assert.ok(topUsage.cardTop >= topUsage.bodyTop - 1 && topUsage.cardBottom <= topUsage.bodyBottom + 1, 'Lifetime usage fits visibly at the top of Settings')
     let meter = await readMeter()
     assert.equal(meter.state, 'empty')
     assert.equal(meter.total, '0')
@@ -2819,17 +3366,23 @@ async function main() {
     await page.evaluate(`document.getElementById('settings').click()`)
     await sleep(300)
     const settingsSections = await page.evaluate(`[...document.querySelectorAll('#settings-modal .settings-body > .settings-section > h3')].map(node => node.textContent)`)
-    assert.deepEqual(settingsSections, ['Model', 'Connection', 'Safety', 'Capture', 'About'], 'Settings should lead with the model info and end with version details')
-    assert.equal(await page.evaluate(`document.getElementById('usage-label').textContent`), 'Lifetime usage', 'the nested usage card sits above About')
+    assert.deepEqual(settingsSections, ['Model', 'Safety', 'Diary', 'Interface', 'About'], 'Settings sections follow Lifetime usage in order')
+    assert.equal(await page.evaluate(`document.querySelector('#settings-modal .settings-body').firstElementChild?.classList.contains('settings-usage')`), true, 'Lifetime usage sits at the very top of Settings')
+    assert.equal(await page.evaluate(`document.getElementById('usage-label').textContent`), 'Lifetime usage')
+    assert.equal(await page.evaluate(`document.querySelector('#settings-modal .settings-body').lastElementChild?.classList.contains('settings-debug-log')`), true, 'Debug log sits at the very bottom of Settings')
+    assert.equal(await page.evaluate(`document.getElementById('settings-advanced').open`), false, 'Advanced settings are collapsed by default')
+    assert.equal(await page.evaluate(`document.getElementById('settings-debug-log').open`), false, 'Debug log is collapsed by default')
+    assert.equal(await page.evaluate(`document.getElementById('setting-diary-auto-suggest').checked`), true, 'diary auto-suggest defaults on')
+    assert.equal(await page.evaluate(`document.getElementById('setting-verbose-activity').checked`), false, 'verbose live activity defaults off')
     const settingsScroll = await page.evaluate(`(() => {
       const body = document.querySelector('#settings-modal .settings-body');
-      const model = document.getElementById('model-label').getBoundingClientRect();
+      const usage = document.getElementById('usage-card').getBoundingClientRect();
       const frame = body.getBoundingClientRect();
-      return { scrollTop: body.scrollTop, modelTop: model.top, frameTop: frame.top, active: document.activeElement.id };
+      return { scrollTop: body.scrollTop, usageTop: usage.top, usageBottom: usage.bottom, frameTop: frame.top, frameBottom: frame.bottom, active: document.activeElement.id };
     })()`)
     assert.equal(settingsScroll.scrollTop, 0, 'Settings should open at the top')
-    assert.ok(settingsScroll.modelTop >= settingsScroll.frameTop, 'Model heading should be visible at the top of the settings body')
-    assert.equal(settingsScroll.active, 'setting-apikey', 'A configured setup should open focused on the model section')
+    assert.ok(settingsScroll.usageTop >= settingsScroll.frameTop - 1 && settingsScroll.usageBottom <= settingsScroll.frameBottom + 1, 'Lifetime usage should be visible at the top of the settings body')
+    assert.equal(settingsScroll.active, 'setting-apikey', 'A configured setup should focus without scrolling away from the top')
     assert.equal(await page.evaluate(`document.querySelector('[data-effort][aria-pressed="true"]').dataset.effort`), 'medium', 'the saved explicit Medium choice survives the Auto default')
     await page.evaluate(`document.querySelector('[data-effort="auto"]').click()`)
     assert.equal(await page.evaluate(`document.getElementById('effort-hint').textContent`), 'Low for actions; medium for reading and synthesis')
@@ -2843,7 +3396,7 @@ async function main() {
     assert.equal(initialAbout.updated, 'No completed update recorded')
     assert.equal(initialAbout.title, '')
     const updatedAt = '2026-11-17T20:00:00.000Z'
-    await makePage(page).recv({ v: 1, type: 'update.state', update: { state: 'current', current: '2.6.0', latest: '2.6.0', last: { from: '2.5.1', to: '2.6.0', at: updatedAt } } })
+    await makePage(page).recv({ v: 1, type: 'update.state', update: { state: 'current', current: '2.6.1', latest: '2.6.1', last: { from: '2.5.1', to: '2.6.1', at: updatedAt } } })
     const populatedAbout = await page.evaluate(`(() => {
       const updated = document.getElementById('settings-updated');
       return {
@@ -2853,7 +3406,7 @@ async function main() {
         title: updated.title,
       };
     })()`)
-    assert.equal(populatedAbout.version, '2.6.0')
+    assert.equal(populatedAbout.version, '2.6.1')
     assert.equal(populatedAbout.updated, populatedAbout.expected, 'the update time is localized for the user')
     assert.equal(populatedAbout.title, `Last successful update: ${updatedAt}`)
     await sleep(2700)
@@ -2890,18 +3443,59 @@ async function main() {
     await sleep(300)
     const shortSettings = await page.evaluate(`(() => {
       const body = document.querySelector('#settings-modal .settings-body');
-      const model = document.getElementById('model-label').getBoundingClientRect();
+      const usage = document.getElementById('usage-card').getBoundingClientRect();
       const frame = body.getBoundingClientRect();
-      return { scrollTop: body.scrollTop, modelTop: model.top, frameTop: frame.top };
+      return { scrollTop: body.scrollTop, usageTop: usage.top, usageBottom: usage.bottom, frameTop: frame.top, frameBottom: frame.bottom };
     })()`)
-    assert.equal(shortSettings.scrollTop, 0, 'Settings should not auto-scroll away from the model section on a short panel')
-    assert.ok(shortSettings.modelTop >= shortSettings.frameTop, 'Model heading should stay visible on a short panel')
-    await page.evaluate(`document.getElementById('settings-close').click()`)
+    assert.equal(shortSettings.scrollTop, 0, 'Settings should not auto-scroll away from the top usage card on a short panel')
+    assert.ok(shortSettings.usageTop >= shortSettings.frameTop - 1 && shortSettings.usageBottom <= shortSettings.frameBottom + 1, 'Lifetime usage should stay visible on a short panel')
     await page.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 940, deviceScaleFactor: 2, mobile: false })
     await sleep(200)
-    await page.evaluate(`document.getElementById('debug-log').click()`)
-    await sleep(300)
+    await page.evaluate(`document.getElementById('advanced-settings-toggle').scrollIntoView({ block: 'start' })`)
+    await page.evaluate(`document.getElementById('advanced-settings-toggle').click()`)
+    await sleep(200)
+    assert.equal(await page.evaluate(`document.getElementById('settings-advanced').open`), true, 'Advanced settings expand on click')
+    const advancedIds = await page.evaluate(`['setting-url', 'setting-token', 'setting-base-url', 'setting-width', 'setting-quality', 'setting-autocapture', 'test-capture'].every(id => document.getElementById('settings-advanced').contains(document.getElementById(id)))`)
+    assert.equal(advancedIds, true, 'Advanced contains connection and capture controls')
+    await page.evaluate(`document.getElementById('setting-autocapture').click()`)
+    await sleep(100)
+    assert.equal(await page.evaluate(`document.getElementById('settings-status').textContent`), 'Saved', 'toggling auto-capture auto-saves')
+    await page.evaluate(`document.getElementById('advanced-settings-toggle').click()`)
+    await sleep(100)
+    await page.evaluate(`document.getElementById('debug-log-toggle').scrollIntoView({ block: 'start' })`)
+    await page.evaluate(`document.getElementById('debug-log-toggle').click()`)
+    await sleep(250)
+    assert.equal(await page.evaluate(`document.getElementById('settings-debug-log').open`), true, 'Debug log expands on click')
+    assert.ok(await page.evaluate(`window.__frames.some(frame => frame.type === 'log.stats')`), 'expanding Debug log requests log.stats')
+    await makePage(page).recv({
+      v: 1,
+      type: 'log.stats.result',
+      stats: {
+        runId: 'run-preview',
+        path: OUT,
+        events: 128,
+        screenshots: 4,
+        turns: 2,
+        warnings: 0,
+        errors: 0,
+        signals: 0,
+        bytes: 48200,
+        sessionId: 'session-preview0001',
+        meta: { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash-1017' },
+        context: { extensionVersion: '2.6.1', platform: 'Linux' },
+        recentSignals: [],
+      },
+    })
+    await sleep(150)
+    await page.evaluate(`document.getElementById('settings-debug-log').scrollIntoView({ block: 'end' })`)
+    await sleep(200)
     await shot('debug-log')
+    await page.evaluate(`document.getElementById('settings-close').click()`)
+    await sleep(200)
+    await page.evaluate(`document.getElementById('diary').click()`)
+    await sleep(300)
+    assert.equal(await page.evaluate(`document.getElementById('diary-modal').classList.contains('hidden')`), false)
+    await shot('diary-modal')
   } else if (SCENARIO === 'disclaimer') {
     // The background worker flags the notice on extension install/reload. Set
     // the flag directly so the preview shows exactly what a user sees, then
@@ -3014,13 +3608,49 @@ async function main() {
     assert.equal(sent.images.length, 1)
     assert.equal(sent.images[0].name, 'notes.png')
     assert.equal(sent.images[0].mimeType, 'image/png')
+    const runningControls = await page.evaluate(`(() => {
+      const send = document.getElementById('send');
+      const stop = document.getElementById('stop');
+      const sendStyle = getComputedStyle(send);
+      const mic = document.getElementById('mic').getBoundingClientRect();
+      const ctx = document.getElementById('composer-model-context').getBoundingClientRect();
+      return {
+        stopVisible: stop.getClientRects().length > 0,
+        sendOpacity: sendStyle.opacity,
+        sendPointer: sendStyle.pointerEvents,
+        micCenterY: mic.top + mic.height / 2,
+        ctxCenterY: ctx.top + ctx.height / 2,
+      };
+    })()`)
+    assert.equal(runningControls.stopVisible, true)
+    assert.equal(runningControls.sendOpacity, '0', 'empty queue send stays hidden while running')
+    assert.equal(runningControls.sendPointer, 'none')
+    assert.ok(Math.abs(runningControls.ctxCenterY - runningControls.micCenterY) <= 2, `context ring aligns with mic (${runningControls.ctxCenterY} vs ${runningControls.micCenterY})`)
+    await page.evaluate(`(() => {
+      const input = document.getElementById('input');
+      input.value = 'Follow up';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`)
+    await sleep(MOTION_SETTLE_MS)
     const controlRects = await page.evaluate(`(() => {
       const stop = document.getElementById('stop').getBoundingClientRect();
       const send = document.getElementById('send').getBoundingClientRect();
-      return { stopBottom: stop.bottom, sendTop: send.top, stopX: stop.x + stop.width / 2, sendX: send.x + send.width / 2 };
+      return {
+        sendOpacity: getComputedStyle(document.getElementById('send')).opacity,
+        sendBottom: send.bottom,
+        stopTop: stop.top,
+        stopX: stop.x + stop.width / 2,
+        sendX: send.x + send.width / 2,
+      };
     })()`)
-    assert.ok(controlRects.stopBottom <= controlRects.sendTop)
-    assert.equal(controlRects.stopX, controlRects.sendX)
+    assert.equal(controlRects.sendOpacity, '1')
+    assert.ok(controlRects.sendBottom <= controlRects.stopTop, 'queued send sits above stop')
+    assert.ok(Math.abs(controlRects.stopX - controlRects.sendX) <= 1)
+    await page.evaluate(`(() => {
+      const input = document.getElementById('input');
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`)
     await page.evaluate(`document.getElementById('stop').click()`)
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'chat.stop').length`), 1)
     await page.evaluate(`window.__mockReceive({ v: 1, type: 'chat.stopped', reason: 'user', sessionId: 'session-preview0001' })`)
@@ -3066,7 +3696,10 @@ async function main() {
     )
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1).reasoningEffort`), 'high')
     await page.evaluate(`window.__mockReceive({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'high' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })`)
-    await page.evaluate(`document.getElementById('debug-log').click()`)
+    await page.evaluate(`document.getElementById('settings').click()`)
+    await sleep(200)
+    await page.evaluate(`document.getElementById('debug-log-toggle').click()`)
+    await sleep(150)
     await page.evaluate(`document.getElementById('log-include-screenshots').click()`)
     await page.evaluate(`document.getElementById('log-export').click()`)
     assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'log.export').at(-1).includeScreenshots`), false)
@@ -3295,7 +3928,7 @@ async function main() {
     await recv({ v: 1, type: 'update.state', update: failure })
     assert.equal((await read()).noticeHidden, true, 'a dismissed error stays dismissed until it changes')
 
-    await recv({ v: 1, type: 'update.state', update: { state: 'pending', current: '2.5.0', latest: '2.6.0', last: null } })
+    await recv({ v: 1, type: 'update.state', update: { state: 'pending', current: '2.5.0', latest: '2.6.1', last: null } })
     state = await read()
     assert.equal(state.noticeHidden, false)
     assert.match(state.noticeText, /v2\.6\.0/u)
@@ -3317,6 +3950,8 @@ async function main() {
     await playReopenScenario(page, shot)
   } else if (SCENARIO === 'confirm') {
     await playConfirmScenario(page, shot)
+  } else if (SCENARIO === 'diary') {
+    await playDiaryScenario(page, shot, setWidth)
   } else if (SCENARIO === 'deadturn') {
     await playDeadTurnScenario(page, shot)
   } else {

@@ -15,13 +15,14 @@ import { isRecord } from './protocol.mjs'
 export const DEFAULT_SETTINGS = Object.freeze({
   confirmIrreversible: false,
   watchAutoSteer: true,
+  diaryAutoSuggest: true,
 })
 
 /**
  * Read the persisted settings. A missing, unreadable, or malformed file falls
  * back to the defaults; unknown keys are dropped, never forwarded.
  * @param {string} path
- * @returns {{confirmIrreversible: boolean, watchAutoSteer: boolean}}
+ * @returns {{confirmIrreversible: boolean, watchAutoSteer: boolean, diaryAutoSuggest: boolean}}
  */
 export function readSettings(path) {
   let parsed
@@ -34,19 +35,21 @@ export function readSettings(path) {
   return {
     confirmIrreversible: parsed.confirmIrreversible === true,
     watchAutoSteer: parsed.watchAutoSteer !== false,
+    diaryAutoSuggest: parsed.diaryAutoSuggest !== false,
   }
 }
 
 /**
  * Persist settings atomically with owner-only permissions.
  * @param {string} path
- * @param {{confirmIrreversible?: unknown, watchAutoSteer?: unknown}} settings
- * @returns {{confirmIrreversible: boolean, watchAutoSteer: boolean}} the normalized stored value
+ * @param {{confirmIrreversible?: unknown, watchAutoSteer?: unknown, diaryAutoSuggest?: unknown}} settings
+ * @returns {{confirmIrreversible: boolean, watchAutoSteer: boolean, diaryAutoSuggest: boolean}} the normalized stored value
  */
 export function writeSettings(path, settings) {
   const normalized = {
     confirmIrreversible: isRecord(settings) && settings.confirmIrreversible === true,
     watchAutoSteer: !isRecord(settings) || settings.watchAutoSteer !== false,
+    diaryAutoSuggest: !isRecord(settings) || settings.diaryAutoSuggest !== false,
   }
   const temp = `${path}.tmp`
   writeFileSync(temp, `${JSON.stringify(normalized, null, 2)}\n`, { mode: 0o600 })

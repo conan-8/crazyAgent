@@ -15,6 +15,8 @@ import { randomBytes } from 'node:crypto'
 import { MarathonState, marathonFrameBody } from './marathon.mjs'
 import { WatchLedger } from './watch-ledger.mjs'
 import { Watcher } from './watcher.mjs'
+import { formatDiaryPromptBlock, matchDiaryForTurn } from './diary.mjs'
+import { DiaryTurnCollector } from './diary-suggester.mjs'
 import { buildPromptBlocks, isDocsDocumentUrl, normalizeImageAttachments, normalizePlanSeed, promptStats } from './prompt.mjs'
 import { PROTOCOL_VERSION, errorMessage, isRecord } from './protocol.mjs'
 
@@ -58,6 +60,15 @@ export class SessionController {
     this.getModelId = options.getModelId
     this.getConfirmIrreversible = options.getConfirmIrreversible ?? (() => false)
     this.getWatchAutoSteer = options.getWatchAutoSteer ?? (() => true)
+    this.diaryStore = options.diaryStore ?? null
+    this.diarySuggester = options.diarySuggester ?? null
+    this.getDiaryAutoSuggest = options.getDiaryAutoSuggest ?? (() => true)
+    /** @type {DiaryTurnCollector} */
+    this.diaryCollector = new DiaryTurnCollector()
+    /** @type {Array<Record<string, any>>} */
+    this.pendingDiarySuggestions = []
+    /** @type {AbortController | null} */
+    this.diarySuggestAbort = null
     /**
      * M3: the watch ledger runs for EVERY turn (marathon or not) so a mid-turn
      * toggle already has history. It is fed from every published frame; the
@@ -407,7 +418,157 @@ export class SessionController {
    */
   dispose(signal) {
     if (this.running && this.shutdownSignal === undefined) this.shutdownSignal = signal ?? 'shutdown'
+    this.#abortDiarySuggestion()
     this.watcher.stop()
+  }
+
+  /** @returns {Array<Record<string, any>>} */
+  diarySuggestionsState() {
+    return this.pendingDiarySuggestions.map(item => ({
+      ...item,
+      sites: Array.isArray(item.sites) ? [...item.sites] : [],
+      ...(item.previousEntry ? { previousEntry: { ...item.previousEntry, sites: [...(item.previousEntry.sites ?? [])] } } : {}),
+    }))
+  }
+
+  /** Sync current enabled site entries to the DSH provider (mid-turn safe). */
+  syncDiaryToTools() {
+    if (this.diaryStore === null) return false
+    return this.bridge.syncDiaryContext?.({ entries: this.diaryStore.listEnabledSiteEntries() }) === true
+  }
+
+  /**
+   * Accept and persist one pending post-run Diary suggestion (optionally edited
+   * by the user before saving).
+   * @param {unknown} id
+   * @param {{scope?: unknown, sites?: unknown, title?: unknown, content?: unknown}} [override]
+   */
+  acceptDiarySuggestion(id, override = {}) {
+    if (typeof id !== 'string' || id.length === 0 || this.diaryStore === null) {
+      return { ok: false, code: 'NOT_FOUND', error: 'Diary suggestion is no longer pending.' }
+    }
+    const index = this.pendingDiarySuggestions.findIndex(item => item.id === id)
+    if (index < 0) {
+      return { ok: false, code: 'NOT_FOUND', error: 'Diary suggestion is no longer pending.' }
+    }
+    const suggestion = this.pendingDiarySuggestions[index]
+    const scope = override?.scope !== undefined ? override.scope : suggestion.scope
+    const sites = override?.sites !== undefined ? override.sites : suggestion.sites
+    const title = override?.title !== undefined ? override.title : suggestion.title
+    const content = override?.content !== undefined ? override.content : suggestion.content
+
+    let result
+    if (suggestion.action === 'update' && typeof suggestion.replacesId === 'string' && suggestion.replacesId.length > 0) {
+      result = this.diaryStore.update(suggestion.replacesId, { scope, sites, title, content, enabled: true })
+      if (!result.ok && result.code === 'NOT_FOUND') {
+        result = this.diaryStore.create({ scope, sites, title, content, enabled: true, source: 'suggested' })
+      }
+    } else {
+      result = this.diaryStore.create({ scope, sites, title, content, enabled: true, source: 'suggested' })
+    }
+    if (!result.ok) {
+      return { ok: false, code: result.code, error: result.error }
+    }
+    this.pendingDiarySuggestions = this.pendingDiarySuggestions.filter(item => item.id !== id)
+    this.syncDiaryToTools()
+    this.logStore.record('companion', 'diary.suggestion.accepted', {
+      action: suggestion.action,
+      scope: result.entry.scope,
+      entryId: result.entry.id,
+    }, { severity: 'info' })
+    return {
+      ok: true,
+      entry: result.entry,
+      diary: this.diaryStore.snapshot(),
+      suggestions: this.diarySuggestionsState(),
+    }
+  }
+
+  /**
+   * Dismiss one (or all) pending post-run Diary suggestions and record
+   * suppression fingerprints so dismissed topics are not re-suggested.
+   * @param {unknown} id
+   * @param {{all?: boolean}} [options]
+   */
+  dismissDiarySuggestion(id, options = {}) {
+    if (options.all === true) {
+      if (this.diaryStore !== null) {
+        for (const item of this.pendingDiarySuggestions) this.diaryStore.suppress(item)
+      }
+      const count = this.pendingDiarySuggestions.length
+      this.pendingDiarySuggestions = []
+      if (count > 0) {
+        this.logStore.record('companion', 'diary.suggestion.dismissed', { all: true, count }, { severity: 'info' })
+      }
+      return {
+        ok: true,
+        diary: this.diaryStore?.snapshot() ?? null,
+        suggestions: [],
+      }
+    }
+    if (typeof id !== 'string' || id.length === 0) {
+      return { ok: false, code: 'NOT_FOUND', error: 'Diary suggestion is no longer pending.' }
+    }
+    const suggestion = this.pendingDiarySuggestions.find(item => item.id === id)
+    if (!suggestion) {
+      return { ok: false, code: 'NOT_FOUND', error: 'Diary suggestion is no longer pending.' }
+    }
+    this.diaryStore?.suppress(suggestion)
+    this.pendingDiarySuggestions = this.pendingDiarySuggestions.filter(item => item.id !== id)
+    this.logStore.record('companion', 'diary.suggestion.dismissed', {
+      action: suggestion.action,
+      scope: suggestion.scope,
+    }, { severity: 'info' })
+    return {
+      ok: true,
+      diary: this.diaryStore?.snapshot() ?? null,
+      suggestions: this.diarySuggestionsState(),
+    }
+  }
+
+  #abortDiarySuggestion() {
+    if (this.diarySuggestAbort !== null) {
+      this.diarySuggestAbort.abort()
+      this.diarySuggestAbort = null
+    }
+  }
+
+  #clearDiarySuggestions() {
+    if (this.pendingDiarySuggestions.length === 0) return
+    this.pendingDiarySuggestions = []
+    this.bridge.sendToUi?.({ v: PROTOCOL_VERSION, type: 'diary.suggestions', turnId: null, suggestions: [] })
+  }
+
+  async #runDiarySuggestion(turnId, sessionId, turnDigest) {
+    this.#abortDiarySuggestion()
+    const abortController = new AbortController()
+    this.diarySuggestAbort = abortController
+    try {
+      const { existing, suppressed } = this.diaryStore.listForExtractor(turnDigest.visitedHosts)
+      const result = await this.diarySuggester.suggest({
+        turnDigest,
+        existingEntries: existing,
+        suppressed,
+        isSuppressed: candidate => this.diaryStore.isSuppressed(candidate),
+        signal: abortController.signal,
+      })
+      if (this.diarySuggestAbort !== abortController || abortController.signal.aborted) return
+      this.diarySuggestAbort = null
+      if (this.running || this.sessionChanging) return
+      const currentSessionId = this.getRunner()?.sessionId
+      if (typeof sessionId === 'string' && typeof currentSessionId === 'string' && sessionId !== currentSessionId) return
+      if (!Array.isArray(result?.suggestions) || result.suggestions.length === 0) return
+      this.pendingDiarySuggestions = result.suggestions
+      this.bridge.sendToUi?.({
+        v: PROTOCOL_VERSION,
+        type: 'diary.suggestions',
+        turnId,
+        suggestions: this.diarySuggestionsState(),
+      })
+    } catch (error) {
+      if (this.diarySuggestAbort === abortController) this.diarySuggestAbort = null
+      this.logStore.record('companion', 'diary.suggest.error', { turnId, message: errorMessage(error) }, { severity: 'warn', turnId })
+    }
   }
 
   /**
@@ -507,6 +668,8 @@ export class SessionController {
     // Any prompt answers an open confirmation; an approve/deny answer already
     // consumed it in submit(). The same session continues either way.
     this.pendingConfirmation = undefined
+    this.#abortDiarySuggestion()
+    this.#clearDiarySuggestions()
     this.turnId = turnId
     const origin = input.origin ?? 'ui'
     // Legacy one-shot arming (old APK /plan, queued panel items): the explicit
@@ -557,7 +720,7 @@ export class SessionController {
       // desktop input instead of colliding with it.
       this.publish({ v: PROTOCOL_VERSION, type: 'chat.user', turnId, origin, text: shownText, imageCount: images.length, ...(planMode ? { marathon: true } : {}) })
     }
-    const done = this.#runTurn({ turnId, runner, prompt, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode, confirmGuard, planSeed })
+    const done = this.#runTurn({ turnId, runner, prompt, shownText, images, autoCaptureFlag: input.autoCapture, origin, planMode, confirmMode, confirmGuard, planSeed })
     return { turnId, done }
   }
 
@@ -667,6 +830,9 @@ export class SessionController {
       const sessionId = await runner.newSession()
       this.logStore.sessionStart(sessionId)
       this.pendingConfirmation = undefined
+      this.#abortDiarySuggestion()
+      this.#clearDiarySuggestions()
+      this.diaryCollector.resetSession()
       // A new chat never inherits the previous chat's marathon switch.
       this.#resetMarathon()
       this.publish({ v: PROTOCOL_VERSION, type: 'chat.session', sessionId })
@@ -711,6 +877,9 @@ export class SessionController {
       }
       this.logStore.sessionStart(resumed)
       this.pendingConfirmation = undefined
+      this.#abortDiarySuggestion()
+      this.#clearDiarySuggestions()
+      this.diaryCollector.resetSession()
       // Continuing a different saved chat resets the switch (the `already`
       // path above never reaches here: the session did not change).
       this.#resetMarathon()
@@ -725,7 +894,7 @@ export class SessionController {
   /**
    * @param {{turnId: string, runner: any, prompt: string, images: any[], autoCaptureFlag: unknown, origin: string, planMode: boolean, confirmMode: boolean, planSeed?: {revision: number, items: Array<{content: string, status: string}>} | null}} turn
    */
-  async #runTurn({ turnId, runner, prompt, images, autoCaptureFlag, planMode, confirmMode, confirmGuard = false, planSeed = null }) {
+  async #runTurn({ turnId, runner, prompt, shownText = prompt, images, autoCaptureFlag, planMode, confirmMode, confirmGuard = false, planSeed = null }) {
     const logStore = this.logStore
     const bridge = this.bridge
     const turnStart = performance.now()
@@ -741,6 +910,7 @@ export class SessionController {
     const turnStats = { failedCalls: 0, usage: emptyUsageTotals() }
     /** @type {{outcome: 'done' | 'stopped' | 'error', error?: string, sessionId?: string | null, help?: {category: string, reason: string, captureError: string | null}}} */
     let ending = { outcome: 'error', error: 'turn ended unexpectedly', marathon: planMode, endedIncomplete: this.watchEndedIncomplete }
+    let diaryFinalizeArgs = { outcome: 'error' }
 
     bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard, planSeed, userPrompt: prompt })
     logStore.turnStart(turnId, prompt, {
@@ -794,7 +964,38 @@ export class SessionController {
       // guidance block; a mid-turn switch is covered by the provider's
       // first-Docs-call fail-safe.
       const docsMode = isDocsDocumentUrl(view?.tab?.url)
-      const blocks = buildPromptBlocks(view, prompt, new Date(), images, { planMode, confirmMode, docsMode, marathon: { seed: planSeed } })
+      const diaryMatch = this.diaryStore !== null
+        ? matchDiaryForTurn(this.diaryStore.snapshot().entries, { url: view?.tab?.url, prompt: shownText })
+        : { entries: [], ids: [], globalCount: 0, siteCount: 0, omitted: 0 }
+      const diaryBlock = formatDiaryPromptBlock(diaryMatch.entries, { omitted: diaryMatch.omitted })
+      const diaryContext = this.diaryStore !== null
+        ? { entries: this.diaryStore.listEnabledSiteEntries(), deliveredIds: diaryMatch.ids }
+        : null
+      if (diaryContext !== null) bridge.syncDiaryContext?.(diaryContext)
+      if (diaryMatch.entries.length > 0) {
+        logStore.record('companion', 'diary.prompt.injected', {
+          count: diaryMatch.entries.length,
+          globalCount: diaryMatch.globalCount,
+          siteCount: diaryMatch.siteCount,
+          omitted: diaryMatch.omitted,
+          chars: diaryBlock.length,
+        }, { turnId, severity: 'info' })
+        bridge.sendToUi?.({
+          v: PROTOCOL_VERSION,
+          type: 'chat.activity',
+          kind: 'diary-applied',
+          scope: 'turn-start',
+          count: diaryMatch.entries.length,
+          titles: diaryMatch.entries.map(entry => entry.title),
+        })
+      }
+      this.diaryCollector.startTurn({
+        turnId,
+        sessionId: runner.sessionId ?? null,
+        prompt: shownText,
+        startUrl: view?.tab?.url ?? null,
+      })
+      const blocks = buildPromptBlocks(view, prompt, new Date(), images, { planMode, confirmMode, docsMode, diaryBlock, marathon: { seed: planSeed } })
       const stats = promptStats(blocks)
       promptTextBytes = stats.textBytes
       imageBytes = stats.imageBytes
@@ -838,7 +1039,7 @@ export class SessionController {
         turnStats.userMessageSeen = false
         // M2: re-arm with the CURRENT plan snapshot, not the turn-start one.
         const currentSeed = this.#currentPlanSeed()
-        bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard, planSeed: currentSeed, userPrompt: prompt })
+        bridge.setTurnId(turnId, { planMode, confirmMode, confirmGuard, planSeed: currentSeed, userPrompt: prompt, ...(diaryContext ? { diaryContext } : {}) })
         const notice = rerunCode === 'MALFORMED_RESPONSE' ? MALFORMED_RETRY_NOTICE : REQUEST_RETRY_NOTICE
         result = await run(resend ? blocks : buildPromptBlocks(null, notice, new Date(), [], { planMode, confirmMode, docsMode, marathon: { seed: currentSeed } }))
       }
@@ -962,6 +1163,7 @@ export class SessionController {
         this.pendingConfirmation = { action: confirm.action, target: confirm.target, turnId, sessionId: result.sessionId }
       }
       ending = { outcome: 'done', sessionId: result.sessionId, label, usage, timings, marathon: planMode, planOutcome: plan?.outcome ?? null, deadTurn, endedIncomplete: this.watchEndedIncomplete, ...(help === undefined ? {} : { help }), ...(confirm === undefined ? {} : { confirm }) }
+      diaryFinalizeArgs = { outcome: 'done', finalText, help, confirm, deadTurn }
     } catch (error) {
       const message = errorMessage(error)
       const timings = {
@@ -1044,7 +1246,21 @@ export class SessionController {
         if (stored.state.plan !== null) this.marathon.pushCarryPrompt(prompt, turnId)
       }
       this.planTurnSnapshot = undefined
+      const diaryDigest = this.diaryCollector.finishTurn(
+        ending.outcome === 'done' ? diaryFinalizeArgs : { outcome: ending.outcome },
+      )
+      const hasPendingSteer = this.pendingSteer !== undefined
       this.#startPendingSteer()
+      if (
+        !hasPendingSteer
+        && diaryDigest !== null
+        && this.diaryStore !== null
+        && this.diarySuggester !== null
+        && this.getDiaryAutoSuggest() === true
+        && this.shutdownSignal === undefined
+      ) {
+        void this.#runDiarySuggestion(turnId, ending.sessionId ?? null, diaryDigest)
+      }
     }
   }
 
@@ -1122,6 +1338,7 @@ export class SessionController {
         }
       }
       this.logStore.toolCall(turnId, { callId, name: data.name, args })
+      this.diaryCollector.noteToolCall({ name: data.name, args })
       this.publish({
         v: PROTOCOL_VERSION,
         type: 'chat.tool_call',
@@ -1148,6 +1365,7 @@ export class SessionController {
       const durationMs = started === undefined ? undefined : Math.round(performance.now() - started)
       if (callId) toolStarts.delete(callId)
       this.logStore.toolResult(turnId, { callId, ok: !isError, text, durationMs })
+      this.diaryCollector.noteToolResult({ ok: !isError, text })
       this.publish({
         v: PROTOCOL_VERSION,
         type: 'chat.tool_result',

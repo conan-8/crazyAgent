@@ -778,3 +778,261 @@ test('roleClickProbe matches Docs submenu items with trailing arrow glyphs and a
   assert.equal(rawRes.matches.length, 1)
   assert.equal(rawRes.matches[0].editor, true)
 })
+
+test('roleClickProbe separates sibling flex/non-inline menuitem spans without splitting inline word formatting', t => {
+  const prev = {
+    window: globalThis.window,
+    document: globalThis.document,
+    location: globalThis.location,
+    Node: globalThis.Node,
+    getComputedStyle: globalThis.getComputedStyle,
+    __crazyagentRoleClickIdentities: globalThis.__crazyagentRoleClickIdentities,
+  }
+  t.after(() => {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete globalThis[k]
+      else globalThis[k] = v
+    }
+  })
+  globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1 }
+  globalThis.location = { href: 'https://docs.google.com/document/d/abc/edit' }
+  const win = { innerWidth: 1200, innerHeight: 800 }
+  win.top = win
+  globalThis.window = win
+  const displays = new WeakMap()
+  globalThis.getComputedStyle = el => ({
+    display: displays.get(el) ?? 'block',
+    visibility: 'visible',
+    contentVisibility: 'visible',
+    opacity: '1',
+  })
+
+  const makeEl = ({ tag = 'div', role = '', display = 'block', childNodes = [], parent = null, rect = { left: 20, top: 20, width: 160, height: 28 } }) => {
+    const el = {
+      nodeType: 1,
+      tagName: tag.toUpperCase(),
+      isConnected: true,
+      hidden: false,
+      inert: false,
+      disabled: false,
+      isContentEditable: false,
+      parentElement: parent,
+      childNodes,
+      getAttribute: name => (name === 'role' && role ? role : null),
+      hasAttribute: () => false,
+      getBoundingClientRect: () => ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height }),
+      getRootNode: () => globalThis.document,
+      matches: sel => sel.split(',').some(part => part.trim() === tag),
+    }
+    displays.set(el, display)
+    return el
+  }
+  const textNode = text => ({ nodeType: 3, textContent: text })
+
+  const labelSpan = makeEl({ tag: 'span', display: 'inline-block', childNodes: [textNode('Page elements')] })
+  const badgeSpan = makeEl({ tag: 'span', display: 'inline-block', childNodes: [textNode('Updated')] })
+  const arrowSpan = makeEl({ tag: 'span', display: 'inline-block', childNodes: [textNode('►')] })
+  const menuitem = makeEl({
+    tag: 'div',
+    role: 'menuitem',
+    display: 'flex',
+    childNodes: [labelSpan, badgeSpan, arrowSpan],
+    rect: { left: 20, top: 40, width: 180, height: 28 },
+  })
+  labelSpan.parentElement = menuitem
+  badgeSpan.parentElement = menuitem
+  arrowSpan.parentElement = menuitem
+
+  const boldChar = makeEl({ tag: 'b', display: 'inline', childNodes: [textNode('B')] })
+  const wordBtn = makeEl({
+    tag: 'button',
+    display: 'inline-block',
+    childNodes: [boldChar, textNode('old')],
+    rect: { left: 20, top: 100, width: 80, height: 28 },
+  })
+  boldChar.parentElement = wordBtn
+
+  const all = [menuitem, labelSpan, badgeSpan, arrowSpan, wordBtn, boldChar]
+  globalThis.document = {
+    designMode: 'off',
+    querySelectorAll: () => all,
+    elementFromPoint: (x, y) => [menuitem, wordBtn].find(el => {
+      const r = el.getBoundingClientRect()
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+    }) ?? null,
+  }
+
+  const pageElRes = roleClickProbe({ role: 'menuitem', name: 'Page elements Updated' })
+  assert.equal(pageElRes.ok, true)
+  assert.equal(pageElRes.matches.length, 1)
+  assert.equal(pageElRes.matches[0].name, 'Page elements Updated')
+
+  const boldRes = roleClickProbe({ role: 'button', name: 'Bold' })
+  assert.equal(boldRes.ok, true)
+  assert.equal(boldRes.matches.length, 1)
+  assert.equal(boldRes.matches[0].name, 'Bold')
+})
+
+test('roleClickProbe pierces Shadow DOM slots and deduplicates Web Component host/button pairs', t => {
+  const prev = {
+    window: globalThis.window,
+    document: globalThis.document,
+    location: globalThis.location,
+    Node: globalThis.Node,
+    getComputedStyle: globalThis.getComputedStyle,
+    __crazyagentRoleClickIdentities: globalThis.__crazyagentRoleClickIdentities,
+  }
+  t.after(() => {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete globalThis[k]
+      else globalThis[k] = v
+    }
+  })
+  globalThis.Node = { TEXT_NODE: 3, ELEMENT_NODE: 1 }
+  globalThis.location = { href: 'https://m3a.vhlcentral.com/sections/1/activities/2' }
+  globalThis.getComputedStyle = () => ({ display: 'inline-flex', visibility: 'visible', contentVisibility: 'visible', opacity: '1' })
+  const win = { innerWidth: 1200, innerHeight: 800 }
+  win.top = win
+  globalThis.window = win
+
+  const btnRect = { left: 700, top: 490, width: 140, height: 36, right: 840, bottom: 526 }
+  const textNode = { nodeType: 3, textContent: 'Save Answers' }
+  const slButton = {
+    nodeType: 1,
+    tagName: 'SL-BUTTON',
+    isConnected: true,
+    hidden: false,
+    inert: false,
+    disabled: false,
+    isContentEditable: false,
+    parentElement: null,
+    children: [],
+    childNodes: [textNode],
+    getAttribute: name => (name === 'role' ? 'button' : null),
+    hasAttribute: () => false,
+    getBoundingClientRect: () => btnRect,
+    getRootNode: () => globalThis.document,
+    matches: () => false,
+  }
+  const btnShadow = { host: slButton }
+  const innerSlot = {
+    nodeType: 1,
+    tagName: 'SLOT',
+    isConnected: true,
+    hidden: false,
+    inert: false,
+    parentElement: null,
+    children: [],
+    childNodes: [],
+    assignedNodes: () => [textNode],
+    assignedElements: () => [],
+    getAttribute: () => null,
+    hasAttribute: () => false,
+    getBoundingClientRect: () => btnRect,
+    getRootNode: () => btnShadow,
+    matches: () => false,
+  }
+  const innerButton = {
+    nodeType: 1,
+    tagName: 'BUTTON',
+    isConnected: true,
+    hidden: false,
+    inert: false,
+    disabled: false,
+    isContentEditable: false,
+    parentElement: null,
+    children: [innerSlot],
+    childNodes: [innerSlot],
+    getAttribute: () => null,
+    hasAttribute: () => false,
+    getBoundingClientRect: () => btnRect,
+    getRootNode: () => btnShadow,
+    matches: sel => sel.split(',').some(part => part.trim() === 'button'),
+  }
+  innerSlot.parentElement = innerButton
+  btnShadow.childNodes = [innerButton]
+  btnShadow.querySelectorAll = () => [innerButton, innerSlot]
+  btnShadow.elementFromPoint = () => innerSlot
+  slButton.shadowRoot = btnShadow
+
+  // Dialog wraps sl-button via a <slot name="footer"> inside its shadowRoot.
+  const slDialog = {
+    nodeType: 1,
+    tagName: 'SL-DIALOG',
+    isConnected: true,
+    hidden: false,
+    inert: false,
+    parentElement: null,
+    children: [slButton],
+    childNodes: [slButton],
+    getAttribute: () => null,
+    hasAttribute: name => name === 'open',
+    getBoundingClientRect: () => ({ left: 200, top: 200, width: 800, height: 400, right: 1000, bottom: 600 }),
+    getRootNode: () => globalThis.document,
+    matches: () => false,
+  }
+  const dialogShadow = { host: slDialog }
+  const footerSlot = {
+    nodeType: 1,
+    tagName: 'SLOT',
+    isConnected: true,
+    hidden: false,
+    inert: false,
+    parentElement: null,
+    children: [],
+    childNodes: [],
+    assignedNodes: () => [slButton],
+    assignedElements: () => [slButton],
+    getAttribute: () => null,
+    hasAttribute: () => false,
+    getBoundingClientRect: () => btnRect,
+    getRootNode: () => dialogShadow,
+    matches: () => false,
+  }
+  const dialogPanel = {
+    nodeType: 1,
+    tagName: 'DIV',
+    isConnected: true,
+    hidden: false,
+    inert: false,
+    parentElement: null,
+    children: [footerSlot],
+    childNodes: [footerSlot],
+    getAttribute: name => (name === 'role' ? 'dialog' : null),
+    hasAttribute: () => false,
+    getBoundingClientRect: () => ({ left: 200, top: 200, width: 800, height: 400, right: 1000, bottom: 600 }),
+    getRootNode: () => dialogShadow,
+    matches: () => false,
+  }
+  footerSlot.parentElement = dialogPanel
+  slButton.assignedSlot = footerSlot
+  dialogShadow.childNodes = [dialogPanel]
+  dialogShadow.querySelectorAll = () => [dialogPanel, footerSlot]
+  dialogShadow.elementFromPoint = () => footerSlot
+  slDialog.shadowRoot = dialogShadow
+
+  globalThis.document = {
+    designMode: 'off',
+    querySelectorAll: () => [slDialog, slButton],
+    // Top-level hit lands on sl-dialog; deepHit must descend shadowRoot -> footerSlot -> slButton -> innerSlot.
+    elementFromPoint: () => slDialog,
+  }
+
+  const res = roleClickProbe({ role: 'button', name: 'Save Answers' })
+  assert.equal(res.ok, true)
+  assert.equal(res.matches.length, 1, 'host + shadow button deduplicate to one match')
+  assert.equal(res.matches[0].covered, false, 'piercing dialog slot finds inner shadow button uncovered')
+  assert.equal(res.matches[0].name, 'Save Answers')
+
+  // Real Chromium retargeting: when slotted light-DOM text sits directly over
+  // <button><slot></slot></button>, shadowRoot.elementFromPoint returns the
+  // host (<sl-button>) itself; elementsFromPoint steps into the shadow tree.
+  globalThis.document.elementFromPoint = () => slButton
+  slButton.getAttribute = () => null
+  btnShadow.elementFromPoint = () => slButton
+  btnShadow.elementsFromPoint = () => [slButton, innerSlot, innerButton]
+  const retargeted = roleClickProbe({ role: 'button', name: 'Save Answers' })
+  assert.equal(retargeted.ok, true)
+  assert.equal(retargeted.matches.length, 1)
+  assert.equal(retargeted.matches[0].covered, false, 'elementsFromPoint resolves retargeted slotted text hit inside shadow button')
+})

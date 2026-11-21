@@ -25,6 +25,7 @@ import { createPlanRuntime } from './plan-runtime.js'
 import { AGENT_HELP_TOOL, createHelpRuntime } from './help.js'
 import { createConfirmRuntime } from './confirm.js'
 import { createWatchSteerRuntime } from './watch-steer.js'
+import { createDiaryRuntime } from './diary.js'
 import { CORE_GUIDANCE, DOCS_MODE_GUIDANCE } from './guidance.js'
 import {
   ACTION_EXPECT_BATCH_CHECKS,
@@ -63,6 +64,8 @@ import { NAVIGATION_KEYS, createCallGuard, toolResultText, noProgressResultText 
 // V2 (§3.3): re-export the shared no-progress predicate so the watch ledger and
 // the provider agree by construction (the ledger imports it from repeat-guards).
 export { noProgressResultText } from './repeat-guards.js'
+import { formatViewLabels } from './view-labels.js'
+export { formatViewLabels, selectListedLabels } from './view-labels.js'
 
 export const name = 'browser-use-extension'
 export const inject = ['browserUse', 'tools', 'systemPrompt']
@@ -151,10 +154,12 @@ class BridgeClient {
     this.timeoutMs = options.timeoutMs
     this.log = options.log
     this.onDocsOutcome = options.onDocsOutcome
+    this.onBridgeResult = options.onBridgeResult
     this.onPlanMode = options.onPlanMode
     this.onConfirmMode = options.onConfirmMode
     this.onTurnContext = options.onTurnContext
     this.onWatchSteer = options.onWatchSteer
+    this.onDiaryContext = options.onDiaryContext
   }
 
   start() {
@@ -289,6 +294,11 @@ class BridgeClient {
           this.onDocsOutcome?.(command, callId, error, value, sessionId)
         } catch {
           // Evidence tracking must not change the tool outcome.
+        }
+        try {
+          this.onBridgeResult?.(command, callId, error, value)
+        } catch {
+          // Diary tracking must not change the tool outcome.
         }
         if (error?.code === 'SIDE_PANEL_CLOSED') {
           this.#executorClosed = { count: this.#executorClosed.count + 1, lastAt: Date.now() }
@@ -461,6 +471,14 @@ class BridgeClient {
         this.onConfirmMode?.(message)
       } catch (error) {
         this.logEvent('confirm.mode.error', { message: error instanceof Error ? error.message : String(error) }, 'warn')
+      }
+      return
+    }
+    if (message.type === 'diary.context' && ws === this.#ws) {
+      try {
+        this.onDiaryContext?.(message)
+      } catch (error) {
+        this.logEvent('diary.context.error', { message: error instanceof Error ? error.message : String(error) }, 'warn')
       }
       return
     }
@@ -888,16 +906,7 @@ function formatView(result) {
   }
   const labels = Array.isArray(result?.labels) ? result.labels : []
   if (labels.length > 0) {
-    const listed = labels.slice(0, 60)
-    lines.push(`labels (click by number): ${labels.length}`)
-    for (const label of listed) {
-      const role = label?.role || label?.tag || 'element'
-      const text = String(label?.text ?? '')
-      lines.push(`[${label?.id}] ${role}${label?.disabled ? ' (disabled)' : ''}${label?.frame ? ' (iframe)' : ''} ${JSON.stringify(text)}`)
-    }
-    if (labels.length > listed.length) {
-      lines.push(`... ${labels.length - listed.length} more labels not listed; take a fresh view for the rest`)
-    }
+    lines.push(...formatViewLabels(labels))
   }
   return lines.join('\n')
 }
@@ -1452,7 +1461,10 @@ function typeContent(result) {
     const pageChanged = typeof typed.pageChanged === 'boolean'
       ? ` pageChanged=${typed.pageChanged} is only a hint, not confirmation.`
       : ''
-    lines.push(`result: input dispatched to the canvas editor; document change is UNVERIFIED.${pageChanged} Use the returned fresh view for visual confirmation before further input; never retry unverified input blindly.`)
+    const canvasNote = typed.canvasEditorName === 'Google Docs'
+      ? ' Note: unlabelled insertText inserts at the caret and does not replace an active Docs canvas selection (press Delete/Backspace first if replacing a selection).'
+      : ''
+    lines.push(`result: input dispatched to the canvas editor; document change is UNVERIFIED.${pageChanged}${canvasNote} Use the returned fresh view for visual confirmation before further input; never retry unverified input blindly.`)
   } else if (result?.changed === false) {
     lines.push('result: NO VISIBLE CHANGE — the field value did not change. Check that the label is an editable field, or click the field first and type into the focused element.')
   } else if (typeof typed.valuePreview === 'string') {
@@ -1723,7 +1735,10 @@ function docsReadContent(result) {
     ? ` docs.omittedImageData=${docs.omittedImageDataCount}(${docs.omittedImageDataChars ?? '?'} chars)`
     : ''
   const header = `docs.status=${docs.status ?? '?'} docs.format=${docs.format ?? '?'} docs.chars=${docs.chars ?? '?'} docs.truncated=${docs.truncated === true} docs.verifiedBy=${docs.verifiedBy ?? 'export'} docs.offset=${offset} docs.next_offset=${nextOffset ?? 'null'}${omitted}`
-  return { content: [{ type: 'text', text: `${header}\n--- document content ---\n${docs.content ?? ''}` }] }
+  const commentNote = docs.format === 'html' && typeof docs.content === 'string' && /#cmnt\d+/u.test(docs.content)
+    ? '\nnote: Google Docs HTML export omits resolved comments and lists each reply in an open thread as an additional [a]/[b] footnote marker on the same anchor.'
+    : ''
+  return { content: [{ type: 'text', text: `${header}${commentNote}\n--- document content ---\n${docs.content ?? ''}` }] }
 }
 
 const BATCH_OPS = ['click', 'click_at', 'hover', 'select', 'select_option', 'type', 'press_key', 'scroll', 'wait_for', 'navigate']
@@ -2210,7 +2225,7 @@ const NO_OP_VIEW_TOOLS = new Set(['browser_switch_tab', 'browser_screenshot', 'b
  * @param {ImageDedupe} [imageDedupe]
  * @param {ReturnType<typeof createDownloadsFolder>} downloadsFolder
  */
-function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), downloadsFolder, helpRuntime, docsBlockBySession = new Map(), osClipboard = createOsClipboard()) {
+function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), downloadsFolder, helpRuntime, docsBlockBySession = new Map(), osClipboard = createOsClipboard(), diaryRuntime = undefined) {
   const names = []
   let virtualClipboardIsImage = false
   /**
@@ -2286,8 +2301,17 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
             else content[textIndex] = { ...content[textIndex], text: `${rules}\n\n${content[textIndex].text}` }
             deduped = { ...deduped, content }
           }
+          const diaryNote = diaryRuntime?.deliverForCall(exec?.callId)
+          if (diaryNote !== undefined && Array.isArray(deduped?.content)) {
+            const content = [...deduped.content]
+            const textIndex = content.findIndex(block => block?.type === 'text' && typeof block.text === 'string')
+            if (textIndex < 0) content.push({ type: 'text', text: diaryNote })
+            else content[textIndex] = { ...content[textIndex], text: `${content[textIndex].text}\n\n${diaryNote}` }
+            deduped = { ...deduped, content }
+          }
           return deduped
         } catch (error) {
+          diaryRuntime?.clearCall(exec?.callId)
           guard.endCall(definition.name, toolArgs, error)
           // A rejection that never reached the browser is an argument error. Say
           // so when the model repeats it, instead of the same text a second time.
@@ -3029,7 +3053,7 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
   ctx.tools.register(define({
     name: 'browser_type',
     rawName: 'browser_type',
-    description: 'Type text into a labelled form field, or into the focused element when no label is given. Without a label, input inserts at the caret/current selection, not a whole-document replace. On normal readable fields, text:"" clears the field and mode:"append" keeps existing text; canvas editors may reject append/empty operations. submit:true presses Enter. Canvas input is dispatched but UNVERIFIED, so use the returned fresh view for visual confirmation. The view is auto/compact (no screenshot) unless the page changed or you pass view:"full".',
+    description: 'Type text into a labelled form field, or into the focused element when no label is given. Without a label, input inserts at the caret (on Google Docs canvas, insertText does not replace an active selection — press Delete/Backspace first if replacing one) and is not a whole-document replace. On normal readable fields, text:"" clears the field and mode:"append" keeps existing text; canvas editors may reject append/empty operations. submit:true presses Enter. Canvas input is dispatched but UNVERIFIED, so use the returned fresh view for visual confirmation. The view is auto/compact (no screenshot) unless the page changed or you pass view:"full".',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -3819,7 +3843,74 @@ function registerTools(ctx, bridge, guard, imageDedupe = new ImageDedupe(), down
     async call(args, exec) {
       const forward = normalizeDocsTableArgs(args)
       const timeoutMs = args.action === 'read' ? 60_000 : args.action === 'create' ? 120_000 : 660_000
-      const result = await bridge.request({ op: 'docs', args: forward }, exec.callId, exec.signal, timeoutMs, exec.agent?.session?.id)
+      const canOsStage = args.action === 'create' && osClipboard?.isAvailable?.() === true && typeof osClipboard.stageHtml === 'function'
+      const buildTableHtml = req => {
+        const esc = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+        const matrix = Array.isArray(req.values)
+          ? req.values
+          : Array.from({ length: req.rows }, () => Array(req.columns).fill(''))
+        const rows = matrix.map(row => `<tr>${row.map(value => `<td style="border:1px solid #000000;padding:5px;vertical-align:top"><p style="margin:0;padding:0">${esc(value)}</p></td>`).join('')}</tr>`).join('')
+        return {
+          html: `<table style="border-collapse:collapse;width:100%"><tbody>${rows}</tbody></table>`,
+          text: matrix.map(row => row.join('\t')).join('\n'),
+        }
+      }
+      const stageAndCreateViaOsClipboard = async (tableHtml, tableText) => {
+        let preserved = null
+        let restoreError = null
+        let staged = null
+        try {
+          preserved = await osClipboard.preserve()
+        } catch (error) {
+          restoreError = error instanceof Error ? error : new Error(String(error))
+        }
+        staged = await osClipboard.stageHtml(tableHtml, tableText)
+        let pasteErr = null
+        let created
+        try {
+          created = await bridge.request({ op: 'docs', args: { ...forward, osStaged: true } }, exec.callId, exec.signal, timeoutMs, exec.agent?.session?.id)
+          await new Promise(resolve => setTimeout(resolve, 150))
+        } catch (error) {
+          pasteErr = error
+        }
+        let restored = false
+        try {
+          restored = await osClipboard.restore(preserved, staged)
+        } catch (error) {
+          restoreError = error instanceof Error ? error : new Error(String(error))
+        }
+        if (pasteErr) throw pasteErr
+        if (isRecord(created?.docs)) {
+          return {
+            ...created,
+            docs: {
+              ...created.docs,
+              clipboardRestored: preserved !== null && restored === true && restoreError === null,
+              ...(restoreError ? { clipboardRestoreError: restoreError.message } : {}),
+            },
+          }
+        }
+        return created
+      }
+      let result
+      try {
+        result = await bridge.request({ op: 'docs', args: forward }, exec.callId, exec.signal, timeoutMs, exec.agent?.session?.id)
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+        const isUnfocusedPreserveError = canOsStage && (
+          code === 'DOCS_CLIPBOARD_PRESERVE_FAILED'
+          || code === 'CLIPBOARD_PRESERVE_FAILED'
+          || /\[table-create-preserve\].*(?:not focused|CLIPBOARD_PRESERVE_FAILED|CLIPBOARD_DENIED|unavailable)/iu.test(msg)
+        )
+        if (!isUnfocusedPreserveError) throw error
+        const content = buildTableHtml(forward)
+        result = await stageAndCreateViaOsClipboard(content.html, content.text)
+        return docsTableContent(result)
+      }
+      if (result?.osTableStageNeeded === true && typeof result.tableHtml === 'string' && canOsStage) {
+        result = await stageAndCreateViaOsClipboard(result.tableHtml, typeof result.tableText === 'string' ? result.tableText : '')
+      }
       return docsTableContent(result)
     },
   }))
@@ -4186,20 +4277,24 @@ export function apply(ctx, config = {}) {
     let planRuntime
     let confirmRuntime
     let watchSteerRuntime
+    let diaryRuntime
     const bridge = new BridgeClient({
       url: bridgeUrl ?? DEFAULT_BRIDGE_URL,
       token: bridgeToken ?? '',
       timeoutMs,
       log,
       onDocsOutcome: docsFinalCheck.observeBridge,
+      onBridgeResult: (command, callId, error, value) => diaryRuntime?.observeBridgeResult(command, callId, error, value),
       onPlanMode: frame => planRuntime?.setMode(frame),
       onConfirmMode: frame => confirmRuntime?.setMode(frame),
       onTurnContext: frame => watchSteerRuntime?.setTurnContext(frame),
       onWatchSteer: frame => watchSteerRuntime?.handleSteer(frame),
+      onDiaryContext: frame => diaryRuntime?.setContext(frame),
     })
     planRuntime = createPlanRuntime({ ctx, bridge })
     confirmRuntime = createConfirmRuntime({ ctx, bridge })
     watchSteerRuntime = createWatchSteerRuntime({ bridge })
+    diaryRuntime = createDiaryRuntime({ bridge })
     // Repeat guard: fails an identical runaway call with a normal tool error
     // before it reaches the bridge, and resets whenever a new turn starts. There
     // is no per-turn call limit.
@@ -4231,7 +4326,7 @@ export function apply(ctx, config = {}) {
     bridge.start()
     const helpRuntime = createHelpRuntime({ bridge })
     const osClipboard = config.osClipboard ?? createOsClipboard()
-    const toolNames = registerTools(ctx, bridge, guard, imageDedupe, downloadsFolder, helpRuntime, docsBlockBySession, osClipboard)
+    const toolNames = registerTools(ctx, bridge, guard, imageDedupe, downloadsFolder, helpRuntime, docsBlockBySession, osClipboard, diaryRuntime)
     /** @type {Map<number, number>} consecutive no-progress tool results per turn */
     const noProgressByTurn = new Map()
     const resolveTurnEffort = (agent, turn) => {
@@ -4491,6 +4586,11 @@ export function apply(ctx, config = {}) {
               bridge.logEvent('turn.outcome.error', { part: 'watch-steer', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
             }
             try {
+              diaryRuntime.endTurn()
+            } catch (error) {
+              bridge.logEvent('turn.outcome.error', { part: 'diary', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
+            }
+            try {
               docsFinalCheck.endTurn(session?.id, turn, outcome)
             } catch (error) {
               bridge.logEvent('turn.outcome.error', { part: 'docs', turn, message: error instanceof Error ? error.message : String(error) }, 'warn')
@@ -4672,6 +4772,7 @@ export function apply(ctx, config = {}) {
       planRuntime.dispose()
       confirmRuntime.dispose()
       watchSteerRuntime.dispose()
+      diaryRuntime.dispose()
       bridge.close()
     }
   }, 'browser-use-extension.runtime')

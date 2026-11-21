@@ -22,6 +22,41 @@ import { join } from 'node:path'
 export const OS_CLIPBOARD_MAX_BYTES = 25_000_000
 
 /**
+ * Format an HTML fragment using Microsoft's CF_HTML clipboard wire header so
+ * Windows Chromium/Google Docs recognizes the pasted clipboard payload as HTML.
+ * Pure helper so unit tests verify byte offsets deterministically.
+ * @param {string} html
+ * @returns {string}
+ */
+export function formatWindowsCfHtml(html) {
+  const fragment = String(html ?? '')
+  const prefix = '<html><body><!--StartFragment-->'
+  const suffix = '<!--EndFragment--></body></html>'
+  const pad = n => String(n).padStart(10, '0')
+  const headerTemplate = [
+    'Version:0.9',
+    `StartHTML:${pad(0)}`,
+    `EndHTML:${pad(0)}`,
+    `StartFragment:${pad(0)}`,
+    `EndFragment:${pad(0)}`,
+    '',
+  ].join('\r\n')
+  const startHtml = Buffer.byteLength(headerTemplate, 'utf8')
+  const startFragment = startHtml + Buffer.byteLength(prefix, 'utf8')
+  const endFragment = startFragment + Buffer.byteLength(fragment, 'utf8')
+  const endHtml = endFragment + Buffer.byteLength(suffix, 'utf8')
+  const header = [
+    'Version:0.9',
+    `StartHTML:${pad(startHtml)}`,
+    `EndHTML:${pad(endHtml)}`,
+    `StartFragment:${pad(startFragment)}`,
+    `EndFragment:${pad(endFragment)}`,
+    '',
+  ].join('\r\n')
+  return `${header}${prefix}${fragment}${suffix}`
+}
+
+/**
  * Inspect magic bytes of a downloaded image file. Only raster formats Chrome
  * can cleanly decode to PNG are accepted; SVGs and non-images return undefined.
  * @param {Buffer|Uint8Array} bytes
@@ -207,7 +242,9 @@ export function createOsClipboard(io = {}) {
           ? 'text/plain;charset=utf-8'
           : types.includes('text/plain')
             ? 'text/plain'
-            : null
+            : types.includes('text/html')
+              ? 'text/html'
+              : null
       if (!mimeType) return { kind: 'unsupported', backend, types: types.slice(0, 8) }
       const args = mimeType === 'image/png' ? ['--type', mimeType] : ['--no-newline', '--type', mimeType]
       const data = await runExecFile(execFileFn, 'wl-paste', args, { env, encoding: 'buffer', maxBuffer: OS_CLIPBOARD_MAX_BYTES, timeout: 2_500 })
@@ -228,7 +265,9 @@ export function createOsClipboard(io = {}) {
           ? 'UTF8_STRING'
           : types.includes('text/plain')
             ? 'text/plain'
-            : null
+            : types.includes('text/html')
+              ? 'text/html'
+              : null
       if (!mimeType) return { kind: 'empty', backend }
       const data = await runExecFile(execFileFn, 'xclip', ['-selection', 'clipboard', '-t', mimeType, '-o'], { env, encoding: 'buffer', maxBuffer: OS_CLIPBOARD_MAX_BYTES, timeout: 2_500 })
       if (!Buffer.isBuffer(data) || data.length === 0) return { kind: 'empty', backend }
@@ -296,6 +335,59 @@ export function createOsClipboard(io = {}) {
     throw new Error(`Unsupported OS clipboard backend: ${backend}`)
   }
 
+  async function stageHtml(html, text = '') {
+    if (!backend) throw new Error('No supported OS clipboard tool is available')
+    if (typeof html !== 'string' || html.length === 0) {
+      throw new Error('OS clipboard HTML staging requires non-empty HTML')
+    }
+    const buf = Buffer.from(html, 'utf8')
+    if (buf.length > OS_CLIPBOARD_MAX_BYTES) {
+      throw new Error(`OS clipboard HTML exceeds the ${OS_CLIPBOARD_MAX_BYTES}-byte limit`)
+    }
+    if (backend === 'wayland') {
+      const holder = await stageForegroundHolder(spawnFn, 'wl-copy', ['--foreground', '--type', 'text/html'], buf, env, settleMs)
+      return { backend, release: holder.release }
+    }
+    if (backend === 'xclip') {
+      await writeDetachedSpawn(spawnFn, 'xclip', ['-selection', 'clipboard', '-t', 'text/html', '-i'], buf, env)
+      return { backend, release: () => {} }
+    }
+    if (backend === 'macos') {
+      const dir = await mkdtempFn(join(tmpdir(), 'crazyagent-clip-'))
+      const file = join(dir, 'table.html')
+      try {
+        await writeFileFn(file, buf, { mode: 0o600 })
+        await runExecFile(execFileFn, 'osascript', [
+          '-e', 'on run argv',
+          '-e', 'set the clipboard to (read (POSIX file (item 1 of argv)) as «class HTML»)',
+          '-e', 'end run',
+          '--', file,
+        ], { env, timeout: 3_000 })
+      } finally {
+        await rmFn(dir, { recursive: true, force: true }).catch(() => {})
+      }
+      return { backend, release: () => {} }
+    }
+    if (backend === 'windows') {
+      const dir = await mkdtempFn(join(tmpdir(), 'crazyagent-clip-'))
+      const file = join(dir, 'table.cfhtml')
+      const textFile = join(dir, 'table.txt')
+      const ps = defaultHasCommand('powershell.exe', env, platform) ? 'powershell.exe' : 'powershell'
+      try {
+        await writeFileFn(file, Buffer.from(formatWindowsCfHtml(html), 'utf8'), { mode: 0o600 })
+        await writeFileFn(textFile, Buffer.from(String(text ?? ''), 'utf8'), { mode: 0o600 })
+        await runExecFile(execFileFn, ps, [
+          '-NoProfile', '-NonInteractive', '-STA', '-Command',
+          'Add-Type -AssemblyName System.Windows.Forms; $obj = New-Object System.Windows.Forms.DataObject; $obj.SetData([System.Windows.Forms.DataFormats]::Html, [System.IO.File]::ReadAllText($env:CRAZYAGENT_CLIP_HTML, [System.Text.Encoding]::UTF8)); $obj.SetData([System.Windows.Forms.DataFormats]::UnicodeText, [System.IO.File]::ReadAllText($env:CRAZYAGENT_CLIP_TEXT, [System.Text.Encoding]::UTF8)); [System.Windows.Forms.Clipboard]::SetDataObject($obj, $true)',
+        ], { env: { ...env, CRAZYAGENT_CLIP_HTML: file, CRAZYAGENT_CLIP_TEXT: textFile }, timeout: 5_000 })
+      } finally {
+        await rmFn(dir, { recursive: true, force: true }).catch(() => {})
+      }
+      return { backend, release: () => {} }
+    }
+    throw new Error(`Unsupported OS clipboard backend: ${backend}`)
+  }
+
   async function restore(snapshot, staged) {
     try { staged?.release?.() } catch {}
     if (!backend || !snapshot || snapshot.kind === 'unsupported') return false
@@ -344,6 +436,7 @@ export function createOsClipboard(io = {}) {
     isAvailable,
     preserve,
     stagePng,
+    stageHtml,
     restore,
   }
 }

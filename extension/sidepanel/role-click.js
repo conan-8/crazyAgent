@@ -109,8 +109,23 @@ export function roleClickProbe(request) {
         const assigned = element.assignedNodes({ flatten: true })
         if (assigned.length > 0) return assigned.map(child => textFor(child, seen)).join('')
       }
-      const children = element.shadowRoot ? element.shadowRoot.childNodes : element.childNodes
-      return Array.from(children).map(child => textFor(child, seen)).join('')
+      const children = (element.shadowRoot ? element.shadowRoot.childNodes : element.childNodes) ?? []
+      const parentFlex = style.display === 'flex' || style.display === 'inline-flex' || style.display === 'grid' || style.display === 'inline-grid'
+      let out = ''
+      for (const child of Array.from(children)) {
+        const piece = textFor(child, seen)
+        if (!piece) continue
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          const childDisplay = getComputedStyle(child).display
+          const separate = parentFlex || (Boolean(childDisplay) && childDisplay !== 'inline')
+          if (separate && out && !/\s$/u.test(out) && !/^\s/u.test(piece)) out += ' '
+          out += piece
+          if (separate && !/\s$/u.test(out)) out += ' '
+        } else {
+          out += piece
+        }
+      }
+      return out
     }
     const byId = (root, id) => {
       if (typeof root.getElementById === 'function') return root.getElementById(id)
@@ -237,10 +252,37 @@ export function roleClickProbe(request) {
     })
     const deepHit = (x, y) => {
       let hit = document.elementFromPoint(x, y)
-      for (let depth = 0; depth < 16 && hit?.shadowRoot && typeof hit.shadowRoot.elementFromPoint === 'function'; depth += 1) {
-        const nested = hit.shadowRoot.elementFromPoint(x, y)
-        if (!nested || nested === hit) break
-        hit = nested
+      for (let depth = 0; depth < 16 && hit; depth += 1) {
+        if (hit.shadowRoot && typeof hit.shadowRoot.elementFromPoint === 'function') {
+          let nested = hit.shadowRoot.elementFromPoint(x, y)
+          // When a slotted light-DOM text node sits over a shadow <button><slot>,
+          // Chromium retargets shadowRoot.elementFromPoint back to the host.
+          // Inspect shadowRoot.elementsFromPoint to step into the shadow tree.
+          if ((!nested || nested === hit || nested.getRootNode?.() !== hit.shadowRoot)
+            && typeof hit.shadowRoot.elementsFromPoint === 'function') {
+            const shadowHit = hit.shadowRoot.elementsFromPoint(x, y).find(node => node && node !== hit && node.getRootNode?.() === hit.shadowRoot)
+            if (shadowHit) nested = shadowHit
+          }
+          if (!nested || nested === hit) break
+          hit = nested
+          continue
+        }
+        if (hit.tagName?.toLowerCase() === 'slot' && typeof hit.assignedElements === 'function') {
+          const assigned = hit.assignedElements({ flatten: true })
+          let slotted = null
+          for (let i = assigned.length - 1; i >= 0; i -= 1) {
+            const candidate = assigned[i]
+            const box = candidate.getBoundingClientRect?.()
+            if (box && x >= box.left && x <= box.right && y >= box.top && y <= box.bottom) {
+              slotted = candidate
+              break
+            }
+          }
+          if (!slotted || slotted === hit) break
+          hit = slotted
+          continue
+        }
+        break
       }
       return hit
     }
@@ -263,8 +305,8 @@ export function roleClickProbe(request) {
       }
     }
     collect(document)
-    const matches = []
-    const nextMatches = []
+    const rawMatches = []
+    const rawNextMatches = []
     let surfaceCount = 0
     for (const element of elements) {
       const role = roleFor(element)
@@ -279,11 +321,18 @@ export function roleClickProbe(request) {
       if (!element.isConnected || hidden(element)) continue
       const name = accessibleName(element)
       const menuitemRole = role === 'menuitem' || role === 'menuitemcheckbox' || role === 'menuitemradio'
+      const hasExplicitAria = Boolean(normalize(element.getAttribute('aria-label')) || normalize(element.getAttribute('aria-labelledby')))
+      const visibleText = menuitemRole && !hasExplicitAria ? normalize(element.innerText) : ''
       const nameMatches = wantedName => {
         if (name === wantedName) return true
         if (!menuitemRole) return false
-        const stripped = name.replace(/\s*[►▸›]+$/u, '').trim()
-        return stripped.length > 0 && stripped === wantedName
+        const candidates = visibleText && visibleText !== name ? [name, visibleText] : [name]
+        for (const candidate of candidates) {
+          if (candidate === wantedName) return true
+          const stripped = candidate.replace(/\s*[►▸›]+$/u, '').trim()
+          if (stripped.length > 0 && stripped === wantedName) return true
+        }
+        return false
       }
       const matchesCurrent = wanted && nameMatches(request.name)
       const matchesNext = wantedNext && nameMatches(request.next.name)
@@ -294,6 +343,10 @@ export function roleClickProbe(request) {
       const y = rect.top + rect.height / 2
       if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) continue
       const hit = deepHit(x, y)
+      const owner = hit ? hitOwner(hit) : undefined
+      const ownsCenter = owner === element
+        || (owner && owner.getRootNode?.()?.host === element)
+        || (owner && element.getRootNode?.()?.host === owner && roleFor(owner) === role)
       const result = {
         role,
         name,
@@ -302,13 +355,26 @@ export function roleClickProbe(request) {
         y,
         coordinateSpace: window === window.top ? 'top' : 'frame',
         disabled: disabledFor(element),
-        covered: !hit || hitOwner(hit) !== element,
+        covered: !hit || !ownsCenter,
         editor: editorFor(element),
         state: stateFor(element),
       }
-      if (matchesCurrent) matches.push({ ...result, name: request.name })
-      if (matchesNext) nextMatches.push({ ...result, name: request.next.name })
+      if (matchesCurrent) rawMatches.push({ element, item: { ...result, name: request.name } })
+      if (matchesNext) rawNextMatches.push({ element, item: { ...result, name: request.next.name } })
     }
+    // If a Web Component shadow host (e.g. <sl-button role="button">) and its
+    // own direct shadow control (<button>) both match, keep the inner control
+    // so one component is never misclassified as two duplicate buttons.
+    const dedupeShadowHosts = list => {
+      const hostsWithInner = new Set()
+      for (const entry of list) {
+        const host = entry.element.getRootNode?.()?.host
+        if (host && list.some(other => other.element === host)) hostsWithInner.add(host)
+      }
+      return list.filter(entry => !hostsWithInner.has(entry.element)).map(entry => entry.item)
+    }
+    const matches = dedupeShadowHosts(rawMatches)
+    const nextMatches = dedupeShadowHosts(rawNextMatches)
     return { ok: true, url: location.href, matches, nextMatches, surfaceCount }
   } catch (error) {
     return {

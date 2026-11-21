@@ -42,12 +42,21 @@ executes on send — other slash-leading text such as `/usr/local/bin`, `/new ch
 or a command with trailing whitespace is sent to the model as ordinary prose.
 The palette is keyboard-navigable and keeps focus in the textarea.
 
-The Settings modal includes a **Lifetime usage** card above About. Its stacked
-bar separates uncached input, cached reads, cache writes, and output; reasoning
-is labelled as part of output. The companion persists aggregate agent-turn totals
-in `.dsh-home/browser-agent/usage.json`, restores them on reconnect, and preserves
-them across release updates. Watcher tokens remain separate, and tracking begins
-with the first turn recorded by this feature rather than backfilling pruned logs.
+The Settings modal leads with **Lifetime usage**, then groups Model, Safety,
+Diary, Interface, and About. Debug log export lives in a collapsible section at
+the bottom. The usage card's stacked bar separates uncached input, cached reads,
+cache writes, and output; reasoning is labelled as part of output. The companion
+persists aggregate agent-turn totals in `.dsh-home/browser-agent/usage.json`,
+restores them on reconnect, and preserves them across release updates. Watcher
+and Diary-suggestion tokens remain separate, and tracking begins with the first
+turn recorded by this feature rather than backfilling pruned logs.
+
+The topbar's **Diary** button opens locally saved global and site-specific notes
+with search, filters, add/edit, pause, and delete. Post-run suggestions appear as
+Save/Edit/Dismiss cards above the composer. The composer aura responds to hover,
+typing, microphone energy, and speech lifecycle events, with reduced-motion
+handling. Diary state lives in `.dsh-home/browser-agent/diary.json` and survives
+updates until an explicit full clean.
 
 The Settings modal ends with an **About** section showing the current version and
 the last successful update's localized date/time. Fresh installations without a
