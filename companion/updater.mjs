@@ -248,6 +248,7 @@ function readLastUpdate(file) {
  * status().state is one of:
  *   disabled   switched off (flag/env/test mode); `reason` says why
  *   idle       enabled, nothing found yet
+ *   checking   fetching GitHub for a newer release
  *   ineligible this checkout is not a clean release checkout; `reason` says why
  *   current    the latest release is already running
  *   pending    a newer release is fetched and waits for an idle companion
@@ -362,7 +363,67 @@ export class Updater {
     }
   }
 
-  async #check() {
+  /**
+   * Check GitHub immediately for a newer release, bypassing the failed-version cooldown.
+   */
+  async checkNow() {
+    if (this.state === 'disabled') {
+      return {
+        ok: false,
+        code: 'UPDATE_DISABLED',
+        error: this.reason || 'Automatic updates are disabled.',
+        update: this.status(),
+      }
+    }
+    if (this.state === 'installing' || this.busy) {
+      return { ok: true, busy: true, update: this.status() }
+    }
+    this.busy = true
+    this.#set('checking')
+    try {
+      await this.#check({ ignoreFailedCooldown: true })
+    } catch (error) {
+      this.#set('error', error instanceof Error ? error.message : String(error))
+    } finally {
+      this.busy = false
+    }
+    return { ok: true, update: this.status() }
+  }
+
+  /** Whether an already-fetched update can be installed right now. */
+  canInstallNow() {
+    if (this.state === 'disabled') {
+      return { ok: false, code: 'UPDATE_DISABLED', error: this.reason || 'Automatic updates are disabled.' }
+    }
+    if (this.state === 'installing' || this.busy) {
+      return { ok: false, code: 'UPDATE_BUSY', error: 'An update check or install is already in progress.' }
+    }
+    if (this.pending === null) {
+      return { ok: false, code: 'UPDATE_NOT_READY', error: 'No update is ready to install yet. Check for updates first.' }
+    }
+    if (!this.options.isIdle()) {
+      return { ok: false, code: 'UPDATE_BUSY', error: 'Finish the active turn and turn off Marathon before installing the update.' }
+    }
+    return { ok: true, version: this.pending }
+  }
+
+  /**
+   * Install an already-fetched pending release immediately without waiting for idle ticks.
+   */
+  async installNow() {
+    const ready = this.canInstallNow()
+    if (!ready.ok) return { ...ready, update: this.status() }
+    this.busy = true
+    try {
+      await this.#install(ready.version)
+    } finally {
+      this.busy = false
+    }
+    return { ok: true, update: this.status() }
+  }
+
+  /** @param {{ignoreFailedCooldown?: boolean}} [options] */
+  async #check({ ignoreFailedCooldown = false } = {}) {
     this.lastCheckAt = this.now()
     this.nextCheckAt = this.lastCheckAt + CHECK_INTERVAL_MS
     const eligible = await checkEligibility({ root: this.root, version: this.version, run: this.run })
@@ -384,7 +445,7 @@ export class Updater {
       return
     }
     const failed = readUpdateState(this.stateFile).failed
-    if (failed !== null && typeof failed === 'object' && failed.version === latest
+    if (!ignoreFailedCooldown && failed !== null && typeof failed === 'object' && failed.version === latest
       && this.now() - Date.parse(String(failed.at)) < FAILED_VERSION_RETRY_MS) {
       this.#set('error', `v${latest} failed to install earlier (${String(failed.error)}); it is retried a day after the failure`)
       return
@@ -392,6 +453,10 @@ export class Updater {
     if (!this.supervised) {
       if (this.state !== 'available') this.log(`update: v${latest} is available. This companion was started without a supervisor, so it will not install it; start it with "npm run dev" for automatic updates.`)
       this.#set('available', 'no supervisor would restart the companion')
+      return
+    }
+    if (this.pending !== null && compareVersions(latest, this.pending) === 0) {
+      this.#set('pending')
       return
     }
     const fetched = await fetchReleaseTag({ root: this.root, version: latest, run: this.run })

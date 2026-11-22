@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { LifetimeUsageStore, normalizeTokenUsage } from '../lifetime-usage.mjs'
+import { LifetimeUsageStore, estimateUsageCostUsd, normalizeTokenUsage } from '../lifetime-usage.mjs'
 
 function tempDir(t) {
   const dir = mkdtempSync(join(tmpdir(), 'crazyagent-lifetime-usage-'))
@@ -76,6 +76,7 @@ test('lifetime totals survive reconstruction, accumulate once per turn, and stay
     cacheWriteTokens: 5,
     reasoningTokens: 12,
     totalTokens: 192,
+    totalCostUsd: 0,
     startedAt: '2026-11-18T10:00:00.000Z',
     updatedAt: '2026-11-19T11:00:00.000Z',
   })
@@ -107,4 +108,50 @@ test('missing or malformed stored data starts clean without throwing', t => {
   assert.equal(new LifetimeUsageStore({ file }).snapshot().totalTokens, 0)
   writeFileSync(file, JSON.stringify({ version: 2, totalTokens: 500 }))
   assert.equal(new LifetimeUsageStore({ file }).snapshot().totalTokens, 0)
+})
+
+test('estimateUsageCostUsd and LifetimeUsageStore compute and persist totalCostUsd across restarts', t => {
+  const pricing = {
+    prompt: 0.000003,
+    completion: 0.000015,
+    cacheRead: 0.0000003,
+    cacheWrite: 0.00000375,
+  }
+  // 1M input ($3) + 100k output incl. 50k reasoning ($1.50) + 2M cacheRead ($0.60) + 100k cacheWrite ($0.375) = $5.475
+  const cost = estimateUsageCostUsd({
+    inputTokens: 1_000_000,
+    outputTokens: 100_000,
+    cacheReadTokens: 2_000_000,
+    cacheWriteTokens: 100_000,
+    reasoningTokens: 50_000,
+  }, pricing)
+  assert.equal(cost, 5.475)
+  assert.equal(estimateUsageCostUsd({ inputTokens: 500, outputTokens: 200 }, null), 0)
+
+  const file = join(tempDir(t), 'usage.json')
+  // Legacy v1 file without totalCostUsd loads cleanly with totalCostUsd: 0.
+  writeFileSync(file, JSON.stringify({
+    version: 1,
+    turns: 1,
+    inputTokens: 1000,
+    outputTokens: 200,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 1200,
+    startedAt: '2026-11-18T10:00:00.000Z',
+    updatedAt: '2026-11-18T10:05:00.000Z',
+    processedTurnIds: ['legacy-1'],
+  }))
+  const store = new LifetimeUsageStore({ file, now: () => new Date('2026-11-20T12:00:00.000Z') })
+  assert.equal(store.snapshot().totalCostUsd, 0)
+  const recorded = store.record('cost-turn-1', {
+    inputTokens: 1_000_000,
+    outputTokens: 100_000,
+    cacheReadTokens: 2_000_000,
+    cacheWriteTokens: 100_000,
+    reasoningTokens: 50_000,
+  }, { pricing })
+  assert.equal(recorded.usage.totalCostUsd, 5.475)
+  assert.equal(new LifetimeUsageStore({ file }).snapshot().totalCostUsd, 5.475)
 })

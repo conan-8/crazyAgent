@@ -145,6 +145,20 @@ test('stepInteractiveAura tracks hover cursor with fluid spring stretch, tracks 
   assert.ok(frame.x > 64 && frame.y < 42, `typing pulls glow toward caret (${frame.x}, ${frame.y})`)
   assert.ok(frame.typeEnergy > 0.15)
 
+  // Typing pulls toward caret left/right even if cursor previously hovered opposite edge
+  const caretDominates = createInteractiveAuraState()
+  caretDominates.hovering = true
+  caretDominates.targetX = 12
+  caretDominates.targetY = 80
+  caretDominates.typeEnergy = 0.9
+  caretDominates.typeX = 88
+  caretDominates.typeY = 30
+  caretDominates.lastInputSource = 'caret'
+  for (let i = 0; i < 25; i += 1) {
+    frame = stepInteractiveAura(caretDominates, { dtMs: 16.67 })
+  }
+  assert.ok(frame.x > 74, `caret source must follow typed side instead of stationary hover (${frame.x})`)
+
   // reducedMotion keeps center fixed without spatial movement
   const rm = createInteractiveAuraState()
   rm.hovering = true

@@ -1569,7 +1569,11 @@ test('Diary turn-start injection, mid-turn sync, post-run suggestion accept/dism
   assert.match(promptText, /<user_diary>/)
   assert.match(promptText, /Verification codes/)
   assert.match(promptText, /Kimi login/)
-  assert.equal(uiFrames.some(f => f.type === 'chat.activity' && f.kind === 'diary-applied'), true)
+  const firstApplied = uiFrames.find(f => f.type === 'chat.activity' && f.kind === 'diary-applied')
+  assert.ok(firstApplied)
+  assert.equal(firstApplied.scope, 'site')
+  assert.equal(firstApplied.host, 'chat.kimi.ai')
+  assert.deepEqual(firstApplied.titles, ['Kimi login'])
   assert.equal(frames.some(f => f.kind === 'diary-applied'), false, 'diary-applied does not leak into RemoteHub publish stream')
   assert.equal(syncedContexts.at(-1).entries.length, 1)
   assert.equal(syncedContexts.at(-1).deliveredIds.length, 2)
@@ -1627,4 +1631,21 @@ test('Diary turn-start injection, mid-turn sync, post-run suggestion accept/dism
   const dismissed = controller.dismissDiarySuggestion('sug-dismiss')
   assert.equal(dismissed.ok, true)
   assert.equal(diaryStore.isSuppressed({ scope: 'global', sites: [], content: 'Keep answers short.' }), true)
+
+  // A turn with only global diary entries injects <user_diary> for the model but emits zero diary-applied UI pills.
+  const prevUiRequest = bridge.requestUi
+  bridge.requestUi = async command => {
+    bridge.requests.push(command)
+    return { tab: { id: 2, title: 'Docs', url: 'https://example.org/' }, view: 'compact', screenshotSkipped: true }
+  }
+  const appliedBeforeGlobalTurn = uiFrames.filter(f => f.type === 'chat.activity' && f.kind === 'diary-applied').length
+  const globalTurn = controller.submit({ text: 'Read page', origin: 'ui' })
+  await runner.started()
+  const globalPrompt = runner.runs.at(-1)[0].text
+  assert.match(globalPrompt, /<user_diary>/)
+  assert.match(globalPrompt, /Verification codes/)
+  assert.equal(uiFrames.filter(f => f.type === 'chat.activity' && f.kind === 'diary-applied').length, appliedBeforeGlobalTurn)
+  runner.current.resolve('DONE')
+  await globalTurn.done
+  bridge.requestUi = prevUiRequest
 })

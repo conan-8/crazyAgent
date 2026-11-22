@@ -95,7 +95,8 @@ There are **34 standing model-facing tools**: 25 general browser tools, 8 guarde
 - **Redesigned sidebar:** Settings leads with Lifetime usage and groups Model/Safety/Diary/Interface/About; Diary gets a topbar button; Debug log moves into Settings. Interactive and speech-reactive composer visuals respond to typing, hover, microphone energy, and reduced-motion preferences.
 - **More reliable browser interfaces:** Shadow DOM/slot-aware labels and role clicks, prioritized open-popup labels, better new-tab and navigation reporting, and real DOM-input verification on canvas-editor pages.
 - **More Google Docs fixes:** broad entity decoding, bounded write-position settling, host HTML clipboard staging for large tables, document-tab detection, Find & Replace cleanup, resolved-comment notes, and clearer canvas-selection typing guidance.
-- **Verified:** **1497/1497 Node tests**, **13/13 headless real-extension suites**, and **23/23 model-harness self-tests** pass. Live real-model Docs, docked-panel visuals, and on-device checks remain open.
+- **Updates, reasoning, and costs:** Settings can check for updates and install a fetched pending release under the existing safety guards; model-specific reasoning choices support additional levels where available; Lifetime usage includes an estimated USD cost from model pricing. Global Diary entries no longer appear as site-applied pills.
+- **Verified:** **1505/1505 Node tests**, **13/13 headless real-extension suites**, and **23/23 model-harness self-tests** pass. Live real-model Docs, docked-panel visuals, and on-device checks remain open.
 - **Android:** unchanged at `0.8.0 (7)`; the release uses the same signature-verified APK and SHA-256 as v2.6.0.
 
 See the complete [v2.6.1 patch notes](RELEASE-NOTES.md). Automatic updates remain fail-closed for development checkouts, edited trees, forks, and unsupervised companions.

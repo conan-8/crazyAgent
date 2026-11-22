@@ -24,6 +24,38 @@ function timestamp(value, fallback = null) {
   return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : fallback
 }
 
+function roundUsd(value) {
+  return Math.round(value * 1e8) / 1e8
+}
+
+function validCost(value) {
+  const number = Number(value)
+  return Number.isFinite(number) && number >= 0 ? roundUsd(number) : null
+}
+
+function costAmount(value) {
+  return validCost(value) ?? 0
+}
+
+/**
+ * Estimate USD cost for one turn from token counts and OpenRouter per-token rates.
+ * `reasoningTokens` is already included in `outputTokens`, so it is not billed twice.
+ */
+export function estimateUsageCostUsd(usage, pricing) {
+  if (!isRecord(pricing)) return 0
+  const normalized = normalizeTokenUsage(usage)
+  const promptRate = validCost(pricing.prompt)
+  const completionRate = validCost(pricing.completion)
+  if (promptRate === null && completionRate === null) return 0
+  const cacheReadRate = validCost(pricing.cacheRead) ?? validCost(pricing.input_cache_read) ?? promptRate ?? 0
+  const cacheWriteRate = validCost(pricing.cacheWrite) ?? validCost(pricing.input_cache_write) ?? promptRate ?? 0
+  const total = normalized.inputTokens * (promptRate ?? 0)
+    + normalized.outputTokens * (completionRate ?? 0)
+    + normalized.cacheReadTokens * cacheReadRate
+    + normalized.cacheWriteTokens * cacheWriteRate
+  return costAmount(total)
+}
+
 /** Input/cache-read/cache-write/output are disjoint; reasoning is part of output. */
 export function normalizeTokenUsage(value) {
   const usage = isRecord(value) ? value : {}
@@ -44,6 +76,7 @@ function emptyState(now) {
   return {
     turns: 0,
     ...normalizeTokenUsage(),
+    totalCostUsd: 0,
     startedAt: now().toISOString(),
     updatedAt: null,
     processedTurnIds: [],
@@ -65,6 +98,7 @@ function readState(file, now) {
   return {
     turns: count(parsed.turns),
     ...usage,
+    totalCostUsd: costAmount(parsed.totalCostUsd),
     startedAt: timestamp(parsed.startedAt, now().toISOString()),
     updatedAt: timestamp(parsed.updatedAt),
     processedTurnIds,
@@ -88,17 +122,19 @@ export class LifetimeUsageStore {
       cacheWriteTokens: this.state.cacheWriteTokens,
       reasoningTokens: this.state.reasoningTokens,
       totalTokens: this.state.totalTokens,
+      totalCostUsd: this.state.totalCostUsd,
       startedAt: this.state.startedAt,
       updatedAt: this.state.updatedAt,
     }
   }
 
-  record(turnId, value) {
+  record(turnId, value, options = {}) {
     const usage = normalizeTokenUsage(value)
     if (typeof turnId !== 'string' || turnId.length === 0 || turnId.length > 160
       || usage.totalTokens === 0 || this.state.processedTurnIds.includes(turnId)) {
       return { changed: false, usage: this.snapshot() }
     }
+    const turnCost = validCost(options?.costUsd) ?? validCost(value?.costUsd) ?? estimateUsageCostUsd(usage, options?.pricing)
     const next = {
       turns: add(this.state.turns, 1),
       inputTokens: add(this.state.inputTokens, usage.inputTokens),
@@ -107,6 +143,7 @@ export class LifetimeUsageStore {
       cacheWriteTokens: add(this.state.cacheWriteTokens, usage.cacheWriteTokens),
       reasoningTokens: add(this.state.reasoningTokens, usage.reasoningTokens),
       totalTokens: add(this.state.totalTokens, usage.totalTokens),
+      totalCostUsd: roundUsd(this.state.totalCostUsd + (turnCost ?? 0)),
       startedAt: this.state.startedAt,
       updatedAt: this.now().toISOString(),
       processedTurnIds: [...this.state.processedTurnIds, turnId].slice(-MAX_TRACKED_TURN_IDS),

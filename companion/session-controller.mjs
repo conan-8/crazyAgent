@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto'
 import { MarathonState, marathonFrameBody } from './marathon.mjs'
 import { WatchLedger } from './watch-ledger.mjs'
 import { Watcher } from './watcher.mjs'
-import { formatDiaryPromptBlock, matchDiaryForTurn } from './diary.mjs'
+import { formatDiaryPromptBlock, hostnameFromUrl, matchDiaryForTurn } from './diary.mjs'
 import { DiaryTurnCollector } from './diary-suggester.mjs'
 import { buildPromptBlocks, isDocsDocumentUrl, normalizeImageAttachments, normalizePlanSeed, promptStats } from './prompt.mjs'
 import { PROTOCOL_VERSION, errorMessage, isRecord } from './protocol.mjs'
@@ -980,14 +980,19 @@ export class SessionController {
           omitted: diaryMatch.omitted,
           chars: diaryBlock.length,
         }, { turnId, severity: 'info' })
-        bridge.sendToUi?.({
-          v: PROTOCOL_VERSION,
-          type: 'chat.activity',
-          kind: 'diary-applied',
-          scope: 'turn-start',
-          count: diaryMatch.entries.length,
-          titles: diaryMatch.entries.map(entry => entry.title),
-        })
+        const siteEntries = diaryMatch.entries.filter(entry => entry.scope === 'site')
+        if (siteEntries.length > 0) {
+          const startHost = hostnameFromUrl(view?.tab?.url) ?? siteEntries[0]?.sites?.[0] ?? ''
+          bridge.sendToUi?.({
+            v: PROTOCOL_VERSION,
+            type: 'chat.activity',
+            kind: 'diary-applied',
+            scope: 'site',
+            ...(startHost ? { host: startHost } : {}),
+            count: siteEntries.length,
+            titles: siteEntries.map(entry => entry.title),
+          })
+        }
       }
       this.diaryCollector.startTurn({
         turnId,

@@ -77,6 +77,14 @@ test('explicit policy overrides classification', () => {
   }
 })
 
+test('explicit policy preserves minimal, xhigh, and max', () => {
+  for (const classification of ['navigate', 'inspect', 'synthesize', 'rapid', 'act']) {
+    for (const policy of ['minimal', 'xhigh', 'max']) {
+      assert.equal(effortFor(policy, classification), policy, `${policy}/${classification}`)
+    }
+  }
+})
+
 test('classifies common editing and formatting verbs as act', () => {
   const prompts = [
     'change the heading to red',

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { completedUpdateNotice, settingsUpdateDetails, updateNotice } from '../sidepanel/update-notice.js'
+import { completedUpdateNotice, settingsUpdateAction, settingsUpdateDetails, updateNotice } from '../sidepanel/update-notice.js'
 
 test('pending and installing updates promise automatic installation and restart', () => {
   assert.deepEqual(updateNotice({ state: 'pending', latest: '2.5.1' }), {
@@ -54,4 +54,34 @@ test('a completed update has one stable announcement key', () => {
   assert.equal(completedUpdateNotice({ last: { ...last, to: 'not a version' } }), null)
   assert.equal(completedUpdateNotice({ last: { ...last, at: 'invalid' } }), null)
   assert.equal(completedUpdateNotice({}), null)
+})
+
+test('settingsUpdateAction maps manual update button label, state, and tone cleanly', () => {
+  assert.equal(settingsUpdateAction(null, { connected: false }).disabled, true)
+  assert.equal(settingsUpdateAction({ state: 'idle' }, { connected: true }).label, 'Check for updates')
+  assert.equal(settingsUpdateAction({ state: 'current', current: '2.6.1' }).statusText, 'Up to date (v2.6.1).')
+  const checking = settingsUpdateAction({ state: 'checking' })
+  assert.equal(checking.label, 'Checking…')
+  assert.equal(checking.disabled, true)
+  assert.equal(updateNotice({ state: 'checking' }), null)
+
+  const pending = settingsUpdateAction({ state: 'pending', latest: '2.7.0' })
+  assert.equal(pending.label, 'Update to v2.7.0')
+  assert.equal(pending.action, 'install')
+  assert.equal(pending.primary, true)
+  assert.equal(pending.disabled, false)
+
+  const installing = settingsUpdateAction({ state: 'installing', latest: '2.7.0' })
+  assert.equal(installing.label, 'Updating…')
+  assert.equal(installing.disabled, true)
+
+  const available = settingsUpdateAction({ state: 'available', latest: '2.7.0' })
+  assert.equal(available.action, 'check')
+  assert.match(available.statusText, /npm run dev/u)
+
+  assert.equal(settingsUpdateAction({ state: 'disabled', reason: 'off' }).disabled, true)
+  assert.match(settingsUpdateAction({ state: 'ineligible', reason: 'branch' }).statusText, /branch/u)
+  const errored = settingsUpdateAction({ state: 'error', reason: 'offline' })
+  assert.equal(errored.tone, 'error')
+  assert.equal(errored.disabled, false)
 })

@@ -361,3 +361,37 @@ test('Updater: disabled does nothing at all', async t => {
   assert.equal(h.fetches, 0)
   assert.deepEqual(h.updater.status(), { state: 'disabled', reason: 'switched off', current: '2.3.0', latest: null, last: null, lastCheckAt: null })
 })
+
+test('Updater: checkNow checks immediately, retries failed cooldowns, and installNow validates idle state', async t => {
+  const disabled = makeUpdater(t, { options: { enabled: false, disabledReason: 'switched off' } })
+  const disabledRes = await disabled.updater.checkNow()
+  assert.equal(disabledRes.ok, false)
+  assert.equal(disabledRes.code, 'UPDATE_DISABLED')
+
+  const h = makeUpdater(t)
+  assert.equal((await h.updater.installNow()).code, 'UPDATE_NOT_READY')
+  const checked = await h.updater.checkNow()
+  assert.equal(checked.ok, true)
+  assert.equal(checked.update.state, 'pending')
+  assert.equal(checked.update.latest, '2.4.0')
+  assert.equal(h.events.some(e => e.event === 'update.state' && e.data.state === 'checking'), true)
+
+  h.idle = false
+  assert.equal((await h.updater.installNow()).code, 'UPDATE_BUSY')
+  h.idle = true
+  const installed = await h.updater.installNow()
+  assert.equal(installed.ok, true)
+  assert.deepEqual(h.applied, ['2.3.0->2.4.0'])
+  assert.deepEqual(h.exits, [UPDATE_EXIT_CODE])
+
+  // Manual checkNow bypasses the 24-hour failed-version cooldown.
+  const failHarness = makeUpdater(t)
+  failHarness.applyResult = { ok: false, stage: 'npm ci', error: 'boom', rolledBack: true }
+  await failHarness.tickAt(FIRST_CHECK_DELAY_MS)
+  for (let i = 0; i < IDLE_TICKS_BEFORE_INSTALL; i += 1) await failHarness.tickAt(failHarness.now + 60_000)
+  const retryHarness = makeUpdater(t, { install: failHarness.install })
+  retryHarness.now = failHarness.now
+  const forced = await retryHarness.updater.checkNow()
+  assert.equal(forced.ok, true)
+  assert.equal(forced.update.state, 'pending')
+})

@@ -162,6 +162,8 @@ export function createInteractiveAuraState() {
     wake: 0,
     typeEnergy: 0,
     typeX: 50,
+    typeY: 26,
+    lastInputSource: 'caret',
     hovering: false,
     angle: 0,
   }
@@ -223,19 +225,22 @@ export function stepInteractiveAura(state, { dtMs = 16.67, reducedMotion = false
   let goalX = 50
   let goalY = 50
   const typing = state.typeEnergy > 0.05
-  if (state.hovering && typing) {
-    goalX = state.targetX * 0.75 + state.typeX * 0.25
-    goalY = state.targetY * 0.75 + 26 * 0.25
+  const isCaretGoal = typing && (state.lastInputSource !== 'pointer' || !state.hovering)
+  if (isCaretGoal) {
+    goalX = state.typeX
+    goalY = Number.isFinite(state.typeY) ? state.typeY : 26
+  } else if (state.hovering && typing) {
+    goalX = state.targetX * 0.7 + state.typeX * 0.3
+    goalY = state.targetY * 0.7 + (Number.isFinite(state.typeY) ? state.typeY : 26) * 0.3
   } else if (state.hovering) {
     goalX = state.targetX
     goalY = state.targetY
-  } else if (typing) {
-    goalX = state.typeX
-    goalY = 26
   }
 
-  const ax = (goalX - state.x) * 95 - state.vx * 13.5
-  const ay = (goalY - state.y) * 95 - state.vy * 13.5
+  const stiffness = isCaretGoal ? 210 : 95
+  const damping = isCaretGoal ? 24 : 13.5
+  const ax = (goalX - state.x) * stiffness - state.vx * damping
+  const ay = (goalY - state.y) * stiffness - state.vy * damping
   state.vx += ax * dtSec
   state.vy += ay * dtSec
   state.x = clamp(state.x + state.vx * dtSec, 4, 96)

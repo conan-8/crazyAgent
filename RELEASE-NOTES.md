@@ -22,9 +22,16 @@ The extension and companion use version `2.6.1`. Android source is unchanged and
 - H1–H4 capture pixels before labeling, settle popup/combobox mutations, prioritize open-overlay labels within the 60-label cap, recognize real DOM inputs on canvas-editor pages, and report inner Docs viewport scrolling accurately.
 - Canvas typing guidance now explicitly says `Input.insertText` inserts at the caret and does not replace an active Docs canvas selection; it never auto-deletes that selection.
 
+## Update controls, reasoning choices, and usage costs
+
+- Settings' About section now offers **Check for updates** and, when a release is already fetched and pending, **Update now**. Manual installation keeps the existing clean-release, supervisor, idle-turn, and Marathon-off guards; repeated checks reuse the pending download instead of fetching it again.
+- OpenRouter model metadata supplies per-model reasoning effort choices, including `minimal`, `xhigh`, and `max` where supported, and disables Off for mandatory-reasoning models. The model picker presents those choices directly.
+- Lifetime usage includes an estimated USD total calculated from prompt/completion/cache pricing. Reasoning remains part of output and is never billed twice; costs are estimates based on available pricing, not provider invoices.
+- Global Diary entries no longer appear as site-applied header pills, and the sidebar receives additional interaction, speech-aura, layout, and narrow-width refinements.
+
 ## Verification
 
-- **1497/1497 Node tests** pass at the release head; model-harness self-test **23/23 scenarios** passes.
+- **1505/1505 Node tests** pass at the refreshed release head; model-harness self-test **23/23 scenarios** passes.
 - Real-extension gate runner: **13/13 suites passed, 0 failed, 7 excluded**. Isolated H1–H3 real-Edge fixtures pass, including zero detached/ghost popup clicks, inner-scroll verification, and preservation of all 17 open-menu labels inside the 60-label cap.
 - Real-panel mock-bridge `diary`, `modals`, and relevant motion/previews pass with inspected screenshots.
 - The signed APK is unchanged and signature-verified. Live real-model 32-item Docs acceptance, multi-tab/VHL acceptance, live docked-panel visual acceptance, and on-device phone checks remain open.

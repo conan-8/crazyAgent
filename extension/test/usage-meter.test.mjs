@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatCompactTokenCount, lifetimeUsageSegments, normalizeLifetimeUsage } from '../sidepanel/usage-meter.js'
+import { formatCompactTokenCount, formatUsdCost, lifetimeUsageSegments, normalizeLifetimeUsage } from '../sidepanel/usage-meter.js'
 
 test('sidebar lifetime usage is normalized and reasoning stays inside output', () => {
   assert.deepEqual(normalizeLifetimeUsage({
@@ -11,6 +11,7 @@ test('sidebar lifetime usage is normalized and reasoning stays inside output', (
     cacheWriteTokens: 5,
     reasoningTokens: 99,
     totalTokens: 175,
+    totalCostUsd: 1.255,
     startedAt: '2026-11-18T10:00:00.000Z',
     updatedAt: 'invalid',
   }), {
@@ -21,14 +22,27 @@ test('sidebar lifetime usage is normalized and reasoning stays inside output', (
     cacheWriteTokens: 5,
     reasoningTokens: 30,
     totalTokens: 175,
+    totalCostUsd: 1.255,
     startedAt: '2026-11-18T10:00:00.000Z',
     updatedAt: null,
   })
   assert.equal(normalizeLifetimeUsage(null).totalTokens, 0)
+  assert.equal(normalizeLifetimeUsage(null).totalCostUsd, 0)
+  assert.equal(normalizeLifetimeUsage({ totalCostUsd: -3 }).totalCostUsd, 0)
   assert.equal(normalizeLifetimeUsage([]).turns, 0)
   assert.equal(normalizeLifetimeUsage({ totalTokens: -5 }).totalTokens, 0)
   assert.equal(normalizeLifetimeUsage({ inputTokens: 10, outputTokens: 5 }).totalTokens, 15)
   assert.equal(normalizeLifetimeUsage({ inputTokens: 10, outputTokens: 5, totalTokens: 2 }).totalTokens, 15)
+})
+
+test('formatUsdCost renders readable lifetime totals across scales', () => {
+  assert.equal(formatUsdCost(0), '$0.00')
+  assert.equal(formatUsdCost(-2), '$0.00')
+  assert.equal(formatUsdCost('invalid'), '$0.00')
+  assert.equal(formatUsdCost(0.00004), '<$0.0001')
+  assert.equal(formatUsdCost(0.0042), '$0.0042')
+  assert.equal(formatUsdCost(18.42), '$18.42')
+  assert.equal(formatUsdCost(1234.5), '$1,234.50')
 })
 
 test('compact token labels remain readable at every magnitude', () => {

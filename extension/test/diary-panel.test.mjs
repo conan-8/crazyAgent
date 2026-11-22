@@ -64,13 +64,19 @@ test('diary-panel filters entries, parses sites, inspects tab URLs, and formats 
 test('diary-panel merges turn entries with deduplication and formats header pill', () => {
   assert.deepEqual(formatDiaryHeaderPill([]), { visible: false, latest: '', overflow: 0, text: '', tooltip: '' })
 
-  let entries = mergeDiaryAppliedEntries([], { scope: 'turn-start', titles: ['Kimi login email'] })
+  // Global / turn-start frames without site specificity never populate the header pill.
+  let entries = mergeDiaryAppliedEntries([], { scope: 'global', titles: ['Verification codes'] })
+  assert.deepEqual(formatDiaryHeaderPill(entries), { visible: false, latest: '', overflow: 0, text: '', tooltip: '' })
+  entries = mergeDiaryAppliedEntries(entries, { scope: 'turn-start', titles: ['Universal note'] })
+  assert.deepEqual(formatDiaryHeaderPill(entries), { visible: false, latest: '', overflow: 0, text: '', tooltip: '' })
+
+  entries = mergeDiaryAppliedEntries([], { scope: 'site', host: 'kimi.ai', titles: ['Kimi login email'] })
   let pill = formatDiaryHeaderPill(entries)
   assert.equal(pill.visible, true)
   assert.equal(pill.latest, 'Kimi login email')
   assert.equal(pill.overflow, 0)
   assert.equal(pill.text, 'Diary · Kimi login email')
-  assert.equal(pill.tooltip, 'Diary applied:\n• Kimi login email')
+  assert.equal(pill.tooltip, 'Diary applied:\n• Kimi login email (kimi.ai)')
 
   // Multiple titles in one frame + mid-turn accumulation + case-insensitive deduplication
   entries = mergeDiaryAppliedEntries(entries, { scope: 'site', host: 'kimi.ai', titles: ['Verification codes', 'kimi login email', 'Concise style'] })

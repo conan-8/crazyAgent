@@ -786,3 +786,17 @@ test('diary.* control frames reach onControl and diary.context syncs on tools co
   assert.equal(cleared.entries.length, 2)
   assert.deepEqual(cleared.deliveredIds, [])
 })
+
+test('update.* control frames reach onControl', async t => {
+  const controls = []
+  const { url } = await setup(t, {
+    onControl: message => { controls.push(message) },
+  })
+  const ui = await connect(url, 'ui')
+  t.after(() => ui.ws.close())
+
+  ui.ws.send(JSON.stringify({ v: 1, type: 'update.check' }))
+  ui.ws.send(JSON.stringify({ v: 1, type: 'update.install' }))
+  await sleep(50)
+  assert.deepEqual(controls.map(item => item.type), ['update.check', 'update.install'])
+})

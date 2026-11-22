@@ -139,15 +139,17 @@ export function autoEffort(classification) {
   return classification === 'navigate' || classification === 'act' || classification === 'rapid' ? 'low' : 'medium'
 }
 
+const EXPLICIT_EFFORTS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+
 /**
  * Resolve the effort to request for one turn.
- * @param {'auto'|'off'|'low'|'medium'|'high'} policy
+ * @param {'auto'|'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max'} policy
  * @param {TurnClass} classification
- * @returns {'off'|'low'|'medium'|'high'}
+ * @returns {'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max'}
  */
 export function effortFor(policy, classification) {
   if (policy === 'auto') return autoEffort(classification)
-  if (policy === 'off' || policy === 'low' || policy === 'medium' || policy === 'high') return policy
+  if (EXPLICIT_EFFORTS.has(policy)) return policy
   return autoEffort(classification)
 }
 

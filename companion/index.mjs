@@ -742,6 +742,38 @@ async function handleControl(message) {
       })
       return
     }
+    if (message.type === 'update.check') {
+      if (!updater) {
+        bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'update.result', action: 'check', ok: false, code: 'UPDATE_UNAVAILABLE', error: 'Updater is unavailable.' })
+        return
+      }
+      logStore.record('extension', 'update.check.request', {}, { severity: 'info' })
+      const result = await updater.checkNow()
+      bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'update.result', action: 'check', ...result })
+      return
+    }
+    if (message.type === 'update.install') {
+      if (!updater) {
+        bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'update.result', action: 'install', ok: false, code: 'UPDATE_UNAVAILABLE', error: 'Updater is unavailable.' })
+        return
+      }
+      const ready = updater.canInstallNow()
+      if (!ready.ok) {
+        bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'update.result', action: 'install', ...ready, update: updater.status() })
+        return
+      }
+      logStore.record('extension', 'update.install.request', { version: ready.version }, { severity: 'info' })
+      bridge.sendToUi({
+        v: PROTOCOL_VERSION,
+        type: 'update.result',
+        action: 'install',
+        ok: true,
+        update: { ...updater.status(), state: 'installing' },
+      })
+      const timer = setTimeout(() => { void updater.installNow() }, 60)
+      timer.unref?.()
+      return
+    }
     if (message.type === 'diary.list') {
       bridge.sendToUi({
         v: PROTOCOL_VERSION,
@@ -987,7 +1019,7 @@ controller.syncDiaryToTools()
 controller.addObserver({
   turnEnded: info => {
     try {
-      const result = lifetimeUsage.record(info.turnId, info.usage)
+      const result = lifetimeUsage.record(info.turnId, info.usage, { pricing: llmConfig?.model?.pricing })
       if (!result.changed) return
       bridge.sendToUi({ v: PROTOCOL_VERSION, type: 'usage.updated', lifetimeUsage: result.usage })
       logStore.record('companion', 'usage.lifetime', result.usage, { severity: 'debug', turnId: info.turnId, noSignal: true })

@@ -15,8 +15,8 @@ import { createPlanPanelModel, renderPlanPanel } from './plan-panel.js'
 import { watchNotice, watchNoticeFromOpen, renderWatchRow, renderWatchCard, watchIsActionable } from './watch-row.js'
 import { PROTOCOL_VERSION, truncate, errorMessage, formatBytes } from './protocol.js'
 import { matchSlashCommands, nextSlashIndex, resolveSlashCommand, slashQuery } from './slash.js'
-import { completedUpdateNotice, settingsUpdateDetails, updateNotice } from './update-notice.js'
-import { formatCompactTokenCount, lifetimeUsageSegments, normalizeLifetimeUsage } from './usage-meter.js'
+import { completedUpdateNotice, settingsUpdateAction, settingsUpdateDetails, updateNotice } from './update-notice.js'
+import { formatCompactTokenCount, formatUsdCost, lifetimeUsageSegments, normalizeLifetimeUsage } from './usage-meter.js'
 import { DIARY_CONTENT_MAX_CHARS, filterDiaryEntries, formatDiaryAppliedText, formatDiaryHeaderPill, mergeDiaryAppliedEntries, normalizeDiarySnapshot, normalizeDiarySuggestions, parseSitesInput, siteFromTabUrl } from './diary-panel.js'
 import { createInteractiveAuraState, createSpeechAuraState, estimateCaretFocusX, measureAudioFrame, stepInteractiveAura, stepSpeechAura, transcriptImpulse } from './speech-aura.js'
 import { browserErrorSummary, browserResultSummary, browserRunningText, chatErrorSummary, reasoningActivityText, toolResultSummary, toolRunningText } from './activity-presenter.js'
@@ -85,6 +85,9 @@ let bannerAction = () => {}
 let updateNoticePrefs = { completed: '', dismissed: '' }
 let companionVersion = ''
 let updateStatus = null
+let updateActionPending = false
+let updateActionFeedback = ''
+let updateActionFeedbackTone = 'muted'
 let lifetimeUsage = normalizeLifetimeUsage(null)
 let statusKind = 'offline'
 let statusLabel = 'Connecting…'
@@ -221,9 +224,12 @@ const els = {
   debugLogToggle: $('debug-log-toggle'),
   settingsVersion: $('settings-version'),
   settingsUpdated: $('settings-updated'),
+  settingsCheckUpdate: $('settings-check-update'),
+  settingsUpdateStatus: $('settings-update-status'),
   usageCard: $('usage-card'),
   settingsUsageTurns: $('settings-usage-turns'),
   settingsUsageTotal: $('settings-usage-total'),
+  settingsUsageCost: $('settings-usage-cost'),
   settingsUsageBar: $('settings-usage-bar'),
   settingsUsageInput: $('settings-usage-input'),
   settingsUsageCacheRead: $('settings-usage-cache-read'),
@@ -426,9 +432,10 @@ function renderComposerModel() {
   const model = modelsState.models.find(item => item.id === llmState.model?.id) ?? llmState.model
   const policy = llmState.reasoningEffort ?? settings.reasoningEffort ?? 'auto'
   const context = contextWindowBadge(model)
-  // `med` keeps the footer compact so more of the model name fits; the tooltip
-  // still spells out the full effort label.
-  const effortText = model?.reasoning === false ? 'no CoT' : policy === 'medium' ? 'med' : policy
+  // `med` / `min` keep the footer compact so more of the model name fits; the
+  // tooltip still spells out the full effort label.
+  const compactEffort = policy === 'medium' ? 'med' : policy === 'minimal' ? 'min' : policy
+  const effortText = model?.reasoning === false ? 'no CoT' : compactEffort
   const effortTitle = model?.reasoning === false
     ? 'This model does not support reasoning'
     : `Reasoning effort: ${effortLabel(policy)}`
@@ -477,6 +484,19 @@ function openModelMenu() {
   setTimeout(() => els.modelSearch.focus(), 0)
 }
 
+const THINKING_EFFORT_ORDER = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+function modelOfferedEfforts(model) {
+  if (!model || !isAgentModel(model) || model.reasoning === false) return []
+  const raw = Array.isArray(model.reasoningEfforts)
+    ? model.reasoningEfforts
+    : model.reasoningMandatory
+      ? ['low', 'medium', 'high']
+      : ['off', 'low', 'medium', 'high']
+  const ordered = THINKING_EFFORT_ORDER.filter(level => raw.includes(level) && !(level === 'off' && model.reasoningMandatory === true))
+  return ordered.length > 0 ? ['auto', ...ordered] : []
+}
+
 function renderModelMenu() {
   const query = els.modelSearch.value.trim().toLowerCase()
   const available = [...modelsState.models]
@@ -491,9 +511,20 @@ function renderModelMenu() {
     if (!query && connected && !modelsState.loading) void refreshModels()
     return
   }
+  const currentPolicy = llmState.reasoningEffort ?? settings.reasoningEffort ?? 'auto'
   for (const model of models.slice(0, 80)) {
     const compatible = isAgentModel(model)
     const limitations = modelLimitations(model)
+    const offeredEfforts = modelOfferedEfforts(model)
+    const selected = model.id === llmState.model?.id
+
+    const row = document.createElement('div')
+    row.className = 'model-menu-row'
+    row.classList.toggle('unavailable', !compatible)
+    row.classList.toggle('selected', selected)
+    row.classList.toggle('has-efforts', offeredEfforts.length > 0)
+    row.dataset.modelId = model.id
+
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'model-menu-item'
@@ -501,7 +532,7 @@ function renderModelMenu() {
     button.classList.toggle('unavailable', !compatible)
     button.title = compatible ? model.id : `${model.id} · ${limitations}; browser-agent models require images and tool calls`
     button.setAttribute('role', 'option')
-    button.setAttribute('aria-selected', String(model.id === llmState.model?.id))
+    button.setAttribute('aria-selected', String(selected))
     const copy = document.createElement('span')
     const name = document.createElement('span')
     name.textContent = shortModelName(model)
@@ -509,20 +540,59 @@ function renderModelMenu() {
     id.textContent = limitations ? `${model.id} · ${limitations}` : model.id
     copy.append(name, id)
     const check = document.createElement('span')
-    check.textContent = model.id === llmState.model?.id ? '✓' : ''
+    check.textContent = selected ? '✓' : ''
     button.append(copy, check)
     button.addEventListener('click', () => {
       if (!compatible) return
       closeModelMenu({ focusComposer: true })
-      if (model.id === llmState.model?.id || busy) return
+      if (selected || busy) return
+      const nextPolicy = offeredEfforts.includes(currentPolicy) ? currentPolicy : 'auto'
       sendLlmConfigure({
         baseUrl: llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL,
         model: model.id,
         remember: true,
-        reasoningEffort: llmState.reasoningEffort ?? settings.reasoningEffort ?? 'auto',
+        reasoningEffort: nextPolicy,
       })
     })
-    els.modelMenuList.appendChild(button)
+    row.appendChild(button)
+
+    if (offeredEfforts.length > 0) {
+      const effortsWrap = document.createElement('div')
+      effortsWrap.className = 'model-menu-efforts-wrap'
+      const efforts = document.createElement('div')
+      efforts.className = 'model-menu-efforts'
+      efforts.setAttribute('role', 'group')
+      efforts.setAttribute('aria-label', `${shortModelName(model)} reasoning effort`)
+      for (const effort of offeredEfforts) {
+        const chip = document.createElement('button')
+        chip.type = 'button'
+        chip.className = 'model-effort-chip'
+        if (effort === 'auto') chip.classList.add('is-auto')
+        const active = selected && effort === currentPolicy
+        if (active) chip.classList.add('is-active')
+        chip.setAttribute('aria-pressed', String(active))
+        chip.dataset.effort = effort
+        chip.textContent = EFFORT_CHIP_LABELS[effort] ?? effort
+        chip.title = `${shortModelName(model)} · ${EFFORT_LABELS[effort] ?? effort}`
+        chip.addEventListener('click', event => {
+          event.stopPropagation()
+          if (!compatible) return
+          closeModelMenu({ focusComposer: true })
+          if (busy || (selected && effort === currentPolicy)) return
+          sendLlmConfigure({
+            baseUrl: llmState.baseUrl || settings.modelBaseUrl || DEFAULT_MODEL_BASE_URL,
+            model: model.id,
+            remember: true,
+            reasoningEffort: effort,
+          })
+        })
+        efforts.appendChild(chip)
+      }
+      effortsWrap.appendChild(efforts)
+      row.appendChild(effortsWrap)
+    }
+
+    els.modelMenuList.appendChild(row)
   }
 }
 
@@ -1091,9 +1161,23 @@ function restoreConversation(id) {
 const EFFORT_LABELS = {
   auto: 'Auto (task-based)',
   off: 'Off',
+  minimal: 'Minimal',
   low: 'Low',
   medium: 'Medium',
   high: 'High',
+  xhigh: 'Extra High',
+  max: 'Max',
+}
+
+const EFFORT_CHIP_LABELS = {
+  auto: 'Auto',
+  off: 'Off',
+  minimal: 'Min',
+  low: 'Low',
+  medium: 'Med',
+  high: 'High',
+  xhigh: 'XHigh',
+  max: 'Max',
 }
 
 function effortLabel(value) {
@@ -1380,6 +1464,12 @@ function renderLifetimeUsage() {
   els.settingsUsageTurns.textContent = `${usage.turns.toLocaleString('en-US')} ${usage.turns === 1 ? 'turn' : 'turns'}`
   els.settingsUsageTotal.textContent = formatCompactTokenCount(usage.totalTokens)
   els.settingsUsageTotal.title = `${usage.totalTokens.toLocaleString('en-US')} total agent tokens`
+  if (els.settingsUsageCost) {
+    els.settingsUsageCost.textContent = formatUsdCost(usage.totalCostUsd)
+    els.settingsUsageCost.title = usage.totalCostUsd > 0
+      ? `Estimated total cost: $${usage.totalCostUsd.toFixed(6)} USD (OpenRouter model rates)`
+      : 'Estimated total cost: $0.00 USD'
+  }
   setUsageMetric(els.settingsUsageInput, usage.inputTokens)
   setUsageMetric(els.settingsUsageCacheRead, usage.cacheReadTokens)
   setUsageMetric(els.settingsUsageCacheWrite, usage.cacheWriteTokens)
@@ -1416,11 +1506,25 @@ function renderSettingsAbout() {
   if (details.updatedAt === null) {
     els.settingsUpdated.textContent = 'No completed update recorded'
     els.settingsUpdated.removeAttribute('title')
-    return
+  } else {
+    const updatedAt = new Date(details.updatedAt)
+    els.settingsUpdated.textContent = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(updatedAt)
+    els.settingsUpdated.title = `Last successful update: ${details.updatedAt}`
   }
-  const updatedAt = new Date(details.updatedAt)
-  els.settingsUpdated.textContent = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(updatedAt)
-  els.settingsUpdated.title = `Last successful update: ${details.updatedAt}`
+  if (els.settingsCheckUpdate) {
+    const actionState = settingsUpdateAction(updateStatus, { connected, requesting: updateActionPending })
+    els.settingsCheckUpdate.textContent = actionState.label
+    els.settingsCheckUpdate.disabled = actionState.disabled
+    els.settingsCheckUpdate.classList.toggle('primary', actionState.primary)
+    els.settingsCheckUpdate.classList.toggle('secondary', !actionState.primary)
+    if (els.settingsUpdateStatus) {
+      const text = updateActionFeedback || actionState.statusText
+      const tone = updateActionFeedback ? updateActionFeedbackTone : actionState.tone
+      els.settingsUpdateStatus.textContent = text
+      els.settingsUpdateStatus.dataset.tone = tone
+      els.settingsUpdateStatus.classList.toggle('hidden', text.length === 0)
+    }
+  }
 }
 
 function openSettings() {
@@ -1565,6 +1669,10 @@ function saveUpdateNoticePrefs() {
 
 function applyUpdateStatus(status) {
   if (status !== undefined) updateStatus = status
+  if (status?.state && status.state !== 'checking') {
+    updateActionPending = false
+    updateActionFeedback = ''
+  }
   renderSettingsAbout()
   const notice = updateNotice(status)
   if (notice && notice.key !== updateNoticePrefs.dismissed) {
@@ -1812,6 +1920,9 @@ function connect() {
     setDiaryBusy(false)
     diaryEditorAwaitingSave = false
     diarySuggestPendingIds.clear()
+    updateActionPending = false
+    updateActionFeedback = ''
+    if (!els.settingsModal.classList.contains('hidden')) renderSettingsAbout()
     if (!els.diaryModal.classList.contains('hidden')) renderDiaryModal()
     if (els.settingsDebugLog?.open) {
       els.logStats.textContent = 'Companion offline. Start it with npm run dev, then reconnect to export logs.'
@@ -2199,6 +2310,7 @@ function renderPromptRail() {
   const chatOpen = prompts.length > 0 && !newChatDraft
   els.app.classList.toggle('chat-open', chatOpen)
   syncUtilitiesAria()
+  syncComposerFocusAura()
   els.backHome.classList.toggle('hidden', !chatOpen)
   els.promptRail.classList.toggle('hidden', !chatOpen)
   els.promptRailList.replaceChildren()
@@ -3070,8 +3182,9 @@ function handleFrame(frame) {
       } else {
         refreshStatus()
       }
-      if (!els.settingsModal.classList.contains('hidden') && connected && modelsState.models.length === 0) {
-        void refreshModels()
+      if (!els.settingsModal.classList.contains('hidden')) {
+        renderSettingsAbout()
+        if (connected && modelsState.models.length === 0) void refreshModels()
       }
       if (!els.diaryModal.classList.contains('hidden')) renderDiaryModal()
       return
@@ -3205,6 +3318,17 @@ function handleFrame(frame) {
       return
     case 'update.state':
       applyUpdateStatus(frame.update)
+      return
+    case 'update.result':
+      updateActionPending = false
+      if (frame.update) applyUpdateStatus(frame.update)
+      if (frame.ok === false && typeof frame.error === 'string' && frame.error.length > 0) {
+        updateActionFeedback = frame.error
+        updateActionFeedbackTone = 'error'
+      } else {
+        updateActionFeedback = ''
+      }
+      renderSettingsAbout()
       return
     case 'usage.updated':
       applyLifetimeUsage(frame.lifetimeUsage)
@@ -3968,9 +4092,13 @@ function closeImage() {
 const interactiveAura = createInteractiveAuraState()
 let interactiveAuraRaf = 0
 let interactiveAuraLastTime = 0
+let caretMirrorEl = null
+let caretMarkerEl = null
 
 function isComposerAuraActive() {
-  return !els.app?.classList.contains('chat-open') || dictation !== null
+  return !els.app?.classList.contains('chat-open')
+    || document.activeElement === els.input
+    || dictation !== null
 }
 
 function resetInteractiveAura() {
@@ -3986,6 +4114,8 @@ function resetInteractiveAura() {
   interactiveAura.hoverEnergy = 0
   interactiveAura.wake = 0
   interactiveAura.typeEnergy = 0
+  interactiveAura.typeY = 26
+  interactiveAura.lastInputSource = 'caret'
   if (!els.composer) return
   els.composer.classList.remove('fluid-active')
   els.composer.style.removeProperty('--fluid-x')
@@ -3996,6 +4126,58 @@ function resetInteractiveAura() {
   els.composer.style.removeProperty('--fluid-dx')
   els.composer.style.removeProperty('--fluid-dy')
   els.composer.style.removeProperty('--fluid-angle')
+}
+
+function syncComposerFocusAura() {
+  const focused = document.activeElement === els.input
+  els.composer?.classList.toggle('input-focused', focused)
+  if (!isComposerAuraActive()) {
+    resetInteractiveAura()
+    return
+  }
+  if (focused && els.app?.classList.contains('chat-open')) startInteractiveAuraLoop()
+}
+
+function measureCaretFocusInShell(textarea, shell) {
+  const caret = textarea.selectionEnd ?? textarea.value.length
+  if (!shell || typeof document === 'undefined') {
+    return { x: estimateCaretFocusX(textarea.value, caret), y: 26 }
+  }
+  const shellRect = shell.getBoundingClientRect()
+  const areaRect = textarea.getBoundingClientRect()
+  if (shellRect.width <= 0 || shellRect.height <= 0 || areaRect.width <= 0) {
+    return { x: estimateCaretFocusX(textarea.value, caret), y: 26 }
+  }
+  if (!caretMirrorEl) {
+    caretMirrorEl = document.createElement('div')
+    caretMirrorEl.setAttribute('aria-hidden', 'true')
+    caretMirrorEl.style.cssText = 'position:fixed;top:-9999px;left:-9999px;visibility:hidden;pointer-events:none;white-space:pre-wrap;overflow-wrap:break-word;word-wrap:break-word;box-sizing:border-box;overflow:hidden;'
+    caretMarkerEl = document.createElement('span')
+    caretMarkerEl.textContent = '\u200b'
+    document.body.appendChild(caretMirrorEl)
+  }
+  const cs = getComputedStyle(textarea)
+  caretMirrorEl.style.width = `${areaRect.width}px`
+  caretMirrorEl.style.font = cs.font
+  caretMirrorEl.style.letterSpacing = cs.letterSpacing
+  caretMirrorEl.style.lineHeight = cs.lineHeight
+  caretMirrorEl.style.padding = cs.padding
+  caretMirrorEl.style.border = cs.border
+  caretMirrorEl.style.tabSize = cs.tabSize
+  caretMirrorEl.style.textIndent = cs.textIndent
+  caretMirrorEl.style.wordBreak = cs.wordBreak
+  caretMirrorEl.textContent = textarea.value.slice(0, caret)
+  caretMirrorEl.appendChild(caretMarkerEl)
+
+  const lineHeightPx = Number.parseFloat(cs.lineHeight) || 18
+  const caretClientX = areaRect.left + caretMarkerEl.offsetLeft - textarea.scrollLeft
+  const caretClientY = areaRect.top + caretMarkerEl.offsetTop - textarea.scrollTop + lineHeightPx * 0.5
+  const rawX = ((caretClientX - shellRect.left) / shellRect.width) * 100
+  const rawY = ((caretClientY - shellRect.top) / shellRect.height) * 100
+  return {
+    x: Math.max(6, Math.min(94, rawX)),
+    y: Math.max(14, Math.min(76, rawY)),
+  }
 }
 
 function applyInteractiveAuraFrame(frame) {
@@ -4051,16 +4233,19 @@ function handleComposerAuraPointer(event) {
   const wakeBoost = event.type === 'pointerenter' ? 0.45 : Math.min(0.65, dist / 24)
   interactiveAura.wake = Math.min(1, interactiveAura.wake + wakeBoost)
   interactiveAura.hovering = true
+  if (event.type === 'pointerenter' || dist > 1.2) interactiveAura.lastInputSource = 'pointer'
   interactiveAura.targetX = nextX
   interactiveAura.targetY = nextY
   if (isComposerAuraActive()) startInteractiveAuraLoop()
 }
 
-function pulseInteractiveTyping(boost = 0.45) {
+function pulseInteractiveTyping(boost = 0.62) {
   if (!els.input) return
-  const caret = els.input.selectionEnd ?? els.input.value.length
-  interactiveAura.typeX = estimateCaretFocusX(els.input.value, caret)
-  interactiveAura.typeEnergy = Math.min(1, Math.max(interactiveAura.typeEnergy + boost * 0.65, boost))
+  const pos = measureCaretFocusInShell(els.input, els.composerShell)
+  interactiveAura.typeX = pos.x
+  interactiveAura.typeY = pos.y
+  interactiveAura.lastInputSource = 'caret'
+  interactiveAura.typeEnergy = Math.min(1, Math.max(interactiveAura.typeEnergy + boost * 0.68, boost))
   if (isComposerAuraActive()) startInteractiveAuraLoop()
 }
 
@@ -4913,6 +5098,8 @@ function closeDiary() {
   if (hadFocus) els.input.focus({ preventScroll: true })
 }
 
+const DIARY_NOTE_TONES = ['amber', 'slate', 'sage', 'plum']
+
 function renderDiaryModal() {
   if (!connected) {
     els.diaryOfflineNote.textContent = 'Connect to the companion to save, edit, or delete entries.'
@@ -4949,10 +5136,16 @@ function renderDiaryModal() {
     els.diaryEmpty.classList.add('hidden')
   }
 
-  for (const entry of filtered) {
+  for (const [index, entry] of filtered.entries()) {
     const card = document.createElement('article')
     card.className = `diary-entry${entry.enabled === false ? ' paused' : ''}`
     card.dataset.diaryId = entry.id
+    card.dataset.noteTone = DIARY_NOTE_TONES[index % DIARY_NOTE_TONES.length]
+    card.dataset.noteTilt = String(index % 4)
+
+    const tape = document.createElement('span')
+    tape.className = 'diary-note-tape'
+    tape.setAttribute('aria-hidden', 'true')
 
     const head = document.createElement('div')
     head.className = 'diary-entry-head'
@@ -4965,12 +5158,6 @@ function renderDiaryModal() {
     scopeBadge.textContent = entry.scope === 'site' ? entry.sites.join(', ') : 'Global'
     badges.appendChild(scopeBadge)
 
-    if (entry.source === 'suggested') {
-      const sourceTag = document.createElement('span')
-      sourceTag.className = 'diary-tag'
-      sourceTag.textContent = 'Suggested'
-      badges.appendChild(sourceTag)
-    }
     if (entry.enabled === false) {
       const pausedTag = document.createElement('span')
       pausedTag.className = 'diary-tag diary-tag-paused'
@@ -5063,7 +5250,7 @@ function renderDiaryModal() {
       actions.appendChild(deleteBtn)
     }
 
-    card.append(head, contentEl, actions)
+    card.append(tape, head, contentEl, actions)
     els.diaryList.appendChild(card)
   }
 
@@ -5953,6 +6140,20 @@ els.updateNoticeDismiss.addEventListener('click', () => {
   }
   els.updateNotice.classList.add('hidden')
 })
+els.settingsCheckUpdate?.addEventListener('click', () => {
+  const actionState = settingsUpdateAction(updateStatus, { connected, requesting: updateActionPending })
+  if (actionState.disabled) return
+  updateActionPending = true
+  updateActionFeedback = ''
+  renderSettingsAbout()
+  const type = actionState.action === 'install' ? 'update.install' : 'update.check'
+  if (!sendFrame({ v: PROTOCOL_VERSION, type })) {
+    updateActionPending = false
+    updateActionFeedback = 'Could not reach companion.'
+    updateActionFeedbackTone = 'error'
+    renderSettingsAbout()
+  }
+})
 
 els.newChat.addEventListener('click', () => {
   if (newChat()) pulseNewChat()
@@ -5974,18 +6175,32 @@ els.composerShell?.addEventListener('pointerleave', () => {
   interactiveAura.hovering = false
 })
 
+els.input.addEventListener('focus', () => {
+  syncComposerFocusAura()
+})
 els.input.addEventListener('input', event => {
   resizeInput()
   renderSlashMenu()
-  pulseInteractiveTyping(0.56)
+  pulseInteractiveTyping(0.72)
   if (event.isTrusted) stopDictation()
 })
-els.input.addEventListener('blur', () => closeSlashMenu())
+els.input.addEventListener('blur', () => {
+  closeSlashMenu()
+  syncComposerFocusAura()
+})
+els.input.addEventListener('keyup', event => {
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Home' || event.key === 'End') {
+    pulseInteractiveTyping(0.28)
+  }
+})
+els.input.addEventListener('mouseup', () => {
+  if (document.activeElement === els.input) pulseInteractiveTyping(0.25)
+})
 els.input.addEventListener('keydown', event => {
   // Enter during IME composition confirms the candidate, not the draft.
   if (event.isComposing) return
   if (!event.metaKey && !event.ctrlKey && !event.altKey && (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete')) {
-    pulseInteractiveTyping(0.36)
+    pulseInteractiveTyping(0.42)
   }
   if (slashMenuOpen) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

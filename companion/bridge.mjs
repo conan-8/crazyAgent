@@ -618,7 +618,7 @@ export class Bridge {
         this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'pong' })
         return
       }
-      if (typeof message.type === 'string' && (message.type.startsWith('log.') || message.type.startsWith('llm.') || message.type.startsWith('settings.') || message.type.startsWith('diary.')) && this.onControl !== undefined) {
+      if (typeof message.type === 'string' && (message.type.startsWith('log.') || message.type.startsWith('llm.') || message.type.startsWith('settings.') || message.type.startsWith('diary.') || message.type.startsWith('update.')) && this.onControl !== undefined) {
         Promise.resolve(this.onControl(message, ws)).catch(error => {
           this.#send(ws, role, { v: PROTOCOL_VERSION, type: 'log.error', message: errorMessage(error) })
         })

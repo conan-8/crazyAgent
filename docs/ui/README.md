@@ -49,7 +49,12 @@ cache writes, and output; reasoning is labelled as part of output. The companion
 persists aggregate agent-turn totals in `.dsh-home/browser-agent/usage.json`,
 restores them on reconnect, and preserves them across release updates. Watcher
 and Diary-suggestion tokens remain separate, and tracking begins with the first
-turn recorded by this feature rather than backfilling pruned logs.
+turn recorded by this feature rather than backfilling pruned logs. The card also
+shows an estimated USD total from available model pricing, not a provider invoice.
+
+The About section can check GitHub immediately and install an already-fetched
+pending release under the same eligibility, supervisor, idle-turn, and Marathon-
+off guards as automatic updates.
 
 The topbar's **Diary** button opens locally saved global and site-specific notes
 with search, filters, add/edit, pause, and delete. Post-run suggestions appear as

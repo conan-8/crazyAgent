@@ -272,6 +272,9 @@ export function formatDiaryAppliedText(frame) {
 export function mergeDiaryAppliedEntries(existing, frame) {
   const list = Array.isArray(existing) ? existing.map(item => ({ ...item })) : []
   const host = typeof frame?.host === 'string' && frame.host.trim().length > 0 ? frame.host.trim() : ''
+  const scope = typeof frame?.scope === 'string' ? frame.scope.trim().toLowerCase() : ''
+  // Never surface universal/global diary entries in the header pill; only site-specific matches apply here.
+  if (scope === 'global' || (scope !== 'site' && !host)) return list
   const titles = Array.isArray(frame?.titles)
     ? frame.titles.filter(item => typeof item === 'string' && item.trim().length > 0).map(item => item.trim())
     : []

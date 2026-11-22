@@ -14,12 +14,50 @@ import yaml from 'js-yaml'
 export const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1'
 export const MODEL_CACHE_MS = 5 * 60 * 1000
 export const RECOMMENDED_MODEL_ID = 'deepseek/deepseek-v4.1-flash-1017'
-export const REASONING_POLICIES = ['auto', 'off', 'low', 'medium', 'high']
+export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+export const REASONING_POLICIES = ['auto', ...THINKING_LEVELS]
 
-/** @param {unknown} value @returns {'auto'|'off'|'low'|'medium'|'high'} */
+/** @param {unknown} value @returns {'auto'|'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max'} */
 export function normalizeReasoningEffort(value) {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : ''
   return REASONING_POLICIES.includes(text) ? text : 'auto'
+}
+
+/**
+ * Filter and order effort values into canonical DSH thinking levels.
+ * @param {unknown} efforts
+ * @param {boolean} reasoning
+ * @param {boolean} [mandatory]
+ * @returns {Array<'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max'>|undefined}
+ */
+function sanitizeEffortList(efforts, reasoning, mandatory = false) {
+  if (reasoning !== true) return []
+  if (!Array.isArray(efforts)) return undefined
+  const picked = new Set()
+  for (const item of efforts) {
+    if (typeof item !== 'string') continue
+    const normalized = item.trim().toLowerCase() === 'none' ? 'off' : item.trim().toLowerCase()
+    if (normalized === 'off' && mandatory) continue
+    if (THINKING_LEVELS.includes(normalized)) picked.add(normalized)
+  }
+  return THINKING_LEVELS.filter(level => picked.has(level))
+}
+
+/**
+ * Normalize OpenRouter's per-model `reasoning` metadata into ordered DSH thinking levels.
+ * Maps OpenRouter `'none'` to `'off'`, excludes `'off'` when reasoning is mandatory,
+ * and returns `[]` for non-reasoning models.
+ * @param {unknown} rawReasoning
+ * @param {boolean} reasoning
+ * @returns {Array<'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max'>}
+ */
+export function normalizeSupportedEfforts(rawReasoning, reasoning) {
+  if (reasoning !== true) return []
+  const meta = rawReasoning && typeof rawReasoning === 'object' ? rawReasoning : null
+  const mandatory = meta?.mandatory === true
+  const normalized = sanitizeEffortList(meta?.supported_efforts, true, mandatory)
+  if (normalized && normalized.length > 0) return normalized
+  return mandatory ? ['low', 'medium', 'high'] : ['off', 'low', 'medium', 'high']
 }
 
 /** @param {'auto'|'off'|'low'|'medium'|'high'} policy */
@@ -31,6 +69,11 @@ export function baseEffortFor(policy) {
 export function normalizeBaseUrl(value) {
   const text = typeof value === 'string' && value.trim().length > 0 ? value.trim() : DEFAULT_BASE_URL
   return text.replace(/\/+$/u, '')
+}
+
+function parsePrice(value) {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? n : undefined
 }
 
 /**
@@ -52,19 +95,28 @@ export function mapModel(raw) {
   const contextWindow = Number(raw.context_length) > 0 ? Math.round(Number(raw.context_length)) : 128_000
   const rawMax = Number(raw.top_provider?.max_completion_tokens ?? raw.max_completion_tokens)
   const maxTokens = Number.isFinite(rawMax) && rawMax > 0 ? Math.round(rawMax) : 8_192
-  const prompt = Number(raw.pricing?.prompt)
-  const completion = Number(raw.pricing?.completion)
+  const prompt = parsePrice(raw.pricing?.prompt)
+  const completion = parsePrice(raw.pricing?.completion)
+  const cacheRead = parsePrice(raw.pricing?.input_cache_read)
+  const cacheWrite = parsePrice(raw.pricing?.input_cache_write)
+  const reasoningMandatory = raw.reasoning?.mandatory === true
+  const reasoningEfforts = normalizeSupportedEfforts(raw.reasoning, reasoning)
+
   return {
     id: raw.id,
     name: typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : raw.id,
     contextWindow,
     maxTokens,
     reasoning,
+    reasoningEfforts,
+    reasoningMandatory,
     imageInput: supportsImage,
     tools: supportsTools,
     pricing: {
-      prompt: Number.isFinite(prompt) ? prompt : undefined,
-      completion: Number.isFinite(completion) ? completion : undefined,
+      prompt,
+      completion,
+      ...(cacheRead !== undefined ? { cacheRead } : {}),
+      ...(cacheWrite !== undefined ? { cacheWrite } : {}),
     },
     description: typeof raw.description === 'string' ? raw.description.slice(0, 240) : undefined,
   }
@@ -130,6 +182,9 @@ export async function validateApiKey(baseUrl, apiKey, options = {}) {
 
 /** @param {string} baseUrl @param {Record<string, any>} model @param {string} [reasoningEffort] */
 export function buildLlmConfig(baseUrl, model, reasoningEffort = 'auto') {
+  const reasoning = model.reasoning === true
+  const reasoningMandatory = reasoning && model.reasoningMandatory === true
+  const reasoningEfforts = sanitizeEffortList(model.reasoningEfforts, reasoning, reasoningMandatory)
   return {
     provider: 'openrouter',
     baseUrl: normalizeBaseUrl(baseUrl),
@@ -139,7 +194,9 @@ export function buildLlmConfig(baseUrl, model, reasoningEffort = 'auto') {
       name: model.name,
       contextWindow: model.contextWindow,
       maxTokens: model.maxTokens,
-      reasoning: model.reasoning === true,
+      reasoning,
+      ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
+      ...(typeof model.reasoningMandatory === 'boolean' ? { reasoningMandatory } : {}),
       pricing: model.pricing,
     },
     updatedAt: new Date().toISOString(),
@@ -163,6 +220,9 @@ export function readLlmConfig(path) {
     if (parsed.provider !== 'openrouter') return undefined
     if (typeof parsed.baseUrl !== 'string' || parsed.baseUrl.length === 0) return undefined
     if (!parsed.model || typeof parsed.model.id !== 'string' || parsed.model.id.length === 0) return undefined
+    const reasoning = parsed.model.reasoning === true
+    const reasoningMandatory = reasoning && parsed.model.reasoningMandatory === true
+    const reasoningEfforts = sanitizeEffortList(parsed.model.reasoningEfforts, reasoning, reasoningMandatory)
     return {
       provider: 'openrouter',
       baseUrl: normalizeBaseUrl(parsed.baseUrl),
@@ -172,7 +232,9 @@ export function readLlmConfig(path) {
         name: typeof parsed.model.name === 'string' ? parsed.model.name : parsed.model.id,
         contextWindow: Number(parsed.model.contextWindow) > 0 ? Math.round(Number(parsed.model.contextWindow)) : 128_000,
         maxTokens: Number(parsed.model.maxTokens) > 0 ? Math.round(Number(parsed.model.maxTokens)) : 8_192,
-        reasoning: parsed.model.reasoning === true,
+        reasoning,
+        ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
+        ...(typeof parsed.model.reasoningMandatory === 'boolean' ? { reasoningMandatory } : {}),
         pricing: parsed.model.pricing,
       },
       updatedAt: parsed.updatedAt,
@@ -227,6 +289,8 @@ export function buildLlmPatch(config) {
               low: 'low',
               medium: 'medium',
               high: 'high',
+              xhigh: 'xhigh',
+              max: 'max',
             },
           }
           : {}),

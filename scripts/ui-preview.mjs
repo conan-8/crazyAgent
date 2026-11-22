@@ -214,10 +214,11 @@ const HELLO_FRAMES = [
     ok: true,
     baseUrl: 'https://openrouter.ai/api/v1',
     models: [
-      { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
-      { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, imageInput: true, tools: true, contextWindow: 1000000 },
-      { id: 'openai/gpt-5', name: 'GPT-5', reasoning: true, imageInput: true, tools: true, contextWindow: 400000 },
-      { id: 'acme/text-only', name: 'Text Only Model', reasoning: true, imageInput: false, tools: true, contextWindow: 128000 },
+      { id: 'deepseek/deepseek-v4.1-flash-1017', name: 'DeepSeek: DeepSeek V4.1 Flash 1017', reasoning: true, reasoningEfforts: ['off', 'low', 'high', 'max'], reasoningMandatory: false, imageInput: true, tools: true, contextWindow: 1000000 },
+      { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, reasoningEfforts: ['off', 'low', 'medium', 'high', 'max'], reasoningMandatory: false, imageInput: true, tools: true, contextWindow: 1000000 },
+      { id: 'openai/gpt-5', name: 'GPT-5', reasoning: true, reasoningEfforts: ['minimal', 'low', 'medium', 'high', 'xhigh'], reasoningMandatory: true, imageInput: true, tools: true, contextWindow: 400000 },
+      { id: 'openai/gpt-4o-mini', name: 'GPT-4o mini', reasoning: false, reasoningEfforts: [], reasoningMandatory: false, imageInput: true, tools: true, contextWindow: 128000 },
+      { id: 'acme/text-only', name: 'Text Only Model', reasoning: true, reasoningEfforts: ['off', 'low', 'high'], reasoningMandatory: false, imageInput: false, tools: true, contextWindow: 128000 },
     ],
   },
 ]
@@ -1537,7 +1538,92 @@ async function playComposerScenario(page, capture) {
     search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   })()`)
   assert.equal(await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1).model`), 'anthropic/claude-sonnet-4.5')
-  await recv({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true }, reasoningEffort: 'medium' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })
+  await recv({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, reasoningEfforts: ['off', 'low', 'medium', 'high', 'max'], reasoningMandatory: false }, reasoningEffort: 'medium' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })
+
+  // Per-model reasoning effort chips expand on hover/focus-within, match each model's
+  // offered levels, and give Auto a glowing yellow gradient.
+  await page.evaluate(`document.getElementById('composer-model').click()`)
+  await sleep(80)
+  const initialMenuState = await page.evaluate(`(() => {
+    const rows = [...document.querySelectorAll('.model-menu-row')];
+    const wraps = [...document.querySelectorAll('.model-menu-efforts-wrap')];
+    return {
+      rowCount: rows.length,
+      allCollapsed: wraps.every(w => parseFloat(getComputedStyle(w).opacity) === 0 && w.getBoundingClientRect().height < 2),
+      nonReasoningChips: document.querySelectorAll('[data-model-id="openai/gpt-4o-mini"] .model-effort-chip').length,
+      unavailableChips: document.querySelectorAll('[data-model-id="acme/text-only"] .model-effort-chip').length,
+    };
+  })()`)
+  assert.equal(initialMenuState.rowCount, 5)
+  assert.equal(initialMenuState.allCollapsed, true, 'effort trays must start collapsed until hovered')
+  assert.equal(initialMenuState.nonReasoningChips, 0, 'non-reasoning model must not render effort chips')
+  assert.equal(initialMenuState.unavailableChips, 0, 'unavailable model must not render effort chips')
+
+  const hoverModelRow = async modelId => {
+    const point = await page.evaluate(`(() => {
+      const btn = document.querySelector('.model-menu-row[data-model-id="' + ${JSON.stringify(modelId)} + '"] .model-menu-item');
+      btn.scrollIntoView({ block: 'nearest' });
+      const r = btn.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`)
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y })
+    await sleep(220)
+    return page.evaluate(`(() => {
+      const row = document.querySelector('.model-menu-row[data-model-id="' + ${JSON.stringify(modelId)} + '"]');
+      const wrap = row.querySelector('.model-menu-efforts-wrap');
+      const chips = [...row.querySelectorAll('.model-effort-chip')];
+      const autoChip = row.querySelector('.model-effort-chip.is-auto');
+      const autoStyle = autoChip ? getComputedStyle(autoChip) : null;
+      return {
+        open: wrap ? (parseFloat(getComputedStyle(wrap).opacity) > 0.9 && wrap.getBoundingClientRect().height > 20) : false,
+        labels: chips.map(c => c.textContent),
+        autoHasGradient: autoStyle ? autoStyle.backgroundImage.includes('linear-gradient') : false,
+        autoHasGlow: autoStyle ? autoStyle.boxShadow !== 'none' : false,
+      };
+    })()`)
+  }
+
+  const deepseekHover = await hoverModelRow('deepseek/deepseek-v4.1-flash-1017')
+  assert.equal(deepseekHover.open, true)
+  assert.deepEqual(deepseekHover.labels, ['Auto', 'Off', 'Low', 'High', 'Max'])
+  assert.equal(deepseekHover.autoHasGradient, true)
+  assert.equal(deepseekHover.autoHasGlow, true)
+
+  const gpt5Hover = await hoverModelRow('openai/gpt-5')
+  assert.equal(gpt5Hover.open, true)
+  assert.deepEqual(gpt5Hover.labels, ['Auto', 'Min', 'Low', 'Med', 'High', 'XHigh'])
+  assert.equal(
+    await page.evaluate(`parseFloat(getComputedStyle(document.querySelector('[data-model-id="deepseek/deepseek-v4.1-flash-1017"] .model-menu-efforts-wrap')).opacity) < 0.05`),
+    true,
+    'previously hovered row must collapse when hovering another row',
+  )
+
+  await hoverModelRow('anthropic/claude-sonnet-4.5')
+  await page.evaluate(`document.querySelector('[data-model-id="anthropic/claude-sonnet-4.5"] .model-effort-chip[data-effort="auto"]').focus()`)
+  await sleep(180)
+  await capture('model-efforts-hover')
+
+  await page.evaluate(`document.querySelector('[data-model-id="anthropic/claude-sonnet-4.5"] .model-effort-chip[data-effort="max"]').click()`)
+  const maxCfg = await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1)`)
+  assert.equal(maxCfg.model, 'anthropic/claude-sonnet-4.5')
+  assert.equal(maxCfg.reasoningEffort, 'max')
+  await recv({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, reasoningEfforts: ['off', 'low', 'medium', 'high', 'max'], reasoningMandatory: false }, reasoningEffort: 'max' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })
+  assert.equal(await page.evaluate(`document.getElementById('composer-model-effort').textContent`), '· max')
+
+  await page.evaluate(`document.getElementById('composer-model').click()`)
+  await sleep(80)
+  await hoverModelRow('anthropic/claude-sonnet-4.5')
+  assert.equal(
+    await page.evaluate(`document.querySelector('[data-model-id="anthropic/claude-sonnet-4.5"] .model-effort-chip[data-effort="max"]').classList.contains('is-active')`),
+    true,
+  )
+  await page.evaluate(`document.querySelector('[data-model-id="anthropic/claude-sonnet-4.5"] .model-effort-chip[data-effort="auto"]').click()`)
+  const autoCfg = await page.evaluate(`window.__frames.filter(frame => frame.type === 'llm.configure').at(-1)`)
+  assert.equal(autoCfg.model, 'anthropic/claude-sonnet-4.5')
+  assert.equal(autoCfg.reasoningEffort, 'auto')
+  await recv({ v: 1, type: 'llm.configured', ok: true, llm: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, reasoningEfforts: ['off', 'low', 'medium', 'high', 'max'], reasoningMandatory: false }, reasoningEffort: 'auto' }, credentials: { configured: true, source: 'stored' }, dsh: { state: 'ready' } })
+  assert.equal(await page.evaluate(`document.getElementById('composer-model-effort').textContent`), '· auto')
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 })
 
   // No listening pill inside the textarea; instead a living yellow aura radiates around
   // the dark obsidian composer on new chats and reacts heavily during dictation.
@@ -1589,13 +1675,26 @@ async function playComposerScenario(page, capture) {
   await page.evaluate(`(() => {
     const input = document.getElementById('input');
     input.focus();
-    input.value = 'Testing fluid typing glow';
+    input.value = 'Hi';
+    input.setSelectionRange(2, 2);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  await sleep(340)
+  const leftTypingX = await page.evaluate(`parseFloat(document.getElementById('composer').style.getPropertyValue('--fluid-x') || '50')`)
+
+  await page.evaluate(`(() => {
+    const input = document.getElementById('input');
+    input.value = 'Testing fluid typing glow across box';
     input.setSelectionRange(input.value.length, input.value.length);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   })()`)
-  await sleep(120)
+  await sleep(100)
   const typingEnergy = await page.evaluate(`parseFloat(document.getElementById('composer').style.getPropertyValue('--fluid-type') || '0')`)
+  await sleep(240)
+  const rightTypingX = await page.evaluate(`parseFloat(document.getElementById('composer').style.getPropertyValue('--fluid-x') || '50')`)
   assert.ok(typingEnergy > 0.25, `typing should boost fluid-type (> 0.25), got ${typingEnergy}`)
+  assert.ok(leftTypingX < 30, `short left text should focus left (< 30), got ${leftTypingX}`)
+  assert.ok(rightTypingX > leftTypingX + 35, `caret glow should glide right as characters are typed (${leftTypingX} -> ${rightTypingX})`)
   await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 10, y: 10 })
   await page.evaluate(`(() => {
     const input = document.getElementById('input');
@@ -1704,9 +1803,45 @@ async function playComposerScenario(page, capture) {
   assert.equal(sent.images.length, 1)
   assert.equal(sent.images[0].name, 'screenshot.png')
 
-  // Open chat while idle: aura fades calm; dictating in open chat lights it back up.
+  // Open chat while idle and unselected: aura is off; selecting/typing or dictating lights it up.
   assert.equal(await page.evaluate(`document.querySelector('.app').classList.contains('chat-open')`), true)
-  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('composer-aura')).opacity`), '0', 'idle open chat keeps aura calm')
+  await page.evaluate(`document.getElementById('input').blur()`)
+  await sleep(520)
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('composer-aura')).opacity`), '0', 'idle open chat keeps aura calm when unselected')
+
+  await page.evaluate(`(() => {
+    const input = document.getElementById('input');
+    input.focus();
+    input.value = 'Hi';
+    input.setSelectionRange(2, 2);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  await sleep(340)
+  const focusedOpenX1 = await page.evaluate(`(() => ({
+    opacity: getComputedStyle(document.getElementById('composer-aura')).opacity,
+    x: parseFloat(document.getElementById('composer').style.getPropertyValue('--fluid-x') || '50'),
+  }))()`)
+  assert.equal(focusedOpenX1.opacity, '1', 'focusing chatbox during an open chat turns the glow on')
+
+  await page.evaluate(`(() => {
+    const input = document.getElementById('input');
+    input.value = 'Moving caret across the active chatbox';
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  await sleep(340)
+  const focusedOpenX2 = await page.evaluate(`parseFloat(document.getElementById('composer').style.getPropertyValue('--fluid-x') || '50')`)
+  assert.ok(focusedOpenX2 > focusedOpenX1.x + 30, `typing in active chat shifts glow right (${focusedOpenX1.x} -> ${focusedOpenX2})`)
+
+  await page.evaluate(`(() => {
+    const input = document.getElementById('input');
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.blur();
+  })()`)
+  await sleep(520)
+  assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('composer-aura')).opacity`), '0', 'blurring chatbox turns glow off again')
+
   await page.evaluate(`document.getElementById('mic').click()`)
   await sleep(250)
   assert.equal(await page.evaluate(`getComputedStyle(document.getElementById('composer-aura')).opacity`), '1', 'dictating in open chat lights aura up')
@@ -2441,8 +2576,22 @@ async function playDiaryScenario(page, capture, setWidth) {
   await recv({ v: 1, type: 'diary.state', ok: true, entry: siteEntry, diary: { version: 1, entries: [siteEntry, globalEntry], suppressedCount: 1 } })
   await sleep(200)
 
-  // 4. Verify filters, search, two-step delete confirm, pause toggle, and narrow 280px layout.
-  assert.equal(await page.evaluate(`document.querySelectorAll('.diary-entry').length`), 2)
+  // 4. Verify sticky-note styling, no Suggested tag, lined paper alignment, filters, search, two-step delete confirm, and narrow 280px layout.
+  const diaryVisual = await page.evaluate(`(() => {
+    const cards = [...document.querySelectorAll('.diary-entry')];
+    const contents = cards.map(c => c.querySelector('.diary-entry-content'));
+    return {
+      count: cards.length,
+      hasSuggested: cards.some(c => [...c.querySelectorAll('.diary-tag')].some(t => t.textContent === 'Suggested')),
+      tapesCount: cards.filter(c => c.querySelector('.diary-note-tape') !== null).length,
+      tones: cards.map(c => c.dataset.noteTone),
+      linedReady: contents.every(el => getComputedStyle(el).lineHeight === '24px' && getComputedStyle(el).backgroundImage.includes('repeating-linear-gradient')),
+    };
+  })()`)
+  assert.equal(diaryVisual.count, 2)
+  assert.equal(diaryVisual.hasSuggested, false, 'Suggested label must not appear on diary entries')
+  assert.equal(diaryVisual.tapesCount, 2, 'each sticky note has shiny tape at the top')
+  assert.equal(diaryVisual.linedReady, true, 'each sticky note uses lined paper background aligned to 24px lines')
   assert.equal(await page.evaluate(`document.getElementById('diary-clear-suppressed').classList.contains('hidden')`), false)
   await capture('list')
 
@@ -2484,9 +2633,16 @@ async function playDiaryScenario(page, capture, setWidth) {
   await page.evaluate(`document.getElementById('diary-close').click()`)
   await sleep(250)
 
-  // 5. Turn-start diary-applied header pill beside Working… + post-run suggestion cards.
+  // 5. Turn-start global diary stays invisible in header; site-specific diary-applied header pill appears beside Working… + post-run suggestion cards.
   await sendPrompt(page, 'Sign in to Kimi')
-  await recv({ v: 1, type: 'chat.activity', kind: 'diary-applied', scope: 'turn-start', count: 1, titles: ['Kimi login email'] })
+  await recv({ v: 1, type: 'chat.activity', kind: 'diary-applied', scope: 'global', count: 1, titles: ['Verification codes'] })
+  await sleep(60)
+  assert.equal(
+    await page.evaluate(`document.querySelector('.agent-turn.running .turn-diary-pill').getClientRects().length`),
+    0,
+    'universal/global diary entries must never render a header pill',
+  )
+  await recv({ v: 1, type: 'chat.activity', kind: 'diary-applied', scope: 'site', host: 'kimi.ai', count: 1, titles: ['Kimi login email'] })
   await sleep(80)
   const firstPill = await page.evaluate(`(() => {
     const pill = document.querySelector('.agent-turn.running .turn-diary-pill');
@@ -3262,6 +3418,7 @@ async function main() {
       cacheWriteTokens: 1_240_000,
       reasoningTokens: 1_296_400,
       totalTokens: 35_900_800,
+      totalCostUsd: 18.42,
       startedAt: '2026-08-14T15:30:00.000Z',
       updatedAt: '2026-11-18T10:15:00.000Z',
     }
@@ -3277,6 +3434,8 @@ async function main() {
         state: card.dataset.state,
         total: document.getElementById('settings-usage-total').textContent,
         totalTitle: document.getElementById('settings-usage-total').title,
+        cost: document.getElementById('settings-usage-cost').textContent,
+        costTitle: document.getElementById('settings-usage-cost').title,
         turns: document.getElementById('settings-usage-turns').textContent,
         input: document.getElementById('settings-usage-input').textContent,
         cacheRead: document.getElementById('settings-usage-cache-read').textContent,
@@ -3319,6 +3478,7 @@ async function main() {
     let meter = await readMeter()
     assert.equal(meter.state, 'empty')
     assert.equal(meter.total, '0')
+    assert.equal(meter.cost, '$0.00')
     assert.equal(meter.turns, '0 turns')
     assert.equal(meter.reasoningHidden, true)
     assert.match(meter.since, /first recorded turn/u)
@@ -3329,6 +3489,8 @@ async function main() {
     assert.equal(meter.state, 'active')
     assert.equal(meter.total, '35.9M')
     assert.equal(meter.totalTitle, '35,900,800 total agent tokens')
+    assert.equal(meter.cost, '$18.42')
+    assert.match(meter.costTitle, /\$18\.420000 USD/u)
     assert.equal(meter.turns, '284 turns')
     assert.equal(meter.input, '8.4M')
     assert.equal(meter.cacheRead, '22.8M')
@@ -3354,6 +3516,7 @@ async function main() {
     await showMeter()
     const restored = await readMeter()
     assert.equal(restored.total, meter.total, 'reconnect restores the authoritative total without adding it again')
+    assert.equal(restored.cost, '$18.42')
     assert.equal(restored.turns, '284 turns')
     await setWidth(320)
     await showMeter()
@@ -3395,6 +3558,19 @@ async function main() {
     assert.equal(initialAbout.version, initialAbout.manifest, 'offline/fresh installs fall back to the extension version')
     assert.equal(initialAbout.updated, 'No completed update recorded')
     assert.equal(initialAbout.title, '')
+
+    // Manual update check -> pending ready-to-install -> manual install trigger.
+    assert.equal(await page.evaluate(`document.getElementById('settings-check-update').textContent`), 'Check for updates')
+    await page.evaluate(`document.getElementById('settings-check-update').click()`)
+    assert.equal(await page.evaluate(`window.__frames.at(-1).type`), 'update.check')
+    assert.equal(await page.evaluate(`document.getElementById('settings-check-update').disabled`), true)
+    await makePage(page).recv({ v: 1, type: 'update.result', action: 'check', ok: true, update: { state: 'pending', current: '2.6.1', latest: '2.7.0', last: null } })
+    assert.equal(await page.evaluate(`document.getElementById('settings-check-update').textContent`), 'Update to v2.7.0')
+    assert.equal(await page.evaluate(`document.getElementById('settings-check-update').classList.contains('primary')`), true)
+    await page.evaluate(`document.getElementById('settings-check-update').click()`)
+    assert.equal(await page.evaluate(`window.__frames.at(-1).type`), 'update.install')
+    await makePage(page).recv({ v: 1, type: 'update.result', action: 'install', ok: true, update: { state: 'installing', current: '2.6.1', latest: '2.7.0', last: null } })
+
     const updatedAt = '2026-11-17T20:00:00.000Z'
     await makePage(page).recv({ v: 1, type: 'update.state', update: { state: 'current', current: '2.6.1', latest: '2.6.1', last: { from: '2.5.1', to: '2.6.1', at: updatedAt } } })
     const populatedAbout = await page.evaluate(`(() => {
@@ -3931,7 +4107,7 @@ async function main() {
     await recv({ v: 1, type: 'update.state', update: { state: 'pending', current: '2.5.0', latest: '2.6.1', last: null } })
     state = await read()
     assert.equal(state.noticeHidden, false)
-    assert.match(state.noticeText, /v2\.6\.0/u)
+    assert.match(state.noticeText, /v2\.6\.1/u)
   } else if (SCENARIO === 'queue') {
     await playQueueScenario(page, shot)
   } else if (SCENARIO === 'composer') {

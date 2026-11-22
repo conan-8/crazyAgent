@@ -188,8 +188,11 @@
                 <span id="settings-usage-turns" class="usage-turns">0 turns</span>
               </div>
               <div class="usage-total-line">
-                <strong id="settings-usage-total">0</strong>
-                <span>total tokens</span>
+                <div class="usage-total-primary">
+                  <strong id="settings-usage-total">0</strong>
+                  <span>total tokens</span>
+                </div>
+                <span id="settings-usage-cost" class="usage-cost">$0.00</span>
               </div>
               <div id="settings-usage-bar" class="usage-bar" role="img" aria-label="No agent token usage recorded">
                 <span class="usage-segment usage-input" data-usage-segment="input"></span>
@@ -305,6 +308,10 @@
                 <dd id="settings-updated">No completed update recorded</dd>
               </div>
             </dl>
+            <div class="settings-about-actions">
+              <button id="settings-check-update" class="secondary" type="button">Check for updates</button>
+            </div>
+            <p id="settings-update-status" class="hint status-hint hidden" role="status"></p>
           </section>
 
           <section class="settings-section settings-advanced" aria-labelledby="advanced-settings-toggle">

@@ -72,3 +72,105 @@ export function completedUpdateNotice(status) {
     text: `Updated to v${to}; companion restarted.`,
   }
 }
+
+export function settingsUpdateAction(status, { connected = true, requesting = false } = {}) {
+  const safeStatus = status !== null && typeof status === 'object' && !Array.isArray(status) ? status : null
+  const current = version(safeStatus?.current)
+  const latest = version(safeStatus?.latest)
+  if (!connected) {
+    return {
+      label: 'Check for updates',
+      action: 'check',
+      disabled: true,
+      primary: false,
+      statusText: 'Connect to the companion to check for updates.',
+      tone: 'muted',
+    }
+  }
+  if (requesting || safeStatus?.state === 'checking') {
+    return {
+      label: 'Checking…',
+      action: 'check',
+      disabled: true,
+      primary: false,
+      statusText: 'Checking GitHub for a newer release…',
+      tone: 'muted',
+    }
+  }
+  switch (safeStatus?.state) {
+    case 'installing':
+      return {
+        label: 'Updating…',
+        action: 'install',
+        disabled: true,
+        primary: false,
+        statusText: latest ? `Installing v${latest}… Companion will restart.` : 'Installing update… Companion will restart.',
+        tone: 'info',
+      }
+    case 'pending':
+      return {
+        label: latest ? `Update to v${latest}` : 'Install update',
+        action: 'install',
+        disabled: false,
+        primary: true,
+        statusText: latest ? `v${latest} is ready to install now.` : 'An update is ready to install now.',
+        tone: 'info',
+      }
+    case 'available':
+      return {
+        label: 'Check for updates',
+        action: 'check',
+        disabled: false,
+        primary: false,
+        statusText: latest
+          ? `v${latest} available. Start with "npm run dev" or the service to install.`
+          : 'Update available. Start with the supervisor to install.',
+        tone: 'info',
+      }
+    case 'current':
+      return {
+        label: 'Check for updates',
+        action: 'check',
+        disabled: false,
+        primary: false,
+        statusText: current ? `Up to date (v${current}).` : 'Up to date.',
+        tone: 'muted',
+      }
+    case 'ineligible':
+      return {
+        label: 'Check for updates',
+        action: 'check',
+        disabled: false,
+        primary: false,
+        statusText: `Unavailable: ${reason(safeStatus.reason)}`,
+        tone: 'muted',
+      }
+    case 'disabled':
+      return {
+        label: 'Check for updates',
+        action: 'check',
+        disabled: true,
+        primary: false,
+        statusText: `Disabled: ${reason(safeStatus.reason)}`,
+        tone: 'muted',
+      }
+    case 'error':
+      return {
+        label: 'Check for updates',
+        action: 'check',
+        disabled: false,
+        primary: false,
+        statusText: `Update check failed: ${reason(safeStatus.reason)}`,
+        tone: 'error',
+      }
+    default:
+      return {
+        label: 'Check for updates',
+        action: 'check',
+        disabled: false,
+        primary: false,
+        statusText: '',
+        tone: 'muted',
+      }
+  }
+}

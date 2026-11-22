@@ -9,6 +9,11 @@ function timestamp(value) {
   return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null
 }
 
+function costUsd(value) {
+  const number = Number(value)
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 1e8) / 1e8 : 0
+}
+
 export function normalizeLifetimeUsage(value) {
   const usage = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {}
   const normalized = {
@@ -19,12 +24,27 @@ export function normalizeLifetimeUsage(value) {
     cacheWriteTokens: count(usage.cacheWriteTokens),
     reasoningTokens: Math.min(count(usage.reasoningTokens), count(usage.outputTokens)),
     totalTokens: 0,
+    totalCostUsd: costUsd(usage.totalCostUsd),
     startedAt: timestamp(usage.startedAt),
     updatedAt: timestamp(usage.updatedAt),
   }
   const componentTotal = Math.min(MAX_COUNT, normalized.inputTokens + normalized.outputTokens + normalized.cacheReadTokens + normalized.cacheWriteTokens)
   normalized.totalTokens = Math.max(count(usage.totalTokens), componentTotal)
   return normalized
+}
+
+export function formatUsdCost(value) {
+  const n = costUsd(value)
+  if (n <= 0) return '$0.00'
+  if (n < 0.0001) return '<$0.0001'
+  if (n < 0.01) return `$${n.toFixed(4)}`
+  if (n < 100) return `$${n.toFixed(2)}`
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n)
 }
 
 export function formatCompactTokenCount(value) {
